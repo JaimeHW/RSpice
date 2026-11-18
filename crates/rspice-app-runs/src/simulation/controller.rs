@@ -544,6 +544,10 @@ impl SimulationController {
         // storage budget as they write it.
         self.runner
             .begin_storage_budget(dispatched_save_policy.maximum_storage_bytes());
+        // One record of the files the run's analyses write, shared by all its
+        // tasks, so a later analysis appends to what an earlier one wrote and
+        // nothing appends to an earlier run's.
+        self.runner.begin_hdl_run();
         self.total_analyses = dispatch.task_count();
         self.current_analysis_idx = 0;
         self.cached_netlist = Some(dispatch.executable_netlist().to_owned());

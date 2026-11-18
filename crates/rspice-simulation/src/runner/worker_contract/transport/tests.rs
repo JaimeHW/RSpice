@@ -43,6 +43,7 @@ fn stb_worker_preserves_circuit_modes_and_rejects_corrupt_root_buffers() {
                 response: retained.clone(),
                 measurements: Vec::new(),
             })),
+            hdl_run_files: None,
         };
         let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
         assert_eq!(transport.clone().into_response().unwrap(), response);
@@ -80,6 +81,7 @@ fn stb_worker_retains_zero_samples_and_rejects_invalid_availability() {
             response: evidence.clone(),
             measurements: Vec::new(),
         })),
+        hdl_run_files: None,
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     assert_eq!(transport.buffers.len(), 1);
@@ -135,6 +137,7 @@ fn worker_transport_extracts_every_retained_pss_numeric_array_from_metadata() {
             measurements: Vec::new(),
             operating_point: super::super::tests::retained_pss_operating_point(),
         })),
+        hdl_run_files: None,
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let metadata = serde_json::to_string(&transport.response).unwrap();
@@ -195,6 +198,7 @@ fn worker_pss_branch_currents_round_trip_and_reject_tamper() {
             measurements: Vec::new(),
             operating_point: point.clone(),
         })),
+        hdl_run_files: None,
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Pss {
@@ -303,6 +307,7 @@ fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
             device_report: None,
             checks: Default::default(),
         })),
+        hdl_run_files: None,
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let metadata = serde_json::to_string(&transport.response).unwrap();

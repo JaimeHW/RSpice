@@ -411,6 +411,43 @@ fn assert_clock(events: &[(f64, String)]) {
 
 /// `top` in one file instantiates `leaf` from another: one compilation
 /// unit on both routes.
+/// A Verilog-A module that writes one line, in each analysis it takes part
+/// in, to `log.txt`, opened `"w"`.
+const EVERY_ANALYSIS: &str = "`include \"disciplines.vams\"\nmodule log(x); inout x; electrical x;\n\
+     integer fd;\nanalog begin\n@(initial_step) begin fd = $fopen(\"log.txt\", \"w\");\n\
+     $fdisplay(fd, \"analysis\"); end\nI(x) <+ V(x) / 1k;\nend\nendmodule\n";
+
+/// LRM 2.4 section 9.5.1.1: a file one analysis of a run opened in a write
+/// mode, a later analysis that opens it in that mode appends to. `rspice
+/// run` solves a deck's `.op` and `.tran` on one engine; the prepared route
+/// runs each card as its own task. Both leave the same bytes: both lines.
+#[test]
+fn a_decks_analyses_write_one_file_the_same_on_the_cli_and_the_prepared_route() {
+    let dir = test_dir("prepared_route_hdl_run_files");
+    write(dir.path(), "log.va", EVERY_ANALYSIS);
+    write(
+        dir.path(),
+        "deck.cir",
+        &format!(
+            "* a deck's analyses write one file\n.options hdl_rundir=\"{}\"\n.hdl \"log.va\"\n\
+             v1 s 0 1\nxa s log\n.op\n.tran 1n 10n\n.end\n",
+            dir.path().display()
+        ),
+    );
+    let deck = dir.path().join("deck.cir");
+    let log = dir.path().join("log.txt");
+    passed(&run_to_json(&deck, &dir.path().join("deck.json")));
+    let cli = std::fs::read(&log).expect("the CLI's run wrote log.txt");
+    std::fs::remove_file(&log).expect("clear the CLI's file");
+    assert_eq!(prepared_manual_run(&deck).len(), 2);
+    let prepared = std::fs::read(&log).expect("the prepared run wrote log.txt");
+    assert_eq!(
+        String::from_utf8_lossy(&prepared),
+        String::from_utf8_lossy(&cli)
+    );
+    assert_eq!(cli, b"analysis\nanalysis\n");
+}
+
 #[test]
 fn a_module_of_one_file_instantiating_one_of_another_gives_the_clis_numbers() {
     let dir = test_dir("prepared-unit");

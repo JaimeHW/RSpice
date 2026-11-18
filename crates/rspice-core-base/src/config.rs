@@ -394,6 +394,98 @@ pub struct HdlRunConfig {
     pub timing_checks: bool,
     /// `.options hdl_libmap`: a Verilog library map file.
     pub library_map: Option<std::path::PathBuf>,
+    /// The run's record of the files its analyses opened for writing, so a
+    /// later analysis appends where an earlier one wrote. The front end that
+    /// starts a run makes one and gives it to every engine the run builds;
+    /// `None` keeps one per engine, for the analyses that engine performs.
+    pub run_files: Option<HdlRunFiles>,
+}
+
+/// The files a simulation run's analyses opened in a write mode that empties
+/// them. LRM 2.4 section 9.5.1.1: "If a file is opened in a write mode in the
+/// first analysis and reopened in that write mode in following analysis, then
+/// content written from the following analyses shall be appended to the
+/// content written during the previous analyses."
+///
+/// The run is what the user started: every analysis of a deck, every task of
+/// a plan, every Run Set point, sweep coordinate and Monte Carlo trial. Each
+/// analysis takes the next number from the record, and once an earlier
+/// analysis has opened a path in a mode, every later open of that path in
+/// that mode appends. Clones share one record; [`Default`] makes a new one.
+#[derive(Debug, Clone, Default)]
+pub struct HdlRunFiles(std::sync::Arc<std::sync::Mutex<HdlRunFilesState>>);
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct HdlRunFilesState {
+    /// How many analyses have taken a number.
+    analyses: u64,
+    /// Each path opened in a write mode that empties it: the mode's code, and
+    /// the first analysis that opened it so.
+    written: std::collections::BTreeMap<std::path::PathBuf, (u8, u64)>,
+}
+
+impl HdlRunFiles {
+    fn state(&self) -> std::sync::MutexGuard<'_, HdlRunFilesState> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The number of the run's next analysis: one past the analyses before it.
+    #[doc(hidden)]
+    pub fn next_analysis(&self) -> u64 {
+        let mut state = self.state();
+        state.analyses += 1;
+        state.analyses
+    }
+
+    /// The analysis whose open of `path` in the mode coded `mode` the run
+    /// counts as the first: `analysis` itself unless an earlier analysis
+    /// opened the path in that mode. An open in another mode starts the path
+    /// over.
+    #[doc(hidden)]
+    pub fn first_opened(&self, path: &std::path::Path, mode: u8, analysis: u64) -> u64 {
+        let mut state = self.state();
+        let first = state
+            .written
+            .entry(path.to_path_buf())
+            .or_insert((mode, analysis));
+        if first.0 != mode {
+            *first = (mode, analysis);
+        }
+        first.1
+    }
+
+    /// Take on what `other` recorded: a run's record after a task the
+    /// browser worker ran on a copy of it.
+    pub fn adopt(&self, other: &Self) {
+        if !std::sync::Arc::ptr_eq(&self.0, &other.0) {
+            let recorded = other.state().clone();
+            *self.state() = recorded;
+        }
+    }
+}
+
+impl PartialEq for HdlRunFiles {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0) || {
+            let mine = self.state().clone();
+            mine == *other.state()
+        }
+    }
+}
+
+impl serde::Serialize for HdlRunFiles {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&*self.state(), serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for HdlRunFiles {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        <HdlRunFilesState as serde::Deserialize>::deserialize(deserializer)
+            .map(|state| Self(std::sync::Arc::new(std::sync::Mutex::new(state))))
+    }
 }
 
 impl Default for HdlRunConfig {
@@ -409,6 +501,7 @@ impl Default for HdlRunConfig {
             path_delays: true,
             timing_checks: true,
             library_map: None,
+            run_files: None,
         }
     }
 }

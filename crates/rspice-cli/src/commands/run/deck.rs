@@ -596,6 +596,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
             .unwrap_or_default(),
         path_delays: args.hdl_path_delays.unwrap_or(true),
         timing_checks: args.hdl_timing_checks.unwrap_or(true),
+        run_files: args.hdl_run_files.clone(),
         ..base.hdl
     };
     base.phase_timings = args

@@ -140,6 +140,12 @@ pub struct SimulationRunner {
     #[cfg(not(target_arch = "wasm32"))]
     storage_budget: Option<Arc<crate::results_store::StorageBudget>>,
 
+    /// The files the run's analyses opened for writing, which every engine
+    /// its tasks build shares, so a later analysis appends where an earlier
+    /// one wrote (LRM 2.4 section 9.5.1.1). A browser task runs on a copy in
+    /// the worker, and the record it returns replaces this one's.
+    hdl_run_files: rspice_core::config::HdlRunFiles,
+
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
 
@@ -177,6 +183,7 @@ impl SimulationRunner {
             transient_states: Arc::default(),
             #[cfg(not(target_arch = "wasm32"))]
             storage_budget: None,
+            hdl_run_files: Default::default(),
             thread_handle: None,
             pending_result: None,
             source_locator: Default::default(),
@@ -260,6 +267,13 @@ impl SimulationRunner {
         }
         #[cfg(target_arch = "wasm32")]
         let _ = limit;
+    }
+
+    /// Start a new run's record of the files its analyses write: the tasks
+    /// started from here on share it, and none appends to what an earlier
+    /// run wrote.
+    pub fn begin_hdl_run(&mut self) {
+        self.hdl_run_files = Default::default();
     }
 
     /// Abort current simulation
@@ -564,6 +578,7 @@ impl SimulationRunner {
                 )),
                 backends: Some(self.backends.clone()),
                 storage_budget: self.storage_budget.clone(),
+                hdl_run_files: Some(self.hdl_run_files.clone()),
                 ..RunStreams::default()
             };
             let handle = std::thread::spawn(move || {
@@ -593,6 +608,7 @@ impl SimulationRunner {
                     transient_checkpoint: Arc::clone(&self.transient_checkpoint),
                     transient_checkpoint_log: Arc::clone(&self.transient_checkpoint_log),
                     backends: self.backends.clone(),
+                    hdl_run_files: self.hdl_run_files.clone(),
                 },
             )?;
         }
@@ -705,6 +721,9 @@ pub(in crate::runner) struct RunStreams {
     /// The storage budget the run's transients write their results stores against.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::runner) storage_budget: Option<Arc<crate::results_store::StorageBudget>>,
+    /// The record of the files the run's analyses wrote, shared by every
+    /// engine the task builds; `None` gives the task one of its own.
+    pub(in crate::runner) hdl_run_files: Option<rspice_core::config::HdlRunFiles>,
 }
 
 fn lock_progress<'a>(
@@ -1069,6 +1088,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         backends,
         #[cfg(not(target_arch = "wasm32"))]
         storage_budget,
+        hdl_run_files,
     } = streams;
 
     // Whatever the engine logs from here on belongs to this run, and only to
@@ -1132,6 +1152,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     limits.max_netlist_bytes = limits.max_expanded_source_bytes;
     let bridge = EngineBridge::new()
         .with_resource_limits(limits)
+        .with_hdl_run_files(hdl_run_files)
         .with_run_log()
         .with_measurement_references(input.measurement_references.clone());
 

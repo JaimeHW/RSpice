@@ -530,6 +530,37 @@ fn a_later_analysis_of_a_run_appends_to_what_an_earlier_one_wrote() {
     assert_eq!(read("channel.txt"), "analysis\n");
 }
 
+/// A run is what its front end makes it: engines given one run's record are
+/// its analyses, as one engine's are, so the `.op` one solves and the
+/// `.tran` another solves write both their lines; an engine given a new
+/// record is a new run.
+#[test]
+fn engines_given_one_run_record_append_as_one_engine_does() {
+    let directory = scratch("run_record");
+    std::fs::write(directory.join("log.va"), EVERY_ANALYSIS).unwrap();
+    let deck = directory.join("deck.cir");
+    std::fs::write(
+        &deck,
+        "* every analysis writes\n.hdl \"log.va\"\nv1 s 0 1\nxa s log\n.end\n",
+    )
+    .unwrap();
+    let netlist = Netlist::parse_file(&deck).unwrap();
+    let mut config = rspice_core::SimulationConfig::default();
+    config.hdl.deck_directory = Some(directory.clone());
+    config.hdl.run_files = Some(Default::default());
+    let read = |file: &str| std::fs::read_to_string(directory.join(file)).unwrap();
+    Engine::new(config.clone()).run_dc_op(&netlist).unwrap();
+    Engine::new(config.clone())
+        .run_tran_with_abort(&netlist, 1e-9, 1e-10, &NoAbort)
+        .unwrap();
+    assert_eq!(read("log.txt"), "analysis\nanalysis\n");
+    assert_eq!(read("channel.txt"), "analysis\nanalysis\n");
+    config.hdl.run_files = Some(Default::default());
+    Engine::new(config).run_dc_op(&netlist).unwrap();
+    assert_eq!(read("log.txt"), "analysis\n");
+    assert_eq!(read("channel.txt"), "analysis\n");
+}
+
 /// A design whose digital half opens a file descriptor and a multichannel
 /// descriptor, and whose analog half opens a file descriptor; each half
 /// writes through every one of them.

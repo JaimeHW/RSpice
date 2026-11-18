@@ -377,6 +377,7 @@ fn configured_monte_carlo_preserves_trial_and_population_limits() {
                 source_path: None,
                 limits,
                 abort: &NoAbort,
+                hdl_run_files: None,
             },
             None,
         )
@@ -426,6 +427,7 @@ fn configured_monte_carlo_preserves_trial_and_population_limits() {
             source_path: None,
             limits,
             abort: &ImmediateAbort,
+            hdl_run_files: None,
         },
     )
     .unwrap_err();

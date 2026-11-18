@@ -29,6 +29,7 @@ fn hb_device_current_spectra_preserve_phasors_units_and_direction_through_worker
         outcome: WorkerOutcome::Success(Box::new(
             WorkerSimulationResult::try_from(result).unwrap(),
         )),
+        hdl_run_files: None,
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let restored = transport.into_response().unwrap();

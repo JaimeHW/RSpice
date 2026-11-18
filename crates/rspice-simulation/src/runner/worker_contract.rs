@@ -133,6 +133,10 @@ pub(crate) struct WorkerRequest {
     /// instead of running that transient again, as a desktop runner does.
     #[serde(default)]
     pub(crate) transient_states: crate::engine_services::TransientStateRole,
+    /// The run's record of the files its earlier analyses wrote: the worker
+    /// runs the task's engines on this copy and answers with it.
+    #[serde(default)]
+    pub(crate) hdl_run_files: rspice_core::config::HdlRunFiles,
 }
 
 /// Browser-worker request split into compact metadata and transferable
@@ -408,10 +412,18 @@ impl WorkerRequest {
             stream_transient_samples: input.stream_transient_samples,
             execution_limits: input.execution_limits,
             transient_states: Default::default(),
+            hdl_run_files: Default::default(),
         })
     }
 
     /// This request playing `role` in its run's transient state hand-off.
+    /// The task runs as an analysis of the run whose file record is `files`.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn with_hdl_run_files(mut self, files: rspice_core::config::HdlRunFiles) -> Self {
+        self.hdl_run_files = files;
+        self
+    }
+
     pub(crate) fn with_transient_states(
         mut self,
         role: crate::engine_services::TransientStateRole,
@@ -453,6 +465,10 @@ pub(crate) enum WorkerSimulationRequest {
 pub(crate) struct WorkerResponse {
     pub id: u64,
     pub outcome: WorkerOutcome,
+    /// The run's file record as the request's analyses left it, which the
+    /// runner takes back for the run's next task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hdl_run_files: Option<rspice_core::config::HdlRunFiles>,
 }
 
 impl WorkerResponse {
@@ -464,7 +480,15 @@ impl WorkerResponse {
         Self {
             id,
             outcome: worker_transfer_outcome_from_result(result),
+            hdl_run_files: None,
         }
+    }
+
+    /// The response, carrying the run's file record as the request left it.
+    #[cfg(any(feature = "browser-worker", test))]
+    pub(crate) fn with_hdl_run_files(mut self, files: rspice_core::config::HdlRunFiles) -> Self {
+        self.hdl_run_files = Some(files);
+        self
     }
 
     pub(crate) fn into_result(self) -> Result<SimulationResult, SimulationError> {

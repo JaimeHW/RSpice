@@ -152,6 +152,29 @@ pub fn run_generated_batch(
 /// How long a fixture batch may run before it is taken to have hung.
 const FIXTURE_BATCH_LIMIT: Duration = Duration::from_secs(60);
 
+/// Run the design of `state` `count` times on one controller, as pressing
+/// Run again does, each run to its end; the host the runs published to.
+pub fn run_generated_batches(mut state: RunTestHost, count: usize) -> RunTestHost {
+    state.model.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
+    state.sync_active_schematic_to_workspace();
+    let export_io = MockExportWorkflowIo::default();
+    let mut controller = SimulationController::new();
+    for _ in 0..count {
+        controller
+            .prepare_run_set_for_preflight(&state)
+            .expect("prepare the complete fixture plan");
+        state.model.simulation.execution.trigger_simulation = true;
+        controller.update(&mut state, &export_io);
+        let deadline = Instant::now() + FIXTURE_BATCH_LIMIT;
+        while controller.has_active_batch() {
+            assert!(Instant::now() < deadline, "fixture batch timed out");
+            std::thread::sleep(Duration::from_millis(1));
+            controller.update(&mut state, &export_io);
+        }
+    }
+    state
+}
+
 /// [`run_generated_batch`] for a design whose run takes longer than a
 /// fixture's, given `limit` before it is taken to have hung.
 pub fn run_generated_batch_within(

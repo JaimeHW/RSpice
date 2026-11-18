@@ -169,6 +169,9 @@ pub fn execute(
         args.phase_timings = Some(std::sync::Arc::clone(&collector));
         (collector, path, args.input.clone())
     });
+    // One record of the files the run's analyses write, for every engine it
+    // builds: each analysis card, sweep coordinate and Monte Carlo trial.
+    args.hdl_run_files = Some(Default::default());
     let quiet = quiet || args.summary.as_deref() == Some(std::path::Path::new("-"));
     let verbose = verbose && !quiet;
     let from_stdin = crate::commands::is_stdin(&args.input);

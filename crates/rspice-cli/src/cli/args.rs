@@ -572,6 +572,12 @@ pub struct RunArgs {
     #[arg(skip)]
     pub(crate) phase_timings: Option<std::sync::Arc<crate::timings::RunTimings>>,
 
+    /// The record of the files the run's analyses opened for writing, shared
+    /// by every engine the run builds, so a later analysis appends where an
+    /// earlier one wrote (LRM 2.4 section 9.5.1.1).
+    #[arg(skip)]
+    pub(crate) hdl_run_files: Option<rspice_core::config::HdlRunFiles>,
+
     // =========================================================================
     // Advanced RF/Analog Analysis Options
     // =========================================================================

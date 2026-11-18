@@ -21,6 +21,7 @@ impl WorkerResponseTransport {
             id: response.id,
             outcome: WorkerOutcomeTransport::from_outcome(response.outcome, &mut buffers)?,
             backends,
+            hdl_run_files: response.hdl_run_files,
         };
         Ok(Self {
             protocol: WORKER_RESPONSE_TRANSPORT_PROTOCOL,
@@ -57,6 +58,7 @@ impl WorkerResponseTransport {
         let response = WorkerResponse {
             id: self.response.id,
             outcome: self.response.outcome.into_outcome(&self.buffers)?,
+            hdl_run_files: self.response.hdl_run_files,
         };
         validate_worker_response_before_transport(&response)?;
         Ok((response, backends))

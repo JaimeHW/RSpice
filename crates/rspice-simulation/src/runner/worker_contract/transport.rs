@@ -247,6 +247,9 @@ pub(crate) struct WorkerResponseTransportMetadata {
     /// Absent when the request was refused before it built a circuit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backends: Option<rspice_core::backends::ExecutionBackends>,
+    /// The run's file record as the request's analyses left it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hdl_run_files: Option<rspice_core::config::HdlRunFiles>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1375,6 +1378,7 @@ mod hb_state_contract_tests {
         let response = WorkerResponse {
             id: 879,
             outcome: WorkerOutcome::Success(Box::new(result(point.clone()))),
+            hdl_run_files: None,
         };
         let native: WorkerResponse =
             serde_json::from_value(serde_json::to_value(&response).unwrap()).unwrap();
@@ -1658,6 +1662,7 @@ mod pstb_floquet_contract_tests {
             WorkerResponse {
                 id: 73,
                 outcome: WorkerOutcome::Success(Box::new(worker.clone())),
+                hdl_run_files: None,
             },
             worker,
         )
@@ -1723,6 +1728,7 @@ mod pstb_floquet_contract_tests {
                     worker,
                 )),
                 backends: Default::default(),
+                hdl_run_files: None,
             },
             buffers: Vec::new(),
         };

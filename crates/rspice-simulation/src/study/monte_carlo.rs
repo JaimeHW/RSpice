@@ -50,6 +50,7 @@ pub(crate) fn prepare_study_with_context(
         source_path,
         limits,
         abort,
+        hdl_run_files,
     } = context;
     ensure_not_aborted(abort).map_err(SimulationError::from)?;
     if !base.objective_terms.is_empty() || !base.constraints.is_empty() {
@@ -65,10 +66,14 @@ pub(crate) fn prepare_study_with_context(
     // native-statistics replay observes the same analysis and solver policy.
     let (analysis, environment) = resolved_study_environment(base, environment);
     let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
-    let engine = rspice_core::Engine::new(rspice_core::SimulationConfig {
+    let mut config = rspice_core::SimulationConfig {
         resource_limits: limits,
         ..Default::default()
-    });
+    };
+    // Every trial is an analysis of the run: a file one trial writes, a
+    // later trial appends to.
+    config.hdl.run_files = hdl_run_files.cloned();
+    let engine = rspice_core::Engine::new(config);
     let circuit = crate::netlist_preparation::parse_analysis_netlist_with_abort(
         &source,
         source_path,

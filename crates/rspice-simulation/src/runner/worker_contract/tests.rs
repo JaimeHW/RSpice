@@ -10,6 +10,7 @@ use super::*;
 
 mod dc_sweep;
 mod hb_current;
+mod hdl_run_files;
 mod result_round_trip;
 mod veriloga_delay_select;
 
@@ -53,6 +54,7 @@ fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
         transient_states: Default::default(),
+        hdl_run_files: Default::default(),
     };
     let mut transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
     transport.request =
@@ -816,6 +818,7 @@ fn worker_request_round_trips_through_json() {
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
         transient_states: Default::default(),
+        hdl_run_files: Default::default(),
     }
     .with_transient_states(transient_states);
 
@@ -1111,6 +1114,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
         transient_states: Default::default(),
+        hdl_run_files: Default::default(),
     };
     let transfer = WorkerRequestTransport::from_request(request.clone()).unwrap();
     assert_eq!(transfer.protocol, WORKER_REQUEST_TRANSPORT_PROTOCOL);
@@ -1201,6 +1205,7 @@ fn standalone_connection_worker_transport_retains_selected_physics() {
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
         transient_states: Default::default(),
+        hdl_run_files: Default::default(),
     };
     let mut old = WorkerRequestTransport::from_request(request.clone()).unwrap();
     old.protocol = 9;
@@ -1294,6 +1299,7 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
         transient_states: Default::default(),
+        hdl_run_files: Default::default(),
     };
 
     let encoded = serde_json::to_vec(&request).unwrap();
@@ -1332,6 +1338,7 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
             stream_transient_samples: false,
             execution_limits: rspice_core::ResourceLimits::default(),
             transient_states: Default::default(),
+            hdl_run_files: Default::default(),
         };
 
         let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
@@ -1699,6 +1706,7 @@ fn response_with_measurement(measurement: WorkerMeasurement) -> WorkerResponse {
             measurements: vec![measurement],
             events: WorkerEventHistory::default(),
         })),
+        hdl_run_files: None,
     }
 }
 
@@ -2075,6 +2083,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
             measurements: Vec::new(),
             events: WorkerEventHistory::default(),
         })),
+        hdl_run_files: None,
     };
 
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
@@ -2131,6 +2140,7 @@ fn worker_transport_retains_monte_carlo_seed_and_samples() {
                 bin_edges: vec![0.9, 0.95, 1.05, 1.1],
             }],
         })),
+        hdl_run_files: None,
     };
 
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
@@ -2160,6 +2170,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
             }],
             measurements: Vec::new(),
         })),
+        hdl_run_files: None,
     };
     let ac_transport = WorkerResponseTransport::from_response(ac.clone()).unwrap();
     // Frequencies (also the waveform's x values), y and the imaginary part.
@@ -2180,6 +2191,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
             summary: None,
             measurements: Vec::new(),
         })),
+        hdl_run_files: None,
     };
     let noise_transport = WorkerResponseTransport::from_response(noise.clone()).unwrap();
     assert_eq!(noise_transport.buffers.len(), 5);
@@ -2202,6 +2214,7 @@ fn worker_transport_retains_and_validates_resolved_port_references() {
                 measurements: Vec::new(),
                 reference_impedances_ohm: Some(references.clone()),
             })),
+            hdl_run_files: None,
         };
         let mut transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
         assert_eq!(transport.buffers.last(), Some(&references));
@@ -2234,6 +2247,7 @@ fn worker_transport_retains_and_validates_resolved_port_references() {
                 measurements: Vec::new(),
                 reference_impedances_ohm: Some(references),
             })),
+            hdl_run_files: None,
         };
         assert!(
             WorkerResponseTransport::from_response(response)
@@ -2291,6 +2305,7 @@ fn sp_noise_request_executes_and_retains_physical_results_through_worker_transpo
                 outcome: WorkerOutcome::Success(Box::new(
                     WorkerSimulationResult::try_from(result).unwrap(),
                 )),
+                hdl_run_files: None,
             };
             if do_noise {
                 for temperature in [0.0, -1.0, f64::NAN, f64::INFINITY] {
@@ -2406,6 +2421,7 @@ fn worker_transport_round_trips_hb_display_and_retained_state() {
             measurements: Vec::new(),
             operating_point: retained_hb_operating_point(),
         })),
+        hdl_run_files: None,
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     assert_eq!(transport.buffers.len(), 7);
@@ -2484,6 +2500,7 @@ fn worker_transport_rejects_missing_or_mismatched_buffers() {
             measurements: Vec::new(),
             events: WorkerEventHistory::default(),
         })),
+        hdl_run_files: None,
     };
 
     let mut missing = WorkerResponseTransport::from_response(response.clone()).unwrap();
@@ -2526,6 +2543,7 @@ fn worker_transport_validates_complex_waveform_shape() {
                 events: WorkerEventHistory::default(),
             }),
             backends: Default::default(),
+            hdl_run_files: None,
         },
         buffers: vec![vec![0.0, 1.0], vec![0.0, 1.0], vec![0.2, 0.4], vec![0.1]],
     };
@@ -2556,6 +2574,7 @@ fn worker_transport_validates_complex_waveform_shape() {
                 events: WorkerEventHistory::default(),
             }),
             backends: Default::default(),
+            hdl_run_files: None,
         },
         buffers: vec![
             vec![0.0, 1.0],
@@ -2611,6 +2630,7 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
         transient_states: Default::default(),
+        hdl_run_files: Default::default(),
     };
     let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
     assert_eq!(transport.buffers, vec![vec![1.25, -1.0e-3]]);
@@ -2671,6 +2691,7 @@ fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
         outcome: WorkerOutcome::Success(Box::new(
             WorkerSimulationResult::try_from(result).unwrap(),
         )),
+        hdl_run_files: None,
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let json = serde_json::to_string(&transport.response).unwrap();

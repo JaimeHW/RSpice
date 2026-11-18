@@ -53,6 +53,8 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) use crate::config::HdlRunFiles;
+
 /// Bit 31: a file descriptor rather than a multichannel descriptor.
 pub(crate) const FD_FLAG: u32 = 0x8000_0000;
 pub(crate) const STDIN: u32 = FD_FLAG;
@@ -383,71 +385,11 @@ pub(crate) struct HdlFileOptions {
     pub unrestricted: bool,
     pub store: Arc<HdlFileStore>,
     /// The files earlier analyses of the run opened for writing.
-    run: Arc<HdlRunFiles>,
+    run: HdlRunFiles,
     /// This analysis, among the run's.
     analysis: u64,
     /// The descriptors the analysis's file tables hand out.
     shared: Arc<SharedDescriptors>,
-}
-
-/// The files a simulation run's analyses opened in a write mode. LRM 2.4
-/// section 9.5.1.1: "If a file is opened in a write mode in the first
-/// analysis and reopened in that write mode in following analysis, then
-/// content written from the following analyses shall be appended to the
-/// content written during the previous analyses." An engine keeps one for
-/// every analysis it performs, an `.op` and the `.tran` after it alike, and
-/// each analysis's options take the next analysis number from it. Once an
-/// earlier analysis has opened a path in a mode, every later open of it in
-/// that mode appends, so no analysis empties what an earlier one wrote.
-#[derive(Debug, Default)]
-pub(crate) struct HdlRunFiles {
-    state: Mutex<RunFilesState>,
-}
-
-#[derive(Debug, Default)]
-struct RunFilesState {
-    /// How many analyses have taken options.
-    analyses: u64,
-    /// Each path opened in a write mode that empties it: the mode, and the
-    /// first analysis that opened it so.
-    written: BTreeMap<PathBuf, (OpenMode, u64)>,
-}
-
-impl HdlRunFiles {
-    fn state(&self) -> std::sync::MutexGuard<'_, RunFilesState> {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    fn next_analysis(&self) -> u64 {
-        let mut state = self.state();
-        state.analyses += 1;
-        state.analyses
-    }
-
-    /// The mode `analysis` opens `path` in when it asks for `mode`, which
-    /// writes and empties the file: appending instead, when an earlier
-    /// analysis opened the path in that mode.
-    fn reopen(&self, path: &Path, mode: OpenMode, analysis: u64) -> OpenMode {
-        let mut state = self.state();
-        let first = state
-            .written
-            .entry(path.to_path_buf())
-            .or_insert((mode, analysis));
-        if first.0 != mode {
-            *first = (mode, analysis);
-        }
-        if first.1 == analysis {
-            mode
-        } else {
-            OpenMode {
-                append: true,
-                truncate: false,
-                ..mode
-            }
-        }
-    }
 }
 
 /// The descriptors every file table of an analysis hands out: the digital
@@ -558,7 +500,7 @@ impl PartialEq for HdlFileOptions {
         self.run_directory == other.run_directory
             && self.unrestricted == other.unrestricted
             && Arc::ptr_eq(&self.store, &other.store)
-            && Arc::ptr_eq(&self.run, &other.run)
+            && self.run == other.run
             && self.analysis == other.analysis
             && Arc::ptr_eq(&self.shared, &other.shared)
     }
@@ -588,7 +530,7 @@ impl HdlFileOptions {
             run_directory: normalize(&run_directory),
             unrestricted,
             store,
-            run: Arc::default(),
+            run: HdlRunFiles::default(),
             analysis: 0,
             shared: Arc::default(),
         }
@@ -598,14 +540,14 @@ impl HdlFileOptions {
     /// the explicit run directory, else the deck's directory, writes land in
     /// a fresh store on the platform's default target, and a file an earlier
     /// analysis of `run` opened for writing is appended to.
-    pub(crate) fn for_run(config: &crate::config::HdlRunConfig, run: &Arc<HdlRunFiles>) -> Self {
+    pub(crate) fn for_run(config: &crate::config::HdlRunConfig, run: &HdlRunFiles) -> Self {
         let directory = config
             .run_directory
             .as_deref()
             .or(config.deck_directory.as_deref());
         Self {
             analysis: run.next_analysis(),
-            run: Arc::clone(run),
+            run: run.clone(),
             ..Self::new(
                 directory,
                 config.unrestricted_io,
@@ -635,6 +577,21 @@ impl HdlFileOptions {
             path.display(),
             self.run_directory.display()
         ))
+    }
+
+    /// The mode this analysis opens `path` in when it asks for `mode`, which
+    /// writes and empties the file: appending instead, when an earlier
+    /// analysis of the run opened the path in that mode.
+    fn reopen(&self, path: &Path, mode: OpenMode) -> OpenMode {
+        if self.run.first_opened(path, mode.code(), self.analysis) == self.analysis {
+            mode
+        } else {
+            OpenMode {
+                append: true,
+                truncate: false,
+                ..mode
+            }
+        }
     }
 
     fn confines(&self, path: &Path) -> bool {
@@ -689,6 +646,15 @@ pub(crate) struct OpenMode {
 }
 
 impl OpenMode {
+    /// The mode as the run's file record keys it.
+    const fn code(self) -> u8 {
+        self.read as u8
+            | (self.write as u8) << 1
+            | (self.append as u8) << 2
+            | (self.truncate as u8) << 3
+            | (self.existing as u8) << 4
+    }
+
     /// A multichannel `$fopen(name)`: write, emptying the file.
     pub(crate) const CHANNEL: Self = Self {
         read: false,
@@ -1093,7 +1059,7 @@ impl HdlFiles {
             options.resolve_read(name).map_err(OpenFailure::Warn)?
         };
         let mode = if mode.truncate {
-            options.run.reopen(&path, mode, options.analysis)
+            options.reopen(&path, mode)
         } else {
             mode
         };

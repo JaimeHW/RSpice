@@ -44,13 +44,14 @@ use std::sync::{
 
 /// A trial inherits its parent engine's execution policy for every nested solve.
 fn service_context<'a>(
-    engine: &rspice_core::Engine,
+    engine: &'a rspice_core::Engine,
     abort: &'a dyn AbortSignal,
 ) -> services::ServiceContext<'a> {
     services::ServiceContext {
         source_path: None,
         limits: engine.config().resource_limits,
         abort,
+        hdl_run_files: engine.config().hdl.run_files.as_ref(),
     }
 }
 

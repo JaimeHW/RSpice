@@ -1362,6 +1362,7 @@ impl PreparedRunSnapshot {
                 source_path: None,
                 limits: execution_limits,
                 abort,
+                hdl_run_files: None,
             },
         )?;
         transient_checkpoint::route_resumes(&mut parts, execution_limits, abort)?;

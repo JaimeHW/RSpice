@@ -99,6 +99,26 @@ impl EngineBridge {
         self
     }
 
+    /// The run's record of the files its analyses wrote, when the run gave
+    /// one: what every engine the bridge's analyses build shares.
+    pub(crate) fn hdl_run_files(&self) -> Option<&rspice_core::config::HdlRunFiles> {
+        self.engine.config().hdl.run_files.as_ref()
+    }
+
+    /// Share `files`, the run's record of the files its analyses wrote, with
+    /// every engine this bridge builds; `None` keeps one per engine.
+    pub(crate) fn with_hdl_run_files(
+        mut self,
+        files: Option<rspice_core::config::HdlRunFiles>,
+    ) -> Self {
+        if files.is_some() {
+            let mut config = self.engine.config().clone();
+            config.hdl.run_files = files;
+            self.engine = rspice_core::Engine::new(config);
+        }
+        self
+    }
+
     /// Send what the engine reports by callback rather than through the
     /// logger — a digital testbench's output and the Verilog-A compiler's
     /// nonfatal findings — to the log of the run executing on this thread.

@@ -9,7 +9,9 @@
 //! between two of them runs as the deck that names those nets.
 
 use crate::simulation::controller::SimulationController;
-use crate::simulation::controller::test_execution::{run_generated_batch, run_manual_batch_at};
+use crate::simulation::controller::test_execution::{
+    run_generated_batch, run_generated_batches, run_manual_batch_at,
+};
 use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{
@@ -1180,4 +1182,113 @@ fn a_port_net_reads_the_kind_it_joins_through_the_instance_above() {
         state.model.schematic = crate::state::SchematicState::default();
         *state.model.schematic.document_mut_for_test() = top_drawing.clone();
     }
+}
+
+/// A Verilog-A view that writes, in each analysis it takes part in, the
+/// temperature it runs at, in degrees Celsius, to `log.txt`, opened `"w"`.
+const LOGGER: &str = "`include \"disciplines.vams\"\nmodule logger(p);\n    inout p;\n    \
+                      electrical p;\n    integer fd;\n    analog begin\n        \
+                      @(initial_step) begin\n            fd = $fopen(\"log.txt\", \"w\");\n            \
+                      $fdisplay(fd, \"%g\", $temperature - 273.15);\n        end\n        \
+                      I(p) <+ V(p) / 1k;\n    end\nendmodule\n";
+
+/// `logger` on a 1 V supply, run as a 1 ns transient at each of
+/// `temperatures`, its run directory `directory`.
+fn logged(directory: &std::path::Path, temperatures: &[&str]) -> RunTestHost {
+    use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind};
+
+    let mut state = RunTestHost::default();
+    let logger = add_source_cell(
+        &mut state,
+        "logger",
+        ViewType::VerilogA,
+        "logger.va",
+        LOGGER,
+    );
+    place(&mut state, &logger, "XL", Point::new(300, 0), &[("p", "s")]);
+    device(
+        &mut state,
+        ComponentType::VoltageSourceAc,
+        "V1",
+        "1",
+        Point::new(700, 0),
+        &["s", "0"],
+    );
+    device(
+        &mut state,
+        ComponentType::Ground,
+        "GND",
+        "",
+        Point::new(900, 0),
+        &["0"],
+    );
+    transient(&mut state, "1n");
+    state.model.sim_setup.run_set.dimensions = vec![RunSetDimension::new(
+        "fixture-temperature",
+        RunSetDimensionKind::Temperature,
+        temperatures,
+        1,
+    )];
+    state.sync_active_schematic_to_workspace();
+    let design = state
+        .model
+        .workspace
+        .configuration_execution_projection(
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
+        )
+        .expect("the design projects")
+        .root()
+        .clone();
+    rspice_design::added_lines::set_added_lines(
+        &mut state.model.workspace.content.added_lines,
+        &design,
+        format!(".options hdl_rundir=\"{}\"\n", directory.display()),
+    );
+    state
+}
+
+/// A scratch run directory.
+fn run_directory() -> std::path::PathBuf {
+    let directory = rspice_app_state::fixture_root::canonical_temp_dir()
+        .join(format!("rspice-hdl-run-files-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).expect("a scratch run directory");
+    directory
+}
+
+/// LRM 2.4 section 9.5.1.1: a file one analysis of a run opened in a write
+/// mode, a later analysis that opens it in that mode appends to. Each point
+/// of a Run Set is an analysis of the one run, so a three-point Run Set
+/// leaves all three points' lines, in point order, not the last point's.
+#[test]
+fn a_run_set_leaves_every_points_line_in_a_file_each_point_opens() {
+    let directory = run_directory();
+    let run = run_generated_batch(
+        logged(&directory, &["-40", "27", "125"]),
+        SimulationRunLifecycle::Completed,
+    );
+    assert_eq!(run.analyses.len(), 3);
+    assert_eq!(
+        std::fs::read_to_string(directory.join("log.txt")).expect("the run wrote log.txt"),
+        "-40\n27\n125\n"
+    );
+}
+
+/// A second run is another run: its first analysis empties the file the
+/// first run wrote, as a second `rspice run` of a deck does.
+#[test]
+fn a_second_run_starts_the_file_over() {
+    let directory = run_directory();
+    let state = run_generated_batches(logged(&directory, &["-40", "27"]), 2);
+    let runs = &state.model.simulation.retained.runs;
+    assert_eq!(runs.len(), 2, "{}", state.model.simulation.execution.status);
+    for run in runs {
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::Completed);
+        assert_eq!(run.analyses.len(), 2);
+    }
+    assert_eq!(
+        std::fs::read_to_string(directory.join("log.txt")).expect("the runs wrote log.txt"),
+        "-40\n27\n"
+    );
 }

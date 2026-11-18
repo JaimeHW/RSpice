@@ -309,6 +309,7 @@ pub(super) fn run_spec_request_in_context(
         source_path,
         limits: bridge.resource_limits(),
         abort: abort_flag,
+        hdl_run_files: bridge.hdl_run_files(),
     };
     // A `.SP`, `.TF`, `.STB` or `.DISTO` card that names a transient state
     // runs around it, and its result is projected as at the operating point.

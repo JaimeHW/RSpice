@@ -11,7 +11,7 @@ impl CircuitData {
     pub(crate) fn configure_analog_hdl(
         &mut self,
         config: &crate::config::HdlRunConfig,
-        run: &std::sync::Arc<crate::xspice::verilog::effects::files::HdlRunFiles>,
+        run: &crate::config::HdlRunFiles,
     ) -> Result<(), String> {
         use crate::xspice::verilog::effects::{analog, files::HdlFileOptions};
         let files = self

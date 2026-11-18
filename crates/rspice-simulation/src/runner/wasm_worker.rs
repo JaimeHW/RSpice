@@ -96,6 +96,9 @@ mod browser {
         )>,
         /// Where the running request's answer says which code ran it.
         active_backends: Option<rspice_core::backends::BackendRecorder>,
+        /// The run's file record, which takes back the copy the request's
+        /// answer carries.
+        active_hdl_run_files: Option<rspice_core::config::HdlRunFiles>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
     }
 
@@ -340,6 +343,7 @@ mod browser {
         pub(crate) transient_checkpoint: CheckpointQueue,
         pub(crate) transient_checkpoint_log: crate::transient_checkpoint::CheckpointLog,
         pub(crate) backends: rspice_core::backends::BackendRecorder,
+        pub(crate) hdl_run_files: rspice_core::config::HdlRunFiles,
     }
 
     pub(crate) fn start_worker_request(
@@ -358,6 +362,7 @@ mod browser {
             transient_checkpoint,
             transient_checkpoint_log,
             backends,
+            hdl_run_files,
         } = channels;
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
@@ -368,7 +373,8 @@ mod browser {
 
         let id = handle.allocate_request_id();
         let worker_request = WorkerRequest::from_runner_parts(id, &request, &input)?
-            .with_transient_states(transient_states);
+            .with_transient_states(transient_states)
+            .with_hdl_run_files(hdl_run_files.clone());
         let message = worker_message(worker_request)?;
         {
             let mut state = handle.state.borrow_mut();
@@ -383,6 +389,7 @@ mod browser {
                 input.execution_limits,
             ));
             state.active_backends = Some(backends);
+            state.active_hdl_run_files = Some(hdl_run_files);
             state.pending_result = None;
         }
 
@@ -552,6 +559,12 @@ mod browser {
                     (state.borrow_mut().active_backends.take(), backends)
                 {
                     recorder.add(&backends);
+                }
+                if let (Some(record), Some(returned)) = (
+                    state.borrow_mut().active_hdl_run_files.take(),
+                    response.hdl_run_files.as_ref(),
+                ) {
+                    record.adopt(returned);
                 }
                 response.into_result()
             }),

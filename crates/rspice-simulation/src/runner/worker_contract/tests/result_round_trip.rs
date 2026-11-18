@@ -175,6 +175,7 @@ fn transient_convergence_survives_worker_round_trip() {
         outcome: WorkerOutcome::Success(Box::new(
             WorkerSimulationResult::try_from(result).unwrap(),
         )),
+        hdl_run_files: None,
     };
     let transport = WorkerResponseTransport::from_response(response).unwrap();
     let json = serde_json::to_string(&transport.response).unwrap();
@@ -1251,6 +1252,7 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
             member_measurements: misattributed,
             variables: vec![WorkerMonteCarloVariable::from(variables[0].clone())],
         })),
+        hdl_run_files: None,
     };
     assert!(
         WorkerResponseTransport::from_response(response)
@@ -1270,6 +1272,7 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
             member_measurements: Vec::new(),
             variables: vec![worker],
         })),
+        hdl_run_files: None,
     };
     assert!(
         WorkerResponseTransport::from_response(response)

@@ -337,6 +337,7 @@ mod tests {
                     source_path: None,
                     limits,
                     abort: &NoAbort,
+                    hdl_run_files: None,
                 },
             )
         };

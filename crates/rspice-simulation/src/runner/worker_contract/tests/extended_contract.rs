@@ -8,6 +8,7 @@ fn worker_response_id_validation_rejects_outer_inner_mismatch() {
     let response = WorkerResponse {
         id: 31,
         outcome: WorkerOutcome::Failure(WorkerSimulationError::Aborted),
+        hdl_run_files: None,
     };
 
     validate_worker_response_id(31, &response).expect("matching ids are valid");
@@ -1032,6 +1033,7 @@ fn worker_request_runs_dc_op() {
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
         transient_states: Default::default(),
+        hdl_run_files: Default::default(),
     };
 
     let response = worker_response_from_request(request);

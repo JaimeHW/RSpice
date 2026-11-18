@@ -6,13 +6,17 @@ use rspice_core::{Netlist, ResourceLimits, SimulationConfig, abort_signal::Abort
 
 use super::ServiceRunResult;
 
-/// Source resolution, resource ceilings, and cancellation for one service call.
-/// Nested work must inherit this context instead of rebuilding default limits.
+/// Source resolution, resource ceilings, cancellation, and the run's HDL file
+/// record for one service call. Nested work must inherit this context instead
+/// of rebuilding default limits.
 #[derive(Clone, Copy)]
 pub struct ServiceContext<'a> {
     pub source_path: Option<&'a Path>,
     pub limits: ResourceLimits,
     pub abort: &'a dyn AbortSignal,
+    /// The record of the files the run's analyses wrote, which every engine
+    /// the call builds shares; `None` gives each engine its own.
+    pub hdl_run_files: Option<&'a rspice_core::config::HdlRunFiles>,
 }
 
 impl<'a> ServiceContext<'a> {
@@ -23,6 +27,7 @@ impl<'a> ServiceContext<'a> {
             source_path,
             limits: ResourceLimits::default(),
             abort,
+            hdl_run_files: None,
         }
     }
 
@@ -66,6 +71,7 @@ impl<'a> ServiceContext<'a> {
     pub(crate) fn engine_config(self, netlist: &Netlist) -> SimulationConfig {
         let mut config = super::build_engine_config(netlist, None);
         config.resource_limits = self.limits;
+        config.hdl.run_files = self.hdl_run_files.cloned();
         config
     }
 

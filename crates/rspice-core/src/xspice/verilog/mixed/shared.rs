@@ -780,7 +780,7 @@ impl MixedDigitalCoordinator {
     pub(crate) fn configure_hdl(
         &mut self,
         config: &crate::config::HdlRunConfig,
-        run: &std::sync::Arc<super::super::effects::files::HdlRunFiles>,
+        run: &crate::config::HdlRunFiles,
     ) {
         use super::super::effects::files::HdlFileOptions;
         self.hdl_output = config.output.clone();

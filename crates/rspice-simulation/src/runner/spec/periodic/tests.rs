@@ -45,6 +45,7 @@ fn envelope_current_branches_survive_all_initializers_and_worker_transport() {
                     source_path: None,
                     limits,
                     abort: &rspice_core::NoAbort,
+                    hdl_run_files: None,
                 },
             )
         };
@@ -526,6 +527,7 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
                 source_path: None,
                 limits,
                 abort: &NoAbort,
+                hdl_run_files: None,
             },
         )
     };

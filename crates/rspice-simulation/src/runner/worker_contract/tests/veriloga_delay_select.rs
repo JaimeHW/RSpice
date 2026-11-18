@@ -64,6 +64,7 @@ fn request(options: &str) -> WorkerRequest {
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
         transient_states: Default::default(),
+        hdl_run_files: Default::default(),
     }
 }
 

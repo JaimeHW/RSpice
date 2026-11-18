@@ -187,8 +187,9 @@ pub(crate) struct WorkerNamedValue {
 
 /// Run one worker request on this thread, as the worker would.
 #[cfg(test)]
-pub(crate) fn worker_response_from_request(request: WorkerRequest) -> WorkerResponse {
+pub(crate) fn worker_response_from_request(mut request: WorkerRequest) -> WorkerResponse {
     let id = request.id;
+    let hdl_run_files = std::mem::take(&mut request.hdl_run_files);
     let (request, input) = request.into_runner_parts();
     let progress = Arc::new(Mutex::new(SimulationProgress::default()));
     let abort_flag = Arc::new(AtomicBool::new(false));
@@ -200,9 +201,13 @@ pub(crate) fn worker_response_from_request(request: WorkerRequest) -> WorkerResp
             input,
             progress,
             abort_flag,
-            super::super::RunStreams::default(),
+            super::super::RunStreams {
+                hdl_run_files: Some(hdl_run_files.clone()),
+                ..Default::default()
+            },
         ),
     )
+    .with_hdl_run_files(hdl_run_files)
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
@@ -485,6 +490,7 @@ fn run_decoded_worker_request(
         TRANSIENT_STATES.with(Arc::clone),
         std::mem::take(&mut request.transient_states),
     );
+    let hdl_run_files = std::mem::take(&mut request.hdl_run_files);
     let (request, input) = request.into_runner_parts();
     install_worker_engine_logger();
     let verbose = super::super::request_asked_for_verbose(&request);
@@ -511,10 +517,12 @@ fn run_decoded_worker_request(
                 ),
                 backends: Some(backends.clone()),
                 transient_states: Some(transient_states),
+                hdl_run_files: Some(hdl_run_files.clone()),
                 ..Default::default()
             },
         ),
-    );
+    )
+    .with_hdl_run_files(hdl_run_files);
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(None));
     worker_response_transport_value(response, backends.snapshot())
 }
@@ -963,6 +971,7 @@ pub(crate) fn worker_response_transport_value(
                     failure,
                 )),
                 backends: response.backends,
+                hdl_run_files: response.hdl_run_files,
             },
             js_sys::Array::new(),
         ),
