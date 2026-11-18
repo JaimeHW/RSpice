@@ -404,6 +404,10 @@ mod tests {
         fixture_with_deck(fail_xspice, "")
     }
 
+    /// An input a rounding past the fixture's 0.6 V upper A/D threshold. A
+    /// sample exactly on a threshold has not crossed it; this one has.
+    const PAST_HIGH: f64 = 0.6f64.next_up();
+
     fn fixture_with_deck(
         fail_xspice: bool,
         extra_deck: &str,
@@ -719,7 +723,7 @@ mod tests {
             .collect();
         let bad = circuit.get_node_by_name("bad").unwrap() - 1;
         solution[p] = 1.0;
-        solution[adc] = 0.6;
+        solution[adc] = PAST_HIGH;
         solution[bad] = 2.0;
         let error = step(
             &engine,
@@ -1000,7 +1004,7 @@ mod tests {
         let adc = circuit.get_node_by_name("adc").unwrap() - 1;
         let bad = circuit.get_node_by_name("bad").unwrap() - 1;
         solution[p] = 1.0;
-        solution[adc] = 0.6;
+        solution[adc] = PAST_HIGH;
         solution[bad] = 2.0;
         let dt = 0.65e-9;
         let error = step(&engine, &mut circuit, &mut matrix, &mut solution, dt, dt).unwrap_err();
@@ -1232,7 +1236,7 @@ mod tests {
             let branch = circuit.num_nodes() + circuit.inductors.branch_indices[0] - 1;
             solution[p] = 1.0;
             solution[bad] = 2.0;
-            solution[adc] = 0.6;
+            solution[adc] = PAST_HIGH;
             solution[qb] = 0.6;
             solution[branch] = 2e-3;
             let time = 0.65e-9;
