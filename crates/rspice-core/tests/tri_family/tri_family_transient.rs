@@ -139,8 +139,22 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 /// between the crossing and the inverter's edge. 1156 − 12 × 7 is 1072. Every
 /// `d_clk` and `d_inv` event lands at the same instant, bit for bit. Linux x64
 /// measured the same hash.
+///
+/// Re-measured at 1072 points, grid c0f4164f8b204e03 (was c9c0f44b35dacca1),
+/// when a converter root began landing past its crossing by half the window an
+/// interpolated crossing is trusted to (`root_landing`), not one representable
+/// instant. Each of the twelve clock edges lands its first root 31 to 58 ulps
+/// later, about 32 × EPSILON of its time, and the points from that landing to
+/// the pulse corner 0.1 ns on move with it: 12 on a rising edge, 8 on a
+/// falling one, 120 in all, 3.4e-25 s later at the first edge and 3.8e-22 s at
+/// the last. The count and the step sequence are unchanged, and every `d_clk`
+/// and `d_inv` event, dated at its located crossing, lands at the same
+/// instant, bit for bit. The module's `clk` edges and the `q` toggles they
+/// clock come from a zero-delay converter, which cannot date an edge before
+/// the instant it decides on, so they move with the 1.65 V landing, now
+/// where `clk` reads past the threshold. Linux x64 measured the same hash.
 const DECK_A_POINTS: usize = 1072;
-const DECK_A_GRID_HASH: u64 = 0xc9c0_f44b_35da_cca1;
+const DECK_A_GRID_HASH: u64 = 0xc0f4_164f_8b20_4e03;
 
 // Deck A pins its point count and grid hash, not a hash of its node waveforms.
 // Its generated diode and its sources run through the platform's libm, which
