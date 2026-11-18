@@ -17,7 +17,7 @@ use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::state::{
     AnalysisResult, AnalysisType, CellViewRef, ProjectSourceBundle, ProjectSourceDependency,
-    ProjectSourceFile, ProjectSourceLanguage, ProjectSourceOwner, SimulationRunLifecycle,
+    ProjectSourceFile, ProjectSourceOwner, SimulationRunLifecycle,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::diagnostic_store::SourceCollections;
@@ -122,7 +122,6 @@ fn checked_run() -> PictureHost {
     );
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(CellViewRef::new("lib", "tb", "veriloga")),
-        ProjectSourceLanguage::VerilogA,
         "tb/tb.va",
         "module tb; endmodule\n",
         Vec::<ProjectSourceFile>::new(),
