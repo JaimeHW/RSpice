@@ -426,6 +426,104 @@ fn a_missing_recent_project_keeps_the_launcher_open_on_its_row() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The launcher lists recent projects as the landing does: one table under
+/// the same column names, a row per project with its name and the date it
+/// was last opened, and no group headings over the rows.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_launcher_lists_recent_projects_as_the_landing_does() {
+    use rspice_app_project::workbench::surfaces::project::landing::landing;
+    use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
+
+    let recent = |path: &str, pinned| RecentFile {
+        kind: RecentKind::Project,
+        path: std::path::PathBuf::from(path),
+        opened_at_unix_ms: 1_760_000_000_000,
+        pinned,
+        missing: false,
+    };
+    let recents = vec![
+        recent("C:/Engineering/Analog/afe.rspiceproj", false),
+        recent("D:/Lab/rf_pa.rspiceproj", true),
+    ];
+    let ctx = Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.platform.recent_files = recents.clone();
+    rspice_app_project::workbench::project::open_project_launcher(
+        &mut app.state.project,
+        &mut app.state.workbench,
+        &mut app.state.platform,
+    );
+    let mut launcher = launcher_frame(&ctx, &mut app, Vec::new()).0;
+    for _ in 0..2 {
+        launcher = launcher_frame(&ctx, &mut app, Vec::new()).0;
+    }
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.close_project_session();
+    app.state.platform.recovery_catalog = Default::default();
+    app.state.platform.recent_files = recents;
+    let landing_ctx = Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&landing_ctx);
+    let output = landing_ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                landing(ui, &mut crate::workbench::features::cx(&mut app));
+            });
+        },
+    );
+    let landing_texts = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::epaint::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let count =
+        |texts: &[String], wanted: &str| texts.iter().filter(|text| *text == wanted).count();
+    let launcher_texts = launcher
+        .iter()
+        .map(|(text, _)| text.clone())
+        .collect::<Vec<_>>();
+    // The sort says "Last opened" too, so the launcher shows it twice.
+    assert!(
+        count(&landing_texts, "Last opened") == 1 && count(&launcher_texts, "Last opened") == 2
+    );
+    for wanted in ["Project", "Location", "afe", "rf_pa"] {
+        assert_eq!(
+            count(&landing_texts, wanted),
+            1,
+            "landing {wanted:?}: {landing_texts:?}"
+        );
+        assert_eq!(
+            count(&launcher_texts, wanted),
+            1,
+            "launcher {wanted:?}: {launcher_texts:?}"
+        );
+    }
+    let dates = |texts: &[String]| {
+        texts
+            .iter()
+            .filter(|text| text.starts_with("20") && text.len() == 16)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(dates(&launcher_texts), dates(&landing_texts));
+    assert_eq!(dates(&launcher_texts).len(), 2, "{launcher_texts:?}");
+    // "Pinned" is the filter's alone, and nothing heads the rows as recent.
+    assert_eq!(count(&launcher_texts, "Pinned"), 1, "{launcher_texts:?}");
+    assert_eq!(count(&launcher_texts, "Recent"), 0, "{launcher_texts:?}");
+}
+
 /// The Safe mode page states its launch scope in one line under a plain
 /// title, and never offers to start safe mode while it is already on.
 #[test]

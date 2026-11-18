@@ -8,18 +8,18 @@
 pub mod recent_rows;
 mod recovery;
 
-use recent_rows::RecentRowAction;
+use recent_rows::{RecentPick, RecentProject, RecentRowAction};
 use recovery::*;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use egui::{
     Align, Align2, Color32, Context, Frame, Id, Margin, Modifiers, Order, Popup, Rect, Response,
-    Sense, Stroke, Ui, UiKind, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Sense, Stroke, Ui, UiKind, Vec2, WidgetInfo, WidgetType, vec2,
 };
 
-use crate::services::recent_files::{RecentFile, RecentKind};
+use crate::services::recent_files::RecentFile;
 use crate::state::write_policy::LocalSafeModeOptions;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -30,7 +30,7 @@ use crate::ui::widgets::{
 };
 
 use crate::workbench::app_state::PlatformState;
-use crate::workbench::design_system::{WorkbenchIcon, painted_label};
+use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
@@ -40,34 +40,6 @@ use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::workspace_state::{
     ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProjectGroup {
-    Pinned,
-    Recent,
-}
-
-impl ProjectGroup {
-    const ALL: [Self; 2] = [Self::Pinned, Self::Recent];
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Pinned => "Pinned",
-            Self::Recent => "Recent",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ProjectEntry {
-    recent: RecentFile,
-    name: String,
-    path_text: String,
-    opened_at_unix_ms: u64,
-    group: ProjectGroup,
-    available: bool,
-    current: bool,
-}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct LauncherFocusState {
@@ -812,12 +784,16 @@ fn launcher_body(
         );
         return;
     }
-    egui::ScrollArea::vertical()
-        .id_salt("workbench.project_launcher.projects")
-        .auto_shrink([false, false])
-        .show(&mut list_ui, |ui| {
-            project_list(ui, &entries, action, layout)
-        });
+    match recent_rows::recent_projects_list(
+        &mut list_ui,
+        "workbench.project_launcher.projects",
+        &entries,
+        |_| {},
+    ) {
+        Some(RecentPick::Open(recent)) => *action = Some(LauncherAction::Open(recent)),
+        Some(RecentPick::Row(row_action)) => *action = Some(LauncherAction::Recent(row_action)),
+        None => {}
+    }
 }
 
 fn project_heading_actions(
@@ -865,63 +841,6 @@ fn project_heading_actions(
             *action = Some(LauncherAction::NewProject);
         }
     }
-}
-
-fn project_list(
-    ui: &mut Ui,
-    entries: &[ProjectEntry],
-    action: &mut Option<LauncherAction>,
-    layout: LauncherLayout,
-) {
-    ui.spacing_mut().item_spacing = Vec2::ZERO;
-    ui.set_min_width(ui.available_width());
-    for group in ProjectGroup::ALL {
-        let group_entries = entries
-            .iter()
-            .filter(|entry| entry.group == group)
-            .collect::<Vec<_>>();
-        if group_entries.is_empty() {
-            continue;
-        }
-        project_group_header(ui, group.label(), group_entries.len());
-        for entry in group_entries {
-            let (row, row_action) = project_row(ui, entry, layout);
-            if let Some(row_action) = row_action {
-                *action = Some(LauncherAction::Recent(row_action));
-            } else if entry.available && response_activated(ui, &row) {
-                *action = Some(LauncherAction::Open(entry.recent.clone()));
-            }
-        }
-    }
-}
-
-fn project_group_header(ui: &mut Ui, label: &str, count: usize) {
-    let t = Tokens::get(ui.ctx());
-    Frame::new()
-        .fill(t.color.bg_panel_2)
-        .inner_margin(Margin::symmetric(13, 0))
-        .show(ui, |ui| {
-            ui.set_height(t.metrics.grid_row_h);
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(label)
-                        .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                        .color(t.color.text_dim),
-                );
-                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(count.to_string())
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                });
-            });
-        });
-    ui.painter().hline(
-        ui.max_rect().x_range(),
-        ui.cursor().top(),
-        Stroke::new(1.0, t.color.border),
-    );
 }
 
 fn launcher_page_regions(ui: &mut Ui, footer_height: f32) -> LauncherPageRegions {
@@ -1212,7 +1131,7 @@ struct ProjectEntries {
     sort: ProjectLauncherSort,
     current_path: Option<PathBuf>,
     current_name: String,
-    entries: Arc<[ProjectEntry]>,
+    entries: Arc<[RecentProject]>,
 }
 
 impl ProjectEntries {
@@ -1229,7 +1148,7 @@ impl ProjectEntries {
 
 /// The launcher's project list, built once for what it is filtered and
 /// sorted by and kept until one of those changes.
-fn project_entries(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> Arc<[ProjectEntry]> {
+fn project_entries(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> Arc<[RecentProject]> {
     let id = Id::new("workbench.project_launcher.entries");
     if let Some(kept) = ctx.data(|data| data.get_temp::<Arc<ProjectEntries>>(id))
         && kept.built_from(cx)
@@ -1251,273 +1170,18 @@ fn project_entries(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> Arc<[ProjectEn
     entries
 }
 
-fn build_project_entries(cx: &Cx<'_, ProjectFeature>) -> Vec<ProjectEntry> {
+fn build_project_entries(cx: &Cx<'_, ProjectFeature>) -> Vec<RecentProject> {
     #[cfg(any(test, feature = "test-support"))]
     PROJECT_LIST_BUILDS.with(|builds| builds.set(builds.get() + 1));
-    let query = cx.state.project_launcher_query.trim().to_lowercase();
     let current_path = current_project_path(cx);
-    let current_path = current_path.as_deref();
     let current_name = cx.model.workspace.content.project.display_name();
-    let filter = cx.state.project_launcher_filter;
-    let mut entries = cx
-        .platform
-        .recent_files
-        .iter()
-        .filter(|recent| recent.kind == RecentKind::Project)
-        .filter_map(|recent| {
-            let current = current_path.is_some_and(|path| path == recent.path);
-            let name = if current {
-                current_name.to_owned()
-            } else {
-                project_name_from_path(&recent.path)
-            };
-            let path_text = crate::services::recent_files::location(recent);
-            let matches_filter = project_matches_filter(filter, recent.pinned);
-            let matches = query.is_empty()
-                || name.to_lowercase().contains(&query)
-                || path_text.to_lowercase().contains(&query);
-            (matches_filter && matches).then(|| ProjectEntry {
-                recent: recent.clone(),
-                name,
-                path_text,
-                opened_at_unix_ms: recent.opened_at_unix_ms,
-                group: project_group(recent.pinned),
-                available: project_path_available(&recent.path),
-                current,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    match cx.state.project_launcher_sort {
-        ProjectLauncherSort::LastOpened => {}
-        ProjectLauncherSort::Name => entries.sort_by(|left, right| {
-            left.name
-                .to_lowercase()
-                .cmp(&right.name.to_lowercase())
-                .then_with(|| left.path_text.cmp(&right.path_text))
-        }),
-    }
-    entries
-}
-
-/// One recent project: its name, its path elided in the middle, when it was
-/// last opened, its state when that is out of the ordinary, and its pin. A
-/// file an open found gone carries a strip with the ways on. Returns the
-/// row's response and what its controls asked.
-fn project_row(
-    ui: &mut Ui,
-    entry: &ProjectEntry,
-    layout: LauncherLayout,
-) -> (egui::Response, Option<RecentRowAction>) {
-    let t = Tokens::get(ui.ctx());
-    let enabled = entry.available && ui.is_enabled();
-    let missing = entry.recent.missing;
-    let strip_height = if missing {
-        recent_rows::missing_strip_height(ui)
-    } else {
-        0.0
-    };
-    let (row_height, cell_height) = two_line_row_height(ui);
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(ui.available_width(), row_height + strip_height),
-        if enabled {
-            Sense::click()
-        } else {
-            Sense::hover()
-        },
-    );
-    let fill = if entry.current || response.hovered() {
-        t.color.bg_hover
-    } else {
-        Color32::TRANSPARENT
-    };
-    ui.painter().rect_filled(rect, 0.0, fill);
-    if entry.current {
-        ui.painter().rect_filled(
-            Rect::from_min_size(rect.min, vec2(2.0, rect.height())),
-            0.0,
-            t.color.accent,
-        );
-    }
-    let horizontal_padding = if layout.phone { 9.0 } else { 13.0 };
-    let main = Rect::from_min_size(rect.min, vec2(rect.width(), row_height));
-    let inner = main.shrink2(vec2(horizontal_padding, (row_height - cell_height) * 0.5));
-    let mut row = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(inner)
-            .layout(egui::Layout::left_to_right(Align::Center)),
-    );
-    row.spacing_mut().item_spacing.x = 9.0;
-    let (icon_column, _) = row.allocate_exact_size(vec2(31.0, cell_height), Sense::hover());
-    let icon_rect = Rect::from_center_size(icon_column.center(), Vec2::splat(27.0));
-    // A project that cannot be opened from here is faint, not red: the state
-    // column says why, with a mark when the file is missing.
-    let openable = entry.available && !missing;
-    row.painter().rect_filled(
-        icon_rect,
-        0.0,
-        if openable {
-            t.color.accent_dim
-        } else {
-            t.color.bg_inset
-        },
-    );
-    WorkbenchIcon::Project.paint(
-        row.painter(),
-        icon_rect.shrink(5.0),
-        if openable {
-            t.color.accent
-        } else {
-            t.color.text_faint
-        },
-    );
-    let pin_width = recent_rows::pin_side(&row);
-    let date_width = if layout.compact { 0.0 } else { 125.0 };
-    let state_width = if layout.compact { 62.0 } else { 70.0 };
-    let trailing_width = date_width + state_width + pin_width + 2.0 * 9.0;
-    let content_width = (row.available_width() - trailing_width - 9.0).max(1.0);
-    row.allocate_ui_with_layout(
-        vec2(content_width, cell_height),
-        egui::Layout::top_down(Align::Min),
-        |ui| {
-            // The whole width, however short the path: the columns after it
-            // start where they start on every other row.
-            ui.set_min_width(content_width);
-            ui.spacing_mut().item_spacing.y = LINE_GAP;
-            // Painted, not labels: a label over the row takes the presses on its text.
-            painted_label(
-                ui,
-                egui::RichText::new(&entry.name)
-                    .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                    .color(t.color.text),
-                egui::TextWrapMode::Truncate,
-            );
-            // The drive and the file name tell two same-named projects apart,
-            // so the path gives way in its middle.
-            let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-            let path = crate::workbench::design_system::elide_middle(
-                ui,
-                &entry.path_text,
-                &font,
-                ui.available_width(),
-            );
-            painted_label(
-                ui,
-                egui::RichText::new(path).font(font).color(t.color.text_dim),
-                egui::TextWrapMode::Extend,
-            );
-        },
-    );
-    if !layout.compact {
-        row.allocate_ui_with_layout(
-            vec2(date_width, cell_height),
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                painted_label(
-                    ui,
-                    egui::RichText::new(recent_rows::last_opened(entry.opened_at_unix_ms))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                    egui::TextWrapMode::Extend,
-                )
-            },
-        );
-    }
-    let state = recent_project_state(entry.available, missing, cfg!(target_arch = "wasm32"));
-    let (state_cell, _) = row.allocate_exact_size(vec2(state_width, cell_height), Sense::hover());
-    if let Some((text, problem)) = state {
-        let galley = row.painter().layout_no_wrap(
-            text.to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-        );
-        use crate::ui::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
-        let mark_advance = if problem.is_some() {
-            PROBLEM_MARK_ADVANCE
-        } else {
-            0.0
-        };
-        let left = state_cell.center().x - (mark_advance + galley.size().x) * 0.5;
-        if let Some(problem) = problem {
-            paint_problem_mark(
-                row.painter(),
-                Rect::from_center_size(
-                    pos2(left + PROBLEM_MARK_SIDE * 0.5, state_cell.center().y),
-                    Vec2::splat(PROBLEM_MARK_SIDE),
-                ),
-                problem,
-            );
-        }
-        row.painter().galley(
-            pos2(
-                left + mark_advance,
-                state_cell.center().y - galley.size().y * 0.5,
-            ),
-            galley,
-            t.color.text_dim,
-        );
-    }
-    let (pin_cell, _) = row.allocate_exact_size(vec2(pin_width, cell_height), Sense::hover());
-    let mut row_action =
-        recent_rows::pin_toggle(&mut row, pin_cell, entry.recent.pinned, &entry.name)
-            .then(|| RecentRowAction::TogglePin(entry.recent.path.clone()));
-    if missing {
-        let strip = Rect::from_min_max(
-            pos2(inner.left() + 31.0 + 9.0, main.bottom()),
-            pos2(inner.right(), rect.bottom() - 4.0),
-        );
-        if let Some(strip_action) = recent_rows::missing_strip(ui, strip, &entry.recent) {
-            row_action = Some(strip_action);
-        }
-    }
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            enabled,
-            format!("Open project {}", entry.name),
-        )
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(match state {
-            Some((text, Some(problem))) => {
-                format!("{}; {}", entry.path_text, problem.announce(text))
-            }
-            Some((text, None)) => format!("{}; {text}", entry.path_text),
-            None => entry.path_text.clone(),
-        });
-    });
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    theme::paint_focus_ring(ui, &response, response.rect);
-    let response = if enabled {
-        recent_rows::hover_and_long_press(ui, response, &recent_rows::full_text(&entry.recent))
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-    } else {
-        response.on_hover_text(
-            "Reopen this project through Browse so browser file permission can be verified",
-        )
-    };
-    (response, row_action)
-}
-
-/// What a recent project's state column says, if anything, and the mark it
-/// earns. A project that opens is the ordinary row and says nothing, and the
-/// current project already wears the accent bar.
-fn recent_project_state(
-    available: bool,
-    missing: bool,
-    browser: bool,
-) -> Option<(&'static str, Option<Problem>)> {
-    if !available && browser {
-        Some(("browse", None))
-    } else if missing {
-        Some(("missing", Some(Problem::Warning)))
-    } else {
-        None
-    }
+    recent_rows::recent_projects(
+        &cx.platform.recent_files,
+        &cx.state.project_launcher_query,
+        cx.state.project_launcher_filter,
+        cx.state.project_launcher_sort,
+        current_path.as_deref().map(|path| (path, current_name)),
+    )
 }
 
 /// The list area with no project in it, at the launcher's size: it is a list
@@ -1684,29 +1348,6 @@ fn launcher_search_focus_border(t: &Tokens) -> Color32 {
     )
 }
 
-fn project_name_from_path(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or("Unnamed project")
-        .to_owned()
-}
-
-const fn project_matches_filter(filter: ProjectLauncherFilter, pinned: bool) -> bool {
-    match filter {
-        ProjectLauncherFilter::All => true,
-        ProjectLauncherFilter::Pinned => pinned,
-    }
-}
-
-const fn project_group(pinned: bool) -> ProjectGroup {
-    if pinned {
-        ProjectGroup::Pinned
-    } else {
-        ProjectGroup::Recent
-    }
-}
-
 fn project_search_id() -> Id {
     Id::new("workbench.project_launcher.search")
 }
@@ -1774,20 +1415,6 @@ pub fn restore_launcher_focus(
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn project_path_available(_path: &Path) -> bool {
-    // Filesystem availability is verified only by the open itself. Probing
-    // local, mapped, removable, or UNC paths from every paint pass can stall
-    // the UI; an open that finds the file gone marks its row missing.
-    true
-}
-
-/// A browser reopens only the projects it keeps a binding for.
-#[cfg(target_arch = "wasm32")]
-fn project_path_available(path: &Path) -> bool {
-    crate::services::recent_files::BrowserRecent::of(path).is_some()
-}
-
 /// The path the open project is listed under: its file, or in the browser
 /// the entry its kept binding is listed under.
 fn current_project_path(cx: &Cx<'_, ProjectFeature>) -> Option<PathBuf> {
@@ -1811,13 +1438,13 @@ mod tests {
     /// to. Where a project is kept is not a state.
     #[test]
     fn a_recent_project_states_only_what_is_out_of_the_ordinary() {
-        assert_eq!(recent_project_state(true, false, false), None);
+        assert_eq!(recent_rows::row_state(true, false, false), None);
         assert_eq!(
-            recent_project_state(true, true, false),
+            recent_rows::row_state(true, true, false),
             Some(("missing", Some(Problem::Warning)))
         );
         assert_eq!(
-            recent_project_state(false, false, true),
+            recent_rows::row_state(false, false, true),
             Some(("browse", None))
         );
     }
@@ -1851,27 +1478,39 @@ mod tests {
     #[test]
     fn project_names_come_from_the_file_name_without_extension() {
         assert_eq!(
-            project_name_from_path(Path::new("C:/Engineering/Precision AFE.rspiceproj")),
+            recent_rows::project_name(std::path::Path::new(
+                "C:/Engineering/Precision AFE.rspiceproj"
+            )),
             "Precision AFE"
         );
     }
 
     #[test]
     fn project_names_have_a_nonempty_fallback() {
-        assert_eq!(project_name_from_path(Path::new("/")), "Unnamed project");
+        assert_eq!(
+            recent_rows::project_name(std::path::Path::new("/")),
+            "Unnamed project"
+        );
     }
 
     #[test]
     fn a_pinned_project_is_listed_under_pinned_and_in_all() {
-        assert!(project_matches_filter(ProjectLauncherFilter::All, false));
-        assert!(project_matches_filter(ProjectLauncherFilter::All, true));
-        assert!(project_matches_filter(ProjectLauncherFilter::Pinned, true));
-        assert!(!project_matches_filter(
+        assert!(recent_rows::matches_filter(
+            ProjectLauncherFilter::All,
+            false
+        ));
+        assert!(recent_rows::matches_filter(
+            ProjectLauncherFilter::All,
+            true
+        ));
+        assert!(recent_rows::matches_filter(
+            ProjectLauncherFilter::Pinned,
+            true
+        ));
+        assert!(!recent_rows::matches_filter(
             ProjectLauncherFilter::Pinned,
             false
         ));
-        assert_eq!(project_group(true), ProjectGroup::Pinned);
-        assert_eq!(project_group(false), ProjectGroup::Recent);
     }
 
     /// A browser keeps nothing for the Recovery page to list, so its

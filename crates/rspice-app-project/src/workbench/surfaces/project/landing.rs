@@ -5,8 +5,8 @@
 //! dispatches the same file and lifecycle workflows as the application menu.
 
 use egui::{
-    Align, Align2, FontId, Frame, Layout, Margin, Rect, Response, ScrollArea, Sense, Stroke, Ui,
-    UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Frame, Layout, Margin, Rect, Response, ScrollArea, Sense, Stroke, Ui, UiBuilder,
+    Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::services::recent_files::{RecentFile, RecentKind};
@@ -20,7 +20,9 @@ use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::workspace_state::ProjectLauncherFilter;
 use crate::workbench::slots::ProjectState;
-use crate::workbench::tools::project_launcher::recent_rows::{self, RecentRowAction};
+use crate::workbench::tools::project_launcher::recent_rows::{
+    self, COMPACT_WIDTH, RecentPick, RecentProject, RecentRowAction,
+};
 
 const CONTENT_MAX_WIDTH: f32 = 1240.0;
 const DESKTOP_GUTTER: f32 = 30.0;
@@ -29,29 +31,9 @@ const BODY_BOTTOM: f32 = 26.0;
 const RAIL_WIDTH: f32 = 322.0;
 const COLUMN_GAP: f32 = 18.0;
 const STACK_BREAKPOINT: f32 = 900.0;
-const PHONE_RECENTS_BREAKPOINT: f32 = 620.0;
-const TABLE_MIN_WIDTH: f32 = 720.0;
-/// The landing's bands and rows are the density's: a recent project's row
-/// and a filter segment are a finger's reach under a coarse pointer, since
-/// each opens or filters with a press.
-fn landing_row_height(t: &Tokens) -> f32 {
-    if t.metrics.is_touch() {
-        t.metrics.touch_target()
-    } else {
-        t.metrics.ctl_h + 4.0
-    }
-}
 /// Side of a problem mark set in front of a card head's fact: read from the
 /// kit, so a marked head and an unmarked one keep the same rhythm.
 use crate::ui::widgets::PROBLEM_MARK_SIDE as MARK_SIDE;
-
-#[derive(Debug, Clone)]
-struct RecentProjectRow {
-    recent: RecentFile,
-    name: String,
-    location: String,
-    last_opened: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LandingAction {
@@ -281,7 +263,7 @@ fn recent_projects(
 ) {
     let t = Tokens::get(ui.ctx());
     let rows = recent_project_rows(cx.state, cx.platform);
-    let compact = ui.available_width() < PHONE_RECENTS_BREAKPOINT;
+    let compact = ui.available_width() < COMPACT_WIDTH;
     // A stacked landing page lives inside an outer scroll area, where the
     // available height can be unbounded. Keep the table useful without ever
     // allowing it to claim an infinite or phone-hostile viewport.
@@ -289,7 +271,7 @@ fn recent_projects(
         if rows.is_empty() {
             222.0
         } else {
-            (142.0 + rows.len() as f32 * compact_row_height(ui)).clamp(250.0, 390.0)
+            (142.0 + rows.len() as f32 * recent_rows::compact_row_height(ui)).clamp(250.0, 390.0)
         }
     } else if table_height == TableHeight::FillColumn {
         ui.available_height().max(180.0)
@@ -324,54 +306,15 @@ fn recent_projects(
         .recent_files
         .iter()
         .all(|recent| recent.kind != RecentKind::Project);
-    if compact {
-        ScrollArea::vertical()
-            .id_salt("workbench.project.landing.recents.compact")
-            .auto_shrink([false, false])
-            .show(&mut rows_ui, |ui| {
-                // Beside the scroll bar, not under it.
-                ui.set_min_width(ui.available_width());
-                compact_recent_header(ui);
-                if rows.is_empty() {
-                    recent_empty_state(ui, no_recents);
-                } else {
-                    for row in &rows {
-                        let (response, row_action) = compact_recent_row(ui, row);
-                        take_row_action(ui, row, response, row_action, action);
-                    }
-                }
-            });
-    } else {
-        ScrollArea::both()
-            .id_salt("workbench.project.landing.recents")
-            .auto_shrink([false, false])
-            .show(&mut rows_ui, |ui| {
-                ui.set_min_width(TABLE_MIN_WIDTH.max(ui.available_width()));
-                recent_table_header(ui);
-                if rows.is_empty() {
-                    recent_empty_state(ui, no_recents);
-                } else {
-                    for row in &rows {
-                        let (response, row_action) = recent_table_row(ui, row);
-                        take_row_action(ui, row, response, row_action, action);
-                    }
-                }
-            });
-    }
-}
-
-/// A row's control pressed, or else the row itself: open it.
-fn take_row_action(
-    ui: &mut Ui,
-    row: &RecentProjectRow,
-    response: Response,
-    row_action: Option<RecentRowAction>,
-    action: &mut Option<LandingAction>,
-) {
-    if let Some(row_action) = row_action {
-        *action = Some(LandingAction::Recent(row_action));
-    } else if response_activated(ui, &response) {
-        *action = Some(LandingAction::OpenRecent(row.recent.clone()));
+    match recent_rows::recent_projects_list(
+        &mut rows_ui,
+        "workbench.project.landing.recents",
+        &rows,
+        |ui| recent_empty_state(ui, no_recents),
+    ) {
+        Some(RecentPick::Open(recent)) => *action = Some(LandingAction::OpenRecent(recent)),
+        Some(RecentPick::Row(row_action)) => *action = Some(LandingAction::Recent(row_action)),
+        None => {}
     }
 }
 
@@ -384,7 +327,7 @@ fn recent_toolbar(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, shown: usize) {
             // The band spans the panel, however little its controls take.
             ui.set_min_width(ui.available_width());
             ui.set_min_height(t.metrics.ctl_h);
-            if ui.available_width() < PHONE_RECENTS_BREAKPOINT {
+            if ui.available_width() < COMPACT_WIDTH {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 5.0;
                     recent_toolbar_title(ui, shown);
@@ -512,343 +455,6 @@ fn segment_button(ui: &mut Ui, label: &str, selected: bool) -> Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn recent_table_header(ui: &mut Ui) {
-    table_cells(ui, ["Project", "Location", "Last opened", ""], true, 0.0);
-}
-
-fn compact_recent_header(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), t.metrics.row_h), Sense::hover());
-    // The list's two column names, said once at its head.
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            "Project, Last opened",
-        )
-    });
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let font = theme::sans(tokens::FS_0, FontWeight::Medium);
-    ui.painter().text(
-        pos2(rect.left() + 8.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        "Project",
-        font.clone(),
-        t.color.text_faint,
-    );
-    ui.painter().text(
-        pos2(rect.right() - 8.0, rect.center().y),
-        Align2::RIGHT_CENTER,
-        "Last opened",
-        font,
-        t.color.text_faint,
-    );
-}
-
-/// The space between a phone row's name and the path under it.
-const COMPACT_LINE_GAP: f32 = 4.0;
-
-/// A phone row's fonts: the project's name over its path.
-fn compact_row_fonts() -> (FontId, FontId) {
-    (
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-    )
-}
-
-/// A phone row's height: its name over its path with a bar's padding above
-/// and below, and never less than a touch target, so a larger target or
-/// larger text grows the row instead of crowding it.
-fn compact_row_height(ui: &Ui) -> f32 {
-    let metrics = Tokens::get(ui.ctx()).metrics;
-    let (name, location) = compact_row_fonts();
-    let lines = ui.fonts_mut(|fonts| fonts.row_height(&name) + fonts.row_height(&location));
-    (lines + COMPACT_LINE_GAP + 2.0 * metrics.bar_pad).max(metrics.touch_target())
-}
-
-/// A phone row: name over path at the left, the date and the pin at the
-/// right, and the missing strip under a file an open found gone.
-fn compact_recent_row(ui: &mut Ui, row: &RecentProjectRow) -> (Response, Option<RecentRowAction>) {
-    let t = Tokens::get(ui.ctx());
-    let row_height = compact_row_height(ui);
-    let strip_height = if row.recent.missing {
-        recent_rows::missing_strip_height(ui)
-    } else {
-        0.0
-    };
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(ui.available_width(), row_height + strip_height),
-        Sense::click(),
-    );
-    if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-    }
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let main = Rect::from_min_size(rect.min, vec2(rect.width(), row_height));
-    let pin_side = recent_rows::pin_side(ui);
-    let right_width = 112.0 + pin_side;
-    let left_width = (main.width() - right_width - 24.0).max(24.0);
-    let (name_font, location_font) = compact_row_fonts();
-    // The two lines sit as one block in the middle of the row, the date
-    // level with the name and the missing word level with the path.
-    let (name_h, location_h) = ui.fonts_mut(|fonts| {
-        (
-            fonts.row_height(&name_font),
-            fonts.row_height(&location_font),
-        )
-    });
-    let block_top = main.center().y - (name_h + COMPACT_LINE_GAP + location_h) * 0.5;
-    let name_y = block_top + name_h * 0.5;
-    let location_y = block_top + name_h + COMPACT_LINE_GAP + location_h * 0.5;
-    let name = super::elide_text(ui, &row.name, &name_font, left_width);
-    let location = crate::workbench::design_system::elide_middle(
-        ui,
-        &row.location,
-        &location_font,
-        left_width,
-    );
-    ui.painter().text(
-        pos2(main.left() + 9.0, name_y),
-        Align2::LEFT_CENTER,
-        name,
-        name_font,
-        t.color.text,
-    );
-    ui.painter().text(
-        pos2(main.left() + 9.0, location_y),
-        Align2::LEFT_CENTER,
-        location,
-        location_font,
-        t.color.text_faint,
-    );
-    let date_right = main.right() - 9.0 - pin_side - 4.0;
-    ui.painter().text(
-        pos2(date_right, name_y),
-        Align2::RIGHT_CENTER,
-        &row.last_opened,
-        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    if row.recent.missing {
-        missing_word(ui, pos2(date_right, location_y));
-    }
-    let pin_cell = Rect::from_min_max(
-        pos2(main.right() - 9.0 - pin_side, main.top()),
-        pos2(main.right() - 9.0, main.bottom()),
-    );
-    let mut row_action = recent_rows::pin_toggle(ui, pin_cell, row.recent.pinned, &row.name)
-        .then(|| RecentRowAction::TogglePin(row.recent.path.clone()));
-    if row.recent.missing {
-        let strip = Rect::from_min_max(
-            pos2(main.left() + 9.0, main.bottom()),
-            pos2(main.right() - 9.0, rect.bottom() - 4.0),
-        );
-        if let Some(strip_action) = recent_rows::missing_strip(ui, strip, &row.recent) {
-            row_action = Some(strip_action);
-        }
-    }
-    theme::paint_focus_ring(ui, &response, rect);
-    (finish_row(ui, row, response), row_action)
-}
-
-/// A table row: name, path elided in the middle, the date it was last
-/// opened, and its state and pin; the missing strip under a file an open
-/// found gone.
-fn recent_table_row(ui: &mut Ui, row: &RecentProjectRow) -> (Response, Option<RecentRowAction>) {
-    let t = Tokens::get(ui.ctx());
-    let fields = [
-        row.name.as_str(),
-        row.location.as_str(),
-        row.last_opened.as_str(),
-        "",
-    ];
-    let strip_height = if row.recent.missing {
-        recent_rows::missing_strip_height(ui)
-    } else {
-        0.0
-    };
-    let (response, cells) = table_cells(ui, fields, false, strip_height);
-    if response.hovered() {
-        ui.painter()
-            .rect_filled(response.rect, 0.0, t.color.bg_hover);
-        // Repaint the cells above the hover fill.
-        paint_table_text(ui, response.rect, &cells, fields, false);
-    }
-    let state = cells[3];
-    let pin_side = recent_rows::pin_side(ui).min(state.height());
-    let pin_cell = Rect::from_min_max(
-        pos2(state.right() - 4.0 - pin_side, state.top()),
-        pos2(state.right() - 4.0, state.bottom()),
-    );
-    if row.recent.missing {
-        missing_word(ui, pos2(pin_cell.left() - 4.0, state.center().y));
-    }
-    let mut row_action = recent_rows::pin_toggle(ui, pin_cell, row.recent.pinned, &row.name)
-        .then(|| RecentRowAction::TogglePin(row.recent.path.clone()));
-    if row.recent.missing {
-        let strip = Rect::from_min_max(
-            pos2(cells[0].left() + 8.0, state.bottom()),
-            pos2(state.right() - 4.0, response.rect.bottom() - 4.0),
-        );
-        if let Some(strip_action) = recent_rows::missing_strip(ui, strip, &row.recent) {
-            row_action = Some(strip_action);
-        }
-    }
-    theme::paint_focus_ring(ui, &response, response.rect);
-    (finish_row(ui, row, response), row_action)
-}
-
-/// "missing", with its mark, ending at `right`.
-fn missing_word(ui: &Ui, right: egui::Pos2) {
-    let t = Tokens::get(ui.ctx());
-    let word = ui.painter().text(
-        right,
-        Align2::RIGHT_CENTER,
-        "missing",
-        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    paint_problem_mark(
-        ui.painter(),
-        Rect::from_center_size(
-            pos2(word.left() - 4.0 - MARK_SIDE * 0.5, word.center().y),
-            Vec2::splat(MARK_SIDE),
-        ),
-        Problem::Warning,
-    );
-}
-
-/// What every recent row says to assistive technology and on hover or
-/// long-press. Each row paints its own focus ring before this.
-fn finish_row(ui: &Ui, row: &RecentProjectRow, response: Response) -> Response {
-    response.widget_info(|| {
-        WidgetInfo::labeled(
-            WidgetType::Button,
-            ui.is_enabled(),
-            format!("Open project {}", row.name),
-        )
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(if row.recent.missing {
-            format!("{}; {}; missing", row.location, row.last_opened)
-        } else {
-            format!("{}; {}", row.location, row.last_opened)
-        });
-    });
-    recent_rows::hover_and_long_press(ui, response, &recent_rows::full_text(&row.recent))
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-fn table_cells<const N: usize>(
-    ui: &mut Ui,
-    fields: [&str; N],
-    header: bool,
-    strip_height: f32,
-) -> (Response, Vec<Rect>) {
-    debug_assert_eq!(N, 4);
-    let t = Tokens::get(ui.ctx());
-    let height = if header {
-        t.metrics.row_h
-    } else {
-        landing_row_height(&t)
-    };
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(
-            ui.available_width().max(TABLE_MIN_WIDTH),
-            height + strip_height,
-        ),
-        if header {
-            Sense::hover()
-        } else {
-            Sense::click()
-        },
-    );
-    if header {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
-    }
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let cells = table_cell_rects(Rect::from_min_size(rect.min, vec2(rect.width(), height)));
-    paint_table_text(ui, rect, &cells, fields, header);
-    (response, cells)
-}
-
-/// The table's columns: the name, the path, the date, and a column that
-/// holds the row's state and pin.
-fn table_cell_rects(rect: Rect) -> Vec<Rect> {
-    let fractions = [0.27_f32, 0.43, 0.19, 0.11];
-    let mut cells = Vec::with_capacity(fractions.len());
-    let mut left = rect.left();
-    for (index, fraction) in fractions.into_iter().enumerate() {
-        let right = if index == fractions.len() - 1 {
-            rect.right()
-        } else {
-            left + rect.width() * fraction
-        };
-        cells.push(Rect::from_min_max(
-            pos2(left, rect.top()),
-            pos2(right, rect.bottom()),
-        ));
-        left = right;
-    }
-    cells
-}
-
-fn paint_table_text<const N: usize>(
-    ui: &Ui,
-    row: Rect,
-    cells: &[Rect],
-    fields: [&str; N],
-    header: bool,
-) {
-    let t = Tokens::get(ui.ctx());
-    for (index, (cell, text)) in cells.iter().zip(fields).enumerate() {
-        if text.is_empty() {
-            continue;
-        }
-        let font = if header {
-            theme::sans(tokens::FS_0, FontWeight::Medium)
-        } else if matches!(index, 1 | 2) {
-            theme::mono(tokens::FS_0, FontWeight::Regular)
-        } else {
-            theme::sans(tokens::FS_0, FontWeight::Regular)
-        };
-        let color = if header || index == 1 {
-            t.color.text_faint
-        } else {
-            t.color.text_dim
-        };
-        let inset = cell.shrink2(vec2(8.0, 0.0));
-        // The drive and the file name tell two same-named projects apart,
-        // so a path gives way in its middle.
-        let text = if index == 1 && !header {
-            crate::workbench::design_system::elide_middle(ui, text, &font, inset.width())
-        } else {
-            super::elide_text(ui, text, &font, inset.width())
-        };
-        ui.painter().with_clip_rect(inset.intersect(row)).text(
-            inset.left_center(),
-            Align2::LEFT_CENTER,
-            text,
-            font,
-            color,
-        );
-    }
-}
-
 fn recent_empty_state(ui: &mut Ui, no_recents: bool) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 82.0), Sense::hover());
@@ -889,43 +495,17 @@ fn recent_empty_state(ui: &mut Ui, no_recents: bool) {
     });
 }
 
-/// The recent projects the landing lists: the device's recents, narrowed by
-/// the launcher's search and filter, which the landing shares.
-fn recent_project_rows(project: &ProjectState, platform: &PlatformState) -> Vec<RecentProjectRow> {
-    let query = project.project_launcher_query.trim().to_lowercase();
-    let filter = project.project_launcher_filter;
-    platform
-        .recent_files
-        .iter()
-        .filter(|recent| recent.kind == RecentKind::Project)
-        .filter_map(|recent| {
-            let matches_filter = match filter {
-                ProjectLauncherFilter::All => true,
-                ProjectLauncherFilter::Pinned => recent.pinned,
-            };
-            let name = recent_project_name(recent);
-            let location = crate::services::recent_files::location(recent);
-            let matches = query.is_empty()
-                || name.to_lowercase().contains(&query)
-                || location.to_lowercase().contains(&query);
-            (matches_filter && matches).then(|| RecentProjectRow {
-                recent: recent.clone(),
-                name,
-                location,
-                last_opened: recent_rows::last_opened(recent.opened_at_unix_ms),
-            })
-        })
-        .collect()
-}
-
-fn recent_project_name(recent: &RecentFile) -> String {
-    recent
-        .path
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or("Unnamed project")
-        .to_owned()
+/// The recent projects the landing lists: the device's recents, narrowed and
+/// ordered by the launcher's search, filter and sort, which the landing
+/// shares. No project is open under the landing.
+fn recent_project_rows(project: &ProjectState, platform: &PlatformState) -> Vec<RecentProject> {
+    recent_rows::recent_projects(
+        &platform.recent_files,
+        &project.project_launcher_query,
+        project.project_launcher_filter,
+        project.project_launcher_sort,
+        None,
+    )
 }
 
 fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
@@ -1025,15 +605,6 @@ fn compact_section_header(ui: &mut Ui, title: &str, meta: &str, problem: Option<
     }
 }
 
-fn response_activated(ui: &mut Ui, response: &Response) -> bool {
-    response.clicked()
-        || (response.has_focus()
-            && ui.input_mut(|input| {
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                    || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
-            }))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1044,7 +615,7 @@ mod tests {
 
     /// The rows the landing lists for `harness`, read from the parts its page
     /// draws from.
-    fn recent_project_rows(harness: &FeatureHarness<ProjectFeature>) -> Vec<RecentProjectRow> {
+    fn recent_project_rows(harness: &FeatureHarness<ProjectFeature>) -> Vec<RecentProject> {
         super::recent_project_rows(&harness.state, &harness.platform)
     }
 
