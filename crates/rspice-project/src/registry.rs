@@ -65,7 +65,7 @@ impl ProjectDocumentId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentRecord {
     pub id: ProjectDocumentId,
     pub dirty: bool,
@@ -80,6 +80,9 @@ pub struct DocumentRegistry {
     /// How many records are dirty.
     dirty: usize,
     comparison_failed: bool,
+    /// How many times a recompare rebuilt the order and index.
+    #[cfg(test)]
+    reindexed: usize,
 }
 
 impl DocumentRegistry {
@@ -155,48 +158,61 @@ impl DocumentRegistry {
         self.dirty = self.records.iter().filter(|record| record.dirty).count();
     }
 
-    /// Compare `id` again: dirty when its working and accepted digests
-    /// differ, and gone when neither holds it.
+    /// Compare each of `changed` again: dirty where its working and accepted
+    /// digests differ, gone where neither holds it, and added where it is
+    /// new. The records that come and go are applied together and the order
+    /// and index rebuilt once, so a change that moves every document of a
+    /// large library (a rename, a delete, their Undo) costs one pass, not one
+    /// pass per document.
     pub(crate) fn recompare(
         &mut self,
-        id: &ProjectDocumentId,
-        current: Option<&ContentDigest>,
-        accepted: Option<&ContentDigest>,
+        changed: &[ProjectDocumentId],
+        current: &HashMap<ProjectDocumentId, ContentDigest>,
+        accepted: &HashMap<ProjectDocumentId, ContentDigest>,
     ) {
-        let dirty = current != accepted;
-        let present = current.is_some() || accepted.is_some();
-        match (self.index.get(id).copied(), present) {
-            (Some(at), true) => {
-                let record = &mut self.records[at];
-                if record.dirty != dirty {
-                    record.dirty = dirty;
-                    if dirty {
-                        self.dirty += 1;
-                    } else {
-                        self.dirty -= 1;
+        let mut gone = std::collections::HashSet::new();
+        let mut added = HashMap::new();
+        for id in changed {
+            let (now, then) = (current.get(id), accepted.get(id));
+            let dirty = now != then;
+            let present = now.is_some() || then.is_some();
+            match (self.index.get(id).copied(), present) {
+                (Some(at), true) => {
+                    let record = &mut self.records[at];
+                    if record.dirty != dirty {
+                        record.dirty = dirty;
+                        if dirty {
+                            self.dirty += 1;
+                        } else {
+                            self.dirty -= 1;
+                        }
                     }
                 }
+                (Some(_), false) => {
+                    gone.insert(id);
+                }
+                (None, true) => {
+                    added.insert(id.clone(), dirty);
+                }
+                (None, false) => {}
             }
-            (Some(at), false) => {
-                self.records.remove(at);
-                self.reindex();
-            }
-            (None, true) => {
-                let key = id.stable_key();
-                let at = self
-                    .records
-                    .partition_point(|record| record.id.stable_key() < key);
-                self.records.insert(
-                    at,
-                    DocumentRecord {
-                        id: id.clone(),
-                        dirty,
-                    },
-                );
-                self.reindex();
-            }
-            (None, false) => {}
         }
+        if gone.is_empty() && added.is_empty() {
+            return;
+        }
+        #[cfg(test)]
+        {
+            self.reindexed += 1;
+        }
+        self.records.retain(|record| !gone.contains(&record.id));
+        self.records.extend(
+            added
+                .into_iter()
+                .map(|(id, dirty)| DocumentRecord { id, dirty }),
+        );
+        self.records
+            .sort_by_cached_key(|record| record.id.stable_key());
+        self.reindex();
     }
 }
 
@@ -496,6 +512,66 @@ fn write_canonical_json(value: &serde_json::Value, out: &mut Vec<u8>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cell(name: &str) -> ProjectDocumentId {
+        ProjectDocumentId::CellView(CellViewRef::new("lib", name, "schematic"))
+    }
+
+    /// A rename of a large library takes every cell away and adds every
+    /// renamed one: the registry comes out as a whole rebuild would make it,
+    /// in one pass rather than one per document (10,001 moved documents
+    /// reindexed one at a time froze a release build for 5.5-8.3 s).
+    #[test]
+    fn recomparing_a_library_rename_rebuilds_the_index_once_and_matches_a_rebuild() {
+        let before = (0..5_000)
+            .map(|n| (cell(&format!("old{n:05}")), digest(&n).unwrap()))
+            .chain([(
+                ProjectDocumentId::ProjectConfiguration,
+                digest(&"cfg").unwrap(),
+            )])
+            .collect::<HashMap<_, _>>();
+        let mut registry = DocumentRegistry::default();
+        registry.rebuild(&before, &before);
+        assert!(!registry.any_dirty());
+
+        let mut after = (0..5_000)
+            .map(|n| (cell(&format!("new{n:05}")), digest(&n).unwrap()))
+            .collect::<HashMap<_, _>>();
+        after.insert(
+            ProjectDocumentId::ProjectConfiguration,
+            digest(&"cfg2").unwrap(),
+        );
+        let changed = before
+            .keys()
+            .chain(after.keys())
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        registry.recompare(&changed, &after, &before);
+
+        let mut rebuilt = DocumentRegistry::default();
+        rebuilt.rebuild(&after, &before);
+        assert_eq!(registry.records(), rebuilt.records());
+        assert_eq!(registry.dirty, rebuilt.dirty);
+        assert_eq!(registry.reindexed, 1, "one rebuild of the order and index");
+        assert!(
+            registry.is_dirty(&cell("old00042")),
+            "a cell gone since the save"
+        );
+        assert!(
+            registry.is_dirty(&cell("new00042")),
+            "a cell new since the save"
+        );
+
+        // Undo: the old names come back, and nothing differs from the save.
+        registry.recompare(&changed, &before, &before);
+        assert!(!registry.any_dirty());
+        assert_eq!(registry.records().len(), before.len());
+        assert_eq!(registry.reindexed, 2);
+        registry.recompare(&[ProjectDocumentId::ProjectConfiguration], &before, &before);
+        assert_eq!(registry.reindexed, 2, "a flag change needs no reindex");
+    }
 
     #[test]
     fn canonical_digest_is_independent_of_map_insertion_order() {

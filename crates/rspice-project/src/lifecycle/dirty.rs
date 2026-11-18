@@ -229,13 +229,7 @@ impl ProjectLifecycle {
                 previous.and_then(|(previous, changed)| Some((previous.into_registry()?, changed)));
             match previous {
                 Some((mut registry, changed)) => {
-                    for id in changed {
-                        registry.recompare(
-                            id,
-                            working.documents().get(id),
-                            baseline.documents().get(id),
-                        );
-                    }
+                    registry.recompare(changed, working.documents(), baseline.documents());
                     registry
                 }
                 None => {
