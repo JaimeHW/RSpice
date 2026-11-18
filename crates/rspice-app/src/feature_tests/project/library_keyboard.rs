@@ -481,7 +481,7 @@ fn a_cell_dragged_onto_a_library_opens_copy_cell_aimed_at_it() {
     let controls = replay.frames(Vec::new());
     let bias = only(&controls, "bias, 1", Role::ListBoxOption).center;
     let analog = only(&controls, "analog, 2", Role::ListBoxOption).center;
-    let reference = only(&controls, "ref, 0, read-only", Role::ListBoxOption).center;
+    let reference = only(&controls, "ref, 0, Read-only", Role::ListBoxOption).center;
 
     drag(&mut replay, bias, reference);
     assert!(

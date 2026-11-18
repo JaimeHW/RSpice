@@ -712,7 +712,7 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
             .expect("a built-in model");
         format!("{}, {}", model.name, model.version)
     };
-    user.click(&format!("Verilog-A models, {}, read-only", models.len()));
+    user.click(&format!("Verilog-A models, {}, Read-only", models.len()));
     assert!(
         user.find(&row("BSIM-BULK")).is_some(),
         "the models are listed"

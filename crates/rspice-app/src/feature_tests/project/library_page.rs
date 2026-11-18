@@ -720,13 +720,13 @@ fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
     // announces each of its cells: the name, the cell count and the access.
     only(
         &controls,
-        &format!("{BUILTIN_VERILOGA_LIBRARY}, read-only"),
+        &format!("{BUILTIN_VERILOGA_LIBRARY}, Read-only"),
         Role::Button,
     );
     only(
         &controls,
         &format!(
-            "{BUILTIN_VERILOGA_LIBRARY}, {}, read-only",
+            "{BUILTIN_VERILOGA_LIBRARY}, {}, Read-only",
             BUILTIN_VERILOGA_MODELS.len()
         ),
         Role::ListBoxOption,
@@ -831,7 +831,7 @@ fn library_rows_mark_only_a_read_only_library_and_a_modified_view() {
     for retired in ["RW", "RO", "saved", "writable", "working changes"] {
         assert!(!lines.contains(&retired), "{retired:?} in:\n{text}");
     }
-    assert!(lines.contains(&"read-only"), "{text}");
+    assert!(lines.contains(&"Read-only"), "{text}");
     assert!(lines.contains(&"modified"), "{text}");
 }
 
