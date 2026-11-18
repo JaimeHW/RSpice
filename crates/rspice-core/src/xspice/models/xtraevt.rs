@@ -372,16 +372,19 @@ impl CodeModel for RealGain {
     }
 
     /// As ngspice-46's `real_gain` (icm/xtraevt/real_gain/cfunc.mod): an
-    /// operating point, a transient's included, holds `ic` and queues the
-    /// instance's own call one `delay` later (`cm_event_queue(delay)`). That
-    /// call, or an input event before it, first posts the gain's output, one
-    /// `delay` after it. The model runs at every timepoint here, so until the
-    /// call it posts nothing and lands the step on the call instead.
+    /// operating point holds `ic` and queues the instance's own call one
+    /// `delay` later (`cm_event_queue(delay)`). ngspice solves the event
+    /// side's operating point (`EVTop`, dctran.c) before every transient, a
+    /// UIC one's included, so a transient's time-zero load is one whether or
+    /// not it solved the analog operating point. That call, or an input
+    /// event before it, first posts the gain's output, one `delay` after it.
+    /// The model runs at every timepoint here, so until the call it posts
+    /// nothing and lands the step on the call instead.
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let ic = finite_event_param(ctx, "real_gain", "ic", 0.0)?;
         let delay = finite_event_delay(ctx, "real_gain", "delay", 1.0e-9)?;
         let commit = commit_event_outputs(ctx);
-        if ctx.is_dc_operating_point() {
+        if ctx.is_dc_operating_point() || (ctx.is_transient() && ctx.time == 0.0) {
             set_real_output_when_changed(ctx, "out", ic, 0.0);
             if commit {
                 let call = ctx.time + delay;
@@ -1063,6 +1066,8 @@ mod tests {
     fn real_gain_transient_outputs_immediately_without_startup_hold() {
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
+        // After time zero, whose load is the operating point's.
+        ctx.time = 1.0e-9;
         ctx.set_param("delay", 1.0e-9);
         ctx.set_param("gain", 10.0);
         ctx.set_input_real("in", 2.0);
@@ -1140,6 +1145,7 @@ mod tests {
         for name in ["ic", "gain", "in_offset", "out_offset"] {
             let mut ctx = CmContext::new();
             ctx.analysis = AnalysisType::Transient;
+            ctx.time = 1.0e-9;
             ctx.set_input_real("in", 3.0);
             RealGain.init(&mut ctx).expect("real_gain initializes");
             ctx.set_param(name, f64::NAN);

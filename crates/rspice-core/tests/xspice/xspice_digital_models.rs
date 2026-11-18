@@ -2025,13 +2025,27 @@ fn assert_real_changes(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
 /// 1.2025e-08   3  -0.75   3    7.25
 /// 1.5025e-08   3   7.25   3    7.25
 /// ```
-///
-/// Each converter dates its edge at the timepoint that reads it, so `r1` and
-/// `re1` change wherever this run's steps put them; `r2` and `re2` are
-/// compared one `delay` after them.
 #[test]
 fn real_gain_first_posts_one_delay_after_the_call_its_operating_point_queued() {
-    let netlist = Netlist::parse(
+    assert_real_gain_first_posts_after_its_queued_call("");
+}
+
+/// UIC skips the analog operating point, not the event side's: ngspice
+/// solves it (`EVTop`, dctran.c) under MODEUIC too, so `real_gain` holds `ic`
+/// and queues its call there all the same. ngspice-46 prints this deck with
+/// `.tran 0.05n 40n uic` exactly as without the `uic`, the table above.
+#[test]
+fn real_gain_under_uic_first_posts_one_delay_after_its_queued_call() {
+    assert_real_gain_first_posts_after_its_queued_call(".tran 0.05n 20n uic\n");
+}
+
+/// Run the two-chain `real_gain` deck, with `tran` before its `.end`, and
+/// hold `r2` and `re2` to ngspice-46's first changes. Each converter dates
+/// its edge at the timepoint that reads it, so `r1` and `re1` change wherever
+/// this run's steps put them; `r2` and `re2` are compared one `delay` after
+/// them.
+fn assert_real_gain_first_posts_after_its_queued_call(tran: &str) {
+    let netlist = Netlist::parse(&format!(
         "\
 * real_gain's first output
 vs s 0 pulse(0 1 10n 1n 1n 30n 80n)
@@ -2049,9 +2063,9 @@ arve re2 ae rv1
 .model rv1 real_to_v(gain=1 transition_time=1n)
 r4 a2 0 1k
 r5 ae 0 1k
-.end
-",
-    )
+{tran}.end
+"
+    ))
     .expect("the deck parses");
     let result = Engine::default()
         .run_tran(&netlist, 20e-9, 0.05e-9)
