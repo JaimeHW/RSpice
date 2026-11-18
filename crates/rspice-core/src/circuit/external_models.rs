@@ -4969,15 +4969,10 @@ impl CircuitData {
     /// of the Verilog-A root it was cut for: no device fired a `cross` or
     /// `above` in it.
     ///
-    /// Only runtime devices can say. A build-time generated compact model
-    /// keeps its crossing history in generated code that offers no such
-    /// query, so a circuit holding one answers no, and its landings restart as
-    /// though they had resolved their roots.
+    /// Only runtime devices hold analog events. A build-time generated compact
+    /// model has none, because the generated-Rust backend refuses them, so
+    /// one in the circuit changes nothing here.
     pub(crate) fn veriloga_landing_left_root_unresolved(&self, step_start: Value) -> bool {
-        #[cfg(feature = "veriloga-builtins-base")]
-        if self.has_generated_veriloga_devices() {
-            return false;
-        }
         #[cfg(feature = "veriloga")]
         {
             !self
@@ -8016,5 +8011,52 @@ endmodule"#;
         );
 
         drop(captured);
+    }
+
+    /// A runtime `cross` that fired nothing in a landed interval leaves the
+    /// root that interval was cut for unresolved, and a generated compact
+    /// model in the same circuit, which holds no analog event, does not
+    /// answer for it.
+    #[cfg(all(feature = "veriloga", feature = "veriloga-model-r2-cmc"))]
+    #[test]
+    fn a_runtime_cross_beside_a_generated_model_reports_its_unresolved_root() {
+        let path =
+            std::env::temp_dir().join(format!("rspice_landing_root_{}.va", std::process::id()));
+        std::fs::write(
+            &path,
+            "`include \"disciplines.vams\"\n\
+             module edge_count(p, n);\n\
+               inout p, n;\n\
+               electrical p, n;\n\
+               real k;\n\
+               analog begin\n\
+                 @(cross(V(p, n) - 0.5, 1)) k = k + 1.0;\n\
+                 I(p, n) <+ 1.0e-6 * k;\n\
+               end\n\
+             endmodule\n",
+        )
+        .expect("write module");
+        let deck = format!(
+            "* a runtime cross beside a generated R2\n\
+             v1 a 0 1\n\
+             x1 a 0 edge_count\n\
+             r1 a b rmod r=1k\n\
+             r2 b 0 1k\n\
+             .model rmod r2_cmc\n\
+             .hdl \"{}\"\n\
+             .end\n",
+            path.display().to_string().replace('\\', "/")
+        );
+        let netlist = crate::Netlist::parse(&deck).expect("deck parses");
+        let engine = crate::engine::Engine::default().resolved_for_netlist(&netlist);
+        let built = engine.build_circuit(&netlist);
+        let _ = std::fs::remove_file(&path);
+        let circuit = built.expect("circuit builds");
+        assert!(circuit.has_generated_veriloga_devices());
+        assert_eq!(circuit.veriloga_analog_devices().count(), 1);
+        assert!(
+            circuit.veriloga_landing_left_root_unresolved(0.0),
+            "no cross fired after the landing's start, so its root is unresolved"
+        );
     }
 }
