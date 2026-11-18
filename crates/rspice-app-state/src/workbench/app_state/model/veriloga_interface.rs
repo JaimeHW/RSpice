@@ -55,9 +55,8 @@ use super::veriloga_compile::compile_project_bundle_receipt;
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::workspace::{starter_veriloga_source, verilog_module_name};
 use crate::state::{
-    CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle,
-    ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry, SymbolElectricalType, View,
-    ViewType,
+    CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle, ProjectSourceOwner,
+    ProjectSourceRegistry, SymbolElectricalType, View, ViewType,
 };
 use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};
 
@@ -479,7 +478,6 @@ pub fn seed_veriloga_view(
     let module_name = verilog_module_name(&reference.cell);
     let mut bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(reference.clone()),
-        ProjectSourceLanguage::VerilogA,
         format!("{module_name}.va"),
         starter_veriloga_source(&module_name, ports),
         [],

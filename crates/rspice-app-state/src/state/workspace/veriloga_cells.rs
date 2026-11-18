@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use rspice_design::schematic::interface_repair::same_terminal_contract;
 
 use crate::state::{
-    Cell, CellViewRef, Library, LibraryManager, ProjectSourceBundle, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceRegistry, View, ViewType,
+    Cell, CellViewRef, Library, LibraryManager, ProjectSourceBundle, ProjectSourceOwner,
+    ProjectSourceRegistry, View, ViewType,
 };
 
 /// The view a Verilog-A module is placed under.
@@ -629,12 +629,10 @@ pub(crate) fn retire_code_workspace_veriloga(
     content: &mut rspice_project::ProjectWorkspace,
     libraries: &mut LibraryManager,
 ) -> Option<String> {
-    let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
+    let owner = ProjectSourceOwner::CodeWorkspace;
     let bundle = content.project_sources.bundle_for_owner(&owner)?.clone();
     if is_retired_demo(&bundle) {
-        content
-            .project_sources
-            .remove(ProjectSourceLanguage::VerilogA);
+        content.project_sources.remove();
         return None;
     }
     let survey = survey_veriloga_bundle(&bundle);
@@ -684,10 +682,7 @@ pub(crate) fn retire_code_workspace_veriloga(
         .and_then(|view| place_veriloga_view(&mut candidate_libraries, &reference, view))
         .and_then(|()| {
             candidate_sources
-                .move_code_workspace_bundle_to_cell_view(
-                    ProjectSourceLanguage::VerilogA,
-                    reference.clone(),
-                )
+                .move_code_workspace_bundle_to_cell_view(reference.clone())
                 .map_err(|error| error.to_string())
         });
     if let Err(error) = moved {

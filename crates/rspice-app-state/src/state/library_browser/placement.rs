@@ -209,9 +209,7 @@ const fn view_preference(view_type: ViewType) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{
-        Cell, Library, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, View,
-    };
+    use crate::state::{Cell, Library, ProjectSourceBundle, ProjectSourceOwner, View};
     use std::path::PathBuf;
 
     #[test]
@@ -291,7 +289,6 @@ mod tests {
             .insert_bundle(
                 ProjectSourceBundle::try_new(
                     ProjectSourceOwner::cell_view(CellViewRef::new("analog", "amp", "veriloga")),
-                    ProjectSourceLanguage::VerilogA,
                     "amp.va",
                     "module amp(inp, out);\n  input inp;\n  output out;\n  electrical inp, out;\nendmodule\n",
                     [],

@@ -1341,7 +1341,6 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
 
     let bundle = ProjectSourceBundle::try_new(
             ProjectSourceOwner::cell_view(reference.clone()),
-            ProjectSourceLanguage::VerilogA,
             "models/amp.va",
             "module project_amp(input in, output out); electrical in, out; analog V(out) <+ V(in); endmodule\n",
             [],
@@ -1908,29 +1907,14 @@ fn file_new_bootstrap_is_empty_but_keeps_a_valid_project_hierarchy() {
 
 #[test]
 fn project_source_names_are_portable_and_extensions_are_case_insensitive() {
-    assert!(
-        ProjectSourceDocument::try_new(
-            "MODEL.VA",
-            ProjectSourceLanguage::VerilogA,
-            "module model; endmodule",
-        )
-        .is_ok()
-    );
+    assert!(ProjectSourceDocument::try_new("MODEL.VA", "module model; endmodule").is_ok());
     assert!(matches!(
-        ProjectSourceDocument::try_new(
-            "bad\"name.va",
-            ProjectSourceLanguage::VerilogA,
-            "module model; endmodule",
-        ),
-        Err(ProjectSourceError::InvalidFileNameCharacters { .. })
+        ProjectSourceDocument::try_new("bad\"name.va", "module model; endmodule"),
+        Err(ProjectSourceError::InvalidFileNameCharacters)
     ));
     assert!(matches!(
-        ProjectSourceDocument::try_new(
-            "COM1.va",
-            ProjectSourceLanguage::VerilogA,
-            "module model; endmodule",
-        ),
-        Err(ProjectSourceError::ReservedFileName { .. })
+        ProjectSourceDocument::try_new("COM1.va", "module model; endmodule"),
+        Err(ProjectSourceError::ReservedFileName)
     ));
 }
 
@@ -1940,7 +1924,6 @@ fn project_source_payload_limit_is_enforced_before_compilation() {
     assert!(matches!(
         ProjectSourceDocument::try_new(
             "oversized.va",
-            ProjectSourceLanguage::VerilogA,
             oversized,
         ),
         Err(ProjectSourceError::SourceTooLarge {
@@ -1955,70 +1938,44 @@ fn project_source_payload_limit_is_enforced_before_compilation() {
 fn source_edits_preserve_exact_utf8_and_invalidate_validation_identity() {
     let mut registry = ProjectSourceRegistry::try_from_documents([ProjectSourceDocument::try_new(
         "sensor_bridge.va",
-        ProjectSourceLanguage::VerilogA,
         "module sensor_bridge; endmodule\r\n",
     )
     .unwrap()])
     .unwrap();
-    let first_identity = registry
-        .mark_validated(ProjectSourceLanguage::VerilogA)
-        .unwrap();
-    assert!(
-        registry
-            .get(ProjectSourceLanguage::VerilogA)
-            .unwrap()
-            .validation_is_current()
-    );
+    let first_identity = registry.mark_validated().unwrap();
+    assert!(registry.get().unwrap().validation_is_current());
 
     let source = "module sensor_bridge; // Δ温度\nendmodule\n".to_owned();
-    assert!(
-        registry
-            .replace_content(ProjectSourceLanguage::VerilogA, source.clone())
-            .unwrap()
-    );
-    let edited = registry.get(ProjectSourceLanguage::VerilogA).unwrap();
+    assert!(registry.replace_content(source.clone()).unwrap());
+    let edited = registry.get().unwrap();
     assert_eq!(edited.content(), source);
     assert_eq!(edited.revision().get(), 2);
     assert!(edited.validated_identity().is_none());
     assert_ne!(edited.content_digest(), first_identity.content_digest());
     let edited_revision = edited.revision();
-    assert!(
-        !registry
-            .replace_content(ProjectSourceLanguage::VerilogA, source)
-            .unwrap()
-    );
-    assert_eq!(
-        registry
-            .get(ProjectSourceLanguage::VerilogA)
-            .unwrap()
-            .revision(),
-        edited_revision
-    );
+    assert!(!registry.replace_content(source).unwrap());
+    assert_eq!(registry.get().unwrap().revision(), edited_revision);
 }
 
 #[test]
 fn imported_source_replacement_is_monotonic_validated_and_atomic() {
     let mut registry = ProjectSourceRegistry::try_from_documents([ProjectSourceDocument::try_new(
         "first.va",
-        ProjectSourceLanguage::VerilogA,
         "module first; endmodule\n",
     )
     .unwrap()])
     .unwrap();
-    registry
-        .mark_validated(ProjectSourceLanguage::VerilogA)
-        .unwrap();
+    registry.mark_validated().unwrap();
 
     assert!(
         registry
             .replace_imported(
-                ProjectSourceLanguage::VerilogA,
                 "second.va".to_owned(),
                 "module second; endmodule\r\n".to_owned(),
             )
             .unwrap()
     );
-    let imported = registry.get(ProjectSourceLanguage::VerilogA).unwrap();
+    let imported = registry.get().unwrap();
     assert_eq!(imported.file_name(), "second.va");
     assert_eq!(imported.content(), "module second; endmodule\r\n");
     assert_eq!(imported.revision().get(), 2);
@@ -2027,7 +1984,6 @@ fn imported_source_replacement_is_monotonic_validated_and_atomic() {
     let before = registry.clone();
     assert!(matches!(
         registry.replace_imported(
-            ProjectSourceLanguage::VerilogA,
             "wrong.txt".to_owned(),
             "module wrong; endmodule\n".to_owned(),
         ),
@@ -2043,38 +1999,25 @@ fn workspace_source_dirty_state_tracks_edits_validation_and_cleaning() {
     workspace
         .content
         .project_sources
-        .insert(
-            ProjectSourceDocument::try_new(
-                "shared.va",
-                ProjectSourceLanguage::VerilogA,
-                "module shared; endmodule\n",
-            )
-            .unwrap(),
-        )
+        .insert(ProjectSourceDocument::try_new("shared.va", "module shared; endmodule\n").unwrap())
         .unwrap();
 
     workspace
         .content
-        .replace_project_source(
-            ProjectSourceLanguage::VerilogA,
-            "module shared; // Unicode Δ\nendmodule\n".to_owned(),
-        )
+        .replace_project_source("module shared; // Unicode Δ\nendmodule\n".to_owned())
         .unwrap();
     assert!(workspace.content.project_sources_dirty);
     assert!(workspace.any_dirty());
     workspace.content.mark_project_sources_clean();
     assert!(!workspace.any_dirty());
 
-    let identity = workspace
-        .content
-        .mark_project_source_validated(ProjectSourceLanguage::VerilogA)
-        .unwrap();
+    let identity = workspace.content.mark_project_source_validated().unwrap();
     assert!(workspace.content.project_sources_dirty);
     assert_eq!(
         workspace
             .content
             .project_sources
-            .get(ProjectSourceLanguage::VerilogA)
+            .get()
             .unwrap()
             .validated_identity(),
         Some(identity)
@@ -2082,36 +2025,23 @@ fn workspace_source_dirty_state_tracks_edits_validation_and_cleaning() {
     workspace.mark_all_clean();
     assert!(!workspace.any_dirty());
 
-    let repeated = workspace
-        .content
-        .mark_project_source_validated(ProjectSourceLanguage::VerilogA)
-        .unwrap();
+    let repeated = workspace.content.mark_project_source_validated().unwrap();
     assert_eq!(repeated, identity);
     assert!(!workspace.any_dirty());
 }
 
 #[test]
 fn project_source_validation_rejects_mismatched_slots_and_stale_evidence() {
-    let document = ProjectSourceDocument::try_new(
-        "sensor_bridge.va",
-        ProjectSourceLanguage::VerilogA,
-        "module sensor_bridge; endmodule",
-    )
-    .unwrap();
+    let document =
+        ProjectSourceDocument::try_new("sensor_bridge.va", "module sensor_bridge; endmodule")
+            .unwrap();
     let mut registry = ProjectSourceRegistry::try_from_documents([document]).unwrap();
-    registry
-        .mark_validated(ProjectSourceLanguage::VerilogA)
-        .unwrap();
+    registry.mark_validated().unwrap();
     let mut value = serde_json::to_value(&registry).unwrap();
     value["bundles"][0]["root"]["content"] = serde_json::Value::String("changed".to_owned());
     assert!(serde_json::from_value::<ProjectSourceRegistry>(value).is_err());
 
-    let root = serde_json::to_value(
-        registry
-            .get(ProjectSourceLanguage::VerilogA)
-            .expect("fixture root exists"),
-    )
-    .unwrap();
+    let root = serde_json::to_value(registry.get().expect("fixture root exists")).unwrap();
     let mut legacy = serde_json::json!({ "verilog_a": root });
     legacy["verilog_a"]["language"] = serde_json::Value::String("rspice-automation".to_owned());
     assert!(serde_json::from_value::<ProjectSourceRegistry>(legacy).is_err());

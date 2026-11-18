@@ -111,11 +111,11 @@ pub use rspice_simulation_contract::plan_payload::{
 // integrations keep compiling" -- there are no downstream integrations; the
 // crate is the application. What is left is what `state::workspace` callers
 // actually name through this path.
+pub use super::project_sources::ProjectSourceRegistry;
 #[cfg(test)]
 pub use super::project_sources::{MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle};
 #[cfg(test)]
 use super::project_sources::{ProjectSourceDocument, ProjectSourceError};
-pub use super::project_sources::{ProjectSourceLanguage, ProjectSourceRegistry};
 
 /// Application editor sessions over the project-owned workspace.
 #[derive(Debug, Clone)]
@@ -189,37 +189,25 @@ impl ProjectWorkspace {
         (self.content.into_inner(), self.session)
     }
 
-    /// Who owns the source bundle a language's editor is showing.
+    /// Who owns the source bundle the editor is showing.
     ///
     /// One owner for one fact, read by every host, command, dialog, and dock.
     /// Every Verilog-family source is a cell view, so the source in front of
     /// the reader is the active cell view's bundle, and there is none while
-    /// the active view is not a Verilog, Verilog-A or Verilog-AMS view. Automation is the project's
-    /// code-workspace bundle.
-    pub fn active_source_owner(
-        &self,
-        language: ProjectSourceLanguage,
-    ) -> Option<crate::state::ProjectSourceOwner> {
-        match language {
-            ProjectSourceLanguage::VerilogA => self
-                .content
-                .active_view_type()
-                .is_some_and(|view_type| view_type.is_hdl_source())
-                .then(|| {
-                    crate::state::ProjectSourceOwner::cell_view(self.content.active_view.clone())
-                }),
-        }
+    /// the active view is not a Verilog, Verilog-A or Verilog-AMS view.
+    pub fn active_source_owner(&self) -> Option<crate::state::ProjectSourceOwner> {
+        self.content
+            .active_view_type()
+            .is_some_and(|view_type| view_type.is_hdl_source())
+            .then(|| crate::state::ProjectSourceOwner::cell_view(self.content.active_view.clone()))
     }
 
     /// The bundle [`Self::active_source_owner`] names, when the project holds
     /// one.
-    pub fn active_source_bundle(
-        &self,
-        language: ProjectSourceLanguage,
-    ) -> Option<&crate::state::ProjectSourceBundle> {
+    pub fn active_source_bundle(&self) -> Option<&crate::state::ProjectSourceBundle> {
         self.content
             .project_sources
-            .bundle_for_owner(&self.active_source_owner(language)?)
+            .bundle_for_owner(&self.active_source_owner()?)
     }
 }
 

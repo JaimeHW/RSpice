@@ -30,7 +30,7 @@ use super::Model;
 use crate::state::workspace::{DeclaredModule, hdl_view, place_veriloga_view};
 use crate::state::{
     CellViewRef, PreparedProjectLibraryMutation, ProjectLibraryMutation, ProjectSourceBundle,
-    ProjectSourceFile, ProjectSourceId, ProjectSourceRole, ViewType,
+    ProjectSourceFile, ProjectSourceId, ViewType,
 };
 use crate::workbench::app_state::design_history::LibraryOperationStart;
 
@@ -124,12 +124,7 @@ impl Model {
             .map_err(|error| error.to_string())?;
         if let Some(profile) = build_profile {
             sources
-                .add_bundle_file_with_role(
-                    bundle_id,
-                    &root,
-                    profile,
-                    ProjectSourceRole::VerilogABuildProfile,
-                )
+                .add_bundle_build_profile_file(bundle_id, &root, profile)
                 .map_err(|error| error.to_string())?;
         }
         let mutation = if first_is_new {

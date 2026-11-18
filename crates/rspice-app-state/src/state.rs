@@ -119,10 +119,9 @@ pub use project_sources::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH;
 pub use project_sources::{
     MAX_PROJECT_CODE_SOURCE_BYTES, MAX_PROJECT_SOURCE_BUNDLE_BYTES, MAX_PROJECT_SOURCE_FILES,
     PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION, ProjectSourceBundle, ProjectSourceDependency,
-    ProjectSourceDocument, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceQualificationAttempt, ProjectSourceQualificationCheck,
+    ProjectSourceDocument, ProjectSourceFile, ProjectSourceId, ProjectSourceOwner,
+    ProjectSourceQualificationAttempt, ProjectSourceQualificationCheck,
     ProjectSourceQualificationDisposition, ProjectSourceQualificationTarget, ProjectSourceRegistry,
-    ProjectSourceRole, ProjectSourceRoleBinding,
 };
 pub use project_sources::{
     canonical_cell_view_owner_key, project_source_path_key, project_source_paths_equal,
