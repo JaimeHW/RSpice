@@ -745,7 +745,7 @@ impl CodeCommand {
             Self::NextProblem => ("Next problem", "Edit", palette),
             Self::PreviousProblem => ("Previous problem", "Edit", palette),
             Self::ShowProblemAtCaret => ("Show problem at caret", "Edit", palette),
-            Self::ShowValueAtCaret => ("Show value", "Code", palette),
+            Self::ShowValueAtCaret => ("Show value", "Netlist", palette),
             Self::FormatDocument => ("Format document", "Edit", palette),
             Self::FoldSelection => ("Fold selection", "View", palette),
             Self::UnfoldAtCaret => ("Unfold at caret", "View", palette),
