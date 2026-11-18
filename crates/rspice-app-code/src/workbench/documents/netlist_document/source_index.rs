@@ -110,7 +110,11 @@ pub fn root_deck_source_index(
     netlist: &mut NetlistDocumentState,
 ) -> Arc<NetlistSourceIndex> {
     let shown = model.simulation.source.netlist_content.as_str();
-    match netlist.open_deck.as_ref().map(|deck| deck.root.text.as_str()) {
+    match netlist
+        .open_deck
+        .as_ref()
+        .map(|deck| deck.root.text.as_str())
+    {
         Some(deck) if deck != shown => {
             let kind = SourceKind::of(&root_deck_path(model, netlist), deck, true);
             now_in(&mut netlist.root_deck_index, kind, deck)
@@ -126,7 +130,11 @@ pub fn root_deck_source_index_now(
     netlist: &mut NetlistDocumentState,
 ) -> Arc<NetlistSourceIndex> {
     let shown = model.simulation.source.netlist_content.as_str();
-    match netlist.open_deck.as_ref().map(|deck| deck.root.text.as_str()) {
+    match netlist
+        .open_deck
+        .as_ref()
+        .map(|deck| deck.root.text.as_str())
+    {
         Some(deck) if deck != shown => {
             let kind = SourceKind::of(&root_deck_path(model, netlist), deck, true);
             now_in(&mut netlist.root_deck_index, kind, deck)

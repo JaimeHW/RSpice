@@ -134,60 +134,100 @@ impl ProjectSymbolKind {
     }
 }
 
-impl NetlistProjectIndex {
-    /// The index of `document`, the root `root`, read from `root_path`, and
-    /// of the SPICE files it includes.
-    fn build(
-        root: ActiveNetlistDocument,
-        root_path: &std::path::Path,
-        document: &crate::state::NetlistDocument,
-    ) -> Self {
-        // A location names the file the reader sees on the deck's tab.
-        let root_name = match root {
-            ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
-            ActiveNetlistDocument::OwnedSource => root_path.file_name().map_or_else(
-                || "deck".to_owned(),
-                |name| name.to_string_lossy().into_owned(),
-            ),
-            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
-                return Self::default();
-            }
-        };
-        let mut files = vec![IndexedFile {
-            root,
-            dependency_identity: None,
-            display_name: root_name,
-            digest: crate::state::content_digest(document.source()),
-        }];
-        let mut texts = vec![document.source()];
-        let mut kinds = vec![SourceKind::of(root_path, document.source(), true)];
-        for dependency in document.dependencies() {
-            if document.is_veriloga_dependency(dependency) {
-                continue;
-            }
-            let Some(source) = dependency.source() else {
-                continue;
+/// One file the project index reads: the root first, then the SPICE files
+/// it includes, each with the identity its tab opens by.
+#[derive(Debug, Clone)]
+struct IndexText {
+    dependency_identity: Option<String>,
+    display_name: String,
+    path: std::path::PathBuf,
+    text: String,
+}
+
+/// The files the index of `root` reads: the generated netlist and the files
+/// it includes, or the open deck and the includes open beside it.
+fn index_texts_in(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    root: ActiveNetlistDocument,
+) -> Option<Vec<IndexText>> {
+    match root {
+        ActiveNetlistDocument::Generated => Some(document_texts(canonical_root_document_in(
+            model, netlist, root,
+        )?)),
+        ActiveNetlistDocument::OwnedSource => {
+            let deck = netlist.open_deck.as_ref()?;
+            let file = |file: &crate::workbench::documents::deck_files::OpenFile,
+                        identity: Option<String>| IndexText {
+                dependency_identity: identity,
+                display_name: file.name(),
+                path: file.path.clone(),
+                text: file.text.clone(),
             };
-            files.push(IndexedFile {
-                root,
-                dependency_identity: Some(dependency.locator().logical_identity().to_owned()),
-                display_name: dependency.locator().display_name().to_owned(),
-                digest: crate::state::content_digest(source),
-            });
-            let locator = dependency.locator();
-            let path = locator
-                .native_origin()
-                .unwrap_or_else(|| locator.logical_identity());
-            kinds.push(SourceKind::of(std::path::Path::new(path), source, false));
-            texts.push(source);
+            Some(
+                std::iter::once(file(&deck.root, None))
+                    .chain(
+                        deck.includes
+                            .iter()
+                            .map(|include| file(include, Some(include.key()))),
+                    )
+                    .collect(),
+            )
         }
-        let sources = files
+        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
+    }
+}
+
+/// The generated netlist `document` and the SPICE files it includes.
+fn document_texts(document: &crate::state::NetlistDocument) -> Vec<IndexText> {
+    let mut texts = vec![IndexText {
+        dependency_identity: None,
+        display_name: "generated.sp".to_owned(),
+        path: std::path::PathBuf::new(),
+        text: document.source().to_owned(),
+    }];
+    for dependency in document.dependencies() {
+        if document.is_veriloga_dependency(dependency) {
+            continue;
+        }
+        let Some(source) = dependency.source() else {
+            continue;
+        };
+        let locator = dependency.locator();
+        texts.push(IndexText {
+            dependency_identity: Some(locator.logical_identity().to_owned()),
+            display_name: locator.display_name().to_owned(),
+            path: std::path::PathBuf::from(
+                locator
+                    .native_origin()
+                    .unwrap_or_else(|| locator.logical_identity()),
+            ),
+            text: source.to_owned(),
+        });
+    }
+    texts
+}
+
+impl NetlistProjectIndex {
+    /// The index of `texts`, the root `root` first, then the SPICE files it
+    /// includes.
+    fn build(root: ActiveNetlistDocument, texts: &[IndexText]) -> Self {
+        let files = texts
             .iter()
-            .zip(texts.iter().zip(kinds))
-            .map(|(file, (text, kind))| DeckIndexSource {
-                identity: file.dependency_identity.as_deref().unwrap_or(""),
-                text,
-                kind,
+            .map(|text| IndexedFile {
+                root,
+                dependency_identity: text.dependency_identity.clone(),
+                display_name: text.display_name.clone(),
+                digest: crate::state::content_digest(&text.text),
+            })
+            .collect::<Vec<_>>();
+        let sources = texts
+            .iter()
+            .enumerate()
+            .map(|(position, text)| DeckIndexSource {
+                identity: text.dependency_identity.as_deref().unwrap_or(""),
+                text: &text.text,
+                kind: SourceKind::of(&text.path, &text.text, position == 0),
             })
             .collect::<Vec<_>>();
         let deck = DeckIndex::build(&sources);
@@ -616,33 +656,35 @@ fn location_in(files: &[IndexedFile], location: &DeckLocation) -> ProjectSourceL
     }
 }
 
+/// What the project index of a root was built from: the generated
+/// document's identity and revision, or the open deck's identity, the
+/// editor's revision of its text and how many of its includes are open.
+type ProjectIndexKey = (crate::state::NetlistDocumentId, u64, usize);
+
 /// The project index of the root the editor shows, kept in the netlist
-/// editor's state against the root document's revision and built away from
-/// the editor's thread.
-pub(crate) type ProjectIndexSlot = BackgroundIndex<
-    (
-        crate::state::NetlistDocumentId,
-        crate::product::ObjectRevision,
-    ),
-    NetlistProjectIndex,
->;
+/// editor's state against what it was built from and built away from the
+/// editor's thread.
+pub(crate) type ProjectIndexSlot = BackgroundIndex<ProjectIndexKey, NetlistProjectIndex>;
 
 /// The root the editor's language tools read, and the key of its text.
 fn shown_root_in(
     model: &Model,
     netlist: &NetlistDocumentState,
-) -> Option<(
-    ActiveNetlistDocument,
-    (
-        crate::state::NetlistDocumentId,
-        crate::product::ObjectRevision,
-    ),
-)> {
+) -> Option<(ActiveNetlistDocument, ProjectIndexKey)> {
     let root = netlist
         .active_dependency_root
         .unwrap_or(netlist.active_document);
-    let document = canonical_root_document_in(model, netlist, root)?;
-    Some((root, (document.id(), document.revision())))
+    let key = match root {
+        ActiveNetlistDocument::OwnedSource => {
+            let deck = netlist.open_deck.as_ref()?;
+            (deck.tab_id(), netlist.revision, deck.includes.len())
+        }
+        _ => {
+            let document = canonical_root_document_in(model, netlist, root)?;
+            (document.id(), document.revision().get(), 0)
+        }
+    };
+    Some((root, key))
 }
 
 /// The project index of the root the editor shows, for a frame. While the
@@ -659,13 +701,12 @@ pub(crate) fn project_index_in(
     }
     let (root, key) = shown_root_in(model, netlist)?;
     if netlist.project_index.wants(|built| *built == key)
-        && let Some(document) = canonical_root_document_in(model, netlist, root).cloned()
+        && let Some(texts) = index_texts_in(model, netlist, root)
     {
         let wake = ctx.clone();
-        let root_path = root_path_of(model, netlist, root);
         netlist.project_index.start(
             key,
-            move || NetlistProjectIndex::build(root, &root_path, &document),
+            move || NetlistProjectIndex::build(root, &texts),
             move || wake.request_repaint(),
         );
     }
@@ -685,25 +726,8 @@ pub(crate) fn project_index_now(
     if let Some(index) = netlist.project_index.wait_for(|built| *built == key) {
         return Some(index);
     }
-    let index = NetlistProjectIndex::build(
-        root,
-        &root_path_of(model, netlist, root),
-        canonical_root_document_in(model, netlist, root)?,
-    );
+    let index = NetlistProjectIndex::build(root, &index_texts_in(model, netlist, root)?);
     Some(netlist.project_index.store(key, index))
-}
-
-/// The file a root is read from: the open deck's, or none for the
-/// generated netlist.
-fn root_path_of(
-    model: &Model,
-    netlist: &NetlistDocumentState,
-    root: ActiveNetlistDocument,
-) -> std::path::PathBuf {
-    match root {
-        ActiveNetlistDocument::OwnedSource => super::source_index::root_deck_path(model, netlist),
-        _ => std::path::PathBuf::new(),
-    }
 }
 
 /// How far a re-parse of the engineering rendering may sit from the evaluated
