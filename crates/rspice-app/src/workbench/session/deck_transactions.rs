@@ -38,6 +38,10 @@ impl AppState {
             self.prompt("A deck cannot be opened while a simulation is running.");
             return false;
         }
+        if !new_project && self.model.safe_mode.project_read_only() {
+            self.prompt("A deck cannot be added: the project is open read-only.");
+            return false;
+        }
         if let Some(unsaved) = self
             .code
             .netlist
@@ -108,6 +112,29 @@ impl AppState {
             let _ = (file, new_project);
             self.open_deck()
         }
+    }
+
+    /// Put `text` in front of the Netlist page as the project's one deck,
+    /// open from a file named `deck.cir` that is never read: what a test that
+    /// only edits and runs the deck opens.
+    #[cfg(test)]
+    pub(crate) fn seed_test_deck(&mut self, text: impl Into<String>) {
+        let deck = rspice_app_code::workbench::documents::deck_files::OpenDeck::in_memory(
+            "deck.cir", text,
+        );
+        self.model.workspace.content.decks = vec![rspice_app_state::state::ProjectDeck {
+            id: deck.id,
+            source: rspice_app_state::state::DeckSource::File {
+                path: "deck.cir".into(),
+            },
+        }];
+        rspice_app_code::workbench::documents::deck_files::install_open_deck(
+            &mut self.model,
+            &mut self.code.netlist,
+            &mut self.code.netlist_open_documents,
+            &mut self.runs,
+            deck,
+        );
     }
 
     /// Write `source` to a deck file and open it, as a test opens one: at
