@@ -85,7 +85,7 @@ fn checked_project() -> RSpiceApp {
 fn schematic_checks_read_alike_on_the_overview_the_band_the_inspector_and_the_status_bar() {
     let mut app = checked_project();
     let (state, text, tone) = row(&mut app, "Schematic checks");
-    assert_eq!(state, "1 error \u{b7} 1 advisory");
+    assert_eq!(state, "1 error \u{b7} 1 warning");
     assert_eq!(tone, Tone::Error);
 
     let overview = painted_on(&mut app, ProjectPage::Overview);

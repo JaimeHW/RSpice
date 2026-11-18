@@ -162,14 +162,14 @@ fn the_checks_segment_counts_every_producer_from_one_list() {
 
     assert_eq!(
         check_summary(counts(&app)).as_deref(),
-        Some("Problems · 1 error · 1 advisory")
+        Some("Problems · 1 error · 1 warning")
     );
     assert_eq!(check_problem(counts(&app)), Some(Problem::Failure));
 
     app.state.workbench.activate(Workspace::Design);
     assert_eq!(
         check_summary(counts(&app)).as_deref(),
-        Some("Problems · 1 error · 1 advisory"),
+        Some("Problems · 1 error · 1 warning"),
         "the count cannot depend on which workspace is open"
     );
 }
@@ -240,7 +240,7 @@ fn the_checks_segment_marks_only_a_problem_and_is_absent_until_checks_run() {
     assert_eq!(check_problem(counts(&app)), Some(Problem::Failure));
     assert_eq!(
         check_summary(counts(&app)).as_deref(),
-        Some("Problems · 1 error · 0 advisories")
+        Some("Problems · 1 error · 0 warnings")
     );
 
     // An edit under the evidence leaves the finding standing and faint:
@@ -255,7 +255,7 @@ fn the_checks_segment_marks_only_a_problem_and_is_absent_until_checks_run() {
         .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     assert_eq!(
         check_summary(counts(&app)).as_deref(),
-        Some("Problems · 0 errors · 0 advisories · 1 stale")
+        Some("Problems · 0 errors · 0 warnings · 1 stale")
     );
     assert_eq!(check_problem(counts(&app)), Some(Problem::Warning));
 }
@@ -270,7 +270,7 @@ fn findings_that_cannot_be_evaluated_are_not_called_stale() {
     };
     assert_eq!(
         check_summary(counts).as_deref(),
-        Some("Problems · 0 errors · 0 advisories · 2 unavailable")
+        Some("Problems · 0 errors · 0 warnings · 2 unavailable")
     );
     assert_eq!(check_problem(counts), Some(Problem::Warning));
 }
@@ -285,7 +285,7 @@ fn only_a_warning_raises_the_warning_mark() {
     };
     assert_eq!(
         check_summary(notes).as_deref(),
-        Some("Problems · 0 errors · 2 advisories")
+        Some("Problems · 0 errors · 2 warnings")
     );
     assert_eq!(check_problem(notes), None);
 

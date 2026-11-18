@@ -6,13 +6,13 @@ pub fn counted(count: usize, singular: &str, plural: &str) -> String {
 }
 
 /// A count of findings as every place that states one says it: errors
-/// first, then advisories, both always named. An error stops the design
-/// working; every other current finding is an advisory.
-pub fn finding_counts(errors: usize, advisories: usize) -> String {
+/// first, then warnings, both always named. An error stops the design
+/// working; every other current finding is a warning.
+pub fn finding_counts(errors: usize, warnings: usize) -> String {
     format!(
         "{} \u{b7} {}",
         counted(errors, "error", "errors"),
-        counted(advisories, "advisory", "advisories")
+        counted(warnings, "warning", "warnings")
     )
 }
 
@@ -35,9 +35,9 @@ mod tests {
 
     #[test]
     fn finding_counts_name_both_counts_in_their_number() {
-        assert_eq!(finding_counts(1, 1), "1 error \u{b7} 1 advisory");
-        assert_eq!(finding_counts(0, 2), "0 errors \u{b7} 2 advisories");
-        assert_eq!(finding_counts(3, 0), "3 errors \u{b7} 0 advisories");
+        assert_eq!(finding_counts(1, 1), "1 error \u{b7} 1 warning");
+        assert_eq!(finding_counts(0, 2), "0 errors \u{b7} 2 warnings");
+        assert_eq!(finding_counts(3, 0), "3 errors \u{b7} 0 warnings");
     }
 
     #[test]
