@@ -389,12 +389,8 @@ impl ProjectWorkspace {
     /// Replace exact source bytes and enter the ordinary project dirty
     /// lifecycle. An unchanged write is a no-op and retains validation.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn replace_project_source(
-        &mut self,
-        language: ProjectSourceLanguage,
-        content: String,
-    ) -> Result<bool, ProjectSourceError> {
-        let changed = self.project_sources.replace_content(language, content)?;
+    pub fn replace_project_source(&mut self, content: String) -> Result<bool, ProjectSourceError> {
+        let changed = self.project_sources.replace_content(content)?;
         if changed {
             self.project_sources_dirty = true;
         }
@@ -451,18 +447,17 @@ impl ProjectWorkspace {
         Ok(changed)
     }
 
-    /// Persist a source document and its semantic role as one authenticated
-    /// source-graph revision.
-    pub fn add_project_source_bundle_file_with_role(
+    /// Persist a source document as the bundle's build profile in one
+    /// authenticated source-graph revision.
+    pub fn add_project_source_bundle_build_profile_file(
         &mut self,
         bundle_id: rspice_design::project_sources::ProjectSourceId,
         importer_path: &str,
         file: rspice_design::project_sources::ProjectSourceFile,
-        role: rspice_design::project_sources::ProjectSourceRole,
     ) -> Result<bool, ProjectSourceError> {
         let changed =
             self.project_sources
-                .add_bundle_file_with_role(bundle_id, importer_path, file, role)?;
+                .add_bundle_build_profile_file(bundle_id, importer_path, file)?;
         if changed {
             self.project_sources_dirty = true;
         }
@@ -545,11 +540,8 @@ impl ProjectWorkspace {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn remove_project_source(
-        &mut self,
-        language: ProjectSourceLanguage,
-    ) -> Option<ProjectSourceDocument> {
-        let removed = self.project_sources.remove(language);
+    pub fn remove_project_source(&mut self) -> Option<ProjectSourceDocument> {
+        let removed = self.project_sources.remove();
         if removed.is_some() {
             self.project_sources_dirty = true;
         }
@@ -562,13 +554,12 @@ impl ProjectWorkspace {
     #[cfg(any(test, feature = "test-support"))]
     pub fn mark_project_source_validated(
         &mut self,
-        language: ProjectSourceLanguage,
     ) -> Result<ProjectSourceValidationIdentity, ProjectSourceError> {
         let before = self
             .project_sources
-            .get(language)
+            .get()
             .and_then(ProjectSourceDocument::validated_identity);
-        let identity = self.project_sources.mark_validated(language)?;
+        let identity = self.project_sources.mark_validated()?;
         if before != Some(identity) {
             self.project_sources_dirty = true;
         }
