@@ -3,12 +3,12 @@
 use super::ProjectLibraries as LibraryManager;
 
 const JSON: &str = concat!(
-    r#"{"libraries":{"work":{"name":"work","path":null,"cells":{"amp":{"name":"amp","views":{"schematic":{"name":"schematic","view_type":"Schematic","file_path":"model.sp","modified":true,"metadata":{"k":"v"}}},"description":"amplifier","metadata":{}}},"technology":"pdk","read_only":false,"metadata":{}}},"#,
+    r#"{"libraries":{"work":{"name":"work","cells":{"amp":{"name":"amp","views":{"schematic":{"name":"schematic","view_type":"Schematic","file_path":"model.sp","modified":true,"metadata":{"k":"v"}}},"description":"amplifier","metadata":{}}},"technology":"pdk","read_only":false,"metadata":{}}},"#,
     r#""selected_library":"work","selected_cell":"amp","selected_view":"schematic","revision":17}"#,
 );
 
 const RON: &str = concat!(
-    r#"(libraries:{"work":(name:"work",path:None,cells:{"amp":(name:"amp",views:{"schematic":(name:"schematic",view_type:Schematic,file_path:Some("model.sp"),modified:true,metadata:{"k":"v"})},description:"amplifier",metadata:{})},technology:"pdk",read_only:false,metadata:{})},"#,
+    r#"(libraries:{"work":(name:"work",cells:{"amp":(name:"amp",views:{"schematic":(name:"schematic",view_type:Schematic,file_path:Some("model.sp"),modified:true,metadata:{"k":"v"})},description:"amplifier",metadata:{})},technology:"pdk",read_only:false,metadata:{})},"#,
     r#"selected_library:Some("work"),selected_cell:Some("amp"),selected_view:Some("schematic"),revision:17)"#,
 );
 
