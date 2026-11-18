@@ -135,7 +135,7 @@ impl Model {
             pending.extend(
                 projection
                     .plan()
-                    .bindings()
+                    .distinct_bindings()
                     .map(|binding| binding.resolved_reference().key().to_ascii_lowercase()),
             );
             while let Some(reference) = pending.pop() {

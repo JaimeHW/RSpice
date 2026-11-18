@@ -631,10 +631,9 @@ pub(super) fn hierarchy_manager_body(
         } else {
             for binding in &resolution.bindings {
                 let path = binding
-                    .instance_paths
+                    .occurrences
                     .first()
-                    .cloned()
-                    .unwrap_or_else(|| binding.reference.display_path());
+                    .map_or_else(|| binding.reference.display_path(), |path| path.to_string());
                 let configuration = resolution.configuration_id.map_or_else(
                     || "active project".to_owned(),
                     |id| {

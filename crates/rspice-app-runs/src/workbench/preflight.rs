@@ -652,7 +652,7 @@ fn collect(state: &impl RunHost) -> PreflightReport {
             format!(
                 "Configuration fallback reviewed for {} at {}",
                 binding.reference.display_path(),
-                binding.instance_paths.join(", ")
+                binding.occurrences.summary()
             ),
         ));
     }

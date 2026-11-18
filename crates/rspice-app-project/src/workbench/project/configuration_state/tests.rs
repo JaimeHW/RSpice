@@ -257,7 +257,7 @@ fn an_instance_inherits_in_the_order_the_resolver_binds() {
 #[test]
 fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
     use rspice_design::hierarchy::{
-        HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding,
+        HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding, RowOccurrences,
     };
 
     let binding = |cell: &str, paths: &[&str]| ResolvedHierarchyBinding {
@@ -269,7 +269,11 @@ fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
         status: HierarchyBindingStatus::Resolved,
         rule: HierarchyBindingRule::ViewList,
         instance_count: paths.len(),
-        instance_paths: paths.iter().map(|path| (*path).to_owned()).collect(),
+        occurrences: RowOccurrences::listed(
+            paths
+                .iter()
+                .map(|path| InstancePath::parse(path).expect("a path")),
+        ),
         used_review_fallback: false,
         diagnostic: None,
         warnings: Vec::new(),

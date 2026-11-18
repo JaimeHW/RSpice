@@ -261,7 +261,7 @@ impl CheckAndSaveValidationReport {
                     format!(
                         "Configuration uses reviewed fallback for {} at {}.",
                         binding.reference.display_path(),
-                        binding.instance_paths.join(", ")
+                        binding.occurrences.summary()
                     ),
                 );
             }

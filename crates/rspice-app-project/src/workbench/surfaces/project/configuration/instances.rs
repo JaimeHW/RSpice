@@ -552,7 +552,6 @@ fn unbound_reason(status: HierarchyBindingStatus) -> Option<&'static str> {
         HierarchyBindingStatus::Incompatible => Some("pins do not fit"),
         HierarchyBindingStatus::Recursive => Some("instantiates itself"),
         HierarchyBindingStatus::DepthLimit => Some("hierarchy too deep"),
-        HierarchyBindingStatus::InstanceLimit => Some("too many instances"),
     }
 }
 

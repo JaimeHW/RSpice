@@ -188,7 +188,12 @@ fn row<'r>(resolution: &'r HierarchyResolution, path: &str) -> &'r ResolvedHiera
     resolution
         .bindings
         .iter()
-        .find(|row| row.instance_paths.iter().any(|candidate| candidate == path))
+        .find(|row| {
+            row.occurrences
+                .paths()
+                .iter()
+                .any(|candidate| candidate == path)
+        })
         .unwrap_or_else(|| panic!("a row for {path}: {:#?}", resolution.bindings))
 }
 
@@ -219,7 +224,7 @@ fn a_cell_binding_runs_another_librarys_cell_for_every_instance() {
         Some(CellViewRef::new("work", "amp", "schematic"))
     );
     assert_eq!(bound.rule, HierarchyBindingRule::CellBinding);
-    assert_eq!(bound.instance_paths, ["/X1", "/X2"]);
+    assert_eq!(bound.occurrences.paths(), ["/X1", "/X2"]);
     for path in ["/X1", "/X2"] {
         assert_eq!(
             bound_cell(&plan, path),

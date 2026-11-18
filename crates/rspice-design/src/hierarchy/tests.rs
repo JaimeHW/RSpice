@@ -387,7 +387,12 @@ fn row<'r>(resolution: &'r HierarchyResolution, path: &str) -> &'r ResolvedHiera
     resolution
         .bindings
         .iter()
-        .find(|row| row.instance_paths.iter().any(|candidate| candidate == path))
+        .find(|row| {
+            row.occurrences
+                .paths()
+                .iter()
+                .any(|candidate| candidate == path)
+        })
         .unwrap_or_else(|| panic!("a row for {path}: {:#?}", resolution.bindings))
 }
 
@@ -454,7 +459,7 @@ fn reviewed_fallback_follows_the_cell_binding_that_won() {
     let unresolved = row(&blocked, "/X1");
     assert_eq!(unresolved.status, HierarchyBindingStatus::Unresolved);
     assert_eq!(unresolved.view_search_order, ["absent"]);
-    assert_eq!(unresolved.instance_paths, ["/X1", "/X2", "/X4"]);
+    assert_eq!(unresolved.occurrences.paths(), ["/X1", "/X2", "/X4"]);
     assert_eq!(
         row(&blocked, "/X3").status,
         HierarchyBindingStatus::Resolved
@@ -491,7 +496,7 @@ fn each_row_names_the_rule_that_chose_its_view() {
             row.rule,
             HierarchyBindingRule::Default,
             "{:?}",
-            row.instance_paths
+            row.occurrences.paths()
         );
     }
 
@@ -525,9 +530,9 @@ fn rows_a_different_rule_chose_are_never_merged() {
     );
     assert_eq!(cell_bound.stop_view, instance_bound.stop_view);
     assert_eq!(cell_bound.rule, HierarchyBindingRule::CellBinding);
-    assert_eq!(cell_bound.instance_paths, ["/X1", "/X4"]);
+    assert_eq!(cell_bound.occurrences.paths(), ["/X1", "/X4"]);
     assert_eq!(instance_bound.rule, HierarchyBindingRule::InstanceBinding);
-    assert_eq!(instance_bound.instance_paths, ["/X2"]);
+    assert_eq!(instance_bound.occurrences.paths(), ["/X2"]);
 }
 
 /// An instance binding that names no views inherits them, from a pattern
@@ -744,4 +749,158 @@ fn placed_functional_parts_reach_the_bill_of_materials_with_their_purchasing_fie
             assert!(csv.contains(&row), "{walk}: no {row} in\n{csv}");
         }
     }
+}
+
+/// `levels` cells under `top`, each placing `width` of the next; the last
+/// is empty. Every cell is a schematic of library `work`.
+fn nested_design(levels: usize, width: usize) -> (Documents, LibraryCatalog) {
+    let names = std::iter::once("top".to_owned())
+        .chain((1..=levels).map(|level| format!("l{level}")))
+        .collect::<Vec<_>>();
+    let mut library = Library::new("work");
+    let mut documents = HashMap::new();
+    for (level, name) in names.iter().enumerate() {
+        let mut cell = Cell::new(name);
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        let mut document = SchematicDocument::default();
+        if let Some(next) = names.get(level + 1) {
+            for at in 0..width {
+                document.components.push(
+                    Component::new(
+                        u64::try_from(at + 1).expect("a small id"),
+                        ComponentType::CellInstance,
+                        Point::new(0, 0),
+                    )
+                    .with_library_cell(LibraryCellInstance::new("work", next, "schematic"))
+                    .with_name_value(format!("X{at}"), next.as_str()),
+                );
+            }
+        }
+        documents.insert(
+            CellViewRef::new("work", name, "schematic").key(),
+            (document, false),
+        );
+    }
+    let mut libraries = LibraryCatalog::default();
+    libraries.add_library(library);
+    (Documents(documents), libraries)
+}
+
+/// A design whose expansion is past a million occurrences resolves as the
+/// handful of cells it is: every occurrence is counted and found by its
+/// path, and the deck's masters are its cells, once each.
+#[test]
+fn a_hierarchy_past_a_million_occurrences_resolves_every_occurrence() {
+    let (documents, libraries) = nested_design(4, 32);
+    let sources = ProjectSourceRegistry::default();
+    let context = HierarchyContext {
+        documents: &documents,
+        libraries: &libraries,
+        project_id: ProjectId::new(),
+        project_sources: &sources,
+        source_files: &NoSourceFiles,
+    };
+    let root = CellViewRef::new("work", "top", "schematic");
+    let (resolution, plan) = resolve_hierarchy(context, root, None);
+
+    let expanded = 1 + 32 + 32 * 32 + 32 * 32 * 32 + 32 * 32 * 32 * 32;
+    assert!(expanded > 1_000_000);
+    assert!(resolution.is_valid(), "{:#?}", resolution.bindings);
+    assert_eq!(resolution.total_instances, expanded);
+    assert_eq!(resolution.resolved_instances, expanded);
+    assert_eq!(plan.bindings().len(), expanded);
+    let deepest = resolution
+        .bindings
+        .iter()
+        .find(|row| row.reference.cell == "l4")
+        .expect("a row for the deepest cell");
+    assert_eq!(deepest.instance_count, 32 * 32 * 32 * 32);
+    assert_eq!(deepest.occurrences.len(), deepest.instance_count);
+    assert_eq!(
+        deepest.occurrences.first().map(|path| path.to_string()),
+        Some("/X0/X0/X0/X0".to_owned())
+    );
+
+    let last = InstancePath::parse("/X31/X31/X31/X31").expect("a path");
+    let first = InstancePath::parse("/x0/x0/x0/x0").expect("a path");
+    let binding = plan.binding(&last).expect("the last occurrence is bound");
+    assert_eq!(binding.resolved_reference().cell, "l4");
+    assert!(plan.occurrence_master(&last).is_some());
+    assert_eq!(
+        plan.occurrence_master(&last),
+        plan.occurrence_master(&first)
+    );
+    assert!(
+        plan.binding(&InstancePath::parse("/X32").expect("a path"))
+            .is_none()
+    );
+    assert_eq!(
+        plan.masters().len(),
+        4,
+        "one master per cell below the root"
+    );
+    let mut walked = plan.bindings();
+    assert_eq!(
+        walked
+            .next()
+            .map(|binding| binding.instance_path().to_string()),
+        Some("/".to_owned())
+    );
+    assert_eq!(
+        walked
+            .next()
+            .map(|binding| binding.instance_path().to_string()),
+        Some("/X0".to_owned())
+    );
+    assert_eq!(
+        walked
+            .next()
+            .map(|binding| binding.instance_path().to_string()),
+        Some("/X0/X0".to_owned())
+    );
+}
+
+/// An override reaches the occurrences its pattern names and no others,
+/// however deep they are and however many of their parents' occurrences
+/// resolve alike.
+#[test]
+fn an_override_below_a_repeated_cell_binds_only_the_occurrences_it_names() {
+    let (documents, libraries) = nested_design(2, 3);
+    let mut definition = bound_configuration(&["schematic"], &[]);
+    definition.overrides = vec![instance_binding("/X1/X2", &["absent"], None)];
+    let mut catalog = ConfigurationSetCatalog::default();
+    let id = catalog
+        .create(definition)
+        .expect("the configuration validates");
+    let sources = ProjectSourceRegistry::default();
+    let context = HierarchyContext {
+        documents: &documents,
+        libraries: &libraries,
+        project_id: ProjectId::new(),
+        project_sources: &sources,
+        source_files: &NoSourceFiles,
+    };
+    let (resolution, plan) = resolve_hierarchy(
+        context,
+        CellViewRef::new("work", "top", "schematic"),
+        catalog.find(id),
+    );
+    let unbound = row(&resolution, "/X1/X2");
+    assert_eq!(unbound.status, HierarchyBindingStatus::Unresolved);
+    assert_eq!(unbound.occurrences.paths(), ["/X1/X2"]);
+    let bound = row(&resolution, "/X2/X2");
+    assert!(bound.status.is_resolved());
+    assert_eq!(bound.instance_count, 8);
+    assert!(!bound.occurrences.paths().contains(&"/X1/X2".to_owned()));
+    assert_eq!(resolution.total_instances, 1 + 3 + 9);
+    assert_eq!(resolution.unresolved_instances(), 1);
+    assert!(
+        plan.binding(&InstancePath::parse("/X1/X2").expect("a path"))
+            .is_none()
+    );
+    assert!(
+        plan.binding(&InstancePath::parse("/X1/X1").expect("a path"))
+            .is_some()
+    );
 }

@@ -134,7 +134,7 @@ fn custom_stop_view_name_stops_the_hierarchy() {
     let stopped = resolution
         .bindings
         .iter()
-        .find(|binding| binding.instance_paths == ["/X1"])
+        .find(|binding| binding.occurrences.paths() == ["/X1"])
         .expect("the DUT row");
     assert_eq!(stopped.reference.view, "spice_tt");
     assert_eq!(stopped.stop_view.as_deref(), Some("spice_tt"));
@@ -196,7 +196,7 @@ fn custom_executable_view_name_is_accepted() {
     let dut = resolution
         .bindings
         .iter()
-        .find(|binding| binding.instance_paths == ["/X1"])
+        .find(|binding| binding.occurrences.paths() == ["/X1"])
         .expect("the DUT row");
     assert!(dut.status.is_resolved(), "diagnostic: {:?}", dut.diagnostic);
     assert_eq!(dut.reference.view, "schematic_fast");
@@ -242,7 +242,7 @@ fn stop_view_matching_a_schematic_warns_and_descends() {
     let dut = resolution
         .bindings
         .iter()
-        .find(|binding| binding.instance_paths == ["/X1"])
+        .find(|binding| binding.occurrences.paths() == ["/X1"])
         .expect("the DUT row");
     assert!(dut.status.is_resolved(), "a warning is not a failure");
     assert!(
@@ -313,7 +313,11 @@ fn an_override_pattern_is_measured_against_the_instances_the_walk_reached() {
     );
     assert!(
         resolution.bindings.iter().all(|binding| {
-            binding.instance_paths.iter().all(|path| path != "/top")
+            binding
+                .occurrences
+                .paths()
+                .iter()
+                .all(|path| path != "/top")
                 && binding
                     .diagnostic
                     .as_deref()
@@ -418,9 +422,8 @@ fn no_configuration_still_builds_a_plan() {
     // map, asked one path at a time — the master record holds no second copy.
     let instantiations = plan
         .bindings()
-        .map(ConfigurationExecutionBinding::instance_path)
+        .map(|binding| binding.instance_path().clone())
         .filter(|path| plan.occurrence_master(path) == Some(key))
-        .cloned()
         .collect::<Vec<_>>();
     assert_eq!(instantiations, vec![x1.clone(), x2.clone()]);
     assert_eq!(

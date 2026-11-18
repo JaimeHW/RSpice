@@ -1,5 +1,7 @@
 use super::*;
-use crate::hierarchy::{HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding};
+use crate::hierarchy::{
+    HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding, RowOccurrences,
+};
 use rspice_design_model::Point;
 
 #[test]
@@ -43,7 +45,9 @@ fn shared_master_renames_prepare_probes_without_mutating_sources() {
             model_section: String::new(),
             status: HierarchyBindingStatus::Resolved,
             instance_count: 2,
-            instance_paths: vec!["/Xleft".to_owned(), "/Xright".to_owned()],
+            occurrences: RowOccurrences::listed(
+                ["/Xleft", "/Xright"].map(|path| InstancePath::parse(path).expect("a path")),
+            ),
             used_review_fallback: false,
             rule: HierarchyBindingRule::Default,
             diagnostic: None,

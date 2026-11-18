@@ -603,9 +603,13 @@ impl Model {
             (InstancePath::root(), plan.root().clone())
         } else {
             plan.bindings()
-                .map(|binding| (binding.instance_path(), binding.resolved_reference()))
-                .find(|(occurrence, _)| occurrence.same_engine_scope(&scope))
-                .map(|(occurrence, master)| (occurrence.clone(), master.clone()))?
+                .find(|binding| binding.instance_path().same_engine_scope(&scope))
+                .map(|binding| {
+                    (
+                        binding.instance_path().clone(),
+                        binding.resolved_reference().clone(),
+                    )
+                })?
         };
         let key = master.key();
         let (_, schematic) = projection

@@ -900,13 +900,13 @@ fn active_configuration_drives_exact_path_resolution_and_receipt_identity() {
     let configured = resolution
         .bindings
         .iter()
-        .find(|binding| binding.instance_paths == ["/X2"])
+        .find(|binding| binding.occurrences.paths() == ["/X2"])
         .expect("exact overridden instance row");
     assert_eq!(configured.view_search_order, ["spice"]);
     assert_eq!(configured.model_section, "tt");
     assert_eq!(configured.status, HierarchyBindingStatus::Unresolved);
     assert!(resolution.bindings.iter().any(|binding| {
-        binding.instance_paths.iter().any(|path| path == "/X1") && binding.status.is_resolved()
+        binding.occurrences.paths().iter().any(|path| path == "/X1") && binding.status.is_resolved()
     }));
 }
 
@@ -999,7 +999,7 @@ fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
     let fallback = resolution
         .bindings
         .iter()
-        .find(|binding| binding.instance_paths == ["/X1"])
+        .find(|binding| binding.occurrences.paths() == ["/X1"])
         .expect("child binding");
 
     assert!(fallback.status.is_resolved());

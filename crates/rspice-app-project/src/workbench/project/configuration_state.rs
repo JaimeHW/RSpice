@@ -1046,14 +1046,13 @@ fn instance_rows(hierarchy: &HierarchyResolution) -> Vec<InstanceRow> {
         .iter()
         .enumerate()
         .flat_map(|(binding, row)| {
-            row.instance_paths.iter().filter_map(move |path| {
-                let parsed = InstancePath::parse(path).ok()?;
+            row.occurrences.iter().map(move |parsed| {
                 let order = parsed
                     .segments()
                     .iter()
                     .map(|segment| segment.to_ascii_lowercase())
                     .collect::<Vec<_>>();
-                Some((order, parsed.to_string(), binding))
+                (order, parsed.to_string(), binding)
             })
         })
         .collect::<Vec<_>>();

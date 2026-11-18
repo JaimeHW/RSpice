@@ -87,8 +87,7 @@ pub fn hierarchy_reference_paths<'a>(
         if !binding.status.is_resolved() {
             continue;
         }
-        for path in &binding.instance_paths {
-            let parent = InstancePath::parse(path).map_err(|error| error.to_string())?;
+        for parent in binding.occurrences.iter() {
             if parent.is_root() {
                 continue;
             }

@@ -629,10 +629,9 @@ pub(super) fn hierarchy_audit_subjects(
         .bindings
         .iter()
         .flat_map(|binding| {
-            binding.instance_paths.iter().filter_map(move |path| {
+            binding.occurrences.iter().filter_map(move |occurrence| {
                 if view_checks == HierarchyViewChecks::SelectedHierarchy
-                    && !crate::state::InstancePath::parse(path)
-                        .is_ok_and(|occurrence| occurrence.starts_with(scope))
+                    && !occurrence.starts_with(scope)
                 {
                     return None;
                 }
@@ -643,7 +642,7 @@ pub(super) fn hierarchy_audit_subjects(
                         .unwrap_or_else(|| binding.reference.view.clone())
                 });
                 Some(HierarchyAuditSubject {
-                    instance_path: path.clone(),
+                    instance_path: occurrence.to_string(),
                     cell_name: binding.reference.cell.clone(),
                     design_view: binding.reference.view.clone(),
                     declared_fallbacks: binding.view_search_order.clone(),

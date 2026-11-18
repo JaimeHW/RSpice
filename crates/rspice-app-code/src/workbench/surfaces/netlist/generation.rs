@@ -295,7 +295,7 @@ pub(super) fn generated_project_source_dependencies(
         )
         .map_err(|error| error.to_string())?;
     let mut retained_keys = std::collections::HashSet::new();
-    for execution in projection.plan().bindings() {
+    for execution in projection.plan().distinct_bindings() {
         let Some(binding) = execution.project_veriloga() else {
             continue;
         };

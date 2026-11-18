@@ -51,7 +51,7 @@ pub fn prepared_configuration_veriloga_runtimes(
     delay_select: DigitalDelaySelect,
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let mut prepared = HashMap::<String, crate::veriloga::PreparedVerilogARuntime>::new();
-    for execution in projection.plan().bindings() {
+    for execution in projection.plan().distinct_bindings() {
         let Some(binding) = execution.project_veriloga() else {
             continue;
         };

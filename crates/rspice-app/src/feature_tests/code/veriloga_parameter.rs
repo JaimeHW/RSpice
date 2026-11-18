@@ -275,7 +275,7 @@ fn the_property_sheet_and_configured_materialization_read_one_allowlist() {
         .expect("the configured design resolves");
     let materialized = projection
         .plan()
-        .bindings()
+        .distinct_bindings()
         .find_map(|execution| {
             execution
                 .materialized_binding()

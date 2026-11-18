@@ -34,14 +34,18 @@ use crate::schematic::functional_catalog::validate_builtin_functional_binding;
 use crate::schematic::generated_veriloga_catalog::validate_generated_veriloga_binding;
 use crate::schematic::port::PortSpec;
 use rspice_design_model::cell_view::{CellViewRef, DEFAULT_SCHEMATIC_VIEW};
-use rspice_vocabulary::hierarchy_path::{HierarchyPathError, InstancePath, InstancePathPattern};
+use rspice_vocabulary::hierarchy_path::{
+    HierarchyPathError, InstancePath, InstancePathPattern, PatternSegment,
+};
 use rspice_vocabulary::product::{ContentDigest, ProjectId};
 use sha2::Digest as _;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 mod bill_of_materials;
 mod materialize;
+mod occurrences;
 pub mod port_fit;
 mod source;
 use materialize::*;
@@ -50,6 +54,8 @@ pub use materialize::{
     materialize_authoritative_source_binding, metadata_value, project_veriloga_binding_for_view,
     source_view_ports, source_view_source,
 };
+pub use occurrences::{HierarchyOccurrences, OccurrenceBinding, PlanBindings, RowOccurrences};
+use occurrences::{OccurrenceEdge, OccurrenceNode, fold};
 pub use source::HierarchySource;
 
 #[cfg(test)]
@@ -61,11 +67,6 @@ mod tests;
 /// designs while placing a deterministic bound on corrupt or hostile project
 /// data before it reaches netlisting.
 const MAX_HIERARCHY_RESOLUTION_DEPTH: usize = 128;
-
-/// Maximum number of expanded instances accepted by the configuration
-/// resolver. The table remains grouped by master, but the receipt count is an
-/// exact expanded-instance count up to this defensive product limit.
-const MAX_HIERARCHY_RESOLUTION_INSTANCES: usize = 1_000_000;
 
 /// One borrowed document and its modification state for hierarchy review.
 #[derive(Clone, Copy)]
@@ -271,13 +272,15 @@ impl MasterRecord {
 /// resolution therefore carries no configuration identity, revision `0`, and
 /// the digest of the empty authority — one value shared by every unconfigured
 /// plan, because they are all governed by the same absence.
+///
+/// The plan holds the resolved hierarchy as the graph of its distinct
+/// contexts, so it is as large as the design's cells and placements, not as
+/// large as its expansion; an occurrence's binding is found by its path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigurationExecutionPlan {
     root: CellViewRef,
-    bindings: BTreeMap<String, ConfigurationExecutionBinding>,
+    occurrences: Arc<HierarchyOccurrences>,
     masters: BTreeMap<MasterKey, MasterRecord>,
-    /// Master identity per occurrence, keyed by [`InstancePath::fold_key`].
-    occurrence_masters: BTreeMap<String, MasterKey>,
     configuration_id: Option<ConfigurationSetId>,
     configuration_revision: u64,
     configuration_digest: ContentDigest,
@@ -288,12 +291,27 @@ impl ConfigurationExecutionPlan {
         &self.root
     }
 
+    /// What runs at one occurrence. Every occurrence of one context shares
+    /// the binding, whose own path is the first of them the design places.
     pub fn binding(&self, instance_path: &InstancePath) -> Option<&ConfigurationExecutionBinding> {
-        self.bindings.get(&instance_path.fold_key())
+        let node = self.occurrences.node_at(instance_path)?;
+        self.occurrences.nodes[node].binding.as_ref()
     }
 
-    pub fn bindings(&self) -> impl ExactSizeIterator<Item = &ConfigurationExecutionBinding> {
-        self.bindings.values()
+    /// Every occurrence that runs something, with its own path, in the order
+    /// the design places them. Counting them costs nothing; walking them
+    /// costs what they are.
+    pub fn bindings(&self) -> PlanBindings<'_> {
+        PlanBindings::new(&self.occurrences)
+    }
+
+    /// Each distinct binding once, in the order the design first places it,
+    /// named by that first occurrence's path.
+    pub fn distinct_bindings(&self) -> impl Iterator<Item = &ConfigurationExecutionBinding> {
+        self.occurrences
+            .first_reached()
+            .into_iter()
+            .filter_map(|node| self.occurrences.nodes[node].binding.as_ref())
     }
 
     /// Every master this plan declares, ordered by folded reference and then
@@ -310,7 +328,8 @@ impl ConfigurationExecutionPlan {
     /// The master one occurrence instantiates, when this plan governs that
     /// occurrence and it resolves to an emitted master.
     pub fn occurrence_master(&self, instance_path: &InstancePath) -> Option<&MasterKey> {
-        self.occurrence_masters.get(&instance_path.fold_key())
+        let node = self.occurrences.node_at(instance_path)?;
+        self.occurrences.nodes[node].master.as_ref()
     }
 
     pub const fn configuration_id(&self) -> Option<ConfigurationSetId> {
@@ -456,7 +475,6 @@ pub enum HierarchyBindingStatus {
     Incompatible,
     Recursive,
     DepthLimit,
-    InstanceLimit,
 }
 
 impl HierarchyBindingStatus {
@@ -468,7 +486,6 @@ impl HierarchyBindingStatus {
             Self::Incompatible => "incompatible",
             Self::Recursive => "recursive",
             Self::DepthLimit => "depth limit",
-            Self::InstanceLimit => "instance limit",
         }
     }
 
@@ -488,7 +505,6 @@ impl HierarchyBindingStatus {
             Self::Incompatible => 3,
             Self::Recursive => 4,
             Self::DepthLimit => 5,
-            Self::InstanceLimit => 6,
         }
     }
 }
@@ -524,11 +540,10 @@ pub struct ResolvedHierarchyBinding {
     pub model_section: String,
     pub status: HierarchyBindingStatus,
     pub instance_count: usize,
-    /// Exact expanded instance paths represented by this grouped semantic
-    /// binding, rendered canonically. Paths remain available for configuration
-    /// review and exact override audit even when repeated masters are grouped
-    /// in the table.
-    pub instance_paths: Vec<String>,
+    /// The expanded occurrences this grouped binding stands for: their paths
+    /// are walked when asked for, never held, so a cell placed a million
+    /// times costs one row.
+    pub occurrences: RowOccurrences,
     /// True when the active configuration explicitly permits and records a
     /// reviewed fallback outside its primary ordered view policy.
     pub used_review_fallback: bool,
@@ -576,19 +591,34 @@ struct HierarchyResolver<'a, D, F> {
     /// The active configuration's cell bindings, keyed by the folded cell
     /// each one names.
     cell_bindings: HashMap<(String, String), &'a ConfigurationCellBinding>,
+    /// Each override's pattern, parsed once.
+    patterns: Vec<Option<InstancePathPattern>>,
     rows: Vec<ResolvedHierarchyBinding>,
     row_indices: HashMap<String, usize>,
-    /// Occurrences merged into each row, keyed by [`InstancePath::fold_key`]
-    /// and valued by the spelling the row displays.
-    row_occurrences: Vec<BTreeMap<String, String>>,
-    total_instances: usize,
-    resolved_instances: usize,
-    encountered_instance_paths: HashMap<String, InstancePath>,
-    execution_bindings: BTreeMap<String, PendingExecutionBinding>,
-    /// Fold keys in the order the walk reached them, which is the order the
-    /// design places its instances and therefore the order masters are named
-    /// in. The map above is ordered lexically, which is not the same thing.
-    execution_order: Vec<String>,
+    /// One node per distinct occurrence context, in the order the walk made
+    /// them; the design root is the first.
+    nodes: Vec<OccurrenceNode>,
+    /// What each node runs, before its subtree's digest is known.
+    pending: Vec<Option<PendingExecutionBinding>>,
+    /// The node each context resolved to, so a second occurrence of it is
+    /// not resolved again.
+    contexts: HashMap<OccurrenceContext, usize>,
+    /// Row entries no node holds, with the path each names.
+    listed: Vec<(usize, InstancePath)>,
+}
+
+/// Everything an occurrence's resolution depends on besides its path: what
+/// it places, where its placement is drawn, the cells above it, and which
+/// overrides can still reach it or an instance under it. Two occurrences
+/// alike in all of these resolve alike, down to every instance under them.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct OccurrenceContext {
+    requested: String,
+    /// The drawn placement, by its address in the master that draws it.
+    placement: usize,
+    depth: usize,
+    ancestors: String,
+    overrides: Vec<usize>,
 }
 
 #[derive(Clone)]
@@ -639,14 +669,21 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                         .collect()
                 })
                 .unwrap_or_default(),
+            patterns: configuration
+                .map(|configuration| {
+                    configuration
+                        .overrides()
+                        .iter()
+                        .map(|scoped| InstancePathPattern::parse(&scoped.instance_path).ok())
+                        .collect()
+                })
+                .unwrap_or_default(),
             rows: Vec::new(),
             row_indices: HashMap::new(),
-            row_occurrences: Vec::new(),
-            total_instances: 0,
-            resolved_instances: 0,
-            encountered_instance_paths: HashMap::new(),
-            execution_bindings: BTreeMap::new(),
-            execution_order: Vec::new(),
+            nodes: Vec::new(),
+            pending: Vec::new(),
+            contexts: HashMap::new(),
+            listed: Vec::new(),
         }
     }
 
@@ -673,7 +710,6 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         if let Some(error) = active_configuration
             .and_then(|configuration| validate_override_pattern_authority(configuration).err())
         {
-            self.total_instances = 1;
             let row = self.binding_row(
                 root.clone(),
                 None,
@@ -682,15 +718,34 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 true,
                 (HierarchyBindingStatus::Unresolved, Some(error)),
             );
-            self.upsert(row, &design_root);
+            self.list(row, design_root.clone());
         } else {
-            self.resolve_reference(root.clone(), None, &design_root, 0, true, &mut ancestors);
+            let reaching = (0..self.patterns.len())
+                .filter(|at| self.patterns[*at].is_some())
+                .collect::<Vec<_>>();
+            self.resolve_reference(
+                root.clone(),
+                None,
+                &design_root,
+                0,
+                true,
+                &mut ancestors,
+                "",
+                &reaching,
+            );
         }
+        let mut graph = HierarchyOccurrences {
+            nodes: std::mem::take(&mut self.nodes),
+            listed: Vec::new(),
+        };
+        graph.seal();
+        let mut reported = Vec::new();
         for (text, purpose) in required_paths {
-            let Some((occurrence, diagnostic)) = self.unmet_requirement(&text, &purpose) else {
+            let Some((occurrence, diagnostic)) =
+                unmet_requirement(&graph, &mut reported, &text, &purpose)
+            else {
                 continue;
             };
-            self.total_instances = self.total_instances.saturating_add(1);
             let row = self.binding_row(
                 root.clone(),
                 None,
@@ -699,10 +754,9 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 false,
                 (HierarchyBindingStatus::Unresolved, Some(diagnostic)),
             );
-            self.upsert(row, &occurrence);
+            self.list(row, occurrence);
         }
         if let Some(error) = self.execution_model_section_conflict() {
-            self.total_instances = self.total_instances.saturating_add(1);
             let row = self.binding_row(
                 root.clone(),
                 None,
@@ -711,71 +765,81 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 true,
                 (HierarchyBindingStatus::Unresolved, Some(error)),
             );
-            self.upsert(row, &design_root);
+            self.list(row, design_root);
         }
-        let active_configuration = self.configuration;
+        graph.listed = std::mem::take(&mut self.listed);
+        let masters = seal_plan(&mut graph, std::mem::take(&mut self.pending));
+        let graph = Arc::new(graph);
+        let mut total_instances = 0_usize;
+        for (index, row) in self.rows.iter_mut().enumerate() {
+            row.instance_count = graph.row_count(index);
+            row.occurrences = RowOccurrences::new(Arc::clone(&graph), index);
+            total_instances = total_instances.saturating_add(row.instance_count);
+        }
+        let resolved_instances = graph
+            .nodes
+            .iter()
+            .filter(|node| node.resolved)
+            .fold(0_usize, |total, node| {
+                total.saturating_add(node.multiplicity)
+            });
         let resolution = HierarchyResolution {
             bindings: self.rows,
-            total_instances: self.total_instances,
-            resolved_instances: self.resolved_instances,
+            total_instances,
+            resolved_instances,
             configuration_id: active_configuration.map(|configuration| configuration.id()),
             configuration_revision: active_configuration
                 .map(|configuration| configuration.revision()),
             configuration_digest: active_configuration
                 .map(|configuration| configuration.semantic_digest()),
         };
-        let plan = seal_plan(
+        let plan = ConfigurationExecutionPlan {
             root,
-            self.execution_bindings,
-            &self.execution_order,
-            active_configuration,
-        );
+            occurrences: graph,
+            masters,
+            configuration_id: active_configuration.map(ConfigurationSet::id),
+            configuration_revision: active_configuration
+                .map_or(UNCONFIGURED_PLAN_REVISION, |configuration| {
+                    configuration.revision()
+                }),
+            configuration_digest: active_configuration.map_or_else(
+                || {
+                    ContentDigest::from_bytes(
+                        sha2::Sha256::digest(UNCONFIGURED_PLAN_AUTHORITY.as_bytes()).into(),
+                    )
+                },
+                |configuration| configuration.semantic_digest(),
+            ),
+        };
         (resolution, plan)
     }
 
-    /// The instance to attribute an unmet configuration requirement to, and
-    /// why it is unmet — or `None` when the expanded hierarchy satisfies it.
-    ///
-    /// `text` is the authored spelling. A requirement naming one instance is
-    /// looked up by identity; a pattern is matched against every instance the
-    /// walk reached, because that is the only thing a pattern can be measured
-    /// against.
-    fn unmet_requirement(&mut self, text: &str, purpose: &str) -> Option<(InstancePath, String)> {
-        match InstancePath::parse(text) {
-            Ok(path) => {
-                let key = path.fold_key();
-                if self.encountered_instance_paths.contains_key(&key) {
-                    return None;
-                }
-                self.encountered_instance_paths.insert(key, path.clone());
-                Some((
-                    path.clone(),
-                    format!("{purpose} {path} does not exist in the expanded hierarchy"),
-                ))
-            }
-            Err(HierarchyPathError::WildcardInPath(_)) => {
-                let diagnostic = match InstancePathPattern::parse(text) {
-                    Ok(pattern) => {
-                        if self
-                            .encountered_instance_paths
-                            .values()
-                            .any(|candidate| pattern.matches(candidate))
-                        {
-                            return None;
-                        }
-                        format!("{purpose} {pattern} matches no instance in the expanded hierarchy")
-                    }
-                    Err(error) => format!("{purpose} {text} is not a hierarchy pattern: {error}"),
-                };
-                Some((InstancePath::root(), diagnostic))
-            }
-            Err(error) => Some((
-                InstancePath::root(),
-                format!("{purpose} {text} is not a hierarchical path: {error}"),
-            )),
-        }
+    /// The overrides of `reaching` that can still reach an instance named
+    /// `name` placed at `depth`, or one under it: a pattern matches at one
+    /// depth only, so it reaches on while each position it pins matches.
+    fn reaching_below(&self, reaching: &[usize], depth: usize, name: &str) -> Vec<usize> {
+        reaching
+            .iter()
+            .copied()
+            .filter(|at| {
+                self.patterns[*at].as_ref().is_some_and(|pattern| {
+                    pattern
+                        .segments()
+                        .get(depth)
+                        .is_some_and(|segment| segment_matches(segment, name))
+                })
+            })
+            .collect()
     }
 
+    /// Resolve the occurrence at `instance_path` into a new node, and each
+    /// instance under it into the node its context resolves to, resolving a
+    /// context the first time it is reached and only then. `reaching` holds
+    /// the overrides that can reach this occurrence or one under it; with the
+    /// cells above it, its depth and its placement, that is all that makes it
+    /// resolve as it does, so the occurrence it was first reached at speaks
+    /// for every other.
+    #[allow(clippy::too_many_arguments)]
     fn resolve_reference(
         &mut self,
         requested: CellViewRef,
@@ -784,29 +848,12 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         depth: usize,
         is_root: bool,
         ancestors: &mut Vec<CellViewRef>,
-    ) {
-        self.encountered_instance_paths
-            .insert(instance_path.fold_key(), instance_path.clone());
-        if self.total_instances >= MAX_HIERARCHY_RESOLUTION_INSTANCES {
-            let mut row = self.binding_row(
-                requested,
-                binding,
-                instance_path,
-                depth,
-                is_root,
-                (
-                    HierarchyBindingStatus::InstanceLimit,
-                    Some(format!(
-                        "hierarchy exceeds the supported limit of {MAX_HIERARCHY_RESOLUTION_INSTANCES} expanded instances"
-                    )),
-                ),
-            );
-            row.instance_count = 1;
-            self.total_instances = self.total_instances.saturating_add(1);
-            self.upsert(row, instance_path);
-            return;
-        }
-        self.total_instances += 1;
+        above: &str,
+        reaching: &[usize],
+    ) -> usize {
+        let node = self.nodes.len();
+        self.nodes.push(OccurrenceNode::default());
+        self.pending.push(None);
 
         if depth > MAX_HIERARCHY_RESOLUTION_DEPTH {
             let row = self.binding_row(
@@ -822,8 +869,8 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                     )),
                 ),
             );
-            self.upsert(row, instance_path);
-            return;
+            self.upsert(row, node);
+            return node;
         }
 
         // A built-in device is the engine's, not a library cell: there is no
@@ -845,8 +892,8 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 is_root,
                 (HierarchyBindingStatus::Incompatible, Some(diagnostic)),
             );
-            self.upsert(row, instance_path);
-            return;
+            self.upsert(row, node);
+            return node;
         }
 
         // Compiled code models are executable leaves, not project library
@@ -856,14 +903,21 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         if let Some(binding) = binding
             && (binding.is_builtin_xspice() || binding.is_builtin_functional())
         {
-            self.resolve_builtin_leaf(requested, binding, instance_path, depth, is_root);
-            return;
+            self.resolve_builtin_leaf(node, requested, binding, instance_path, depth, is_root);
+            return node;
         }
         if let Some(binding) = binding
             && binding.is_generated_veriloga()
         {
-            self.resolve_generated_veriloga(requested, binding, instance_path, depth, is_root);
-            return;
+            self.resolve_generated_veriloga(
+                node,
+                requested,
+                binding,
+                instance_path,
+                depth,
+                is_root,
+            );
+            return node;
         }
 
         // A binding to another cell searches that cell for the views the
@@ -929,8 +983,8 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                     placed: target.as_ref().map(|_| requested.clone()),
                 },
             );
-            self.upsert(row, instance_path);
-            return;
+            self.upsert(row, node);
+            return node;
         }
 
         let (master, mut status, mut diagnostic) = match master {
@@ -1085,15 +1139,18 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             } else {
                 master.materialized_binding.clone()
             };
-            self.stage_binding(PendingExecutionBinding {
-                instance_path: instance_path.clone(),
-                resolved_reference: resolved_reference.clone(),
-                resolved_view_type: view_type,
-                materialized_binding,
-                model_section: model_section.clone(),
-                stop_boundary,
-                project_veriloga,
-            });
+            self.stage_binding(
+                node,
+                PendingExecutionBinding {
+                    instance_path: instance_path.clone(),
+                    resolved_reference: resolved_reference.clone(),
+                    resolved_view_type: view_type,
+                    materialized_binding,
+                    model_section: model_section.clone(),
+                    stop_boundary,
+                    project_veriloga,
+                },
+            );
         }
 
         let mut row = self.binding_row_with_master(
@@ -1114,37 +1171,37 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             row.model_section = section;
         }
         row.warnings = warnings;
-        self.upsert(row, instance_path);
+        self.upsert(row, node);
         if status.is_resolved() {
-            self.resolved_instances += 1;
+            self.nodes[node].resolved = true;
         }
 
         // A cell that does not fit binds nothing, so nothing under it runs.
         if stop_boundary || status == HierarchyBindingStatus::Incompatible {
-            return;
+            return node;
         }
 
         let Some(schematic) = master.as_ref().and_then(|master| master.schematic) else {
-            return;
+            return node;
         };
-        let children = schematic
+        if !schematic
             .document
             .components
             .iter()
-            .filter(|component| component.kind == ComponentType::CellInstance)
-            .filter_map(|component| {
-                component
-                    .library_cell
-                    .clone()
-                    .map(|binding| (component.name.clone(), binding))
-            })
-            .collect::<Vec<_>>();
-        if children.is_empty() {
-            return;
+            .any(|component| component.kind == ComponentType::CellInstance)
+        {
+            return node;
         }
-
+        let above = format!("{above}|{}", hierarchy_identity(&resolved_reference));
         ancestors.push(resolved_reference.clone());
-        for (instance_name, child) in &children {
+        for component in &schematic.document.components {
+            if component.kind != ComponentType::CellInstance {
+                continue;
+            }
+            let Some(child) = component.library_cell.as_ref() else {
+                continue;
+            };
+            let instance_name = &component.name;
             let requested_view = if child.view.eq_ignore_ascii_case("symbol") {
                 DEFAULT_SCHEMATIC_VIEW
             } else {
@@ -1156,16 +1213,39 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             // that silently disappears from the manifest is a hierarchy the
             // receipt claims is complete and is not.
             match instance_path.child(instance_name) {
-                Ok(child_path) => self.resolve_reference(
-                    requested,
-                    Some(child),
-                    &child_path,
-                    depth + 1,
-                    false,
-                    ancestors,
-                ),
+                Ok(child_path) => {
+                    let reaching = self.reaching_below(reaching, depth, instance_name);
+                    let context = OccurrenceContext {
+                        requested: requested.key().to_ascii_lowercase(),
+                        placement: std::ptr::from_ref(child).addr(),
+                        depth: depth + 1,
+                        ancestors: above.clone(),
+                        overrides: reaching.clone(),
+                    };
+                    let resolved = match self.contexts.get(&context) {
+                        Some(&existing) => existing,
+                        None => {
+                            let created = self.resolve_reference(
+                                requested,
+                                Some(child),
+                                &child_path,
+                                depth + 1,
+                                false,
+                                ancestors,
+                                &above,
+                                &reaching,
+                            );
+                            self.contexts.insert(context, created);
+                            created
+                        }
+                    };
+                    self.nodes[node].children.push(OccurrenceEdge {
+                        name: instance_name.clone(),
+                        folded: fold(instance_name),
+                        node: resolved,
+                    });
+                }
                 Err(error) => {
-                    self.total_instances = self.total_instances.saturating_add(1);
                     let row = self.binding_row(
                         requested,
                         Some(child),
@@ -1174,11 +1254,12 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                         false,
                         (HierarchyBindingStatus::Unresolved, Some(error.to_string())),
                     );
-                    self.upsert(row, instance_path);
+                    self.upsert(row, node);
                 }
             }
         }
         ancestors.pop();
+        node
     }
 
     /// Resolve a compiled built-in placement: an XSPICE code model or a
@@ -1186,6 +1267,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
     /// search nor a model section can apply to them.
     fn resolve_builtin_leaf(
         &mut self,
+        node: usize,
         requested: CellViewRef,
         binding: &LibraryCellInstance,
         instance_path: &InstancePath,
@@ -1228,15 +1310,18 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         }
 
         if status.is_resolved() {
-            self.stage_binding(PendingExecutionBinding {
-                instance_path: instance_path.clone(),
-                resolved_reference: requested.clone(),
-                resolved_view_type: ViewType::Custom,
-                materialized_binding: Some(binding.clone()),
-                model_section: None,
-                stop_boundary: true,
-                project_veriloga: None,
-            });
+            self.stage_binding(
+                node,
+                PendingExecutionBinding {
+                    instance_path: instance_path.clone(),
+                    resolved_reference: requested.clone(),
+                    resolved_view_type: ViewType::Custom,
+                    materialized_binding: Some(binding.clone()),
+                    model_section: None,
+                    stop_boundary: true,
+                    project_veriloga: None,
+                },
+            );
         }
 
         let mut row = self.binding_row(
@@ -1251,14 +1336,15 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         row.view_search_order = vec![view.to_owned()];
         row.stop_view = Some(view.to_owned());
         row.model_section.clear();
-        self.upsert(row, instance_path);
+        self.upsert(row, node);
         if status.is_resolved() {
-            self.resolved_instances += 1;
+            self.nodes[node].resolved = true;
         }
     }
 
     fn resolve_generated_veriloga(
         &mut self,
+        node: usize,
         requested: CellViewRef,
         binding: &LibraryCellInstance,
         instance_path: &InstancePath,
@@ -1289,15 +1375,18 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             ));
         }
         if status.is_resolved() {
-            self.stage_binding(PendingExecutionBinding {
-                instance_path: instance_path.clone(),
-                resolved_reference: requested.clone(),
-                resolved_view_type: ViewType::VerilogA,
-                materialized_binding: Some(binding.clone()),
-                model_section: None,
-                stop_boundary: true,
-                project_veriloga: None,
-            });
+            self.stage_binding(
+                node,
+                PendingExecutionBinding {
+                    instance_path: instance_path.clone(),
+                    resolved_reference: requested.clone(),
+                    resolved_view_type: ViewType::VerilogA,
+                    materialized_binding: Some(binding.clone()),
+                    model_section: None,
+                    stop_boundary: true,
+                    project_veriloga: None,
+                },
+            );
         }
         let mut row = self.binding_row(
             requested,
@@ -1311,9 +1400,9 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         row.view_search_order = vec!["veriloga-generated".to_owned()];
         row.stop_view = Some("veriloga-generated".to_owned());
         row.model_section.clear();
-        self.upsert(row, instance_path);
+        self.upsert(row, node);
         if status.is_resolved() {
-            self.resolved_instances += 1;
+            self.nodes[node].resolved = true;
         }
     }
 
@@ -1426,7 +1515,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             stop_view,
             status,
             instance_count: 1,
-            instance_paths: vec![instance_path.to_string()],
+            occurrences: RowOccurrences::listed([]),
             used_review_fallback,
             diagnostic,
             warnings: Vec::new(),
@@ -1690,24 +1779,14 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         selected_configuration_override(&self.overrides, &instance_path.to_string())
     }
 
-    /// Retain one resolved occurrence, in walk order, for the plan this
-    /// resolution seals. A second visit to one instance is impossible — the
-    /// walk descends each placed instance once — so the order vector and the
-    /// map stay in step.
-    fn stage_binding(&mut self, binding: PendingExecutionBinding) {
-        let key = binding.instance_path.fold_key();
-        if self
-            .execution_bindings
-            .insert(key.clone(), binding)
-            .is_none()
-        {
-            self.execution_order.push(key);
-        }
+    /// Retain what one node runs for the plan this resolution seals.
+    fn stage_binding(&mut self, node: usize, binding: PendingExecutionBinding) {
+        self.pending[node] = Some(binding);
     }
 
     fn execution_model_section_conflict(&self) -> Option<String> {
         let mut sources = HashMap::<String, (Option<&str>, &InstancePath)>::new();
-        for binding in self.execution_bindings.values() {
+        for binding in self.pending.iter().flatten() {
             let Some(materialized) = binding.materialized_binding.as_ref() else {
                 continue;
             };
@@ -1989,10 +2068,24 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             .validate_source_file(source_path, view.view_type, binding)
     }
 
-    fn upsert(&mut self, mut row: ResolvedHierarchyBinding, occurrence: &InstancePath) {
+    /// Count each occurrence of `node` in `row`'s group.
+    fn upsert(&mut self, row: ResolvedHierarchyBinding, node: usize) {
+        let index = self.group(row);
+        self.nodes[node].rows.push(index);
+    }
+
+    /// Count `occurrence`, which no node holds, in `row`'s group.
+    fn list(&mut self, row: ResolvedHierarchyBinding, occurrence: InstancePath) {
+        let index = self.group(row);
+        self.listed.push((index, occurrence));
+    }
+
+    /// The group `row` belongs to, made if it is the first of it. Counts and
+    /// occurrences are the graph's, once the walk is done.
+    fn group(&mut self, mut row: ResolvedHierarchyBinding) -> usize {
         // Rows are grouped by the executable binding contract, not by their
         // current outcome. Repeated instances of one master must remain one
-        // review row while `instance_paths` preserves every exact occurrence;
+        // review row while its occurrences name every exact instance;
         // a recursive or unresolved occurrence then promotes the aggregate to
         // the most severe observed status. Configuration variants still split
         // naturally through their ordered views, stop, model, and fallback
@@ -2014,14 +2107,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             row.rule,
         );
         if let Some(index) = self.row_indices.get(&key).copied() {
-            // Occurrences are merged by path identity, so two spellings of one
-            // instance count once and the listed order is the paths' rather
-            // than the order the walk happened to reach them in.
-            let occurrences = &mut self.row_occurrences[index];
-            occurrences.insert(occurrence.fold_key(), occurrence.to_string());
             let existing = &mut self.rows[index];
-            existing.instance_count = existing.instance_count.saturating_add(row.instance_count);
-            existing.instance_paths = occurrences.values().cloned().collect();
             // Warnings are the row's, not one occurrence's: merged occurrences
             // share the grouped binding contract that provoked them.
             for warning in std::mem::take(&mut row.warnings) {
@@ -2033,84 +2119,157 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 existing.status = row.status;
                 existing.diagnostic = row.diagnostic;
             }
-            return;
+            return index;
         }
-        self.row_indices.insert(key, self.rows.len());
-        self.row_occurrences.push(BTreeMap::from([(
-            occurrence.fold_key(),
-            occurrence.to_string(),
-        )]));
+        let index = self.rows.len();
+        self.row_indices.insert(key, index);
         self.rows.push(row);
+        index
     }
 }
 
-/// Turn one walk's staged occurrences into the frozen execution plan.
+/// Whether a pattern position admits an instance named `name`.
+fn segment_matches(segment: &PatternSegment, name: &str) -> bool {
+    match segment {
+        PatternSegment::Star => true,
+        PatternSegment::Name(expected) => fold(expected) == fold(name),
+    }
+}
+
+/// The instance to attribute an unmet configuration requirement to, and why
+/// it is unmet — or `None` when the expanded hierarchy satisfies it.
 ///
-/// Three things are decided here and nowhere else: each occurrence's closure
-/// digest, which occurrences are one master, and what that master is called.
+/// `text` is the authored spelling. A requirement naming one instance is
+/// looked up by its path; a pattern is matched against every instance the
+/// hierarchy places, a context at a time, because that is the only thing a
+/// pattern can be measured against. `reported` holds the paths already
+/// reported missing, so one is reported once.
+fn unmet_requirement(
+    graph: &HierarchyOccurrences,
+    reported: &mut Vec<InstancePath>,
+    text: &str,
+    purpose: &str,
+) -> Option<(InstancePath, String)> {
+    match InstancePath::parse(text) {
+        Ok(path) => {
+            if graph.node_at(&path).is_some()
+                || reported
+                    .iter()
+                    .any(|seen| seen.fold_key() == path.fold_key())
+            {
+                return None;
+            }
+            reported.push(path.clone());
+            Some((
+                path.clone(),
+                format!("{purpose} {path} does not exist in the expanded hierarchy"),
+            ))
+        }
+        Err(HierarchyPathError::WildcardInPath(_)) => {
+            let diagnostic = match InstancePathPattern::parse(text) {
+                Ok(pattern) => {
+                    if places_a_match(graph, &pattern)
+                        || reported.iter().any(|seen| pattern.matches(seen))
+                    {
+                        return None;
+                    }
+                    format!("{purpose} {pattern} matches no instance in the expanded hierarchy")
+                }
+                Err(error) => format!("{purpose} {text} is not a hierarchy pattern: {error}"),
+            };
+            Some((InstancePath::root(), diagnostic))
+        }
+        Err(error) => Some((
+            InstancePath::root(),
+            format!("{purpose} {text} is not a hierarchical path: {error}"),
+        )),
+    }
+}
+
+/// Whether the hierarchy places an instance `pattern` matches: a walk of the
+/// graph that tries each context once at each position of the pattern.
+fn places_a_match(graph: &HierarchyOccurrences, pattern: &InstancePathPattern) -> bool {
+    fn from(
+        graph: &HierarchyOccurrences,
+        segments: &[PatternSegment],
+        node: usize,
+        at: usize,
+        tried: &mut HashMap<(usize, usize), bool>,
+    ) -> bool {
+        if at == segments.len() {
+            return true;
+        }
+        if let Some(found) = tried.get(&(node, at)) {
+            return *found;
+        }
+        let found = graph.nodes[node].children.iter().any(|edge| {
+            segment_matches(&segments[at], &edge.name)
+                && from(graph, segments, edge.node, at + 1, tried)
+        });
+        tried.insert((node, at), found);
+        found
+    }
+    !graph.nodes.is_empty() && from(graph, pattern.segments(), 0, 0, &mut HashMap::new())
+}
+
+/// Seal what each node runs into the frozen execution plan, and name its
+/// masters.
+///
+/// Three things are decided here and nowhere else: each node's closure
+/// digest, which nodes are one master, and what that master is called.
 /// Everything downstream — the emitted deck, the receipt, the repair actions —
 /// reads those three answers rather than deriving a fourth.
 fn seal_plan(
-    root: CellViewRef,
-    pending: BTreeMap<String, PendingExecutionBinding>,
-    order: &[String],
-    configuration: Option<&ConfigurationSet>,
-) -> ConfigurationExecutionPlan {
-    let mut children = HashMap::<String, Vec<String>>::new();
-    for key in order {
-        let binding = &pending[key];
-        if let Some(parent) = binding.instance_path.parent() {
-            children
-                .entry(parent.fold_key())
-                .or_default()
-                .push(key.clone());
-        }
-    }
-    let mut digests = HashMap::<String, ContentDigest>::with_capacity(pending.len());
-    for key in order.iter().rev() {
-        let binding = &pending[key];
-        let child_digests = children
-            .get(key)
-            .map(|keys| {
-                keys.iter()
-                    .filter_map(|child| digests.get(child).copied())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        digests.insert(
-            key.clone(),
-            master_closure_digest(
-                &binding.resolved_reference,
-                binding.resolved_view_type,
-                binding.model_section.as_deref(),
-                binding.stop_boundary,
-                binding
-                    .project_veriloga
-                    .as_ref()
-                    .map(ConfigurationVerilogABinding::source_closure_digest),
-                &child_digests,
-            ),
-        );
+    graph: &mut HierarchyOccurrences,
+    pending: Vec<Option<PendingExecutionBinding>>,
+) -> BTreeMap<MasterKey, MasterRecord> {
+    // Children before parents: a closure digest folds its children's.
+    let mut digests = vec![None::<ContentDigest>; graph.nodes.len()];
+    let mut order = graph.topological_order();
+    order.reverse();
+    for node in order {
+        let Some(binding) = pending[node].as_ref() else {
+            continue;
+        };
+        let children = graph.nodes[node]
+            .children
+            .iter()
+            .filter_map(|edge| digests[edge.node])
+            .collect::<Vec<_>>();
+        digests[node] = Some(master_closure_digest(
+            &binding.resolved_reference,
+            binding.resolved_view_type,
+            binding.model_section.as_deref(),
+            binding.stop_boundary,
+            binding
+                .project_veriloga
+                .as_ref()
+                .map(ConfigurationVerilogABinding::source_closure_digest),
+            &children,
+        ));
     }
 
-    let mut bindings = BTreeMap::new();
     let mut master_order = Vec::new();
     let mut reserved = HashSet::new();
-    for key in order {
-        let pending = &pending[key];
-        let closure = digests[key];
-        let emits_subcircuit = !pending.instance_path.is_root()
+    for node in graph.first_reached() {
+        let Some(binding) = pending[node].as_ref() else {
+            continue;
+        };
+        let Some(closure) = digests[node] else {
+            continue;
+        };
+        let emits_subcircuit = !binding.instance_path.is_root()
             && matches!(
-                pending.resolved_view_type,
+                binding.resolved_view_type,
                 ViewType::Schematic | ViewType::Testbench
             );
         if emits_subcircuit {
             master_order.push((
-                MasterKey::new(&pending.resolved_reference, closure),
-                pending.resolved_reference.clone(),
-                pending.instance_path.clone(),
+                node,
+                MasterKey::new(&binding.resolved_reference, closure),
+                binding.resolved_reference.clone(),
             ));
-        } else if let Some(module) = pending
+        } else if let Some(module) = binding
             .materialized_binding
             .as_ref()
             .and_then(|binding| binding.module_name.as_deref())
@@ -2121,54 +2280,37 @@ fn seal_plan(
             // its own name. A generated subcircuit may not shadow it.
             reserved.insert(module.to_ascii_lowercase());
         }
-        bindings.insert(
-            key.clone(),
-            ConfigurationExecutionBinding {
-                instance_path: pending.instance_path.clone(),
-                resolved_reference: pending.resolved_reference.clone(),
-                resolved_view_type: pending.resolved_view_type,
-                materialized_binding: pending.materialized_binding.clone(),
-                model_section: pending.model_section.clone(),
-                stop_boundary: pending.stop_boundary,
-                project_veriloga: pending.project_veriloga.clone(),
-                binding_closure_digest: closure,
-            },
-        );
     }
-
     let names = assign_master_names(
         master_order
             .iter()
-            .map(|(key, reference, _)| (key, reference)),
+            .map(|(_, key, reference)| (key, reference)),
         &reserved,
     );
     let mut masters = BTreeMap::<MasterKey, MasterRecord>::new();
-    let mut occurrence_masters = BTreeMap::new();
-    for (key, _, occurrence) in master_order {
-        if !masters.contains_key(&key) {
-            masters.insert(key.clone(), MasterRecord::new(names[&key].clone()));
-        }
-        occurrence_masters.insert(occurrence.fold_key(), key);
+    for (node, key, _) in master_order {
+        masters
+            .entry(key.clone())
+            .or_insert_with(|| MasterRecord::new(names[&key].clone()));
+        graph.nodes[node].master = Some(key);
     }
 
-    ConfigurationExecutionPlan {
-        root,
-        bindings,
-        masters,
-        occurrence_masters,
-        configuration_id: configuration.map(ConfigurationSet::id),
-        configuration_revision: configuration.map_or(UNCONFIGURED_PLAN_REVISION, |configuration| {
-            configuration.revision()
-        }),
-        configuration_digest: configuration.map_or_else(
-            || {
-                ContentDigest::from_bytes(
-                    sha2::Sha256::digest(UNCONFIGURED_PLAN_AUTHORITY.as_bytes()).into(),
-                )
-            },
-            |configuration| configuration.semantic_digest(),
-        ),
+    for (node, pending) in pending.into_iter().enumerate() {
+        let (Some(pending), Some(closure)) = (pending, digests[node]) else {
+            continue;
+        };
+        graph.nodes[node].binding = Some(ConfigurationExecutionBinding {
+            instance_path: pending.instance_path,
+            resolved_reference: pending.resolved_reference,
+            resolved_view_type: pending.resolved_view_type,
+            materialized_binding: pending.materialized_binding,
+            model_section: pending.model_section,
+            stop_boundary: pending.stop_boundary,
+            project_veriloga: pending.project_veriloga,
+            binding_closure_digest: closure,
+        });
     }
+    masters
 }
 
 /// One override with its pattern re-spelled in the canonical grammar.
