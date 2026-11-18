@@ -1636,10 +1636,6 @@ mod tests {
             "source_add_row",
         ),
         (
-            "rspice-app-models/src/workbench/app/dialogs/pdk_settings.rs",
-            "env_add_row",
-        ),
-        (
             "rspice-app-models/src/workbench/surfaces/models/manager/dialogs.rs",
             "render_dialog",
         ),
