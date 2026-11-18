@@ -215,6 +215,20 @@ fn render_close_project_review(
             .map(|document| (document_icon(document), document.label()))
             .collect()
     };
+    // A cellview of a library kept in a folder of its own is written to its
+    // folder, not the project file, so the comparison above never names it:
+    // each with edits here is named by its library.
+    for reference in app.model().unsaved_library_cellviews() {
+        if !documents.contains(&ProjectDocumentId::CellView(reference.clone())) {
+            unsaved.push((
+                WorkbenchIcon::Design,
+                format!(
+                    "{} \u{b7} {} \u{b7} {}",
+                    reference.library, reference.cell, reference.view
+                ),
+            ));
+        }
+    }
     if app.model_draft_unsaved() {
         unsaved.push((WorkbenchIcon::Models, "Device model draft".to_owned()));
     }

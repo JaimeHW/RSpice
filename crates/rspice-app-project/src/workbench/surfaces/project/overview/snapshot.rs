@@ -29,7 +29,7 @@ use crate::workbench::app_state::design_checks::finding_identities;
 use crate::workbench::app_state::{DesignCheckStatus, Model};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
+use crate::workbench::lifecycle::project_lifecycle::{ProjectDocumentId, dirty_documents};
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::health::{self, DesignSubject, SubjectStatus};
 use crate::workbench::project::schematic_row_key;
@@ -303,8 +303,18 @@ impl OverviewSnapshot {
     /// known kept in `ctx` until what it was derived from changes.
     pub fn capture(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> Self {
         let project = &cx.model.workspace.content.project;
-        let dirty_documents =
-            dirty_document_count(&lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers));
+        // The project file's documents with unsaved changes, and each
+        // cellview of a library kept in a folder of its own with edits here,
+        // which that file does not hold: each is one document.
+        let dirty = dirty_documents(&lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers));
+        let dirty_documents = dirty.len()
+            + cx.model
+                .unsaved_library_cellviews()
+                .into_iter()
+                .filter(|reference| {
+                    !dirty.contains(&ProjectDocumentId::CellView(reference.clone()))
+                })
+                .count();
         let netlist_first = cx.model.is_netlist_first_without_schematic();
         let source_deck = source_deck_snapshot(ctx, cx.model);
 

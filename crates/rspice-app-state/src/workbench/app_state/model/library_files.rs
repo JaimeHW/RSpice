@@ -336,6 +336,39 @@ impl Model {
             .collect()
     }
 
+    /// Each cellview of a library kept in a folder of its own with edits
+    /// here not yet saved, by library: those open with unsaved changes and
+    /// those the last check found edited. The project file does not hold
+    /// them, so its comparison never counts them; each is one unsaved
+    /// document all the same, which the Overview counts and the close
+    /// review names.
+    pub fn unsaved_library_cellviews(&self) -> Vec<crate::state::CellViewRef> {
+        let mut found = self
+            .workspace
+            .content
+            .open_views
+            .iter()
+            .filter(|document| {
+                document.dirty
+                    && self
+                        .library_manager
+                        .is_referenced(&document.reference.library)
+            })
+            .map(|document| document.reference.clone())
+            .collect::<Vec<_>>();
+        for (library, file) in self.unsaved_library_files() {
+            if let LibraryFile::CellView { cell, view, .. } = file {
+                let reference = crate::state::CellViewRef::new(&library, &cell, &view);
+                if !found.contains(&reference) {
+                    found.push(reference);
+                }
+            }
+        }
+        found.sort_by_key(crate::state::CellViewRef::key);
+        found.dedup();
+        found
+    }
+
     /// The files that changed on disk since this session loaded them, for
     /// the Refresh list.
     pub fn refresh_rows(&self) -> Vec<RefreshRow> {
