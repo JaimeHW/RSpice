@@ -325,27 +325,35 @@ pub(crate) fn retain_sessions(
 /// `revision`, as the editor `editor_id` takes it. The snapshot is kept
 /// between frames: it is built again only when the owner's text is not the
 /// one kept, so a revision the owner moved on for an edit the editor made
-/// itself costs a comparison, not a copy.
+/// itself costs a comparison, not a copy, and an edit the owner refused
+/// gives way to the text the owner kept.
 pub(crate) fn string_owner_text(
     ctx: &egui::Context,
     editor_id: egui::Id,
     revision: u64,
     source: &str,
 ) -> TextSnapshot {
-    let kept =
-        ctx.data_mut(|data| data.remove_temp::<(u64, TextSnapshot)>(editor_id.with("owner-text")));
+    let kept = ctx.data_mut(|data| {
+        data.remove_temp::<(Option<u64>, TextSnapshot)>(editor_id.with("owner-text"))
+    });
     match kept {
-        Some((kept_revision, text)) if kept_revision == revision || text.equals_str(source) => text,
+        Some((kept_revision, text))
+            if kept_revision == Some(revision) || text.equals_str(source) =>
+        {
+            text
+        }
         _ => TextSnapshot::new(source),
     }
 }
 
-/// Keep `text` as the text of the string owner of the editor `editor_id` at
-/// its `revision`, for [`string_owner_text`] to take next frame.
+/// Keep `text`, the editor's text after a frame, for [`string_owner_text`]
+/// to take next frame. `revision` is the owner's revision the text is known
+/// to be: the one it was taken at when the frame changed nothing, or `None`
+/// when the frame changed it, since the owner may yet refuse the change.
 pub(crate) fn keep_string_owner_text(
     ctx: &egui::Context,
     editor_id: egui::Id,
-    revision: u64,
+    revision: Option<u64>,
     text: TextSnapshot,
 ) {
     ctx.data_mut(|data| data.insert_temp(editor_id.with("owner-text"), (revision, text)));
@@ -386,13 +394,17 @@ pub(crate) fn show_virtual_text_editor(
         .ctx()
         .data_mut(|data| data.remove_temp::<VirtualEditorSession>(session_id))
         .unwrap_or_default();
-    if session.bound_revision != source.revision() {
-        if session.model.adopt(source) {
-            restart_maximum_column_scan(&mut session);
-            session.ime = None;
-        }
-        session.bound_revision = source.revision();
+    // The owner's text is taken when the owner moves to another one, and
+    // kept as the text it holds when it is the editor's own: either is what
+    // a refusal of later edits returns to.
+    if (session.bound_revision != source.revision()
+        || source.revision() == session.model.revision())
+        && session.model.adopt(source)
+    {
+        restart_maximum_column_scan(&mut session);
+        session.ime = None;
     }
+    session.bound_revision = source.revision();
 
     if let Some(line) = requested_line {
         let logical_line = line

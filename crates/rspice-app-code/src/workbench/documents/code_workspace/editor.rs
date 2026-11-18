@@ -505,7 +505,7 @@ fn show_code_document_impl(
     crate::workbench::documents::virtual_text_editor::keep_string_owner_text(
         ui.ctx(),
         editor_id,
-        source_revision,
+        (!output.changed).then_some(source_revision),
         text,
     );
     let assist_answer = assist_keys.map(|keys| {

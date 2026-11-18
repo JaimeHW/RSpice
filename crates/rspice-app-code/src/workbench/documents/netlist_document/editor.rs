@@ -358,7 +358,7 @@ pub fn show(
         crate::workbench::documents::virtual_text_editor::keep_string_owner_text(
             ui.ctx(),
             editor_id,
-            revision,
+            (!changed).then_some(revision),
             text,
         );
         cursor_line = output.cursor_line;
