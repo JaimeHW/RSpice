@@ -1975,18 +1975,99 @@ a_gain r rout rg
         "d_to_real should record delayed high real event at 1.1ns, got {r:?}"
     );
 
-    let rout = real_event_values(&result, "rout");
-    assert!(
-        rout.iter()
-            .any(|(time, value)| (*time - 50.0e-12).abs() <= 1.0e-18
-                && (*value + 2.0).abs() <= 1.0e-12),
-        "real_gain should record initial transformed event after its delay, got {rout:?}"
+    // ngspice-46 on this deck: `rout` holds `ic`, 0, from the operating
+    // point, takes -2 at 100 ps, one delay after the call the operating point
+    // queued at 50 ps, and 7 at 1.15 ns.
+    assert_real_changes(
+        &real_event_changes(&result, "rout"),
+        &[(100.0e-12, -2.0), (1.15e-9, 7.0)],
     );
+}
+
+/// The changes of a real event net away from 0, the value it holds before
+/// its first event: each value it took, with when, dropping a point that
+/// repeats the value before it.
+fn real_event_changes(result: &TransientResult, node: &str) -> Vec<(f64, f64)> {
+    let mut changes: Vec<(f64, f64)> = Vec::new();
+    for (time, value) in real_event_values(result, node) {
+        if changes.last().map_or(0.0, |(_, last)| *last) != value {
+            changes.push((time, value));
+        }
+    }
+    changes
+}
+
+/// `actual` names the changes `expected` does, each within a femtosecond
+/// rounding of its time.
+fn assert_real_changes(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
     assert!(
-        rout.iter()
-            .any(|(time, value)| (*time - 1.15e-9).abs() <= 1.0e-18
-                && (*value - 7.0).abs() <= 1.0e-12),
-        "real_gain should record delayed transformed high event at 1.15ns, got {rout:?}"
+        actual.len() == expected.len()
+            && actual.iter().zip(expected).all(|(got, want)| {
+                (got.0 - want.0).abs() <= 1.0e-18 && (got.1 - want.1).abs() <= 1.0e-12
+            }),
+        "expected {expected:?}, got {actual:?}"
+    );
+}
+
+/// `real_gain` holds `ic` through the operating point and queues its own call
+/// one `delay` later, as ngspice-46's does (icm/xtraevt/real_gain/cfunc.mod,
+/// `cm_event_queue(delay)`): that call posts the gain one `delay` after it,
+/// so `r2` first moves at 6 ns. An input event ahead of the call posts one
+/// `delay` after itself instead, and the call then changes nothing. ngspice-46
+/// prints this deck's real nets as:
+///
+/// ```text
+/// time        r1  r2     re1  re2
+/// 0           -1   0     -1    0
+/// 1.7675e-09  -1   0      3    0
+/// 4.7675e-09  -1   0      3    7.25
+/// 6e-09       -1  -0.75   3    7.25
+/// 1.2025e-08   3  -0.75   3    7.25
+/// 1.5025e-08   3   7.25   3    7.25
+/// ```
+///
+/// Each converter dates its edge at the timepoint that reads it, so `r1` and
+/// `re1` change wherever this run's steps put them; `r2` and `re2` are
+/// compared one `delay` after them.
+#[test]
+fn real_gain_first_posts_one_delay_after_the_call_its_operating_point_queued() {
+    let netlist = Netlist::parse(
+        "\
+* real_gain's first output
+vs s 0 pulse(0 1 10n 1n 1n 30n 80n)
+ve e 0 pulse(0 1 0.2n 0.1n 0.1n 30n 80n)
+aad [s e] [d de] adc1
+.model adc1 adc_bridge(in_low=0.5 in_high=0.5 rise_delay=1n fall_delay=1n)
+adr d NULL r1 d2r
+adre de NULL re1 d2r
+.model d2r d_to_real(zero=-1 one=3 delay=0.5n)
+ag r1 r2 g1
+age re1 re2 g1
+.model g1 real_gain(in_offset=0.5 gain=2 out_offset=0.25 delay=3n ic=0)
+arv2 r2 a2 rv1
+arve re2 ae rv1
+.model rv1 real_to_v(gain=1 transition_time=1n)
+r4 a2 0 1k
+r5 ae 0 1k
+.end
+",
+    )
+    .expect("the deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 20e-9, 0.05e-9)
+        .expect("transient solves");
+    let r1 = real_event_changes(&result, "r1");
+    let re1 = real_event_changes(&result, "re1");
+    assert_eq!(r1.len(), 2, "{r1:?}");
+    assert_eq!(re1.len(), 2, "{re1:?}");
+    let delay = 3e-9;
+    assert_real_changes(
+        &real_event_changes(&result, "r2"),
+        &[(6e-9, -0.75), (r1[1].0 + delay, 7.25)],
+    );
+    assert_real_changes(
+        &real_event_changes(&result, "re2"),
+        &[(re1[1].0 + delay, 7.25)],
     );
 }
 

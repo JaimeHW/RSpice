@@ -9,9 +9,10 @@ use crate::xspice::{
 /// Every model here carries all it keeps between accepted points in its
 /// context, which a transient checkpoint's context image holds whole: the
 /// published output the change test compares against, the event time of each
-/// real input, `real_delay`'s last clock level in an integer state, and
-/// `real_to_v`'s ramp (level, target, start time, start value) in four
-/// states. A resumed run therefore continues each one from its saved state.
+/// real input, `real_delay`'s last clock level in an integer state,
+/// `real_gain`'s pending call in two states, and `real_to_v`'s ramp (level,
+/// target, start time, start value) in four states. A resumed run therefore
+/// continues each one from its saved state.
 fn context_checkpoint() -> XspiceCheckpointSupport {
     XspiceCheckpointSupport::Serializable
 }
@@ -242,6 +243,14 @@ impl CodeModel for DigitalToReal {
 #[derive(Debug, Default)]
 pub struct RealGain;
 
+/// `real_gain`'s state: the instant of the call its operating point queued,
+/// or [`REAL_GAIN_NO_CALL`] once that call is made or overtaken.
+const REAL_GAIN_CALL: usize = 0;
+/// `real_gain`'s state: the latest input event the operating point read, so
+/// a later one is told from it.
+const REAL_GAIN_INPUT_SEEN: usize = 1;
+const REAL_GAIN_NO_CALL: Value = -1.0;
+
 impl CodeModel for RealGain {
     fn name(&self) -> &str {
         "real_gain"
@@ -276,7 +285,10 @@ impl CodeModel for RealGain {
         })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ctx.allocate_states(2);
+        ctx.set_initial_state(REAL_GAIN_CALL, REAL_GAIN_NO_CALL);
+        ctx.set_initial_state(REAL_GAIN_INPUT_SEEN, REAL_GAIN_NO_CALL);
         Ok(())
     }
 
@@ -284,14 +296,56 @@ impl CodeModel for RealGain {
         context_checkpoint()
     }
 
+    /// As ngspice-46's `real_gain` (icm/xtraevt/real_gain/cfunc.mod): an
+    /// operating point, a transient's included, holds `ic` and queues the
+    /// instance's own call one `delay` later (`cm_event_queue(delay)`). That
+    /// call, or an input event before it, first posts the gain's output, one
+    /// `delay` after it. The model runs at every timepoint here, so until the
+    /// call it posts nothing and lands the step on the call instead.
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let ic = finite_event_param(ctx, "real_gain", "ic", 0.0)?;
-        if ctx.is_dc() {
+        let delay = finite_event_delay(ctx, "real_gain", "delay", 1.0e-9)?;
+        let commit = commit_event_outputs(ctx);
+        if ctx.is_dc_operating_point() {
             set_real_output_when_changed(ctx, "out", ic, 0.0);
+            if commit {
+                let call = ctx.time + delay;
+                let seen = ctx
+                    .input_real_event_time("in")
+                    .map_or(ctx.time, |at| at.max(ctx.time));
+                ctx.set_state(REAL_GAIN_CALL, call);
+                ctx.set_state(REAL_GAIN_INPUT_SEEN, seen);
+                // A transient's operating point: its first step lands there.
+                if ctx.is_transient() && ctx.is_ahead(call) {
+                    ctx.request_temporary_breakpoint(call);
+                }
+            }
             return Ok(());
         }
 
-        let delay = finite_event_delay(ctx, "real_gain", "delay", 1.0e-9)?;
+        // The queued call, until it is made: an input event overtakes it,
+        // since the call it makes posts what that one already has.
+        let mut delay = delay;
+        let call = ctx.state(REAL_GAIN_CALL);
+        if call != REAL_GAIN_NO_CALL {
+            let input_moved = ctx
+                .input_real_event_time("in")
+                .is_some_and(|at| at > ctx.state(REAL_GAIN_INPUT_SEEN));
+            if !input_moved {
+                if !ctx.is_due(call) {
+                    if commit && ctx.is_ahead(call) {
+                        ctx.request_temporary_breakpoint(call);
+                    }
+                    return Ok(());
+                }
+                // Dated from the call, not the clock.
+                delay = (call + delay - ctx.time).max(0.0);
+            }
+            if commit {
+                ctx.set_state(REAL_GAIN_CALL, REAL_GAIN_NO_CALL);
+            }
+        }
+
         let gain = finite_event_param(ctx, "real_gain", "gain", 1.0)?;
         let in_offset = finite_event_param(ctx, "real_gain", "in_offset", 0.0)?;
         let out_offset = finite_event_param(ctx, "real_gain", "out_offset", 0.0)?;
