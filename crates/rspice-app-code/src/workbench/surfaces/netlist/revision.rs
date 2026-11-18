@@ -69,6 +69,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, Code
             match crate::workbench::documents::netlist_document::compare_generated_revision(
                 cx.model,
                 &mut cx.state.netlist,
+                cx.runs,
                 dialog.selected_history_index,
             ) {
                 Ok(()) => dialog.open = false,

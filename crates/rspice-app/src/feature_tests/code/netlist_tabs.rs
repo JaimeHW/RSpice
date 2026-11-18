@@ -6,7 +6,7 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, themed_context};
 use crate::workbench::examples::hierarchy_reference;
-use rspice_app_code::workbench::documents::netlist_document::{self, NetlistTab};
+use rspice_app_code::workbench::documents::netlist_document::{self, CompareSide, NetlistTab};
 use rspice_app_state::state::SimulationRunIntent;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::document_bar::{
@@ -221,4 +221,99 @@ fn a_run_input_opened_from_results_is_a_tab_that_keeps_its_text() {
     let tab = tab_labelled(&app, &format!("Run {run} input"));
     assert!(tab.active, "{tab:?}");
     assert_eq!(app.state.model.simulation.source.netlist_content, INPUT);
+}
+
+/// The deck compared with its file on disk shows what was typed since, on
+/// a tab naming both sides; closing the view brings the deck back with the
+/// edit, and the deck is still what F5 runs.
+#[test]
+fn the_deck_compared_with_its_file_shows_the_edit_on_a_tab_naming_both() {
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-deck-disk-comparison-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&folder).expect("fixture folder");
+    let mut app = RSpiceApp::test_instance();
+    assert!(app.state.open_test_deck(
+        DECK.to_owned(),
+        Some(folder.join("amp_tb.cir")),
+        "amp_tb.cir"
+    ));
+    app.state.workbench.workspace = Workspace::Netlist;
+    let edited = DECK.replace("1k", "2k");
+    assert!(netlist_document::edit_deck_file(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        edited.clone(),
+    ));
+    let deck = app
+        .state
+        .code
+        .netlist
+        .open_deck
+        .as_ref()
+        .expect("the deck is open")
+        .id;
+
+    netlist_document::compare(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &app.state.runs,
+        CompareSide::DiskFile(deck),
+        CompareSide::Deck(deck),
+    )
+    .expect("the deck and its file compare");
+    application_frame(&mut app);
+
+    let view = tab_labelled(&app, "amp_tb.cir on disk vs amp_tb.cir");
+    assert!(view.active && view.closable, "{view:?}");
+    let shown = app.state.model.simulation.source.netlist_content.clone();
+    assert!(
+        shown.starts_with("--- amp_tb.cir on disk\n+++ amp_tb.cir\n"),
+        "{shown}"
+    );
+    assert!(shown.contains("\n-R1 out 0 1k\n+R1 out 0 2k\n"), "{shown}");
+    assert_eq!(press_run(&mut app), "deck", "a view leaves what runs");
+
+    let documents =
+        rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents(
+            app.state
+                .code
+                .netlist_tabs(&app.state.model, app.state.workbench.messages()),
+        );
+    assert!(close_document(&mut app.state, &view.id, &documents));
+    assert_eq!(app.state.code.netlist.front, NetlistTab::Deck(deck));
+    assert_eq!(app.state.model.simulation.source.netlist_content, edited);
+    std::fs::remove_dir_all(folder).expect("fixture removed");
+}
+
+/// The deck compared with the generated netlist, and the generated netlist
+/// with its previous build, each name their sides on the tab.
+#[test]
+fn a_comparison_tab_names_the_two_texts_it_compares() {
+    let mut app = plan_and_deck_session();
+    let deck = app
+        .state
+        .code
+        .netlist
+        .open_deck
+        .as_ref()
+        .expect("the deck is open")
+        .id;
+
+    netlist_document::compare(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &app.state.runs,
+        CompareSide::Deck(deck),
+        CompareSide::Generated,
+    )
+    .expect("the deck and the generated netlist compare");
+
+    assert!(tab_labelled(&app, "deck.cir vs Generated netlist").active);
+    let shown = &app.state.model.simulation.source.netlist_content;
+    assert!(
+        shown.starts_with("--- deck.cir\n+++ Generated netlist\n"),
+        "{shown}"
+    );
 }

@@ -341,7 +341,7 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
         NetlistRoot::Comparison
     );
     let diff = harness.state.netlist.generated_diff_source.as_str();
-    assert!(diff.contains("--- run-3"), "{diff}");
+    assert!(diff.contains("--- Run 3 input"), "{diff}");
     assert!(diff.contains("-R1 out 0 1k"), "{diff}");
     assert!(diff.contains("+R1 out 0 2k"), "{diff}");
 

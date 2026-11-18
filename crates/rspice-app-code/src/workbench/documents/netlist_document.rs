@@ -36,13 +36,13 @@ pub use references::open_deck_place;
 
 pub use super::netlist_tabs::{CompareSide, NetlistRoot, NetlistTab};
 pub use added_lines::{added_lines_design, added_lines_text, edit_added_lines, show_added_lines};
-pub use comparison::compare_generated_revision;
 pub use comparison::{close_revision_comparison, reveal_executed_deck};
 pub use comparison::{
     close_run_deck_snapshot, compare_run_deck_snapshot_in, open_executed_deck_in,
     open_netlist_comparison, open_run_deck_snapshot_in, run_deck_snapshot_artifact_name_in,
     run_deck_snapshot_run_id_in,
 };
+pub use comparison::{compare, compare_generated_revision};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub use editor::show as show_editor;
 pub use editor::{

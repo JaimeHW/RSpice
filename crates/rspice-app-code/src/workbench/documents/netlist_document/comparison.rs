@@ -1,12 +1,14 @@
-//! Read-only comparisons for the netlist editor.
+//! Read-only comparisons for the netlist editor, and a run's input.
 //!
-//! Comparing two generated revisions, and the deck a completed run consumed
-//! against the deck in the editor, are one concern: each replaces the visible
-//! source with text nobody may edit and remembers which deck to return to.
+//! A comparison is a view of two texts: the deck against its file on disk,
+//! against the last run's input or against the generated netlist, and the
+//! generated netlist against its previous build. Each shows the line diff
+//! from one to the other on the comparison tab, which nobody edits, and
+//! remembers the tab to go back to.
 
 // Through the parent rather than `crate::workbench`: the module's edge onto
 // `app_state` is being retired, and a submodule of it does not need its own.
-use super::{CompareSide, Model, NetlistDocumentState, NetlistRoot, NetlistTab};
+use super::{CompareSide, Model, NetlistDocumentState, NetlistTab};
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
@@ -28,52 +30,163 @@ pub fn open_netlist_comparison(model: &mut Model, netlist: &mut NetlistDocumentS
     true
 }
 
+/// Compare the generated netlist's build `index` builds back with the
+/// generated netlist now.
 pub fn compare_generated_revision(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
+    runs: &RunsState,
     index: usize,
 ) -> Result<(), String> {
-    let previous = netlist
-        .generated_history
-        .get(index)
-        .ok_or_else(|| "The selected generated revision is no longer retained.".to_owned())?;
-    let current = model
-        .netlist_artifacts
-        .generated_document
-        .as_ref()
-        .and_then(crate::state::NetlistDocument::generated_artifact)
-        .ok_or_else(|| "No current generated artifact is available.".to_owned())?;
-    let previous_label = format!("generated-{}", short_digest(previous.content_digest()));
-    let current_label = format!("generated-{}", short_digest(current.content_digest()));
-    let diff = similar::TextDiff::from_lines(previous.source(), current.source())
+    compare(
+        model,
+        netlist,
+        runs,
+        CompareSide::PreviousGenerated(index),
+        CompareSide::Generated,
+    )
+}
+
+/// Put the comparison of `left` with `right` in front: the line diff from
+/// `left`'s text to `right`'s, on the comparison tab. Why there is nothing
+/// to compare, when one side has no text.
+pub fn compare(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &RunsState,
+    left: CompareSide,
+    right: CompareSide,
+) -> Result<(), String> {
+    let (before, before_label) = side_text(model, netlist, runs, left)?;
+    let (after, after_label) = side_text(model, netlist, runs, right)?;
+    let diff = similar::TextDiff::from_lines(before.as_str(), after.as_str())
         .unified_diff()
         .context_radius(3)
-        .header(&previous_label, &current_label)
+        .header(&before_label, &after_label)
         .to_string();
     netlist.generated_diff_source = if diff.is_empty() {
-        format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
+        format!("--- {before_label}\n+++ {after_label}\n No changes\n")
     } else {
         diff
     };
-    netlist.comparison_return = NetlistTab::Generated;
-    put_comparison_in_front(
-        netlist,
-        CompareSide::PreviousGenerated(index),
-        CompareSide::Generated,
-    );
+    // Closing the view goes back to the tab it was opened from; a view
+    // opened over a run's input goes back to the tab that input was opened
+    // over, as the input is no one's working text.
+    if netlist.front.is_run_input() {
+        netlist.comparison_return = netlist.run_input_return.clone();
+    } else if !netlist.front.is_comparison() {
+        netlist.comparison_return = netlist.front.clone();
+    }
+    put_comparison_in_front(netlist, left, right);
     netlist.active_document_initialized = true;
     model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
+    netlist.requested_line = None;
+    netlist.cursor_line = 0;
     netlist.revision = netlist.revision.wrapping_add(1);
     netlist.completion_open = false;
     model.invalidate_source_evidence();
     Ok(())
 }
 
-/// Put the working deck back in the editor after a read-only document.
+/// The text of one side of a comparison and the words its header names it
+/// by, or why it has none.
+fn side_text(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    runs: &RunsState,
+    side: CompareSide,
+) -> Result<(String, String), String> {
+    let open_deck = |id| {
+        netlist
+            .open_deck
+            .as_ref()
+            .filter(|deck| deck.id == id)
+            .ok_or_else(|| "The deck is no longer open.".to_owned())
+    };
+    match side {
+        CompareSide::Generated => model
+            .netlist_artifacts
+            .generated_document
+            .as_ref()
+            .map(|_| {
+                (
+                    model.netlist_artifacts.generated_source.clone(),
+                    "Generated netlist".to_owned(),
+                )
+            })
+            .ok_or_else(|| "There is no generated netlist to compare.".to_owned()),
+        CompareSide::PreviousGenerated(index) => netlist
+            .generated_history
+            .get(index)
+            .map(|previous| (previous.source().to_owned(), "Previous build".to_owned()))
+            .ok_or_else(|| "That build of the generated netlist is no longer kept.".to_owned()),
+        CompareSide::Deck(id) => {
+            let deck = open_deck(id)?;
+            Ok((deck.root.text.clone(), deck.root.name()))
+        }
+        CompareSide::DiskFile(id) => {
+            let deck = open_deck(id)?;
+            Ok((disk_text(deck)?, format!("{} on disk", deck.root.name())))
+        }
+        CompareSide::RunInput(run) => Ok((
+            run_input_text(model, runs, run)?,
+            format!("Run {run} input"),
+        )),
+    }
+}
+
+/// The text of the open deck's file as it is on disk now.
+#[cfg(not(target_arch = "wasm32"))]
+fn disk_text(deck: &super::super::deck_files::OpenDeck) -> Result<String, String> {
+    if deck.is_stored() {
+        return Err(format!(
+            "{} is kept in the project, with no file to compare.",
+            deck.root.name()
+        ));
+    }
+    let bytes = std::fs::read(&deck.root.path)
+        .map_err(|error| format!("{} cannot be read: {error}", deck.root.name()))?;
+    Ok(super::super::deck_files::OpenFile::from_bytes(deck.root.path.clone(), &bytes)?.text)
+}
+
+/// A deck in the browser is kept in the project, with no file to read.
+#[cfg(target_arch = "wasm32")]
+fn disk_text(deck: &super::super::deck_files::OpenDeck) -> Result<String, String> {
+    Err(format!(
+        "{} is kept in the project, with no file to compare.",
+        deck.root.name()
+    ))
+}
+
+/// The input run `run` read: the deck the last manual run read, or the one
+/// point a run of one point read.
+fn run_input_text(model: &Model, runs: &RunsState, run: u64) -> Result<String, String> {
+    if runs.manual_run.last_run_id == Some(run)
+        && let Some(buffer) = runs.manual_run.last_run_buffer.as_ref()
+    {
+        return Ok(buffer.clone());
+    }
+    let deck = model
+        .simulation
+        .retained
+        .executed_decks
+        .get(run)
+        .ok_or_else(|| format!("The input of Run {run} is no longer kept."))?;
+    match deck.points.as_slice() {
+        [point] => Ok(point.deck.to_string()),
+        _ => Err(format!(
+            "Run {run} read {} points: open one point's input to compare it.",
+            deck.points.len()
+        )),
+    }
+}
+
+/// Put the tab a read-only view was opened from back in front: the Added
+/// lines, the deck or the generated netlist.
 ///
-/// The working deck is the open deck's text, not the document that was on
-/// screen: leaving a viewer must never overwrite an edit the engineer has not
-/// saved yet.
+/// The deck is the open deck's text, not the document that was on screen:
+/// leaving a view must never overwrite an edit the engineer has not saved
+/// yet.
 fn return_to_working_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -84,6 +197,7 @@ fn return_to_working_deck(
         .as_ref()
         .map(|deck| (deck.id, deck.root.text.clone()));
     match (root.root(), deck) {
+        (NetlistTab::AddedLines, _) if super::show_added_lines(model, netlist) => return,
         (NetlistTab::Deck(id), Some((open, source))) if id == open => {
             netlist.front = NetlistTab::Deck(id);
             netlist.run_target = crate::workbench::documents::netlist_tabs::RunTarget::Deck(id);
@@ -118,10 +232,6 @@ fn put_comparison_in_front(
 ) {
     netlist.comparison_sides = Some((left, right));
     netlist.front = NetlistTab::Compare { left, right };
-}
-
-fn short_digest(digest: crate::product::ContentDigest) -> String {
-    digest.to_string().chars().take(12).collect()
 }
 
 /// The run a reopenable deck snapshot belongs to.
@@ -172,9 +282,8 @@ pub fn open_run_deck_snapshot_in(
 /// this session no longer holds cannot be opened — and says so by refusing,
 /// rather than by opening the working deck, which is a different document.
 ///
-/// Read-only is a property of the document, not of this route: the run
-/// snapshot is the one [`NetlistRoot`] the editor never makes
-/// editable and no lifecycle, save, or ownership action accepts.
+/// Read-only is a property of the tab, not of this route: the editor never
+/// makes a run input editable and no save action accepts one.
 ///
 /// The deck is checked against its run's receipt here, once, and the verdict
 /// travels with the selection. Opening is the only moment the answer can
@@ -289,9 +398,9 @@ pub fn close_run_deck_snapshot(model: &mut Model, netlist: &mut NetlistDocumentS
     true
 }
 
-/// Diff the run's sealed deck against the working revision it was opened
-/// from. It writes the model and the netlist editor's state, and reads the
-/// runs that sealed the deck.
+/// Compare the last manual run's input with the deck or generated netlist
+/// the input was opened over, else with the one in front. It writes the
+/// model and the netlist editor's state, and reads the runs.
 pub fn compare_run_deck_snapshot_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -308,58 +417,19 @@ pub fn compare_run_deck_snapshot_in(
                 .to_owned(),
         );
     }
-    let run_id = runs
-        .manual_run
-        .last_run_id
-        .ok_or_else(|| "No completed manual run owns a deck snapshot.".to_owned())?;
-    let snapshot = runs
-        .manual_run
-        .last_run_buffer
-        .clone()
-        .ok_or_else(|| "The deck this run used is no longer retained.".to_owned())?;
-    let root = netlist.run_input_return.clone();
-    let (working, current_label, right) = match root.root_kind() {
-        NetlistRoot::Deck => {
-            let deck = netlist
-                .open_deck
-                .as_ref()
-                .ok_or_else(|| "No deck is open.".to_owned())?;
-            (
-                deck.root.text.clone(),
-                deck.root.name(),
-                CompareSide::Deck(deck.id),
-            )
-        }
-        _ => {
-            let document = model
-                .netlist_artifacts
-                .generated_document
-                .as_ref()
-                .ok_or_else(|| "No current generated artifact is available.".to_owned())?;
-            (
-                model.netlist_artifacts.generated_source.clone(),
-                format!("generated-{}", short_digest(document.content_digest())),
-                CompareSide::Generated,
-            )
-        }
-    };
-    let previous_label = format!("run-{run_id}");
-    let diff = similar::TextDiff::from_lines(snapshot.as_str(), working.as_str())
-        .unified_diff()
-        .context_radius(3)
-        .header(&previous_label, &current_label)
-        .to_string();
-    netlist.generated_diff_source = if diff.is_empty() {
-        format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
+    let run_id = run_deck_snapshot_run_id_in(runs).ok_or_else(|| {
+        "No manual run has finished yet: there is no run input to compare.".to_owned()
+    })?;
+    // The deck or generated netlist the run input was opened over, else the
+    // one in front.
+    let working = if netlist.front.is_run_input() {
+        netlist.run_input_return.root()
     } else {
-        diff
+        netlist.front.root()
     };
-    netlist.comparison_return = root;
-    put_comparison_in_front(netlist, CompareSide::RunInput(run_id), right);
-    netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
-    netlist.revision = netlist.revision.wrapping_add(1);
-    netlist.completion_open = false;
-    model.invalidate_source_evidence();
-    Ok(())
+    let right = match working {
+        NetlistTab::Deck(id) => CompareSide::Deck(id),
+        _ => CompareSide::Generated,
+    };
+    compare(model, netlist, runs, CompareSide::RunInput(run_id), right)
 }

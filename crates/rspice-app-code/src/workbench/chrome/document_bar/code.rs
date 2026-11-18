@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use crate::workbench::MessageCatalog;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::documents::netlist_document::{
-    NetlistDocumentState, NetlistRoot, NetlistTab,
+    CompareSide, NetlistDocumentState, NetlistRoot, NetlistTab,
 };
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -97,10 +97,10 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         }));
     }
 
-    if netlist.comparison_sides.is_some() {
+    if let Some((left, right)) = netlist.comparison_sides {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistComparison,
-            label: messages.text(crate::workbench::MessageId::NetlistComparisonDocument),
+            label: comparison_label(model, netlist, messages, left, right),
             icon: WorkbenchIcon::Compare,
             dirty: false,
         });
@@ -117,6 +117,52 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         documents.push(code_workspace_document(model));
     }
     documents
+}
+
+/// A comparison's tab label, its two sides: "amp_tb.cir on disk vs
+/// amp_tb.cir", "Run 12 input vs amp_tb.cir", "Previous build vs Generated
+/// netlist".
+fn comparison_label(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    messages: MessageCatalog,
+    left: CompareSide,
+    right: CompareSide,
+) -> String {
+    use crate::workbench::MessageId;
+    let deck_name = |id: crate::state::DeckId| {
+        netlist
+            .open_deck
+            .as_ref()
+            .filter(|deck| deck.id == id)
+            .map(|deck| deck.root.name())
+            .or_else(|| {
+                model
+                    .workspace
+                    .content
+                    .decks
+                    .iter()
+                    .find(|deck| deck.id == id)
+                    .map(crate::state::ProjectDeck::name)
+            })
+            .unwrap_or_default()
+    };
+    let side = |side: CompareSide| match side {
+        CompareSide::Generated => messages.text(MessageId::CodeGeneratedNetlist),
+        CompareSide::PreviousGenerated(_) => messages.text(MessageId::NetlistComparePreviousBuild),
+        CompareSide::Deck(id) => deck_name(id),
+        CompareSide::DiskFile(id) => {
+            messages.format(MessageId::NetlistCompareOnDisk, &[("name", &deck_name(id))])
+        }
+        CompareSide::RunInput(run) => messages.format(
+            MessageId::NetlistRunSnapshotDocument,
+            &[("id", &run.to_string())],
+        ),
+    };
+    messages.format(
+        MessageId::NetlistComparisonDocument,
+        &[("left", &side(left)), ("right", &side(right))],
+    )
 }
 
 /// A run input's tab label: "Run 12 input" for the deck a manual run read
