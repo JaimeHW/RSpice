@@ -9,7 +9,7 @@ use rspice_core::netlist::{SourceKind, comment_start};
 
 pub(crate) use crate::state::netlist_diagnostics::{DeckReading, Dialect};
 
-use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
+use super::{Model, NetlistDocumentState, NetlistRoot};
 use crate::workbench::MessageId;
 use crate::workbench::documents::text_editor_commands::EditorSyntax;
 
@@ -57,16 +57,14 @@ pub(crate) fn shown_source_in(
             root: false,
         });
     }
-    let path = match netlist.active_document {
-        ActiveNetlistDocument::OwnedSource => {
-            super::active_deck_file_in(netlist).map(|file| file.path.clone())
-        }
-        ActiveNetlistDocument::Generated | ActiveNetlistDocument::RunSnapshot => None,
-        ActiveNetlistDocument::GeneratedDiff => return None,
+    let path = match netlist.front.root_kind() {
+        NetlistRoot::Deck => super::active_deck_file_in(netlist).map(|file| file.path.clone()),
+        NetlistRoot::Generated | NetlistRoot::AddedLines | NetlistRoot::RunInput => None,
+        NetlistRoot::Comparison => return None,
     };
     Some(ShownSource {
         path: path.unwrap_or_default(),
-        root: netlist.active_dependency_identity.is_none(),
+        root: netlist.front.include().is_none(),
     })
 }
 

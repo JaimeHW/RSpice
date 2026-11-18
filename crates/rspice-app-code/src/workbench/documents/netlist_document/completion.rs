@@ -421,10 +421,7 @@ fn pin_help(
     let written = before.len() - 1;
     if letter.eq_ignore_ascii_case(&'x') {
         let project = state.project_index.last_built()?;
-        let scope = project.scope_at(
-            state.active_dependency_identity.as_deref(),
-            state.cursor_line + 1,
-        );
+        let scope = project.scope_at(state.front.include(), state.cursor_line + 1);
         let subcircuits =
             project.defined_in_reach(scope, &[rspice_core::netlist::DeckSymbolKind::Subcircuit]);
         let words = buffer[line_start..line_end]
@@ -525,10 +522,7 @@ fn collect_candidates(
         }
         let project = state.project_index.last_built();
         let scope = project.as_ref().map_or(0, |project| {
-            project.scope_at(
-                state.active_dependency_identity.as_deref(),
-                state.cursor_line + 1,
-            )
+            project.scope_at(state.front.include(), state.cursor_line + 1)
         });
         let nodes = project
             .as_ref()
@@ -581,10 +575,7 @@ fn collect_candidates(
     let project_symbols = project
         .as_ref()
         .map(|index| {
-            let scope = index.scope_at(
-                state.active_dependency_identity.as_deref(),
-                state.cursor_line + 1,
-            );
+            let scope = index.scope_at(state.front.include(), state.cursor_line + 1);
             index.completion_symbols_in(messages, scope)
         })
         .unwrap_or_default();
@@ -611,12 +602,9 @@ fn collect_candidates(
     }
     // Parameter names complete inside `{expressions}` and values: the ones
     // the caret's scope sees, a subcircuit's own and its formals inside it.
-    let parameters = project.as_ref().map(|index| {
-        index.parameters_visible_at(
-            state.active_dependency_identity.as_deref(),
-            state.cursor_line + 1,
-        )
-    });
+    let parameters = project
+        .as_ref()
+        .map(|index| index.parameters_visible_at(state.front.include(), state.cursor_line + 1));
     for parameter in parameters.into_iter().flatten() {
         let name_lower = parameter.name.to_ascii_lowercase();
         if name_lower.starts_with(&lower) && name_lower != lower {

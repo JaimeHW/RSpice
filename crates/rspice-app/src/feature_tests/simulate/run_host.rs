@@ -3,7 +3,7 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;
-use rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument;
+use rspice_app_code::workbench::documents::netlist_document::{CompareSide, NetlistTab};
 use rspice_app_runs::simulation::{RunHost, ViewerHost};
 use rspice_app_simulate::workbench::simulate::run_host::{FrozenRun, run_host};
 use rspice_app_state::state::{RunEvent, RunEventSink};
@@ -108,7 +108,10 @@ fn a_frozen_host_keeps_the_compilation_and_the_netlist_code_shows() {
     )
     .expect("compile project Verilog-A source");
     app.state.code.code_workspace.veriloga.receipt = Some(receipt);
-    app.state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    app.state.code.netlist.front = NetlistTab::Compare {
+        left: CompareSide::PreviousGenerated(0),
+        right: CompareSide::Generated,
+    };
     app.state.code.netlist.active_document_initialized = true;
 
     let frozen = frozen_from(&mut app);

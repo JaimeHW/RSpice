@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rspice_core::netlist::{DeckIndex, DeckLocation, DeckSymbolKind};
 
-use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
+use super::{Model, NetlistDocumentState, NetlistRoot};
 use crate::state::{
     AnalysisResultSourceDomain, CellViewRef, NetlistDocument, NetlistSourceIndex, SimulationRun,
 };
@@ -32,7 +32,7 @@ pub enum CaretName {
 /// Where the caret stood in which document when its name was last read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CaretKey {
-    document: ActiveNetlistDocument,
+    document: NetlistRoot,
     dependency: Option<String>,
     char_index: usize,
 }
@@ -40,8 +40,8 @@ struct CaretKey {
 impl CaretKey {
     fn of(netlist: &NetlistDocumentState) -> Self {
         Self {
-            document: netlist.active_document,
-            dependency: netlist.active_dependency_identity.clone(),
+            document: netlist.front.root_kind(),
+            dependency: netlist.front.include().map(str::to_owned),
             char_index: netlist.cursor_char_index,
         }
     }
@@ -206,8 +206,7 @@ pub const NO_SCHEMATIC_SOURCE: &str = "this line has no schematic source";
 /// Whether the editor shows the generated netlist itself, rather than an
 /// include it reads, a comparison or a deck.
 pub(crate) fn generated_netlist_in_front(netlist: &NetlistDocumentState) -> bool {
-    netlist.active_document == ActiveNetlistDocument::Generated
-        && netlist.active_dependency_identity.is_none()
+    netlist.front.shows_generated() && netlist.front.include().is_none()
 }
 
 /// Where the generated line under the caret came from: the net under the
@@ -304,12 +303,10 @@ pub(crate) struct PlotTarget {
 /// netlist, a deck, or the deck a run executed, each itself rather than an
 /// include it reads.
 pub(crate) fn plottable_document_in_front(netlist: &NetlistDocumentState) -> bool {
-    netlist.active_dependency_identity.is_none()
+    netlist.front.include().is_none()
         && matches!(
-            netlist.active_document,
-            ActiveNetlistDocument::Generated
-                | ActiveNetlistDocument::OwnedSource
-                | ActiveNetlistDocument::RunSnapshot
+            netlist.front.root_kind(),
+            NetlistRoot::Generated | NetlistRoot::Deck | NetlistRoot::RunInput
         )
 }
 
@@ -326,8 +323,9 @@ fn document_run<'a>(
     let kept = |run: Option<&'a SimulationRun>, reason| {
         run.filter(|run| !run.analyses.is_empty()).ok_or(reason)
     };
-    match netlist.active_document {
-        ActiveNetlistDocument::Generated => {
+    match netlist.front.root_kind() {
+        // The Added lines run with the plan, so their run is the plan's.
+        NetlistRoot::Generated | NetlistRoot::AddedLines => {
             let of_design = |run: &&SimulationRun| {
                 !run.analyses.is_empty()
                     && run.prepared_receipt().is_some_and(|receipt| {
@@ -347,7 +345,7 @@ fn document_run<'a>(
                 })
                 .ok_or("the design has not been run")
         }
-        ActiveNetlistDocument::OwnedSource => {
+        NetlistRoot::Deck => {
             if runs.manual_run.pending_manual_run_id.is_some() {
                 return Err("the deck is still running");
             }
@@ -360,7 +358,7 @@ fn document_run<'a>(
                 "the deck's run is no longer kept",
             )
         }
-        ActiveNetlistDocument::RunSnapshot => {
+        NetlistRoot::RunInput => {
             let run = netlist
                 .executed_deck_view
                 .map(|selection| selection.run_id)
@@ -368,7 +366,7 @@ fn document_run<'a>(
                 .ok_or("the run is no longer kept")?;
             kept(retained.run_by_sequence(run), "the run is no longer kept")
         }
-        ActiveNetlistDocument::GeneratedDiff => Err("a comparison is not a run's input"),
+        NetlistRoot::Comparison => Err("a comparison is not a run's input"),
     }
 }
 

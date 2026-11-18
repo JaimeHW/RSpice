@@ -18,8 +18,7 @@ use rspice_core::netlist::{DeckCardKind, DeckIndex, DeckNameAt, DeckSymbolKind, 
 
 use super::language::{NetlistProjectIndex, project_index_now};
 use super::{
-    ActiveNetlistDocument, Model, NetlistDocumentState, OwnedNetlistReplacement,
-    canonical_root_document_in,
+    Model, NetlistDocumentState, NetlistRoot, OwnedNetlistReplacement, canonical_root_document_in,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -116,10 +115,10 @@ fn indexed_texts(
 fn file_text(
     model: &Model,
     netlist: &NetlistDocumentState,
-    root: ActiveNetlistDocument,
+    root: NetlistRoot,
     identity: Option<&str>,
 ) -> Option<String> {
-    if root == ActiveNetlistDocument::OwnedSource {
+    if root == NetlistRoot::Deck {
         return netlist
             .open_deck
             .as_ref()?
@@ -151,7 +150,7 @@ pub(crate) fn name_at_caret(
         .ok_or_else(|| messages.text(MessageId::NetlistFollowNoNames))?;
     let buffer = &model.simulation.source.netlist_content;
     let file = index
-        .file_holding(netlist.active_dependency_identity.as_deref(), buffer)
+        .file_holding(netlist.front.include(), buffer)
         .ok_or_else(still_reading)?;
     let texts = indexed_texts(model, netlist, &index).ok_or_else(still_reading)?;
     let byte = buffer
@@ -365,11 +364,7 @@ impl DeckRename {
         netlist: &mut NetlistDocumentState,
         messages: MessageCatalog,
     ) -> Result<Self, String> {
-        if netlist
-            .active_dependency_root
-            .unwrap_or(netlist.active_document)
-            != ActiveNetlistDocument::OwnedSource
-        {
+        if netlist.front.root_kind() != NetlistRoot::Deck {
             return Err(messages.text(MessageId::NetlistRenameGeneratedDeck));
         }
         let caret = name_at_caret(model, netlist, messages)?;
@@ -735,10 +730,8 @@ pub(crate) fn still_current(
 /// The revision of the deck the editor's names are read from: the editor's
 /// of the open deck's text, or the generated netlist's own.
 fn deck_revision(model: &Model, netlist: &NetlistDocumentState) -> Option<u64> {
-    let root = netlist
-        .active_dependency_root
-        .unwrap_or(netlist.active_document);
-    if root == ActiveNetlistDocument::OwnedSource {
+    let root = netlist.front.root_kind();
+    if root == NetlistRoot::Deck {
         return netlist.open_deck.as_ref().map(|_| netlist.revision);
     }
     canonical_root_document_in(model, netlist, root).map(|document| document.revision().get())
@@ -861,9 +854,7 @@ pub fn open_deck_place(
     workbench: &mut crate::workbench::state::WorkbenchSession,
     (include, line, column): (Option<&str>, usize, usize),
 ) -> Result<(), String> {
-    let root = netlist
-        .active_dependency_root
-        .unwrap_or(netlist.active_document);
+    let root = netlist.front.root_kind();
     super::language::open_project_location_in(
         model,
         netlist,

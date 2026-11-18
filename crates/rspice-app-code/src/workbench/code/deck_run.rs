@@ -27,10 +27,8 @@ pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
     // The deck's files are looked at on disk and saved first, so the run
     // reads what their tabs show; a file changed on disk under edits holds
     // the run until the reader answers for it.
-    match crate::workbench::documents::deck_files::sync_before_run(
-        cx.model,
-        &mut cx.state.netlist,
-    ) {
+    match crate::workbench::documents::deck_files::sync_before_run(cx.model, &mut cx.state.netlist)
+    {
         Ok(notices) => {
             for notice in notices {
                 cx.wb.prompt(notice);

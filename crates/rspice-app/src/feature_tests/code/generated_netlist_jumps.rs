@@ -12,7 +12,7 @@ use rspice_app_code::workbench::documents::netlist_document::fixtures::{
     DECK_INCLUDE, seed_deck_with_include,
 };
 use rspice_app_code::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, open_netlist_dependency_from_root_in,
+    NetlistRoot, open_netlist_dependency_from_root_in,
 };
 use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -34,9 +34,7 @@ fn design_app() -> RSpiceApp {
 fn deck_in_front_app() -> RSpiceApp {
     let mut app = design_app();
     app.state.workbench.activate(Workspace::Netlist);
-    app.state.model.simulation.source.netlist_content = DECK.to_owned();
-    app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    app.state.code.netlist.active_document_initialized = true;
+    app.state.seed_test_deck(DECK);
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     app
@@ -54,14 +52,14 @@ fn include_in_front_app() -> RSpiceApp {
         &mut state.code.netlist,
         &mut state.code.netlist_open_documents,
         &mut state.runs,
-        ActiveNetlistDocument::OwnedSource,
+        NetlistRoot::Deck,
         DECK_INCLUDE,
     )
     .expect("the include opens");
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     assert!(
-        app.state.code.netlist.active_dependency_identity.is_some(),
+        app.state.code.netlist.front.include().is_some(),
         "the include is in front before the jump"
     );
     app
@@ -99,12 +97,12 @@ fn assert_generated_in_front(app: &mut RSpiceApp, hidden: &str, from: &str) {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist, "{from}");
     assert_eq!(
-        app.state.code.netlist.active_document,
-        ActiveNetlistDocument::Generated,
+        app.state.code.netlist.front.root_kind(),
+        NetlistRoot::Generated,
         "{from}: the generated netlist is in front"
     );
     assert!(
-        app.state.code.netlist.active_dependency_identity.is_none(),
+        app.state.code.netlist.front.include().is_none(),
         "{from}: no include is in front"
     );
     let generated = app.state.model.netlist_artifacts.generated_source.clone();

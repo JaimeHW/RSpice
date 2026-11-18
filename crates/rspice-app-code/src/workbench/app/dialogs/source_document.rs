@@ -156,7 +156,7 @@ pub fn netlist_lifecycle_facts(
         logical_path: file.name(),
         line_endings: line_ending_summary(&file.line_ending.write(&file.text)),
         native_path: file.path.display().to_string(),
-        include: netlist.active_dependency_identity.is_some(),
+        include: netlist.front.include().is_some(),
     })
 }
 

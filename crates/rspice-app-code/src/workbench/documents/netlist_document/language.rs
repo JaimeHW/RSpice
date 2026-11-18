@@ -15,7 +15,7 @@ use rspice_core::netlist::{
 };
 
 use super::index_worker::BackgroundIndex;
-use super::{ActiveNetlistDocument, Model, NetlistDocumentState, canonical_root_document_in};
+use super::{Model, NetlistDocumentState, NetlistRoot, canonical_root_document_in};
 use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -50,7 +50,7 @@ impl ProjectSymbolKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProjectSourceLocation {
-    pub(crate) root: ActiveNetlistDocument,
+    pub(crate) root: NetlistRoot,
     pub(crate) dependency_identity: Option<String>,
     pub(crate) display_name: String,
     pub(crate) line: usize,
@@ -105,7 +105,7 @@ pub(crate) struct NetlistProjectIndex {
 /// One file of the index: where it opens, and the text it was indexed from.
 #[derive(Debug, Clone)]
 struct IndexedFile {
-    root: ActiveNetlistDocument,
+    root: NetlistRoot,
     dependency_identity: Option<String>,
     display_name: String,
     digest: crate::product::ContentDigest,
@@ -149,13 +149,13 @@ struct IndexText {
 fn index_texts_in(
     model: &Model,
     netlist: &NetlistDocumentState,
-    root: ActiveNetlistDocument,
+    root: NetlistRoot,
 ) -> Option<Vec<IndexText>> {
     match root {
-        ActiveNetlistDocument::Generated => Some(document_texts(canonical_root_document_in(
+        NetlistRoot::Generated => Some(document_texts(canonical_root_document_in(
             model, netlist, root,
         )?)),
-        ActiveNetlistDocument::OwnedSource => {
+        NetlistRoot::Deck => {
             let deck = netlist.open_deck.as_ref()?;
             let file = |file: &crate::workbench::documents::deck_files::OpenFile,
                         identity: Option<String>| IndexText {
@@ -174,7 +174,7 @@ fn index_texts_in(
                     .collect(),
             )
         }
-        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
+        NetlistRoot::AddedLines | NetlistRoot::Comparison | NetlistRoot::RunInput => None,
     }
 }
 
@@ -211,7 +211,7 @@ fn document_texts(document: &crate::state::NetlistDocument) -> Vec<IndexText> {
 impl NetlistProjectIndex {
     /// The index of `texts`, the root `root` first, then the SPICE files it
     /// includes.
-    fn build(root: ActiveNetlistDocument, texts: &[IndexText]) -> Self {
+    fn build(root: NetlistRoot, texts: &[IndexText]) -> Self {
         let files = texts
             .iter()
             .map(|text| IndexedFile {
@@ -414,7 +414,7 @@ impl NetlistProjectIndex {
     }
 
     /// The root the index was built for.
-    pub(crate) fn root(&self) -> Option<ActiveNetlistDocument> {
+    pub(crate) fn root(&self) -> Option<NetlistRoot> {
         self.files.first().map(|file| file.root)
     }
 
@@ -802,7 +802,7 @@ impl NetlistProjectIndex {
 fn location_in(files: &[IndexedFile], location: &DeckLocation) -> ProjectSourceLocation {
     let file = files.get(location.file);
     ProjectSourceLocation {
-        root: file.map_or(ActiveNetlistDocument::Generated, |file| file.root),
+        root: file.map_or(NetlistRoot::Generated, |file| file.root),
         dependency_identity: file.and_then(|file| file.dependency_identity.clone()),
         display_name: file
             .map(|file| file.display_name.clone())
@@ -826,12 +826,10 @@ pub(crate) type ProjectIndexSlot = BackgroundIndex<ProjectIndexKey, NetlistProje
 fn shown_root_in(
     model: &Model,
     netlist: &NetlistDocumentState,
-) -> Option<(ActiveNetlistDocument, ProjectIndexKey)> {
-    let root = netlist
-        .active_dependency_root
-        .unwrap_or(netlist.active_document);
+) -> Option<(NetlistRoot, ProjectIndexKey)> {
+    let root = netlist.front.root_kind();
     let key = match root {
-        ActiveNetlistDocument::OwnedSource => {
+        NetlistRoot::Deck => {
             let deck = netlist.open_deck.as_ref()?;
             (deck.tab_id(), netlist.revision, deck.includes.len())
         }
@@ -1126,7 +1124,7 @@ pub(crate) fn value_hover_at_in(
     buffer: &str,
     char_index: usize,
 ) -> Option<NetlistValueHover> {
-    if netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+    if netlist.front.is_comparison() {
         return None;
     }
     let revision = netlist.revision;
@@ -1171,13 +1169,13 @@ pub(crate) fn name_hover(
     if let Some((built, revision, dependency, at, hover)) = held
         && std::sync::Weak::ptr_eq(&built, &Arc::downgrade(&index))
         && revision == netlist.revision
-        && dependency == netlist.active_dependency_identity
+        && dependency.as_deref() == netlist.front.include()
         && at == char_index
     {
         return hover;
     }
     let hover = index.hover_at(
-        netlist.active_dependency_identity.as_deref(),
+        netlist.front.include(),
         &model.simulation.source.netlist_content,
         char_index,
         messages,
@@ -1185,7 +1183,7 @@ pub(crate) fn name_hover(
     let held: Held = (
         Arc::downgrade(&index),
         netlist.revision,
-        netlist.active_dependency_identity.clone(),
+        netlist.front.include().map(str::to_owned),
         char_index,
         hover.clone(),
     );
@@ -1213,22 +1211,23 @@ pub(crate) fn open_project_location_in(
         )?;
     } else {
         match location.root {
-            ActiveNetlistDocument::Generated => {
-                if netlist.active_document != ActiveNetlistDocument::Generated
-                    || netlist.active_dependency_identity.is_some()
-                {
+            NetlistRoot::Generated => {
+                if !netlist.front.shows_generated() || netlist.front.include().is_some() {
                     super::open_generated_primary_in(model, netlist);
                 }
             }
-            ActiveNetlistDocument::OwnedSource => {
+            NetlistRoot::Deck => {
                 if !crate::workbench::documents::deck_files::show_deck(model, netlist) {
                     return Err("The deck is no longer open.".to_owned());
                 }
             }
-            ActiveNetlistDocument::GeneratedDiff => {
+            NetlistRoot::AddedLines => {
+                super::show_added_lines(model, netlist);
+            }
+            NetlistRoot::Comparison => {
                 return Err("A comparison has no project symbol definitions.".to_owned());
             }
-            ActiveNetlistDocument::RunSnapshot => {
+            NetlistRoot::RunInput => {
                 return Err(
                     "The deck a completed run used has no project symbol definitions.".to_owned(),
                 );
@@ -1261,7 +1260,7 @@ pub fn go_to_definition_at_cursor_in(
     // The read under the caret binds the definition its scope sees: a
     // subcircuit's own parameter inside it, the deck's outside.
     let bound = index.definition_at(
-        netlist.active_dependency_identity.as_deref(),
+        netlist.front.include(),
         &model.simulation.source.netlist_content,
         netlist.cursor_char_index,
     );
@@ -1317,12 +1316,7 @@ pub fn show_signature_help_at_cursor(
         None => {
             let index = project_index_now(model, netlist)
                 .ok_or_else(|| messages.text(MessageId::NetlistSignatureNoIndex))?;
-            match index.signature_at(
-                netlist.active_dependency_identity.as_deref(),
-                &source,
-                cursor,
-                messages,
-            ) {
+            match index.signature_at(netlist.front.include(), &source, cursor, messages) {
                 Some(Ok(signature)) => (signature.title, signature.detail),
                 Some(Err(name)) => {
                     return Err(messages
@@ -1450,7 +1444,7 @@ fn apply_quick_fix(
     }
     let mut replacement = source.clone();
     replacement.replace_range(fix.span.clone(), &fix.replacement);
-    let edit = if let Some(identity) = netlist.active_dependency_identity.as_deref() {
+    let edit = if let Some(identity) = netlist.front.include() {
         super::OwnedNetlistReplacement::dependency(identity, &source, replacement, 1)
     } else {
         super::OwnedNetlistReplacement::root(&source, replacement, 1)

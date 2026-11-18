@@ -24,7 +24,7 @@ use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
-use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
+use crate::workbench::documents::netlist_document::{NetlistDocumentState, NetlistRoot};
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
@@ -86,7 +86,7 @@ pub(in crate::workbench) fn netlist(
     parts: &mut NetlistNavigator<'_>,
 ) -> NetlistNavigatorAsked {
     let mut asked = NetlistNavigatorAsked::default();
-    if parts.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+    if parts.netlist.front.is_comparison() {
         netlist_diff(ui, parts);
         return asked;
     }
@@ -102,7 +102,7 @@ pub(in crate::workbench) fn netlist(
         &index,
         parts.filter,
         &root_label,
-        parts.netlist.active_document == ActiveNetlistDocument::Generated,
+        parts.netlist.front.shows_generated(),
         parts.outline_collapsed,
         &retained_include_facts(parts.model, parts.netlist, parts.code_workspace, messages),
         messages,
@@ -554,7 +554,7 @@ pub(in crate::workbench) fn netlist(
     }
     asked.open_in_design = open_in_design;
     if let Some(requested) = open_include.as_deref()
-        && parts.netlist.active_document == ActiveNetlistDocument::OwnedSource
+        && parts.netlist.front.shows_deck()
     {
         if let Err(error) = open_deck_include(parts, requested) {
             asked.prompt = Some(error);
@@ -683,9 +683,10 @@ pub(super) fn active_netlist_artifact_name(
     netlist: &NetlistDocumentState,
     runs: &RunsState,
 ) -> String {
-    match netlist.active_document {
-        ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
-        ActiveNetlistDocument::OwnedSource => netlist
+    match netlist.front.root_kind() {
+        NetlistRoot::Generated => "generated.sp".to_owned(),
+        NetlistRoot::AddedLines => "Added lines".to_owned(),
+        NetlistRoot::Deck => netlist
             .open_deck
             .as_ref()
             .map(|deck| deck.root.name())
@@ -698,10 +699,10 @@ pub(super) fn active_netlist_artifact_name(
                     .map(|deck| deck.name())
             })
             .unwrap_or_else(|| "deck.cir".to_owned()),
-        ActiveNetlistDocument::GeneratedDiff => "generated.diff".to_owned(),
+        NetlistRoot::Comparison => "generated.diff".to_owned(),
         // A synthetic filename, like the two above it: an identifier, never
         // translated copy.
-        ActiveNetlistDocument::RunSnapshot => {
+        NetlistRoot::RunInput => {
             crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name_in(runs)
         }
     }
@@ -711,11 +712,12 @@ pub(super) fn active_canonical_netlist_document<'a>(
     model: &'a Model,
     netlist: &'a NetlistDocumentState,
 ) -> Option<&'a crate::state::NetlistDocument> {
-    match netlist.active_document {
-        ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_document.as_ref(),
-        ActiveNetlistDocument::OwnedSource
-        | ActiveNetlistDocument::GeneratedDiff
-        | ActiveNetlistDocument::RunSnapshot => None,
+    match netlist.front.root_kind() {
+        NetlistRoot::Generated => model.netlist_artifacts.generated_document.as_ref(),
+        NetlistRoot::AddedLines
+        | NetlistRoot::Deck
+        | NetlistRoot::Comparison
+        | NetlistRoot::RunInput => None,
     }
 }
 
@@ -946,7 +948,7 @@ pub(super) fn retained_include_facts(
     messages: MessageCatalog,
 ) -> Vec<IncludeRowFacts> {
     let project_paths = model.workspace.content.project.include_search_paths().len();
-    if netlist.active_document == ActiveNetlistDocument::OwnedSource {
+    if netlist.front.shows_deck() {
         // A deck is a file: its includes are the files the check read for
         // its lines, one row a line, so a library two lines name for two
         // sections is two rows and one tab.

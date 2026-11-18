@@ -66,34 +66,31 @@ const fn platform_include_access() -> IncludeAccess {
 /// over the model and the netlist editor's state.
 pub fn editor_id_in(model: &super::Model, netlist: &super::NetlistDocumentState) -> egui::Id {
     let base = egui::Id::new("rspice.netlist.editor.text");
-    if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
+    if netlist.front.is_comparison() {
         return base.with("comparison");
     }
-    let root = netlist
-        .active_dependency_root
-        .unwrap_or(netlist.active_document);
+    let root = netlist.front.root_kind();
     let document_id = match root {
-        super::ActiveNetlistDocument::Generated => model
+        super::NetlistRoot::Generated => model
             .netlist_artifacts
             .generated_document
             .as_ref()
             .map(|document| document.id()),
-        super::ActiveNetlistDocument::OwnedSource => {
-            netlist.open_deck.as_ref().map(|deck| deck.tab_id())
-        }
-        super::ActiveNetlistDocument::GeneratedDiff | super::ActiveNetlistDocument::RunSnapshot => {
-            None
-        }
+        super::NetlistRoot::Deck => netlist.open_deck.as_ref().map(|deck| deck.tab_id()),
+        super::NetlistRoot::AddedLines
+        | super::NetlistRoot::Comparison
+        | super::NetlistRoot::RunInput => None,
     };
-    match (document_id, netlist.active_dependency_identity.as_deref()) {
+    match (document_id, netlist.front.include()) {
         (Some(document_id), Some(identity)) => base.with((document_id, identity)),
         (Some(document_id), None) => base.with(document_id),
         (None, Some(identity)) => base.with(("dependency", identity)),
         (None, None) => base.with(match root {
-            super::ActiveNetlistDocument::Generated => "generated",
-            super::ActiveNetlistDocument::OwnedSource => "owned",
-            super::ActiveNetlistDocument::GeneratedDiff => "comparison",
-            super::ActiveNetlistDocument::RunSnapshot => "run-snapshot",
+            super::NetlistRoot::Generated => "generated",
+            super::NetlistRoot::AddedLines => "added-lines",
+            super::NetlistRoot::Deck => "owned",
+            super::NetlistRoot::Comparison => "comparison",
+            super::NetlistRoot::RunInput => "run-snapshot",
         }),
     }
 }
@@ -216,7 +213,7 @@ pub fn show(
         .collect::<Vec<_>>();
     let edited_lines = runs.manual_run.edited_lines.clone();
     let net_marks = super::cross_probe::net_marks(model, netlist).to_vec();
-    let cross_probe_line = (netlist.active_document == super::ActiveNetlistDocument::Generated)
+    let cross_probe_line = (netlist.front.shows_generated())
         .then_some(netlist.cross_probe_line)
         .flatten()
         .map(|line| line.saturating_sub(1));
@@ -238,7 +235,7 @@ pub fn show(
         .take()
         .or_else(|| show_go_to_line(ui, editor_id, &buffer, workbench.messages()));
 
-    let diff_document = netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff;
+    let diff_document = netlist.front.is_comparison();
 
     let mut completion_changed = false;
     let changed;
@@ -253,22 +250,17 @@ pub fn show(
 
     {
         let messages = workbench.messages();
-        let accessible_label = messages.text(if editable {
+        let accessible_label = messages.text(if netlist.front == super::NetlistTab::AddedLines {
+            MessageId::EditorAddedLinesEditor
+        } else if editable {
             MessageId::EditorProjectSpiceNetlistEditor
         } else {
-            match netlist.active_document {
-                super::ActiveNetlistDocument::Generated => {
-                    MessageId::EditorGeneratedSpiceNetlistViewer
-                }
-                super::ActiveNetlistDocument::OwnedSource => {
-                    MessageId::EditorProjectSpiceNetlistViewer
-                }
-                super::ActiveNetlistDocument::GeneratedDiff => {
-                    MessageId::EditorGeneratedSpiceComparisonViewer
-                }
-                super::ActiveNetlistDocument::RunSnapshot => {
-                    MessageId::EditorRunSnapshotSpiceNetlistViewer
-                }
+            match netlist.front.root_kind() {
+                super::NetlistRoot::Generated => MessageId::EditorGeneratedSpiceNetlistViewer,
+                super::NetlistRoot::AddedLines => MessageId::EditorAddedLinesEditor,
+                super::NetlistRoot::Deck => MessageId::EditorProjectSpiceNetlistViewer,
+                super::NetlistRoot::Comparison => MessageId::EditorGeneratedSpiceComparisonViewer,
+                super::NetlistRoot::RunInput => MessageId::EditorRunSnapshotSpiceNetlistViewer,
             }
         });
         let style = crate::workbench::documents::virtual_text_editor::VirtualEditorStyle {
@@ -618,14 +610,22 @@ pub fn commit_edit(
     cursor_line: usize,
     now: f64,
 ) {
-    // Only the open deck and its open includes take an edit: the generated
-    // netlist, a comparison and a run's input are read-only.
+    // Only the Added lines, the open deck and its open includes take an
+    // edit: the generated netlist, a comparison and a run's input are
+    // read-only.
+    if netlist.front == super::NetlistTab::AddedLines {
+        if super::edit_added_lines(model, netlist, buffer.to_owned()) {
+            netlist.last_edit_time = now;
+            netlist.typed_revision = Some(netlist.revision);
+        }
+        return;
+    }
     if !super::edit_deck_file(model, netlist, buffer.to_owned()) {
         return;
     }
     netlist.last_edit_time = now;
     netlist.typed_revision = Some(netlist.revision);
-    if netlist.active_dependency_identity.is_none() {
+    if netlist.front.include().is_none() {
         runs.manual_run.edited_lines.insert(cursor_line);
         super::refresh_diff_pips_from_baseline_in(model, runs);
     }
@@ -661,7 +661,7 @@ fn refresh_diagnostics(
     if netlist.diag_revision == Some(revision) && netlist.diag_library_folders == folders {
         return;
     }
-    if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
+    if netlist.front.is_comparison() {
         validate_visible_source_in(model, netlist, include_resolutions, revision);
         return;
     }
@@ -719,7 +719,7 @@ fn validate_visible_source_in(
     include_resolutions: &BTreeMap<String, IncludeResolution>,
     revision: u64,
 ) {
-    if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
+    if netlist.front.is_comparison() {
         netlist.diag_library_folders = model.library_folders().to_vec();
         Arc::make_mut(&mut netlist.diagnostics).clear();
         netlist.diag_revision = Some(revision);
@@ -938,6 +938,9 @@ struct SourceCheck {
     /// shown file, and every file of the deck there, read through them
     /// rather than any disk.
     stored: Option<(PathBuf, Vec<(PathBuf, String)>)>,
+    /// Whether the text is the Added lines, which are checked for the lines
+    /// the generated netlist cannot take rather than parsed as a deck.
+    added_lines: bool,
     include_resolutions: BTreeMap<String, IncludeResolution>,
     /// The name the page shows the text under: what a source with no file
     /// is read as, and what its findings name.
@@ -972,23 +975,23 @@ impl SourceCheck {
         revision: u64,
     ) -> Self {
         let buffer = model.simulation.source.netlist_content.clone();
-        let is_dependency = netlist.active_dependency_identity.is_some();
+        let is_dependency = netlist.front.include().is_some();
+        let added_lines = netlist.front == super::NetlistTab::AddedLines;
         let deck = CheckedDeck::Buffer;
         let source_path = if let Some(dependency) = super::active_dependency_in(model, netlist) {
             dependency.locator().native_origin().map(PathBuf::from)
         } else {
-            match netlist.active_document {
-                super::ActiveNetlistDocument::OwnedSource => {
+            match netlist.front.root_kind() {
+                super::NetlistRoot::Deck => {
                     super::active_deck_file_in(netlist).map(|file| file.path.clone())
                 }
-                super::ActiveNetlistDocument::Generated => {
-                    model.schematic.session.current_file.clone()
-                }
-                super::ActiveNetlistDocument::GeneratedDiff
-                | super::ActiveNetlistDocument::RunSnapshot => None,
+                super::NetlistRoot::Generated => model.schematic.session.current_file.clone(),
+                super::NetlistRoot::AddedLines
+                | super::NetlistRoot::Comparison
+                | super::NetlistRoot::RunInput => None,
             }
         };
-        let stored = (netlist.active_document == super::ActiveNetlistDocument::OwnedSource)
+        let stored = (netlist.front.root_kind() == super::NetlistRoot::Deck)
             .then(|| crate::workbench::documents::deck_files::stored_sources(netlist, &buffer))
             .flatten();
         // The browser build reads included sources from the libraries it
@@ -1022,6 +1025,7 @@ impl SourceCheck {
             sealed_sources,
             is_dependency,
             stored,
+            added_lines,
             include_resolutions: include_resolutions.clone(),
             shown_path: super::dialect::shown_source_in(model, netlist)
                 .map(|shown| shown.path)
@@ -1042,9 +1046,31 @@ impl SourceCheck {
             sealed_sources,
             is_dependency,
             stored,
+            added_lines,
             include_resolutions,
             shown_path,
         } = self;
+        if added_lines {
+            let validation_id = crate::state::content_digest(&buffer).to_string();
+            let mut diagnostics = super::added_lines::refusals(&buffer);
+            for diagnostic in &mut diagnostics {
+                diagnostic.bind_validation(revision, &validation_id);
+            }
+            return CheckedSource {
+                revision,
+                library_folders,
+                diagnostics: bounded_netlist_diagnostics(
+                    diagnostics,
+                    &buffer,
+                    revision,
+                    &validation_id,
+                ),
+                symbols: None,
+                unread: None,
+                reading: None,
+                includes: None,
+            };
+        }
         // A narrow override is parsed as the deck it executes as: the
         // generated base with the override spliced in. Every position the
         // parse reports is a position in that deck, and has to be carried

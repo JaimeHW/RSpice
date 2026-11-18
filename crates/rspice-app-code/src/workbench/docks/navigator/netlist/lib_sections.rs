@@ -115,7 +115,7 @@ pub(super) fn section_edit(
     let mut replacement = source.clone();
     replacement.replace_range(span, section);
     Ok(super::LibSectionRewrite {
-        dependency: netlist.active_dependency_identity.clone(),
+        dependency: netlist.front.include().map(str::to_owned),
         original: source,
         replacement,
         selected: format!("Selected .lib section {section} on line {line}."),
@@ -174,7 +174,7 @@ mod tests {
     use crate::workbench::code::tests::{CodeHarness, harness};
     use crate::workbench::documents::deck_files::{OpenDeck, show_deck};
     use crate::workbench::documents::netlist_document::{
-        ActiveNetlistDocument, OwnedNetlistReplacement, replace_deck_files, undo_netlist_edit,
+        NetlistTab, OwnedNetlistReplacement, replace_deck_files, undo_netlist_edit,
     };
 
     /// Choosing `section` for the card at `line`, as the shell commits it.
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn sections_are_enumerated_from_retained_bytes_once_per_revision() {
         let mut harness = corner_deck_state(ROOT);
-        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.state.netlist.front = NetlistTab::Generated;
         refresh(
             &harness.model,
             &harness.state.netlist,
@@ -337,7 +337,7 @@ mod tests {
             "only a library card has a section token to move"
         );
 
-        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.state.netlist.front = NetlistTab::Generated;
         assert_eq!(
             use_section(&mut harness, 2, "ff").unwrap_err(),
             "This netlist source is read-only; its .lib section cannot be changed.",

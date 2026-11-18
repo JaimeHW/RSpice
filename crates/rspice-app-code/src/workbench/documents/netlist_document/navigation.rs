@@ -75,12 +75,10 @@ pub fn open_source_location(
     included_source: Option<&std::path::Path>,
     line: Option<usize>,
 ) -> Result<(), String> {
-    let root = netlist
-        .active_dependency_root
-        .unwrap_or(netlist.active_document);
+    let root = netlist.front.root_kind();
     if let Some(source_path) = included_source {
         // An include of the open deck is a file, named by its path.
-        let dependency_identity = if root == super::ActiveNetlistDocument::OwnedSource {
+        let dependency_identity = if root == super::NetlistRoot::Deck {
             Ok(source_path.to_string_lossy().into_owned())
         } else {
             canonical_root_document_in(model, netlist, root)

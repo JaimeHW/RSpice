@@ -3,7 +3,7 @@
 
 use crate::workbench::AppState;
 use rspice_app_code::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, active_netlist_source_is_editable_in, close_run_deck_snapshot,
+    NetlistRoot, active_netlist_source_is_editable_in, close_run_deck_snapshot,
     open_run_deck_snapshot_in,
 };
 
@@ -24,10 +24,7 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
         &mut state.code.netlist,
         &state.runs
     ));
-    assert_eq!(
-        state.code.netlist.active_document,
-        ActiveNetlistDocument::RunSnapshot
-    );
+    assert_eq!(state.code.netlist.front.root_kind(), NetlistRoot::RunInput);
     assert_eq!(state.model.simulation.source.netlist_content, RAN);
     assert!(!active_netlist_source_is_editable_in(
         &state.model,
@@ -60,10 +57,7 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
         &mut state.model,
         &mut state.code.netlist
     ));
-    assert_eq!(
-        state.code.netlist.active_document,
-        ActiveNetlistDocument::OwnedSource
-    );
+    assert_eq!(state.code.netlist.front.root_kind(), NetlistRoot::Deck);
     assert_eq!(state.model.simulation.source.netlist_content, EDITED);
 }
 

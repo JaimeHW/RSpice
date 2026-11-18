@@ -71,7 +71,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                 ],
             );
         });
-        let include = cx.state.netlist.active_dependency_identity.clone();
+        let include = cx.state.netlist.front.include().map(str::to_owned);
         let answered = match pressed {
             Some(DiskAnswer::Reload) => {
                 deck_files::reload_from_disk(cx.model, &mut cx.state.netlist, include.as_deref())
@@ -94,7 +94,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
         }
         return;
     }
-    if file.dirty && cx.state.netlist.active_dependency_identity.is_some() {
+    if file.dirty && cx.state.netlist.front.include().is_some() {
         super::advisory_band(ui, None, |ui| {
             ui.label(messages.text(MessageId::NetlistIncludeNotSaved));
         });

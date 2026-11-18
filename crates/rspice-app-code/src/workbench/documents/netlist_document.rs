@@ -15,6 +15,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 
 const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
 
+mod added_lines;
 mod baseline;
 mod comparison;
 mod completion;
@@ -33,6 +34,8 @@ mod source_index;
 pub use navigation::{open_diagnostic_location, open_source_location};
 pub use references::open_deck_place;
 
+pub use super::netlist_tabs::{CompareSide, NetlistRoot, NetlistTab};
+pub use added_lines::{added_lines_design, added_lines_text, edit_added_lines, show_added_lines};
 pub use comparison::compare_generated_revision;
 pub use comparison::{close_revision_comparison, reveal_executed_deck};
 pub use comparison::{
@@ -290,10 +293,10 @@ pub fn redo_netlist_edit(
 /// Replace the text of the file in front, the open deck or an include open
 /// beside it, with what the editor shows. Whether that changed it.
 pub fn edit_deck_file(model: &mut Model, netlist: &mut NetlistDocumentState, text: String) -> bool {
-    if netlist.active_document != ActiveNetlistDocument::OwnedSource {
+    if !netlist.front.shows_deck() {
         return false;
     }
-    let include = netlist.active_dependency_identity.clone();
+    let include = netlist.front.include().map(str::to_owned);
     let Some(deck) = netlist.open_deck.as_mut() else {
         return false;
     };
@@ -317,13 +320,14 @@ pub fn edit_deck_file(model: &mut Model, netlist: &mut NetlistDocumentState, tex
 fn canonical_root_document_in<'a>(
     model: &'a Model,
     _netlist: &'a NetlistDocumentState,
-    root: ActiveNetlistDocument,
+    root: NetlistRoot,
 ) -> Option<&'a crate::state::NetlistDocument> {
     match root {
-        ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_document.as_ref(),
-        ActiveNetlistDocument::OwnedSource
-        | ActiveNetlistDocument::GeneratedDiff
-        | ActiveNetlistDocument::RunSnapshot => None,
+        NetlistRoot::Generated => model.netlist_artifacts.generated_document.as_ref(),
+        NetlistRoot::AddedLines
+        | NetlistRoot::Deck
+        | NetlistRoot::Comparison
+        | NetlistRoot::RunInput => None,
     }
 }
 
@@ -331,13 +335,10 @@ fn canonical_root_document_in<'a>(
 /// file the editor edits and Save writes.
 #[must_use]
 pub fn active_deck_file_in(netlist: &NetlistDocumentState) -> Option<&super::deck_files::OpenFile> {
-    if netlist.active_document != ActiveNetlistDocument::OwnedSource {
+    if !netlist.front.shows_deck() {
         return None;
     }
-    netlist
-        .open_deck
-        .as_ref()?
-        .file(netlist.active_dependency_identity.as_deref())
+    netlist.open_deck.as_ref()?.file(netlist.front.include())
 }
 
 /// Exact retained dependency currently projected as a first-class source
@@ -348,9 +349,8 @@ pub(crate) fn active_dependency_in<'a>(
     model: &'a Model,
     netlist: &'a NetlistDocumentState,
 ) -> Option<&'a crate::state::DependencyMetadata> {
-    let identity = netlist.active_dependency_identity.as_deref()?;
-    let root = netlist.active_dependency_root?;
-    canonical_root_document_in(model, netlist, root)?
+    let identity = netlist.front.include()?;
+    canonical_root_document_in(model, netlist, netlist.front.root_kind())?
         .dependencies()
         .iter()
         .find(|dependency| dependency.locator().logical_identity() == identity)
@@ -365,7 +365,7 @@ pub fn active_netlist_source_is_editable_in(
     _model: &Model,
     netlist: &NetlistDocumentState,
 ) -> bool {
-    active_deck_file_in(netlist).is_some()
+    netlist.front == NetlistTab::AddedLines || active_deck_file_in(netlist).is_some()
 }
 
 /// Which netlist document a manual deck run would take its source from.
@@ -375,15 +375,13 @@ pub fn active_netlist_source_is_editable_in(
 /// nothing infers one from the visible buffer.
 ///
 /// It reads the model and the netlist editor's state.
-pub(crate) fn effective_active_document_in(
-    netlist: &NetlistDocumentState,
-) -> ActiveNetlistDocument {
+pub(crate) fn effective_active_document_in(netlist: &NetlistDocumentState) -> NetlistRoot {
     if netlist.active_document_initialized {
-        netlist.active_document
+        netlist.front.root_kind()
     } else if netlist.open_deck.is_some() {
-        ActiveNetlistDocument::OwnedSource
+        NetlistRoot::Deck
     } else {
-        ActiveNetlistDocument::Generated
+        NetlistRoot::Generated
     }
 }
 
@@ -399,9 +397,7 @@ pub(crate) fn working_deck_source_in<'a>(
     netlist: &'a NetlistDocumentState,
 ) -> &'a str {
     match netlist.open_deck.as_ref() {
-        Some(deck)
-            if effective_active_document_in(netlist) == ActiveNetlistDocument::OwnedSource =>
-        {
+        Some(deck) if effective_active_document_in(netlist) == NetlistRoot::Deck => {
             deck.root.text.as_str()
         }
         _ => model.simulation.source.netlist_content.as_str(),
@@ -419,9 +415,7 @@ pub(crate) fn open_netlist_dependency_in(
     runs: &mut RunsState,
     logical_identity: &str,
 ) -> Result<(), String> {
-    let root = netlist
-        .active_dependency_root
-        .unwrap_or(netlist.active_document);
+    let root = netlist.front.root_kind();
     open_netlist_dependency_from_root_in(
         model,
         netlist,
@@ -440,14 +434,14 @@ pub fn open_netlist_dependency_from_root_in(
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
     runs: &mut RunsState,
-    root: ActiveNetlistDocument,
+    root: NetlistRoot,
     logical_identity: &str,
 ) -> Result<(), String> {
-    if root == ActiveNetlistDocument::OwnedSource {
+    if root == NetlistRoot::Deck {
         let path = std::path::PathBuf::from(logical_identity);
         return super::deck_files::show_include(model, netlist, open_documents, runs, &path);
     }
-    if root == ActiveNetlistDocument::GeneratedDiff {
+    if root == NetlistRoot::Comparison {
         return Err("Revision comparisons do not own dependency documents.".to_owned());
     }
     let document = canonical_root_document_in(model, netlist, root).ok_or_else(|| {
@@ -484,7 +478,7 @@ pub(crate) fn put_dependency_in_front(
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
     runs: &mut RunsState,
-    root: ActiveNetlistDocument,
+    root: NetlistRoot,
     root_document_id: crate::state::NetlistDocumentId,
     logical_identity: &str,
     source: String,
@@ -500,10 +494,18 @@ pub(crate) fn put_dependency_in_front(
             "Close an include tab before opening another; the workspace retains at most {MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS} secondary netlist documents."
         ));
     }
-    netlist.active_document = root;
-    netlist.active_dependency_root = Some(root);
-    netlist.active_dependency_identity = Some(logical_identity.to_owned());
+    netlist.front = NetlistTab::Include {
+        deck: match root {
+            NetlistRoot::Deck => netlist.open_deck.as_ref().map(|deck| deck.id),
+            _ => None,
+        },
+        path: logical_identity.to_owned(),
+    };
     open_documents.insert(tab);
+    if root == NetlistRoot::Deck {
+        // A deck's include shows with the deck's tab beside it.
+        netlist.deck_tab_closed = false;
+    }
     netlist.active_document_initialized = true;
     model.simulation.source.netlist_content = source;
     netlist.requested_line = None;
@@ -523,20 +525,17 @@ pub(crate) fn close_active_dependency_in(
     netlist: &mut NetlistDocumentState,
     runs: &mut RunsState,
 ) -> bool {
-    let Some(root) = netlist.active_dependency_root.take() else {
+    if netlist.front.include().is_none() {
         return false;
-    };
-    netlist.active_dependency_identity = None;
-    netlist.active_document = root;
-    model.simulation.source.netlist_content = match root {
-        ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_source.clone(),
-        ActiveNetlistDocument::OwnedSource => netlist
+    }
+    netlist.front = netlist.front.root();
+    model.simulation.source.netlist_content = match netlist.front.root_kind() {
+        NetlistRoot::Deck => netlist
             .open_deck
             .as_ref()
             .map(|deck| deck.root.text.clone())
             .unwrap_or_default(),
-        ActiveNetlistDocument::GeneratedDiff => netlist.generated_diff_source.clone(),
-        ActiveNetlistDocument::RunSnapshot => run_snapshot_source_in(model, netlist, runs),
+        _ => model.netlist_artifacts.generated_source.clone(),
     };
     netlist.requested_line = None;
     netlist.cursor_line = 0;
@@ -560,9 +559,7 @@ pub fn show_generated_deck(
     if !open_generated_primary_in(model, netlist)
         && model.netlist_artifacts.generated_document.is_none()
     {
-        netlist.active_dependency_identity = None;
-        netlist.active_dependency_root = None;
-        netlist.active_document = ActiveNetlistDocument::Generated;
+        netlist.front = NetlistTab::Generated;
         netlist.active_document_initialized = true;
         netlist.run_the_plan();
     }
@@ -587,14 +584,12 @@ pub fn open_generated_primary_in(model: &mut Model, netlist: &mut NetlistDocumen
     // yet, whatever the default says: the page would put a retained deck in
     // front on its first frame.
     if netlist.active_document_initialized
-        && netlist.active_document == ActiveNetlistDocument::Generated
-        && netlist.active_dependency_identity.is_none()
+        && netlist.front.shows_generated()
+        && netlist.front.include().is_none()
     {
         return false;
     }
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
-    netlist.active_document = ActiveNetlistDocument::Generated;
+    netlist.front = NetlistTab::Generated;
     netlist.active_document_initialized = true;
     model.simulation.source.netlist_content = model.netlist_artifacts.generated_source.clone();
     netlist.completion_open = false;
@@ -602,21 +597,6 @@ pub fn open_generated_primary_in(model: &mut Model, netlist: &mut NetlistDocumen
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
     true
-}
-
-/// Code-workspace document currently projected into the central editor.
-/// The generated netlist and the open deck are independent documents;
-/// switching between them changes neither.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ActiveNetlistDocument {
-    #[default]
-    Generated,
-    /// The open deck, a file, or an include file open beside it.
-    OwnedSource,
-    GeneratedDiff,
-    /// The exact deck a completed manual run consumed. Sealed with that run,
-    /// so it is a viewer and never an editable deck.
-    RunSnapshot,
 }
 
 /// Find asked for on the Netlist page, from its toolbar or the workbench's
@@ -660,24 +640,23 @@ pub struct NetlistDocumentState {
     /// The project deck whose file could not be read, so it is not tried
     /// again on every frame.
     pub unreadable_deck: Option<crate::state::DeckId>,
+    /// Whether the reader closed the open deck's tab: the deck stays open,
+    /// with any edit not yet saved, until it is shown again.
+    pub deck_tab_closed: bool,
     /// What Run runs on this workspace: read through
     /// [`NetlistDocumentState::run_target`], which answers the plan for a
     /// deck that is no longer open.
     pub(crate) run_target: super::netlist_tabs::RunTarget,
     /// Prior immutable artifacts retained for deterministic revision compare.
     pub generated_history: Vec<crate::state::GeneratedArtifact>,
-    /// Read-only unified comparison document (`generated.diff`).
+    /// The open comparison's unified diff, while a comparison tab is open.
     pub generated_diff_source: String,
-    /// Document selected before entering a read-only revision comparison.
-    pub comparison_return_document: ActiveNetlistDocument,
-    /// Active central document.
-    pub active_document: ActiveNetlistDocument,
-    /// Logical identity of the include projected into the editor, the path
-    /// of a deck's include file, or `None` when the root is visible.
-    pub active_dependency_identity: Option<String>,
-    /// Root document the include in front belongs to. Stored separately so
-    /// the generated deck's includes and the open deck's cannot be confused.
-    pub active_dependency_root: Option<ActiveNetlistDocument>,
+    /// The tab in front before the comparison, which closing it brings back.
+    pub comparison_return: NetlistTab,
+    /// The two sides of the open comparison, while a comparison tab is open.
+    pub comparison_sides: Option<(CompareSide, CompareSide)>,
+    /// The tab in front of the page.
+    pub front: NetlistTab,
     /// Whether initial active-document selection has been reconciled with a
     /// just-opened project's deck.
     pub active_document_initialized: bool,
@@ -722,9 +701,9 @@ pub struct NetlistDocumentState {
     live_check: editor::LiveCheck,
     /// Result data version last reconciled with the editor baseline.
     seen_data_version: u64,
-    /// Working deck the run snapshot was opened from, so its comparison knows
-    /// which revision to diff against once the snapshot itself is active.
-    pub(crate) run_snapshot_return_document: ActiveNetlistDocument,
+    /// The tab in front before the run's input, which closing it brings
+    /// back and which its comparison compares against.
+    pub(crate) run_input_return: NetlistTab,
     /// Which executed deck the run-snapshot document is showing.
     ///
     /// Absent means it is showing this session's manual-deck baseline: the
@@ -733,6 +712,8 @@ pub struct NetlistDocumentState {
     /// point of a completed run was actually handed — a different artifact,
     /// for a different question, with nothing to diff it against.
     pub executed_deck_view: Option<ExecutedDeckSelection>,
+    /// The run input whose tab is open, by run and point, while it is.
+    pub open_run_input: Option<(u64, Option<usize>)>,
     /// Zero-based line containing the caret.
     pub cursor_line: usize,
     /// Unicode-scalar caret position in the visible source. Language actions
@@ -810,7 +791,7 @@ impl NetlistDocumentState {
             self.requested_line = None;
         }
         self.cross_probe_line = line;
-        if line.is_some() && self.active_document == ActiveNetlistDocument::Generated {
+        if line.is_some() && self.front.shows_generated() {
             self.requested_line = line;
         }
     }
@@ -820,7 +801,7 @@ impl NetlistDocumentState {
     /// parsed yet, or the comparison is showing, for which the editor clears
     /// its findings without parsing anything.
     pub(crate) fn validated_revision(&self) -> Option<u64> {
-        if self.active_document == ActiveNetlistDocument::GeneratedDiff {
+        if self.front.is_comparison() {
             return None;
         }
         self.diag_revision

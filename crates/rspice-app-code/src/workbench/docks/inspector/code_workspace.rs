@@ -28,9 +28,7 @@ pub(in crate::workbench) fn code_workspace_inspector(
     ui: &mut Ui,
     reads: &CodeInspector<'_>,
 ) -> Option<uuid::Uuid> {
-    use crate::workbench::documents::netlist_document::{
-        ActiveNetlistDocument, DiagnosticSeverity,
-    };
+    use crate::workbench::documents::netlist_document::{DiagnosticSeverity, NetlistRoot};
 
     let messages = reads.messages;
     const DIAGNOSTIC_PREVIEW_LIMIT: usize = 20;
@@ -113,9 +111,9 @@ pub(in crate::workbench) fn code_workspace_inspector(
     if active_dependency_in(reads.model, reads.netlist).is_some() {
         dependency_provenance(ui, reads);
     } else {
-        match reads.netlist.active_document {
-            ActiveNetlistDocument::OwnedSource => deck_file_provenance(ui, reads),
-            ActiveNetlistDocument::RunSnapshot => {} // its run's, stated by the strip over the deck
+        match reads.netlist.front.root_kind() {
+            NetlistRoot::Deck => deck_file_provenance(ui, reads),
+            NetlistRoot::RunInput => {} // its run's, stated by the strip over the deck
             _ => generated_provenance(ui, reads.model, messages),
         }
     }

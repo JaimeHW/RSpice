@@ -184,10 +184,7 @@ fn canonical_diagnostic_navigation_opens_the_exact_include_and_line() {
     )
     .unwrap();
 
-    assert_eq!(
-        harness.state.netlist.active_dependency_identity.as_deref(),
-        Some(DECK_INCLUDE)
-    );
+    assert_eq!(harness.state.netlist.front.include(), Some(DECK_INCLUDE));
     assert_eq!(harness.state.netlist.cursor_line, 17);
     assert_eq!(harness.state.netlist.requested_line, Some(18));
     assert_eq!(
@@ -208,7 +205,7 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
         );
     }
     let before_source = harness.model.simulation.source.netlist_content.clone();
-    let before_document = harness.state.netlist.active_document;
+    let before_document = harness.state.netlist.front.root_kind();
 
     let error = open_netlist_dependency_in(
         &mut harness.model,
@@ -219,9 +216,8 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
     )
     .unwrap_err();
     assert!(error.contains("Close an include tab"));
-    assert_eq!(harness.state.netlist.active_document, before_document);
-    assert!(harness.state.netlist.active_dependency_root.is_none());
-    assert!(harness.state.netlist.active_dependency_identity.is_none());
+    assert_eq!(harness.state.netlist.front.root_kind(), before_document);
+    assert!(harness.state.netlist.front.include().is_none());
     assert_eq!(
         harness.model.simulation.source.netlist_content,
         before_source
@@ -341,8 +337,8 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
     .unwrap();
 
     assert_eq!(
-        harness.state.netlist.active_document,
-        ActiveNetlistDocument::GeneratedDiff
+        harness.state.netlist.front.root_kind(),
+        NetlistRoot::Comparison
     );
     let diff = harness.state.netlist.generated_diff_source.as_str();
     assert!(diff.contains("--- run-3"), "{diff}");
@@ -353,10 +349,7 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
         &mut harness.model,
         &mut harness.state.netlist
     ));
-    assert_eq!(
-        harness.state.netlist.active_document,
-        ActiveNetlistDocument::OwnedSource
-    );
+    assert_eq!(harness.state.netlist.front.root_kind(), NetlistRoot::Deck);
     assert_eq!(harness.model.simulation.source.netlist_content, EDITED);
 }
 
@@ -424,8 +417,8 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
         1
     ));
     assert_eq!(
-        harness.state.netlist.active_document,
-        ActiveNetlistDocument::RunSnapshot
+        harness.state.netlist.front.root_kind(),
+        NetlistRoot::RunInput
     );
     assert_eq!(harness.model.simulation.source.netlist_content, HOT);
     assert!(

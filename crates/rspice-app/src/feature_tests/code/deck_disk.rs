@@ -13,9 +13,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
 use crate::workbench::app_state::AppState;
 use rspice_app_code::workbench::documents::deck_files;
-use rspice_app_code::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, edit_deck_file,
-};
+use rspice_app_code::workbench::documents::netlist_document::edit_deck_file;
 use rspice_app_state::state::ProjectDeck;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
@@ -186,9 +184,9 @@ fn compare_shows_the_file_on_disk_against_the_tab() {
     deck_files::compare_with_disk(&mut state.model, &mut state.code.netlist, None)
         .expect("compared");
 
-    assert_eq!(
-        state.code.netlist.active_document,
-        ActiveNetlistDocument::GeneratedDiff
+    assert!(
+        state.code.netlist.front.is_comparison(),
+        "the comparison is in front"
     );
     let shown = &state.model.simulation.source.netlist_content;
     for line in [

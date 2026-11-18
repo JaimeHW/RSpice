@@ -10,7 +10,6 @@ use crate::workbench::chrome::toolbar::{explicit_label_width, toolbar_icon_butto
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{
     Cx, Reads, ToolbarAction, ToolbarControl, ToolbarEntry, ToolbarIcon, ToolbarId, ToolbarTool,
@@ -231,11 +230,11 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
 ];
 
 fn generated_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
-    reads.state.netlist.active_document == ActiveNetlistDocument::Generated
+    reads.state.netlist.front.shows_generated()
 }
 
 fn owned_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
-    reads.state.netlist.active_document != ActiveNetlistDocument::Generated
+    reads.state.netlist.front.shows_deck()
 }
 
 #[cfg(test)]

@@ -92,8 +92,10 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
         .current_generation_input_digest = Some(digest);
     // The engineer is looking at their own deck, so the jump has a document
     // transition to make rather than a no-op reactivation to skip.
-    state.code.netlist.active_document =
-        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.front =
+        rspice_app_code::workbench::documents::netlist_document::NetlistTab::Deck(
+            rspice_app_state::state::DeckId::new(),
+        );
     state.code.netlist.active_document_initialized = true;
     (state, source_id, load_id, unmapped_id)
 }
@@ -192,10 +194,10 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
 
     assert_eq!(state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
-        state.code.netlist.active_document,
-        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
+        state.code.netlist.front.root_kind(),
+        rspice_app_code::workbench::documents::netlist_document::NetlistRoot::Generated
     );
-    assert!(state.code.netlist.active_dependency_identity.is_none());
+    assert!(state.code.netlist.front.include().is_none());
     assert_eq!(state.model.simulation.source.netlist_content, DECK);
     // The outline and the source-mapping panel both read the active line, so
     // the caret request and the cursor have to agree about which card it is.

@@ -1,0 +1,224 @@
+//! The Netlist workspace's tabs, in whole applications: the generated
+//! netlist and the Added lines pinned first, what Run runs as tabs come to
+//! the front and close, the Added lines' check, and the tab a run's input
+//! opens on.
+
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::veriloga_design_tests::{DESKTOP, themed_context};
+use crate::workbench::examples::hierarchy_reference;
+use rspice_app_code::workbench::documents::netlist_document::{self, NetlistTab};
+use rspice_app_state::state::SimulationRunIntent;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::chrome::document_bar::{
+    WorkspaceDocumentDescriptor, activate_document, close_document, document_descriptors,
+};
+use rspice_app_workbench::workbench::framework::command_registry::ids;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
+use rspice_vocabulary::diagnostics::DiagnosticSeverity;
+
+const DECK: &str = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+
+/// The hierarchical reference design on the Netlist workspace, with its
+/// generated netlist built and the engineer's deck.cir open in front.
+fn plan_and_deck_session() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state = hierarchy_reference::build().state;
+    app.state.seed_test_deck(DECK);
+    app.state.workbench.activate(Workspace::Netlist);
+    application_frame(&mut app);
+    app
+}
+
+/// One whole application frame on a desktop window.
+fn application_frame(app: &mut RSpiceApp) {
+    application_frame_at(app, 0.0);
+}
+
+/// One whole application frame on a desktop window, `seconds` into the
+/// session.
+fn application_frame_at(app: &mut RSpiceApp, seconds: f64) {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, DESKTOP)),
+        time: Some(seconds),
+        ..Default::default()
+    };
+    let _ = themed_context().run_ui(input, |ui| {
+        app.prepare_frame(ui.ctx());
+        app.render_frame_chrome(ui);
+        app.render_frame_dialogs(ui.ctx());
+    });
+}
+
+/// The tab strip's tabs, by label and whether each closes.
+fn tabs(app: &RSpiceApp) -> Vec<(String, bool)> {
+    document_descriptors(&app.state)
+        .into_iter()
+        .map(|tab| (tab.label, tab.closable))
+        .collect()
+}
+
+fn tab_labelled(app: &RSpiceApp, label: &str) -> WorkspaceDocumentDescriptor {
+    document_descriptors(&app.state)
+        .into_iter()
+        .find(|tab| tab.label == label)
+        .unwrap_or_else(|| panic!("no tab is labelled {label}: {:?}", tabs(app)))
+}
+
+/// Press F5 and say what it ran: the deck as written, or the plan.
+fn press_run(app: &mut RSpiceApp) -> &'static str {
+    app.execute_command_key(ids::RUN_SIMULATION);
+    let execution = &app.state.model.simulation.execution;
+    let deck =
+        execution.trigger_simulation && execution.run_intent == SimulationRunIntent::ManualDeck;
+    let plan = app.state.runs.preflight.take_run_and_queue_request();
+    match (deck, plan) {
+        (true, false) => "deck",
+        (false, true) => "plan",
+        (false, false) => "nothing",
+        (true, true) => "both",
+    }
+}
+
+/// The generated netlist and the Added lines come first and stay: neither
+/// closes. The deck beside them does.
+#[test]
+fn the_generated_netlist_and_the_added_lines_are_pinned_first() {
+    let app = plan_and_deck_session();
+
+    assert_eq!(
+        tabs(&app),
+        [
+            ("Generated netlist".to_owned(), false),
+            ("Added lines".to_owned(), false),
+            ("deck.cir".to_owned(), true),
+        ]
+    );
+}
+
+/// The Added lines run with the plan: their tab in front makes the plan
+/// what F5 runs, where the deck in front ran the deck.
+#[test]
+fn the_added_lines_in_front_make_the_plan_what_runs() {
+    let mut app = plan_and_deck_session();
+
+    assert!(activate_document(
+        &mut app.state,
+        &WorkspaceDocumentId::NetlistAddedLines
+    ));
+
+    assert_eq!(app.state.code.netlist.front, NetlistTab::AddedLines);
+    assert_eq!(press_run(&mut app), "plan");
+}
+
+/// Closing the deck's tab while it is what runs takes the tab, brings the
+/// tab beside it to the front, and F5 runs the plan.
+#[test]
+fn closing_the_deck_tab_that_runs_makes_the_plan_what_runs() {
+    let mut app = plan_and_deck_session();
+    let deck = tab_labelled(&app, "deck.cir");
+    assert!(deck.active, "the deck opened in front");
+    let documents =
+        rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents(
+            app.state
+                .code
+                .netlist_tabs(&app.state.model, app.state.workbench.messages()),
+        );
+
+    assert!(close_document(&mut app.state, &deck.id, &documents));
+    application_frame(&mut app);
+
+    assert_eq!(
+        tabs(&app),
+        [
+            ("Generated netlist".to_owned(), false),
+            ("Added lines".to_owned(), false),
+        ],
+        "the deck's tab has gone and stays gone"
+    );
+    assert_eq!(app.state.code.netlist.front, NetlistTab::AddedLines);
+    assert_eq!(press_run(&mut app), "plan");
+}
+
+/// A line the plan owns is refused on its own line of the Added lines, and
+/// what was typed is kept with the project.
+#[test]
+fn an_added_line_the_plan_owns_is_refused_on_its_line() {
+    let mut app = plan_and_deck_session();
+    assert!(activate_document(
+        &mut app.state,
+        &WorkspaceDocumentId::NetlistAddedLines
+    ));
+    let typed = "R9 out 0 10k\n.tran 1n 1u\n";
+
+    assert!(netlist_document::edit_added_lines(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        typed.to_owned(),
+    ));
+    // The check reads the lines once typing has paused.
+    application_frame_at(&mut app, 1.0);
+
+    let errors = app
+        .state
+        .code
+        .netlist
+        .diagnostics
+        .iter()
+        .filter(|finding| finding.severity == DiagnosticSeverity::Error)
+        .map(|finding| (finding.line, finding.message.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        errors,
+        [(
+            Some(1),
+            "Analyses belong to the plan: add .tran in Simulate ▸ Analyses".to_owned()
+        )],
+        "the second line is refused, the first is not"
+    );
+    assert_eq!(netlist_document::added_lines_text(&app.state.model), typed);
+    assert!(
+        app.state.model.workspace.content.project_metadata_dirty,
+        "the project has the edit to save"
+    );
+}
+
+/// A run's input opened from Results is a tab named for the run, holding
+/// the text the run read through the frames after.
+#[test]
+fn a_run_input_opened_from_results_is_a_tab_that_keeps_its_text() {
+    use crate::workbench::commands::tests::{RunOrigin, app_with_prepared_run};
+    use rspice_app_results::workbench::results::commands::ResultsCommand;
+    use rspice_app_state::state::{ExecutedDeck, ExecutedDeckPoint};
+
+    const INPUT: &str = "task deck\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n";
+    let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
+    let run = app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .expect("the fixture selected a run")
+        .id;
+    app.state
+        .model
+        .simulation
+        .retained
+        .executed_decks
+        .retain(ExecutedDeck {
+            run_id: run,
+            points: vec![ExecutedDeckPoint {
+                label: "nominal".to_owned(),
+                deck: INPUT.into(),
+                model_sources: Vec::new(),
+            }],
+        });
+
+    app.execute_command_key(ResultsCommand::OpenTaskDeck.key());
+    application_frame(&mut app);
+    application_frame(&mut app);
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    let tab = tab_labelled(&app, &format!("Run {run} input"));
+    assert!(tab.active, "{tab:?}");
+    assert_eq!(app.state.model.simulation.source.netlist_content, INPUT);
+}

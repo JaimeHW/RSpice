@@ -6,7 +6,7 @@
 
 // Through the parent rather than `crate::workbench`: the module's edge onto
 // `app_state` is being retired, and a submodule of it does not need its own.
-use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
+use super::{CompareSide, Model, NetlistDocumentState, NetlistRoot, NetlistTab};
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
@@ -14,12 +14,11 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 /// comparison remains an explicit revision workflow; a tab switch is only a
 /// presentation transition.
 pub fn open_netlist_comparison(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
-    if netlist.generated_diff_source.is_empty() {
+    let Some((left, right)) = netlist.comparison_sides else {
         return false;
-    }
-    netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
+    };
+    netlist.front = NetlistTab::Compare { left, right };
+    netlist.front = netlist.front.root();
     netlist.active_document_initialized = true;
     model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
     netlist.completion_open = false;
@@ -56,10 +55,12 @@ pub fn compare_generated_revision(
     } else {
         diff
     };
-    netlist.comparison_return_document = ActiveNetlistDocument::Generated;
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
-    netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    netlist.comparison_return = NetlistTab::Generated;
+    put_comparison_in_front(
+        netlist,
+        CompareSide::PreviousGenerated(index),
+        CompareSide::Generated,
+    );
     netlist.active_document_initialized = true;
     model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
     netlist.revision = netlist.revision.wrapping_add(1);
@@ -76,21 +77,21 @@ pub fn compare_generated_revision(
 fn return_to_working_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    root: ActiveNetlistDocument,
+    root: &NetlistTab,
 ) {
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
     let deck = netlist
         .open_deck
         .as_ref()
-        .map(|deck| deck.root.text.clone());
-    match (root, deck) {
-        (ActiveNetlistDocument::OwnedSource, Some(source)) => {
-            netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        .map(|deck| (deck.id, deck.root.text.clone()));
+    match (root.root(), deck) {
+        (NetlistTab::Deck(id), Some((open, source))) if id == open => {
+            netlist.front = NetlistTab::Deck(id);
+            netlist.run_target = crate::workbench::documents::netlist_tabs::RunTarget::Deck(id);
             model.simulation.source.netlist_content = source;
         }
         _ => {
-            netlist.active_document = ActiveNetlistDocument::Generated;
+            netlist.front = NetlistTab::Generated;
+            netlist.run_the_plan();
             model.simulation.source.netlist_content =
                 model.netlist_artifacts.generated_source.clone();
         }
@@ -102,10 +103,21 @@ fn return_to_working_deck(
 }
 
 pub fn close_revision_comparison(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
-    let root = netlist.comparison_return_document;
-    return_to_working_deck(model, netlist, root);
+    let root = netlist.comparison_return.clone();
+    return_to_working_deck(model, netlist, &root);
     netlist.generated_diff_source.clear();
+    netlist.comparison_sides = None;
     true
+}
+
+/// Put the comparison of `left` to `right` in front, as the comparison tab.
+fn put_comparison_in_front(
+    netlist: &mut NetlistDocumentState,
+    left: CompareSide,
+    right: CompareSide,
+) {
+    netlist.comparison_sides = Some((left, right));
+    netlist.front = NetlistTab::Compare { left, right };
 }
 
 fn short_digest(digest: crate::product::ContentDigest) -> String {
@@ -161,7 +173,7 @@ pub fn open_run_deck_snapshot_in(
 /// rather than by opening the working deck, which is a different document.
 ///
 /// Read-only is a property of the document, not of this route: the run
-/// snapshot is the one [`ActiveNetlistDocument`] the editor never makes
+/// snapshot is the one [`NetlistRoot`] the editor never makes
 /// editable and no lifecycle, save, or ownership action accepts.
 ///
 /// The deck is checked against its run's receipt here, once, and the verdict
@@ -245,13 +257,16 @@ fn project_run_snapshot_in(
     netlist: &mut NetlistDocumentState,
     runs: &RunsState,
 ) {
-    if netlist.active_document != ActiveNetlistDocument::RunSnapshot {
-        netlist.run_snapshot_return_document = netlist.active_document;
+    if !netlist.front.is_run_input() {
+        netlist.run_input_return = netlist.front.clone();
     }
     let source = super::run_snapshot_source_in(model, netlist, runs);
-    netlist.active_document = ActiveNetlistDocument::RunSnapshot;
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
+    let (run, point) = match netlist.executed_deck_view {
+        Some(selection) => (selection.run_id, Some(selection.point)),
+        None => (runs.manual_run.last_run_id.unwrap_or_default(), None),
+    };
+    netlist.front = NetlistTab::RunInput { run, point };
+    netlist.open_run_input = Some((run, point));
     netlist.active_document_initialized = true;
     model.simulation.source.netlist_content = source;
     netlist.requested_line = None;
@@ -264,12 +279,13 @@ fn project_run_snapshot_in(
 
 /// Leave the run snapshot for the working deck it was opened from.
 pub fn close_run_deck_snapshot(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
-    if netlist.active_document != ActiveNetlistDocument::RunSnapshot {
+    if !netlist.front.is_run_input() {
         return false;
     }
     netlist.executed_deck_view = None;
-    let root = netlist.run_snapshot_return_document;
-    return_to_working_deck(model, netlist, root);
+    netlist.open_run_input = None;
+    let root = netlist.run_input_return.clone();
+    return_to_working_deck(model, netlist, &root);
     true
 }
 
@@ -301,14 +317,18 @@ pub fn compare_run_deck_snapshot_in(
         .last_run_buffer
         .clone()
         .ok_or_else(|| "The deck this run used is no longer retained.".to_owned())?;
-    let root = netlist.run_snapshot_return_document;
-    let (working, current_label) = match root {
-        ActiveNetlistDocument::OwnedSource => {
+    let root = netlist.run_input_return.clone();
+    let (working, current_label, right) = match root.root_kind() {
+        NetlistRoot::Deck => {
             let deck = netlist
                 .open_deck
                 .as_ref()
                 .ok_or_else(|| "No deck is open.".to_owned())?;
-            (deck.root.text.clone(), deck.root.name())
+            (
+                deck.root.text.clone(),
+                deck.root.name(),
+                CompareSide::Deck(deck.id),
+            )
         }
         _ => {
             let document = model
@@ -319,6 +339,7 @@ pub fn compare_run_deck_snapshot_in(
             (
                 model.netlist_artifacts.generated_source.clone(),
                 format!("generated-{}", short_digest(document.content_digest())),
+                CompareSide::Generated,
             )
         }
     };
@@ -333,10 +354,8 @@ pub fn compare_run_deck_snapshot_in(
     } else {
         diff
     };
-    netlist.comparison_return_document = root;
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
-    netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    netlist.comparison_return = root;
+    put_comparison_in_front(netlist, CompareSide::RunInput(run_id), right);
     netlist.active_document_initialized = true;
     model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
     netlist.revision = netlist.revision.wrapping_add(1);

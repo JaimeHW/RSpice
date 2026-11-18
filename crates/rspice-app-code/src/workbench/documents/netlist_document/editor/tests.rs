@@ -1503,9 +1503,10 @@ fn closing_an_include_tab_lets_go_of_its_editor() {
         .state
         .netlist_open_documents
         .insert(include_tab.clone());
-    harness.state.netlist.active_dependency_root =
-        Some(super::super::ActiveNetlistDocument::OwnedSource);
-    harness.state.netlist.active_dependency_identity = Some("a.inc".to_owned());
+    harness.state.netlist.front = super::super::NetlistTab::Include {
+        deck: harness.state.netlist.open_deck.as_ref().map(|deck| deck.id),
+        path: "a.inc".to_owned(),
+    };
     harness.model.simulation.source.netlist_content = "* a.inc\nR9 x 0 1k\n".into();
     let include_editor = editor_id_in(&harness.model, &harness.state.netlist);
     assert_ne!(include_editor, deck_editor);

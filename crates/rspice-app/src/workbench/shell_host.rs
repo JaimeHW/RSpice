@@ -1100,11 +1100,11 @@ impl DocumentHost for AppState {
             Workspace::Results => result_documents(&state.model),
             Workspace::Verify => verification_documents(),
             Workspace::Models => models_documents(),
-            Workspace::Netlist => netlist_workspace_documents(state.code.netlist_tabs(
-                &state.model,
-                &state.runs,
-                state.workbench.messages(),
-            )),
+            Workspace::Netlist => netlist_workspace_documents(
+                state
+                    .code
+                    .netlist_tabs(&state.model, state.workbench.messages()),
+            ),
         }
     }
 
@@ -1119,8 +1119,8 @@ impl DocumentHost for AppState {
 
     fn activate_owned_document(&mut self, document: &WorkspaceDocumentId) -> bool {
         use rspice_app_code::workbench::chrome::document_bar::code::{
-            activate_generated_netlist, activate_netlist_comparison, activate_netlist_dependency,
-            activate_netlist_run_snapshot, activate_owned_netlist,
+            activate_added_lines, activate_generated_netlist, activate_netlist_comparison,
+            activate_netlist_dependency, activate_netlist_run_input, activate_owned_netlist,
         };
         use rspice_app_design::workbench::chrome::document_bar::design::activate_cell_view;
         use rspice_app_results::workbench::chrome::document_bar::results::{
@@ -1163,10 +1163,15 @@ impl DocumentHost for AppState {
             WorkspaceDocumentId::NetlistComparison => {
                 activate_netlist_comparison(&mut state.model, &mut state.code.netlist)
             }
-            WorkspaceDocumentId::NetlistRunSnapshot => activate_netlist_run_snapshot(
+            WorkspaceDocumentId::NetlistAddedLines => {
+                activate_added_lines(&mut state.model, &mut state.code.netlist)
+            }
+            WorkspaceDocumentId::NetlistRunInput { run, point } => activate_netlist_run_input(
                 &mut state.model,
                 &mut state.code.netlist,
                 &state.runs,
+                *run,
+                *point,
             ),
             WorkspaceDocumentId::Project
             | WorkspaceDocumentId::SimulationPlan
@@ -1190,6 +1195,28 @@ impl DocumentHost for AppState {
                 rspice_app_code::workbench::chrome::document_bar::code::close_netlist_dependency(
                     &mut state.code.netlist_open_documents,
                     document,
+                );
+                None
+            }
+            WorkspaceDocumentId::NetlistOwned(_) => {
+                rspice_app_code::workbench::chrome::document_bar::code::close_netlist_deck(
+                    &mut state.model,
+                    &mut state.code.netlist,
+                    &mut state.code.netlist_open_documents,
+                );
+                None
+            }
+            WorkspaceDocumentId::NetlistRunInput { .. } => {
+                rspice_app_code::workbench::chrome::document_bar::code::close_netlist_run_input(
+                    &mut state.model,
+                    &mut state.code.netlist,
+                );
+                None
+            }
+            WorkspaceDocumentId::NetlistComparison => {
+                rspice_app_code::workbench::chrome::document_bar::code::close_netlist_comparison(
+                    &mut state.model,
+                    &mut state.code.netlist,
                 );
                 None
             }

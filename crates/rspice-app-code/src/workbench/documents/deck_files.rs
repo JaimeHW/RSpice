@@ -20,7 +20,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 
 use crate::state::{DeckId, NetlistDocumentId, StoredDeck, StoredDeckFile, TextEncoding};
 use crate::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, NetlistDocumentState, OwnedNetlistReplacement,
+    NetlistDocumentState, NetlistRoot, NetlistTab, OwnedNetlistReplacement,
 };
 use crate::workbench::state::WorkspaceDocumentId;
 
@@ -494,6 +494,11 @@ pub fn compare_with_disk(
         .as_deref()
         .ok_or_else(|| "Nothing on disk is newer than the tab.".to_owned())?;
     let name = file.name();
+    let deck = netlist
+        .open_deck
+        .as_ref()
+        .map(|deck| deck.id)
+        .ok_or_else(|| "The file is no longer open.".to_owned())?;
     let disk = format!("{name} on disk");
     let yours = format!("{name} in RSpice");
     let diff = similar::TextDiff::from_lines(change.text.as_str(), file.text.as_str())
@@ -502,7 +507,14 @@ pub fn compare_with_disk(
         .header(&disk, &yours)
         .to_string();
     netlist.generated_diff_source = diff;
-    netlist.comparison_return_document = ActiveNetlistDocument::OwnedSource;
+    // Closing the view goes back to the tab it was opened from.
+    if !netlist.front.is_comparison() && !netlist.front.is_run_input() {
+        netlist.comparison_return = netlist.front.clone();
+    }
+    netlist.comparison_sides = Some((
+        crate::workbench::documents::netlist_document::CompareSide::DiskFile(deck),
+        crate::workbench::documents::netlist_document::CompareSide::Deck(deck),
+    ));
     crate::workbench::documents::netlist_document::open_netlist_comparison(model, netlist);
     Ok(())
 }
@@ -883,9 +895,8 @@ fn close_open_deck(
         WorkspaceDocumentId::NetlistDependency { root, .. } => *root != previous,
         _ => true,
     });
-    netlist.active_document = ActiveNetlistDocument::Generated;
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
+    netlist.front = NetlistTab::Generated;
+    netlist.run_the_plan();
     model.simulation.source.netlist_content = model.netlist_artifacts.generated_source.clone();
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
@@ -936,10 +947,10 @@ pub fn locate_deck(
 /// include on its tab.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_shown_file(netlist: &mut NetlistDocumentState) -> Result<(), String> {
-    if netlist.active_document != ActiveNetlistDocument::OwnedSource {
+    if !netlist.front.shows_deck() {
         return Err("Only a deck or an include it reads is saved to its file.".to_owned());
     }
-    let include = netlist.active_dependency_identity.clone();
+    let include = netlist.front.include().map(str::to_owned);
     let file = netlist
         .open_deck
         .as_mut()
@@ -960,7 +971,7 @@ pub fn stored_sources(
 ) -> Option<(PathBuf, Vec<(PathBuf, String)>)> {
     let deck = netlist.open_deck.as_ref()?;
     let files = deck.stored_files.as_ref()?;
-    let include = netlist.active_dependency_identity.as_deref();
+    let include = netlist.front.include();
     let root_text = match include {
         None => shown.to_owned(),
         Some(_) => deck.root.line_ending.write(&deck.root.text).into_owned(),
@@ -1332,20 +1343,18 @@ pub fn show_deck(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool 
     let Some(deck) = netlist.open_deck.as_ref() else {
         return false;
     };
-    // The deck in front is the deck Run runs.
+    // The deck in front is the deck Run runs, on its tab again.
     netlist.run_target = super::netlist_tabs::RunTarget::Deck(deck.id);
+    netlist.deck_tab_closed = false;
     // Asking again for the deck already in front changes nothing: a fresh
     // revision would throw away the deck's settled check.
-    if netlist.active_document == ActiveNetlistDocument::OwnedSource
-        && netlist.active_dependency_identity.is_none()
+    if netlist.front == NetlistTab::Deck(deck.id)
         && model.simulation.source.netlist_content == deck.root.text
     {
         return true;
     }
     model.simulation.source.netlist_content = deck.root.text.clone();
-    netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
+    netlist.front = NetlistTab::Deck(deck.id);
     netlist.active_document_initialized = true;
     netlist.completion_open = false;
     netlist.completion_dismissed_at = None;
@@ -1414,7 +1423,7 @@ pub fn show_include(
         netlist,
         open_documents,
         runs,
-        ActiveNetlistDocument::OwnedSource,
+        NetlistRoot::Deck,
         root,
         &key,
         text,

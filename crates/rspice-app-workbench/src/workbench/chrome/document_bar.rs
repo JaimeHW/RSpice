@@ -367,10 +367,11 @@ pub fn document_descriptors(state: &impl DocumentSession) -> Vec<WorkspaceDocume
         .enumerate()
         .map(|(index, document)| WorkspaceDocumentDescriptor {
             open: index == 0
+                || document.id.is_pinned()
                 || !state.workbench().documents.is_closed(&document.id)
                 || active.as_ref() == Some(&document.id),
             active: active.as_ref() == Some(&document.id),
-            closable: index > 0,
+            closable: index > 0 && !document.id.is_pinned(),
             owner: state.workbench().window_session.owner(&document.id),
             id: document.id,
             label: document.label,
@@ -396,10 +397,11 @@ pub fn all_document_descriptors(state: &impl DocumentSession) -> Vec<WorkspaceDo
                         == Some(&document.id);
                     WorkspaceDocumentDescriptor {
                         open: index == 0
+                            || document.id.is_pinned()
                             || !state.workbench().documents.is_closed(&document.id)
                             || active,
                         active,
-                        closable: index > 0,
+                        closable: index > 0 && !document.id.is_pinned(),
                         owner,
                         id: document.id,
                         label: document.label,
@@ -549,9 +551,10 @@ fn owned_documents(
 }
 
 fn document_is_closable(state: &impl DocumentSession, document: &WorkspaceDocumentId) -> bool {
-    available_documents_for_workspace(state, document.workspace())
-        .first()
-        .is_some_and(|root| root.id != *document)
+    !document.is_pinned()
+        && available_documents_for_workspace(state, document.workspace())
+            .first()
+            .is_some_and(|root| root.id != *document)
 }
 
 /// Whether each of `documents` can be closed, as [`document_is_closable`]

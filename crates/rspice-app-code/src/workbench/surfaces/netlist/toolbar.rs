@@ -17,7 +17,7 @@ use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::CodeRequest;
 use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint_problem_mark};
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+use crate::workbench::documents::netlist_document::NetlistRoot;
 use crate::workbench::framework::feature::Cx;
 
 use super::{active_document_available, document_syntax_status, generated_primary_ready_in};
@@ -95,13 +95,13 @@ fn full_action_extent(
     ];
     if context.dependency_visible {
         widths.push(button(&messages.text(MessageId::NetlistReturnRoot)));
-        if context.active == ActiveNetlistDocument::OwnedSource {
+        if context.active == NetlistRoot::Deck {
             widths.push(button(&messages.text(MessageId::NetlistSaveSourceDeck)));
         }
     } else {
         match context.active {
-            ActiveNetlistDocument::Generated => {}
-            ActiveNetlistDocument::OwnedSource => {
+            NetlistRoot::Generated | NetlistRoot::AddedLines => {}
+            NetlistRoot::Deck => {
                 widths.push(button(&messages.text(MessageId::NetlistSaveSourceDeck)));
                 widths.push(button(&messages.text(if context.generated_ready {
                     MessageId::NetlistReturnPrimary
@@ -109,7 +109,7 @@ fn full_action_extent(
                     MessageId::CodeSourceLifecycleTitle
                 })));
             }
-            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
+            NetlistRoot::Comparison | NetlistRoot::RunInput => {
                 widths.push(button(&messages.text(MessageId::NetlistReturnPrimary)));
             }
         }
@@ -120,7 +120,7 @@ fn full_action_extent(
 /// What decides which actions the toolbar paints.
 #[derive(Clone, Copy)]
 struct ActionSetContext {
-    active: ActiveNetlistDocument,
+    active: NetlistRoot,
     dependency_visible: bool,
     generated_ready: bool,
 }
@@ -148,8 +148,8 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     );
 
     let content = rect.shrink2(vec2(CODE_TOOLBAR_PADDING_X, 0.0));
-    let active = cx.state.netlist.active_document;
-    let dependency_visible = cx.state.netlist.active_dependency_identity.is_some();
+    let active = cx.state.netlist.front.root_kind();
+    let dependency_visible = cx.state.netlist.front.include().is_some();
     // The deck or an include beside it: a file, which Save writes.
     let deck_file_dirty =
         crate::workbench::documents::netlist_document::active_deck_file_in(&cx.state.netlist)
@@ -261,7 +261,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             if let Some(language_action) = language_tools_menu(
                 ui,
                 messages,
-                active_available && active != ActiveNetlistDocument::GeneratedDiff,
+                active_available && active != NetlistRoot::Comparison,
                 active_editable,
                 quick_fix_available,
             ) {
@@ -306,8 +306,8 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 }
             } else {
                 match active {
-                    ActiveNetlistDocument::Generated => {}
-                    ActiveNetlistDocument::OwnedSource => {
+                    NetlistRoot::Generated | NetlistRoot::AddedLines => {}
+                    NetlistRoot::Deck => {
                         let save = ui
                             .add_enabled_ui(deck_file_dirty.unwrap_or(false), |ui| {
                                 ui.add_sized(
@@ -321,7 +321,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                             action = Some(NetlistToolbarAction::Save);
                         }
                     }
-                    ActiveNetlistDocument::GeneratedDiff => {
+                    NetlistRoot::Comparison => {
                         if ui
                             .add_sized(
                                 [PHONE_PRIMARY_WIDTH, control_h],
@@ -335,7 +335,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                             action = Some(NetlistToolbarAction::CloseComparison);
                         }
                     }
-                    ActiveNetlistDocument::RunSnapshot => {
+                    NetlistRoot::RunInput => {
                         if ui
                             .add_sized(
                                 [PHONE_PRIMARY_WIDTH, control_h],
@@ -381,7 +381,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             if let Some(language_action) = language_tools_menu(
                 ui,
                 messages,
-                active_available && active != ActiveNetlistDocument::GeneratedDiff,
+                active_available && active != NetlistRoot::Comparison,
                 active_editable,
                 quick_fix_available,
             ) {
@@ -405,8 +405,8 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 }
             } else {
                 match active {
-                    ActiveNetlistDocument::Generated => {}
-                    ActiveNetlistDocument::OwnedSource => {
+                    NetlistRoot::Generated | NetlistRoot::AddedLines => {}
+                    NetlistRoot::Deck => {
                         if ui
                             .add_enabled(
                                 deck_file_dirty.unwrap_or(false),
@@ -431,7 +431,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                             action = Some(NetlistToolbarAction::ManageTopDecks);
                         }
                     }
-                    ActiveNetlistDocument::GeneratedDiff => {
+                    NetlistRoot::Comparison => {
                         if ui
                             .button(messages.text(MessageId::NetlistReturnPrimary))
                             .clicked()
@@ -439,7 +439,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                             action = Some(NetlistToolbarAction::CloseComparison);
                         }
                     }
-                    ActiveNetlistDocument::RunSnapshot => {
+                    NetlistRoot::RunInput => {
                         if ui
                             .button(messages.text(MessageId::NetlistReturnPrimary))
                             .clicked()

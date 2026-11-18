@@ -2,7 +2,7 @@
 
 use crate::workbench::RSpiceApp;
 use egui::vec2;
-use rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument;
+use rspice_app_code::workbench::documents::netlist_document::NetlistTab;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::retain_generated;
 use rspice_app_code::workbench::surfaces::netlist::toolbar::{CodeToolbarLayout, code_toolbar};
 
@@ -28,7 +28,7 @@ fn schematic_first_app() -> RSpiceApp {
     );
     app.state.model.simulation.source.netlist_content =
         app.state.model.netlist_artifacts.generated_source.clone();
-    app.state.code.netlist.active_document = ActiveNetlistDocument::Generated;
+    app.state.code.netlist.front = NetlistTab::Generated;
     app.state.code.netlist.active_document_initialized = true;
     app
 }

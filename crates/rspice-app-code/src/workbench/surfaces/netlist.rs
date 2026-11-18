@@ -31,7 +31,7 @@ use crate::workbench::design_system::{
     Problem, WorkbenchIcon, empty_state, empty_state_with_actions, paint_problem_mark,
 };
 use crate::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, ExecutedDeckVerification, cross_probe,
+    ExecutedDeckVerification, NetlistRoot, cross_probe,
 };
 use crate::workbench::framework::feature::Cx;
 
@@ -556,7 +556,7 @@ pub fn run_strip_projection(
     };
 
     let active = effective_active_document_in(netlist);
-    let (run_id, phase) = if active == ActiveNetlistDocument::RunSnapshot {
+    let (run_id, phase) = if active == NetlistRoot::RunInput {
         // Which run the snapshot belongs to is whichever binding put it there.
         // `last_run_id` is the *manual baseline* binding, and an executed deck
         // is opened from a run that never touched it — reading only that one
@@ -568,11 +568,8 @@ pub fn run_strip_projection(
         };
         (run_id, RunStripPhase::Snapshot)
     } else {
-        if netlist.active_dependency_identity.is_some()
-            || !matches!(
-                active,
-                ActiveNetlistDocument::Generated | ActiveNetlistDocument::OwnedSource
-            )
+        if netlist.front.include().is_some()
+            || !matches!(active, NetlistRoot::Generated | NetlistRoot::Deck)
         {
             return None;
         }
@@ -1064,8 +1061,8 @@ fn generated_primary_unavailable(
     model: &crate::workbench::app_state::Model,
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
 ) -> bool {
-    netlist.active_dependency_identity.is_none()
-        && netlist.active_document == ActiveNetlistDocument::Generated
+    netlist.front.include().is_none()
+        && netlist.front.shows_generated()
         && !generated_primary_ready_in(model)
 }
 
@@ -1080,17 +1077,18 @@ fn active_document_available(
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
     runs: &rspice_app_runs::workbench::slots::runs::RunsState,
 ) -> bool {
-    if netlist.active_dependency_identity.is_some() {
+    if netlist.front.include().is_some() {
         return crate::workbench::documents::netlist_document::active_dependency_in(model, netlist)
             .is_some()
             || crate::workbench::documents::netlist_document::active_deck_file_in(netlist)
                 .is_some();
     }
-    match netlist.active_document {
-        ActiveNetlistDocument::Generated => generated_primary_ready_in(model),
-        ActiveNetlistDocument::OwnedSource => netlist.open_deck.is_some(),
-        ActiveNetlistDocument::GeneratedDiff => !netlist.generated_diff_source.is_empty(),
-        ActiveNetlistDocument::RunSnapshot => {
+    match netlist.front.root_kind() {
+        NetlistRoot::Generated => generated_primary_ready_in(model),
+        NetlistRoot::AddedLines => true,
+        NetlistRoot::Deck => netlist.open_deck.is_some(),
+        NetlistRoot::Comparison => !netlist.generated_diff_source.is_empty(),
+        NetlistRoot::RunInput => {
             crate::workbench::documents::netlist_document::run_deck_snapshot_run_id_in(runs)
                 .is_some()
         }
@@ -1109,12 +1107,12 @@ fn document_syntax_status(
     messages: crate::workbench::MessageCatalog,
 ) -> Option<(String, Problem)> {
     if matches!(
-        netlist.active_document,
-        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot
+        netlist.front.root_kind(),
+        NetlistRoot::Comparison | NetlistRoot::RunInput
     ) {
         return None;
     }
-    if netlist.active_document == ActiveNetlistDocument::Generated
+    if netlist.front.shows_generated()
         && (model.netlist_artifacts.generation_error.is_some()
             || !generated_primary_ready_in(model)
             || model.netlist_artifacts.generated_input_digest
@@ -1162,6 +1160,7 @@ mod tests {
     use super::fixtures::{retain_generated, seal_manual_run};
     use super::*;
     use crate::workbench::code::tests::{CodeHarness, harness};
+    use crate::workbench::documents::netlist_document::NetlistTab;
 
     fn configured_veriloga_state() -> (CodeHarness, String) {
         let mut harness = harness();
@@ -1344,7 +1343,7 @@ mod tests {
     #[test]
     fn empty_generated_primary_reports_blocked_without_claiming_staleness() {
         let mut harness = harness();
-        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.state.netlist.front = NetlistTab::Generated;
         harness.model.netlist_artifacts.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
 
@@ -1371,7 +1370,7 @@ mod tests {
             &mut harness.state.netlist,
             "retained\n.end\n",
         );
-        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.state.netlist.front = NetlistTab::Generated;
         harness.model.netlist_artifacts.generation_error = Some("Regeneration failed.".to_owned());
 
         assert!(!generated_primary_unavailable(
@@ -1397,7 +1396,7 @@ mod tests {
             &mut harness.state.netlist,
             "retained\n.end\n",
         );
-        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        harness.state.netlist.front = NetlistTab::Generated;
         harness.model.netlist_artifacts.generated_source.clear();
         harness.model.netlist_artifacts.generation_error = None;
 
@@ -1498,13 +1497,18 @@ mod tests {
     #[test]
     fn run_strip_does_not_speak_for_an_include_or_a_comparison() {
         let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        harness.state.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+        harness.state.netlist.front = NetlistTab::Compare {
+            left: crate::workbench::documents::netlist_document::CompareSide::PreviousGenerated(0),
+            right: crate::workbench::documents::netlist_document::CompareSide::Generated,
+        };
         assert!(
             run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs).is_none()
         );
 
-        harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        harness.state.netlist.active_dependency_identity = Some("models/r.inc".to_owned());
+        harness.state.netlist.front = NetlistTab::Include {
+            deck: harness.state.netlist.open_deck.as_ref().map(|deck| deck.id),
+            path: "models/r.inc".to_owned(),
+        };
         assert!(
             run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs).is_none()
         );

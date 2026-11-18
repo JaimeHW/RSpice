@@ -63,7 +63,7 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::workbench::code::tests::{CodeHarness, harness};
-    use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+    use crate::workbench::documents::netlist_document::NetlistTab;
     use crate::workbench::framework::command_registry::CommandAvailability;
     use crate::workbench::framework::feature::{Feature, ForeignAvailability};
 
@@ -119,7 +119,7 @@ mod tests {
         );
         generated.model.simulation.source.netlist_content =
             generated.model.netlist_artifacts.generated_source.clone();
-        generated.state.netlist.active_document = ActiveNetlistDocument::Generated;
+        generated.state.netlist.front = NetlistTab::Generated;
         generated.state.netlist.active_document_initialized = true;
         let shown = header(&mut generated);
         assert!(shown.iter().any(|text| text == "Read-only"), "{shown:?}");

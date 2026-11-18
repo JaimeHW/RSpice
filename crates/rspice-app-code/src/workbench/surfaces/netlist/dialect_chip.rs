@@ -420,7 +420,9 @@ mod tests {
         use std::path::PathBuf;
 
         use crate::workbench::code::tests::{CodeHarness, harness};
-        use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, editor_id_in};
+        use crate::workbench::documents::netlist_document::{
+            NetlistRoot, NetlistTab, editor_id_in,
+        };
         use crate::workbench::framework::command_registry::CommandAvailability;
         use crate::workbench::framework::feature::{Feature, ForeignAvailability};
         use crate::workbench::framework::requests::{SourceEditorRequest, StandardCommand};
@@ -454,10 +456,7 @@ mod tests {
                 &mut harness.runs,
                 deck,
             );
-            assert_eq!(
-                harness.state.netlist.active_document,
-                ActiveNetlistDocument::OwnedSource
-            );
+            assert_eq!(harness.state.netlist.front.root_kind(), NetlistRoot::Deck);
             harness
         }
 
@@ -566,7 +565,7 @@ mod tests {
             );
             generated.model.simulation.source.netlist_content =
                 generated.model.netlist_artifacts.generated_source.clone();
-            generated.state.netlist.active_document = ActiveNetlistDocument::Generated;
+            generated.state.netlist.front = NetlistTab::Generated;
             generated.state.netlist.active_document_initialized = true;
             let _ = frame(&context, &mut generated, Vec::new());
             let generated_shown = header(&frame(&context, &mut generated, Vec::new()));

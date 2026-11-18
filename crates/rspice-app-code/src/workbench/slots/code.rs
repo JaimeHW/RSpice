@@ -5,7 +5,7 @@
 
 use crate::workbench::app::dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
-use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
+use crate::workbench::documents::netlist_document::{NetlistDocumentState, NetlistRoot};
 use crate::workbench::framework::feature::{CodePort, NetlistDocumentKey};
 use rspice_app_runs::simulation::{DeckOrigin, ManualDeck};
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
@@ -57,18 +57,16 @@ impl CodeState {
     }
 
     /// What the document bar's Netlist tabs read of the feature, beside the
-    /// model, the runs and the message catalogue.
+    /// model and the message catalogue.
     pub fn netlist_tabs<'a>(
         &'a self,
         model: &'a rspice_app_state::workbench::app_state::model::Model,
-        runs: &'a rspice_app_runs::workbench::slots::runs::RunsState,
         messages: crate::workbench::MessageCatalog,
     ) -> crate::workbench::chrome::document_bar::code::NetlistTabsReads<'a> {
         crate::workbench::chrome::document_bar::code::NetlistTabsReads {
             model,
             netlist: &self.netlist,
             open_documents: &self.netlist_open_documents,
-            runs,
             messages,
         }
     }
@@ -132,7 +130,7 @@ impl CodePort for CodeState {
     }
 
     fn shown_netlist_document_key(&self) -> NetlistDocumentKey {
-        netlist_document_key(self.netlist.active_document)
+        netlist_document_key(self.netlist.front.root_kind())
     }
 
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
@@ -188,33 +186,45 @@ impl CodePort for CodeState {
 
 /// The key a change check compares for `document`: each document its own,
 /// so a switch between any two of them is a change.
-const fn netlist_document_key(document: ActiveNetlistDocument) -> NetlistDocumentKey {
+const fn netlist_document_key(document: NetlistRoot) -> NetlistDocumentKey {
     NetlistDocumentKey::new(match document {
-        ActiveNetlistDocument::Generated => 0,
-        ActiveNetlistDocument::OwnedSource => 1,
-        ActiveNetlistDocument::GeneratedDiff => 2,
-        ActiveNetlistDocument::RunSnapshot => 3,
+        NetlistRoot::Generated => 0,
+        NetlistRoot::Deck => 1,
+        NetlistRoot::Comparison => 2,
+        NetlistRoot::RunInput => 3,
+        NetlistRoot::AddedLines => 4,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::documents::netlist_document::NetlistTab;
 
     /// A run's sealed deck and the generated netlist are different
     /// documents, so the switch between them is a change a reader re-projects
     /// on, as is every other switch.
     #[test]
     fn every_shown_netlist_document_has_its_own_key() {
+        let deck = crate::state::DeckId::new();
         let documents = [
-            ActiveNetlistDocument::Generated,
-            ActiveNetlistDocument::OwnedSource,
-            ActiveNetlistDocument::GeneratedDiff,
-            ActiveNetlistDocument::RunSnapshot,
+            NetlistTab::Generated,
+            NetlistTab::Deck(deck),
+            NetlistTab::Compare {
+                left: crate::workbench::documents::netlist_document::CompareSide::PreviousGenerated(
+                    0,
+                ),
+                right: crate::workbench::documents::netlist_document::CompareSide::Generated,
+            },
+            NetlistTab::RunInput {
+                run: 1,
+                point: None,
+            },
+            NetlistTab::AddedLines,
         ];
         let mut code = CodeState::default();
         let keys = documents.map(|document| {
-            code.netlist.active_document = document;
+            code.netlist.front = document;
             code.shown_netlist_document_key()
         });
         assert_ne!(keys[0], keys[3], "the generated netlist and a run's deck");

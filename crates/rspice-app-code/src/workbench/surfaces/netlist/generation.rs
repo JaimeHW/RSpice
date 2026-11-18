@@ -16,7 +16,9 @@ use crate::state::{
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::code::CodeFeature;
-use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
+use crate::workbench::documents::netlist_document::{
+    NetlistDocumentState, NetlistRoot, NetlistTab,
+};
 use crate::workbench::framework::feature::Cx;
 
 /// Rebuild the immutable generated primary whenever any authoritative project
@@ -25,15 +27,19 @@ use crate::workbench::framework::feature::Cx;
 /// partial bytes.
 pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
     if !cx.state.netlist.active_document_initialized {
-        cx.state.netlist.active_document = if cx.state.netlist.open_deck.is_some() {
-            ActiveNetlistDocument::OwnedSource
-        } else {
-            ActiveNetlistDocument::Generated
-        };
+        // A deck the session opens with is in front, and Run runs it.
+        match cx.state.netlist.open_deck.as_ref().map(|deck| deck.id) {
+            Some(id) => {
+                cx.state.netlist.front = NetlistTab::Deck(id);
+                cx.state.netlist.run_target =
+                    crate::workbench::documents::netlist_tabs::RunTarget::Deck(id);
+            }
+            None => cx.state.netlist.front = NetlistTab::Generated,
+        }
         cx.state.netlist.active_document_initialized = true;
     }
 
-    if cx.state.netlist.active_dependency_identity.is_some()
+    if cx.state.netlist.front.include().is_some()
         && crate::workbench::documents::netlist_document::active_dependency_in(
             cx.model,
             &cx.state.netlist,
@@ -59,7 +65,7 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
 
     // The deck or the include in front is its file's text, which the editor
     // edits in place: the buffer follows it, never the other way round.
-    if cx.state.netlist.active_document == ActiveNetlistDocument::OwnedSource {
+    if cx.state.netlist.front.shows_deck() {
         if let Some(file) =
             crate::workbench::documents::netlist_document::active_deck_file_in(&cx.state.netlist)
             && cx.model.simulation.source.netlist_content != file.text
@@ -77,15 +83,11 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
     )
     .and_then(crate::state::DependencyMetadata::source)
     .map(str::to_owned)
-    .or_else(|| match cx.state.netlist.active_document {
-        ActiveNetlistDocument::Generated => {
-            Some(cx.model.netlist_artifacts.generated_source.clone())
-        }
-        ActiveNetlistDocument::OwnedSource => None,
-        ActiveNetlistDocument::GeneratedDiff => {
-            Some(cx.state.netlist.generated_diff_source.clone())
-        }
-        ActiveNetlistDocument::RunSnapshot => Some(
+    .or_else(|| match cx.state.netlist.front.root_kind() {
+        NetlistRoot::Generated => Some(cx.model.netlist_artifacts.generated_source.clone()),
+        NetlistRoot::AddedLines | NetlistRoot::Deck => None,
+        NetlistRoot::Comparison => Some(cx.state.netlist.generated_diff_source.clone()),
+        NetlistRoot::RunInput => Some(
             crate::workbench::documents::netlist_document::run_snapshot_source_in(
                 cx.model,
                 &cx.state.netlist,

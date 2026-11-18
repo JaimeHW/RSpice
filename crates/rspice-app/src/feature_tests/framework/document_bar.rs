@@ -74,7 +74,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
     let mut state = multi_document_netlist_state();
     assert_eq!(
         document_descriptors(&state).len(),
-        2,
+        3,
         "resolved closures are available in the navigator, not opened as thousands of tabs"
     );
     rspice_app_code::workbench::documents::netlist_document::open_netlist_dependency_from_root_in(
@@ -82,7 +82,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
         &mut state.code.netlist,
         &mut state.code.netlist_open_documents,
         &mut state.runs,
-        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated,
+        rspice_app_code::workbench::documents::netlist_document::NetlistRoot::Generated,
         "models/resistor.inc",
     )
     .unwrap();
@@ -91,7 +91,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
         &mut state.code.netlist,
         &mut state.code.netlist_open_documents,
         &mut state.runs,
-        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource,
+        rspice_app_code::workbench::documents::netlist_document::NetlistRoot::Deck,
         DECK_INCLUDE,
     )
     .unwrap();
@@ -100,43 +100,41 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
         &mut state.code.netlist,
     );
     let descriptors = document_descriptors(&state);
-    assert_eq!(descriptors.len(), 4);
+    assert_eq!(descriptors.len(), 5);
     assert!(matches!(
         descriptors[0].id,
         WorkspaceDocumentId::NetlistGenerated(_)
     ));
+    assert_eq!(descriptors[1].id, WorkspaceDocumentId::NetlistAddedLines);
     assert!(matches!(
-        descriptors[1].id,
+        descriptors[2].id,
         WorkspaceDocumentId::NetlistDependency { .. }
     ));
     assert!(matches!(
-        descriptors[2].id,
+        descriptors[3].id,
         WorkspaceDocumentId::NetlistOwned(_)
     ));
     assert!(matches!(
-        descriptors[3].id,
+        descriptors[4].id,
         WorkspaceDocumentId::NetlistDependency { .. }
     ));
     assert!(descriptors[0].active);
 
-    let deck_include = descriptors[3].id.clone();
+    let deck_include = descriptors[4].id.clone();
     assert!(activate_document(&mut state, &deck_include));
     assert_eq!(
-        state.code.netlist.active_document,
-        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
+        state.code.netlist.front.root_kind(),
+        rspice_app_code::workbench::documents::netlist_document::NetlistRoot::Deck
     );
-    assert_eq!(
-        state.code.netlist.active_dependency_identity.as_deref(),
-        Some(DECK_INCLUDE)
-    );
+    assert_eq!(state.code.netlist.front.include(), Some(DECK_INCLUDE));
     assert_eq!(active_document_id(&state), Some(deck_include.clone()));
 
-    let generated_dependency = descriptors[1].id.clone();
-    let documents = netlist_workspace_documents(state.code.netlist_tabs(
-        &state.model,
-        &state.runs,
-        state.workbench.messages(),
-    ));
+    let generated_dependency = descriptors[2].id.clone();
+    let documents = netlist_workspace_documents(
+        state
+            .code
+            .netlist_tabs(&state.model, state.workbench.messages()),
+    );
     assert!(close_document(
         &mut state,
         &generated_dependency,

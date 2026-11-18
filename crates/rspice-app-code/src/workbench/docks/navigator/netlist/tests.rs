@@ -12,10 +12,16 @@ use crate::workbench::code::tests::harness;
 fn a_run_snapshot_and_a_comparison_report_no_include_status() {
     let mut harness = harness();
     for document in [
-        ActiveNetlistDocument::RunSnapshot,
-        ActiveNetlistDocument::GeneratedDiff,
+        crate::workbench::documents::netlist_document::NetlistTab::RunInput {
+            run: 1,
+            point: None,
+        },
+        crate::workbench::documents::netlist_document::NetlistTab::Compare {
+            left: crate::workbench::documents::netlist_document::CompareSide::PreviousGenerated(0),
+            right: crate::workbench::documents::netlist_document::CompareSide::Generated,
+        },
     ] {
-        harness.state.netlist.active_document = document;
+        harness.state.netlist.front = document;
         assert!(netlist_dependency_status(&harness.model, &harness.state.netlist).is_none());
     }
 }

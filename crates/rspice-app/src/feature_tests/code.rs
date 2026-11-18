@@ -22,6 +22,7 @@ mod netlist_generation;
 mod netlist_language;
 mod netlist_source_menu;
 mod netlist_surface;
+mod netlist_tabs;
 mod netlist_toolbar;
 mod netlist_transfer;
 mod netlist_workflow;

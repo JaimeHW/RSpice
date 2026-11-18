@@ -11,9 +11,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::deck_files::LineEnding;
-use rspice_app_code::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, edit_deck_file,
-};
+use rspice_app_code::workbench::documents::netlist_document::{NetlistTab, edit_deck_file};
 use rspice_app_state::state::TextEncoding;
 use rspice_app_state::time_compat::with_unix_epoch;
 
@@ -102,9 +100,9 @@ fn the_generated_netlist_saved_as_a_deck_names_the_design_and_opens_as_a_deck() 
     assert_eq!(rest.trim_end(), generated.trim_end());
     let deck = app.state.code.netlist.open_deck.as_ref().expect("open");
     assert_eq!(deck.root.path, path);
-    assert_eq!(
-        app.state.code.netlist.active_document,
-        ActiveNetlistDocument::OwnedSource
+    assert!(
+        matches!(app.state.code.netlist.front, NetlistTab::Deck(_)),
+        "the deck is in front"
     );
     assert_eq!(app.state.model.simulation.source.netlist_content, text);
     let content = &app.state.model.workspace.content;

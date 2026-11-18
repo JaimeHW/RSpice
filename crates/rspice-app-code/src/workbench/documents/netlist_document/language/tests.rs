@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::workbench::code::tests::{CodeHarness, harness};
+use crate::workbench::documents::netlist_document::NetlistTab;
 
 #[test]
 fn project_index_resolves_cross_file_definitions_and_references_case_insensitively() {
@@ -34,8 +35,7 @@ fn project_index_resolves_cross_file_definitions_and_references_case_insensitive
     )
     .unwrap();
 
-    let index =
-        NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document_texts(&document));
+    let index = NetlistProjectIndex::build(NetlistRoot::Generated, &document_texts(&document));
 
     let definitions = index.definitions_named("cell");
     assert_eq!(definitions.len(), 1);
@@ -118,8 +118,7 @@ fn verilog_a_sources_stay_out_of_the_spice_project_index() {
     )
     .unwrap();
 
-    let index =
-        NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document_texts(&document));
+    let index = NetlistProjectIndex::build(NetlistRoot::Generated, &document_texts(&document));
 
     let instances = index
         .hierarchy()
@@ -189,8 +188,7 @@ S1 a b c d smod\n\
     )
     .unwrap();
 
-    let index =
-        NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document_texts(&document));
+    let index = NetlistProjectIndex::build(NetlistRoot::Generated, &document_texts(&document));
 
     for name in ["dmod", "qmod", "mmod", "rmod", "smod"] {
         assert_eq!(
@@ -205,7 +203,7 @@ S1 a b c d smod\n\
 #[test]
 fn expanded_hierarchy_stops_at_recursive_subcircuit_edges() {
     let location = |line| ProjectSourceLocation {
-        root: ActiveNetlistDocument::Generated,
+        root: NetlistRoot::Generated,
         dependency_identity: None,
         display_name: "recursive.sp".to_owned(),
         line,
@@ -272,8 +270,7 @@ B1 y 0 V={shape(V(out))*gain}\n\
     )
     .unwrap();
 
-    let index =
-        NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document_texts(&document));
+    let index = NetlistProjectIndex::build(NetlistRoot::Generated, &document_texts(&document));
 
     assert_eq!(index.definitions_named("base").len(), 1);
     assert_eq!(index.definitions_named("gain").len(), 1);
@@ -311,7 +308,7 @@ fn go_to_definition_lands_on_the_definition_in_the_file_that_holds_it() {
 
     assert_eq!(said, "Opened definition of rmodel");
     assert_eq!(
-        harness.state.netlist.active_dependency_identity.as_deref(),
+        harness.state.netlist.front.include(),
         Some(crate::workbench::documents::netlist_document::fixtures::DECK_INCLUDE)
     );
     assert_eq!(harness.state.netlist.requested_line, Some(1));
@@ -351,7 +348,7 @@ R2 a 0 {gain}
         )
         .unwrap(),
     );
-    harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
+    harness.state.netlist.front = NetlistTab::Generated;
     harness.model.simulation.source.netlist_content = deck.to_owned();
     let mut go_to = |needle: &str| {
         harness.state.netlist.cursor_char_index =
@@ -688,7 +685,11 @@ fn value_hover_answers_a_repeated_pointer_position_from_retained_state() {
 #[test]
 fn value_hover_declines_a_unified_comparison_document() {
     let mut harness = hover_state();
-    harness.state.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    harness.state.netlist.front =
+        crate::workbench::documents::netlist_document::NetlistTab::Compare {
+            left: crate::workbench::documents::netlist_document::CompareSide::PreviousGenerated(0),
+            right: crate::workbench::documents::netlist_document::CompareSide::Generated,
+        };
 
     assert_eq!(hover_at(&mut harness, ".param l=", 7), None);
 }

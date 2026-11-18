@@ -11,7 +11,7 @@
     clippy::unreachable
 )]
 
-use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
+use super::{Model, NetlistDocumentState, NetlistTab};
 use crate::product::ObjectRevision;
 use crate::state::{
     DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
@@ -80,7 +80,7 @@ pub fn seed_deck(model: &mut Model, netlist: &mut NetlistDocumentState, root: &s
         },
     }];
     netlist.open_deck = Some(deck);
-    netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    netlist.front = NetlistTab::Deck(model.workspace.content.decks[0].id);
     netlist.active_document_initialized = true;
     model.simulation.source.netlist_content = root.to_owned();
     model

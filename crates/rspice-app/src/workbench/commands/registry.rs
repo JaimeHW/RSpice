@@ -771,8 +771,8 @@ mod tests {
 
         assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
         assert_eq!(
-            app.state.code.netlist.active_document,
-            rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
+            app.state.code.netlist.front.root_kind(),
+            rspice_app_code::workbench::documents::netlist_document::NetlistRoot::Generated
         );
         let line = app
             .state

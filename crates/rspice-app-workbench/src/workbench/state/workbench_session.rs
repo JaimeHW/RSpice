@@ -100,15 +100,20 @@ pub enum WorkspaceDocumentId {
     Verification,
     Models,
     NetlistGenerated(crate::state::NetlistDocumentId),
+    /// The lines the plan's root design adds to its generated netlist.
+    NetlistAddedLines,
     NetlistOwned(crate::state::NetlistDocumentId),
     NetlistDependency {
         root: crate::state::NetlistDocumentId,
         logical_identity: String,
     },
     NetlistComparison,
-    /// The read-only deck a completed manual run consumed. There is one at a
-    /// time because one run at a time owns the deck baseline.
-    NetlistRunSnapshot,
+    /// The text run `run` executed: for `point` of a sweep, or the deck a
+    /// manual run read when `point` is `None`. Read-only, kept with the run.
+    NetlistRunInput {
+        run: u64,
+        point: Option<usize>,
+    },
     /// Legacy single-document session identity retained so older device-local
     /// workbench snapshots continue to deserialize. New netlist sessions use
     /// the stable document-specific variants above.
@@ -125,12 +130,20 @@ impl WorkspaceDocumentId {
             Self::Verification => Workspace::Verify,
             Self::Models => Workspace::Models,
             Self::NetlistGenerated(_)
+            | Self::NetlistAddedLines
             | Self::NetlistOwned(_)
             | Self::NetlistDependency { .. }
             | Self::NetlistComparison
-            | Self::NetlistRunSnapshot
+            | Self::NetlistRunInput { .. }
             | Self::NetlistSource => Workspace::Netlist,
         }
+    }
+
+    /// Whether the document's tab stays while its workspace is open: the
+    /// generated netlist and the Added lines, which every schematic design
+    /// has.
+    pub const fn is_pinned(&self) -> bool {
+        matches!(self, Self::NetlistGenerated(_) | Self::NetlistAddedLines)
     }
 }
 

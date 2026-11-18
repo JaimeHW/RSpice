@@ -105,10 +105,7 @@ fn a_parameter_is_found_on_a_continuation_line_and_in_the_file_the_deck_includes
         (row.include.as_deref(), row.line, row.column),
     )
     .expect("the include opens at the row");
-    assert_eq!(
-        harness.state.netlist.active_dependency_identity.as_deref(),
-        Some(DECK_INCLUDE)
-    );
+    assert_eq!(harness.state.netlist.front.include(), Some(DECK_INCLUDE));
     assert_eq!(harness.state.netlist.cursor_line, 1);
 }
 

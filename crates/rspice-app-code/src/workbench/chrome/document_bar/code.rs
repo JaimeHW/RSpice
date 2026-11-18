@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use crate::workbench::MessageCatalog;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, NetlistDocumentState, run_deck_snapshot_run_id_in,
+    NetlistDocumentState, NetlistRoot, NetlistTab,
 };
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -16,23 +16,24 @@ use rspice_app_state::workbench::app_state::model::Model;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// What the Netlist tabs read: the model, the netlist editor's documents,
-/// the includes the reader opened, the runs that sealed a deck and the
-/// message catalogue.
+/// the includes the reader opened and the message catalogue.
 #[derive(Clone, Copy)]
 pub struct NetlistTabsReads<'a> {
     pub(crate) model: &'a Model,
     pub(crate) netlist: &'a NetlistDocumentState,
     pub(crate) open_documents: &'a HashSet<WorkspaceDocumentId>,
-    pub(crate) runs: &'a RunsState,
     pub(crate) messages: MessageCatalog,
 }
 
+/// The Netlist page's tabs, in order: the generated netlist and the Added
+/// lines (pinned while there is a design to netlist), each include of the
+/// generated netlist the reader opened, the deck and its open includes, the
+/// open comparison and the open run input.
 pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<WorkspaceDocument> {
     let NetlistTabsReads {
         model,
         netlist,
         open_documents,
-        runs,
         messages,
     } = reads;
     let mut documents = Vec::new();
@@ -41,6 +42,12 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
             id: WorkspaceDocumentId::NetlistGenerated(generated.id()),
             label: messages.text(crate::workbench::MessageId::CodeGeneratedNetlist),
             icon: WorkbenchIcon::Netlist,
+            dirty: false,
+        });
+        documents.push(WorkspaceDocument {
+            id: WorkspaceDocumentId::NetlistAddedLines,
+            label: messages.text(crate::workbench::MessageId::NetlistAddedLinesDocument),
+            icon: WorkbenchIcon::Code,
             dirty: false,
         });
         documents.extend(generated.dependencies().iter().filter_map(|dependency| {
@@ -64,7 +71,11 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         }));
     }
 
-    if let Some(deck) = netlist.open_deck.as_ref() {
+    if let Some(deck) = netlist
+        .open_deck
+        .as_ref()
+        .filter(|_| !netlist.deck_tab_closed)
+    {
         let root = deck.tab_id();
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistOwned(root),
@@ -86,21 +97,18 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         }));
     }
 
-    if !netlist.generated_diff_source.is_empty() {
+    if netlist.comparison_sides.is_some() {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistComparison,
             label: messages.text(crate::workbench::MessageId::NetlistComparisonDocument),
-            icon: WorkbenchIcon::Code,
+            icon: WorkbenchIcon::Compare,
             dirty: false,
         });
     }
-    if let Some(run_id) = run_deck_snapshot_run_id_in(runs) {
+    if let Some((run, point)) = netlist.open_run_input {
         documents.push(WorkspaceDocument {
-            id: WorkspaceDocumentId::NetlistRunSnapshot,
-            label: messages.format(
-                crate::workbench::MessageId::NetlistRunSnapshotDocument,
-                &[("id", &run_id.to_string())],
-            ),
+            id: WorkspaceDocumentId::NetlistRunInput { run, point },
+            label: run_input_label(model, messages, run, point),
             icon: WorkbenchIcon::Results,
             dirty: false,
         });
@@ -109,6 +117,37 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         documents.push(code_workspace_document(model));
     }
     documents
+}
+
+/// A run input's tab label: "Run 12 input" for the deck a manual run read
+/// or a run of one point, "Run 12 · point 3/9" for one point of several.
+fn run_input_label(
+    model: &Model,
+    messages: MessageCatalog,
+    run: u64,
+    point: Option<usize>,
+) -> String {
+    let id = run.to_string();
+    let count = model
+        .simulation
+        .retained
+        .executed_decks
+        .get(run)
+        .map_or(0, |deck| deck.points.len());
+    match point {
+        Some(point) if count > 1 => messages.format(
+            crate::workbench::MessageId::NetlistRunInputPointDocument,
+            &[
+                ("id", &id),
+                ("point", &(point + 1).to_string()),
+                ("count", &count.to_string()),
+            ],
+        ),
+        _ => messages.format(
+            crate::workbench::MessageId::NetlistRunSnapshotDocument,
+            &[("id", &id)],
+        ),
+    }
 }
 
 /// The deck's own tab, when the Netlist workspace has no other document to
@@ -126,38 +165,37 @@ pub fn active_netlist_document_id(
     model: &Model,
     netlist: &NetlistDocumentState,
 ) -> Option<WorkspaceDocumentId> {
-    if netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
-        return Some(WorkspaceDocumentId::NetlistComparison);
-    }
-    if netlist.active_document == ActiveNetlistDocument::RunSnapshot {
-        return Some(WorkspaceDocumentId::NetlistRunSnapshot);
-    }
-    let root = netlist
-        .active_dependency_root
-        .unwrap_or(netlist.active_document);
-    let document = match root {
-        ActiveNetlistDocument::Generated => model
+    let generated = || {
+        model
             .netlist_artifacts
             .generated_document
             .as_ref()
-            .map(|document| document.id()),
-        ActiveNetlistDocument::OwnedSource => netlist.open_deck.as_ref().map(|deck| deck.tab_id()),
-        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
-    }?;
-    if let Some(logical_identity) = netlist.active_dependency_identity.as_ref() {
-        Some(WorkspaceDocumentId::NetlistDependency {
-            root: document,
-            logical_identity: logical_identity.clone(),
-        })
-    } else {
-        Some(match root {
-            ActiveNetlistDocument::Generated => WorkspaceDocumentId::NetlistGenerated(document),
-            ActiveNetlistDocument::OwnedSource => WorkspaceDocumentId::NetlistOwned(document),
-            ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
-                return None;
-            }
-        })
-    }
+            .map(|document| document.id())
+    };
+    let deck = |id: crate::state::DeckId| {
+        netlist
+            .open_deck
+            .as_ref()
+            .filter(|deck| deck.id == id)
+            .map(|deck| deck.tab_id())
+    };
+    Some(match &netlist.front {
+        NetlistTab::Generated => WorkspaceDocumentId::NetlistGenerated(generated()?),
+        NetlistTab::AddedLines => WorkspaceDocumentId::NetlistAddedLines,
+        NetlistTab::Deck(id) => WorkspaceDocumentId::NetlistOwned(deck(*id)?),
+        NetlistTab::Include { deck: root, path } => WorkspaceDocumentId::NetlistDependency {
+            root: match root {
+                Some(id) => deck(*id)?,
+                None => generated()?,
+            },
+            logical_identity: path.clone(),
+        },
+        NetlistTab::RunInput { run, point } => WorkspaceDocumentId::NetlistRunInput {
+            run: *run,
+            point: *point,
+        },
+        NetlistTab::Compare { .. } => WorkspaceDocumentId::NetlistComparison,
+    })
 }
 
 /// Show the generated netlist, when it is the one this tab names.
@@ -172,8 +210,7 @@ pub fn activate_generated_netlist(
         .as_ref()
         .is_some_and(|document| document.id() == *document_id);
     available
-        && ((netlist.active_document == ActiveNetlistDocument::Generated
-            && netlist.active_dependency_identity.is_none())
+        && ((netlist.front.shows_generated() && netlist.front.include().is_none())
             || crate::workbench::documents::netlist_document::open_generated_primary_in(
                 model, netlist,
             ))
@@ -208,13 +245,14 @@ pub fn activate_netlist_dependency(
         .as_ref()
         .is_some_and(|document| document.id() == *root)
     {
-        Some(ActiveNetlistDocument::Generated)
-    } else if netlist
-        .open_deck
-        .as_ref()
-        .is_some_and(|deck| deck.tab_id() == *root)
+        Some(NetlistRoot::Generated)
+    } else if !netlist.deck_tab_closed
+        && netlist
+            .open_deck
+            .as_ref()
+            .is_some_and(|deck| deck.tab_id() == *root)
     {
-        Some(ActiveNetlistDocument::OwnedSource)
+        Some(NetlistRoot::Deck)
     } else {
         None
     };
@@ -236,13 +274,72 @@ pub fn activate_netlist_comparison(model: &mut Model, netlist: &mut NetlistDocum
     crate::workbench::documents::netlist_document::open_netlist_comparison(model, netlist)
 }
 
-/// Show the deck the last manual run consumed.
-pub fn activate_netlist_run_snapshot(
+/// Show the Added lines of the plan's root design.
+pub fn activate_added_lines(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
+    crate::workbench::documents::netlist_document::show_added_lines(model, netlist)
+}
+
+/// Show the input run `run` executed, for `point` of it or, with no point,
+/// the deck a manual run read.
+pub fn activate_netlist_run_input(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     runs: &RunsState,
+    run: u64,
+    point: Option<usize>,
 ) -> bool {
-    crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(model, netlist, runs)
+    match point {
+        Some(point) => crate::workbench::documents::netlist_document::open_executed_deck_in(
+            model, netlist, runs, run, point,
+        ),
+        None => crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(
+            model, netlist, runs,
+        ),
+    }
+}
+
+/// Close the deck's tab and its includes' tabs, and put the generated
+/// netlist in front when the deck or one of its includes was: the plan is
+/// what Run runs again. The deck stays open, with any edit not yet saved,
+/// until it is shown again.
+pub fn close_netlist_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+) {
+    let Some(deck) = netlist.open_deck.as_ref() else {
+        return;
+    };
+    let root = deck.tab_id();
+    open_documents.retain(|tab| {
+        !matches!(tab, WorkspaceDocumentId::NetlistDependency { root: of, .. } if *of == root)
+    });
+    netlist.deck_tab_closed = true;
+    netlist.run_the_plan();
+    if matches!(
+        netlist.front,
+        NetlistTab::Deck(_) | NetlistTab::Include { deck: Some(_), .. }
+    ) {
+        crate::workbench::documents::netlist_document::open_generated_primary_in(model, netlist);
+    }
+}
+
+/// Close the run input's tab, and leave it when it is in front.
+pub fn close_netlist_run_input(model: &mut Model, netlist: &mut NetlistDocumentState) {
+    if !crate::workbench::documents::netlist_document::close_run_deck_snapshot(model, netlist) {
+        netlist.open_run_input = None;
+        netlist.executed_deck_view = None;
+    }
+}
+
+/// Close the comparison's tab, and leave it when it is in front.
+pub fn close_netlist_comparison(model: &mut Model, netlist: &mut NetlistDocumentState) {
+    if netlist.front.is_comparison() {
+        crate::workbench::documents::netlist_document::close_revision_comparison(model, netlist);
+    } else {
+        netlist.generated_diff_source.clear();
+        netlist.comparison_sides = None;
+    }
 }
 
 /// Close an include tab: the reader no longer has it open. The tab's
