@@ -250,13 +250,10 @@ pub(in crate::workbench) fn live_check_digest(
     if let Some(error) = model.workspace.annotation_restoration_error() {
         return Err(format!("reference annotation restoration failed: {error}"));
     }
+    // Through a canvas gesture, the findings stand as they stood before
+    // it, and are judged again at the drop.
     let projection = model
-        .workspace
-        .design_projection(
-            &model.library_manager,
-            &model.workspace.content.active_view,
-            &model.schematic,
-        )
+        .design_projection_through_gesture()
         .map_err(|error| error.to_string())?;
     let digest_of = |key: &str| -> Result<Option<ContentDigest>, String> {
         projection

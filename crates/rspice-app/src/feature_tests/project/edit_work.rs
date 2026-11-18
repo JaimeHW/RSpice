@@ -19,6 +19,7 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::{
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{Cell, ComponentType, Library, Point, View, ViewType};
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 use rspice_app_state::workbench::app_state::model::FRAME_SYNCS;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_design::projection::{materialization_count, reset_materialization_count};
@@ -212,6 +213,31 @@ fn a_drag_is_compared_and_projected_at_the_drop_not_on_each_move() {
     let editor = &mut replay.app.state.model.schematic.session.editor;
     editor.needs_fit = false;
     editor.zoom = 1.0;
+    // A live check stands on the drawing, as one does once any edit has
+    // settled, and whether its findings are current is asked every frame.
+    idle(&mut replay, WARM_UP_FRAMES);
+    place(&mut replay.app);
+    idle(&mut replay, WARM_UP_FRAMES);
+    std::thread::sleep(LIVE_CHECK_SETTLED);
+    idle(&mut replay, WARM_UP_FRAMES);
+    let subject = replay.app.state.model.workspace.content.active_view.clone();
+    assert!(
+        replay
+            .app
+            .state
+            .model
+            .diagnostics
+            .batch(&DiagnosticInputs::LiveCheck { subject })
+            .is_some(),
+        "the drawing's live check has run"
+    );
+    assert!(
+        replay
+            .app
+            .state
+            .save_project_to_path(&folder.join("edits.rspiceproj")),
+        "the project saves"
+    );
     idle(&mut replay, WARM_UP_FRAMES);
     let canvas = replay
         .ctx()
