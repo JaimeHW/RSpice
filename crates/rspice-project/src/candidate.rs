@@ -1,6 +1,6 @@
 //! Document-scoped save candidates over canonical project content.
 
-use crate::registry::ProjectDocumentId;
+use crate::registry::{ProjectDocumentId, library_catalog_digest};
 use crate::{ProjectExecutionContext, ProjectFile};
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_simulation_contract::plan_model::SimulationPlan;
@@ -130,5 +130,16 @@ fn overlay_cell_view(
         .project_sources
         .synchronize_cell_view_bundle_from(reference, &working.workspace.project_sources)
         .map_err(|error| error.to_string())?;
+    // A cell view that created its cell brings the cell into the catalog,
+    // and with it the receipt that records the creation: once the catalog
+    // stands as the working one does, so does the journal of how it got
+    // there. Another structural change still unsaved leaves both behind.
+    if library_catalog_digest(&target.libraries)? == library_catalog_digest(&working.libraries)? {
+        target
+            .workspace
+            .project
+            .adopt_library_mutation_audit(&working.workspace.project)
+            .map_err(|error| error.to_string())?;
+    }
     Ok(())
 }

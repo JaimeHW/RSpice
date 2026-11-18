@@ -846,6 +846,35 @@ impl ProjectDescriptor {
         &self.library_mutation_audit
     }
 
+    /// Take the library journal `working` keeps, with the project revision
+    /// its last receipt reached, when it continues the one kept here: for a
+    /// project that now holds the library catalog that journal records, so
+    /// each receipt travels with the change it records. A journal that does
+    /// not continue this one is left as it is.
+    pub fn adopt_library_mutation_audit(
+        &mut self,
+        working: &Self,
+    ) -> Result<(), ProjectDescriptorError> {
+        if working.id != self.id
+            || working.library_mutation_audit.len() <= self.library_mutation_audit.len()
+            || !working
+                .library_mutation_audit
+                .starts_with(&self.library_mutation_audit)
+        {
+            return Ok(());
+        }
+        let mut candidate = self.clone();
+        candidate
+            .library_mutation_audit
+            .clone_from(&working.library_mutation_audit);
+        if let Some(last) = candidate.library_mutation_audit.last() {
+            candidate.revision = candidate.revision.max(last.to_project_revision);
+        }
+        candidate.validate()?;
+        *self = candidate;
+        Ok(())
+    }
+
     /// Preflight an exact library membership mutation, including the complete
     /// receipt and both next revisions, before any live catalog state changes.
     pub fn prepare_library_mutation(

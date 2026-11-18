@@ -506,3 +506,106 @@ fn new_cell_view_adds_to_the_cell_just_created_without_views() {
     let cell = super::super::replay::only(&form, "Cell", Role::Label);
     assert_eq!(cell.value, "sar8");
 }
+
+/// File > Save on a new cell's drawing writes the cell with it and the
+/// receipt that records its creation, so nothing reads unsaved after it,
+/// the project configuration included; another cell created and left
+/// unsaved keeps both back until it is saved too.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn file_save_on_a_new_cells_drawing_writes_the_cell_and_its_receipt() {
+    use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+        SaveScope, dirty_documents_fresh,
+    };
+    use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
+    use rspice_app_workbench::workbench::chrome::document_bar::activate_document_by_id;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
+    use rspice_project::registry::ProjectDocumentId;
+
+    let folder = unique_temp_dir("new-cell-file-save");
+    let mut app = creating(false);
+    app.state.project.new_cell_create_testbench = false;
+    app.state.project.new_cell_create_veriloga = false;
+    assert!(
+        app.state
+            .save_project_to_path(&folder.join("cells.rspiceproj")),
+        "the project saves"
+    );
+    let receipts = |app: &RSpiceApp| {
+        app.state
+            .platform
+            .project_lifecycle
+            .authority
+            .accepted()
+            .expect("the project is saved")
+            .baseline()
+            .workspace
+            .project
+            .library_mutation_audit()
+            .len()
+    };
+    let saved = receipts(&app);
+    let save = |app: &mut RSpiceApp, cell: &str| {
+        let project = &mut app.state.project;
+        project.new_cell_library = "behavioral".to_owned();
+        project.new_cell_name = cell.to_owned();
+        project.new_cell_create_schematic = true;
+        project.new_cell_library_revision = app.state.model.library_manager.revision();
+        assert!(create(app), "{cell} is created");
+        assert!(
+            matches!(
+                app.state.save_project_scope(SaveScope::ActiveDocument),
+                SaveRequestOutcome::CanonicalComplete
+            ),
+            "{cell}: the save completes"
+        );
+    };
+    let schematic =
+        |cell: &str| ProjectDocumentId::CellView(CellViewRef::new("behavioral", cell, "schematic"));
+
+    save(&mut app, "comparator");
+    assert_eq!(
+        dirty_documents_fresh(&app.state),
+        Vec::new(),
+        "nothing reads unsaved"
+    );
+    assert_eq!(receipts(&app), saved + 1, "the file holds the receipt");
+
+    // A cell left unsaved: the next one's save writes its own drawing, and
+    // the catalog and its receipts wait for the first.
+    let project = &mut app.state.project;
+    project.new_cell_name = "latch".to_owned();
+    project.new_cell_library_revision = app.state.model.library_manager.revision();
+    assert!(create(&mut app), "latch is created");
+    save(&mut app, "flop");
+    assert_eq!(
+        dirty_documents_fresh(&app.state),
+        vec![schematic("latch"), ProjectDocumentId::ProjectConfiguration],
+        "the unsaved cell and the catalog that holds it read unsaved"
+    );
+    assert_eq!(receipts(&app), saved + 1, "the receipts wait");
+
+    // Saved in its turn, it brings them along.
+    assert!(
+        activate_document_by_id(
+            &mut app.state,
+            &WorkspaceDocumentId::CellView(CellViewRef::new("behavioral", "latch", "schematic")),
+        ),
+        "latch comes to the front"
+    );
+    assert!(
+        matches!(
+            app.state.save_project_scope(SaveScope::ActiveDocument),
+            SaveRequestOutcome::CanonicalComplete
+        ),
+        "latch: the save completes"
+    );
+    assert_eq!(
+        dirty_documents_fresh(&app.state),
+        Vec::new(),
+        "nothing reads unsaved"
+    );
+    assert_eq!(receipts(&app), saved + 3, "the file holds every receipt");
+    let _ = std::fs::remove_dir_all(folder);
+}

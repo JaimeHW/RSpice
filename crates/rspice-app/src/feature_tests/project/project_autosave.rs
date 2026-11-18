@@ -9,14 +9,17 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted};
+use super::with_cx;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, list,
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
-    has_unsaved_changes, has_unsaved_changes_fresh,
+    SaveScope, active_document_is_dirty, has_unsaved_changes, has_unsaved_changes_fresh,
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{ComponentType, Point};
@@ -25,6 +28,8 @@ use rspice_app_state::workbench::workspace::Workspace;
 /// The folder the crashed session saves its project in, handed to the child
 /// process that plays it.
 const CRASH_FOLDER: &str = "RSPICE_TEST_CRASHED_SESSION_FOLDER";
+/// Set when the crashed session's unsaved work is a new cell, not a part.
+const CRASH_NEW_CELL: &str = "RSPICE_TEST_CRASHED_SESSION_NEW_CELL";
 const PROJECT: &str = "amp.rspiceproj";
 
 fn edit(app: &mut RSpiceApp, index: i32) {
@@ -54,10 +59,10 @@ fn frames_until(ctx: &egui::Context, app: &mut RSpiceApp, done: impl Fn(&RSpiceA
     }
 }
 
-/// The session the crash tests end: it saves a project, adds a part, lets
-/// the autosave interval pass and, once the autosave is on disk, stops the
-/// process as a crash would, cleaning nothing up. Run only by
-/// [`crashed_session`] in a process of its own.
+/// The session the crash tests end: it saves a project, adds a part (or,
+/// asked to, creates a new cell), lets the autosave interval pass and, once
+/// the autosave is on disk, stops the process as a crash would, cleaning
+/// nothing up. Run only by [`crashed_session`] in a process of its own.
 #[test]
 #[ignore = "played in a child process by the crash tests"]
 fn crashed_session_child() {
@@ -73,7 +78,24 @@ fn crashed_session_child() {
     let folder = PathBuf::from(folder);
     let mut app = RSpiceApp::test_instance();
     assert!(app.state.save_project_to_path(&folder.join(PROJECT)));
-    edit(&mut app, 7);
+    if std::env::var_os(CRASH_NEW_CELL).is_some() {
+        let project = &mut app.state.project;
+        project.new_cell_library = app
+            .state
+            .model
+            .workspace
+            .content
+            .project
+            .root_library
+            .clone();
+        project.new_cell_name = "crashcell".to_owned();
+        project.new_cell_create_schematic = true;
+        project.new_cell_library_revision = app.state.model.library_manager.revision();
+        assert!(with_cx(&mut app, create_new_cell), "the cell is created");
+        app.after_contribution();
+    } else {
+        edit(&mut app, 7);
+    }
     assert!(has_unsaved_changes_fresh(&app.state));
     app.state.platform.project_autosave.arm_due();
     let ctx = offscreen();
@@ -87,15 +109,25 @@ fn crashed_session_child() {
 /// session wrote before it was killed, and how many parts the saved project
 /// has.
 fn crashed_session(label: &str) -> (PathBuf, usize) {
+    crashed_session_with(label, false)
+}
+
+/// [`crashed_session`], whose unsaved work is a new cell when `new_cell`.
+fn crashed_session_with(label: &str, new_cell: bool) -> (PathBuf, usize) {
     let folder = unique_temp_dir(label);
-    let status = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+    let mut child = std::process::Command::new(std::env::current_exe().expect("the test binary"));
+    child
         .args([
             "--exact",
             "feature_tests::project::project_autosave::crashed_session_child",
             "--ignored",
             "--test-threads=1",
         ])
-        .env(CRASH_FOLDER, &folder)
+        .env(CRASH_FOLDER, &folder);
+    if new_cell {
+        child.env(CRASH_NEW_CELL, "1");
+    }
+    let status = child
         .stdout(std::process::Stdio::null())
         .status()
         .expect("the crashed session runs");
@@ -164,6 +196,77 @@ fn after_a_crash_keep_puts_the_recovered_changes_back() {
         "asked once"
     );
     let _ = std::fs::remove_dir_all(folder);
+}
+
+/// Keep, then File > Save: the file takes the recovered work and nothing
+/// reads unsaved any more, not the title, the toolbar, a tab or the
+/// Overview; an edit made after it and undone back to where the save left it
+/// reads clean. Played for a recovered part and for a recovered new cell.
+#[test]
+fn after_a_crash_keep_then_save_leaves_nothing_unsaved() {
+    for (label, new_cell) in [
+        ("autosave-crash-keep-save", false),
+        ("autosave-crash-keep-save-cell", true),
+    ] {
+        let (folder, _) = crashed_session_with(label, new_cell);
+        let (mut app, ctx, asked) = open_after_crash(&folder);
+        app_frame(
+            &ctx,
+            &mut app,
+            click_on(&asked, "Keep the recovered changes"),
+        );
+        app_frame(&ctx, &mut app, Vec::new());
+        assert!(
+            has_unsaved_changes_fresh(&app.state),
+            "{label}: kept as unsaved work"
+        );
+
+        assert!(
+            matches!(
+                app.state.save_project_scope(SaveScope::ActiveDocument),
+                SaveRequestOutcome::CanonicalComplete
+            ),
+            "{label}: the save completes"
+        );
+        app_frame(&ctx, &mut app, Vec::new());
+        let unsaved_marks = |app: &RSpiceApp| {
+            (
+                has_unsaved_changes_fresh(&app.state),
+                has_unsaved_changes(&app.state),
+                active_document_is_dirty(&app.state),
+                app.last_window_title.contains('*'),
+                app.state
+                    .model
+                    .workspace
+                    .content
+                    .open_views
+                    .iter()
+                    .filter(|view| view.dirty)
+                    .map(|view| view.reference.display_path())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            unsaved_marks(&app),
+            (false, false, false, false, Vec::new()),
+            "{label}: after the save nothing reads unsaved"
+        );
+
+        edit(&mut app, 9);
+        app_frame(&ctx, &mut app, Vec::new());
+        assert!(
+            has_unsaved_changes_fresh(&app.state),
+            "{label}: an edit after the save is unsaved"
+        );
+        assert!(app.state.model.schematic.undo(), "{label}: undone");
+        app_frame(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            unsaved_marks(&app),
+            (false, false, false, false, Vec::new()),
+            "{label}: the edit undone back to the save reads clean"
+        );
+        let _ = std::fs::remove_dir_all(folder);
+    }
 }
 
 /// "Open the saved project" leaves the saved project open, clean, and the

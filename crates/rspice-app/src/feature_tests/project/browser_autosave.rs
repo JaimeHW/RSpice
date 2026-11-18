@@ -17,10 +17,13 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use super::recovery_frames::{app_frame, click_on, offscreen, painted, saved_project};
+use super::with_cx;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::services_access::initialize_from_session;
 use crate::workbench::app_state::session::session_store::read_browser_session;
+use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
+use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
 use rspice_app_services::workbench::app_state::session::browser_session::RUNS_KEY;
 use rspice_app_services::workbench::lifecycle::durable_records::{
     BrowserRecords, DurableRecords, KeptInMemory, MemoryOrigin, MemoryRecords, block_on,
@@ -29,7 +32,9 @@ use rspice_app_services::workbench::lifecycle::durable_records::{
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     CHECKPOINT_ENCODINGS, ProjectCheckpointReason, list_records,
 };
-use rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    SaveScope, active_document_is_dirty, has_unsaved_changes, has_unsaved_changes_fresh,
+};
 use rspice_app_state::diagnostics::LogSeverity;
 use rspice_app_state::state::{ComponentType, Point};
 
@@ -291,6 +296,111 @@ fn in_the_browser_a_reload_offers_the_autosave_back() {
     assert!(has_unsaved_changes(&app.state), "as unsaved work");
     assert!(app.state.platform.project_autosave.offer.is_none());
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// Keep after a reload, then File > Save: nothing reads unsaved any more,
+/// not the title, the toolbar, a tab or the Overview; an edit made after it
+/// and undone back to where the save left it reads clean. Played for a part
+/// and for a new cell left unsaved when the page went.
+#[test]
+fn in_the_browser_keep_then_save_leaves_nothing_unsaved() {
+    for (label, new_cell) in [
+        ("browser-autosave-keep-save", false),
+        ("browser-autosave-keep-save-cell", true),
+    ] {
+        let mut browser = Browser::open();
+        let (mut app, root) = saved_project(label);
+        if new_cell {
+            let project = &mut app.state.project;
+            project.new_cell_library = app
+                .state
+                .model
+                .workspace
+                .content
+                .project
+                .root_library
+                .clone();
+            project.new_cell_name = "crashcell".to_owned();
+            project.new_cell_create_schematic = true;
+            project.new_cell_library_revision = app.state.model.library_manager.revision();
+            assert!(
+                with_cx(&mut app, create_new_cell),
+                "{label}: the cell is created"
+            );
+            app.after_contribution();
+        } else {
+            edit(&mut app, 1);
+        }
+        let ctx = offscreen();
+        browser.leave_the_page(&ctx, &mut app, true);
+        assert_eq!(
+            browser.autosaves(&app),
+            1,
+            "{label}: leaving the page wrote it"
+        );
+        drop(app);
+
+        let mut app = browser.reload();
+        let asked = paint_until(&ctx, &mut app, |text| {
+            text.contains("Recover unsaved changes?")
+        });
+        app_frame(
+            &ctx,
+            &mut app,
+            click_on(&asked, "Keep the recovered changes"),
+        );
+        app_frame(&ctx, &mut app, Vec::new());
+        assert!(
+            has_unsaved_changes_fresh(&app.state),
+            "{label}: kept as unsaved work"
+        );
+
+        assert!(
+            matches!(
+                app.state.save_project_scope(SaveScope::ActiveDocument),
+                SaveRequestOutcome::CanonicalComplete
+            ),
+            "{label}: the save completes"
+        );
+        app_frame(&ctx, &mut app, Vec::new());
+        let unsaved_marks = |app: &RSpiceApp| {
+            (
+                has_unsaved_changes_fresh(&app.state),
+                has_unsaved_changes(&app.state),
+                active_document_is_dirty(&app.state),
+                app.last_window_title.contains('*'),
+                app.state
+                    .model
+                    .workspace
+                    .content
+                    .open_views
+                    .iter()
+                    .filter(|view| view.dirty)
+                    .map(|view| view.reference.display_path())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            unsaved_marks(&app),
+            (false, false, false, false, Vec::new()),
+            "{label}: after the save nothing reads unsaved"
+        );
+
+        edit(&mut app, 9);
+        app_frame(&ctx, &mut app, Vec::new());
+        assert!(
+            has_unsaved_changes_fresh(&app.state),
+            "{label}: an edit after the save is unsaved"
+        );
+        assert!(app.state.model.schematic.undo(), "{label}: undone");
+        app_frame(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            unsaved_marks(&app),
+            (false, false, false, false, Vec::new()),
+            "{label}: the edit undone back to the save reads clean"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 /// A page left before its autosave was written still brings the work back:
