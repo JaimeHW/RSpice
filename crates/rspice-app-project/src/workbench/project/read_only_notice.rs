@@ -59,9 +59,26 @@ impl ProjectFeature {
         let sentence = reason.sentence();
         let action = ReadOnlyAction::for_reason(reason);
         let t = Tokens::get(root.ctx());
+        // Under a finger there is no hover to read a cut sentence: it wraps,
+        // and the notice is as tall as its lines.
+        let wrap = t.metrics.is_touch();
+        let height = if wrap {
+            let across = root.available_width();
+            let width = notice_text_width(root, across, action);
+            let lines = root
+                .painter()
+                .layout(sentence.clone(), notice_font(), t.color.text, width)
+                .size()
+                .y;
+            layout
+                .document_bar_height
+                .max(lines + 2.0 * t.metrics.bar_pad)
+        } else {
+            layout.document_bar_height
+        };
         let mut pressed = false;
         Panel::top("project.read_only_notice")
-            .exact_size(layout.document_bar_height)
+            .exact_size(height)
             .frame(Frame::new().fill(t.color.bg_panel_2))
             .show_separator_line(false)
             .show(root, |ui| {
@@ -71,7 +88,7 @@ impl ProjectFeature {
                     (rect.bottom() - 0.5).max(rect.top()),
                     egui::Stroke::new(1.0, t.color.border),
                 );
-                pressed = notice_row(ui, &sentence, action);
+                pressed = notice_row(ui, &sentence, action, wrap);
             });
         if pressed {
             match action {
@@ -83,20 +100,39 @@ impl ProjectFeature {
     }
 }
 
-/// The mark, the sentence (elided to the room the button leaves, whole on
-/// hover and to a screen reader) and the action, on one line.
-fn notice_row(ui: &mut Ui, sentence: &str, action: ReadOnlyAction) -> bool {
+fn notice_font() -> egui::FontId {
+    theme::sans(tokens::FS_1, FontWeight::Regular)
+}
+
+/// The room the sentence has across a notice `width` wide: what the inset,
+/// the mark and the button leave.
+fn notice_text_width(ui: &mut Ui, width: f32, action: ReadOnlyAction) -> f32 {
+    let button_width = Button::new(action.label()).compact().measured_width(ui);
+    (width - 2.0 * panel_inset(ui) - PROBLEM_MARK_SIDE - 8.0 - button_width - NOTICE_GAP)
+        .max(24.0)
+}
+
+/// The mark, the sentence and the action. Under a pointer the sentence is
+/// one line, elided to the room the button leaves and whole on hover; under
+/// a finger it wraps. A screen reader has it whole either way.
+fn notice_row(ui: &mut Ui, sentence: &str, action: ReadOnlyAction, wrap: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let inset = panel_inset(ui);
     let rect = ui.max_rect().shrink2(vec2(inset, 0.0));
     let button = Button::new(action.label()).compact();
     let button_width = button.measured_width(ui);
-    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let font = notice_font();
     let mark_side = PROBLEM_MARK_SIDE;
     let text_left = rect.left() + mark_side + 8.0;
-    let text_width = (rect.right() - button_width - NOTICE_GAP - text_left).max(24.0);
-    let shown = elide_text(ui, sentence, &font, text_width);
-    let galley = ui.painter().layout_no_wrap(shown, font, t.color.text);
+    let across = ui.max_rect().width();
+    let text_width = notice_text_width(ui, across, action);
+    let galley = if wrap {
+        ui.painter()
+            .layout(sentence.to_owned(), font, t.color.text, text_width)
+    } else {
+        let shown = elide_text(ui, sentence, &font, text_width);
+        ui.painter().layout_no_wrap(shown, font, t.color.text)
+    };
     let text_rect = egui::Rect::from_min_size(
         egui::pos2(text_left, rect.center().y - galley.size().y * 0.5),
         galley.size(),
