@@ -2745,3 +2745,46 @@ fn live_ngspice_oracle_dc_and_charge() {
         worst.0, worst.1
     );
 }
+
+/// Near zero bias a reverse-biased junction charge is `c0*v*(1 + MJ*v/(2*PB))`
+/// to second order, and it keeps that relative precision however small the
+/// bias: a companion divides the charge's absolute error by dt, so a charge
+/// rounded to a quantum of `PB*c0*EPSILON` left a 1e-19 s step unable to
+/// move it at all.
+#[test]
+fn junction_charges_keep_their_relative_precision_near_zero_bias() {
+    for mjs in [0.42, 0.5] {
+        let mut card = nmos45();
+        for (name, value) in [("MJS", mjs), ("CJSWS", 0.0), ("CJSWGS", 0.0)] {
+            card.insert(name.to_string(), value);
+        }
+        let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+        let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+            .expect("nmos device");
+        let charge_at = |vbs: Value| {
+            let bias = Bsim4v8Bias {
+                vds: 0.0,
+                vgs: 0.0,
+                vbs,
+            };
+            let op = dev.eval(bias, GMIN, true).expect("charge eval");
+            op.charge.expect("charges")
+        };
+        let at_zero = charge_at(0.0);
+        let mt = &dev.model_temp;
+        assert!(at_zero.capbs > 0.0 && at_zero.capbd > 0.0);
+        for v in [-1e-18, -3.4e-18, -1e-15, -1e-12, -1e-9] {
+            let c = charge_at(v);
+            for (charge, c0, phi, grading, side) in [
+                (c.qbs, at_zero.capbs, mt.phi_bs, mt.mjs, "qbs"),
+                (c.qbd, at_zero.capbd, mt.phi_bd, mt.mjd, "qbd"),
+            ] {
+                let expected = c0 * v * (1.0 + 0.5 * grading * v / phi);
+                assert!(
+                    (charge - expected).abs() <= expected.abs() * 1e-12,
+                    "{side}({v:e}) = {charge:e}, expected {expected:e} (MJ={grading})"
+                );
+            }
+        }
+    }
+}

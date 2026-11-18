@@ -109,6 +109,24 @@ fn fetlim(vnew: Value, vold: Value, vto: Value, vtstlo: Value) -> Value {
     }
 }
 
+/// One reverse-biased BSIM junction component (b3ld.c, b4ld.c and the
+/// BSIMSOI loads): the charge per unit zero-bias capacitance
+/// `phi*(1 - (1 - v/phi)^(1-m))/(1-m)` and the capacitance factor
+/// `(1 - v/phi)^-m`, with the reference's square root at m = 0.5. The charge
+/// is formed from `ln_1p(-v/phi)`; see `graded_depletion_charge`.
+#[inline]
+pub(crate) fn bsim_junction_depletion(v: Value, phi: Value, grading: Value) -> (Value, Value) {
+    let arg = 1.0 - v / phi;
+    let sarg = if grading == 0.5 {
+        1.0 / arg.sqrt()
+    } else {
+        (-grading * arg.ln()).exp()
+    };
+    let charge =
+        crate::device::semiconductor::graded_depletion_charge(phi, grading, (-v / phi).ln_1p());
+    (charge, sarg)
+}
+
 mod ac_nqs;
 pub mod b3soi;
 pub mod bsim3v3;

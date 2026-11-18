@@ -33,6 +33,7 @@ use super::common::{CHARGE_Q, DELTA_1, DELTA_3, DELTA_4, EPSSI, EXP_THRESHOLD, M
 use super::params::{Bsim3v3EquationSet, Bsim3v3Model};
 use super::temp::{Bsim3v3InstTemp, Bsim3v3ModelTemp, Bsim3v3SizeDep};
 use crate::Value;
+use crate::device::mosfet::bsim_junction_depletion;
 
 /// Input branch voltages, in device polarity (`mtype` folded in by the
 /// caller) and already limited — the `vbs`/`vgs`/`vds` of b3ld.c:371 after
@@ -1986,9 +1987,11 @@ pub fn eval(
     } else if model.cap_mod == 1 {
         let (cgdo, qgdo) = if vgd < 0.0 {
             let t1 = (1.0 - 4.0 * vgd / p.ckappa).sqrt();
+            // b3ld.c's -0.5*CKAPPA*(T1 - 1) is 2*vgd/(1 + T1): near zero bias
+            // T1 rounds to one, and T1 - 1 would quantize the charge.
             (
                 p.cgdo + p.weff_cv * p.cgdl / t1,
-                p.cgdo * vgd - p.weff_cv * 0.5 * p.cgdl * p.ckappa * (t1 - 1.0),
+                p.cgdo * vgd + p.weff_cv * p.cgdl * 2.0 * vgd / (1.0 + t1),
             )
         } else {
             (
@@ -1999,9 +2002,11 @@ pub fn eval(
 
         let (cgso, qgso) = if vgs < 0.0 {
             let t1 = (1.0 - 4.0 * vgs / p.ckappa).sqrt();
+            // b3ld.c's -0.5*CKAPPA*(T1 - 1) is 2*vgs/(1 + T1): near zero bias
+            // T1 rounds to one, and T1 - 1 would quantize the charge.
             (
                 p.cgso + p.weff_cv * p.cgsl / t1,
-                p.cgso * vgs - p.weff_cv * 0.5 * p.cgsl * p.ckappa * (t1 - 1.0),
+                p.cgso * vgs + p.weff_cv * p.cgsl * 2.0 * vgs / (1.0 + t1),
             )
         } else {
             (
@@ -2095,35 +2100,16 @@ fn junction_depletion(
     } else if vbs < 0.0 {
         let mut qbs = 0.0;
         let mut capbs = 0.0;
-        if czbs > 0.0 {
-            let arg = 1.0 - vbs / mt.phi_b;
-            let sarg = if mj == 0.5 {
-                1.0 / arg.sqrt()
-            } else {
-                (-mj * arg.ln()).exp()
-            };
-            qbs = mt.phi_b * czbs * (1.0 - arg * sarg) / (1.0 - mj);
-            capbs = czbs * sarg;
-        }
-        if czbssw > 0.0 {
-            let arg = 1.0 - vbs / mt.phi_bsw;
-            let sarg = if mjsw == 0.5 {
-                1.0 / arg.sqrt()
-            } else {
-                (-mjsw * arg.ln()).exp()
-            };
-            qbs += mt.phi_bsw * czbssw * (1.0 - arg * sarg) / (1.0 - mjsw);
-            capbs += czbssw * sarg;
-        }
-        if czbsswg > 0.0 {
-            let arg = 1.0 - vbs / mt.phi_bswg;
-            let sarg = if mjswg == 0.5 {
-                1.0 / arg.sqrt()
-            } else {
-                (-mjswg * arg.ln()).exp()
-            };
-            qbs += mt.phi_bswg * czbsswg * (1.0 - arg * sarg) / (1.0 - mjswg);
-            capbs += czbsswg * sarg;
+        for (c0, phi, grading) in [
+            (czbs, mt.phi_b, mj),
+            (czbssw, mt.phi_bsw, mjsw),
+            (czbsswg, mt.phi_bswg, mjswg),
+        ] {
+            if c0 > 0.0 {
+                let (q, sarg) = bsim_junction_depletion(vbs, phi, grading);
+                qbs += c0 * q;
+                capbs += c0 * sarg;
+            }
         }
         charge.qbs = qbs;
         charge.capbs = capbs;
@@ -2142,35 +2128,16 @@ fn junction_depletion(
     } else if vbd < 0.0 {
         let mut qbd = 0.0;
         let mut capbd = 0.0;
-        if czbd > 0.0 {
-            let arg = 1.0 - vbd / mt.phi_b;
-            let sarg = if mj == 0.5 {
-                1.0 / arg.sqrt()
-            } else {
-                (-mj * arg.ln()).exp()
-            };
-            qbd = mt.phi_b * czbd * (1.0 - arg * sarg) / (1.0 - mj);
-            capbd = czbd * sarg;
-        }
-        if czbdsw > 0.0 {
-            let arg = 1.0 - vbd / mt.phi_bsw;
-            let sarg = if mjsw == 0.5 {
-                1.0 / arg.sqrt()
-            } else {
-                (-mjsw * arg.ln()).exp()
-            };
-            qbd += mt.phi_bsw * czbdsw * (1.0 - arg * sarg) / (1.0 - mjsw);
-            capbd += czbdsw * sarg;
-        }
-        if czbdswg > 0.0 {
-            let arg = 1.0 - vbd / mt.phi_bswg;
-            let sarg = if mjswg == 0.5 {
-                1.0 / arg.sqrt()
-            } else {
-                (-mjswg * arg.ln()).exp()
-            };
-            qbd += mt.phi_bswg * czbdswg * (1.0 - arg * sarg) / (1.0 - mjswg);
-            capbd += czbdswg * sarg;
+        for (c0, phi, grading) in [
+            (czbd, mt.phi_b, mj),
+            (czbdsw, mt.phi_bsw, mjsw),
+            (czbdswg, mt.phi_bswg, mjswg),
+        ] {
+            if c0 > 0.0 {
+                let (q, sarg) = bsim_junction_depletion(vbd, phi, grading);
+                qbd += c0 * q;
+                capbd += c0 * sarg;
+            }
         }
         charge.qbd = qbd;
         charge.capbd = capbd;

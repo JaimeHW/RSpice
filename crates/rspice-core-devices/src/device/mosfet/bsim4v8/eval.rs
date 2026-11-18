@@ -50,6 +50,7 @@ use super::common::{
 use super::params::Bsim4v8Model;
 use super::temp::{Bsim4v8InstTemp, Bsim4v8ModelTemp, Bsim4v8SizeDep};
 use crate::Value;
+use crate::device::mosfet::bsim_junction_depletion;
 
 /// Input branch voltages, in device polarity (`mtype` folded in by the
 /// caller) and already limited — the `vbs`/`vgs`/`vds` of b4ld.c after
@@ -3232,35 +3233,16 @@ pub(crate) fn eval_with_dc_output_vdsat(
         } else if vbs_jct < 0.0 {
             ch.qbs = 0.0;
             ch.capbs = 0.0;
-            if czbs > 0.0 {
-                let arg = 1.0 - vbs_jct / mt.phi_bs;
-                let sarg = if mjs == 0.5 {
-                    1.0 / arg.sqrt()
-                } else {
-                    (-mjs * arg.ln()).exp()
-                };
-                ch.qbs = mt.phi_bs * czbs * (1.0 - arg * sarg) / (1.0 - mjs);
-                ch.capbs = czbs * sarg;
-            }
-            if czbssw > 0.0 {
-                let arg = 1.0 - vbs_jct / mt.phi_bsws;
-                let sarg = if mjsws == 0.5 {
-                    1.0 / arg.sqrt()
-                } else {
-                    (-mjsws * arg.ln()).exp()
-                };
-                ch.qbs += mt.phi_bsws * czbssw * (1.0 - arg * sarg) / (1.0 - mjsws);
-                ch.capbs += czbssw * sarg;
-            }
-            if czbsswg > 0.0 {
-                let arg = 1.0 - vbs_jct / mt.phi_bswgs;
-                let sarg = if mjswgs == 0.5 {
-                    1.0 / arg.sqrt()
-                } else {
-                    (-mjswgs * arg.ln()).exp()
-                };
-                ch.qbs += mt.phi_bswgs * czbsswg * (1.0 - arg * sarg) / (1.0 - mjswgs);
-                ch.capbs += czbsswg * sarg;
+            for (c0, phi, grading) in [
+                (czbs, mt.phi_bs, mjs),
+                (czbssw, mt.phi_bsws, mjsws),
+                (czbsswg, mt.phi_bswgs, mjswgs),
+            ] {
+                if c0 > 0.0 {
+                    let (q, sarg) = bsim_junction_depletion(vbs_jct, phi, grading);
+                    ch.qbs += c0 * q;
+                    ch.capbs += c0 * sarg;
+                }
             }
         } else {
             let t0 = czbs + czbssw + czbsswg;
@@ -3279,35 +3261,16 @@ pub(crate) fn eval_with_dc_output_vdsat(
         } else if vbd_jct < 0.0 {
             ch.qbd = 0.0;
             ch.capbd = 0.0;
-            if czbd > 0.0 {
-                let arg = 1.0 - vbd_jct / mt.phi_bd;
-                let sarg = if mjd == 0.5 {
-                    1.0 / arg.sqrt()
-                } else {
-                    (-mjd * arg.ln()).exp()
-                };
-                ch.qbd = mt.phi_bd * czbd * (1.0 - arg * sarg) / (1.0 - mjd);
-                ch.capbd = czbd * sarg;
-            }
-            if czbdsw > 0.0 {
-                let arg = 1.0 - vbd_jct / mt.phi_bswd;
-                let sarg = if mjswd == 0.5 {
-                    1.0 / arg.sqrt()
-                } else {
-                    (-mjswd * arg.ln()).exp()
-                };
-                ch.qbd += mt.phi_bswd * czbdsw * (1.0 - arg * sarg) / (1.0 - mjswd);
-                ch.capbd += czbdsw * sarg;
-            }
-            if czbdswg > 0.0 {
-                let arg = 1.0 - vbd_jct / mt.phi_bswgd;
-                let sarg = if mjswgd == 0.5 {
-                    1.0 / arg.sqrt()
-                } else {
-                    (-mjswgd * arg.ln()).exp()
-                };
-                ch.qbd += mt.phi_bswgd * czbdswg * (1.0 - arg * sarg) / (1.0 - mjswgd);
-                ch.capbd += czbdswg * sarg;
+            for (c0, phi, grading) in [
+                (czbd, mt.phi_bd, mjd),
+                (czbdsw, mt.phi_bswd, mjswd),
+                (czbdswg, mt.phi_bswgd, mjswgd),
+            ] {
+                if c0 > 0.0 {
+                    let (q, sarg) = bsim_junction_depletion(vbd_jct, phi, grading);
+                    ch.qbd += c0 * q;
+                    ch.capbd += c0 * sarg;
+                }
             }
         } else {
             let t0 = czbd + czbdsw + czbdswg;

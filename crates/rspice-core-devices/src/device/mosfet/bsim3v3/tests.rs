@@ -1921,3 +1921,57 @@ fn pmos_polarity_mirrors_nmos_conventions() {
         op.cd
     );
 }
+
+/// Near zero bias a reverse-biased junction charge is `c0*v*(1 + MJ*v/(2*PB))`
+/// to second order, and the CAPMOD=1 overlap charge below zero bias is
+/// `CGDO*v + Weff*CGDL*v*(1 + v/CKAPPA)`. Both keep that relative precision
+/// however small the bias: a companion divides a charge's absolute error by
+/// dt, so a charge rounded to a quantum of `PB*c0*EPSILON` left a 1e-19 s
+/// step unable to move it at all.
+#[test]
+fn junction_and_overlap_charges_keep_their_relative_precision_near_zero_bias() {
+    let check = |charge: Value, expected: Value, what: &str| {
+        assert!(
+            (charge - expected).abs() <= expected.abs() * 1e-12,
+            "{what}: Q = {charge:e}, expected {expected:e}"
+        );
+    };
+    for mj in [0.38, 0.5] {
+        let mut card = nmos018();
+        for (name, value) in [
+            ("MJ", mj),
+            ("CJSW", 0.0),
+            ("CJSWG", 0.0),
+            ("CAPMOD", 1.0),
+            ("XPART", -1.0),
+            ("CGDL", 2e-10),
+        ] {
+            card.insert(name.to_string(), value);
+        }
+        let dev = device_with_card(card, 0.18e-6, 10e-6);
+        let charge_at = |vgs: Value, vbs: Value| {
+            dev.eval(Bsim3v3Bias { vds: 0.0, vgs, vbs }, GMIN, true)
+                .expect("charge eval")
+                .charge
+                .expect("charges")
+        };
+        let c0 = charge_at(0.0, 0.0).capbs;
+        let phi = dev.model_temp.phi_b;
+        let (cgdo, overlap, ckappa) = (
+            dev.size.cgdo,
+            dev.size.weff_cv * dev.size.cgdl,
+            dev.size.ckappa,
+        );
+        assert!(c0 > 0.0 && overlap > 0.0);
+        for v in [-1e-18, -3.4e-18, -1e-15, -1e-12, -1e-9] {
+            let c = charge_at(0.0, v);
+            let expected = c0 * v * (1.0 + 0.5 * mj * v / phi);
+            check(c.qbs, expected, &format!("qbs({v:e}) MJ={mj}"));
+            check(c.qbd, expected, &format!("qbd({v:e}) MJ={mj}"));
+            // XPART<0 leaves the drain charge to the overlap, and qbd is zero.
+            let qgdo = -charge_at(v, 0.0).qd_state();
+            let expected = cgdo * v + overlap * v * (1.0 + v / ckappa);
+            check(qgdo, expected, &format!("qgdo({v:e})"));
+        }
+    }
+}
