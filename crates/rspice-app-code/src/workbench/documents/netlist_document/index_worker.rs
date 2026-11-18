@@ -94,31 +94,19 @@ impl<K: Send + 'static, T: Send + Sync + 'static> BackgroundIndex<K, T> {
         }
     }
 
-    /// Whether the text `is_current` accepts is neither built nor building.
-    /// A build of a text that has moved on is dropped: its answer is of
-    /// another text, and its thread finishes into a closed channel.
+    /// Whether the text `is_current` accepts is neither built nor building,
+    /// and no build is running. A build of a text that has moved on is let
+    /// finish, and what it built stands in until the build of the text as
+    /// it then stands, which the frame it wakes starts: one build runs at a
+    /// time however fast the text changes, so neither the threads nor the
+    /// copies of the text they read pile up.
     pub(crate) fn wants(&mut self, is_current: impl Fn(&K) -> bool) -> bool {
         self.take_finished();
         if self.built.as_ref().is_some_and(|(key, _)| is_current(key)) {
             return false;
         }
-        self.drop_build_unless(&is_current);
         !self.is_building()
     }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn drop_build_unless(&mut self, is_current: &impl Fn(&K) -> bool) {
-        if self
-            .running
-            .as_ref()
-            .is_some_and(|running| !is_current(&running.key))
-        {
-            self.running = None;
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn drop_build_unless(&mut self, _is_current: &impl Fn(&K) -> bool) {}
 
     #[cfg(not(target_arch = "wasm32"))]
     const fn is_building(&self) -> bool {
@@ -187,8 +175,14 @@ impl<K: Send + 'static, T: Send + Sync + 'static> BackgroundIndex<K, T> {
         None
     }
 
-    /// Keep `index`, built here, as the index of the text `key` names.
+    /// Keep `index`, built here, as the index of the text `key` names. A
+    /// build still running is of an older text: it is dropped, so it cannot
+    /// replace this index when it finishes.
     pub(crate) fn store(&mut self, key: K, index: T) -> Arc<T> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.running = None;
+        }
         let index = Arc::new(index);
         self.built = Some((key, Arc::clone(&index)));
         index
@@ -229,5 +223,60 @@ mod tests {
             "a build of another text answers nothing about this one"
         );
         assert_eq!(index.wait_for(|key| *key == "two").as_deref(), Some(&2));
+    }
+
+    /// However fast the text changes, one build runs at a time: the build of
+    /// a text that moved on is let finish and stands in, and only then does
+    /// the build of the text as it stands start.
+    #[test]
+    fn one_build_runs_at_a_time_and_a_finished_one_stands_in() {
+        let mut index = BackgroundIndex::<&'static str, usize>::default();
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let (finished, done) = std::sync::mpsc::channel::<()>();
+        assert!(index.wants(|key| *key == "one"));
+        index.start(
+            "one",
+            move || {
+                gate.recv().ok();
+                1
+            },
+            move || {
+                finished.send(()).ok();
+            },
+        );
+        assert!(
+            !index.wants(|key| *key == "two"),
+            "the build of one runs on while the text moves to two"
+        );
+        release.send(()).expect("the build waits for this");
+        done.recv().expect("the build of one finishes");
+        assert!(index.wants(|key| *key == "two"));
+        assert_eq!(index.last_built().as_deref(), Some(&1), "one stands in");
+    }
+
+    /// An action that waited for nothing and built the index of the text as
+    /// it stands keeps that index when an older build finishes later.
+    #[test]
+    fn an_index_built_in_place_outlasts_an_older_build_finishing() {
+        let mut index = BackgroundIndex::<&'static str, usize>::default();
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let (finished, done) = std::sync::mpsc::channel::<()>();
+        index.start(
+            "one",
+            move || {
+                gate.recv().ok();
+                1
+            },
+            move || {
+                finished.send(()).ok();
+            },
+        );
+        assert_eq!(index.wait_for(|key| *key == "two"), None);
+        index.store("two", 2);
+        release.send(()).expect("the build waits for this");
+        // The build of one ends here, whether or not anything takes it.
+        done.recv().ok();
+        assert!(!index.wants(|key| *key == "two"), "two is built");
+        assert_eq!(index.last_built().as_deref(), Some(&2));
     }
 }
