@@ -90,6 +90,12 @@ pub(in crate::workbench) fn netlist(
         netlist_diff(ui, parts);
         return asked;
     }
+    if let Some(missing) =
+        crate::workbench::documents::deck_files::missing_deck_in_front(parts.model, parts.netlist)
+    {
+        missing_deck_outline(ui, parts, &missing, &mut asked);
+        return asked;
+    }
     let root_label = active_netlist_artifact_name(parts.model, parts.netlist, parts.runs);
     let messages = parts.messages;
     let index = crate::workbench::documents::netlist_document::visible_source_index_in(
@@ -611,6 +617,47 @@ pub(in crate::workbench) fn netlist(
         asked.prompt = Some(error);
     }
     asked
+}
+
+/// The outline of a deck whose file is missing: the project's decks, then
+/// just the missing file, said to be not found, its last path on hover.
+/// There is no text to outline or map back to its source.
+fn missing_deck_outline(
+    ui: &mut Ui,
+    parts: &mut NetlistNavigator<'_>,
+    missing: &crate::workbench::documents::deck_files::MissingDeck,
+    asked: &mut NetlistNavigatorAsked,
+) {
+    let messages = parts.messages;
+    let height = outline_row_height(ui, parts.coarse_pointer);
+    let path = missing.path.display().to_string();
+    let not_found = messages.text(MessageId::NetlistNavigatorDeckMissing);
+    ScrollArea::vertical()
+        .id_salt("workbench.netlist.navigator")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            decks::list(ui, parts, height, asked);
+            section_header(
+                ui,
+                &messages.text(MessageId::NetlistNavigatorStructure),
+                None,
+            );
+            let _ = netlist_outline_row(
+                ui,
+                OutlineRowVisual {
+                    label: &missing.name,
+                    meta: Some(not_found.as_str()),
+                    meta_tone: Some(Tokens::get(ui.ctx()).color.warn),
+                    icon: Some(WorkbenchIcon::File),
+                    shape: NetlistOutlineRowShape::Leaf,
+                    selected: true,
+                    enabled: false,
+                    height,
+                    hover: Some(&path),
+                },
+            );
+        });
 }
 
 fn outline_row_height(ui: &Ui, coarse_pointer: bool) -> f32 {

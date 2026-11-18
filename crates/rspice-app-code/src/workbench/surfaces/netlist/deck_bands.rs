@@ -1,7 +1,8 @@
 //! The bands over a deck's file: a file changed on disk while its tab held
 //! edits, an include's edits the check does not read yet, a deck whose file
 //! is not where the project says, and in the browser a deck that is a file
-//! on the desktop, which it cannot read or run.
+//! on the desktop, which it cannot read or run. A deck whose file is missing
+//! also has its page's body, which offers the band's two ways out.
 //!
 //! The disk is looked at when the page is shown and when the window takes
 //! the focus back with the page in front, never on every frame; a run and a
@@ -24,7 +25,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             cx.wb.prompt(notice);
         }
     }
-    if let Some(missing) = deck_files::missing_deck(cx.model, &cx.state.netlist) {
+    if let Some(missing) = deck_files::missing_deck_in_front(cx.model, &cx.state.netlist) {
         missing_band(ui, cx, &missing, messages);
         return;
     }
@@ -118,7 +119,7 @@ fn missing_band(
     missing: &deck_files::MissingDeck,
     messages: MessageCatalog,
 ) {
-    let confirm_id = egui::Id::new("netlist.deck_bands.remove").with(missing.id);
+    let confirm_id = remove_confirm_id(missing);
     let confirming = ui
         .ctx()
         .data(|data| data.get_temp::<bool>(confirm_id))
@@ -168,10 +169,65 @@ fn missing_band(
             )
         };
     });
-    let locate = pressed == Some(MissingAnswer::Locate);
-    let remove = pressed == Some(MissingAnswer::Remove);
-    let ask = pressed == Some(MissingAnswer::Ask);
-    let cancel = pressed == Some(MissingAnswer::Cancel);
+    if let Some(answer) = pressed {
+        answer_missing(ui, cx, missing, answer);
+    }
+}
+
+/// The page's body for a deck whose file is missing: the file is missing,
+/// where it was last, and the band's two ways out. Remove from project asks
+/// on the band, as the band's own button does.
+pub(super) fn missing_body(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, CodeFeature>,
+    missing: &deck_files::MissingDeck,
+    messages: MessageCatalog,
+) {
+    let mut pressed = None;
+    crate::workbench::design_system::empty_state_with_actions(
+        ui,
+        crate::workbench::design_system::WorkbenchIcon::File,
+        &messages.format(
+            MessageId::NetlistDeckMissingTitle,
+            &[("name", &missing.name)],
+        ),
+        &messages.format(
+            MessageId::NetlistDeckMissingDescription,
+            &[("path", &missing.path.display().to_string())],
+        ),
+        |ui| {
+            if cfg!(not(target_arch = "wasm32"))
+                && ui
+                    .button(messages.text(MessageId::NetlistDeckLocate))
+                    .clicked()
+            {
+                pressed = Some(MissingAnswer::Locate);
+            }
+            if ui
+                .button(messages.text(MessageId::NetlistDeckRemoveFromProject))
+                .clicked()
+            {
+                pressed = Some(MissingAnswer::Ask);
+            }
+        },
+    );
+    if let Some(answer) = pressed {
+        answer_missing(ui, cx, missing, answer);
+    }
+}
+
+/// Carry out what the missing deck's band or body answered.
+fn answer_missing(
+    ui: &Ui,
+    cx: &mut Cx<'_, CodeFeature>,
+    missing: &deck_files::MissingDeck,
+    answer: MissingAnswer,
+) {
+    let confirm_id = remove_confirm_id(missing);
+    let locate = answer == MissingAnswer::Locate;
+    let remove = answer == MissingAnswer::Remove;
+    let ask = answer == MissingAnswer::Ask;
+    let cancel = answer == MissingAnswer::Cancel;
     if ask || cancel {
         ui.ctx().data_mut(|data| data.insert_temp(confirm_id, ask));
     }
@@ -211,6 +267,11 @@ fn missing_band(
     }
     #[cfg(target_arch = "wasm32")]
     let _ = locate;
+}
+
+/// Where the band keeps that it is asking whether to remove `missing`.
+fn remove_confirm_id(missing: &deck_files::MissingDeck) -> egui::Id {
+    egui::Id::new("netlist.deck_bands.remove").with(missing.id)
 }
 
 /// What the missing deck's band answers.

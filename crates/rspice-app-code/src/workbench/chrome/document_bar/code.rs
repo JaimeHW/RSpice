@@ -27,8 +27,9 @@ pub struct NetlistTabsReads<'a> {
 
 /// The Netlist page's tabs, in order: the generated netlist and the Added
 /// lines (pinned while there is a design to netlist), each include of the
-/// generated netlist the reader opened, the deck and its open includes, the
-/// open comparison and the open run input.
+/// generated netlist the reader opened, the deck and its open includes (or
+/// the deck whose file is missing, alone), the open comparison and the open
+/// run input.
 pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<WorkspaceDocument> {
     let NetlistTabsReads {
         model,
@@ -95,6 +96,20 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
                 dirty: file.dirty,
             })
         }));
+    } else if let Some(missing) =
+        crate::workbench::documents::deck_files::missing_deck(model, netlist)
+            .filter(|_| !netlist.deck_tab_closed)
+    {
+        // A deck whose file is missing keeps its tab, which stands in its
+        // missing state until the file is found or the deck removed.
+        documents.push(WorkspaceDocument {
+            id: WorkspaceDocumentId::NetlistOwned(
+                crate::workbench::documents::deck_files::deck_tab_id(missing.id),
+            ),
+            label: missing.name,
+            icon: WorkbenchIcon::Netlist,
+            dirty: false,
+        });
     }
 
     if let Some((left, right)) = netlist.comparison_sides {
@@ -253,6 +268,10 @@ pub fn active_netlist_document_id(
             .as_ref()
             .filter(|deck| deck.id == id)
             .map(|deck| deck.tab_id())
+            .or_else(|| {
+                (netlist.open_deck.is_none() && netlist.unreadable_deck == Some(id))
+                    .then(|| crate::workbench::documents::deck_files::deck_tab_id(id))
+            })
     };
     Some(match &netlist.front {
         NetlistTab::Generated => WorkspaceDocumentId::NetlistGenerated(generated()?),
@@ -291,17 +310,21 @@ pub fn activate_generated_netlist(
             ))
 }
 
-/// Show the open deck, when it is the one this tab names.
+/// Show the open deck, or the deck whose file is missing in its missing
+/// state, when it is the one this tab names.
 pub fn activate_owned_netlist(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     document_id: &crate::state::NetlistDocumentId,
 ) -> bool {
-    let available = netlist
-        .open_deck
-        .as_ref()
-        .is_some_and(|deck| deck.tab_id() == *document_id);
-    available && crate::workbench::documents::deck_files::show_deck(model, netlist)
+    use crate::workbench::documents::deck_files;
+    if let Some(deck) = netlist.open_deck.as_ref() {
+        return deck.tab_id() == *document_id && deck_files::show_deck(model, netlist);
+    }
+    netlist
+        .unreadable_deck
+        .filter(|id| deck_files::deck_tab_id(*id) == *document_id)
+        .is_some_and(|id| deck_files::show_missing_deck(model, netlist, id))
 }
 
 /// Show an include of the generated netlist or of the open deck, as a tab
@@ -383,6 +406,19 @@ pub fn close_netlist_deck(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
 ) {
     let Some(deck) = netlist.open_deck.as_ref() else {
+        // The missing deck's tab closes as an open deck's does; the deck
+        // stays in the project, missing.
+        if netlist.unreadable_deck.is_some() {
+            netlist.deck_tab_closed = true;
+            netlist.run_the_plan();
+            if matches!(netlist.front, NetlistTab::Deck(_))
+                && !crate::workbench::documents::netlist_document::open_generated_primary_in(
+                    model, netlist,
+                )
+            {
+                netlist.front = NetlistTab::Generated;
+            }
+        }
         return;
     };
     let root = deck.tab_id();

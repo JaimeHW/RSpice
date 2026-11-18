@@ -195,8 +195,10 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
 /// verbs that tab has: the generated netlist is saved as a deck, exported
 /// and compared with an earlier build; a deck is saved, saved elsewhere
 /// when it is a file, exported and compared; an include of a deck is saved.
-/// The Added lines are saved with the project, by the Save at the toolbar's
-/// head, and a run's input and a comparison are only read.
+/// A deck whose file is missing shows its Save and Export, unavailable until
+/// the file is found. The Added lines are saved with the project, by the
+/// Save at the toolbar's head, and a run's input and a comparison are only
+/// read.
 ///
 /// Find is deliberately absent: the page's own toolbar sits directly under
 /// this one and owns it.
@@ -245,6 +247,20 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
         ],
     ),
     ToolbarEntry::Only(
+        missing_deck_in_front,
+        &[
+            ToolbarEntry::Control(ToolbarControl {
+                show: missing_deck_save,
+                overflow: None,
+            }),
+            labelled(
+                CodeCommand::ExportNetlist.key(),
+                WorkbenchIcon::Export,
+                "Export deck",
+            ),
+        ],
+    ),
+    ToolbarEntry::Only(
         include_of_deck_in_front,
         &[labelled(ids::SAVE, WorkbenchIcon::Save, "Save include")],
     ),
@@ -254,8 +270,52 @@ fn generated_netlist_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.state.netlist.front.shows_generated()
 }
 
+/// The open deck is in front.
 fn deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
-    matches!(reads.state.netlist.front, NetlistTab::Deck(_))
+    let netlist = &reads.state.netlist;
+    matches!(netlist.front, NetlistTab::Deck(id)
+        if netlist.open_deck.as_ref().is_some_and(|deck| deck.id == id))
+}
+
+/// A deck that is not open is in front: its file is missing, and the page
+/// stands in its missing state.
+pub(super) fn missing_deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+    matches!(reads.state.netlist.front, NetlistTab::Deck(_)) && !deck_in_front(reads)
+}
+
+/// Save deck, drawn as its tool is and unavailable, saying on hover that the
+/// deck's file is not where the project says. Save is the project's command,
+/// which would save the project here: the deck in front has nothing to save.
+fn missing_deck_save(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
+    use crate::workbench::MessageId;
+
+    let (icon, label) = (WorkbenchIcon::Save, "Save deck");
+    let reason = crate::workbench::documents::deck_files::missing_deck(cx.model, &cx.state.netlist)
+        .map(|missing| {
+            cx.wb.messages().format(
+                MessageId::NetlistDeckMissing,
+                &[
+                    ("name", &missing.name),
+                    ("path", &missing.path.display().to_string()),
+                ],
+            )
+        })
+        .unwrap_or_default();
+    let response = ui.add_enabled_ui(false, |ui| {
+        if layout.toolbar_labels {
+            labeled_icon_button_sized(
+                ui,
+                icon,
+                label,
+                false,
+                explicit_label_width(ui, label, false),
+                layout.toolbar_control_height,
+            )
+        } else {
+            icon_button(ui, icon, label, false, toolbar_icon_button_size(layout))
+        }
+    });
+    let _ = response.inner.on_disabled_hover_text(reason);
 }
 
 /// A deck that is a file is in front: Save deck as writes it elsewhere. A

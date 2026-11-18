@@ -17,7 +17,7 @@
 use std::collections::HashSet;
 
 use crate::state::command_catalog::CommandKey;
-use crate::state::{CellViewRef, Component, LibraryManager, ProjectSourceRegistry};
+use crate::state::{CellViewRef, Component, DeckId, LibraryManager, ProjectSourceRegistry};
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::layout::LayoutSpec;
@@ -128,6 +128,12 @@ impl NetlistDocumentKey {
 pub trait CodePort {
     /// The deck in front of the netlist editor, which a manual run reads.
     fn manual_deck(&self) -> Option<ManualDeck<'_>>;
+    /// The deck Run names on the Netlist workspace while its file cannot be
+    /// read: Run is that deck's, and unavailable until the file is found. A
+    /// port with no netlist editor names none.
+    fn unreadable_run_deck(&self) -> Option<DeckId> {
+        None
+    }
     /// Which netlist document the editor shows, as a change check compares
     /// it. A port with no netlist editor always shows the same one.
     fn shown_netlist_document_key(&self) -> NetlistDocumentKey {

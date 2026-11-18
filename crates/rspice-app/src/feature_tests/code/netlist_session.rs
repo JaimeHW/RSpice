@@ -191,3 +191,82 @@ fn a_deck_whose_file_went_between_launches_reopens_as_missing() {
     assert_eq!(missing.path.file_name(), deck.file_name());
     assert_eq!(reopened.state.workbench.workspace, Workspace::Netlist);
 }
+
+/// What one frame told assistive technology: each node's label, whether it
+/// is a toggled row or tab, whether it is disabled, and where it is.
+fn told(output: &egui::FullOutput) -> Vec<(String, bool, bool, egui::Rect)> {
+    output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .filter_map(|(_, node)| {
+            let bounds = node.bounds()?;
+            Some((
+                node.label()?.to_owned(),
+                node.toggled().is_some(),
+                node.is_disabled(),
+                egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                ),
+            ))
+        })
+        .collect()
+}
+
+/// The deck the launch reopens is missing: the workspace stands on its tab,
+/// in its missing state alone. The deck's verbs are there and unavailable,
+/// Run names the deck and cannot run it, nothing of the generated netlist's
+/// view is shown, and the outline holds just the missing file.
+#[test]
+fn a_deck_whose_file_went_between_launches_stands_on_its_tab_in_its_missing_state() {
+    let (deck, include) = deck_on_disk();
+    let mut app = working_app(&deck, &include);
+    let id = app
+        .state
+        .code
+        .netlist
+        .open_deck
+        .as_ref()
+        .expect("the deck is open")
+        .id;
+    std::fs::remove_file(&deck).expect("the deck's file goes");
+
+    let mut reopened = relaunch(&mut app);
+    let ctx = themed_context();
+    frame(&ctx, &mut reopened, DESKTOP);
+    let output = frame(&ctx, &mut reopened, DESKTOP);
+
+    assert_eq!(reopened.state.code.netlist.front, NetlistTab::Deck(id));
+    let nodes = told(&output);
+    let disabled = |wanted: &str| {
+        nodes
+            .iter()
+            .find(|(label, ..)| label == wanted || label.starts_with(&format!("{wanted} (")))
+            .map(|(_, _, disabled, _)| *disabled)
+    };
+    for verb in ["Save deck", "Export deck"] {
+        assert_eq!(disabled(verb), Some(true), "{verb} is there, unavailable");
+    }
+    assert!(
+        nodes
+            .iter()
+            .any(|(label, _, disabled, _)| label.starts_with("Run deck long.cir") && *disabled),
+        "Run names the missing deck and cannot run it: {nodes:?}"
+    );
+    for gone in ["Save as deck", "Export netlist", "New deck…", "Open deck…"] {
+        assert_eq!(disabled(gone), None, "{gone} belongs to another view");
+    }
+    // The outline is the left dock's column of rows, right of the rail.
+    let outline = nodes
+        .iter()
+        .filter(|(_, row, _, rect)| *row && rect.min.x > 50.0 && rect.max.x < 320.0)
+        .map(|(label, ..)| label.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outline,
+        ["long.cir"],
+        "the outline holds just the missing file"
+    );
+}

@@ -240,7 +240,7 @@ impl OpenDeck {
     /// The identity the deck's tabs go by.
     #[must_use]
     pub fn tab_id(&self) -> NetlistDocumentId {
-        NetlistDocumentId::try_from_uuid(self.id.as_uuid()).unwrap_or_default()
+        deck_tab_id(self.id)
     }
 
     /// The open include named `key`.
@@ -1141,6 +1141,33 @@ pub fn missing_deck(model: &Model, netlist: &NetlistDocumentState) -> Option<Mis
     })
 }
 
+/// The identity the tabs of the deck `id` go by, open or missing.
+#[must_use]
+pub fn deck_tab_id(id: DeckId) -> NetlistDocumentId {
+    NetlistDocumentId::try_from_uuid(id.as_uuid()).unwrap_or_default()
+}
+
+/// The missing deck, when it is the one in front: its tab is the page's,
+/// and the page stands in its missing state.
+#[must_use]
+pub fn missing_deck_in_front(model: &Model, netlist: &NetlistDocumentState) -> Option<MissingDeck> {
+    missing_deck(model, netlist).filter(|missing| netlist.front == NetlistTab::Deck(missing.id))
+}
+
+/// Bring the deck `id`, which could not be read, to the front when its file
+/// is missing: the page stands on its tab in its missing state, and Run
+/// names it, unavailable until the file is found. Whether it did.
+pub fn show_missing_deck(model: &Model, netlist: &mut NetlistDocumentState, id: DeckId) -> bool {
+    if missing_deck(model, netlist).is_none_or(|missing| missing.id != id) {
+        return false;
+    }
+    netlist.front = NetlistTab::Deck(id);
+    netlist.run_target = super::netlist_tabs::RunTarget::Deck(id);
+    netlist.deck_tab_closed = false;
+    netlist.active_document_initialized = true;
+    true
+}
+
 /// The deck of the project the browser could not open because it is a
 /// file on the desktop, when that is why no deck is open.
 #[must_use]
@@ -1203,6 +1230,12 @@ pub fn remove_deck(
     content.decks_dirty = true;
     if netlist.unreadable_deck == Some(id) {
         netlist.unreadable_deck = None;
+        netlist.run_the_plan();
+        if netlist.front == NetlistTab::Deck(id)
+            && !super::netlist_document::open_generated_primary_in(model, netlist)
+        {
+            netlist.front = NetlistTab::Generated;
+        }
     }
     Ok(name)
 }
@@ -1607,6 +1640,7 @@ pub fn open_deck_by_id(
         Err(error) => {
             close_open_deck(model, netlist, open_documents);
             netlist.unreadable_deck = Some(id);
+            show_missing_deck(model, netlist, id);
             Err(error)
         }
     }
@@ -1634,6 +1668,7 @@ pub fn open_project_deck(
         Ok(open) => install_open_deck(model, netlist, open_documents, runs, open),
         Err(error) => {
             netlist.unreadable_deck = Some(id);
+            show_missing_deck(model, netlist, id);
             model.record(
                 crate::diagnostics::LogSeverity::Error,
                 crate::diagnostics::LogSource::Netlist,

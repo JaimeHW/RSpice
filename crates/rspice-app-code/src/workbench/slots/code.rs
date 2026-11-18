@@ -146,6 +146,17 @@ impl CodePort for CodeState {
         CodeState::manual_deck(self)
     }
 
+    fn unreadable_run_deck(&self) -> Option<crate::state::DeckId> {
+        match self.netlist.run_target() {
+            crate::workbench::documents::netlist_tabs::RunTarget::Deck(id)
+                if self.netlist.open_deck.is_none() =>
+            {
+                Some(id)
+            }
+            _ => None,
+        }
+    }
+
     fn shown_netlist_document_key(&self) -> NetlistDocumentKey {
         netlist_document_key(self.netlist.front.root_kind())
     }

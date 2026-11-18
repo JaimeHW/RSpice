@@ -136,9 +136,13 @@ const ROUTED: &[RoutedCommand<CodeFeature>] = &[
     RoutedCommand {
         key: ids::RUN_SIMULATION,
         takes: |reads| reads.wb.workspace == Workspace::Netlist && runs_a_deck(reads),
+        // The deck Run names runs once it is open: a deck whose file is
+        // missing waits until it is found.
         enabled: |reads| {
             let execution = &reads.model.simulation.execution;
-            !execution.has_active_execution() && !execution.trigger_simulation
+            !execution.has_active_execution()
+                && !execution.trigger_simulation
+                && reads.state.netlist.open_deck.is_some()
         },
         execute: deck_run::request_deck_run,
     },
@@ -300,10 +304,15 @@ impl CommandSet for CodeCommand {
                     None => (true, UNAVAILABLE),
                 }
             }
-            Self::ImportVerilogA
-            | Self::ExportNetlist
-            | Self::ExportBillOfMaterials
-            | Self::GenerateNetlist => (true, UNAVAILABLE),
+            // The deck in front exports, and a deck whose file is missing
+            // has nothing to export until it is found.
+            Self::ExportNetlist => (
+                reads.wb.workspace != Workspace::Netlist || !toolbar::missing_deck_in_front(reads),
+                "the deck's file is missing",
+            ),
+            Self::ImportVerilogA | Self::ExportBillOfMaterials | Self::GenerateNetlist => {
+                (true, UNAVAILABLE)
+            }
             // The locator owns every reason the jump cannot be made, so the
             // disabled explanation is the one the execution would have hit.
             Self::ShowInNetlist if !schematic_in_front(reads) => {
@@ -506,7 +515,15 @@ impl CommandSet for CodeCommand {
                 }
             }
             Self::ShowRunDeck => {
-                crate::workbench::documents::deck_files::show_deck(cx.model, &mut cx.state.netlist);
+                use crate::workbench::documents::deck_files;
+                // The deck Run names is the open one, or the one whose file
+                // is missing, which stands in its missing state.
+                if !deck_files::show_deck(cx.model, &mut cx.state.netlist)
+                    && let crate::workbench::documents::netlist_tabs::RunTarget::Deck(id) =
+                        cx.state.netlist.run_target()
+                {
+                    deck_files::show_missing_deck(cx.model, &mut cx.state.netlist, id);
+                }
             }
             Self::ManageSourceDocument => cx.wb.outbox.push(CodeRequest::ManageSourceDocument),
             Self::GoToDefinition => cx.wb.outbox.push(CodeRequest::GoToDefinition),

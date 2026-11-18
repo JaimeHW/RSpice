@@ -233,11 +233,17 @@ pub fn reopen(
     if let Some(front) = &session.front {
         bring_to_front(model, netlist, open_documents, runs, front);
     }
-    let open_deck = netlist.open_deck.as_ref().map(|deck| deck.id);
+    // The deck is the open one, or the one whose file is missing, which
+    // stands on its tab as it would and which Run names.
+    let deck = netlist
+        .open_deck
+        .as_ref()
+        .map(|deck| deck.id)
+        .or(netlist.unreadable_deck);
     netlist.deck_tab_closed =
-        session.deck_tab_closed && open_deck.is_some() && !netlist.front.shows_deck();
+        session.deck_tab_closed && deck.is_some() && !netlist.front.shows_deck();
     netlist.run_target = match session.run_deck {
-        Some(deck) if open_deck == Some(deck) => RunTarget::Deck(deck),
+        Some(run) if deck == Some(run) => RunTarget::Deck(run),
         _ => RunTarget::Plan,
     };
     netlist.comparison_return = session.comparison_return;

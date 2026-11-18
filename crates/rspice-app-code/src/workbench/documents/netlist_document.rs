@@ -772,12 +772,16 @@ pub struct NetlistDocumentState {
 
 impl NetlistDocumentState {
     /// What Run runs: the deck it was last pointed at while that deck is the
-    /// open one, else the plan.
+    /// open one, or while it is the deck whose file could not be read, which
+    /// Run names and cannot run; else the plan.
     #[must_use]
     pub fn run_target(&self) -> super::netlist_tabs::RunTarget {
         use super::netlist_tabs::RunTarget;
         match self.run_target {
-            RunTarget::Deck(id) if self.open_deck.as_ref().is_some_and(|deck| deck.id == id) => {
+            RunTarget::Deck(id)
+                if self.open_deck.as_ref().is_some_and(|deck| deck.id == id)
+                    || self.unreadable_deck == Some(id) =>
+            {
                 RunTarget::Deck(id)
             }
             RunTarget::Deck(_) | RunTarget::Plan => RunTarget::Plan,

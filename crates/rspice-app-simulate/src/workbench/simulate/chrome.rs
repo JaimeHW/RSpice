@@ -100,16 +100,32 @@ fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunC
         ),
     };
     let primary = entry(primary);
-    let unavailable_reason =
-        (!primary.enabled).then(|| unavailable_reason(cx, primary.key, execution_active));
     // Run on the Netlist workspace runs the deck the code feature names, when
-    // it names one; the plan otherwise.
-    let deck = (cx.wb.workspace == Workspace::Netlist)
+    // it names one; the plan otherwise. A deck whose file is missing is named
+    // too, and Run waits until it is found.
+    let on_netlist = cx.wb.workspace == Workspace::Netlist;
+    let unreadable = on_netlist
+        .then(|| cx.peers.code().unreadable_run_deck())
+        .flatten()
+        .and_then(|id| {
+            cx.model
+                .workspace
+                .content
+                .decks
+                .iter()
+                .find(|deck| deck.id == id)
+        });
+    let unavailable_reason = (!primary.enabled).then(|| match unreadable {
+        Some(deck) if !execution_active => missing_deck_reason(cx, deck),
+        _ => unavailable_reason(cx, primary.key, execution_active),
+    });
+    let deck = on_netlist
         .then(|| {
             cx.peers
                 .code()
                 .manual_deck()
                 .map(|deck| deck.name.to_owned())
+                .or_else(|| unreadable.map(crate::state::ProjectDeck::name))
         })
         .flatten();
     RunControls {
@@ -121,6 +137,18 @@ fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunC
         unavailable_reason,
         deck,
     }
+}
+
+/// Why Run cannot run `deck`: its file is not where the project says.
+fn missing_deck_reason(cx: &Cx<'_, SimulateFeature>, deck: &crate::state::ProjectDeck) -> String {
+    let path = deck
+        .file_path(cx.model.workspace.content.project.data_root())
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    cx.wb.messages().format(
+        crate::workbench::localization::MessageId::NetlistDeckMissing,
+        &[("name", &deck.name()), ("path", &path)],
+    )
 }
 
 /// Why Run or Stop, `command`, is unavailable: while a run is active, the

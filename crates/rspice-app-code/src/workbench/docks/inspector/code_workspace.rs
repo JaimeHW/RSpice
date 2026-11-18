@@ -476,10 +476,28 @@ fn added_lines_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
 /// The file in front, the deck or one of its includes: where it is, and the
 /// encoding and line endings Save writes it back in.
 fn deck_file_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
+    let messages = reads.messages;
     let Some(file) = active_deck_file_in(reads.netlist) else {
+        // A deck whose file is missing: the path it was last at, and that
+        // it is missing.
+        if let Some(missing) = crate::workbench::documents::deck_files::missing_deck_in_front(
+            reads.model,
+            reads.netlist,
+        ) {
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceFileFile),
+                &missing.path.display().to_string(),
+            );
+            property_row_problem(
+                ui,
+                &messages.text(MessageId::NetlistState),
+                &messages.text(MessageId::NetlistDeckMissingState),
+                Some(Problem::Failure),
+            );
+        }
         return;
     };
-    let messages = reads.messages;
     property_row(
         ui,
         &messages.text(MessageId::CodeSourceFileFile),

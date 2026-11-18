@@ -27,7 +27,16 @@ pub(super) fn list(
     }
     let messages = parts.messages;
     let folder = parts.model.workspace.content.project.data_root();
-    let open = parts.netlist.open_deck.as_ref().map(|deck| deck.id);
+    // The deck in front: the open one, or the one whose file is missing.
+    let open = parts
+        .netlist
+        .open_deck
+        .as_ref()
+        .map(|deck| deck.id)
+        .or(match parts.netlist.front {
+            crate::workbench::documents::netlist_document::NetlistTab::Deck(id) => Some(id),
+            _ => None,
+        });
     let rows = decks
         .iter()
         .map(|deck| {

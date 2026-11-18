@@ -228,7 +228,15 @@ pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
         &mut cx.state.netlist,
         cx.runs,
     );
-    if !generated_primary_unavailable(cx.model, &cx.state.netlist) {
+    // A deck whose file is missing has no text in front: no editor to find,
+    // undo or zoom in.
+    if !generated_primary_unavailable(cx.model, &cx.state.netlist)
+        && crate::workbench::documents::deck_files::missing_deck_in_front(
+            cx.model,
+            &cx.state.netlist,
+        )
+        .is_none()
+    {
         let editor = crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
             id: editor_id_in(cx.model, &cx.state.netlist),
             editable: active_netlist_source_is_editable_in(cx.model, &cx.state.netlist),
@@ -352,7 +360,15 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
-        if generated_primary_unavailable(cx.model, &cx.state.netlist) {
+        if let Some(missing) = crate::workbench::documents::deck_files::missing_deck_in_front(
+            cx.model,
+            &cx.state.netlist,
+        ) {
+            // The deck in front is missing: the page says so, where it was
+            // last, and offers the band's two ways out.
+            let messages = cx.wb.messages();
+            deck_bands::missing_body(ui, cx, &missing, messages);
+        } else if generated_primary_unavailable(cx.model, &cx.state.netlist) {
             let messages = cx.wb.messages();
             if cx.state.netlist.open_deck.is_none()
                 && cx.model.netlist_artifacts.generated_document.is_none()
