@@ -46,7 +46,7 @@ pub fn page(ui: &mut Ui, state: &mut PreferencesDialogs<'_>, actions: &mut Prefe
     searchable_row(
         ui,
         "Roots",
-        "A path names a root as $NAME/\u{2026}. A value set here beats the environment's.",
+        "A library or model path names its root as $NAME. A value set here beats the environment's.",
         &[
             "root",
             "variable",
@@ -178,8 +178,9 @@ enum Edit {
     Remove(String),
 }
 
-/// The variables, one row each, then the editor under them: a name, a
-/// value or a picked folder, Set, and Remove for the selected row.
+/// The variables, one row each, then the editor under them, every line as
+/// wide as the list: the name; the folder, with Browse… on the desktop; and
+/// Remove (for the selected row) and Set, of one width, at the right.
 fn table(ui: &mut Ui, variables: &[Variable], draft: &mut Draft) -> Option<Edit> {
     let t = Tokens::get(ui.ctx());
     if !variables.is_empty() {
@@ -215,62 +216,82 @@ fn table(ui: &mut Ui, variables: &[Variable], draft: &mut Draft) -> Option<Edit>
     }
     let mut edit = None;
     let height = t.metrics.ctl_h;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(tokens::SP_3, tokens::SP_3);
-        let name_width = 128.0_f32.min(ui.available_width());
+    let gap = tokens::SP_3;
+    let full = ui.available_width();
+    let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = vec2(gap, gap);
         text_field(
             ui,
             egui::TextEdit::singleline(&mut draft.name)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .font(mono.clone())
                 .hint_text("NAME"),
-            name_width,
+            full,
         );
-        let value_width = (ui.available_width() - name_width).clamp(160.0, 320.0);
-        let value = text_field(
-            ui,
-            egui::TextEdit::singleline(&mut draft.value)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .hint_text("Folder"),
-            value_width,
-        );
-        #[cfg(not(target_arch = "wasm32"))]
-        if Button::new("Browse\u{2026}")
-            .min_height(height)
-            .show(ui)
-            .clicked()
-            && let Some(picked) = rfd::FileDialog::new()
-                .set_title("Pick the root's folder")
-                .pick_folder()
-        {
-            draft.value = picked.display().to_string();
-        }
+        let value = ui
+            .horizontal(|ui| {
+                #[cfg(not(target_arch = "wasm32"))]
+                let browse = Button::new("Browse\u{2026}").min_height(height);
+                #[cfg(not(target_arch = "wasm32"))]
+                let browse_width = browse.measured_width(ui) + gap;
+                #[cfg(target_arch = "wasm32")]
+                let browse_width = 0.0;
+                let value = text_field(
+                    ui,
+                    egui::TextEdit::singleline(&mut draft.value)
+                        .font(mono.clone())
+                        .hint_text("Folder"),
+                    (full - browse_width).max(0.0),
+                );
+                #[cfg(not(target_arch = "wasm32"))]
+                if browse.show(ui).clicked()
+                    && let Some(picked) = rfd::FileDialog::new()
+                        .set_title("Pick the root's folder")
+                        .pick_folder()
+                {
+                    draft.value = picked.display().to_string();
+                }
+                value
+            })
+            .inner;
         let typed = draft.name.trim().trim_start_matches('$').to_owned();
         let entered = value.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        if (Button::new("Set")
-            .min_height(height)
-            .enabled(!typed.is_empty())
-            .show(ui)
-            .clicked()
-            || entered)
-            && !typed.is_empty()
-        {
-            edit = Some(Edit::Set(typed, draft.value.trim().to_owned()));
-        }
-        let removable = draft.selected.as_ref().filter(|name| {
+        let removable = draft.selected.clone().filter(|name| {
             variables
                 .iter()
-                .any(|variable| &variable.name == *name && variable.preferences.is_some())
+                .any(|variable| &variable.name == name && variable.preferences.is_some())
         });
-        if Button::new("Remove")
-            .min_height(height)
-            .enabled(removable.is_some())
-            .destructive(true)
-            .show(ui)
-            .clicked()
-            && let Some(name) = removable
-        {
-            edit = Some(Edit::Remove(name.clone()));
-        }
+        let button = Button::new("Remove")
+            .measured_width(ui)
+            .max(Button::new("Set").measured_width(ui));
+        ui.allocate_ui_with_layout(
+            vec2(full, height),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if (Button::new("Set")
+                    .min_height(height)
+                    .min_width(button)
+                    .enabled(!typed.is_empty())
+                    .show(ui)
+                    .clicked()
+                    || entered)
+                    && !typed.is_empty()
+                {
+                    edit = Some(Edit::Set(typed.clone(), draft.value.trim().to_owned()));
+                }
+                if Button::new("Remove")
+                    .min_height(height)
+                    .min_width(button)
+                    .enabled(removable.is_some())
+                    .destructive(true)
+                    .show(ui)
+                    .clicked()
+                    && let Some(name) = removable.clone()
+                {
+                    edit = Some(Edit::Remove(name));
+                }
+            },
+        );
     });
     edit
 }
