@@ -13,11 +13,13 @@ use std::sync::Arc;
 use super::Model;
 use crate::state::workspace::{ConfigurationExecutionPlanError, DesignProjection};
 
-/// The projection the rails last read, with the open view and the stamps of
-/// everything but the drawing it was read under. Runtime only: a copy of
-/// the model reads its own.
+/// The projection the rails last read, or why the design did not resolve,
+/// with the open view and the stamps of everything but the drawing it was
+/// read under. Runtime only: a copy of the model reads its own.
 #[derive(Debug, Default)]
-pub struct HeldProjection(RefCell<Option<(HoldKey, Arc<DesignProjection>)>>);
+pub struct HeldProjection(RefCell<Option<(HoldKey, Projected)>>);
+
+type Projected = Result<Arc<DesignProjection>, ConfigurationExecutionPlanError>;
 
 impl Clone for HeldProjection {
     fn clone(&self) -> Self {
@@ -36,10 +38,9 @@ impl Model {
     /// The configured design's projection of the open drawing, as the
     /// workspace answers it, except through a canvas gesture: then the one
     /// read before the gesture moved the drawing, while nothing but the
-    /// drawing has moved since.
-    pub fn design_projection_through_gesture(
-        &self,
-    ) -> Result<Arc<DesignProjection>, ConfigurationExecutionPlanError> {
+    /// drawing has moved since. A design that did not resolve before the
+    /// gesture is not projected again until it ends either.
+    pub fn design_projection_through_gesture(&self) -> Projected {
         let key = HoldKey {
             view: self.workspace.content.active_view.key(),
             stamps: [
@@ -52,17 +53,14 @@ impl Model {
             && let Some((held_key, held)) = &*self.held_projection.0.borrow()
             && *held_key == key
         {
-            return Ok(Arc::clone(held));
+            return held.clone();
         }
         let projection = self.workspace.design_projection(
             &self.library_manager,
             &self.workspace.content.active_view,
             &self.schematic,
         );
-        *self.held_projection.0.borrow_mut() = projection
-            .as_ref()
-            .ok()
-            .map(|projection| (key, Arc::clone(projection)));
+        *self.held_projection.0.borrow_mut() = Some((key, projection.clone()));
         projection
     }
 }

@@ -18,7 +18,11 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DIRTY_RECOMPUTES, has_unsaved_changes,
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
-use rspice_app_state::state::{Cell, ComponentType, Library, Point, View, ViewType};
+use rspice_app_state::state::{
+    Cell, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
+    ConfigurationPlatform, ConfigurationSetDefinition, ConfigurationSetOverride, InstancePath,
+    Library, Point, UnresolvedBindingPolicy, View, ViewType,
+};
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 use rspice_app_state::workbench::app_state::model::FRAME_SYNCS;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -208,7 +212,51 @@ struct DragFrame {
 /// as edited from the first move, and the drop compares it once.
 #[test]
 fn a_drag_is_compared_and_projected_at_the_drop_not_on_each_move() {
-    let (mut replay, folder) = saved_project("edit-work-drag");
+    let (replay, folder) = saved_project("edit-work-drag");
+    drag_a_part(replay, folder, true);
+}
+
+/// A drag over a configured design that does not resolve is held the same
+/// way: the reason it does not resolve stands through the drag, and the
+/// design is projected again at the drop.
+#[test]
+fn a_design_that_does_not_resolve_is_projected_at_the_drop_not_on_each_move() {
+    let (mut replay, folder) = saved_project("edit-work-drag-unresolved");
+    let content = &mut replay.app.state.model.workspace.content;
+    let mut configurations = (*content.configuration_sets).clone();
+    configurations
+        .create(ConfigurationSetDefinition {
+            name: "Unresolved".to_owned(),
+            root: content.active_view.clone(),
+            dut_path: InstancePath::root().to_string(),
+            executable_view_policy: vec!["schematic".to_owned()],
+            stop_views: Vec::new(),
+            unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
+            black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+            overrides: vec![ConfigurationSetOverride {
+                instance_path: "/XMISSING".to_owned(),
+                executable_views: vec!["schematic".to_owned()],
+                stop_view: None,
+                model_section: None,
+                eligible_platforms: vec![ConfigurationPlatform::Desktop],
+                target: None,
+            }],
+            cell_bindings: Vec::new(),
+            model_profile: ConfigurationModelProfile::ProjectRunSetSections,
+            owner: "Local project".to_owned(),
+        })
+        .expect("the configuration is well formed");
+    content
+        .replace_configuration_sets(configurations)
+        .expect("the configuration publishes");
+    drag_a_part(replay, folder, false);
+}
+
+/// Drags the middle part of the saved drawing four grid steps across the
+/// canvas in whole application frames, and checks what each frame did.
+/// `resolves` says whether the configured design resolves, and so whether a
+/// live check stands on the drawing through the drag.
+fn drag_a_part(mut replay: Replay, folder: std::path::PathBuf, resolves: bool) {
     replay.app.state.workbench.activate(Workspace::Design);
     let editor = &mut replay.app.state.model.schematic.session.editor;
     editor.needs_fit = false;
@@ -220,17 +268,22 @@ fn a_drag_is_compared_and_projected_at_the_drop_not_on_each_move() {
     idle(&mut replay, WARM_UP_FRAMES);
     std::thread::sleep(LIVE_CHECK_SETTLED);
     idle(&mut replay, WARM_UP_FRAMES);
-    let subject = replay.app.state.model.workspace.content.active_view.clone();
-    assert!(
-        replay
-            .app
-            .state
-            .model
-            .diagnostics
-            .batch(&DiagnosticInputs::LiveCheck { subject })
-            .is_some(),
-        "the drawing's live check has run"
+    let model = &replay.app.state.model;
+    let subject = model.workspace.content.active_view.clone();
+    assert_eq!(
+        model.design_projection_through_gesture().is_ok(),
+        resolves,
+        "whether the configured design resolves"
     );
+    if resolves {
+        assert!(
+            model
+                .diagnostics
+                .batch(&DiagnosticInputs::LiveCheck { subject })
+                .is_some(),
+            "the drawing's live check has run"
+        );
+    }
     assert!(
         replay
             .app
