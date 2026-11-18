@@ -188,7 +188,7 @@ fn tab_panels(output: &egui::FullOutput) -> Vec<String> {
 #[test]
 fn the_configuration_chip_opens_its_page_in_the_frame_it_was_clicked_in() {
     let (ctx, mut app, settled) = settled_on(ProjectPage::Library);
-    assert_eq!(tab_panels(&settled), ["Project Library"]);
+    assert_eq!(tab_panels(&settled), ["Project Library Manager"]);
 
     let clicked = click_announced(
         &ctx,
