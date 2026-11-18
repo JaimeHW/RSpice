@@ -282,14 +282,22 @@ fn a_save_leaves_only_the_project_and_its_checkpoints_beside_it() {
         let attributes = std::fs::metadata(root.join(markers[0]))
             .expect("the marker is there")
             .file_attributes();
-        assert_ne!(attributes & FILE_ATTRIBUTE_HIDDEN, 0, "the open marker is hidden");
+        assert_ne!(
+            attributes & FILE_ATTRIBUTE_HIDDEN,
+            0,
+            "the open marker is hidden"
+        );
     }
 
     assert!(
         app.state
             .close_project_discard(ProjectCloseDestination::EmptyWorkbench)
     );
-    assert_eq!(beside(), expected, "a closed project leaves its file and checkpoints");
+    assert_eq!(
+        beside(),
+        expected,
+        "a closed project leaves its file and checkpoints"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
