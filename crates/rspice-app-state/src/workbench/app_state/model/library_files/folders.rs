@@ -269,6 +269,7 @@ fn this_computer() -> String {
 /// Someone else's lock on `file`, as its folder holds it now: none when
 /// there is none, when it is `own`, or when it was left on this computer
 /// by a process that is provably gone, which the first edit takes over.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn lock_elsewhere(
     folder: &Path,
     file: &LibraryFile,
@@ -279,6 +280,16 @@ pub(super) fn lock_elsewhere(
         && found.process != std::process::id()
         && rspice_output::process_liveness(found.process) == Some(false);
     (own != Some(&found) && !left_behind).then_some(found)
+}
+
+/// A browser reads no folder by path, so it finds no lock.
+#[cfg(target_arch = "wasm32")]
+pub(super) fn lock_elsewhere(
+    _: &Path,
+    _: &LibraryFile,
+    _: Option<&LibraryFileLock>,
+) -> Option<LibraryFileLock> {
+    None
 }
 
 /// Whether two paths name one folder, as far as this computer can tell.
