@@ -1,6 +1,6 @@
 //! The Cells table: each library/cell of the expanded design once, how many
-//! instances it has, what they resolved to, and the cell binding they all
-//! follow. A cell binding for a cell the design does not instantiate binds
+//! instances it has, the cell a binding runs in its place, what they
+//! resolved to, and the cell binding they all follow. A cell binding for a cell the design does not instantiate binds
 //! nothing; it stays listed, marked, so it can be removed.
 
 use super::*;
@@ -12,10 +12,12 @@ use crate::workbench::project::configuration_state::{
 
 use super::instances::{TableAction, answer, ident, lead_follows, table_height, view_list};
 
-fn columns() -> [Column; 6] {
+fn columns() -> [Column; 7] {
     [
         Column::words("Library", 104.0),
         Column::name("Cell", 120.0),
+        Column::name("Cell to use", 120.0)
+            .tooltip("The cell a cell binding runs in this cell's place"),
         Column::number("Instances", 84.0),
         Column::words("View found", 110.0),
         Column::name("View to use", 120.0),
@@ -69,6 +71,7 @@ fn cell_cells(row: &CellTableRow, inherited: &str) -> Vec<Cell> {
     vec![
         ident(&row.library),
         ident(&row.cell),
+        row.target.as_deref().map_or_else(Cell::empty, ident),
         Cell::number(row.instances.to_string()).sort_by(SortKey::Number(row.instances as f64)),
         found,
         view_list(&row.to_use),

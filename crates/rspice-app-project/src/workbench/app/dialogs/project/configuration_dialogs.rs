@@ -1,9 +1,11 @@
 //! The configuration dialogs: New configuration, Clone, Rename and Delete,
-//! and the question asked before edits that are not applied would be lost.
+//! the question asked before edits that are not applied would be lost, and
+//! the picker that binds rows of the page's tables to another cell.
 //!
-//! Everything else about a configuration is edited on its page. These four
-//! are the transactions that add one to the project, name one, or take one
-//! away; each commits through the configuration transactions.
+//! Everything else about a configuration is edited on its page. New, Clone,
+//! Rename and Delete are the transactions that add one to the project, name
+//! one, or take one away; each commits through the configuration
+//! transactions. The picker edits the page's edits, as the page does.
 
 use egui::{Context, Id, Ui};
 
@@ -28,6 +30,9 @@ use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::simulation::SimulationController;
 use rspice_app_runs::workbench::slots::runs::RunsState;
+
+mod bind_cell;
+pub use bind_cell::{BindToCell, open_bind_to_cell};
 
 /// Where a new configuration's view list and stop list come from.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -121,6 +126,8 @@ pub enum ConfigurationDialog {
     Delete(ConfigurationSetId),
     /// Drop the edits not applied to the configuration.
     Revert(ConfigurationSetId),
+    /// Bind instances or cells of the configuration to another cell.
+    BindToCell(Box<BindToCell>),
 }
 
 /// A request that takes the open project away, held while the configuration
@@ -147,6 +154,8 @@ pub struct ConfigurationDialogState {
     /// What a dialog committed asks to happen once the check of the
     /// configuration runs are to use answers.
     after_check: Option<AfterCheck>,
+    /// The picker's table: the cell view picked in it.
+    bind_table: crate::ui::widgets::table::TableState,
 }
 
 /// What follows a commit a dialog asked for, once it lands or is refused.
@@ -413,6 +422,10 @@ pub fn render_configuration_dialog(parts: &mut ConfigurationDialogParts<'_>, ctx
     let Some(dialog) = parts.dialogs.open.clone() else {
         return;
     };
+    if let ConfigurationDialog::BindToCell(_) = dialog {
+        bind_cell::bind_to_cell_dialog(ctx, parts);
+        return;
+    }
     if let ConfigurationDialog::Revert(id) = dialog {
         match revert_dialog(ctx, parts.configuration, parts.model, id) {
             DialogChoice::Primary => {
@@ -439,7 +452,7 @@ pub fn render_configuration_dialog(parts: &mut ConfigurationDialogParts<'_>, ctx
         ConfigurationDialog::Delete(id) => {
             delete_dialog(ctx, parts.model, id, write_allowed, refusal)
         }
-        ConfigurationDialog::Revert(_) => return,
+        ConfigurationDialog::Revert(_) | ConfigurationDialog::BindToCell(_) => return,
     };
     match choice {
         DialogChoice::Primary => {

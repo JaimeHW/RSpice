@@ -10,7 +10,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use rspice_design::configuration_set::check_definition;
+use rspice_design::configuration_set::{BindingTarget, check_definition};
 use rspice_design::stamped::Stamped;
 
 use crate::state::workspace::{DesignProjectionCache, DesignProjectionKey, HierarchyResolution};
@@ -594,6 +594,8 @@ pub(crate) struct CellTableRow {
     pub(crate) found: String,
     /// The view its cell binding uses, or Inherited.
     pub(crate) to_use: String,
+    /// The cell its cell binding runs in its place, as `library/cell`.
+    pub(crate) target: Option<String>,
     pub(crate) in_design: bool,
     /// Its view-to-use choices, an index into `view_options`.
     pub(crate) options: usize,
@@ -853,6 +855,7 @@ impl ConfigurationTables {
                     row.views_found.join(", ")
                 },
                 to_use: cell_to_use(definition, &row.library, &row.cell),
+                target: cell_target(definition, &row.library, &row.cell),
                 in_design: true,
                 options: options(&row.library, &row.cell),
             });
@@ -878,6 +881,7 @@ impl ConfigurationTables {
                 instances: 0,
                 found: "\u{2014}".to_owned(),
                 to_use: cell_to_use(definition, &binding.library, &binding.cell),
+                target: binding.target.as_ref().map(BindingTarget::display_path),
                 in_design: false,
                 options: options(&binding.library, &binding.cell),
             });
@@ -965,6 +969,19 @@ fn cell_to_use(
             || INHERITED.to_owned(),
             |binding| view_list_label(&binding.executable_views),
         )
+}
+
+/// The cell `library`/`cell`'s own binding runs in its place, if it binds
+/// another.
+fn cell_target(
+    definition: Option<&ConfigurationSetDefinition>,
+    library: &str,
+    cell: &str,
+) -> Option<String> {
+    definition
+        .and_then(|definition| cell_binding(definition, library, cell))
+        .and_then(|binding| binding.target.as_ref())
+        .map(BindingTarget::display_path)
 }
 
 /// For each tree row, the views its own instance binding names, if it names
@@ -1074,20 +1091,22 @@ fn instance_rows(hierarchy: &HierarchyResolution) -> Vec<InstanceRow> {
     instances
 }
 
-/// The grouped bindings regrouped by the library/cell they instantiate.
+/// The grouped bindings regrouped by the library/cell the design places,
+/// whichever cell a binding runs in its place.
 fn cell_rows(hierarchy: &HierarchyResolution) -> Vec<CellRow> {
     let mut cells: std::collections::BTreeMap<(String, String), CellRow> =
         std::collections::BTreeMap::new();
     for binding in &hierarchy.bindings {
         let reference = &binding.reference;
+        let placed = binding.placed.as_ref().unwrap_or(reference);
         let row = cells
             .entry((
-                reference.library.to_ascii_lowercase(),
-                reference.cell.to_ascii_lowercase(),
+                placed.library.to_ascii_lowercase(),
+                placed.cell.to_ascii_lowercase(),
             ))
             .or_insert_with(|| CellRow {
-                library: reference.library.clone(),
-                cell: reference.cell.clone(),
+                library: placed.library.clone(),
+                cell: placed.cell.clone(),
                 instances: 0,
                 views_found: Vec::new(),
             });
@@ -1154,21 +1173,30 @@ pub(crate) fn apply_cell_binding_change(
                 .filter(|stop| views.iter().any(|view| view.eq_ignore_ascii_case(stop)));
         }
         BindingChange::Stop(stop) => binding.stop_view = stop,
+        // Inheriting the views keeps a binding to another cell: its
+        // instances then search that cell with the views they inherit.
+        BindingChange::Inherit if binding.target.is_some() => {
+            binding.executable_views.clear();
+            binding.stop_view = None;
+        }
         BindingChange::Remove | BindingChange::Inherit => {
             definition.cell_bindings.remove(index);
             return;
         }
         BindingChange::ModelSection(_) | BindingChange::OnlyOn(_) | BindingChange::Path(_) => {}
     }
-    // A cell binding holds nothing but its views: without them it is none.
-    if definition.cell_bindings[index].executable_views.is_empty() {
+    // A cell binding holds its views and the cell it binds to: with neither
+    // it is none.
+    let binding = &definition.cell_bindings[index];
+    if binding.executable_views.is_empty() && binding.target.is_none() {
         definition.cell_bindings.remove(index);
     }
 }
 
 /// Make `view` the first view every instance of `library`/`cell` tries,
-/// keeping the rest of its binding's list behind it, or with `None` remove
-/// the cell binding so they inherit the view list again.
+/// keeping the rest of its binding's list behind it, or with `None` stop the
+/// cell binding naming views so they inherit the view list again; a binding
+/// to another cell stays.
 pub fn set_cell_view(
     definition: &mut ConfigurationSetDefinition,
     library: &str,
@@ -1176,7 +1204,7 @@ pub fn set_cell_view(
     view: Option<&str>,
 ) {
     match view {
-        None => apply_cell_binding_change(definition, library, cell, &[], BindingChange::Remove),
+        None => apply_cell_binding_change(definition, library, cell, &[], BindingChange::Inherit),
         Some(view) => {
             if let Some(binding) = definition.cell_bindings.iter_mut().find(|binding| {
                 binding.library.eq_ignore_ascii_case(library)
@@ -1352,10 +1380,11 @@ pub(crate) fn apply_binding_change(
     }
 }
 
-/// Whether a binding names no views, no model section and no platform
-/// restriction: it binds as if it were not there.
+/// Whether a binding names no views, no other cell, no model section and no
+/// platform restriction: it binds as if it were not there.
 fn sets_nothing(binding: &ConfigurationSetOverride) -> bool {
     binding.executable_views.is_empty()
+        && binding.target.is_none()
         && binding.model_section.is_none()
         && ConfigurationPlatform::ALL
             .iter()
@@ -1388,6 +1417,8 @@ pub(crate) fn inherited_views(
     count_scan();
     let cell_binding = cell_binding(definition, library, cell);
     let cell_stop = cell_binding.and_then(|binding| binding.stop_view.clone());
+    // A cell binding that only binds another cell names no views to inherit.
+    let cell_binding = cell_binding.filter(|binding| !binding.executable_views.is_empty());
     let Ok(instance) = InstancePath::parse(path) else {
         return (definition.executable_view_policy.clone(), cell_stop);
     };
@@ -1640,6 +1671,11 @@ pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
         other => other.to_string(),
     }
 }
+
+mod binding_target;
+pub(crate) use binding_target::{
+    TargetChoice, bound_target, placed_cells, placed_pins, rows_label, target_choices,
+};
 
 #[cfg(test)]
 mod tests;

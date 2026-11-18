@@ -70,7 +70,7 @@ pub(super) fn nodes(output: &egui::FullOutput) -> Vec<Node> {
         .collect()
 }
 
-fn says(output: &egui::FullOutput, text: &str) -> bool {
+pub(super) fn says(output: &egui::FullOutput, text: &str) -> bool {
     nodes(output)
         .iter()
         .any(|node| node.label == text || node.value == text)
@@ -153,7 +153,7 @@ pub(super) fn press_at(ctx: &Context, app: &mut RSpiceApp, at: Pos2) -> egui::Fu
 }
 
 /// Open the dropdown named `label` and pick `option` from it.
-fn pick(
+pub(super) fn pick(
     ctx: &Context,
     app: &mut RSpiceApp,
     output: &egui::FullOutput,
@@ -165,7 +165,7 @@ fn pick(
 }
 
 /// Whether the button `output` announced as `name` is drawn but not offered.
-fn disabled(output: &egui::FullOutput, name: &str) -> bool {
+pub(super) fn disabled(output: &egui::FullOutput, name: &str) -> bool {
     nodes(output)
         .iter()
         .any(|node| node.role == Role::Button && node.label == name && node.disabled)
@@ -183,7 +183,7 @@ pub(super) fn secondary_press(at: Pos2) -> Vec<egui::Event> {
 }
 
 /// Paint until no check runs, as the reader's screen would while one does.
-fn paint_until_checked(ctx: &Context, app: &mut RSpiceApp) -> egui::FullOutput {
+pub(super) fn paint_until_checked(ctx: &Context, app: &mut RSpiceApp) -> egui::FullOutput {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         app_frame(ctx, app, Vec::new());
@@ -363,7 +363,8 @@ fn an_invalid_entry_is_refused_at_its_field_and_the_tables_stay() {
     );
     assert!(says(
         &output,
-        "Table columns: Instance, Cell, View found, View to use, Bound by, Model section, Status"
+        "Table columns: Instance, Cell, Cell to use, View found, View to use, Bound by, \
+         Model section, Status"
     ));
 }
 

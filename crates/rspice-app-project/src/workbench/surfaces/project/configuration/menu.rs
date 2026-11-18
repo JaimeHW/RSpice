@@ -2,6 +2,7 @@
 //! item acts on every selected row at once as one edit of the configuration:
 //! one change to the edits, which Apply commits as one step of Undo, and which
 //! is refused whole, with the reason, when the configuration cannot hold it.
+//! Bind to cell opens the picker that binds the rows to another cell.
 
 use super::*;
 
@@ -9,9 +10,10 @@ use crate::state::{
     CellViewRef, ConfigurationCellBinding, ConfigurationPlatform, ConfigurationSetDefinition,
     ConfigurationSetId, ConfigurationSetOverride, InstancePath, LibraryManager, ViewType,
 };
+use crate::workbench::app::dialogs::project::configuration_dialogs::open_bind_to_cell;
 use crate::workbench::project::configuration_state::{
-    BindingChange, ConfigurationRow, CopiedBinding, INHERITED, apply_binding_change, cell_binding,
-    instance_binding, set_cell_view, set_instance_view,
+    BindingChange, ConfigurationRow, CopiedBinding, INHERITED, apply_binding_change,
+    apply_cell_binding_change, cell_binding, instance_binding, set_cell_view, set_instance_view,
 };
 
 /// Where the open menu is remembered between frames.
@@ -34,6 +36,9 @@ struct RowMenu {
     removable: bool,
     /// What Copy binding put aside can go on some selected row.
     pastable: bool,
+    /// Every selected row is one instance below the top cell, or a cell:
+    /// what a binding to another cell can stand in for.
+    bindable: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +52,7 @@ struct MenuRow {
 enum Pick {
     Open,
     SetView(Option<String>),
+    BindToCell,
     Remove,
     Copy,
     Paste,
@@ -105,6 +111,17 @@ pub(super) fn row_menu(
                 });
             }
         }
+        Pick::BindToCell => {
+            if let Some(id) = id {
+                open_bind_to_cell(
+                    &mut cx.state.configuration_dialog,
+                    cx.model,
+                    &cx.state.configuration,
+                    id,
+                    rows,
+                );
+            }
+        }
         Pick::Remove => {
             if let Some(id) = id {
                 remove_bindings(cx, id, &rows);
@@ -146,8 +163,8 @@ pub(super) fn open_view(
 }
 
 /// Remove every binding `rows` hold of their own, as one edit: each
-/// instance and cell goes back to what it inherits, and each pattern
-/// binding goes.
+/// instance and cell goes back to what it inherits and runs its placed cell
+/// again, and each pattern binding goes.
 pub(super) fn remove_bindings(
     cx: &mut Cx<'_, ProjectFeature>,
     id: ConfigurationSetId,
@@ -160,7 +177,13 @@ pub(super) fn remove_bindings(
                     apply_binding_change(definition, path, &[], BindingChange::Remove);
                 }
                 ConfigurationRow::Cell { library, cell } => {
-                    set_cell_view(definition, library, cell, None);
+                    apply_cell_binding_change(
+                        definition,
+                        library,
+                        cell,
+                        &[],
+                        BindingChange::Remove,
+                    );
                 }
             }
         }
@@ -218,6 +241,7 @@ fn facts(
         copyable: rows.first().is_some_and(|row| own(&row.row)),
         removable: rows.iter().any(|row| own(&row.row)),
         pastable: copied.is_some_and(|copied| rows.iter().any(|row| takes(copied, &row.row))),
+        bindable: !rows.is_empty() && rows.iter().all(|row| bindable(&row.row)),
         rows,
     }
 }
@@ -257,6 +281,9 @@ fn show(ctx: &egui::Context, menu_id: egui::Id, menu: &RowMenu, opened: bool) ->
                 }
             });
         });
+        if item(ui, "Bind to cell\u{2026}", edits && menu.bindable) {
+            pick = Some(Pick::BindToCell);
+        }
         if item(ui, "Remove binding", edits && menu.removable) {
             pick = Some(Pick::Remove);
         }
@@ -341,6 +368,19 @@ fn view_to_open(
         .get_view(&reference.view)?
         .view_type;
     Some((reference, view_type))
+}
+
+/// Whether a binding to another cell can stand in for `row`: an instance
+/// below the top cell, or a cell. The top cell is the design itself, and a
+/// pattern names instances of many cells.
+fn bindable(row: &ConfigurationRow) -> bool {
+    match row {
+        ConfigurationRow::Instance(path) => {
+            InstancePath::parse(path).is_ok_and(|path| !path.segments().is_empty())
+        }
+        ConfigurationRow::Cell { .. } => true,
+        ConfigurationRow::Pattern(_) => false,
+    }
 }
 
 /// Whether `row` holds a binding of its own in `definition`.

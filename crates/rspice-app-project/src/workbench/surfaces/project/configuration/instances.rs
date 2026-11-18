@@ -336,10 +336,13 @@ pub(super) fn ident(text: impl Into<String>) -> Cell {
 
 /// The Instances table's columns: the tree's, which the pattern rows above
 /// it share. The tree's order is the hierarchy's, so no head sorts it.
-fn instance_columns() -> [Column; 7] {
+fn instance_columns() -> [Column; 8] {
     [
         Column::name("Instance", 140.0).unsortable(),
         Column::name("Cell", 120.0).unsortable(),
+        Column::name("Cell to use", 120.0)
+            .unsortable()
+            .tooltip("The cell a binding runs in the placed cell's place"),
         Column::words("View found", 96.0).unsortable(),
         Column::name("View to use", 110.0).unsortable(),
         // A pattern's row says which platforms it is limited to here, so
@@ -522,6 +525,7 @@ fn pattern_cells(row: &PatternRow) -> Vec<Cell> {
         ident(&row.pattern).leaf(),
         Cell::absent(),
         Cell::absent(),
+        Cell::absent(),
         view_list(&row.views),
         Cell::text(bound_by),
         row.model_section
@@ -564,6 +568,8 @@ fn instance_cells(
 ) -> Vec<Cell> {
     let binding = &hierarchy[row.binding];
     let reference = &binding.reference;
+    // A binding to another cell runs `reference` in the placed cell's place.
+    let placed = binding.placed.as_ref().unwrap_or(reference);
     let instance = if flat {
         ident(&row.path)
     } else {
@@ -600,7 +606,12 @@ fn instance_cells(
     };
     vec![
         instance,
-        ident(format!("{}/{}", reference.library, reference.cell)),
+        ident(format!("{}/{}", placed.library, placed.cell)),
+        if binding.placed.is_some() {
+            ident(format!("{}/{}", reference.library, reference.cell))
+        } else {
+            Cell::empty()
+        },
         found,
         to_use,
         Cell::text(rule_label(binding.rule)),

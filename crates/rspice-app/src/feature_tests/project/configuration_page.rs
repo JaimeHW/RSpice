@@ -309,7 +309,8 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
         );
     }
     assert!(shown.says(
-        "Table columns: Instance, Cell, View found, View to use, Bound by, Model section, Status"
+        "Table columns: Instance, Cell, Cell to use, View found, View to use, Bound by, \
+         Model section, Status"
     ));
 
     let collapsed = app.state.project.configuration.visible_instances().len();
@@ -348,7 +349,8 @@ fn the_cells_tab_lists_each_cell_once_with_its_binding() {
         rspice_app_project::workbench::project::configuration_state::ConfigurationTab::Cells;
     let shown = frame(&mut app, 1440.0);
     assert!(shown.says(
-        "Table columns: Library, Cell, Instances, View found, View to use, Inherited view list"
+        "Table columns: Library, Cell, Cell to use, Instances, View found, View to use, \
+         Inherited view list"
     ));
     for row in [
         "Library: user, Cell: amp, Instances: 2, View found: schematic, View to use: Inherited",

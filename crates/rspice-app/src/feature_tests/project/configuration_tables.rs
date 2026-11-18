@@ -67,7 +67,7 @@ fn forty_amps() -> RSpiceApp {
 }
 
 /// The table rows a frame announced, top to bottom.
-fn rows(output: &egui::FullOutput) -> Vec<Node> {
+pub(super) fn rows(output: &egui::FullOutput) -> Vec<Node> {
     let mut rows = nodes(output)
         .into_iter()
         .filter(|node| node.role == Role::Row)
@@ -80,7 +80,7 @@ fn rows(output: &egui::FullOutput) -> Vec<Node> {
 }
 
 /// The row whose words begin with `start`, and where it is on the screen.
-fn row_at(output: &egui::FullOutput, start: &str) -> Pos2 {
+pub(super) fn row_at(output: &egui::FullOutput, start: &str) -> Pos2 {
     let rows = rows(output);
     rows.iter()
         .find(|node| node.label.starts_with(start))
@@ -105,7 +105,7 @@ fn key(key: Key, modifiers: Modifiers) -> Event {
 
 /// A press on the row at `at` and its release a frame later, as a hand
 /// clicks: the table takes the keyboard with the row.
-fn select(ctx: &Context, app: &mut RSpiceApp, at: Pos2) -> egui::FullOutput {
+pub(super) fn select(ctx: &Context, app: &mut RSpiceApp, at: Pos2) -> egui::FullOutput {
     let edge = |pressed| Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
@@ -139,7 +139,7 @@ fn double_click(ctx: &Context, app: &mut RSpiceApp, at: Pos2) -> egui::FullOutpu
 
 /// Open the menu of the row at `at` and take `item` from it, through
 /// "Set view to" when `view` names a choice of that submenu.
-fn take_from_menu(
+pub(super) fn take_from_menu(
     ctx: &Context,
     app: &mut RSpiceApp,
     at: Pos2,
@@ -270,7 +270,8 @@ fn pattern_bindings_are_rows_of_the_tree() {
         .count();
     assert_eq!(heads, 1, "the patterns and the tree share one head");
     let row = format!(
-        "Instance: /B0/*, Cell: {dash}, View found: {dash}, View to use: schematic, \
+        "Instance: /B0/*, Cell: {dash}, Cell to use: {dash}, View found: {dash}, \
+         View to use: schematic, \
          Bound by: Pattern binding, Model section: {dash}",
         dash = '\u{2014}'
     );
