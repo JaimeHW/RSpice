@@ -97,6 +97,19 @@ impl Route {
         }
     }
 
+    /// How many times its declared budget (`timeout_s`) a cell gets on this
+    /// route. Budgets are declared for the compiled engine, which the
+    /// interpreter, native and application routes run. The browser worker
+    /// runs it as WebAssembly under Node and executes 3.0–3.8× the
+    /// interpreter's instructions on the same cells (measured), so it gets
+    /// 4×, that ratio rounded up.
+    pub const fn time_allowance_factor(self) -> u64 {
+        match self {
+            Self::Worker => 4,
+            Self::Interp | Self::Native | Self::App => 1,
+        }
+    }
+
     pub fn from_token(token: &str) -> Option<Self> {
         match token {
             "interp" => Some(Self::Interp),

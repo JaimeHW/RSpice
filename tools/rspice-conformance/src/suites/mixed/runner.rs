@@ -138,8 +138,10 @@ pub fn selected_designs(designs: &[String]) -> Result<Vec<Design>, String> {
     Ok(selected)
 }
 
-/// The cells of `design` this run selects, each with its declared budget.
+/// The cells of `design` this run selects, each with its budget: the declared
+/// one times the run's route's [`Route::time_allowance_factor`].
 fn selected_cells(options: &RunOptions, design: &Design) -> Vec<(String, String, u64)> {
+    let factor = options.route().time_allowance_factor();
     design
         .cells()
         .into_iter()
@@ -156,7 +158,11 @@ fn selected_cells(options: &RunOptions, design: &Design) -> Vec<(String, String,
                 return None;
             }
             let entry = design.analysis(&analysis).expect("declared");
-            (!entry.extended || options.extended).then_some((variant, analysis, entry.timeout_s))
+            (!entry.extended || options.extended).then_some((
+                variant,
+                analysis,
+                entry.timeout_s * factor,
+            ))
         })
         .collect()
 }
@@ -1661,6 +1667,36 @@ mod tests {
                     assert!(seen.insert(path.clone()), "{} is shared", path.display());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_worker_route_gets_four_times_each_declared_budget() {
+        assert_eq!(Route::Interp.time_allowance_factor(), 1);
+        assert_eq!(Route::Native.time_allowance_factor(), 1);
+        assert_eq!(Route::Worker.time_allowance_factor(), 4);
+        let design = selected_designs(&["C6".to_owned()])
+            .expect("corpus loads")
+            .remove(0);
+        let compiled = RunOptions {
+            extended: true,
+            ..RunOptions::default()
+        };
+        let worker = RunOptions {
+            worker: Some(PathBuf::from("web")),
+            ..compiled.clone()
+        };
+        let declared = selected_cells(&compiled, &design);
+        let scaled = selected_cells(&worker, &design);
+        assert!(!declared.is_empty());
+        assert_eq!(declared.len(), scaled.len());
+        for ((variant, analysis, budget), scaled) in declared.iter().zip(&scaled) {
+            let entry = design.analysis(analysis).expect("declared");
+            assert_eq!(*budget, entry.timeout_s, "{variant} {analysis}");
+            assert_eq!(
+                *scaled,
+                (variant.clone(), analysis.clone(), 4 * entry.timeout_s)
+            );
         }
     }
 
