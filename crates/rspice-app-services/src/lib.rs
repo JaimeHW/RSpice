@@ -46,6 +46,8 @@ pub mod workbench {
         pub mod download;
         #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
         pub mod file_import;
+        #[cfg(target_arch = "wasm32")]
+        pub mod folder_upload;
         #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
         pub mod qualification;
     }
