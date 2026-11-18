@@ -840,7 +840,7 @@ fn an_unreadable_store_is_one_word_and_cannot_take_a_checkpoint() {
         .expect("the frame announces its tree")
         .nodes
         .iter()
-        .find(|(_, node)| node.label().as_deref() == Some("Create checkpoint"))
+        .find(|(_, node)| node.label() == Some("Create checkpoint"))
         .map(|(_, node)| node.is_disabled())
         .expect("the page offers Create checkpoint");
     assert!(

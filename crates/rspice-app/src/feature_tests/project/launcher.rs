@@ -464,7 +464,7 @@ fn the_launcher_lists_recent_projects_as_the_landing_does() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.close_project_session();
-    app.state.platform.recovery_catalog = Default::default();
+    *app.state.platform.recovery_catalog = Default::default();
     app.state.platform.recent_files = recents;
     let landing_ctx = Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&landing_ctx);
