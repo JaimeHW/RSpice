@@ -410,6 +410,16 @@ pub fn dependencies(ctx: &egui::Context, model: &Model) -> SubjectStatus {
     }
 }
 
+/// What the health line says when the store that keeps the project's
+/// checkpoints cannot be read: what is wrong and what to do, as Recovery
+/// says it. What the system said goes to the Console, never to the line.
+#[cfg(not(target_arch = "wasm32"))]
+const CHECKPOINTS_UNREADABLE: &str = "Checkpoints could not be read. Check that you may open \
+     their folder; the Console has what the system said.";
+#[cfg(target_arch = "wasm32")]
+const CHECKPOINTS_UNREADABLE: &str = "Checkpoints could not be read. Check that this site may \
+     store data; the Console has what the browser said.";
+
 /// The work a save would write, and what the Recovery page can bring back.
 /// The checkpoints are counted once the page's catalogue has listed them;
 /// a store that could not be listed, or holds damaged checkpoints, is the
@@ -426,12 +436,8 @@ pub fn unsaved_work(
     } else {
         counted(unsaved_documents, "unsaved document", "unsaved documents")
     };
-    if let Some(error) = &recovery.error {
-        return SubjectStatus::new(
-            Tone::Warn,
-            state,
-            format!("Checkpoints cannot be listed: {error}"),
-        );
+    if recovery.error.is_some() {
+        return SubjectStatus::new(Tone::Warn, state, CHECKPOINTS_UNREADABLE);
     }
     if !recovery.quarantined.is_empty() {
         return SubjectStatus::new(
@@ -496,5 +502,51 @@ pub const fn worse(left: Tone, right: Tone) -> Tone {
         (Tone::Error, _) | (_, Tone::Error) => Tone::Error,
         (Tone::Warn, _) | (_, Tone::Warn) => Tone::Warn,
         (Tone::Neutral, Tone::Neutral) => Tone::Neutral,
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    /// A checkpoint folder that cannot be read is named on the health line
+    /// in plain words, with what to do; what the system said is left to the
+    /// Console.
+    #[test]
+    fn unreadable_checkpoints_read_in_plain_words() {
+        let recovery = ProjectCheckpointRecoveryState {
+            initialized: true,
+            error: Some(
+                "project recovery directory 'D:\\designs\\amp.rspice-recovery' could not be \
+                 read: Access is denied. (os error 5)"
+                    .to_owned(),
+            ),
+            ..Default::default()
+        };
+        let status = unsaved_work(0, true, &recovery);
+        assert_eq!(status.tone, Tone::Warn);
+        assert_eq!(status.state, "Saved");
+        assert!(
+            status
+                .detail
+                .starts_with("Checkpoints could not be read. Check that you may open")
+                && status
+                    .detail
+                    .ends_with("the Console has what the system said."),
+            "{}",
+            status.detail
+        );
+        for system in [
+            "Access is denied",
+            "os error",
+            "rspice-recovery",
+            "directory",
+        ] {
+            assert!(
+                !status.detail.contains(system),
+                "the line repeats what the system said: {}",
+                status.detail
+            );
+        }
     }
 }
