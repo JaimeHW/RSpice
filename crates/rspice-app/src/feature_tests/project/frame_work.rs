@@ -642,7 +642,7 @@ fn the_attach_dialog_proves_its_candidates_when_the_catalogue_changes() {
         .expect("the model library imports");
     let offered = painted(&app_frame(&ctx, &mut app, Vec::new()));
     assert!(
-        offered.contains("\u{b7} 1 model \u{b7} 1 source file")
+        offered.contains("\u{b7} 1 model \u{b7} 1 model file")
             && !offered.contains("No model library can be attached"),
         "{offered}"
     );
