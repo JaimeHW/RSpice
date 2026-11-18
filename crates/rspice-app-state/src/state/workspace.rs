@@ -13,7 +13,10 @@ use rspice_design::hierarchy as hierarchy_resolver;
 mod materialize;
 mod open_documents;
 mod plan_configuration;
-pub use plan_configuration::{PlanConfigurationSets, recorded_configuration_words};
+pub use plan_configuration::{
+    PlanConfigurationSets, RecordedConfigurationStanding, recorded_configuration_standing,
+    recorded_configuration_words,
+};
 mod reference_preparation;
 mod schematic_buffers;
 mod veriloga_cells;

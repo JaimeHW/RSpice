@@ -32,10 +32,16 @@ pub(super) fn result_run(
         .prepared_receipt()
         .and_then(|receipt| receipt.configuration())
     {
-        property_row(
+        // A result from a configuration that moved since is one to look at
+        // before relying on: the mark says so, the words say how.
+        use crate::state::workspace::RecordedConfigurationStanding;
+        let standing =
+            crate::state::workspace::recorded_configuration_standing(configurations, recorded);
+        property_row_problem(
             ui,
             "Configuration",
             &crate::state::workspace::recorded_configuration_words(configurations, recorded),
+            (standing != RecordedConfigurationStanding::AsRun).then_some(Problem::Warning),
         );
     }
     property_row(ui, "Duration", &manifest.elapsed_time);

@@ -156,6 +156,29 @@ pub fn show(
                                 .as_deref()
                                 .unwrap_or("none, a manual deck"),
                         );
+                        // The design the run elaborated: by the name it ran
+                        // under, and by identity and revision, which is what
+                        // tells it apart from the configuration as it stands.
+                        if let Some(recorded) = run
+                            .prepared_receipt()
+                            .and_then(|receipt| receipt.configuration())
+                        {
+                            property_row(
+                                ui,
+                                "Configuration",
+                                &crate::state::workspace::recorded_configuration_words(
+                                    &model.workspace.content.configuration_sets,
+                                    recorded,
+                                ),
+                            );
+                            if let Some(id) = recorded.id {
+                                property_row(
+                                    ui,
+                                    "Configuration ID",
+                                    &format!("{id} \u{b7} revision {}", recorded.revision),
+                                );
+                            }
+                        }
                         property_row(ui, "Project revision", &authority.project_revision);
                         property_row(
                             ui,

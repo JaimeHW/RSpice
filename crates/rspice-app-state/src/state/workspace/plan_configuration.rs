@@ -118,6 +118,35 @@ impl ProjectWorkspace {
     }
 }
 
+/// Whether the configuration a run recorded still stands as it ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordedConfigurationStanding {
+    /// The project holds it at the revision the run elaborated, or the run
+    /// used the built-in default, which never changes.
+    AsRun,
+    /// The project holds it at another revision.
+    Changed,
+    /// The project no longer holds it.
+    Deleted,
+}
+
+/// How the configuration a run recorded stands in `catalog` now.
+pub fn recorded_configuration_standing(
+    catalog: &ConfigurationSetCatalog,
+    recorded: &rspice_results::run_receipt::RunConfiguration,
+) -> RecordedConfigurationStanding {
+    let Some(id) = recorded.id else {
+        return RecordedConfigurationStanding::AsRun;
+    };
+    match catalog.find(id) {
+        None => RecordedConfigurationStanding::Deleted,
+        Some(configuration) if configuration.revision() != recorded.revision => {
+            RecordedConfigurationStanding::Changed
+        }
+        Some(_) => RecordedConfigurationStanding::AsRun,
+    }
+}
+
 /// How the configuration a run recorded reads now: its name when it ran, and
 /// whether the project has changed or deleted it since, so a result from a
 /// configuration that moved never passes for one from the current design.
@@ -125,14 +154,9 @@ pub fn recorded_configuration_words(
     catalog: &ConfigurationSetCatalog,
     recorded: &rspice_results::run_receipt::RunConfiguration,
 ) -> String {
-    let Some(id) = recorded.id else {
-        return recorded.name.clone();
-    };
-    match catalog.find(id) {
-        None => format!("{} (deleted since)", recorded.name),
-        Some(configuration) if configuration.revision() != recorded.revision => {
-            format!("{} (changed since)", recorded.name)
-        }
-        Some(_) => recorded.name.clone(),
+    match recorded_configuration_standing(catalog, recorded) {
+        RecordedConfigurationStanding::AsRun => recorded.name.clone(),
+        RecordedConfigurationStanding::Changed => format!("{} (changed)", recorded.name),
+        RecordedConfigurationStanding::Deleted => format!("{} (deleted)", recorded.name),
     }
 }
