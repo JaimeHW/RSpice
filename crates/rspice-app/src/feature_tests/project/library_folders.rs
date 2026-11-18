@@ -464,13 +464,9 @@ fn autosave_and_crash(mut app: RSpiceApp) {
         has_unsaved_changes_fresh(&app.state),
         "there is unsaved work"
     );
-    // A one-minute interval, armed a minute back, so the next frame writes
-    // the autosave.
+    // A one-minute interval, due now, so the next frame writes the autosave.
     app.state.platform.autosave_minutes = 1;
-    let armed = Instant::now()
-        .checked_sub(Duration::from_secs(60))
-        .expect("the clock has run for a minute");
-    app.state.platform.project_autosave.arm_at(armed);
+    app.state.platform.project_autosave.arm_due();
     let ctx = offscreen();
     let deadline = Instant::now() + Duration::from_secs(60);
     while app.state.platform.project_autosave.written().is_empty() {
