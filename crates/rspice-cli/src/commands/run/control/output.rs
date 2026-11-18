@@ -497,7 +497,9 @@ pub(in crate::commands::run) fn deck_directory_destination(
     let directory = std::path::absolute(&directory)
         .map_err(|error| CliError::output_error(&directory, error))?;
     let directory = lexical(&directory);
-    let destination = lexical(&directory.join(path));
+    // Either slash separates the name's directories, as in an `.include`.
+    let destination =
+        lexical(&directory.join(rspice_core::netlist::source_path_literal_to_host_path(path)));
     if destination.starts_with(&directory) && destination != directory {
         Ok(Ok(destination))
     } else {

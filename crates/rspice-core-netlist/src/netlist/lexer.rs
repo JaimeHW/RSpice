@@ -664,12 +664,14 @@ impl<'a> Lexer<'a> {
 
     /// Parse a quoted string "...": everything up to the next `"`, as written.
     ///
-    /// No SPICE simulator gives a backslash a meaning inside a deck string,
-    /// so a Windows path keeps its separators: Xyce reads a quoted field to
-    /// the next quote (`N_IO_SpiceSeparatedFieldTool.C`), as ngspice's card
-    /// readers do (`inpgtok.c`, `inpgstr.c`, XSPICE `mifgetvalue.c`), and
-    /// LTspice opens `PWL file="d\e.txt"` as written and ends
-    /// `file="q\"x.txt"` at `q\`. A string cannot hold a `"`.
+    /// A backslash has no meaning in a card's string, so a Windows path
+    /// keeps its separators: Xyce reads a quoted field to the next quote
+    /// (`N_IO_SpiceSeparatedFieldTool.C`), as ngspice's card readers do
+    /// (`inpgtok.c`, `inpgstr.c`, XSPICE `mifgetvalue.c`), and LTspice opens
+    /// `PWL file="d\e.txt"` as written and ends `file="q\"x.txt"` at `q\`.
+    /// Only ngspice's command shell (`cp_lexer`, which also reads its own
+    /// `.options` lines) drops a backslash inside quotes; the `.options`
+    /// strings read here are RSpice's and Xyce's. A string cannot hold a `"`.
     fn parse_string(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
         // Find the closing quote past the opening one without collecting the
         // rest of the input: that made lexing quadratic in the deck's length.

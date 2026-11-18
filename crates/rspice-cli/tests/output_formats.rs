@@ -1950,6 +1950,32 @@ fn xyce_writes_ac_tables_where_the_cards_name_them() {
     );
 }
 
+/// A `.PRINT FILE=` written on Windows names the same file on every host: a
+/// backslash separates its directories, as in an `.include`, so `..\` leaves
+/// the deck's directory and is refused like `../`.
+#[test]
+fn a_backslash_in_a_print_file_separates_directories() {
+    let dir = test_dir("xyce_files_backslash");
+    let deck_dir = dir.join("deck");
+    std::fs::create_dir_all(deck_dir.join("tables")).expect("deck directory");
+    let deck = "* ac files\nV1 1 0 dc 0 ac 1\nR1 1 2 1k\nC1 2 0 1u\n.ac dec 1 100 1k\n\
+                .print ac file=\"tables\\gain.csv\" format=csv vdb(2)\n\
+                .print ac file=\"..\\escape.prn\" vm(2)\n.end\n";
+    let output = run_xyce_files(&deck_dir, "rc.cir", deck, &[]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        std::fs::read_to_string(deck_dir.join("tables").join("gain.csv")).expect("FILE= table"),
+        "FREQ,VDB(2)\n1.00000000e+02,-1.44507012e+00\n1.00000000e+03,-1.60722353e+01\n"
+    );
+    assert!(!dir.join("escape.prn").exists());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(r"warning: ..\escape.prn is not written")
+            && stderr.contains("outside the deck's directory"),
+        "{stderr}"
+    );
+}
+
 /// Under `.STEP`, Xyce 7.10 writes every coordinate's rows into one table,
 /// each restarting its `Index`, closes it with `End of Xyce(TM) Parameter
 /// Sweep`, writes coordinate k's measures to `deck.cir.mt<k>`, and lists each
