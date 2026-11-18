@@ -2336,8 +2336,8 @@ mod tests {
     #[test]
     fn checkpoint_closes_over_deck_entries_and_veriloga_sources() {
         use crate::state::{
-            ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
-            ProjectSourceOwner, ProjectSourceRegistry, ProjectSourceRole, ProjectSourceRoleBinding,
+            ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner,
+            ProjectSourceRegistry,
         };
 
         fn file(path: &str, content: &str) -> ProjectSourceFile {
@@ -2349,19 +2349,13 @@ mod tests {
                 .expect("source dependency fixture is valid")
         }
 
-        fn role(path: &str, source_role: ProjectSourceRole) -> ProjectSourceRoleBinding {
-            ProjectSourceRoleBinding::try_new(path, source_role)
-                .expect("source role fixture is valid")
-        }
-
         let veriloga_root =
             "`include \"physics/thermal_constants.vams\"\nmodule sensor_core; endmodule\n";
         let veriloga_dependency = "`define ROOM_TEMPERATURE 300.15\n";
         let build_profile = "[compiler]\nwarnings = \"error\"\n";
 
-        let veriloga = ProjectSourceBundle::try_new_with_roles(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+        let veriloga = ProjectSourceBundle::try_new_with_build_profile(
+            ProjectSourceOwner::CodeWorkspace,
             "devices/sensor_core.va",
             veriloga_root,
             [
@@ -2372,10 +2366,7 @@ mod tests {
                 dependency("devices/sensor_core.va", "physics/thermal_constants.vams"),
                 dependency("devices/sensor_core.va", "build/release.profile"),
             ],
-            [role(
-                "build/release.profile",
-                ProjectSourceRole::VerilogABuildProfile,
-            )],
+            Some("build/release.profile".to_owned()),
         )
         .expect("Verilog-A source closure is valid");
         let veriloga_id = veriloga.id();
@@ -2418,8 +2409,8 @@ mod tests {
             Some(build_profile)
         );
         assert_eq!(
-            restored_veriloga.role_for_path("build/release.profile"),
-            Some(ProjectSourceRole::VerilogABuildProfile)
+            restored_veriloga.build_profile_path(),
+            Some("build/release.profile")
         );
 
         state.model.workspace.content.decks = vec![crate::state::ProjectDeck::for_file(

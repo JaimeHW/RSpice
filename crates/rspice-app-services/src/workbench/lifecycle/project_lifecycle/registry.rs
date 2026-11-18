@@ -336,7 +336,6 @@ mod tests {
             .insert(
                 crate::state::ProjectSourceDocument::try_new(
                     "shared.va",
-                    crate::state::ProjectSourceLanguage::VerilogA,
                     "module shared; endmodule\n",
                 )
                 .unwrap(),
@@ -348,10 +347,7 @@ mod tests {
             .model
             .workspace
             .content
-            .replace_project_source(
-                crate::state::ProjectSourceLanguage::VerilogA,
-                "module shared_edited; endmodule\n".to_owned(),
-            )
+            .replace_project_source("module shared_edited; endmodule\n".to_owned())
             .unwrap();
         let current = super::super::snapshot(&state).expect("edited snapshot");
         let mut registry = DocumentRegistry::default();
@@ -391,7 +387,6 @@ mod tests {
             .insert_bundle(
                 crate::state::ProjectSourceBundle::try_new(
                     crate::state::ProjectSourceOwner::cell_view(reference.clone()),
-                    crate::state::ProjectSourceLanguage::VerilogA,
                     "behavior.va",
                     "module behavior(p, n); inout p, n; endmodule",
                     std::iter::empty(),

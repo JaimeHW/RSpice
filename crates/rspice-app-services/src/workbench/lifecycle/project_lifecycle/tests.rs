@@ -42,18 +42,14 @@ fn has_ac_analysis(setup: &rspice_simulation_contract::setup_state::SimulationSe
 /// Write `content` as the project-wide Verilog-A source, the code-workspace
 /// source a project-wide edit reaches, creating it the first time.
 fn edit_code_workspace_source(state: &mut ServicesHost, content: &str) {
-    let language = crate::state::ProjectSourceLanguage::VerilogA;
     let project = &mut state.model.workspace.content;
-    if project.project_sources.get(language).is_some() {
-        project
-            .replace_project_source(language, content.to_owned())
-            .unwrap();
+    if project.project_sources.get().is_some() {
+        project.replace_project_source(content.to_owned()).unwrap();
     } else {
         project
             .insert_project_source_bundle(
                 crate::state::ProjectSourceBundle::try_new(
-                    crate::state::ProjectSourceOwner::code_workspace(language),
-                    language,
+                    crate::state::ProjectSourceOwner::CodeWorkspace,
                     "shared.va",
                     content,
                     [],

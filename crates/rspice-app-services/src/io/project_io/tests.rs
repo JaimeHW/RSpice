@@ -242,7 +242,6 @@ fn serialized_analysis_instance_mut<'a>(
 fn cell_source_bundle(reference: CellViewRef) -> crate::state::ProjectSourceBundle {
     crate::state::ProjectSourceBundle::try_new(
         crate::state::ProjectSourceOwner::cell_view(reference),
-        crate::state::ProjectSourceLanguage::VerilogA,
         "behavior.va",
         "module behavior(p, n); inout p, n; endmodule",
         std::iter::empty(),
