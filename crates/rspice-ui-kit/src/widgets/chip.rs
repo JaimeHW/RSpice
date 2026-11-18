@@ -34,6 +34,12 @@ fn padded_width(t: &Tokens, text: f32) -> f32 {
 /// A 22 px toggle chip with a mono label. Returns the response; the caller
 /// owns the toggle state (`on`).
 pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
+    chip_at_width(ui, label, on, 0.0)
+}
+
+/// [`chip`] at least `width` wide, its label centred: chips that are
+/// siblings in a row stand at one width, the widest one's.
+pub fn chip_at_width(ui: &mut Ui, label: &str, on: bool, width: f32) -> Response {
     let t = Tokens::get(ui.ctx());
     let c = &t.color;
 
@@ -45,7 +51,7 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
         )
     });
     let size = vec2(
-        padded_width(&t, galley.size().x),
+        padded_width(&t, galley.size().x).max(width),
         if t.metrics.is_touch() {
             t.metrics.touch_target()
         } else {

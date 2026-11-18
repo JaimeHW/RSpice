@@ -4,13 +4,12 @@
 
 use egui::{Key, Modifiers, Ui};
 
-use super::super::CONSOLE_SELECT_CHROME;
 use super::lines::Rows;
 use super::{body_id, find_id, source};
 use crate::state::SimulationRun;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, select_mono_with_response};
+use crate::ui::widgets::{chip, select_mono_width, select_mono_with_response};
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
 use crate::workbench::framework::workbench_host::ConsoleHost;
 use crate::workbench::state::{ConsoleChannel, ConsoleSeverity, ConsoleView};
@@ -46,19 +45,14 @@ pub fn toolbar(ui: &mut Ui, state: &mut impl ConsoleHost) {
             view.toggle(severity);
         }
     }
-    channel(
-        ui,
-        &state.model().simulation.retained.runs,
-        &mut view,
-        advance,
-    );
+    channel(ui, &state.model().simulation.retained.runs, &mut view);
     find(ui, &mut view, advance);
     state.workbench_mut().console_view = view;
 }
 
 /// The channel selector: the session's log first, then each run the session
 /// holds, newest first, by the run's own label.
-fn channel(ui: &mut Ui, runs: &[SimulationRun], view: &mut ConsoleView, advance: f32) {
+fn channel(ui: &mut Ui, runs: &[SimulationRun], view: &mut ConsoleView) {
     let mut options = Vec::with_capacity(runs.len() + 1);
     options.push(SESSION.to_owned());
     options.extend(runs.iter().map(|run| run.label.clone()));
@@ -69,20 +63,16 @@ fn channel(ui: &mut Ui, runs: &[SimulationRun], view: &mut ConsoleView, advance:
             .find(|run| run.id == sequence)
             .map_or_else(|| SESSION.to_owned(), |run| run.label.clone()),
     };
-    // Sized to the longest choice, so picking one never moves the controls
-    // beside it.
-    let widest = options
-        .iter()
-        .map(|option| option.chars().count())
-        .max()
-        .unwrap_or(0);
+    // Sized to the longest choice in the face it prints in, so every choice
+    // prints whole and picking one never moves the controls beside it.
+    let width = select_mono_width(ui, &options);
     let picked = select_mono_with_response(
         ui,
         "workbench.console.channel",
         "Console channel",
         &selected,
         &options,
-        advance * widest as f32 + CONSOLE_SELECT_CHROME,
+        width,
     )
     .picked;
     if let Some(picked) = picked {

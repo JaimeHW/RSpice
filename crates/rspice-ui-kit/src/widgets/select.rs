@@ -185,6 +185,24 @@ pub fn select_with_details(
     .0
 }
 
+/// The width a [`select_mono_with_response`] needs to say each of `options`
+/// whole: the widest in the face it prints them in, with the room before it
+/// and the chevron's after.
+#[must_use]
+pub fn select_mono_width(ui: &Ui, options: &[String]) -> f32 {
+    let font = theme::field_mono();
+    let widest = options
+        .iter()
+        .map(|option| {
+            ui.painter()
+                .layout_no_wrap(option.clone(), font.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
+    widest.ceil() + VALUE_INSET + CHEVRON_ROOM
+}
+
 /// Mockup-authored engineering-field select. Field values and options use the
 /// same mono face as adjacent exact-value inputs without changing toolbar or
 /// navigation selects globally.
@@ -830,6 +848,34 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect()
+    }
+
+    /// A mono select as wide as [`select_mono_width`] measures prints its
+    /// longest choice whole, in the larger face it prints choices in.
+    #[test]
+    fn a_mono_select_at_its_measured_width_prints_its_longest_choice_whole() {
+        let ctx = egui::Context::default();
+        crate::Theme::default().apply(&ctx);
+        let options = ["All producers", "Verilog-A compiler 12", "Netlist 3"]
+            .map(str::to_owned)
+            .to_vec();
+        let longest = options[1].clone();
+        let mut printed = Vec::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let width = select_mono_width(ui, &options);
+                let _ = select_mono_with_response(ui, "mono", "Mono", &longest, &options, width);
+            });
+            printed = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+        }
+        assert!(printed.contains(&longest), "{printed:?}");
     }
 
     /// A long list scrolls inside its drop-down: the drop-down never grows

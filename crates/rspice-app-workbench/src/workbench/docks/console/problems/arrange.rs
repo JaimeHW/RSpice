@@ -124,6 +124,22 @@ impl Tally {
     pub const fn severity(&self, level: DiagnosticLevel) -> usize {
         self.severities[level.rung()]
     }
+
+    /// A tally stating what each filter control would list, for a strip
+    /// drawn without a listing behind it.
+    #[cfg(test)]
+    pub(super) fn of(
+        severities: [usize; DiagnosticLevel::ALL.len()],
+        waived: usize,
+        producers: Vec<(String, usize)>,
+    ) -> Self {
+        Self {
+            severities,
+            waived,
+            producers,
+            widest: [0; super::grid::FITTED.len()],
+        }
+    }
 }
 
 /// What the listing held when an arrangement was built from it.

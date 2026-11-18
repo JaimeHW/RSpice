@@ -49,9 +49,6 @@ pub const CONSOLE_COLUMN_GAP: f32 = 9.0;
 /// runs past its widest text. Two of them are the gutter between one
 /// column's widest text and the next column's, the same between every pair.
 pub const CONSOLE_CELL_INSET: f32 = 6.0;
-/// A select's frame around its text: the inset before it and the chevron's
-/// well after it. A select is sized to its longest choice plus this.
-const CONSOLE_SELECT_CHROME: f32 = 32.0;
 /// Side of a row's leading problem mark, and the gutter every row reserves for
 /// it so a marked row's columns line up with an unmarked row's. Both read from
 /// the kit, so a console row's mark is the mark every other panel sets.
