@@ -13,6 +13,7 @@ pub use resource_policy::execution_resource_policy_blocker;
 pub mod preparation;
 #[cfg(test)]
 mod qpss_artifact_tests;
+mod run_memory;
 mod snapshot;
 mod source_lines;
 pub use source_lines::TaskSourceLocator;

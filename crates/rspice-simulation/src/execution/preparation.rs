@@ -1,5 +1,7 @@
 //! Checked generated-design and manual-deck preparation over borrowed inputs.
 
+use super::run_memory;
+pub use super::run_memory::MachineMemory;
 use super::{
     ExecutionTargetCapabilities, ModelSourceIdentity, PreparationError, PreparationStage,
     PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy, SnapshotParts,
@@ -12,16 +14,17 @@ use crate::execution::SimulationRunIntent;
 use crate::execution_identity::{drc_receipt_digest, manual_source_receipt_digest};
 use crate::manual_deck;
 use crate::model_sources::{
-    prepared_project_model_sources, validate_projected_model_binding_authority,
+    prepared_project_model_sources_of, validate_projected_model_binding_authority,
 };
 use crate::netlist_gen::{CrossProbeSnapshot, NetlistSourceData};
 use crate::netlist_preparation::dependencies::{
     expand_generated_dependencies_with_sealed_sources, expand_manual_dependencies,
 };
 use crate::netlist_preparation::{
-    contains_external_include_directive, deferred_external_source_reason, executable_logical_lines,
-    measurements, reject_deferred_external_sources_with_project_runtimes,
-    validated_executable_hierarchy,
+    ExecutableHierarchy, contains_external_include_directive, deferred_external_source_reason,
+    executable_logical_lines, measurements, parse_executable,
+    reject_deferred_external_sources_with_project_runtimes, unparsed_executable_source,
+    validated_executable_hierarchy_with_limits_and_abort,
 };
 use crate::output_contract::selection::{effective_plan_capture, projection_occurrence_nets};
 use crate::preparation::{QueuedAnalysis, validate_prepared_periodic_sources};
@@ -61,6 +64,10 @@ pub struct RunPreparationInputs<'a, R, A> {
     /// smaller of whatever it ends up with and the parallelism the host
     /// reports.
     pub max_parallel_workers: Option<usize>,
+    /// The memory of the machine the run is prepared on, which bounds the
+    /// design it may run. `None` where the host cannot say, as in a
+    /// browser: the run keeps the counts this build ships.
+    pub machine_memory: Option<MachineMemory>,
     /// Folders this host searches for a deck's `.include` and `.lib` files
     /// after the project's own include search paths. Device-local like the
     /// worker ceiling: the reader's, not the project's.
@@ -77,9 +84,41 @@ pub struct RunPreparationInputs<'a, R, A> {
 
 impl<R, A> RunPreparationInputs<'_, R, A> {
     /// The resource ceilings this run executes under: the reviewed shipped
-    /// limits, with the only one the reader controls applied over them.
+    /// limits, with the counts a run materializes sized to the machine and
+    /// the worker ceiling the reader chose applied over them.
     fn execution_limits(&self) -> rspice_core::ResourceLimits {
-        execution_limits_for(self.max_parallel_workers)
+        execution_limits_for(self.max_parallel_workers, self.machine_memory)
+    }
+
+    /// `executable_netlist` parsed and flattened once, under this run's
+    /// limits, for every check the preparation makes of it and for the
+    /// snapshot that seals it.
+    fn executable_hierarchy(
+        &self,
+        executable_netlist: &str,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<ExecutableHierarchy, PreparationError> {
+        let limits = self.execution_limits();
+        let parsed = parse_executable(executable_netlist, limits, abort)
+            .map_err(unparsed_executable_source)?;
+        self.flattened(parsed, abort)
+    }
+
+    /// `parsed`, which [`parse_executable`] made under this run's limits,
+    /// flattened; a design the machine cannot hold is refused in the
+    /// reader's words, saying what it needs and what there is.
+    fn flattened(
+        &self,
+        parsed: rspice_core::Netlist,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<ExecutableHierarchy, PreparationError> {
+        let hierarchy = ExecutableHierarchy::of_parsed(parsed, self.execution_limits(), abort);
+        let Some(memory) = self.machine_memory else {
+            return hierarchy;
+        };
+        let hierarchy = hierarchy.map_err(|error| run_memory::too_big_for(error, memory))?;
+        run_memory::check_fits(hierarchy.devices(), memory)?;
+        Ok(hierarchy)
     }
 
     /// The chain this run's includes resolve through.
@@ -120,24 +159,29 @@ pub struct StoredDeckInputs<'a> {
     pub files: &'a [rspice_design::deck::StoredDeckFile],
 }
 
-/// The reviewed shipped ceilings, with the one the reader controls applied.
+/// The reviewed shipped ceilings, with the counts a run materializes sized
+/// to `machine_memory` and the worker ceiling the reader chose applied.
 ///
-/// `None` leaves the limits exactly as this build ships them, byte for byte.
-/// That is deliberate rather than an optimization: a snapshot carrying
-/// anything else is a snapshot with custom resource limits, and the analyses
-/// that do not enforce them refuse to run under one. A reader who has chosen
-/// nothing must not be handed a custom-limits run.
+/// The shipped counts guard a service against input it did not write. A run
+/// of the reader's own design on their own machine is bounded by that
+/// machine instead, never below what ships. With neither a machine nor a
+/// ceiling the limits are exactly as this build ships them.
 ///
 /// A free function so the arithmetic can be read and tested without
-/// assembling a run's worth of borrowed catalogs. Every other limit stays at
-/// the shipped value: the worker count is the only one a preference reaches,
-/// and a run must not quietly widen the rest along with it.
-fn execution_limits_for(max_parallel_workers: Option<usize>) -> rspice_core::ResourceLimits {
+/// assembling a run's worth of borrowed catalogs. What a run reads from
+/// files and how deep its hierarchy nests stay at the shipped values.
+fn execution_limits_for(
+    max_parallel_workers: Option<usize>,
+    machine_memory: Option<MachineMemory>,
+) -> rspice_core::ResourceLimits {
     let mut limits = rspice_core::ResourceLimits::default();
     if let Some(workers) = max_parallel_workers {
         limits.max_parallel_workers = workers;
     }
-    limits
+    match machine_memory {
+        Some(memory) => run_memory::sized_to(limits, memory.installed_bytes),
+        None => limits,
+    }
 }
 
 pub fn build_analysis_plan(
@@ -506,14 +550,23 @@ where
         inputs.execution_limits(),
     )?;
     PreparationError::check_abort(abort)?;
-    reject_unresolved_device_models(&netlist, has_project_technology)?;
-    PreparationError::check_abort(abort)?;
-    reject_deferred_corner_model_sources(
-        tasks.iter().map(PreparedTask::queued_analysis),
-        &netlist,
+    // One parse and one flattening of the deck serve every check below and
+    // the snapshot that seals it: a million devices take seconds to flatten.
+    let hierarchy = inputs.executable_hierarchy(&netlist, abort)?;
+    reject_unresolved_models_in(
+        &hierarchy.parsed,
+        &hierarchy.flattened,
+        has_project_technology,
     )?;
     PreparationError::check_abort(abort)?;
-    let project_model_sources = prepared_project_model_sources(inputs.technology.models, &netlist)?;
+    reject_deferred_corner_model_sources_under(
+        tasks.iter().map(PreparedTask::queued_analysis),
+        &netlist,
+        hierarchy.limits(),
+    )?;
+    PreparationError::check_abort(abort)?;
+    let project_model_sources =
+        prepared_project_model_sources_of(inputs.technology.models, &hierarchy)?;
 
     let source_digest = generated_executable_source_digest(&netlist);
     let receipt =
@@ -559,8 +612,7 @@ where
         root_schematic.current_file(),
     )?;
 
-    // The limits are the ones `PreparedRunSnapshot::new` validates under.
-    PreparedRunSnapshot::new_with_preparation_policy(
+    PreparedRunSnapshot::new_with_hierarchy(
         SnapshotParts {
             task_source_policy: super::snapshot::TaskSourcePolicy::PreparedObservations,
             execution_limits: inputs.execution_limits(),
@@ -630,7 +682,7 @@ where
             sealed_source_dependencies,
             configuration: Some(configuration),
         },
-        rspice_core::ResourceLimits::default(),
+        hierarchy,
         abort,
         progress,
     )
@@ -850,45 +902,47 @@ pub fn build_prepared_manual_deck<R, A>(
     // A sealed Verilog-A source is a dependency like an include: the run
     // refuses to dispatch once the host no longer gives the bytes it sealed.
     sealed_source_dependencies.extend(deck_hdl_dependencies);
-    // One parse serves the model check and the deck's own warnings (a dropped
-    // control command, a shadowed definition), which the run advises as a
-    // headless run of the same deck does. It is the parse the deck's queue is
-    // read from, control regions and all. Each is worded as the engine words
-    // the parse warnings it also logs, "line 5: …", so a run can tell the
-    // engine repeating one from news.
-    let parsed = match rspice_core::Netlist::parse(&expanded) {
-        Ok(parsed) => Some(parsed),
+    // One parse and one flattening serve the model checks, the deck's own
+    // warnings (a dropped control command, a shadowed definition), which the
+    // run advises as a headless run of the same deck does, and the snapshot
+    // that seals the run. Each warning is worded as the engine words the
+    // parse warnings it also logs, "line 5: …", so a run can tell the engine
+    // repeating one from news.
+    let parsed = match parse_executable(&expanded, inputs.execution_limits(), &rspice_core::NoAbort)
+    {
+        Ok(parsed) => parsed,
         Err(error) => {
-            // A deck that included files is refused here, where the card
-            // that failed can still be named by the file and line that wrote
-            // it; the checks after this parse the expanded text and could
-            // name only its line.
-            if let Some(lines) = source_lines.as_ref().and_then(|(lines, expansion)| {
-                super::source_lines::aligned_line_map(lines, expansion, &expanded)
-            }) {
+            // A deck that included files is refused where the card that
+            // failed can still be named by the file and line that wrote it.
+            if let rspice_core::netlist::ParseWithAbortError::Parse(failure) = &error
+                && let Some(lines) = source_lines.as_ref().and_then(|(lines, expansion)| {
+                    super::source_lines::aligned_line_map(lines, expansion, &expanded)
+                })
+            {
                 return Err(PreparationError::new(
                     PreparationStage::SourceChecks,
-                    super::source_lines::located_parse_message(error.to_string(), &lines),
+                    super::source_lines::located_parse_message(failure.to_string(), &lines),
                 ));
             }
-            None
+            return Err(unparsed_executable_source(error));
         }
     };
-    if let Some(parsed) = &parsed {
-        reject_unresolved_models_in(parsed, has_project_technology)?;
-    }
-    let advisories = parsed.map_or_else(Vec::new, |parsed| {
-        parsed
-            .diagnostics
-            .into_iter()
-            .map(|diagnostic| match diagnostic.line {
-                0 => diagnostic.message,
-                line => format!("line {line}: {}", diagnostic.message),
-            })
-            .collect()
-    });
+    let advisories = parsed
+        .diagnostics
+        .iter()
+        .map(|diagnostic| match diagnostic.line {
+            0 => diagnostic.message.clone(),
+            line => format!("line {line}: {}", diagnostic.message),
+        })
+        .collect();
+    let hierarchy = inputs.flattened(parsed, &rspice_core::NoAbort)?;
+    reject_unresolved_models_in(
+        &hierarchy.parsed,
+        &hierarchy.flattened,
+        has_project_technology,
+    )?;
     let project_model_sources =
-        prepared_project_model_sources(inputs.technology.models, &expanded)?;
+        prepared_project_model_sources_of(inputs.technology.models, &hierarchy)?;
     let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(
         inputs.technology.project.id(),
         inputs.project_sources,
@@ -971,9 +1025,10 @@ pub fn build_prepared_manual_deck<R, A>(
         inputs.analysis.sim_setup.reference_pvt.process,
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
     )?;
-    reject_deferred_corner_model_sources(
+    reject_deferred_corner_model_sources_under(
         tasks.iter().map(PreparedTask::queued_analysis),
         &expanded,
+        hierarchy.limits(),
     )?;
     let analysis_config_digests = tasks
         .iter()
@@ -1013,40 +1068,50 @@ pub fn build_prepared_manual_deck<R, A>(
         origin,
     )?;
 
-    PreparedRunSnapshot::new(SnapshotParts {
-        task_source_policy: super::snapshot::TaskSourcePolicy::AuthoredDeck,
-        execution_limits: inputs.execution_limits(),
-        measurement_references,
-        data_files,
-        hdl_deck_directory: source_directory(origin),
-        intent: SimulationRunIntent::ManualDeck,
-        simulation_plan_id: None,
-        project_revision: inputs.technology.project.revision().get(),
-        topology_revision: inputs.schematic_topology_revision,
-        source_digest,
-        reference_process: inputs.analysis.sim_setup.reference_pvt.process,
-        reference_temperature_celsius: inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
-        run_set: None,
-        tasks,
-        executable_netlist: expanded,
-        save_policy: SavePolicy::RetainEngineProducedResults,
-        model_identities,
-        project_model_sources,
-        specifications: Vec::new(),
-        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
-        project_veriloga_runtimes,
-        // A manual deck selects its own sections and carries its own corner
-        // directives; no deck of its run is materialized for a process.
-        corner_veriloga_runtimes: Default::default(),
-        target: ExecutionTargetCapabilities::current(),
-        receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
-        advisories,
-        manual_source: Some(source.to_owned()),
-        cross_probe: None,
-        touchstone_export,
-        sealed_source_dependencies,
-        configuration: None,
-    })
+    PreparedRunSnapshot::new_with_hierarchy(
+        SnapshotParts {
+            task_source_policy: super::snapshot::TaskSourcePolicy::AuthoredDeck,
+            execution_limits: inputs.execution_limits(),
+            measurement_references,
+            data_files,
+            hdl_deck_directory: source_directory(origin),
+            intent: SimulationRunIntent::ManualDeck,
+            simulation_plan_id: None,
+            project_revision: inputs.technology.project.revision().get(),
+            topology_revision: inputs.schematic_topology_revision,
+            source_digest,
+            reference_process: inputs.analysis.sim_setup.reference_pvt.process,
+            reference_temperature_celsius: inputs
+                .analysis
+                .sim_setup
+                .reference_pvt
+                .temperature_celsius,
+            run_set: None,
+            tasks,
+            executable_netlist: expanded,
+            save_policy: SavePolicy::RetainEngineProducedResults,
+            model_identities,
+            project_model_sources,
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            project_veriloga_runtimes,
+            // A manual deck selects its own sections and carries its own corner
+            // directives; no deck of its run is materialized for a process.
+            corner_veriloga_runtimes: Default::default(),
+            target: ExecutionTargetCapabilities::current(),
+            receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
+            advisories,
+            manual_source: Some(source.to_owned()),
+            cross_probe: None,
+            touchstone_export,
+            sealed_source_dependencies,
+            configuration: None,
+        },
+        hierarchy,
+        &rspice_core::NoAbort,
+        &|_| {},
+    )
     .map(|snapshot| match source_lines {
         Some((lines, expansion)) => snapshot.with_source_lines(&expansion, Some(lines)),
         None => snapshot,
@@ -1160,26 +1225,15 @@ pub fn touchstone_export_policy<'a>(
     )
 }
 
-pub(crate) fn reject_unresolved_device_models(
-    executable_netlist: &str,
-    technology_in_effect: bool,
-) -> Result<(), PreparationError> {
-    // Parseability and hierarchy resolution belong to earlier stages, which
-    // report them in their own words; this check contributes nothing when
-    // either fails.
-    match rspice_core::netlist::parse_netlist(executable_netlist) {
-        Ok(parsed) => reject_unresolved_models_in(&parsed, technology_in_effect),
-        Err(_) => Ok(()),
-    }
-}
-
-fn reject_unresolved_models_in(
+/// Refuse a deck whose devices name a model nothing defines, from the
+/// flattening its preparation already made.
+pub(crate) fn reject_unresolved_models_in(
     parsed: &rspice_core::Netlist,
+    flattened: &rspice_core::netlist::FlattenedNetlist,
     technology_in_effect: bool,
 ) -> Result<(), PreparationError> {
-    let Ok(unresolved) = rspice_core::netlist::unresolved_device_model_references(parsed) else {
-        return Ok(());
-    };
+    let unresolved =
+        rspice_core::netlist::unresolved_flattened_device_model_references(parsed, flattened);
     if unresolved.is_empty() {
         return Ok(());
     }
@@ -1217,6 +1271,20 @@ pub fn reject_deferred_corner_model_sources<'a>(
     tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
     executable_netlist: &str,
 ) -> Result<(), PreparationError> {
+    reject_deferred_corner_model_sources_under(
+        tasks,
+        executable_netlist,
+        rspice_core::ResourceLimits::default(),
+    )
+}
+
+/// [`reject_deferred_corner_model_sources`], flattening each corner's deck
+/// under `limits`, the limits the run executes under.
+pub(crate) fn reject_deferred_corner_model_sources_under<'a>(
+    tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
+    executable_netlist: &str,
+    limits: rspice_core::ResourceLimits,
+) -> Result<(), PreparationError> {
     for task in tasks {
         let Some(corner) = task.spec_options.corner.as_ref() else {
             continue;
@@ -1251,7 +1319,12 @@ pub fn reject_deferred_corner_model_sources<'a>(
             .map_err(|error| {
                 PreparationError::new(PreparationStage::ModelBindings, error.to_string())
             })?;
-            validated_executable_hierarchy(&source).map_err(|error| {
+            validated_executable_hierarchy_with_limits_and_abort(
+                &source,
+                limits,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .map_err(|error| {
                 PreparationError::new(
                     PreparationStage::ModelBindings,
                     format!("Materialized {process:?} corner source failed validation: {error}"),
@@ -1318,7 +1391,7 @@ mod tests {
     #[test]
     fn the_worker_ceiling_is_the_only_limit_a_preference_moves() {
         let shipped = rspice_core::ResourceLimits::default();
-        let limits = execution_limits_for(Some(6));
+        let limits = execution_limits_for(Some(6), None);
 
         assert_eq!(limits.max_parallel_workers, 6);
         // Everything a run is allowed to materialize stays where the build
@@ -1330,19 +1403,33 @@ mod tests {
         assert_eq!(limits.max_batch_runs, shipped.max_batch_runs);
     }
 
-    /// Choosing nothing must produce the shipped limits *exactly*.
-    ///
-    /// Not merely equivalent ones: `execution_resource_policy_blocker`
-    /// compares against `ResourceLimits::default()` and refuses any run that
-    /// differs, so a snapshot that restated the worker ceiling rather than
-    /// leaving it alone would turn every default session's run into a
-    /// custom-limits run and get it refused.
+    /// Choosing nothing on a host that cannot say its memory produces the
+    /// shipped limits *exactly*.
     #[test]
     fn choosing_no_ceiling_leaves_the_shipped_limits_untouched() {
         assert_eq!(
-            execution_limits_for(None),
+            execution_limits_for(None, None),
             rspice_core::ResourceLimits::default()
         );
+    }
+
+    /// A desktop run's counts follow the machine's memory, and the run's
+    /// worker ceiling still applies over them.
+    #[test]
+    fn a_machines_memory_sizes_the_counts_a_run_may_materialize() {
+        let gigabytes = 1024 * 1024 * 1024;
+        let limits = execution_limits_for(
+            Some(3),
+            Some(MachineMemory {
+                installed_bytes: 32 * gigabytes,
+                free_bytes: 4 * gigabytes,
+            }),
+        );
+        let shipped = rspice_core::ResourceLimits::default();
+        assert_eq!(limits.max_parallel_workers, 3);
+        assert!(limits.max_flattened_elements > 4 * shipped.max_flattened_elements);
+        assert_eq!(limits.max_netlist_bytes, shipped.max_netlist_bytes);
+        assert_eq!(limits.max_hierarchy_depth, shipped.max_hierarchy_depth);
     }
 
     /// Everything a manual deck's preparation borrows, empty: no project, no
@@ -1399,6 +1486,7 @@ mod tests {
                 imported_checkpoints: &self.monte_carlo,
                 imported_transient_checkpoints: &self.transient,
                 max_parallel_workers: None,
+                machine_memory: None,
                 library_folders: &[],
                 compilation: None,
                 design_checks: rspice_design::drc::DrcConfig::default(),
@@ -1492,5 +1580,89 @@ mod tests {
             "{read:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A deck of `fanout`^`levels` resistors placed through `levels`
+    /// subcircuits, written beside the other test decks as `name`.
+    fn nested_deck(name: &str, fanout: usize, levels: usize) -> (String, std::path::PathBuf) {
+        let mut deck = format!("{name}\n.subckt l{levels} a b\nR1 a b 1k\n.ends\n");
+        for level in (1..levels).rev() {
+            deck.push_str(&format!(".subckt l{level} a b\n"));
+            for at in 0..fanout {
+                deck.push_str(&format!("X{at} a b l{}\n", level + 1));
+            }
+            deck.push_str(".ends\n");
+        }
+        for at in 0..fanout {
+            deck.push_str(&format!("X{at} in 0 l1\n"));
+        }
+        deck.push_str("V1 in 0 1\n.op\n.end\n");
+        let dir = std::env::temp_dir().join(format!("rspice-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create the deck directory");
+        let path = dir.join(format!("{name}.cir"));
+        std::fs::write(&path, &deck).expect("write the deck");
+        (deck, path)
+    }
+
+    /// Flattening is what a large design costs to prepare. Every check of
+    /// the devices a deck holds, and the snapshot that seals its run, read
+    /// the one flattening its preparation makes.
+    #[test]
+    fn preparing_a_deck_flattens_its_hierarchy_once() {
+        let (deck, path) = nested_deck("flattened-once", 4, 3);
+        let fixture = ManualDeckFixture::default();
+        let inputs = fixture.inputs();
+        let before = rspice_core::netlist::flattenings_on_this_thread();
+        build_prepared_manual_deck(&inputs, manual(&deck, &path))
+            .unwrap_or_else(|error| panic!("the deck prepares: {error}"));
+        assert_eq!(
+            rspice_core::netlist::flattenings_on_this_thread() - before,
+            1
+        );
+    }
+
+    /// A run of the reader's own design is bounded by their machine, not by
+    /// the count the engine ships for input it did not write: a design past
+    /// that count prepares on a machine with memory for it, and a design
+    /// the machine has no memory free for is refused before it runs, saying
+    /// what it needs and what there is.
+    #[test]
+    fn a_design_is_bounded_by_the_machine_it_runs_on() {
+        let gigabytes = 1024 * 1024 * 1024;
+        let shipped = rspice_core::ResourceLimits::default().max_flattened_elements;
+        let (deck, path) = nested_deck("machine-sized", 64, 3);
+        assert!(64 * 64 * 64 > shipped);
+        let fixture = ManualDeckFixture::default();
+        let roomy = RunPreparationInputs {
+            machine_memory: Some(MachineMemory {
+                installed_bytes: 16 * gigabytes,
+                free_bytes: 8 * gigabytes,
+            }),
+            ..fixture.inputs()
+        };
+        let snapshot = build_prepared_manual_deck(&roomy, manual(&deck, &path))
+            .unwrap_or_else(|error| panic!("the machine holds the design: {error}"));
+        assert!(snapshot.execution_limits().max_flattened_elements > shipped);
+
+        let busy = RunPreparationInputs {
+            machine_memory: Some(MachineMemory {
+                installed_bytes: 16 * gigabytes,
+                free_bytes: gigabytes / 2,
+            }),
+            ..fixture.inputs()
+        };
+        let refused = build_prepared_manual_deck(&busy, manual(&deck, &path))
+            .expect_err("half a gigabyte does not hold the design");
+        assert_eq!(
+            refused.message(),
+            "This design has 262,145 devices. Running it needs about 1.3 GB of memory, and this \
+             computer has 512 MB free. Close other programs to free memory, or run it on a \
+             computer with more."
+        );
+
+        // Without a machine to size them by, the shipped count still holds.
+        let refused = build_prepared_manual_deck(&fixture.inputs(), manual(&deck, &path))
+            .expect_err("the shipped count does not hold the design");
+        assert!(refused.resource_limit().is_some(), "{refused}");
     }
 }

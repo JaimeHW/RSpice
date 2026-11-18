@@ -81,6 +81,12 @@ impl PreparationError {
         self.refusal.as_ref()
     }
 
+    /// The same failure, said as `message`.
+    pub(crate) fn said_as(mut self, message: impl Into<String>) -> Self {
+        self.message = message.into();
+        self
+    }
+
     /// The same failure, at the line the parser reported it on.
     pub fn at_line(mut self, line: Option<usize>) -> Self {
         self.line = line;

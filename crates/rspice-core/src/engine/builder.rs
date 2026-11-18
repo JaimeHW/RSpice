@@ -6280,7 +6280,7 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_valid_configuration()?;
         netlist.params.restart_statistical_stream();
-        let mut flattened = flatten_netlist_with_models_config_with_abort(
+        let flattened = flatten_netlist_with_models_config_with_abort(
             netlist,
             FlattenerConfig {
                 max_depth: engine.config.resource_limits.max_hierarchy_depth,
@@ -6290,6 +6290,33 @@ impl Engine {
             &NoAbort,
         )
         .map_err(|error| map_build_parse_error("model-bin hierarchy flattening", error))?;
+        engine.inspect_resolved_model_bins(netlist, flattened)
+    }
+
+    /// [`Self::validate_model_bin_contracts`] over `flattened`, the
+    /// flattening of a freshly parsed `netlist` under this engine's limits
+    /// that the caller has already made, so a caller that needs the
+    /// flattening for other checks too makes it once.
+    pub fn validate_flattened_model_bin_contracts(
+        &self,
+        netlist: &Netlist,
+        flattened: crate::netlist::FlattenedNetlist,
+    ) -> Result<(), SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_valid_configuration()?;
+        engine
+            .inspect_resolved_model_bins(netlist, flattened)
+            .map(|_| ())
+    }
+
+    /// The inspection [`Self::inspect_model_bins`] makes once `netlist` is
+    /// flattened, on an engine already resolved for it.
+    fn inspect_resolved_model_bins(
+        &self,
+        netlist: &Netlist,
+        mut flattened: crate::netlist::FlattenedNetlist,
+    ) -> Result<ModelBinInspection, SimulationError> {
+        let engine = self;
         let mut effective_model_netlist;
         let netlist = if flattened.scoped_models.is_empty() {
             netlist

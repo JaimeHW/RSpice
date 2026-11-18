@@ -1056,6 +1056,7 @@ impl PreparedRunSnapshot {
         self.simulation_plan_id
     }
 
+    #[cfg(test)]
     pub(crate) fn new(parts: SnapshotParts) -> Result<Self, PreparationError> {
         Self::new_with_preparation_policy(
             parts,
@@ -1084,8 +1085,32 @@ impl PreparedRunSnapshot {
     ///
     /// `progress` is told how many of the run's points have their deck ready.
     pub(crate) fn new_with_preparation_policy(
+        parts: SnapshotParts,
+        limits: rspice_core::ResourceLimits,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+        progress: &dyn Fn(PreparationProgress),
+    ) -> Result<Self, PreparationError> {
+        Self::prepare(parts, limits, None, abort, progress)
+    }
+
+    /// A snapshot of `parts`, whose executable deck its preparation has
+    /// already parsed and flattened as `hierarchy`: the snapshot validates
+    /// under the limits the deck was flattened under and reads that
+    /// flattening instead of making its own.
+    pub(crate) fn new_with_hierarchy(
+        parts: SnapshotParts,
+        hierarchy: crate::netlist_preparation::ExecutableHierarchy,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+        progress: &dyn Fn(PreparationProgress),
+    ) -> Result<Self, PreparationError> {
+        let limits = hierarchy.limits();
+        Self::prepare(parts, limits, Some(hierarchy), abort, progress)
+    }
+
+    fn prepare(
         mut parts: SnapshotParts,
         limits: rspice_core::ResourceLimits,
+        hierarchy: Option<crate::netlist_preparation::ExecutableHierarchy>,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
         progress: &dyn Fn(PreparationProgress),
     ) -> Result<Self, PreparationError> {
@@ -1562,21 +1587,27 @@ impl PreparedRunSnapshot {
                 )
             })?;
         PreparationError::check_abort(abort)?;
-        let parsed_netlist = rspice_core::Netlist::parse_with_options_and_abort(
-            &parts.executable_netlist,
-            rspice_core::netlist::NetlistParseOptions {
-                resource_limits: limits,
-                ..Default::default()
-            },
-            abort,
-        )
-        .map_err(|error| {
-            PreparationError::from_parse(
-                PreparationStage::Netlist,
-                "Prepared executable netlist is invalid",
-                error,
-            )
-        })?;
+        let (parsed_netlist, flattened) = match hierarchy {
+            Some(hierarchy) => {
+                let (parsed, flattened) = hierarchy.into_parts();
+                (parsed, Some(flattened))
+            }
+            None => (
+                crate::netlist_preparation::parse_executable(
+                    &parts.executable_netlist,
+                    limits,
+                    abort,
+                )
+                .map_err(|error| {
+                    PreparationError::from_parse(
+                        PreparationStage::Netlist,
+                        "Prepared executable netlist is invalid",
+                        error,
+                    )
+                })?,
+                None,
+            ),
+        };
         saved_outputs::bind_decks(&mut parts.tasks, &parsed_netlist, abort, progress)?;
         let model_bin_config = rspice_core::SimulationConfig {
             resource_limits: limits,
@@ -1585,14 +1616,19 @@ impl PreparedRunSnapshot {
             ),
             ..Default::default()
         };
-        rspice_core::Engine::new(model_bin_config)
-            .validate_model_bin_contracts(&parsed_netlist)
-            .map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::ModelBindings,
-                    format!("Prepared model-bin resolution is invalid: {error}"),
-                )
-            })?;
+        let model_bins = rspice_core::Engine::new(model_bin_config);
+        match flattened {
+            Some(flattened) => {
+                model_bins.validate_flattened_model_bin_contracts(&parsed_netlist, flattened)
+            }
+            None => model_bins.validate_model_bin_contracts(&parsed_netlist),
+        }
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!("Prepared model-bin resolution is invalid: {error}"),
+            )
+        })?;
         let expected_veriloga_bindings = parts
             .project_veriloga_runtimes
             .sources()

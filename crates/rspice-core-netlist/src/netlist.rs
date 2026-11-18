@@ -87,6 +87,9 @@ pub use expr::{
     ParamContext, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy, RandomState,
     StatisticalParamMode,
 };
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub use flattener::flattenings_on_this_thread;
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
     flatten_netlist, flatten_netlist_with_models, flatten_netlist_with_models_config_with_abort,
@@ -107,7 +110,10 @@ pub use initcond::{
     DeviceInitialConditionSourceProvider, DeviceInitialConditionSourceText,
     MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,
 };
-pub use model_resolution::{UnresolvedDeviceModelReference, unresolved_device_model_references};
+pub use model_resolution::{
+    UnresolvedDeviceModelReference, unresolved_device_model_references,
+    unresolved_flattened_device_model_references,
+};
 pub use mutual_inductor::validate_mutual_inductor_references;
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 #[doc(hidden)]

@@ -10,6 +10,7 @@ pub use catalog_sealing::{
 
 mod project_provenance;
 pub use project_provenance::prepared_project_model_sources;
+pub(crate) use project_provenance::prepared_project_model_sources_of;
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};

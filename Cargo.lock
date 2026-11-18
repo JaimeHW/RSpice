@@ -5434,6 +5434,7 @@ dependencies = [
 name = "rspice-app-runs"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "log",
  "num-complex",
  "ron",
@@ -5458,6 +5459,7 @@ dependencies = [
  "similar",
  "uuid",
  "web-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6176,6 +6178,7 @@ dependencies = [
  "num-complex",
  "ron",
  "rspice-core",
+ "rspice-core-netlist",
  "rspice-design",
  "rspice-design-model",
  "rspice-model-library",

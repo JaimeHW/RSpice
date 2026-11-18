@@ -16,7 +16,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use super::{ElementKind, ModelDef, Netlist, flatten_netlist_with_models};
+use super::{ElementKind, FlattenedNetlist, ModelDef, Netlist, flatten_netlist_with_models};
 use crate::builtin_lib::FOUNDATION_LIB;
 
 /// One instantiated device whose model name the builder would reject.
@@ -68,6 +68,18 @@ pub fn unresolved_device_model_references(
 ) -> Result<Vec<UnresolvedDeviceModelReference>, String> {
     let flattened = flatten_netlist_with_models(netlist)
         .map_err(|error| format!("subcircuit flattening failed: {error}"))?;
+    Ok(unresolved_flattened_device_model_references(
+        netlist, &flattened,
+    ))
+}
+
+/// [`unresolved_device_model_references`] over `flattened`, a flattening of
+/// `netlist` the caller has already made, so a caller that needs the
+/// flattening for other checks too makes it once.
+pub fn unresolved_flattened_device_model_references(
+    netlist: &Netlist,
+    flattened: &FlattenedNetlist,
+) -> Vec<UnresolvedDeviceModelReference> {
     let declared = DeclaredModels::collect(netlist, &flattened.scoped_models);
 
     let mut unresolved = Vec::new();
@@ -84,7 +96,7 @@ pub fn unresolved_device_model_references(
             model: model.to_string(),
         });
     }
-    Ok(unresolved)
+    unresolved
 }
 
 /// Type names a MOSFET accepts in place of a card.

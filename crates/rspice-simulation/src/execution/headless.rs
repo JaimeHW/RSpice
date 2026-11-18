@@ -242,8 +242,11 @@ pub fn prepare_headless_run(
     }
     // Reject hierarchy amplification under the caller's policy before any
     // compatibility check can repeat flattening under default limits.
-    validated_parsed_hierarchy_with_limits_and_abort(&parsed, expanded_limits, abort)?;
-    super::preparation::reject_unresolved_device_models(&expanded, false)?;
+    let flattened =
+        validated_parsed_hierarchy_with_limits_and_abort(&parsed, expanded_limits, abort)?;
+    super::preparation::reject_unresolved_models_in(&parsed, &flattened, false)?;
+    // Released before the snapshot reads the deck again.
+    drop(flattened);
     if let Some(refusal) = crate::netlist_preparation::included_hdl_source_refusal(
         &expanded,
         &sealed_source_dependencies,

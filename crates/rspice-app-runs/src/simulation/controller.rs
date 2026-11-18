@@ -71,6 +71,7 @@ pub(crate) mod dc_history_tests;
 #[cfg(test)]
 mod directive_parse_ratchet;
 mod live_transient;
+mod machine_memory;
 #[cfg(test)]
 mod manual_deck_tests;
 mod monte_carlo_checkpoint;

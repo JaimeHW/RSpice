@@ -605,6 +605,8 @@ impl<'a> Flattener<'a> {
         netlist: &Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Element>, ParseWithAbortError> {
+        #[cfg(any(test, feature = "test-support"))]
+        FLATTENINGS.with(|count| count.set(count.get() + 1));
         self.instance_metadata.clear();
         self.param_resolver.clear_expansion();
         // Every instance of a subcircuit evaluates the same body expressions;
@@ -5898,6 +5900,19 @@ pub(super) fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
             *parameter2 *= m;
         }
     }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    static FLATTENINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many hierarchies this thread has flattened, so a test can hold a
+/// caller to the number of flattenings it makes.
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub fn flattenings_on_this_thread() -> usize {
+    FLATTENINGS.with(std::cell::Cell::get)
 }
 
 /// Convenience function to flatten a netlist

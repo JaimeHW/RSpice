@@ -60,6 +60,13 @@ rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = f
 [target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
 
+# The memory a run of the reader's design may hold, as the system reports it.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
 web-sys = { version = "0.3", features = ["Window", "Document", "Element"] }

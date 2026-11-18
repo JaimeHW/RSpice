@@ -1,6 +1,6 @@
 //! Exact project model provenance in the executable source.
 
-use crate::netlist_preparation::validated_executable_hierarchy;
+use crate::netlist_preparation::{ExecutableHierarchy, validated_executable_hierarchy};
 use crate::preparation::{PreparationError, PreparationStage};
 use std::collections::{HashMap, HashSet};
 
@@ -9,6 +9,23 @@ pub fn prepared_project_model_sources(
     executable_netlist: &str,
 ) -> Result<Vec<rspice_results::run_receipt::PreparedModelSourceIdentity>, PreparationError> {
     let (parsed, flattened) = validated_executable_hierarchy(executable_netlist)?;
+    project_model_sources_in(catalog, &parsed, &flattened)
+}
+
+/// [`prepared_project_model_sources`] of a deck its preparation has already
+/// parsed and flattened.
+pub(crate) fn prepared_project_model_sources_of(
+    catalog: &rspice_model_library::ModelCatalog,
+    hierarchy: &ExecutableHierarchy,
+) -> Result<Vec<rspice_results::run_receipt::PreparedModelSourceIdentity>, PreparationError> {
+    project_model_sources_in(catalog, &hierarchy.parsed, &hierarchy.flattened)
+}
+
+fn project_model_sources_in(
+    catalog: &rspice_model_library::ModelCatalog,
+    parsed: &rspice_core::Netlist,
+    flattened: &rspice_core::netlist::FlattenedNetlist,
+) -> Result<Vec<rspice_results::run_receipt::PreparedModelSourceIdentity>, PreparationError> {
     let referenced_names = flattened
         .elements
         .iter()

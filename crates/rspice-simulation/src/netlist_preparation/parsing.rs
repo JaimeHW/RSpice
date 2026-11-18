@@ -130,7 +130,19 @@ pub(crate) fn validated_executable_hierarchy_with_limits_and_abort(
     limits: rspice_core::ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<(rspice_core::Netlist, rspice_core::netlist::FlattenedNetlist), PreparationError> {
-    let parsed = rspice_core::Netlist::parse_with_options_and_abort(
+    let parsed =
+        parse_executable(executable_netlist, limits, abort).map_err(unparsed_executable_source)?;
+    let flattened = validated_parsed_hierarchy_with_limits_and_abort(&parsed, limits, abort)?;
+    Ok((parsed, flattened))
+}
+
+/// `executable_netlist` parsed as a prepared run's snapshot parses it.
+pub(crate) fn parse_executable(
+    executable_netlist: &str,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<rspice_core::Netlist, rspice_core::netlist::ParseWithAbortError> {
+    rspice_core::Netlist::parse_with_options_and_abort(
         executable_netlist,
         rspice_core::netlist::NetlistParseOptions {
             resource_limits: limits,
@@ -138,15 +150,66 @@ pub(crate) fn validated_executable_hierarchy_with_limits_and_abort(
         },
         abort,
     )
-    .map_err(|error| {
-        PreparationError::from_parse(
-            PreparationStage::ModelBindings,
-            "Executable source cannot authenticate project model use",
-            error,
-        )
-    })?;
-    let flattened = validated_parsed_hierarchy_with_limits_and_abort(&parsed, limits, abort)?;
-    Ok((parsed, flattened))
+}
+
+/// The refusal of an executable deck that does not parse.
+pub(crate) fn unparsed_executable_source(
+    error: rspice_core::netlist::ParseWithAbortError,
+) -> PreparationError {
+    PreparationError::from_parse(
+        PreparationStage::ModelBindings,
+        "Executable source cannot authenticate project model use",
+        error,
+    )
+}
+
+/// A run's deck parsed and flattened once, under the limits the run prepares
+/// it under, for every check its preparation makes of the hierarchy and for
+/// the snapshot that seals it.
+///
+/// Flattening is what a large design costs to prepare: a million devices
+/// take seconds each time. Every check reads this one.
+pub struct ExecutableHierarchy {
+    pub(crate) parsed: rspice_core::Netlist,
+    pub(crate) flattened: rspice_core::netlist::FlattenedNetlist,
+    limits: rspice_core::ResourceLimits,
+}
+
+impl ExecutableHierarchy {
+    /// `parsed`, which [`parse_executable`] made under `limits`, flattened.
+    pub(crate) fn of_parsed(
+        parsed: rspice_core::Netlist,
+        limits: rspice_core::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, PreparationError> {
+        // The engine restarts the deck's statistical draws before each
+        // flattening it makes, so the devices read here are the ones the
+        // run's model bins resolve.
+        parsed.params.restart_statistical_stream();
+        let flattened = validated_parsed_hierarchy_with_limits_and_abort(&parsed, limits, abort)?;
+        Ok(Self {
+            parsed,
+            flattened,
+            limits,
+        })
+    }
+
+    /// The limits the deck was parsed and flattened under.
+    pub(crate) const fn limits(&self) -> rspice_core::ResourceLimits {
+        self.limits
+    }
+
+    /// How many devices the flattened deck holds.
+    pub(crate) fn devices(&self) -> usize {
+        self.flattened.elements.len()
+    }
+
+    /// The parsed deck and its flattening.
+    pub(crate) fn into_parts(
+        self,
+    ) -> (rspice_core::Netlist, rspice_core::netlist::FlattenedNetlist) {
+        (self.parsed, self.flattened)
+    }
 }
 
 /// Validate an already parsed source without reparsing it or resampling its

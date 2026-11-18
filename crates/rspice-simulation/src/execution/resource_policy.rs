@@ -65,8 +65,11 @@ pub fn execution_resource_policy_blocker(
     limits.max_include_depth = defaults.max_include_depth;
     limits.max_hierarchy_depth = defaults.max_hierarchy_depth;
     limits.max_flattened_elements = defaults.max_flattened_elements;
-    // A result budget above the default narrows nothing, and the command line
-    // starts from one so a large batch run is not refused for its size.
+    // A count above the default narrows nothing: the command line starts
+    // from a larger result budget so a large batch run is not refused for its
+    // size, and a desktop run's counts are sized to the machine's memory.
+    limits.max_circuit_nodes = limits.max_circuit_nodes.min(defaults.max_circuit_nodes);
+    limits.max_matrix_unknowns = limits.max_matrix_unknowns.min(defaults.max_matrix_unknowns);
     limits.max_result_values = limits.max_result_values.min(defaults.max_result_values);
     (limits != defaults).then_some(
         "this analysis does not yet enforce custom execution resource limits; use default execution limits",
@@ -103,6 +106,23 @@ mod tests {
             execution_resource_policy_blocker(&NON_ENFORCING, limits),
             None
         );
+    }
+
+    /// A desktop run's counts are sized to the machine's memory, which only
+    /// ever widens them.
+    #[test]
+    fn counts_sized_to_a_large_machine_do_not_refuse_an_analysis() {
+        let mut limits = ResourceLimits::default();
+        limits.max_flattened_elements *= 16;
+        limits.max_circuit_nodes *= 16;
+        limits.max_matrix_unknowns *= 16;
+        limits.max_result_values *= 16;
+        assert_eq!(
+            execution_resource_policy_blocker(&NON_ENFORCING, limits),
+            None
+        );
+        limits.max_matrix_unknowns = ResourceLimits::default().max_matrix_unknowns / 2;
+        assert!(execution_resource_policy_blocker(&NON_ENFORCING, limits).is_some());
     }
 
     #[test]

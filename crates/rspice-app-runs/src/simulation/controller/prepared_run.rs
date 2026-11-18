@@ -124,6 +124,7 @@ fn run_preparation_inputs_reading<'a>(
         imported_checkpoints: &model.simulation.retained.imported_monte_carlo_checkpoints,
         imported_transient_checkpoints: &model.simulation.retained.imported_transient_checkpoints,
         max_parallel_workers: model.preferences.solver_worker_limit(),
+        machine_memory: super::machine_memory::machine_memory(),
         library_folders: model.library_folders(),
         compilation,
         design_checks: model.configured_root_design_check_config(),
@@ -171,6 +172,7 @@ struct FrozenRunInputs {
     imported_transient_checkpoints:
         rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     max_parallel_workers: Option<usize>,
+    machine_memory: Option<rspice_simulation::execution::preparation::MachineMemory>,
     library_folders: Vec<std::path::PathBuf>,
     compilation: Option<rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
     design_checks: rspice_design::drc::DrcConfig,
@@ -232,6 +234,7 @@ impl FrozenRunPreparation {
                     .imported_transient_checkpoints
                     .clone(),
                 max_parallel_workers: model.preferences.solver_worker_limit(),
+                machine_memory: super::machine_memory::machine_memory(),
                 library_folders: model.library_folders().to_vec(),
                 compilation: state.veriloga_compilation().cloned(),
                 design_checks: model.configured_root_design_check_config(),
@@ -302,6 +305,7 @@ impl FrozenRunInputs {
             imported_checkpoints: &self.imported_checkpoints,
             imported_transient_checkpoints: &self.imported_transient_checkpoints,
             max_parallel_workers: self.max_parallel_workers,
+            machine_memory: self.machine_memory,
             library_folders: &self.library_folders,
             compilation: self.compilation.as_ref(),
             design_checks: self.design_checks.clone(),

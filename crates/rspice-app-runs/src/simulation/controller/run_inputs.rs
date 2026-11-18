@@ -209,6 +209,9 @@ impl<'a> LiveInputs<'a> {
             imported_checkpoints,
             imported_transient_checkpoints,
             max_parallel_workers,
+            // The machine's memory bounds what a run may hold, not what it
+            // computes: a run is not stale for it.
+            machine_memory: _,
             library_folders,
             compilation,
             design_checks,

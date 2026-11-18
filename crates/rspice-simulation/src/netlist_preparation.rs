@@ -30,12 +30,14 @@ pub use hdl_sources::{DeckHdlRefusal, SealedDeckHdl, deck_source_key, seal_deck_
 pub(crate) use process_programs::{STARTS_PROGRAMS, resolve_process_programs};
 
 mod parsing;
+pub use parsing::ExecutableHierarchy;
 pub use parsing::{
     parse_analysis_netlist_with_abort, parse_runner_netlist_with_abort,
     parse_runner_netlist_with_options_and_abort,
     parse_runner_netlist_with_resource_limits_and_abort, validated_executable_hierarchy,
 };
 pub(crate) use parsing::{
+    parse_executable, unparsed_executable_source,
     validated_executable_hierarchy_with_limits_and_abort,
     validated_parsed_hierarchy_with_limits_and_abort,
 };

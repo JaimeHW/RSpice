@@ -53,6 +53,9 @@ wasm-bindgen.workspace = true
 web-sys = { workspace = true, features = ["Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console"] }
 
 [dev-dependencies]
+# The engine's count of the hierarchies a thread flattens, which holds a
+# preparation to flattening its deck once.
+rspice-core-netlist = { workspace = true, default-features = false, features = ["test-support"] }
 rspice-design = { workspace = true, features = ["schematic-test-fixtures", "test-support"] }
 rspice-simulation-contract = { workspace = true, features = ["test-support"] }
 ron = { version = "0.12.2", features = ["integer128"] }
