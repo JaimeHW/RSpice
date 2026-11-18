@@ -403,6 +403,36 @@ fn a_technology_change_needs_no_reason() {
     assert!(ProjectTechnologyChangeAuthority::new("", "engineer.james", "").is_err());
 }
 
+/// A technology's name, version and library are recorded at whatever length
+/// the PDK gives them: only an empty name, one spaced at either end or one
+/// holding a control character is refused.
+#[test]
+fn a_technology_named_at_any_length_attaches() {
+    let long = "Qualified analog models for the 180 nm mixed-signal process ".repeat(20);
+    let long = long.trim_end();
+    assert!(long.chars().count() > 1_000);
+    let mut binding = serde_json::to_value(technology_binding_fixture()).expect("serializes");
+    binding["package_name"] = serde_json::Value::String(long.to_owned());
+    binding["package_version"] = serde_json::Value::String(long.to_owned());
+    let binding: ProjectTechnologyBinding = serde_json::from_value(binding).expect("restores");
+    binding.validate().expect("a long name validates");
+    let mut project = ProjectDescriptor::default();
+    project
+        .attach_technology_audited(binding, checkpoint_context(&project, 0x51))
+        .expect("the attachment commits");
+    assert_eq!(project.technology_binding().unwrap().package_name(), long);
+
+    let mut spaced = serde_json::to_value(technology_binding_fixture()).expect("serializes");
+    spaced["package_name"] = serde_json::Value::String(format!("{long} "));
+    let spaced: ProjectTechnologyBinding = serde_json::from_value(spaced).expect("restores");
+    assert!(matches!(
+        spaced.validate(),
+        Err(TechnologyBindingError::SurroundingWhitespace(
+            "package_name"
+        ))
+    ));
+}
+
 /// A context over a checkpoint of `project` as it is now.
 fn checkpoint_context(project: &ProjectDescriptor, seed: u8) -> ProjectTechnologyChangeContext {
     ProjectTechnologyChangeContext::new(

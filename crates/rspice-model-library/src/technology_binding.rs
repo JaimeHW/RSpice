@@ -417,9 +417,6 @@ fn validate_technology_text(
     if value != value.trim() {
         return Err(TechnologyBindingError::SurroundingWhitespace(field));
     }
-    if value.chars().count() > 240 {
-        return Err(TechnologyBindingError::FieldTooLong(field));
-    }
     if value.chars().any(char::is_control) {
         return Err(TechnologyBindingError::ControlCharacter(field));
     }
@@ -434,8 +431,6 @@ pub enum TechnologyBindingError {
     RequiredField(&'static str),
     #[error("technology binding field {0} must not begin or end with whitespace")]
     SurroundingWhitespace(&'static str),
-    #[error("technology binding field {0} exceeds 240 Unicode scalar values")]
-    FieldTooLong(&'static str),
     #[error("technology binding field {0} contains a control character")]
     ControlCharacter(&'static str),
     #[error("technology binding has no canonical root model source")]

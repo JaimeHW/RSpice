@@ -140,10 +140,7 @@ fn unattachable_reason(error: &TechnologyBindingError) -> &'static str {
              files: import them as a library and attach that."
         }
         Why::NoModels => "its model files define no device models. Check them in Models.",
-        Why::RequiredField(_)
-        | Why::SurroundingWhitespace(_)
-        | Why::FieldTooLong(_)
-        | Why::ControlCharacter(_) => {
+        Why::RequiredField(_) | Why::SurroundingWhitespace(_) | Why::ControlCharacter(_) => {
             "its name, PDK name or version cannot be recorded as written. Correct it in Models."
         }
         _ => {
