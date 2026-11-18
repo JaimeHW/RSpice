@@ -362,7 +362,7 @@ pub fn model_sources(ctx: &egui::Context, model: &Model) -> SubjectStatus {
         format!(
             "{} \u{b7} {}",
             counted(libraries, "library", "libraries"),
-            counted(sources, "source file", "source files")
+            counted(sources, "model file", "model files")
         ),
     )
 }

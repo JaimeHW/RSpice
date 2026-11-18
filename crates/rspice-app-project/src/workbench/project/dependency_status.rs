@@ -376,7 +376,7 @@ fn model_library_status(model: &Model, library: &ModelLibrary) -> LibraryStatus 
                 label: "Incomplete",
                 detail: Some(format!(
                     "{missing} of {} not kept in the project",
-                    source_files(files)
+                    model_files(files)
                 )),
             };
         }
@@ -419,7 +419,7 @@ fn model_library_status(model: &Model, library: &ModelLibrary) -> LibraryStatus 
     } else {
         "In project"
     };
-    LibraryStatus::neutral(label, Some(source_files(files)))
+    LibraryStatus::neutral(label, Some(model_files(files)))
 }
 
 /// The file a finding is about, by name: the library's source row beside it
@@ -448,8 +448,8 @@ pub(crate) fn shown_path(path: &Path) -> String {
     text
 }
 
-fn source_files(count: usize) -> String {
-    format!("{count} source file{}", if count == 1 { "" } else { "s" })
+fn model_files(count: usize) -> String {
+    format!("{count} model file{}", if count == 1 { "" } else { "s" })
 }
 
 /// What every status reads: the two catalogues and the drift report. Each is
