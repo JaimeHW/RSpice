@@ -926,10 +926,25 @@ pub fn labeled_icon_button_sized(
     width: f32,
     height: f32,
 ) -> Response {
+    labeled_icon_button_named(ui, icon, label, label, selected, width, height)
+}
+
+/// A labelled icon button that says `label` and is named `name`, which its
+/// hover gives and a screen reader reads: a tool's verb on the button, and
+/// the verb with its key as its name.
+pub fn labeled_icon_button_named(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    name: &str,
+    selected: bool,
+    width: f32,
+    height: f32,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name)
     });
     if ui.is_rect_visible(rect) {
         let enabled = ui.is_enabled();
@@ -976,7 +991,7 @@ pub fn labeled_icon_button_sized(
         );
         theme::paint_focus_ring_outset(ui, &response, rect);
     }
-    response.on_hover_text(label)
+    response.on_hover_text(name)
 }
 
 /// A read-only property row. Its value reads at the size a field beside it

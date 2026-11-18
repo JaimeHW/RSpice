@@ -19,7 +19,7 @@ use crate::workbench::framework::workbench_host::WorkbenchHost;
 use super::super::layout::{LayoutSpec, RUN_CONFIG_CHIP_MAX_WIDTH};
 use super::super::state::{Drawer, Workspace};
 use crate::ui::panels::{
-    WorkbenchIcon, icon_button, labeled_icon_button_sized, labeled_icon_button_width,
+    WorkbenchIcon, icon_button, labeled_icon_button_named, labeled_icon_button_width,
 };
 use crate::workbench::framework::command_registry::CommandAvailability;
 
@@ -678,8 +678,9 @@ fn toolbar_command(
         crate::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
-    // A labelled tool's button says only its verb, as every verb's does; the
-    // key is on its hover, and an icon's hover is the verb and the key.
+    // A labelled tool's button says only its verb, as every verb's does; its
+    // name, which its hover gives and a screen reader reads, is the verb and
+    // the key, as an icon's is.
     let label = if shortcut.is_empty() {
         base_label.to_owned()
     } else {
@@ -704,19 +705,15 @@ fn toolbar_command(
     }
     let response = ui.add_enabled_ui(enabled, |ui| {
         if show_label {
-            let button = labeled_icon_button_sized(
+            labeled_icon_button_named(
                 ui,
                 icon,
                 base_label,
+                &label,
                 selected,
                 label_width,
                 layout.toolbar_control_height,
-            );
-            if shortcut.is_empty() {
-                button
-            } else {
-                button.on_hover_text(&label)
-            }
+            )
         } else {
             icon_button(ui, icon, &label, selected, toolbar_icon_button_size(layout))
         }
