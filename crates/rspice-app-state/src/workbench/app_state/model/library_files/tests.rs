@@ -304,8 +304,16 @@ fn a_file_changed_on_disk_is_named_never_overwritten_and_refreshed_on_request() 
         })
     );
 
-    // The second project edited the same file meanwhile.
+    // The second project edited the same file meanwhile; its Save finds
+    // the newer file without a check first.
     annotate(&mut second, "second");
+    let mut unchecked = working_file(&second);
+    assert!(
+        second
+            .write_library_files(&mut unchecked)
+            .unwrap_err()
+            .contains("Changed on disk since you started editing")
+    );
     assert_eq!(second.check_library_files(), 1);
     assert_eq!(
         second.library_file_status(LIBRARY, &schematic_file()),

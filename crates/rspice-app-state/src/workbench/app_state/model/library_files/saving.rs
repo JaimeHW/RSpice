@@ -94,6 +94,9 @@ impl Model {
     /// must then stay as it was.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn write_library_files(&mut self, file: &mut ProjectFile) -> Result<(), String> {
+        // What another writer saved since the last check is found now, so
+        // it is never written over unasked.
+        self.check_library_files_on_disk();
         self.refresh_library_edits();
         let planned = self.plan_library_writes(file)?;
         let mut failures = Vec::new();
