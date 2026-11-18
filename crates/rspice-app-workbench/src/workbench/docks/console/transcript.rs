@@ -333,7 +333,7 @@ fn body(ui: &mut Ui, state: &impl ConsoleHost, view: &mut ConsoleView) -> Intent
 fn empty_state(source: Source<'_>, view: &ConsoleView, rows: &Rows) -> String {
     if source.len() == 0 {
         return match source {
-            Source::Session(_) => "No studio activity yet.",
+            Source::Session(_) => "Nothing logged yet.",
             Source::Run(_) => "This run wrote no log.",
         }
         .to_owned();

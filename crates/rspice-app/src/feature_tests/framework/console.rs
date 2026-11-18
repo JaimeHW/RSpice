@@ -1236,7 +1236,7 @@ fn each_channel_says_why_it_shows_no_rows() {
     let mut state = AppState::default();
     state.model.log_buffer.clear();
     let rendered = painted_console_body(|ui| transcript::console(ui, &mut state));
-    assert!(rendered.contains("No studio activity yet."), "{rendered}");
+    assert!(rendered.contains("Nothing logged yet."), "{rendered}");
     assert!(!rendered.contains("will appear"), "{rendered}");
 
     state
