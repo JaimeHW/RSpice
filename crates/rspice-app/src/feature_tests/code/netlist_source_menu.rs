@@ -146,3 +146,83 @@ fn the_pages_context_reads_the_rows_the_host_reads_once_the_page_has_drawn() {
         }
     }
 }
+
+/// One frame of the application's deck page on `ctx`, which keeps the
+/// editor's session from frame to frame, carrying `events`.
+fn page_frame(ctx: &egui::Context, app: &mut RSpiceApp, events: Vec<egui::Event>) {
+    let input = egui::RawInput {
+        events,
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            show_prepared(ui, &mut features::cx_with_menu_answers(app, |_| false));
+        });
+    });
+}
+
+/// What Edit > Undo, Cut, Copy, Paste, Delete and Select All answer.
+fn edit_answers(app: &RSpiceApp) -> [CommandAvailability; 6] {
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+    [
+        ids::UNDO,
+        ids::CUT,
+        ids::COPY,
+        ids::PASTE,
+        ids::DELETE,
+        ids::SELECT_ALL,
+    ]
+    .map(|key| app.command_availability(key))
+}
+
+/// Edit > Undo offers a step only once the deck's editor has one to take.
+#[test]
+fn undo_waits_for_a_step_of_the_editors_history() {
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut app = deck_page(DeckPage::Owned, true);
+    prepare_workspace(&mut features::cx(&mut app));
+    page_frame(&ctx, &mut app, Vec::new());
+    page_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        edit_answers(&app)[0],
+        CommandAvailability::Disabled("nothing to undo"),
+        "a deck just opened has nothing to undo"
+    );
+
+    let editor = rspice_app_code::workbench::documents::netlist_document::editor_id_in(
+        &app.state.model,
+        &app.state.code.netlist,
+    );
+    ctx.memory_mut(|memory| memory.request_focus(editor));
+    page_frame(&ctx, &mut app, Vec::new());
+    page_frame(&ctx, &mut app, vec![egui::Event::Text("x".to_owned())]);
+    page_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        edit_answers(&app)[0],
+        CommandAvailability::Available,
+        "a typed character can be undone"
+    );
+}
+
+/// On the read-only deck a run used, every edit is unavailable, Undo
+/// included, because the document is read-only, not because there is
+/// nothing to undo; reading it stays possible.
+#[test]
+fn a_read_only_deck_shows_its_edits_unavailable_as_read_only() {
+    let mut app = deck_page(DeckPage::RunSnapshot, true);
+    prepare_workspace(&mut features::cx(&mut app));
+    draw(&mut app);
+    let read_only = CommandAvailability::Disabled("the document is read-only");
+    assert_eq!(
+        edit_answers(&app),
+        [
+            read_only,
+            read_only,
+            CommandAvailability::Available,
+            read_only,
+            read_only,
+            CommandAvailability::Available,
+        ]
+    );
+}

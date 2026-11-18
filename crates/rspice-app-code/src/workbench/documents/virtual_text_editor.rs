@@ -1037,6 +1037,11 @@ pub(crate) fn show_virtual_text_editor(
         );
     }
     let unanswered_history = session.unanswered_history.take();
+    crate::workbench::documents::text_editor_commands::publish_history_steps(
+        ui.ctx(),
+        editor_id,
+        &session.model,
+    );
     ui.ctx()
         .data_mut(|data| data.insert_temp(session_id, session));
     VirtualEditorOutput {

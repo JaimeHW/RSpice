@@ -138,6 +138,8 @@ pub(super) fn source_editor_app() -> RSpiceApp {
         rspice_app_code::workbench::documents::text_editor_commands::ActiveSourceEditor {
             id: Id::new("menu-pin-source"),
             editable: true,
+            can_undo: true,
+            can_redo: true,
             navigable: true,
         },
     );

@@ -68,6 +68,16 @@ impl SourceEditHistory {
         Ok(changed)
     }
 
+    /// Whether `bundle_id` has a step to undo, for `Undo`, or to redo.
+    pub(crate) fn has_step(&self, bundle_id: ProjectSourceId, command: StandardCommand) -> bool {
+        let steps = if command == StandardCommand::Undo {
+            &self.undo
+        } else {
+            &self.redo
+        };
+        steps.iter().any(|step| step.bundle_id == bundle_id)
+    }
+
     /// Undo or redo the newest step of `bundle_id`. Returns whether a step
     /// was taken. A file edited since the step refuses it, and the step
     /// stays: undoing that edit makes it possible again.

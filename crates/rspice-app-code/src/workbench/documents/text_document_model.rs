@@ -538,6 +538,16 @@ impl TextDocumentModel {
         self.insert_at_selections("")
     }
 
+    /// Whether the history has a step to undo.
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// Whether the history has a step to redo.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
     pub fn undo(&mut self) -> bool {
         let Some(entry) = self.undo.pop() else {
             return false;

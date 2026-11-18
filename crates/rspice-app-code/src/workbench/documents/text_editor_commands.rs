@@ -18,6 +18,63 @@ use crate::workbench::framework::requests::{
 pub(crate) mod veriloga_blocks;
 pub(crate) mod veriloga_syntax;
 
+/// Whether an editor's own history, as it was last drawn, has a step to
+/// undo and one to redo.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct HistorySteps {
+    undo: bool,
+    redo: bool,
+}
+
+fn history_steps_id(editor_id: Id) -> Id {
+    editor_id.with("history-steps")
+}
+
+/// Record whether the history of the editor `editor_id`, drawn this frame
+/// over `model`, has a step to undo and one to redo, for the page that puts
+/// it in front.
+pub(crate) fn publish_history_steps(
+    ctx: &egui::Context,
+    editor_id: Id,
+    model: &super::text_document_model::TextDocumentModel,
+) {
+    let steps = HistorySteps {
+        undo: model.can_undo(),
+        redo: model.can_redo(),
+    };
+    ctx.data_mut(|data| data.insert_temp(history_steps_id(editor_id), steps));
+}
+
+/// `editor` as Edit > Undo and Redo address it: with a step to undo or to
+/// redo where its own history, as it was last drawn, has one or `editor`
+/// already says its owner's has (a rename or a replace across files).
+pub(crate) fn with_history_steps(
+    ctx: &egui::Context,
+    mut editor: ActiveSourceEditor,
+) -> ActiveSourceEditor {
+    let steps = ctx
+        .data(|data| data.get_temp::<HistorySteps>(history_steps_id(editor.id)))
+        .unwrap_or_default();
+    editor.can_undo |= steps.undo;
+    editor.can_redo |= steps.redo;
+    editor
+}
+
+/// `editor` with the steps the last publication of the same editor had, for
+/// a page that puts it in front before it can ask the editor. That
+/// publication was settled after the editor last drew, so it is the newest
+/// answer for both histories.
+pub(crate) fn with_held_history_steps(
+    held: Option<ActiveSourceEditor>,
+    mut editor: ActiveSourceEditor,
+) -> ActiveSourceEditor {
+    if let Some(held) = held.filter(|held| held.id == editor.id) {
+        editor.can_undo = held.can_undo;
+        editor.can_redo = held.can_redo;
+    }
+    editor
+}
+
 #[derive(Debug, Clone, Default)]
 struct GoToLineState {
     open: bool,

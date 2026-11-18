@@ -53,7 +53,7 @@ pub fn prepare(cx: &mut Cx<'_, CodeFeature>) {
     );
     let shown_path =
         header.map_or_else(|| active_path.clone(), |(identity, _)| identity.to_owned());
-    cx.wb.active_source_editor = Some(page_editor(
+    let editor = page_editor(
         cx.model,
         &cx.state.code_workspace,
         cx.platform,
@@ -61,7 +61,13 @@ pub fn prepare(cx: &mut Cx<'_, CodeFeature>) {
         &shown_path,
         editor_language(&selected, &active_path, header.is_some()),
         header.is_none(),
-    ));
+    );
+    cx.wb.active_source_editor = Some(
+        crate::workbench::documents::text_editor_commands::with_held_history_steps(
+            cx.wb.active_source_editor,
+            editor,
+        ),
+    );
 }
 
 /// Whether the page's editor's right-click menu is open, or may open on
@@ -118,6 +124,16 @@ fn page_editor(
         // service does not index, and a built-in header is not part of the
         // bundle it indexes.
         navigable: editable && editor_language == CodeEditorLanguage::VerilogA,
+        // A step the editor's own history has not is the bundle's: a
+        // format, rename or replace across its files.
+        can_undo: code.source_edit_history.has_step(
+            bundle_id,
+            crate::workbench::framework::requests::StandardCommand::Undo,
+        ),
+        can_redo: code.source_edit_history.has_step(
+            bundle_id,
+            crate::workbench::framework::requests::StandardCommand::Redo,
+        ),
     }
 }
 
@@ -558,6 +574,19 @@ fn source_editor(
             Err(error) => cx.wb.prompt(error),
         }
     }
+    super::netlist::settle_source_editor(
+        ui.ctx(),
+        cx.wb,
+        page_editor(
+            cx.model,
+            &cx.state.code_workspace,
+            cx.platform,
+            selected,
+            active_path,
+            editor_language,
+            editable,
+        ),
+    );
     cx.state.code_workspace.source_carets.insert(
         (bundle_id, active_path.to_owned()),
         interaction.cursor_char_index,

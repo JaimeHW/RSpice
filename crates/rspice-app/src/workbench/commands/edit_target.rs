@@ -20,7 +20,7 @@ use rspice_app_workbench::workbench::framework::command_registry::{
     CommandAvailability, WorkbenchCommand,
 };
 use rspice_app_workbench::workbench::framework::feature::held_back;
-use rspice_app_workbench::workbench::framework::requests::SourceEditorRequest;
+use rspice_app_workbench::workbench::framework::requests::{SourceEditorRequest, StandardCommand};
 use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
 
 use super::{
@@ -29,14 +29,20 @@ use super::{
 
 /// The request the active source editor takes in `command`'s place, with
 /// whether it accepts it: a read-only editor refuses a request that would
-/// change its text. `None` when no source editor takes the command.
+/// change its text, and Undo and Redo need a step of its history to take.
+/// `None` when no source editor takes the command.
 pub(in crate::workbench) fn source_editor_redirect(
     command: WorkbenchCommand,
     workbench: &WorkbenchSession,
 ) -> Option<(SourceEditorRequest, bool)> {
     let request = command.source_editor_request()?;
     let editor = workbench.active_source_editor?;
-    Some((request, editor.editable || !request.mutates_source()))
+    let accepted = match request {
+        SourceEditorRequest::Standard(StandardCommand::Undo) => editor.editable && editor.can_undo,
+        SourceEditorRequest::Standard(StandardCommand::Redo) => editor.editable && editor.can_redo,
+        _ => editor.editable || !request.mutates_source(),
+    };
+    Some((request, accepted))
 }
 
 impl RSpiceApp {
@@ -101,6 +107,16 @@ impl RSpiceApp {
         }
         if self.workbench_command_enabled(command) {
             return CommandAvailability::Available;
+        }
+        // A read-only document refuses every edit, history included, and
+        // says so rather than that there is nothing to undo.
+        if let Some(editor) = self.state.workbench.active_source_editor
+            && !editor.editable
+            && command
+                .source_editor_request()
+                .is_some_and(SourceEditorRequest::mutates_source)
+        {
+            return CommandAvailability::Disabled("the document is read-only");
         }
         CommandAvailability::Disabled(match command {
             // A step taken mid-drag would be folded into the drag when it

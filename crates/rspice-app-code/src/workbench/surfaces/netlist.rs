@@ -35,6 +35,25 @@ use crate::workbench::documents::netlist_document::{
 };
 use crate::workbench::framework::feature::Cx;
 
+/// Publish `editor` again once it has drawn, with its owner's history as
+/// `editor` gives it: the editor's own history may have taken or made a step
+/// while it drew, and a command raised before the page draws again answers
+/// from this.
+pub(super) fn settle_source_editor(
+    ctx: &egui::Context,
+    workbench: &mut crate::workbench::WorkbenchSession,
+    editor: crate::workbench::documents::text_editor_commands::ActiveSourceEditor,
+) {
+    if workbench
+        .active_source_editor
+        .is_some_and(|shown| shown.id == editor.id)
+    {
+        workbench.active_source_editor = Some(
+            crate::workbench::documents::text_editor_commands::with_history_steps(ctx, editor),
+        );
+    }
+}
+
 /// Publish the source editor a page shows as its document, and hand it any
 /// request the menus, palette or shortcuts made for it. Called before the
 /// editor is drawn so it applies the request in the same frame.
@@ -43,7 +62,8 @@ pub(super) fn publish_source_editor(
     workbench: &mut crate::workbench::WorkbenchSession,
     editor: crate::workbench::documents::text_editor_commands::ActiveSourceEditor,
 ) {
-    workbench.active_source_editor = Some(editor);
+    workbench.active_source_editor =
+        Some(crate::workbench::documents::text_editor_commands::with_history_steps(ctx, editor));
     if let Some(request) = workbench.outbox.take() {
         crate::workbench::documents::text_editor_commands::queue_source_editor_request(
             ctx, editor.id, request,
@@ -179,7 +199,8 @@ pub fn reveal_in_netlist(
 /// it draws it.
 pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::netlist_document::{
-        active_netlist_source_is_editable_in, editor_id_in,
+        active_netlist_source_is_editable_in, can_redo_netlist_edit, can_undo_netlist_edit,
+        editor_id_in,
     };
 
     // A project with decks opens its first one, which the page then shows.
@@ -197,12 +218,18 @@ pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
         cx.wb,
     );
     if !generated_primary_unavailable(cx.model, &cx.state.netlist) {
+        let editor = crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+            id: editor_id_in(cx.model, &cx.state.netlist),
+            editable: active_netlist_source_is_editable_in(cx.model, &cx.state.netlist),
+            navigable: true,
+            can_undo: can_undo_netlist_edit(&cx.state.netlist),
+            can_redo: can_redo_netlist_edit(&cx.state.netlist),
+        };
         cx.wb.active_source_editor = Some(
-            crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
-                id: editor_id_in(cx.model, &cx.state.netlist),
-                editable: active_netlist_source_is_editable_in(cx.model, &cx.state.netlist),
-                navigable: true,
-            },
+            crate::workbench::documents::text_editor_commands::with_held_history_steps(
+                cx.wb.active_source_editor,
+                editor,
+            ),
         );
     }
 }
@@ -374,15 +401,23 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                     cx.model,
                     &cx.state.netlist,
                 );
-            publish_source_editor(
-                ui.ctx(),
-                cx.wb,
-                crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
-                    id: editor_id,
-                    editable,
-                    navigable: true,
-                },
-            );
+            let page_editor =
+                |netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState| {
+                    crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+                        id: editor_id,
+                        editable,
+                        navigable: true,
+                        can_undo:
+                            crate::workbench::documents::netlist_document::can_undo_netlist_edit(
+                                netlist,
+                            ),
+                        can_redo:
+                            crate::workbench::documents::netlist_document::can_redo_netlist_edit(
+                                netlist,
+                            ),
+                    }
+                };
+            publish_source_editor(ui.ctx(), cx.wb, page_editor(&cx.state.netlist));
             step_netlist_problem(ui.ctx(), cx.model, &cx.state.netlist, cx.wb, editor_id);
             reveal_in_netlist(ui, cx.model, &mut cx.state.netlist, editor_id);
             // A tab closed, or a project closed, lets go of its editor and
@@ -403,6 +438,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                 cx.runs,
                 cx.wb,
             );
+            settle_source_editor(ui.ctx(), cx.wb, page_editor(&cx.state.netlist));
             // The right-click menu's rows read the page's context, which
             // holds the menu's answers while the menu is open or opening; the
             // row chosen runs once the page has drawn.

@@ -390,6 +390,11 @@ pub struct ActiveSourceEditor {
     /// Its language service answers go to definition, find references and
     /// rename for this document.
     pub navigable: bool,
+    /// Whether its history, as it was last drawn, has a step to undo: what
+    /// Edit > Undo offers for it.
+    pub can_undo: bool,
+    /// Whether its history has a step to redo.
+    pub can_redo: bool,
 }
 
 /// New workbench session state. Durable layout preferences are kept with the
