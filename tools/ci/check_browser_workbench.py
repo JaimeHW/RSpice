@@ -569,15 +569,21 @@ def wait_for_checkpoint_publication(browser, before, description, timeout=30):
 
 
 def verify_checkpoint(records, started_ms, finished_ms):
+    manifest, raw, project = checkpoint_pair(records)
+    if manifest["schema_version"] != 2 or manifest["reason"] != "manual" or manifest["pinned"]:
+        raise AssertionError(f"Unexpected checkpoint identity: {manifest}")
+    if not started_ms <= manifest["created_unix_ms"] <= finished_ms:
+        raise AssertionError(f"Checkpoint wall time is outside the observed creation interval: {manifest}")
+    return manifest, raw, project
+
+
+def checkpoint_pair(records):
+    """The one checkpoint `records` hold, read back and checked against its manifest."""
     manifests = [(key, json.loads(value)) for key, value in records.items()
                  if key.endswith(".manifest")]
     if len(manifests) != 1 or len(records) != 2:
         raise AssertionError(f"Expected one fresh checkpoint pair; got {list(records)}")
     key, manifest = manifests[0]
-    if manifest["schema_version"] != 2 or manifest["reason"] != "manual" or manifest["pinned"]:
-        raise AssertionError(f"Unexpected checkpoint identity: {manifest}")
-    if not started_ms <= manifest["created_unix_ms"] <= finished_ms:
-        raise AssertionError(f"Checkpoint wall time is outside the observed creation interval: {manifest}")
     snapshot_key = key.removesuffix(".manifest") + ".snapshot"
     if snapshot_key not in records:
         raise AssertionError("Checkpoint manifest has no matching snapshot")
@@ -605,6 +611,36 @@ def verify_recovery_copy(project, recovered, filename):
     expected["workspace"]["project"].update(id=descriptor["id"], path=filename)
     if recovered != expected:
         raise AssertionError("Recovery changed content beyond the new identity and destination")
+
+
+def restore_checkpoint(browser, records, project, review_intervals):
+    """Restore asks in the checkpoint's row before it changes anything, and a
+    declined restore leaves every checkpoint as it was. A restore that goes
+    ahead keeps the project as it is now as a "Before restore" checkpoint
+    first, changes no other checkpoint, and says what it restored."""
+    question = "Restore “Manual checkpoint” from"
+    browser.click("Restore Manual checkpoint into the project", "button")
+    if not reports(controls(browser.capture("checkpoint-restore-asked")), question):
+        raise AssertionError("Restore went ahead without asking")
+    browser.click("Cancel", "button")
+    if reports(controls(browser.snapshot()), question) or checkpoint_records(browser) != records:
+        raise AssertionError("A declined restore was not dismissed or changed the checkpoints")
+    browser.click("Restore Manual checkpoint into the project", "button")
+    browser.click("Restore Manual checkpoint", "button")
+    wait_for_checkpoint_publication(browser, records, "the before-restore checkpoint")
+    wait_for(lambda: reports(controls(browser.snapshot()), "Restored “Manual checkpoint” from"),
+             "the restore's report")
+    browser.capture("checkpoint-restored")
+    after = checkpoint_records(browser)
+    if any(after.get(key) != value for key, value in records.items()):
+        raise AssertionError("Restoring changed the checkpoint it restored")
+    added = {key: value for key, value in after.items() if key not in records}
+    manifest, _, kept = checkpoint_pair(added)
+    if manifest["reason"] != "before-restore":
+        raise AssertionError(f"The restore kept the project under another reason: {manifest}")
+    if kept["workspace"]["project"]["id"] != project["workspace"]["project"]["id"]:
+        raise AssertionError("The before-restore checkpoint holds another project")
+    verify_review(kept, review_intervals)
 
 
 def choose_command(browser, label, *, input_burst=False, keyboard=()):
@@ -697,7 +733,10 @@ def run(browser):
     browser.capture("checkpoint-created")
     reject_checkpoint_clock(browser, "retained-checkpoint-store")
     verify_checkpoint_time(browser, manifest, time.time_ns() // 1_000_000)
-    browser.click("Restore Manual checkpoint as a new project", "button")
+    # Save as new project... is the row's second action; in a browser it
+    # downloads the copy.
+    browser.click("More actions for Manual checkpoint", "button")
+    browser.click("Save as new project…", "button")
 
     def download():
         files = list(browser.downloads.glob("*.rspiceproj"))
@@ -710,6 +749,7 @@ def run(browser):
     if checkpoint_records(browser) != records:
         raise AssertionError("Exporting a recovery copy mutated its durable checkpoint")
     browser.capture("checkpoint-exported")
+    restore_checkpoint(browser, records, project, review_intervals)
     choose_command(browser, "Revision history")
     wait_for(lambda: any("Project revision and audit history" in (control["label"], control["value"])
                         for control in controls(browser.snapshot())), "revision history")
@@ -717,7 +757,8 @@ def run(browser):
     validated_save = validated_save_clock(browser, review_intervals)
     model_validation = model_validation_clock(browser)
     provider_decision = provider_decision_clock(browser)
-    return {"startup": "passed", "checkpoint_export": "passed", "revision_history": "opened",
+    return {"startup": "passed", "checkpoint_export": "passed", "checkpoint_restore": "passed",
+            "revision_history": "opened",
             "configuration_opening_input": "passed",
             "review_and_checkpoint_clock_failures": {fault: "passed" for fault in CLOCK_FAULTS},
             "validated_save": validated_save,
