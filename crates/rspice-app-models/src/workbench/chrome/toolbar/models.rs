@@ -15,7 +15,11 @@ use super::{
 
 const MODELS_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, Option<&str>); 4] = [
     (ids::SAVE, WorkbenchIcon::Save, None),
-    (ids::PDK_SETTINGS, WorkbenchIcon::Add, Some("Add library")),
+    (
+        ModelsCommand::PdkSettings.key(),
+        WorkbenchIcon::Add,
+        Some(ModelsCommand::PdkSettings.declared_spec().label),
+    ),
     (
         ModelsCommand::RescanModelLibraries.key(),
         WorkbenchIcon::Refresh,
