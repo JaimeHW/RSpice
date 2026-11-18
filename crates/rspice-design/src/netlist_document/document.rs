@@ -1155,7 +1155,7 @@ impl NetlistDocument {
         }
         let Some(generated_artifact) = &self.generated_artifact else {
             return Err(DocumentError::InvalidPersistedDocument(
-                "a netlist document requires its generated artifact".to_owned(),
+                "the netlist document has no generated netlist".to_owned(),
             ));
         };
         if self.source != generated_artifact.source
@@ -1163,7 +1163,7 @@ impl NetlistDocument {
             || self.provenance.generated.as_ref() != Some(&generated_artifact.provenance)
         {
             return Err(DocumentError::InvalidPersistedDocument(
-                "the document does not match its generated artifact".to_owned(),
+                "the netlist document does not match the netlist generated for it".to_owned(),
             ));
         }
         Ok(())
