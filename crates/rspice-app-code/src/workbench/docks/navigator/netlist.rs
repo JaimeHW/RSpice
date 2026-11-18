@@ -1231,15 +1231,7 @@ fn diff_hunk_label(range: &str, messages: MessageCatalog) -> String {
 }
 
 pub(super) fn diff_totals(diff: &str) -> (usize, usize) {
-    diff.lines().fold((0, 0), |(added, removed), line| {
-        if line.starts_with('+') && !line.starts_with("+++") {
-            (added + 1, removed)
-        } else if line.starts_with('-') && !line.starts_with("---") {
-            (added, removed + 1)
-        } else {
-            (added, removed)
-        }
-    })
+    crate::workbench::documents::netlist_document::diff_line_counts(diff)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

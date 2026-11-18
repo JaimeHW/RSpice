@@ -42,7 +42,7 @@ pub use comparison::{
     open_netlist_comparison, open_run_deck_snapshot_in, run_deck_snapshot_artifact_name_in,
     run_deck_snapshot_run_id_in,
 };
-pub use comparison::{compare, compare_generated_revision};
+pub use comparison::{compare, compare_generated_revision, diff_line_counts};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub use editor::show as show_editor;
 pub use editor::{

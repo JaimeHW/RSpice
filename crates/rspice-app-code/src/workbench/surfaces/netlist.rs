@@ -11,6 +11,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
+mod comparison_view;
 mod deck_bands;
 mod dialect_chip;
 pub mod generation;
@@ -388,6 +389,11 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                         .unwrap_or(&default_description),
                 );
             }
+        } else if cx.state.netlist.front.is_comparison() {
+            // A comparison is a view of two texts, not a text: its lines are
+            // listed with both texts' numbers rather than put in an editor.
+            let reveal = cx.state.netlist.requested_line.take();
+            comparison_view::show(ui, &cx.state.netlist.generated_diff_source, reveal);
         } else {
             let editor_id = crate::workbench::documents::netlist_document::editor_id_in(
                 cx.model,

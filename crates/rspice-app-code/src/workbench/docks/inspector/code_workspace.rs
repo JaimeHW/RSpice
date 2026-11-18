@@ -122,7 +122,7 @@ pub(in crate::workbench) fn code_workspace_inspector(
             }
             front => match front.root_kind() {
                 NetlistRoot::Deck => deck_file_provenance(ui, reads),
-                NetlistRoot::Comparison => {}
+                NetlistRoot::Comparison => comparison_facts(ui, reads),
                 _ => generated_provenance(ui, reads.model, messages),
             },
         }
@@ -352,6 +352,62 @@ fn local_time(unix_seconds: f64) -> Option<String> {
         local.minute(),
         local.second()
     ))
+}
+
+/// A comparison: the two texts it compares, by name, and how many lines
+/// the second adds to the first and takes from it.
+fn comparison_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
+    use crate::workbench::MessageId;
+    let Some((left, right)) = reads.netlist.comparison_sides else {
+        return;
+    };
+    let messages = reads.messages;
+    let name = |side| {
+        crate::workbench::chrome::document_bar::code::compare_side_name(
+            reads.model,
+            reads.netlist,
+            messages,
+            side,
+        )
+    };
+    section_header(
+        ui,
+        &messages.text(MessageId::NetlistNavigatorRevisionComparison),
+        None,
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::NetlistInspectorCompareFrom),
+        &name(left),
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::NetlistInspectorCompareTo),
+        &name(right),
+    );
+    let (added, removed) = crate::workbench::documents::netlist_document::diff_line_counts(
+        &reads.netlist.generated_diff_source,
+    );
+    let lines = |count: usize| {
+        messages.format(
+            if count == 1 {
+                MessageId::NetlistInspectorLineCountSingular
+            } else {
+                MessageId::NetlistInspectorLineCount
+            },
+            &[("count", &count.to_string())],
+        )
+    };
+    property_row(
+        ui,
+        &messages.text(MessageId::NetlistInspectorLinesAdded),
+        &lines(added),
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::NetlistInspectorLinesRemoved),
+        &lines(removed),
+    );
 }
 
 /// The Added lines: the design they belong to, and the plan they run with,

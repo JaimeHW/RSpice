@@ -130,6 +130,24 @@ fn comparison_label(
     right: CompareSide,
 ) -> String {
     use crate::workbench::MessageId;
+    messages.format(
+        MessageId::NetlistComparisonDocument,
+        &[
+            ("left", &compare_side_name(model, netlist, messages, left)),
+            ("right", &compare_side_name(model, netlist, messages, right)),
+        ],
+    )
+}
+
+/// One side of a comparison by name, as its tab and the inspector name it:
+/// "amp_tb.cir on disk", "Run 12 input", "Previous build".
+pub fn compare_side_name(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    messages: MessageCatalog,
+    side: CompareSide,
+) -> String {
+    use crate::workbench::MessageId;
     let deck_name = |id: crate::state::DeckId| {
         netlist
             .open_deck
@@ -162,7 +180,7 @@ fn comparison_label(
             })
             .map_or_else(|| deck_name(id), |file| file.name())
     };
-    let side = |side: CompareSide| match side {
+    match side {
         CompareSide::Generated => messages.text(MessageId::CodeGeneratedNetlist),
         CompareSide::PreviousGenerated(_) => messages.text(MessageId::NetlistComparePreviousBuild),
         CompareSide::Deck(id) => file_name(id),
@@ -173,11 +191,7 @@ fn comparison_label(
             MessageId::NetlistRunSnapshotDocument,
             &[("id", &run.to_string())],
         ),
-    };
-    messages.format(
-        MessageId::NetlistComparisonDocument,
-        &[("left", &side(left)), ("right", &side(right))],
-    )
+    }
 }
 
 /// A run input's tab label: "Run 12 input" for the deck a manual run read

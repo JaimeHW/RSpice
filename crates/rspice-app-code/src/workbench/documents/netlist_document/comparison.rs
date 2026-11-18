@@ -12,6 +12,21 @@ use super::{CompareSide, Model, NetlistDocumentState, NetlistTab};
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
+/// How many lines a comparison's second text adds to the first, and how
+/// many it takes away, read off its unified diff.
+#[must_use]
+pub fn diff_line_counts(diff: &str) -> (usize, usize) {
+    diff.lines().fold((0, 0), |(added, removed), line| {
+        if line.starts_with('+') && !line.starts_with("+++") {
+            (added + 1, removed)
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            (added, removed + 1)
+        } else {
+            (added, removed)
+        }
+    })
+}
+
 /// Reopen the already-materialized comparison document. Creating a new
 /// comparison remains an explicit revision workflow; a tab switch is only a
 /// presentation transition.

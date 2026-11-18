@@ -457,6 +457,27 @@ fn the_deck_compared_with_its_file_shows_the_edit_on_a_tab_naming_both() {
         "{shown}"
     );
     assert!(shown.contains("\n-R1 out 0 1k\n+R1 out 0 2k\n"), "{shown}");
+    // The view lists the lines, not the diff's own headers, and the
+    // inspector names the two texts and counts what changed.
+    let painted = drawn_frame_at(&mut app, 1.0);
+    assert!(
+        !painted.lines().any(|line| line.starts_with("--- ")
+            || line.starts_with("+++ ")
+            || line.starts_with("@@")),
+        "{painted}"
+    );
+    for row in [
+        "R1 out 0 2k",
+        "From",
+        "amp_tb.cir on disk",
+        "To",
+        "amp_tb.cir",
+        "Added",
+        "Removed",
+        "1 line",
+    ] {
+        assert!(painted.lines().any(|line| line == row), "{row}: {painted}");
+    }
     assert_eq!(press_run(&mut app), "deck", "a view leaves what runs");
 
     let documents =
