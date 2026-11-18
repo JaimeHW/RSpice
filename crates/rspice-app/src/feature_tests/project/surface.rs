@@ -712,7 +712,7 @@ fn the_netlist_first_overview_names_the_deck() {
 #[cfg(not(target_arch = "wasm32"))]
 fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSpiceApp {
     use rspice_app_services::workbench::lifecycle::project_checkpoint::{
-        ProjectCheckpointReason, fixture_quarantine, fixture_summary,
+        CheckpointDamage, ProjectCheckpointReason, fixture_quarantine, fixture_summary,
     };
 
     let mut app = populated_project_app();
@@ -746,6 +746,7 @@ fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSp
     if set_aside {
         recovery.quarantined = vec![fixture_quarantine(
             "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
+            CheckpointDamage::ChangedCopy,
             "project checkpoint bytes do not match their integrity manifest",
         )];
     }
@@ -853,12 +854,14 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
         "1 damaged",
         "Damaged",
         "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
-        "Project checkpoint bytes do not match their integrity manifest",
+        "The copy of the project it keeps has changed since it was taken, so it cannot be \
+         trusted. Delete it.",
         "These checkpoints are damaged, so they cannot be restored.",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
     assert!(!text.contains("set aside"), "{text}");
+    assert!(!text.contains("integrity manifest"), "{text}");
 
     let mut unreadable = recovery_project_app(0, false, true);
     let text = painted_project_page(size, |ui| show(ui, &mut unreadable));

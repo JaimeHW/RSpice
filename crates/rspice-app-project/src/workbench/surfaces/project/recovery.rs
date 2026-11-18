@@ -1492,12 +1492,7 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIn
                         theme::mono(tokens::FS_0, FontWeight::Medium),
                         tokens.color.text,
                     );
-                    text_block(
-                        ui,
-                        &sentence_case(artifact.reason()),
-                        body_font(),
-                        tokens.color.text_dim,
-                    );
+                    text_block(ui, artifact.problem(), body_font(), tokens.color.text_dim);
                     ui.add_space(6.0);
                     let deletion = CheckpointDeletion::SetAside(label.to_owned());
                     if snapshot.delete_review.as_ref() == Some(&deletion) {
@@ -1956,6 +1951,7 @@ pub(super) fn take_checkpoint_job_answer(cx: &mut Cx<'_, ProjectFeature>) {
     let Some(job) = recovery.job.take() else {
         return;
     };
+    let damaged_before = damaged_labels(recovery);
     match answer {
         CheckpointJobAnswer::Listed(listed) => install_catalog(recovery, listed),
         CheckpointJobAnswer::Created(created) => match *created {
@@ -2001,6 +1997,43 @@ pub(super) fn take_checkpoint_job_answer(cx: &mut Cx<'_, ProjectFeature>) {
             }
             report_change(cx, outcome);
         }
+    }
+    record_found_damage(cx, &damaged_before);
+}
+
+/// The damaged checkpoints the page lists, by label.
+pub(super) fn damaged_labels(
+    recovery: &crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState,
+) -> Vec<String> {
+    recovery
+        .quarantined
+        .iter()
+        .map(|artifact| artifact.label().to_owned())
+        .collect()
+}
+
+/// Writes each damaged checkpoint a listing found that the listing before it
+/// did not to the Console, with the store's own account of it: the page says
+/// what is wrong in the reader's words, and the Console keeps what was found.
+pub(super) fn record_found_damage(cx: &mut Cx<'_, ProjectFeature>, before: &[String]) {
+    let found = cx
+        .state
+        .project_checkpoint_recovery
+        .quarantined
+        .iter()
+        .filter(|artifact| !before.iter().any(|label| label == artifact.label()))
+        .map(|artifact| {
+            format!(
+                "Damaged checkpoint {}: {} ({})",
+                artifact.label(),
+                artifact.problem(),
+                artifact.detail()
+            )
+        })
+        .collect::<Vec<_>>();
+    for line in found {
+        cx.model
+            .record(LogSeverity::Warning, LogSource::Studio, line);
     }
 }
 

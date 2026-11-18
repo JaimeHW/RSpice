@@ -177,10 +177,50 @@ pub struct ProjectCheckpointSummary {
     locator: ProjectCheckpointLocator,
 }
 
+/// What is wrong with a checkpoint RSpice will not restore, as the reader
+/// knows a checkpoint: a record of a project and the copy of it it keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckpointDamage {
+    /// Its record could not be read from the disk at all.
+    Unreadable,
+    /// Its record is cut short or is not one RSpice wrote.
+    Record,
+    /// The copy of the project it records is not there.
+    MissingCopy,
+    /// The copy of the project it records is not the one it took.
+    ChangedCopy,
+    /// It is filed under another project, or under a name it was not
+    /// written with.
+    Misfiled,
+}
+
+impl CheckpointDamage {
+    /// What is wrong, and what to do about it.
+    pub const fn problem(self) -> &'static str {
+        match self {
+            Self::Unreadable => {
+                "Its record could not be read from the disk. If the drive it is on is \
+                 disconnected, reconnect it and open Recovery again; otherwise delete it."
+            }
+            Self::Record => "Its record is damaged, so what it holds is unknown. Delete it.",
+            Self::MissingCopy => "The copy of the project it keeps is missing. Delete it.",
+            Self::ChangedCopy => {
+                "The copy of the project it keeps has changed since it was taken, so it \
+                 cannot be trusted. Delete it."
+            }
+            Self::Misfiled => {
+                "It is filed under another project, so it cannot be restored here. Delete it."
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectCheckpointQuarantine {
     label: String,
-    reason: String,
+    damage: CheckpointDamage,
+    /// The store's own account of it, for the Console.
+    detail: String,
     #[cfg(not(target_arch = "wasm32"))]
     artifacts: Vec<PathBuf>,
     #[cfg(target_arch = "wasm32")]
@@ -194,8 +234,19 @@ impl ProjectCheckpointQuarantine {
         &self.label
     }
 
-    pub fn reason(&self) -> &str {
-        &self.reason
+    /// What is wrong with it.
+    pub const fn damage(&self) -> CheckpointDamage {
+        self.damage
+    }
+
+    /// What is wrong with it and what to do, in the reader's words.
+    pub const fn problem(&self) -> &'static str {
+        self.damage.problem()
+    }
+
+    /// The store's own account of what it found, for the Console.
+    pub fn detail(&self) -> &str {
+        &self.detail
     }
 }
 
@@ -313,10 +364,15 @@ impl ProjectCheckpointSummary {
 
 /// A set-aside artifact that exists only in a test.
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
-pub fn fixture_quarantine(label: &str, reason: &str) -> ProjectCheckpointQuarantine {
+pub fn fixture_quarantine(
+    label: &str,
+    damage: CheckpointDamage,
+    detail: &str,
+) -> ProjectCheckpointQuarantine {
     ProjectCheckpointQuarantine {
         label: label.to_owned(),
-        reason: reason.to_owned(),
+        damage,
+        detail: detail.to_owned(),
         artifacts: Vec::new(),
     }
 }
@@ -1469,20 +1525,22 @@ fn list_directory_for(
         // A manifest that cannot be read is quarantined, as the browser store
         // does, so the recovery page states it rather than the checkpoint
         // silently not being there.
-        let unreadable = |reason: String| ProjectCheckpointQuarantine {
+        let unreadable = |damage: CheckpointDamage, detail: String| ProjectCheckpointQuarantine {
             label: path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "checkpoint manifest".to_owned()),
-            reason,
+            damage,
+            detail,
             artifacts: vec![path.clone()],
         };
         let bytes = match std::fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) => {
-                quarantined.push(unreadable(format!(
-                    "checkpoint manifest could not be read: {error}"
-                )));
+                quarantined.push(unreadable(
+                    CheckpointDamage::Unreadable,
+                    format!("checkpoint manifest could not be read: {error}"),
+                ));
                 continue;
             }
         };
@@ -1490,9 +1548,10 @@ fn list_directory_for(
             Ok(manifest) if project_id.is_none_or(|id| manifest.project_id == id) => manifest,
             Ok(_) => continue,
             Err(error) => {
-                quarantined.push(unreadable(format!(
-                    "checkpoint manifest is invalid: {error}"
-                )));
+                quarantined.push(unreadable(
+                    CheckpointDamage::Record,
+                    format!("checkpoint manifest is invalid: {error}"),
+                ));
                 continue;
             }
         };
@@ -1506,10 +1565,11 @@ fn list_directory_for(
         ) {
             Ok(summary) => match snapshot_present(&summary) {
                 Ok(()) => checkpoints.push(summary),
-                Err(error) => {
+                Err((damage, detail)) => {
                     quarantined.push(ProjectCheckpointQuarantine {
                         label: summary.checkpoint_id.to_string(),
-                        reason: error,
+                        damage,
+                        detail,
                         artifacts: summary
                             .locator
                             .files()
@@ -1523,7 +1583,8 @@ fn list_directory_for(
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "checkpoint manifest".to_owned()),
-                reason: error,
+                damage: CheckpointDamage::Record,
+                detail: error,
                 artifacts: vec![path],
             }),
         }
@@ -1539,17 +1600,26 @@ fn list_directory_for(
 /// Whether a listed checkpoint's snapshot is there at the length its
 /// manifest records: what a listing can know without reading it.
 #[cfg(not(target_arch = "wasm32"))]
-fn snapshot_present(summary: &ProjectCheckpointSummary) -> Result<(), String> {
-    let (_, snapshot) = summary.locator.files().ok_or(KEPT_IN_THE_BROWSER)?;
+fn snapshot_present(summary: &ProjectCheckpointSummary) -> Result<(), (CheckpointDamage, String)> {
+    let (_, snapshot) = summary.locator.files().ok_or((
+        CheckpointDamage::MissingCopy,
+        KEPT_IN_THE_BROWSER.to_owned(),
+    ))?;
     super::recovery::disk_observation::file_stat();
     let metadata = std::fs::metadata(snapshot).map_err(|error| {
-        format!(
-            "project checkpoint snapshot '{}' could not be found: {error}",
-            snapshot.display()
+        (
+            CheckpointDamage::MissingCopy,
+            format!(
+                "project checkpoint snapshot '{}' could not be found: {error}",
+                snapshot.display()
+            ),
         )
     })?;
     if metadata.len() != summary.snapshot_byte_len {
-        return Err("project checkpoint bytes do not match their integrity manifest".to_owned());
+        return Err((
+            CheckpointDamage::ChangedCopy,
+            "project checkpoint bytes do not match their integrity manifest".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -1940,7 +2010,8 @@ fn visit_browser_checkpoint_record(
     let Some(value) = value else {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest_key.clone(),
-            reason: "checkpoint manifest is not a JSON string".to_owned(),
+            damage: CheckpointDamage::Record,
+            detail: "checkpoint manifest is not a JSON string".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
         });
         return;
@@ -1950,7 +2021,8 @@ fn visit_browser_checkpoint_record(
         Err(error) => {
             accumulator.quarantined.push(ProjectCheckpointQuarantine {
                 label: manifest_key.clone(),
-                reason: format!("checkpoint manifest is invalid: {error}"),
+                damage: CheckpointDamage::Record,
+                detail: format!("checkpoint manifest is invalid: {error}"),
                 artifact_keys: vec![manifest_key, snapshot_key],
             });
             return;
@@ -1959,7 +2031,8 @@ fn visit_browser_checkpoint_record(
     if manifest.project_id != accumulator.project_id {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest_key.clone(),
-            reason: "checkpoint key ownership and manifest project identity disagree".to_owned(),
+            damage: CheckpointDamage::Misfiled,
+            detail: "checkpoint key ownership and manifest project identity disagree".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
         });
         return;
@@ -1968,7 +2041,8 @@ fn visit_browser_checkpoint_record(
     if manifest_key != expected_manifest_key || snapshot_key != expected_snapshot_key {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest.checkpoint_id.to_string(),
-            reason: "checkpoint manifest is stored under the wrong browser storage keys".to_owned(),
+            damage: CheckpointDamage::Misfiled,
+            detail: "checkpoint manifest is stored under the wrong browser storage keys".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
         });
         return;
@@ -1976,7 +2050,8 @@ fn visit_browser_checkpoint_record(
     let Some(snapshot) = snapshot else {
         accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: manifest.checkpoint_id.to_string(),
-            reason: "checkpoint snapshot is missing".to_owned(),
+            damage: CheckpointDamage::MissingCopy,
+            detail: "checkpoint snapshot is missing".to_owned(),
             artifact_keys: vec![manifest_key, snapshot_key],
         });
         return;
@@ -1992,7 +2067,8 @@ fn visit_browser_checkpoint_record(
         Err(error) => {
             accumulator.quarantined.push(ProjectCheckpointQuarantine {
                 label: manifest_key.clone(),
-                reason: error,
+                damage: CheckpointDamage::Record,
+                detail: error,
                 artifact_keys: vec![manifest_key, snapshot_key],
             });
             return;
@@ -2002,7 +2078,8 @@ fn visit_browser_checkpoint_record(
         Ok(_) => accumulator.checkpoints.push(summary),
         Err(error) => accumulator.quarantined.push(ProjectCheckpointQuarantine {
             label: summary.checkpoint_id.to_string(),
-            reason: error,
+            damage: CheckpointDamage::ChangedCopy,
+            detail: error,
             artifact_keys: vec![manifest_key, snapshot_key],
         }),
     }
@@ -2514,9 +2591,13 @@ mod tests {
         let catalog = list(&state.model).expect("catalog returns quarantine diagnostics");
         assert!(catalog.checkpoints.is_empty());
         assert_eq!(catalog.quarantined.len(), 1);
+        assert_eq!(
+            catalog.quarantined[0].damage(),
+            CheckpointDamage::ChangedCopy
+        );
         assert!(
             catalog.quarantined[0]
-                .reason()
+                .detail()
                 .contains("integrity manifest")
         );
         let _ = std::fs::remove_dir_all(&directory);

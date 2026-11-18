@@ -344,6 +344,61 @@ fn a_checkpoint_created_on_the_recovery_page_is_written_while_the_page_paints() 
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A checkpoint whose copy of the project changed on disk is listed as
+/// damaged with what is wrong and what to do; the store's own account of it
+/// goes to the Console once, not again when the page lists it again.
+#[test]
+fn a_damaged_checkpoint_says_what_is_wrong_and_the_console_keeps_the_store_text() {
+    let (mut app, root) = saved_project("recovery-page-damaged");
+    for _ in 0..2 {
+        create(&mut app.state, ProjectCheckpointReason::Manual).expect("checkpoint written");
+    }
+    let folder = root.join("idle.rspice-recovery");
+    let copy = std::fs::read_dir(&folder)
+        .expect("the recovery folder lists")
+        .map(|entry| entry.expect("an entry").path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "rspiceproj")
+        })
+        .expect("a checkpoint keeps a copy of the project");
+    std::fs::write(&copy, b"cut short").expect("the copy changes on disk");
+
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Recovery;
+    let ctx = offscreen();
+    let listed = paint_until(&ctx, &mut app, |text| text.contains("1 damaged"));
+    let text = painted(&listed);
+    assert!(
+        text.contains(
+            "The copy of the project it keeps has changed since it was taken, so it cannot be \
+             trusted. Delete it."
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("integrity manifest"), "{text}");
+    let console = |app: &RSpiceApp| {
+        app.state
+            .model
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.message.starts_with("Damaged checkpoint"))
+            .map(|entry| entry.message.clone())
+            .collect::<Vec<_>>()
+    };
+    let lines = console(&app);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("integrity manifest"), "{lines:?}");
+
+    app.state.project.project_checkpoint_recovery.invalidate();
+    paint_until(&ctx, &mut app, |text| text.contains("1 damaged"));
+    for _ in 0..IDLE_FRAMES {
+        app_frame(&ctx, &mut app, Vec::new());
+    }
+    assert_eq!(console(&app).len(), 1, "a listing again finds nothing new");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Whether each checkpoint row's Restore… can be pressed, top to bottom.
 fn restores_offered(output: &egui::FullOutput) -> Vec<bool> {
     let Some(update) = output.platform_output.accesskit_update.as_ref() else {
