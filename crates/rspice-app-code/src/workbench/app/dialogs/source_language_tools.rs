@@ -286,27 +286,34 @@ const DECK_NEW_NAME_FIELD: &str = "workbench.rename-symbol.deck-new-name";
 const PREVIEW_ROOM: usize = 20;
 
 /// A changed line, before and after, cut to the same window about its first
-/// change, so a long card still shows the name the rename changes; `…`
-/// stands for what is cut.
+/// change, starting on a word, so a long card still shows the name the
+/// rename changes; `…` stands for what is cut.
 fn around_the_change(before: &str, after: &str) -> (String, String) {
-    let first = before
-        .chars()
-        .zip(after.chars())
+    let was = before.chars().collect::<Vec<_>>();
+    let is = after.chars().collect::<Vec<_>>();
+    let first = was
+        .iter()
+        .zip(&is)
         .take_while(|(was, is)| was == is)
         .count();
-    // A change near the start shows the line from its start.
-    let start = if first <= PREVIEW_ROOM / 2 {
+    // A change near the start shows the line from its start; one further
+    // in, the words just before it. Both lines read the same up to the
+    // change, so one window start serves both.
+    let mut start = if first <= PREVIEW_ROOM / 2 {
         0
     } else {
-        first - PREVIEW_ROOM / 3
+        (first - PREVIEW_ROOM / 3)
+            .min(was.len().saturating_sub(PREVIEW_ROOM))
+            .min(is.len().saturating_sub(PREVIEW_ROOM))
     };
-    let cut = |line: &str| {
-        let chars = line.chars().collect::<Vec<_>>();
+    while start > 0 && start < first && was[start - 1] != ' ' {
+        start += 1;
+    }
+    let cut = |chars: &[char]| {
         if chars.len() <= PREVIEW_ROOM {
-            return line.to_owned();
+            return chars.iter().collect::<String>();
         }
-        let start = start.min(chars.len() - PREVIEW_ROOM);
-        let end = start + PREVIEW_ROOM;
+        let end = (start + PREVIEW_ROOM).min(chars.len());
         let mut shown = String::new();
         if start > 0 {
             shown.push('\u{2026}');
@@ -317,7 +324,7 @@ fn around_the_change(before: &str, after: &str) -> (String, String) {
         }
         shown
     };
-    (cut(before), cut(after))
+    (cut(&was), cut(&is))
 }
 
 /// Rename symbol over the deck: the name under the caret, the new name, and
