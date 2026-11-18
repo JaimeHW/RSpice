@@ -567,6 +567,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SimulateCommand::AddAnalysis.key(),
     SimulateCommand::Options.key(),
     CodeCommand::GenerateNetlist.key(),
+    CodeCommand::ShowInSchematic.key(),
     CodeCommand::FindCodeDocument.key(),
     CodeCommand::ValidateCodeDocument.key(),
     CodeCommand::ManageSourceDocument.key(),

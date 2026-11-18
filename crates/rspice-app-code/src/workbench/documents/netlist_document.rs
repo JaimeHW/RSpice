@@ -24,6 +24,7 @@ const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
 mod baseline;
 mod comparison;
 mod completion;
+pub(crate) mod cross_probe;
 mod deck_transaction;
 pub(crate) mod diagnostics;
 pub(crate) mod dialect;
@@ -2337,6 +2338,9 @@ pub struct NetlistDocumentState {
     /// The same for the project's top-level deck while the editor shows other
     /// text. Read through [`root_deck_source_index`].
     root_deck_index: source_index::SourceIndexSlot,
+    /// The name under the caret, as the frame last read it. Read through
+    /// [`cross_probe::caret_name`].
+    caret_name: cross_probe::CaretNameCache,
 }
 
 impl NetlistDocumentState {

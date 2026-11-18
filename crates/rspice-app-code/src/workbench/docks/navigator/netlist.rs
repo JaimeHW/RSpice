@@ -80,9 +80,6 @@ pub(crate) struct NetlistNavigatorAsked {
     pub(crate) use_section: Option<LibSectionRewrite>,
     /// The include whose file the reader picks again.
     pub(crate) relink: Option<String>,
-    /// The schematic instance a generated line was written for, to be shown
-    /// on its schematic in Design.
-    pub(crate) show_instance: Option<crate::workbench::app_state::cell_usage::CellInstanceUse>,
 }
 
 pub(in crate::workbench) fn netlist(
@@ -556,8 +553,7 @@ pub(in crate::workbench) fn netlist(
                     &messages.text(MessageId::NetlistNavigatorSourceMapping),
                     None,
                 );
-                asked.show_instance =
-                    netlist_source_mapping(ui, parts.model, parts.messages, active_line);
+                netlist_source_mapping(ui, parts.model, parts.messages, active_line);
             }
 
             if projection.is_empty() {
@@ -2163,14 +2159,14 @@ pub(super) fn netlist_outline_icon(kind: NetlistNavigatorRowKind) -> WorkbenchIc
 }
 
 /// The active line's provenance over the model and the message catalogue.
-/// A cross-probe returns the instance the line was written for, which the
-/// shell shows on its schematic in Design.
+/// Going to what the line was written from is the editor's: Show in
+/// schematic on the line itself.
 pub(super) fn netlist_source_mapping(
     ui: &mut Ui,
     model: &Model,
     messages: MessageCatalog,
     active_line: usize,
-) -> Option<crate::workbench::app_state::cell_usage::CellInstanceUse> {
+) {
     let t = Tokens::get(ui.ctx());
     let mapping = model
         .netlist_artifacts
@@ -2183,14 +2179,12 @@ pub(super) fn netlist_source_mapping(
                 entry.cell_identity().to_owned(),
                 entry.view_identity().to_owned(),
                 entry.instance_identity().map(str::to_owned),
-                entry.component_id(),
             )
         });
-    let Some((cell, view, instance, component_id)) = mapping else {
+    let Some((cell, view, instance)) = mapping else {
         muted(ui, &messages.text(MessageId::NetlistNavigatorNoProvenance));
-        return None;
+        return;
     };
-    let mut shown = None;
     egui::Frame::new()
         .inner_margin(egui::Margin {
             left: 10,
@@ -2223,20 +2217,7 @@ pub(super) fn netlist_source_mapping(
                     .color(t.color.text_faint),
                 );
             }
-            if let (Some(component_id), Some(schematic)) =
-                (component_id, crate::state::CellViewRef::from_key(&view))
-                && ui
-                    .button(messages.text(MessageId::NetlistNavigatorCrossProbe))
-                    .clicked()
-            {
-                shown = Some(crate::workbench::app_state::cell_usage::CellInstanceUse {
-                    schematic,
-                    instance: instance.unwrap_or_default(),
-                    component_id,
-                });
-            }
         });
-    shown
 }
 
 #[cfg(test)]

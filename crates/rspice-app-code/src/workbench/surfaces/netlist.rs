@@ -31,7 +31,7 @@ use crate::workbench::design_system::{
     Problem, WorkbenchIcon, empty_state, empty_state_with_actions, paint_problem_mark,
 };
 use crate::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, ExecutedDeckVerification,
+    ActiveNetlistDocument, ExecutedDeckVerification, cross_probe,
 };
 use crate::workbench::framework::feature::Cx;
 
@@ -413,6 +413,18 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             );
             if let Some(choice) = choice {
                 cx.execute(choice.command());
+            }
+            // Double-clicking an instance's name on the generated netlist
+            // goes to that instance on its schematic, as Show in schematic
+            // does from the menu.
+            if response.double_clicked()
+                && cross_probe::generated_netlist_in_front(&cx.state.netlist)
+                && matches!(
+                    cross_probe::caret_name(cx.model, &cx.state.netlist),
+                    Some(cross_probe::CaretName::Element { head: true, .. })
+                )
+            {
+                cx.execute(crate::workbench::code::commands::CodeCommand::ShowInSchematic.key());
             }
         }
     });

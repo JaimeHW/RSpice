@@ -1,4 +1,4 @@
-//! Showing one placed instance on the drawing it is in.
+//! Showing one placed instance, or one net, on the drawing it is in.
 //!
 //! Several lists name an instance that is somewhere else — the Studio's
 //! Excitations ledger, the Stimulus Library's adopter cards — and every one of
@@ -44,6 +44,13 @@ pub fn placed_instance_in(
         .select_only_component(component_id);
     model.schematic.session.editor.net_highlight.clear();
     model.schematic.session.editor.center_request = position;
+}
+
+/// Show the design with the net of this name selected, lit and centred on
+/// the cell view on screen. Whether that cell view has a net of the name.
+pub fn named_net_in(model: &mut Model, wb: &mut WorkbenchSession, name: &str) -> bool {
+    wb.activate(Workspace::Design);
+    model.show_design_net(name)
 }
 
 /// Whether the buffer on screen is the one this occurrence names.

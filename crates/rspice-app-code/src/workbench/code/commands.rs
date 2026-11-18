@@ -40,6 +40,9 @@ pub enum CodeCommand {
     /// canvas context menu, the instance inspector and the design navigator
     /// all route here rather than each moving the workspace themselves.
     ShowInNetlist,
+    /// The way back: the instance or net the generated netlist's line under
+    /// the caret was written for, selected on its schematic.
+    ShowInSchematic,
     FindCodeDocument,
     ValidateCodeDocument,
     ManageSourceDocument,
@@ -152,6 +155,11 @@ pub enum CodeRequest {
     /// Open the schematic an instance of the cell is placed in, with the
     /// instance selected and centred.
     OpenCellInstance(rspice_app_state::workbench::app_state::cell_usage::CellInstanceUse),
+    /// Open `schematic` with the net `net` selected, lit and centred.
+    ShowNetInSchematic {
+        schematic: CellViewRef,
+        net: String,
+    },
     /// Restore the owned revision the netlist page's revision dialog has
     /// selected.
     RestoreOwnedNetlistRevision,
@@ -199,6 +207,7 @@ pub enum CodeHandOff {
     CreateVerilogADevice,
     ImportVerilogACells,
     OpenCellInstance(rspice_app_state::workbench::app_state::cell_usage::CellInstanceUse),
+    ShowNetInSchematic { schematic: CellViewRef, net: String },
     CommitNetlistImport,
     BeginNetlistProfileReview,
     ImportDroppedNetlist(Vec<egui::DroppedFile>),
@@ -406,6 +415,12 @@ const RENAME_SYMBOL: &[ShortcutBinding] = &[primary(
     chord(Key::F2, false, false, false, "F2"),
     DESKTOP_BROWSER,
 )];
+// Beside the language keys on F12: from a line of the generated netlist to
+// what the schematic drew it from. A browser leaves Alt+F12 to the page.
+const SHOW_IN_SCHEMATIC: &[ShortcutBinding] = &[primary(
+    chord(Key::F12, false, true, false, "Alt+F12"),
+    DESKTOP_BROWSER,
+)];
 // F8 also steps through a drawing's violations; with a source editor focused
 // the editor's context outranks the workspace's, so the key follows focus.
 const NEXT_PROBLEM: &[ShortcutBinding] = &[primary(chord(Key::F8, false, false, false, "F8"), ALL)];
@@ -424,7 +439,7 @@ const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::ImportNetlist,
@@ -435,6 +450,7 @@ impl CodeCommand {
         Self::ExportBillOfMaterials,
         Self::GenerateNetlist,
         Self::ShowInNetlist,
+        Self::ShowInSchematic,
         Self::FindCodeDocument,
         Self::ValidateCodeDocument,
         Self::ManageSourceDocument,
@@ -478,6 +494,7 @@ impl CodeCommand {
             Self::ExportBillOfMaterials => CommandKey::new("export-bill-of-materials"),
             Self::GenerateNetlist => CommandKey::new("generated-netlist"),
             Self::ShowInNetlist => ids::SHOW_IN_NETLIST,
+            Self::ShowInSchematic => CommandKey::new("show-in-schematic"),
             Self::FindCodeDocument => CommandKey::new("find-code"),
             Self::ValidateCodeDocument => CommandKey::new("validate-code"),
             Self::ManageSourceDocument => CommandKey::new("manage-source-document"),
@@ -588,6 +605,7 @@ impl CodeCommand {
             | Self::GoToDefinition
             | Self::FindReferences
             | Self::RenameSymbol
+            | Self::ShowInSchematic
             | Self::FindCodeDocument => ShortcutContext::SourceEditor,
             Self::ShowInNetlist => ShortcutContext::DesignWorkspace,
             _ => ShortcutContext::Global,
@@ -614,6 +632,7 @@ impl CodeCommand {
             Self::GoToDefinition => GO_TO_DEFINITION,
             Self::FindReferences => FIND_REFERENCES,
             Self::RenameSymbol => RENAME_SYMBOL,
+            Self::ShowInSchematic => SHOW_IN_SCHEMATIC,
             Self::FindCodeDocument => FIND_CODE_DOCUMENT,
             Self::CompileVerilogA => COMPILE_VERILOGA,
             _ => NONE,
@@ -647,6 +666,7 @@ impl CodeCommand {
                 navigates.with(CommandFlags::PRIMARY_RESERVED_BY_BROWSER, true),
             ),
             Self::ShowInNetlist => ("Show in netlist", "Design", navigates),
+            Self::ShowInSchematic => ("Show in schematic", "Code", navigates),
             Self::FindCodeDocument => ("Find in source\u{2026}", "Code", palette),
             Self::ValidateCodeDocument => ("Validate netlist", "Code", palette),
             Self::ManageSourceDocument => ("Manage source document\u{2026}", "Code", palette),

@@ -35,7 +35,7 @@ use crate::workbench::documents::code_workspace::{
     CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
     design_hosts_veriloga, poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
 };
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, cross_probe};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -65,6 +65,8 @@ pub const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
             Separator,
         ],
     ),
+    MenuEntry::command(CodeCommand::ShowInSchematic.key()).access('S'),
+    Separator,
     MenuEntry::command(ids::CUT).access('T'),
     MenuEntry::command(ids::COPY).access('C'),
     MenuEntry::command(ids::PASTE).access('P'),
@@ -87,6 +89,7 @@ impl Feature for CodeFeature {
         CodeCommand::GoToDefinition.key(),
         CodeCommand::FindReferences.key(),
         CodeCommand::RenameSymbol.key(),
+        CodeCommand::ShowInSchematic.key(),
         ids::CUT,
         ids::COPY,
         ids::PASTE,
@@ -195,6 +198,12 @@ impl CommandSet for CodeCommand {
         if !self.source_editor_only() {
             return true;
         }
+        // Only a line of the generated netlist was written from a schematic.
+        if self == Self::ShowInSchematic {
+            return reads.wb.active_source_editor.is_some()
+                && netlist_page_on_screen(reads)
+                && cross_probe::generated_netlist_in_front(&reads.state.netlist);
+        }
         reads.wb.active_source_editor.is_some_and(|editor| {
             !self.navigates_source_language()
                 || (editor.navigable
@@ -250,6 +259,14 @@ impl CommandSet for CodeCommand {
                 None => (true, UNAVAILABLE),
                 Some(block) => (false, block),
             },
+            Self::ShowInSchematic => {
+                let netlist = &reads.state.netlist;
+                let name = cross_probe::caret_name(model, netlist);
+                match cross_probe::schematic_target(model, netlist, name) {
+                    Ok(_) => (true, UNAVAILABLE),
+                    Err(reason) => (false, reason),
+                }
+            }
             Self::FindCodeDocument => (code_document_on_screen(reads), UNAVAILABLE),
             Self::ValidateCodeDocument => (
                 netlist_page_on_screen(reads)
@@ -399,6 +416,7 @@ impl CommandSet for CodeCommand {
             }
             Self::GenerateNetlist => cx.wb.outbox.push(CodeRequest::GenerateNetlist),
             Self::ShowInNetlist => cx.wb.outbox.push(CodeRequest::ShowInNetlist),
+            Self::ShowInSchematic => show_in_schematic(cx),
             Self::FindCodeDocument => cx.wb.outbox.push(CodeRequest::FindCodeDocument),
             Self::ValidateCodeDocument => cx.wb.outbox.push(CodeRequest::ValidateCodeDocument),
             Self::ManageSourceDocument => cx.wb.outbox.push(CodeRequest::ManageSourceDocument),
@@ -421,6 +439,30 @@ fn editor_takes(wb: &WorkbenchSession, command: CodeCommand) -> bool {
     match (wb.active_source_editor, command.source_editor_request()) {
         (Some(editor), Some(request)) => editor.editable || !request.mutates_source(),
         _ => false,
+    }
+}
+
+/// Open the schematic the generated line under the caret was written from,
+/// at the net under the caret when the line connects it, else at the
+/// instance the line is the card of. The name is read from the text as it
+/// stands, not from the frame before.
+pub(crate) fn show_in_schematic(cx: &mut Cx<'_, CodeFeature>) {
+    if !cross_probe::generated_netlist_in_front(&cx.state.netlist) {
+        return;
+    }
+    let name = cross_probe::caret_name_now(cx.model, &mut cx.state.netlist);
+    match cross_probe::schematic_target(cx.model, &cx.state.netlist, name.as_ref()) {
+        Ok(cross_probe::SchematicTarget::Instance(usage)) => {
+            cx.wb.outbox.push(CodeRequest::OpenCellInstance(usage));
+        }
+        Ok(cross_probe::SchematicTarget::Net { schematic, net }) => {
+            cx.wb
+                .outbox
+                .push(CodeRequest::ShowNetInSchematic { schematic, net });
+        }
+        Err(reason) => cx
+            .wb
+            .prompt(format!("Cannot show the line in the schematic: {reason}.")),
     }
 }
 

@@ -215,6 +215,9 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         CodeRequest::OpenCellInstance(usage) => {
             return Some(CodeHandOff::OpenCellInstance(usage));
         }
+        CodeRequest::ShowNetInSchematic { schematic, net } => {
+            return Some(CodeHandOff::ShowNetInSchematic { schematic, net });
+        }
         // Each of the netlist page's transactions commits through a
         // candidate copy, so the feature runs the body the dialog ran in
         // place over what the dialog stored.

@@ -10,6 +10,7 @@
 
 mod cross_probe;
 mod definition_index;
+mod design_net;
 mod drawing_sheet;
 mod drawing_sheet_overflow;
 mod drawing_sheet_presets;

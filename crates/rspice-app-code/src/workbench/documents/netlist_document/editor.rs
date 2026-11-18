@@ -182,6 +182,7 @@ pub fn show(
     let mut completion_changed = false;
     let changed;
     let cursor_line;
+    let cursor_column;
     let cursor_char_index;
     let selected_char_range;
     let hover_char_index;
@@ -283,6 +284,7 @@ pub fn show(
         );
         changed = output.changed;
         cursor_line = output.cursor_line;
+        cursor_column = output.cursor_column;
         cursor_char_index = output.cursor_char_index;
         selected_char_range = output.selected_char_range;
         hover_char_index = output.hover_char_index;
@@ -355,6 +357,9 @@ pub fn show(
     // The buffer was taken at the beginning of the frame. What the guard
     // refuses is shown until the next frame draws the project's deck again.
     model.simulation.source.netlist_content = buffer;
+    // What the caret stands on is read once it has moved, so the editor's
+    // menu and the commands it offers read the name rather than the deck.
+    super::cross_probe::follow_caret(ui.ctx(), model, netlist, cursor_line, cursor_column);
     // The editor's history starts again whenever the document is replaced
     // underneath it, so once it is spent the next older step is the
     // netlist's own: a replace-all or a rename.

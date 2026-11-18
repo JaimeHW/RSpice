@@ -305,12 +305,46 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
             // schematic that cannot be opened has said why on the status bar.
             app.state.open_workspace_view(usage.schematic.clone());
             if app.state.model.workspace.content.active_view == usage.schematic {
-                rspice_app_workbench::workbench::app::reveal::placed_instance_in(
+                // A line generated before the instance was deleted still
+                // names it: the schematic opens and says so, rather than
+                // selecting an id nothing on it carries.
+                let placed = app
+                    .state
+                    .model
+                    .schematic
+                    .document()
+                    .components
+                    .iter()
+                    .any(|component| component.id == usage.component_id);
+                if placed {
+                    rspice_app_workbench::workbench::app::reveal::placed_instance_in(
+                        &mut app.state.model,
+                        &mut app.state.workbench,
+                        None,
+                        usage.component_id,
+                    );
+                } else {
+                    activate_workspace(app, Workspace::Design);
+                    app.state.prompt(format!(
+                        "{} is not on {} any more.",
+                        usage.instance, usage.schematic.cell
+                    ));
+                }
+            }
+        }
+        CodeHandOff::ShowNetInSchematic { schematic, net } => {
+            // As an instance: the schematic first, then the net on it. A
+            // net the drawing no longer has is said, not silently missed.
+            app.state.open_workspace_view(schematic.clone());
+            if app.state.model.workspace.content.active_view == schematic
+                && !rspice_app_workbench::workbench::app::reveal::named_net_in(
                     &mut app.state.model,
                     &mut app.state.workbench,
-                    None,
-                    usage.component_id,
-                );
+                    &net,
+                )
+            {
+                app.state
+                    .prompt(format!("Net {net} is not on {} any more.", schematic.cell));
             }
         }
         CodeHandOff::CommitNetlistImport => {

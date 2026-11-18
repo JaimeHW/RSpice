@@ -202,6 +202,8 @@ pub(crate) struct LayoutRow<'a> {
 pub(crate) struct VirtualEditorOutput {
     pub changed: bool,
     pub cursor_line: usize,
+    /// The caret's character column on its line.
+    pub cursor_column: usize,
     pub cursor_char_index: usize,
     /// Character under the pointer in the code well. Gutter, folded-away,
     /// and off-document positions report `None` so language hovers never
@@ -876,9 +878,13 @@ pub(crate) fn show_virtual_text_editor(
             .max(session.model.maximum_selected_line_columns());
         restart_maximum_column_scan(&mut session);
     }
-    let cursor_line = session.model.selections().last().map_or(0, |selection| {
-        session.model.line_column_for_char(selection.cursor).0
-    });
+    let (cursor_line, cursor_column) = session
+        .model
+        .selections()
+        .last()
+        .map_or((0, 0), |selection| {
+            session.model.line_column_for_char(selection.cursor)
+        });
     publish_caret_line(ui.ctx(), editor_id, cursor_line);
     let cursor_char_index = session
         .model
@@ -916,6 +922,7 @@ pub(crate) fn show_virtual_text_editor(
     VirtualEditorOutput {
         changed,
         cursor_line,
+        cursor_column,
         cursor_char_index,
         hover_char_index,
         selected_char_range,

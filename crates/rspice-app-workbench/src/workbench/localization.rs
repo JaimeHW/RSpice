@@ -439,7 +439,6 @@ define_messages! {
     NetlistNavigatorNoProvenance => "This line has no schematic source.",
     NetlistNavigatorMappedLine => "Line {line} · {cell}",
     NetlistNavigatorInstance => "Instance {instance}",
-    NetlistNavigatorCrossProbe => "Cross-probe schematic component",
     NetlistShowInstanceLocated => "Located instance {instance} at generated line {line}.",
     NetlistShowInstanceStale => "Located instance {instance} at generated line {line} in a stale deck; regenerating it may move the card.",
     CodeNavigatorFiles => "Files",
