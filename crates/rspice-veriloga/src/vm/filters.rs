@@ -877,17 +877,15 @@ mod tests {
     }
 
     /// A crossing whose root estimate lands in the last float interval before
-    /// the candidate is bracketed by the float just before it, and a crossing
-    /// in an interval with no float inside is located: it fires at the end.
+    /// the candidate, or in an interval with no float inside, is located: it
+    /// fires at the end, the first instant past the root time can write.
     ///
     /// The first case is the corpus PLL's VCO, `@(cross(ph - 0.5, 0))` with
     /// `ph` near 0.5. The solver lands on the crossing, the expression reads
-    /// one ulp of 0.5 there, and that is far above a tolerance scaled by the
-    /// expression's own value (3.9e-4 at the accepted point). The root
-    /// estimate is the last float before the candidate, which used to refuse
-    /// the run as unrefinable.
+    /// one ulp of 0.5 there, and the root estimate is the last float before
+    /// the candidate, which used to refuse the run as unrefinable.
     #[test]
-    fn a_crossing_in_the_last_float_interval_is_bracketed_and_then_located() {
+    fn a_crossing_in_the_last_float_interval_is_located_at_the_candidate() {
         let start = 6.202_420_706_862_774e-9;
         let end = 6.204_860_122_698_261e-9;
         let mut detector = CrossDetector::default();
@@ -895,20 +893,9 @@ mod tests {
         detector.commit();
         let ulp_of_half = 0.5 * f64::EPSILON;
         assert_eq!(detector.eval(ulp_of_half, end, 0), Ok(1.0));
+        assert_eq!(detector.candidate_refinement_time(), None);
         let last = f64::from_bits(end.to_bits() - 1);
-        assert_eq!(
-            detector.candidate_refinement_time(),
-            Some(last),
-            "the float just before the candidate brackets the crossing"
-        );
-
-        // The bracket held: the crossing is in the last float interval.
-        let mut located = CrossDetector::default();
-        located.eval(-ulp_of_half, last, 0).unwrap();
-        located.commit();
-        assert_eq!(located.eval(ulp_of_half, end, 0), Ok(1.0));
-        assert_eq!(located.candidate_refinement_time(), None);
-        let crossing = located.candidate.last_crossing_time;
+        let crossing = detector.candidate.last_crossing_time;
         assert!((last..=end).contains(&crossing), "{crossing:e}");
 
         // So is a jump between adjacent floats, whatever its height.

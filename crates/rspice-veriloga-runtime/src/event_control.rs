@@ -233,19 +233,21 @@ fn generated_refinement_time_past(
 
 /// Where an unconverged crossing in `(start, end)` is resolved next, or `None`
 /// when it is resolved as finely as time can be written: the first float
-/// after the root estimate; for an estimate in the last float interval, the
-/// float just before `end`, which brackets it; for an interval with no float
-/// inside, nothing, because the crossing is located at `end`.
+/// after the root estimate, or nothing when that float is `end` itself.
+///
+/// `end` is then the first instant past the estimated root that time can
+/// write, so no landing can sit nearer the root on its far side, whatever the
+/// tolerances ask. Sampling the float before `end` instead, to bracket the
+/// root, walked a chase back one float per trial for as long as the samples
+/// still read past the threshold: each one moved the bracket by a single
+/// float while the root estimate, anchored at the far accepted point, stayed
+/// in the last interval.
 fn generated_refinement_time(start: Value, estimate: Value, end: Value) -> Option<Value> {
     if !estimate.is_finite() || end <= start {
         return None;
     }
     let target = generated_next_time_after(estimate.max(start));
-    if target > start && target < end {
-        return Some(target);
-    }
-    let last = Value::from_bits(end.to_bits() - 1);
-    (last > start).then_some(last)
+    (target > start && target < end).then_some(target)
 }
 
 fn generated_crossing_time(accepted: GeneratedCrossState, value: Value, time: Value) -> Value {
@@ -314,16 +316,27 @@ pub struct CrossingDecision {
 /// `q`. Such a candidate is an ordinary point on the near side.
 ///
 /// A landed candidate resolves the crossing when it lies within `time_tol` of
-/// the estimated root and within `expr_tol` of zero. Where the accepted point
-/// itself already reads the crossing to within `expr_tol` — the previous
-/// landing came to rest on the threshold, one representable instant short of
-/// the flip — the root is located there, and the expression criterion, whose
-/// default scales with the two values and so collapses with the accepted
-/// one, says nothing more. The candidate resolves the crossing within
-/// `time_tol` of that point, and the retry lands half the default window past
-/// it, where any expression that changes faster than its own rounding over
-/// that interval has flipped. A sweep point at the same time has no root to refine
-/// and keeps the closed comparison.
+/// the estimated root and within `expr_tol` of zero. The LRM leaves an omitted
+/// `expr_tol` to the simulator, and RSpice's is what the expression moves over
+/// the default time window, 64 ulps of the time's scale: the landing is held
+/// to that window, inside any tighter `time_tol`. A default scaled by the
+/// expression's two values instead shrinks with the bracket and not with time,
+/// so once a step is shorter than about a hundredth of the time it ends at, it
+/// asks for a landing nearer the root than time can be written, and every
+/// chase ran on to the float grid. A candidate with no float between it and
+/// the root estimate is the first instant past the root that time can write,
+/// and resolves the crossing whatever the tolerances ask
+/// ([`generated_refinement_time`]).
+///
+/// Where the accepted point itself already reads the crossing to within
+/// `expr_tol` — the previous landing came to rest on the threshold, one
+/// representable instant short of the flip — the root is located there, and
+/// the expression criterion, whose default scales with the two values and so
+/// collapses with the accepted one, says nothing more. The candidate resolves
+/// the crossing within `time_tol` of that point, and the retry lands half the
+/// default window past it, where any expression that changes faster than its
+/// own rounding over that interval has flipped. A sweep point at the same time
+/// has no root to refine and keeps the closed comparison.
 pub fn decide_crossing(
     accepted: CrossingAccepted,
     value: Value,
@@ -387,15 +400,21 @@ pub fn decide_crossing(
             }
         } else {
             let time_error = (time - crossing_time).max(0.0);
-            if time_error > effective_time_tol || value.abs() > effective_expr_tol {
+            let resolved = if rule.expr_tol > 0.0 {
+                time_error <= effective_time_tol && value.abs() <= effective_expr_tol
+            } else {
+                let default_window = generated_event_effective_tolerance(0.0, time_scale);
+                time_error <= effective_time_tol.min(default_window)
+            };
+            if resolved {
+                None
+            } else {
                 generated_refinement_time_past(
                     accepted.time,
                     crossing_time,
                     time,
                     margin(crossing_time),
                 )
-            } else {
-                None
             }
         }
     } else {
@@ -568,31 +587,26 @@ mod tests {
     }
 
     /// The refinement rule every route shares ([`decide_crossing`]): the first
-    /// float after the root estimate; for an estimate in the last float
-    /// interval, the float just before the candidate, which brackets it; for
-    /// an interval with no float inside, nothing, so the crossing fires at the
-    /// candidate, located to the resolution of time.
+    /// float after the root estimate, or nothing when that float is the
+    /// candidate, so the crossing fires there, located to the resolution of
+    /// time.
     #[test]
-    fn refinement_brackets_the_last_float_interval_and_then_locates_the_crossing() {
+    fn a_root_in_the_last_float_interval_is_located_at_the_candidate() {
         let next = |time: Value| Value::from_bits(time.to_bits() + 1);
         let previous = |time: Value| Value::from_bits(time.to_bits() - 1);
         assert_eq!(generated_refinement_time(0.0, 0.25, 1.0), Some(next(0.25)));
-        assert_eq!(
-            generated_refinement_time(0.0, previous(1.0), 1.0),
-            Some(previous(1.0)),
-            "an estimate in the last float interval is bracketed by the float before the end"
-        );
+        assert_eq!(generated_refinement_time(0.0, previous(1.0), 1.0), None);
         assert_eq!(generated_refinement_time(previous(1.0), 1.0, 1.0), None);
         assert_eq!(generated_refinement_time(0.0, Value::NAN, 1.0), None);
         assert_eq!(generated_refinement_time(1.0, 0.5, 1.0), None);
 
         // The corpus PLL's VCO, `@(cross(ph - 0.5, 0))` with `ph` near 0.5:
         // the solver lands on the crossing, where the expression reads one
-        // ulp of 0.5, far above a tolerance scaled by its own small value.
+        // ulp of 0.5 and the root estimate is the float before the candidate.
         let start = 6.202_420_706_862_774e-9;
         let end = 6.204_860_122_698_261e-9;
         let ulp_of_half = 0.5 * Value::EPSILON;
-        let cross = |accepted_value: Value, accepted_time, value, time| {
+        let cross = |accepted_value: Value, accepted_time, value, time, tolerance| {
             decide_crossing(
                 CrossingAccepted {
                     side: generated_event_side(accepted_value),
@@ -603,30 +617,143 @@ mod tests {
                 time,
                 CrossingRule {
                     direction: 0,
-                    time_tol: 0.0,
-                    expr_tol: 0.0,
+                    time_tol: tolerance,
+                    expr_tol: tolerance,
                     enabled: true,
                     same_time_static: false,
                 },
             )
         };
-        let bracketed = cross(-3.931_437_199_186_094e-4, start, ulp_of_half, end);
-        assert!(bracketed.fired);
-        assert_eq!(bracketed.refinement_time, Some(previous(end)));
-
-        let located = cross(-ulp_of_half, previous(end), ulp_of_half, end);
-        assert!(located.fired);
-        assert_eq!(located.refinement_time, None);
-        assert!(
-            (previous(end)..=end).contains(&located.time),
-            "{:e}",
-            located.time
-        );
+        // The candidate is the first instant past that root time can write,
+        // so it resolves the crossing, whatever the tolerances ask.
+        for tolerance in [0.0, 1.0e-30] {
+            let located = cross(
+                -3.931_437_199_186_094e-4,
+                start,
+                ulp_of_half,
+                end,
+                tolerance,
+            );
+            assert!(located.fired);
+            assert_eq!(located.refinement_time, None, "tolerance {tolerance:e}");
+            assert!(
+                (previous(end)..=end).contains(&located.time),
+                "{:e}",
+                located.time
+            );
+        }
 
         // So is a jump between adjacent floats, whatever its height.
-        let jump = cross(-1.0, 1.0, 1.0, next(1.0));
+        let jump = cross(-1.0, 1.0, 1.0, next(1.0), 0.0);
         assert!(jump.fired);
         assert_eq!(jump.refinement_time, None);
+    }
+
+    /// Chase a crossing of `expression` the way the transient engine does:
+    /// a candidate that asks for a landing is rejected and the accepted point
+    /// stays; one that fires nothing is accepted, and the chase resumes at the
+    /// earliest candidate end seen to hold the root. Returns the candidates
+    /// tried, the points accepted, and the instant the event fired at.
+    fn chase(
+        expression: impl Fn(Value) -> Value,
+        accepted_time: Value,
+        first_candidate: Value,
+        rule: CrossingRule,
+    ) -> (Vec<Value>, Vec<Value>, Value) {
+        let mut accepted = CrossingAccepted {
+            side: generated_event_side(expression(accepted_time)),
+            value: expression(accepted_time),
+            time: accepted_time,
+        };
+        let (mut tried, mut landed) = (Vec::new(), Vec::new());
+        let mut bound = first_candidate;
+        let mut candidate = first_candidate;
+        while tried.len() < 1000 {
+            tried.push(candidate);
+            let value = expression(candidate);
+            let decision = decide_crossing(accepted, value, candidate, rule);
+            if decision.fired {
+                bound = bound.min(candidate);
+            }
+            match decision.refinement_time {
+                Some(target) => candidate = target,
+                None if decision.fired => return (tried, landed, candidate),
+                None => {
+                    landed.push(candidate);
+                    if value != 0.0 {
+                        accepted.side = generated_event_side(value);
+                    }
+                    accepted.value = value;
+                    accepted.time = candidate;
+                    candidate = bound;
+                }
+            }
+        }
+        panic!("the chase did not end: tried {tried:?}, accepted {landed:?}");
+    }
+
+    /// The review deck's analog crossing: `cross(V(x) - 0.9, +1)` on 0.9 +
+    /// 1.2 sin(2 pi 10 MHz t), rising through its root at 5.8 us at 75 V/us,
+    /// from an accepted point 173 fs short of it.
+    ///
+    /// With no `expr_tol`, the landing half the default window past the root
+    /// estimate resolves the crossing. The expression there reads 3e-12, and a
+    /// default scaled by the accepted value (1.3e-5) asked for 2e-19, below
+    /// what one float of time moves it (6e-14). So the chase ran on to the
+    /// float grid and stepped back one float per trial until a sample read the
+    /// threshold exactly, accepted that point on the threshold, and fired one
+    /// solver floor past it.
+    #[test]
+    fn a_crossing_with_no_expr_tol_fires_at_its_first_landing() {
+        let root = 5.8e-6;
+        let expression = |time: Value| 75.0e6 * (time - root);
+        let rule = CrossingRule {
+            direction: 1,
+            time_tol: 0.0,
+            expr_tol: 0.0,
+            enabled: true,
+            same_time_static: false,
+        };
+        let (tried, landed, fired_at) = chase(
+            expression,
+            5.799_999_827_027_085_4e-6,
+            5.800_000_000_002_369_5e-6,
+            rule,
+        );
+        assert_eq!(tried.len(), 2, "tried {tried:?}");
+        assert!(landed.is_empty(), "accepted {landed:?}");
+        assert!(
+            fired_at > root && fired_at - root <= 64.0 * Value::EPSILON * root,
+            "fired at {fired_at:e}"
+        );
+    }
+
+    /// A `time_tol` finer than the spacing of time at the root cannot be met
+    /// by any landing; the first instant past the root that time can write
+    /// resolves the crossing, with no point accepted on the way. Bracketing
+    /// that instant by the float before it stepped the chase back one float
+    /// per trial while the samples read past the threshold, and here accepted
+    /// the root itself, where the expression reads zero.
+    #[test]
+    fn a_time_tol_finer_than_time_fires_at_the_first_instant_past_the_root() {
+        let root = 5.8e-6;
+        let expression = |time: Value| 75.0e6 * (time - root);
+        let rule = CrossingRule {
+            direction: 1,
+            time_tol: 1.0e-30,
+            expr_tol: 1.0e-12,
+            enabled: true,
+            same_time_static: false,
+        };
+        let (tried, landed, fired_at) = chase(
+            expression,
+            5.799_999_827_027_085_4e-6,
+            5.800_000_000_002_369_5e-6,
+            rule,
+        );
+        assert_eq!(tried.len(), 2, "tried {tried:?}");
+        assert!(landed.is_empty(), "accepted {landed:?}");
+        assert_eq!(fired_at, Value::from_bits(root.to_bits() + 1));
     }
 
     /// The crossing rule every route shares (VAMS-LRM 2.4 5.10.3.1: the
