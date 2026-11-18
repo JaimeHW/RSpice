@@ -883,6 +883,47 @@ impl ModelsFeature {
         }
     }
 
+    /// Apply the path variables Preferences ▸ Paths set, as the model-path
+    /// dialog applies its copy: the configuration with that table, kept on
+    /// disk first, then live, its model libraries read again through it.
+    pub fn apply_path_variables(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &Context,
+        variables: std::collections::HashMap<String, String>,
+    ) {
+        let mut config = cx.model.pdk_config.clone();
+        config.environment_variables = variables;
+        Self::apply_pdk_settings(cx, ctx, config);
+    }
+
+    /// Apply a changed model-path configuration: off this thread on the
+    /// desktop, through the browser's storage in a browser.
+    fn apply_pdk_settings(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &Context,
+        config: crate::state::pdk_config::PdkConfig,
+    ) {
+        #[cfg(not(target_arch = "wasm32"))]
+        Self::start_native_pdk_configuration_apply(cx, ctx, config);
+        #[cfg(target_arch = "wasm32")]
+        match prepare_pdk_configuration(cx.model, cx.platform, config) {
+            Ok((config, candidate, loaded)) => {
+                if let Err(error) =
+                    crate::workbench::models::pdk_persistence::start_browser_pdk_settings_publication(
+                        ctx,
+                        &cx.model.pdk_config,
+                        config,
+                        candidate,
+                        loaded,
+                    )
+                {
+                    emit_pdk_apply_messages(cx.model, Err(vec![error]));
+                }
+            }
+            Err(errors) => emit_pdk_apply_messages(cx.model, Err(errors)),
+        }
+    }
+
     pub(in crate::workbench) fn process_pdk_settings_dialog(
         cx: &mut Cx<'_, ModelsFeature>,
         ctx: &Context,
@@ -894,26 +935,14 @@ impl ModelsFeature {
         );
         match result {
             PdkSettingsDialogResult::Applied(config) => {
-                let config = *config;
-                #[cfg(not(target_arch = "wasm32"))]
-                Self::start_native_pdk_configuration_apply(cx, ctx, config);
-                #[cfg(target_arch = "wasm32")]
-                match prepare_pdk_configuration(cx.model, cx.platform, config) {
-                    Ok((config, candidate, loaded)) => {
-                        if let Err(error) =
-                            crate::workbench::models::pdk_persistence::start_browser_pdk_settings_publication(
-                                ctx,
-                                &cx.model.pdk_config,
-                                config,
-                                candidate,
-                                loaded,
-                            )
-                        {
-                            emit_pdk_apply_messages(cx.model, Err(vec![error]));
-                        }
-                    }
-                    Err(errors) => emit_pdk_apply_messages(cx.model, Err(errors)),
-                }
+                // The path variables are Preferences ▸ Paths' to edit: the
+                // dialog's copy keeps the table as it is now, not as it was
+                // when the dialog opened.
+                let mut config = *config;
+                config
+                    .environment_variables
+                    .clone_from(&cx.model.pdk_config.environment_variables);
+                Self::apply_pdk_settings(cx, ctx, config);
             }
             PdkSettingsDialogResult::LoadFile(path) => {
                 #[cfg(not(target_arch = "wasm32"))]

@@ -2,12 +2,12 @@
 //! the product dialog pattern.
 //!
 //! One master–detail surface replaces the four ad-hoc tabs: sources on the
-//! left rail (enable checkbox, inline path edit, file count at a glance)
-//! with the environment variables underneath — they exist to be used in
-//! paths, so they belong next to them, not on a far tab — and the selected
-//! source's discovered files on the right with type badges and a live
-//! filter. Everything edits the working copy immediately; Rescan is the
-//! only deferred action and Close commits.
+//! left rail (enable checkbox, inline path edit, file count at a glance),
+//! and the selected source's discovered files on the right with type badges
+//! and a live filter. Everything edits the working copy immediately; Rescan
+//! is the only deferred action and Save commits. The path variables a
+//! source names its root by are Preferences ▸ Paths' to edit, the one table
+//! library folders read too; a source's tooltip shows what it expands to.
 
 use std::path::PathBuf;
 
@@ -30,8 +30,6 @@ use crate::workbench::app_state::session::pdk_settings::{
 const PANE_HEIGHT: f32 = 340.0;
 /// Height of source rows.
 const ROW_H: f32 = 26.0;
-/// Height of environment rows.
-const ENV_ROW_H: f32 = 24.0;
 /// Height of discovered-file rows and the table header.
 const FILE_ROW_H: f32 = 24.0;
 /// Width of the SECTIONS column, measured from the right edge.
@@ -59,16 +57,6 @@ enum SourceAction {
     /// Add a new source from the inline input.
     Add(String),
     /// Hide the inline new-source input.
-    DismissAdd,
-}
-
-/// What an environment-list interaction asked for this frame.
-enum EnvAction {
-    /// Remove an override by name.
-    Remove(String),
-    /// Add an override from the inline inputs.
-    Add(String, String),
-    /// Hide the inline new-variable inputs.
     DismissAdd,
 }
 
@@ -159,12 +147,10 @@ pub fn render_pdk_settings_dialog(
 }
 
 // ---------------------------------------------------------------------------
-// left rail — sources + environment
+// left rail — sources
 // ---------------------------------------------------------------------------
 
 fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
     #[cfg(target_arch = "wasm32")]
     let mut import_browser_file = false;
     #[cfg(not(target_arch = "wasm32"))]
@@ -200,23 +186,8 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
         });
     });
 
-    // The environment block is pinned below the sources; size it first so
-    // the sources list takes exactly the remaining pane height.
-    let mut env: Vec<(String, String)> = state
-        .config
-        .env_overrides()
-        .iter()
-        .map(|(name, value)| (name.clone(), value.clone()))
-        .collect();
-    env.sort_by(|a, b| a.0.cmp(&b.0));
-    let trailing_h = if state.adding_env {
-        ENV_ROW_H + 4.0
-    } else {
-        0.0
-    };
-    let env_list_h = (env.len() as f32 * ENV_ROW_H + trailing_h).min(96.0);
-    // Two pane headers (sources, environment) and the rule between the lists.
-    let sources_h = PANE_HEIGHT - 2.0 * pane_header_height(ui.ctx()) - 1.0 - env_list_h;
+    // The sources list takes the pane's height under its header.
+    let sources_h = PANE_HEIGHT - pane_header_height(ui.ctx());
 
     let mut action: Option<SourceAction> = None;
     egui::ScrollArea::vertical()
@@ -248,54 +219,6 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
                 action = Some(act);
             }
         });
-
-    // Environment under a thin separator, headed as the sources are.
-    let sep_y = ui.cursor().top() + 0.5;
-    ui.painter()
-        .hline(ui.max_rect().x_range(), sep_y, Stroke::new(1.0, c.border));
-    ui.add_space(1.0);
-    // Its add action is a header button, as the sources' is: it was a faint
-    // row wedged under the last variable at the pane's bottom edge.
-    pane_header_inset(ui, INSET, |ui| {
-        header_caption(ui, "Environment");
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if Button::new("Add")
-                .icon(Icon::Add)
-                .compact()
-                .accessible_label("Add environment variable")
-                .show(ui)
-                .clicked()
-            {
-                state.adding_env = true;
-                ui.ctx().memory_mut(|m| m.request_focus(env_name_id()));
-            }
-        });
-    });
-
-    let mut env_action: Option<EnvAction> = None;
-    // An empty list takes no height: a scroll area keeps a floor of its own,
-    // which would hold a blank strip under the header.
-    if env_list_h > 0.0 {
-        egui::ScrollArea::vertical()
-            .id_salt("rspice.pdk.env")
-            .max_height(env_list_h)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for (index, (name, value)) in env.iter().enumerate() {
-                    let resolved = crate::state::pdk_config::expand_path(&state.config, value);
-                    if let Some(act) = env_row(ui, index, name, value, &resolved) {
-                        env_action = Some(act);
-                    }
-                }
-                if state.adding_env
-                    && let Some(act) =
-                        env_add_row(ui, &mut state.new_env_name, &mut state.new_env_value)
-                {
-                    env_action = Some(act);
-                }
-            });
-    }
 
     if let Some(act) = action {
         match act {
@@ -335,20 +258,6 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
                 state.add_library_path(path);
             }
             SourceAction::DismissAdd => state.adding_path = false,
-        }
-    }
-    if let Some(act) = env_action {
-        match act {
-            EnvAction::Remove(name) => state.remove_env_override(&name),
-            EnvAction::Add(name, value) => {
-                state.adding_env = false;
-                state.add_env_override(name, value);
-            }
-            EnvAction::DismissAdd => {
-                state.adding_env = false;
-                state.new_env_name.clear();
-                state.new_env_value.clear();
-            }
         }
     }
     import_browser_file
@@ -598,150 +507,6 @@ fn source_add_row(ui: &mut Ui, buffer: &mut String) -> Option<SourceAction> {
                     action = Some(SourceAction::Add(buffer.trim().to_owned()));
                 } else {
                     action = Some(SourceAction::DismissAdd);
-                }
-            }
-        },
-    );
-    action
-}
-
-/// One environment row: `$NAME` left, value right (tooltip shows the
-/// resolved expansion), remove button on hover.
-fn env_row(
-    ui: &mut Ui,
-    index: usize,
-    name: &str,
-    value: &str,
-    resolved: &str,
-) -> Option<EnvAction> {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let width = ui.available_width();
-    let mut action = None;
-
-    ui.allocate_ui_with_layout(
-        vec2(width, ENV_ROW_H),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            let rect = ui.max_rect();
-            let row_id = ui.id().with(("rspice.pdk.env", index));
-            let hovered = ui.rect_contains_pointer(rect);
-            let hover = ui.ctx().animate_bool_with_time(
-                row_id.with("hover"),
-                hovered,
-                ui.style().animation_time,
-            );
-            if hover > 0.0 {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
-                );
-            }
-
-            ui.add_space(INSET);
-            let name_w = (rect.width() * 0.45).max(40.0);
-            let name_galley = ui.fonts_mut(|f| {
-                let mut job = egui::text::LayoutJob::simple_singleline(
-                    format!("${name}"),
-                    theme::mono(tokens::FS_1, FontWeight::Regular),
-                    egui::Color32::PLACEHOLDER,
-                );
-                job.wrap = egui::text::TextWrapping::truncate_at_width(name_w);
-                f.layout_job(job)
-            });
-            let name_used = name_galley.size().x.min(name_w);
-            let (name_rect, _) = ui.allocate_exact_size(vec2(name_used, ENV_ROW_H), Sense::hover());
-            ui.painter().galley(
-                egui::pos2(
-                    name_rect.left(),
-                    name_rect.center().y - name_galley.size().y * 0.5,
-                ),
-                name_galley,
-                mix(c.text_dim, c.text, hover),
-            );
-
-            let value_w = (ui.available_width() - 22.0).max(10.0);
-            let (value_rect, value_response) =
-                ui.allocate_exact_size(vec2(value_w, ENV_ROW_H), Sense::hover());
-            let value_galley = ui.fonts_mut(|f| {
-                let mut job = egui::text::LayoutJob::simple_singleline(
-                    value.to_owned(),
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    egui::Color32::PLACEHOLDER,
-                );
-                job.wrap = egui::text::TextWrapping::truncate_at_width(value_w);
-                f.layout_job(job)
-            });
-            ui.painter().galley(
-                egui::pos2(
-                    value_rect.right() - value_galley.size().x.min(value_w),
-                    value_rect.center().y - value_galley.size().y * 0.5,
-                ),
-                value_galley,
-                c.text_faint,
-            );
-            if resolved != value {
-                value_response.on_hover_text(format!("→ {resolved}"));
-            }
-
-            if hovered {
-                if IconButton::new(Icon::Close)
-                    .side(16.0)
-                    .tooltip("Remove variable")
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(EnvAction::Remove(name.to_owned()));
-                }
-            } else {
-                ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-            }
-        },
-    );
-
-    action
-}
-
-/// The inline name/value inputs opened by "+ variable…". Enter commits
-/// when the name is non-empty; ✕ dismisses.
-fn env_add_row(ui: &mut Ui, name: &mut String, value: &mut String) -> Option<EnvAction> {
-    let mut action = None;
-    let width = ui.available_width();
-    ui.allocate_ui_with_layout(
-        vec2(width, ENV_ROW_H + 4.0),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.add_space(INSET);
-            let name_response = ui.add(
-                egui::TextEdit::singleline(name)
-                    .id(env_name_id())
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .hint_text("NAME")
-                    .margin(egui::Margin::symmetric(5, 2))
-                    .desired_width(72.0),
-            );
-            let value_response = ui.add(
-                egui::TextEdit::singleline(value)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .hint_text("value or path")
-                    .margin(egui::Margin::symmetric(5, 2))
-                    .desired_width((ui.available_width() - 24.0).max(40.0)),
-            );
-            if IconButton::new(Icon::Close)
-                .side(16.0)
-                .tooltip("Dismiss")
-                .show(ui)
-                .clicked()
-            {
-                action = Some(EnvAction::DismissAdd);
-            }
-            let entered = ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if entered && (name_response.lost_focus() || value_response.lost_focus()) {
-                let trimmed = name.trim().trim_start_matches('$').to_owned();
-                if !trimmed.is_empty() {
-                    action = Some(EnvAction::Add(trimmed, value.trim().to_owned()));
                 }
             }
         },
@@ -1112,10 +877,6 @@ fn add_path_id() -> egui::Id {
     egui::Id::new("rspice.pdk.add_path")
 }
 
-fn env_name_id() -> egui::Id {
-    egui::Id::new("rspice.pdk.env_name")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1161,12 +922,10 @@ mod tests {
     }
 
     /// The footer says Save and Cancel, not "Close saves, Esc discards"; no
-    /// em dash stands in for a word or a blank; and the environment rows sit
-    /// inside the panes. The environment's header was measured as 23 points
-    /// tall and drew 31, so its list ran 8 points under the panes' bottom,
-    /// clipped.
+    /// em dash stands in for a word or a blank; and the path variables are
+    /// not edited here: Preferences ▸ Paths is their one editor.
     #[test]
-    fn the_paths_dialog_saves_or_cancels_and_shows_the_environment_whole() {
+    fn the_paths_dialog_saves_or_cancels_and_leaves_the_variables_to_preferences() {
         let mut state = PdkSettingsDialogState::new();
         state.open(crate::state::pdk_config::PdkConfig::default());
         let nodes = nodes(&mut state);
@@ -1180,16 +939,10 @@ mod tests {
                 .any(|(name, _)| name.contains('\u{2014}') || name.contains("Close saves")),
             "{nodes:?}"
         );
-        let (_, sources) = named("Sources").expect("the sources header");
-        let (_, add) = named("Add environment variable").expect("the add-variable row");
-        // The panes start at the sources header's top, which its caption
-        // is centred in, and are PANE_HEIGHT tall.
-        let panes_bottom =
-            sources.center().y - crate::ui::widgets::PANE_HEADER_H * 0.5 + PANE_HEIGHT;
+        assert!(named("Sources").is_some(), "no sources header");
         assert!(
-            add.bottom() <= panes_bottom + 0.5,
-            "the environment list ends at {} under panes ending at {panes_bottom}",
-            add.bottom()
+            named("Environment").is_none() && named("Add environment variable").is_none(),
+            "the dialog still edits the path variables: {nodes:?}"
         );
     }
 

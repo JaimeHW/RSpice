@@ -221,6 +221,21 @@ impl Request for ApplyWaveformDefaults {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Apply the path variables Preferences ▸ Paths set: the table library
+/// folders and model paths name their roots by. Raised by the settings
+/// feature when the reader sets, removes or restores a variable, and taken
+/// straight after the call that raised it by the models feature, which
+/// applies it as it applies the model paths, kept on disk first.
+#[derive(Clone, Debug)]
+pub struct ApplyPathVariables {
+    pub ctx: egui::Context,
+    pub variables: std::collections::HashMap<String, String>,
+}
+
+impl Request for ApplyPathVariables {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Export the displayed dataset as the File menu does: the edit typed into
 /// the inspector lands, then the format is asked. Raised by the results
 /// feature's Export dataset… command, and taken straight after it returns.

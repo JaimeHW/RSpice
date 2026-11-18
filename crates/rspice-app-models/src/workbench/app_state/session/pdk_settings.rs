@@ -15,16 +15,10 @@ pub struct PdkSettingsDialogState {
     original_config: Option<PdkConfig>,
     /// Input field for new library path
     pub new_path_input: String,
-    /// Input field for new environment variable name
-    pub new_env_name: String,
-    /// Input field for new environment variable value
-    pub new_env_value: String,
     /// Source selected in the rail; `None` shows files of every source
     pub selected_source: Option<usize>,
     /// Whether the inline new-source input row is showing
     pub adding_path: bool,
-    /// Whether the inline new-variable input row is showing
-    pub adding_env: bool,
     /// Filter text for discovered files
     pub file_filter: String,
     /// Index of path being edited (if any)
@@ -164,20 +158,6 @@ impl PdkSettingsDialogState {
         self.config.toggle_path_recursive(index);
     }
 
-    /// Add an environment variable override
-    pub fn add_env_override(&mut self, name: String, value: String) {
-        if !name.is_empty() {
-            self.config.set_env_override(name, value);
-            self.new_env_name.clear();
-            self.new_env_value.clear();
-        }
-    }
-
-    /// Remove an environment variable override
-    pub fn remove_env_override(&mut self, name: &str) {
-        self.config.remove_env_override(name);
-    }
-
     /// Apply changes and return the updated config
     pub fn apply(&mut self) -> PdkConfig {
         // Discovery, model parsing, project publication, and durable config
@@ -191,11 +171,8 @@ impl PdkSettingsDialogState {
     /// Reset all input fields
     fn reset_inputs(&mut self) {
         self.new_path_input.clear();
-        self.new_env_name.clear();
-        self.new_env_value.clear();
         self.file_filter.clear();
         self.adding_path = false;
-        self.adding_env = false;
         self.editing_path_index = None;
         self.edit_path_buffer.clear();
     }

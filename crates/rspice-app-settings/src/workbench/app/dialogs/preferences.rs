@@ -64,6 +64,9 @@ pub struct PreferencePageActions {
     pub export_settings_file: bool,
     pub show_settings_file: bool,
     pub shortcut_policy_candidate: Option<crate::state::shortcuts::ShortcutPreferences>,
+    /// The path variables Paths set or restored, which the models feature
+    /// applies.
+    pub path_variables: Option<std::collections::HashMap<String, String>>,
 }
 
 /// What Preferences and the windows it opens read and write: the settings
@@ -253,6 +256,14 @@ impl PreferencesDialogs<'_> {
         }
         if let Some(profile) = actions.shortcut_policy_candidate {
             self.begin_shortcut_policy_publication(ctx, profile);
+        }
+        if let Some(variables) = actions.path_variables {
+            self.workbench
+                .outbox
+                .push(crate::workbench::framework::requests::ApplyPathVariables {
+                    ctx: ctx.clone(),
+                    variables,
+                });
         }
     }
 

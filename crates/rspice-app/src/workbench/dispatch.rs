@@ -51,12 +51,12 @@ use rspice_app_workbench::workbench::framework::command_registry::{
 use rspice_app_workbench::workbench::framework::feature::{Execute, held_back};
 use rspice_app_workbench::workbench::framework::host::{Host, InspectorScope};
 use rspice_app_workbench::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, ClearSelectedModel,
-    CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites,
-    OpenInDesign, OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring,
-    PrintActiveView, ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
-    SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
-    ShowWaveforms, VoidVerilogAEvidence,
+    self, ApplyPathVariables, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel,
+    ClearSelectedModel, CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid,
+    MarkFailureSites, OpenInDesign, OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition,
+    OpenSymbolAuthoring, PrintActiveView, ProjectFileAction, PromptAfterCommands,
+    RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels,
+    ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
 };
 
 /// Who carries out a command once the prologue has let it through.
@@ -359,6 +359,13 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, ApplyWaveformDefaults| {
                 ResultsFeature::apply_waveform_defaults(&mut features::cx(app));
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ApplyPathVariables { ctx, variables }| {
+                ModelsFeature::apply_path_variables(&mut features::cx(app), &ctx, variables);
             },
         );
         requests::drain(

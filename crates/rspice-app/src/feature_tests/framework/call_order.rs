@@ -513,6 +513,13 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
+        "5.1",
+        &[
+            "|app, ApplyPathVariables { ctx, variables }|",
+            "ModelsFeature::apply_path_variables(&mut features::cx(app), &ctx, variables);",
+        ],
+    ),
+    (
         "6",
         &["|app, ExportDataset| file_action(app, FileMenuAction::ExportCsvWaveforms)"],
     ),
@@ -1602,8 +1609,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        34,
-        "`after_contribution` answers exactly the thirty-four requests it lists"
+        35,
+        "`after_contribution` answers exactly the thirty-five requests it lists"
     );
 }
 

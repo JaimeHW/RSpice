@@ -10,6 +10,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod libraries;
 mod navigation;
+pub mod paths;
 mod simulation;
 mod startup_files;
 mod waveform_defaults;
@@ -60,6 +61,7 @@ pub fn render(
         PreferenceCategory::Simulation => simulation::page(ui, state),
         PreferenceCategory::Schematic => schematic(ui, state),
         PreferenceCategory::Projects => projects(ui, state, actions),
+        PreferenceCategory::Paths => paths::page(ui, state, actions),
         PreferenceCategory::Results => results(ui, state),
     }
 }
@@ -1069,6 +1071,7 @@ pub fn restore_defaults(
             }
             state.trim_recent_files();
         }
+        PreferenceCategory::Paths => paths::restore_defaults(state, actions),
         PreferenceCategory::Results => {
             preferences.restore_defaults(
                 &[

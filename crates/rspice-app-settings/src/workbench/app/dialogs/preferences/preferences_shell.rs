@@ -169,13 +169,14 @@ pub enum PreferenceCategory {
     Units,
     Schematic,
     Projects,
+    Paths,
     Results,
     Simulation,
     Navigation,
 }
 
 impl PreferenceCategory {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Appearance,
         Self::Accessibility,
         Self::Workspace,
@@ -185,6 +186,7 @@ impl PreferenceCategory {
         Self::Simulation,
         Self::Schematic,
         Self::Projects,
+        Self::Paths,
         Self::Results,
     ];
 
@@ -197,6 +199,7 @@ impl PreferenceCategory {
             Self::Units => "Units and notation",
             Self::Schematic => "Schematic editor",
             Self::Projects => "Projects and files",
+            Self::Paths => "Paths",
             Self::Results => "Results and precision",
             Self::Simulation => "Simulation",
             Self::Navigation => "Navigation",
@@ -210,9 +213,12 @@ impl PreferenceCategory {
             | Self::Workspace
             | Self::Navigation
             | Self::Shortcuts => CategoryGroup::Interface,
-            Self::Units | Self::Simulation | Self::Schematic | Self::Projects | Self::Results => {
-                CategoryGroup::Engineering
-            }
+            Self::Units
+            | Self::Simulation
+            | Self::Schematic
+            | Self::Projects
+            | Self::Paths
+            | Self::Results => CategoryGroup::Engineering,
         }
     }
 
@@ -225,6 +231,7 @@ impl PreferenceCategory {
             Self::Units => "units",
             Self::Schematic => "schematic",
             Self::Projects => "projects",
+            Self::Paths => "paths",
             Self::Results => "results",
             Self::Simulation => "simulation",
             Self::Navigation => "navigation",
@@ -1917,6 +1924,7 @@ mod tests {
                 "Simulation",
                 "Schematic editor",
                 "Projects and files",
+                "Paths",
                 "Results and precision",
             ]
         );
