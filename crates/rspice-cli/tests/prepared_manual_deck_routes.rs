@@ -777,9 +777,9 @@ output nd; electrical nd;\n  integer cnt;\n  initial begin cnt = 0; q = 0; end\n
 always @(posedge clk) begin cnt = cnt + 1; q = ~q; end\n  analog V(nd) <+ cnt;\nendmodule\n";
 
 /// An analog `cross` on the same node and threshold. Its 1e-30 s time
-/// tolerance lands each event one representable instant past its root, so
-/// the solver chases every root of the sine from below in steps of a few
-/// ulps, sampling the A/D's input on both sides of it.
+/// tolerance lands each event at the first instant past its root the solver
+/// can take, so the solver samples the A/D's input on both sides of every
+/// root of the sine.
 const TIGHT_CROSS: &str = "`include \"disciplines.vams\"\n\
 module tight_cross(x, na);\n  input x; electrical x; output na; electrical na; integer ca;\n  \
 analog begin\n    @(initial_step) ca = 0;\n    \
