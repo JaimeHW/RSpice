@@ -1232,7 +1232,7 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
     // authorizing it still held.
     let mut rerun_preflight = false;
     let configuration_choices = plan_configuration::ConfigurationChoices::of(cx.model);
-    let mut picked_configuration = None;
+    let picked_configuration;
     let chip = pages::PreflightChip::resolve(cx.model, cx.runs);
     let chip_reserve = chip.as_ref().map_or(0.0, |chip| chip.reserve(ui));
     let actions_width =
@@ -1257,9 +1257,6 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
                     // instead of running under the group.
                     ui.set_width(heading_width);
                     heading(ui, &plan_name, None);
-                    ui.add_space(CONFIGURATION_ROW_GAP);
-                    picked_configuration =
-                        plan_configuration::configuration_row(ui, &configuration_choices);
                 },
             );
             if let Some(chip) = &chip {
@@ -1283,6 +1280,11 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
                 .show(ui)
                 .clicked();
         });
+        // Under the whole title row, not in the heading's column: the column
+        // is what the actions leave, which on a tablet is too narrow for the
+        // configuration's name.
+        ui.add_space(CONFIGURATION_ROW_GAP);
+        picked_configuration = plan_configuration::configuration_row(ui, &configuration_choices);
     } else {
         heading(ui, &plan_name, None);
         ui.add_space(CONFIGURATION_ROW_GAP);
