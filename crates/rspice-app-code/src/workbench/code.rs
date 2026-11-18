@@ -740,6 +740,17 @@ impl CodeFeature {
         );
     }
 
+    /// Bring the project's deck to the front of the Netlist page: the open
+    /// deck, or else the project's first, read now or shown missing.
+    pub fn show_project_deck(cx: &mut Cx<'_, Self>) {
+        crate::workbench::documents::deck_files::show_project_deck(
+            cx.model,
+            &mut cx.state.netlist,
+            &mut cx.state.netlist_open_documents,
+            cx.runs,
+        );
+    }
+
     /// A project replaced since the last check starts the code workspace
     /// over, and the run prepared for the old project is dropped.
     pub fn reset_after_project_change(cx: &mut Cx<'_, Self>) {

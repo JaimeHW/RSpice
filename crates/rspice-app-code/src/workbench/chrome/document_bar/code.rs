@@ -26,10 +26,12 @@ pub struct NetlistTabsReads<'a> {
 }
 
 /// The Netlist page's tabs, in order: the generated netlist and the Added
-/// lines (pinned while there is a design to netlist), each include of the
-/// generated netlist the reader opened, the deck and its open includes (or
-/// the deck whose file is missing, alone), the open comparison and the open
-/// run input.
+/// lines (pinned while there is a design to netlist, and the generated
+/// netlist alone while it is in front with nothing generated beside a deck's
+/// tab, which is the way back to the deck), each include of the generated
+/// netlist the reader opened, the deck and its open includes (or the deck
+/// whose file is missing, alone), the open comparison and the open run
+/// input.
 pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<WorkspaceDocument> {
     let NetlistTabsReads {
         model,
@@ -38,6 +40,14 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         messages,
     } = reads;
     let mut documents = Vec::new();
+    if nothing_generated_in_front(model, netlist) {
+        documents.push(WorkspaceDocument {
+            id: WorkspaceDocumentId::NetlistGenerated(nothing_generated_tab_id()),
+            label: messages.text(crate::workbench::MessageId::CodeGeneratedNetlist),
+            icon: WorkbenchIcon::Netlist,
+            dirty: false,
+        });
+    }
     if let Some(generated) = model.netlist_artifacts.generated_document.as_ref() {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistGenerated(generated.id()),
@@ -240,6 +250,26 @@ fn run_input_label(
     }
 }
 
+/// Whether the generated netlist, with nothing generated, is in front with
+/// a deck's tab beside it, so it has a tab of its own and the deck's tab is
+/// the way back.
+fn nothing_generated_in_front(model: &Model, netlist: &NetlistDocumentState) -> bool {
+    model.netlist_artifacts.generated_document.is_none()
+        && netlist.front == NetlistTab::Generated
+        && !netlist.deck_tab_closed
+        && (netlist.open_deck.is_some()
+            || crate::workbench::documents::deck_files::missing_deck(model, netlist).is_some())
+}
+
+/// The identity of the generated netlist's tab while nothing is generated:
+/// fixed, and never one a generated netlist is given, which is random.
+fn nothing_generated_tab_id() -> crate::state::NetlistDocumentId {
+    crate::state::NetlistDocumentId::try_from_uuid(uuid::Uuid::from_u128(
+        0x0000_0000_0000_8000_8000_0000_0000_0001,
+    ))
+    .unwrap_or_default()
+}
+
 /// The deck's own tab, when the Netlist workspace has no other document to
 /// list.
 fn code_workspace_document(model: &Model) -> WorkspaceDocument {
@@ -274,6 +304,9 @@ pub fn active_netlist_document_id(
             })
     };
     Some(match &netlist.front {
+        NetlistTab::Generated if nothing_generated_in_front(model, netlist) => {
+            WorkspaceDocumentId::NetlistGenerated(nothing_generated_tab_id())
+        }
         NetlistTab::Generated => WorkspaceDocumentId::NetlistGenerated(generated()?),
         NetlistTab::AddedLines => WorkspaceDocumentId::NetlistAddedLines,
         NetlistTab::Deck(id) => WorkspaceDocumentId::NetlistOwned(deck(*id)?),
@@ -292,12 +325,19 @@ pub fn active_netlist_document_id(
     })
 }
 
-/// Show the generated netlist, when it is the one this tab names.
+/// Show the generated netlist, when it is the one this tab names, or the
+/// page that says why there is none on the tab it stands on.
 pub fn activate_generated_netlist(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     document_id: &crate::state::NetlistDocumentId,
 ) -> bool {
+    if *document_id == nothing_generated_tab_id()
+        && model.netlist_artifacts.generated_document.is_none()
+    {
+        crate::workbench::documents::netlist_document::front_generated(model, netlist);
+        return true;
+    }
     let available = model
         .netlist_artifacts
         .generated_document

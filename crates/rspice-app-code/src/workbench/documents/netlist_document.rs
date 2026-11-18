@@ -560,15 +560,21 @@ pub fn show_generated_deck(
     netlist: &mut NetlistDocumentState,
     workbench: &mut crate::workbench::state::WorkbenchSession,
 ) {
+    front_generated(model, netlist);
+    if workbench.workspace != crate::workbench::state::Workspace::Netlist {
+        workbench.activate(crate::workbench::state::Workspace::Netlist);
+    }
+}
+
+/// Put the generated netlist in front of the Netlist page: its text, or with
+/// nothing generated the page that states why there is none.
+pub fn front_generated(model: &mut Model, netlist: &mut NetlistDocumentState) {
     if !open_generated_primary_in(model, netlist)
         && model.netlist_artifacts.generated_document.is_none()
     {
         netlist.front = NetlistTab::Generated;
         netlist.active_document_initialized = true;
         netlist.run_the_plan();
-    }
-    if workbench.workspace != crate::workbench::state::Workspace::Netlist {
-        workbench.activate(crate::workbench::state::Workspace::Netlist);
     }
 }
 

@@ -569,6 +569,16 @@ impl Request for ShowProjectModels {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Show the project's deck in front of the Netlist workspace. Raised by the
+/// overview of a project its deck drives, and taken straight after the call
+/// that raised it.
+#[derive(Clone, Debug)]
+pub struct ShowProjectDeck;
+
+impl Request for ShowProjectDeck {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Ask on the Models workspace's catalog to attach the model pack release
 /// `pack_id` `version` that offers the part `part_id`. Raised by the
 /// schematic's component shelf, and taken straight after the call that

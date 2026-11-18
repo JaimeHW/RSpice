@@ -10,6 +10,8 @@ use rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_so
 
 mod deck_dialects;
 mod deck_disk;
+#[cfg(not(target_arch = "wasm32"))]
+mod deck_in_front;
 mod deck_save_as;
 mod generated_netlist_jumps;
 mod netlist_cross_probe;

@@ -95,6 +95,9 @@ pub enum OverviewIntent {
     /// describes: the configuration's root when one is used for runs.
     CheckSimulationRoot,
     OpenProjectRoot,
+    /// The project's deck, in front of the Netlist workspace, whatever was
+    /// in front there before.
+    OpenProjectDeck,
     OpenProjectModels,
     OpenRun(usize),
     /// Open a view of a cell: the one the Cells table's row names.
@@ -133,6 +136,11 @@ impl OverviewIntent {
                 cx.wb
                     .outbox
                     .push(ProjectRequest::OpenView(root, ViewType::Schematic));
+            }
+            Self::OpenProjectDeck => {
+                cx.wb
+                    .outbox
+                    .push(crate::workbench::framework::requests::ShowProjectDeck);
             }
             Self::OpenProjectModels => {
                 cx.wb

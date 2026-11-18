@@ -635,6 +635,14 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
+        "18.01",
+        &[
+            "|app, ShowProjectDeck|",
+            "CodeFeature::show_project_deck(&mut features::cx(app));",
+            "app.execute_command_key(ids::NETLIST_WORKSPACE);",
+        ],
+    ),
+    (
         "19",
         &[
             "|app,",
@@ -1599,8 +1607,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        35,
-        "`after_contribution` answers exactly the thirty-five requests it lists"
+        36,
+        "`after_contribution` answers exactly the thirty-six requests it lists"
     );
 }
 

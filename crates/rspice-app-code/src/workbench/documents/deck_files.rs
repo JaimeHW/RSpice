@@ -1646,6 +1646,25 @@ pub fn open_deck_by_id(
     }
 }
 
+/// Bring the project's deck to the front: the open deck; else the deck
+/// whose file could not be read, in its missing state; else the project's
+/// first deck, read now.
+pub fn show_project_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+) {
+    if show_deck(model, netlist) {
+        return;
+    }
+    if let Some(id) = netlist.unreadable_deck {
+        show_missing_deck(model, netlist, id);
+        return;
+    }
+    open_project_deck(model, netlist, open_documents, runs);
+}
+
 /// Open the project's first deck when the project has decks and none is
 /// open, once per project: a deck that cannot be read is reported once.
 pub fn open_project_deck(

@@ -141,7 +141,7 @@ pub(super) fn overview_header(
                     };
                     if primary.accent().show(ui).clicked() {
                         intent = Some(if snapshot.netlist_first {
-                            OverviewIntent::Command(ids::open_workspace(Workspace::Netlist))
+                            OverviewIntent::OpenProjectDeck
                         } else {
                             OverviewIntent::OpenProjectRoot
                         });

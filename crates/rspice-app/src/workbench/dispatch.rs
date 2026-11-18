@@ -66,8 +66,8 @@ use rspice_app_workbench::workbench::framework::requests::{
     ClearSelectedModel, CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid,
     MarkFailureSites, OpenInDesign, OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition,
     OpenSymbolAuthoring, PrintActiveView, ProjectFileAction, PromptAfterCommands,
-    RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels,
-    ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
+    RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter, ShowProjectDeck,
+    ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
 };
 
 /// Whether the command `key` names runs at once while the focused source
@@ -568,6 +568,14 @@ impl RSpiceApp {
             |app, ShowProjectModels| {
                 ModelsFeature::show_project_models(&mut features::cx(app));
                 app.execute_command_key(ids::MODELS_CATALOG);
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ShowProjectDeck| {
+                CodeFeature::show_project_deck(&mut features::cx(app));
+                app.execute_command_key(ids::NETLIST_WORKSPACE);
             },
         );
         requests::drain(
