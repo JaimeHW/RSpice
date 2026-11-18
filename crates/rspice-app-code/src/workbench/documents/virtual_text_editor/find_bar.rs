@@ -98,7 +98,7 @@ impl FindBar {
         if self.query.is_empty() {
             return;
         }
-        let text = model.to_source();
+        let text = model.rope().to_string();
         let matches = match find_all_in_source_bounded(&text, &self.query, options, usize::MAX) {
             Ok(found) => found,
             Err(FindError::InvalidRegularExpression(_)) => {
@@ -562,7 +562,7 @@ fn replacements(
     model: &TextDocumentModel,
     bytes: &[Range<usize>],
 ) -> Option<Vec<String>> {
-    let text = model.to_source();
+    let text = model.rope().to_string();
     let outcome = replace_source_ranges(
         &text,
         &bar.query,
