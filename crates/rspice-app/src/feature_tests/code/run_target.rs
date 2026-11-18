@@ -446,6 +446,42 @@ fn check_and_netlist_names_the_line_a_deck_cannot_run_from() {
     assert!(!deck_run_started(&app), "nothing starts");
 }
 
+/// A library the deck names and nothing holds reads the same in the deck's
+/// finding, Run's refusal and Check and netlist's, at the line that names it:
+/// the file, then each folder looked in once.
+#[test]
+fn a_missing_library_reads_the_same_in_its_finding_and_its_refusals() {
+    let source = "standalone\n.lib \"corners.lib\" tt\nV1 out 0 1\n.op\n.end\n";
+    let said = "corners.lib not found (looked in the deck's folder, lib/, models/, ../lib/, \
+                ../models/)";
+    let mut replay =
+        crate::feature_tests::replay::Replay::of(netlist_session_with_deck(source, "amp_tb.cir"));
+    replay.frames(Vec::new());
+    let findings = replay
+        .app
+        .state
+        .code
+        .netlist
+        .diagnostics
+        .iter()
+        .map(|finding| (finding.source_line, finding.message.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(findings, [(Some(1), said.to_owned())]);
+
+    press_run(&mut replay.app);
+    assert!(!deck_run_started(&replay.app), "nothing starts");
+    assert_eq!(
+        replay.app.state.prompt_text().unwrap_or_default(),
+        format!("amp_tb.cir did not run: line 2: {said}")
+    );
+
+    replay.app.execute_command_key(ids::CHECK_AND_NETLIST);
+    assert_eq!(
+        replay.app.state.prompt_text().unwrap_or_default(),
+        format!("amp_tb.cir cannot run: line 2: {said}")
+    );
+}
+
 /// With the generated netlist in front the plan is what runs, and Check and
 /// netlist is Simulate's check of it: the code feature leaves it alone.
 #[test]

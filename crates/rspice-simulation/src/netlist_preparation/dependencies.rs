@@ -295,12 +295,7 @@ pub fn expand_manual_dependencies(
                 &mut |location, _| rewrite(location),
                 &rspice_core::abort_signal::NoAbort,
             )
-            .map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::SourceChecks,
-                    format!("Could not read the deck's includes: {error}"),
-                )
-            })?;
+            .map_err(|error| unread_dependency(error, &absolute_origin))?;
         Ok(ExpandedManualDependencies {
             expanded,
             canonical_origin: Some(path_identity(&absolute_origin)),
@@ -308,6 +303,34 @@ pub fn expand_manual_dependencies(
             source_lines: crate::execution::included_line_map(lines),
         })
     }
+}
+
+/// The refusal of the deck at `deck` whose includes could not be read. A
+/// failure the include search placed at a line of the deck itself, such as a
+/// file found in none of the folders it looked in, is that line's, in the
+/// search's own words; any other says what could not be sealed.
+#[cfg(not(target_arch = "wasm32"))]
+fn unread_dependency(
+    error: rspice_core::netlist::ParseWithAbortError,
+    deck: &Path,
+) -> PreparationError {
+    use rspice_core::netlist::{ParseError, ParseWithAbortError};
+    if let ParseWithAbortError::Parse(ParseError::Syntax { line, message }) = &error
+        && *line > 0
+    {
+        // The search names the deck as a diagnostic shows a path, without
+        // the verbatim prefix a canonical Windows path carries.
+        let shown = deck.display().to_string();
+        let shown = shown.strip_prefix(r"\\?\").unwrap_or(&shown);
+        if let Some(said) = message.strip_prefix(&format!("{shown}:{line}: ")) {
+            return PreparationError::new(PreparationStage::SourceChecks, said)
+                .at_line(Some(*line));
+        }
+    }
+    PreparationError::new(
+        PreparationStage::SourceChecks,
+        format!("Could not read the deck's includes: {error}"),
+    )
 }
 
 /// Expand a deck the project keeps as text through the files kept with it,
