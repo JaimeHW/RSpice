@@ -662,28 +662,21 @@ impl<'a> Lexer<'a> {
         Ok((TokenKind::Expression(content.to_string()), end))
     }
 
-    /// Parse a quoted string "..."
+    /// Parse a quoted string "...": everything up to the next `"`, as written.
+    ///
+    /// No SPICE simulator gives a backslash a meaning inside a deck string,
+    /// so a Windows path keeps its separators: Xyce reads a quoted field to
+    /// the next quote (`N_IO_SpiceSeparatedFieldTool.C`), as ngspice's card
+    /// readers do (`inpgtok.c`, `inpgstr.c`, XSPICE `mifgetvalue.c`), and
+    /// LTspice opens `PWL file="d\e.txt"` as written and ends
+    /// `file="q\"x.txt"` at `q\`. A string cannot hold a `"`.
     fn parse_string(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
-        let mut content = String::new();
-        // Read lazily up to the closing quote (skipping the opening one):
-        // collecting the whole remaining input for every string made lexing
-        // quadratic in the length of the deck.
-        let mut chars = input.char_indices().skip(1);
-
-        while let Some((at, c)) = chars.next() {
-            if c == '"' {
-                return Ok((TokenKind::StringLit(content), at + 1));
-            } else if c == '\\'
-                && let Some((_, escaped)) = chars.next()
-            {
-                // Escape sequence
-                content.push(escaped);
-            } else {
-                content.push(c);
-            }
+        // Find the closing quote past the opening one without collecting the
+        // rest of the input: that made lexing quadratic in the deck's length.
+        match input[1..].find('"') {
+            Some(at) => Ok((TokenKind::StringLit(input[1..=at].to_string()), at + 2)),
+            None => Err(LexError::UnterminatedString(self.line)),
         }
-
-        Err(LexError::UnterminatedString(self.line))
     }
 }
 
@@ -1286,7 +1279,7 @@ mod tests {
                 0 => format!("{:.6e}", 2e-7 * index as f64),
                 1 => format!("-{index}"),
                 2 => format!("{index}.5ns"),
-                _ => format!("\"s\\\"{index}\""),
+                _ => format!("\"s\\{index}\""),
             })
             .collect::<Vec<_>>()
             .join(",");
@@ -1316,7 +1309,7 @@ mod tests {
         assert_eq!(numbers.len(), entries * 3 / 4);
         assert_eq!(&numbers[..3], &[0.0, -1.0, 2.5e-9]);
         assert_eq!(strings.len(), entries / 4);
-        assert_eq!(strings[0], "s\"3");
+        assert_eq!(strings[0], r"s\3");
     }
 
     #[test]
@@ -1742,6 +1735,60 @@ mod tests {
                 .iter()
                 .any(|token| token.kind == TokenKind::Ident("DECK".to_string())
                     && token.lexeme == "deck")
+        );
+    }
+
+    fn string_tokens(input: &str) -> Vec<(String, String)> {
+        tokenize(input)
+            .expect("tokenize")
+            .into_iter()
+            .filter_map(|token| match token.kind {
+                TokenKind::StringLit(value) => Some((value, token.lexeme)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_quoted_windows_path_keeps_every_backslash() {
+        for path in [
+            r"C:\runs\x",
+            r"\\server\share\models\nmos.lib",
+            r"runs\",
+            r"C:\",
+            r"..\stim\new.csv",
+            r"\\?\C:\long\path",
+        ] {
+            let quoted = format!("\"{path}\"");
+            assert_eq!(
+                string_tokens(&format!(".options hdl_rundir={quoted} x=1\n")),
+                [(path.to_owned(), quoted)],
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_backslash_does_not_hide_the_closing_quote() {
+        // LTspice reads `file="q\"x.txt"` as `q\` followed by `x.txt"`.
+        let tokens = tokenize(r#"V1 a 0 PWL file="q\"x.txt"#).expect("tokenize");
+        assert!(tokens.iter().any(|token| token.kind
+            == TokenKind::StringLit(r"q\".to_owned())
+            && token.lexeme == r#""q\""#));
+        assert_eq!(
+            tokenize(r#"V1 a 0 PWL file="q\"x.txt""#),
+            Err(LexError::UnterminatedString(1))
+        );
+    }
+
+    #[test]
+    fn a_string_after_a_trailing_backslash_lexes_on_its_own() {
+        assert_eq!(
+            string_tokens(r#".options hdl_rundir="out\" hdl_libmap="lib\map""#),
+            [
+                (r"out\".to_owned(), r#""out\""#.to_owned()),
+                (r"lib\map".to_owned(), r#""lib\map""#.to_owned()),
+            ]
         );
     }
 
