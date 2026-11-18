@@ -979,7 +979,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 Some(pins) => {
                     status = HierarchyBindingStatus::Incompatible;
                     diagnostic = Some(format!(
-                        "{cell} no longer fits {instance_path}: {pins}. Bind it to a cell that holds its pins, or remove the binding"
+                        "{cell} no longer fits {instance_path}: {pins}; bind it to a cell that holds its pins, or remove the binding"
                     ));
                 }
                 None => warnings.extend(fit.unconnected_warning(&cell)),
