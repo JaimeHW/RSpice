@@ -354,9 +354,11 @@ pub struct NetlistParseOptions {
     /// Compatibility dialect for the deck's own syntax and semantics, the
     /// parse-time half of `--spice-dialect`. `None` takes the deck's
     /// `.options rspice_dialect=` wherever it appears, as the simulation does,
-    /// and otherwise RSpice's own (best-available) reading. Only the ngspice
-    /// dialect changes a reading here: it reproduces ngspice where RSpice
-    /// otherwise reads a card as Spectre or HSPICE would.
+    /// and otherwise RSpice's own (best-available) reading. The ngspice
+    /// dialect reproduces ngspice where RSpice otherwise reads a card as
+    /// Spectre or HSPICE would, and the ngspice and Xyce dialects read a
+    /// `.func` formal inside `v()` or `i()` as the node named after it where
+    /// RSpice otherwise reads it as LTspice does.
     pub spice_dialect: Option<crate::config::SpiceDialect>,
     pub parameter_redefinition_policy: ParameterRedefinitionPolicy,
     pub parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy,
