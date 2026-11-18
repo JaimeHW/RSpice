@@ -563,3 +563,54 @@ fn the_restore_autosave_dialog_states_the_age_it_was_offered_with() {
     assert_eq!(take_disk_reads(), DiskReads::default());
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// After a Save as, the Overview's header and the line over the Recovery
+/// page state one revision, the project's, and the header names the new
+/// file, on frames painted one after another in one context, as a reader
+/// moving between the pages sees them.
+#[test]
+fn after_a_save_as_the_overview_and_the_recovery_page_state_one_revision() {
+    let (mut app, root) = saved_project("save-as-revision");
+    for name in ["Amplifier a", "Amplifier b", "Amplifier c", "Amplifier d"] {
+        app.state
+            .model
+            .workspace
+            .content
+            .project
+            .rename(name)
+            .expect("the project is renamed");
+    }
+    assert!(app.state.save_project_to_path(&root.join("idle.rspiceproj")));
+    let revision = |app: &RSpiceApp| {
+        format!(
+            "Revision {}",
+            app.state.model.workspace.content.project.revision().get()
+        )
+    };
+    let ctx = offscreen();
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Overview;
+    let before = revision(&app);
+    paint_until(&ctx, &mut app, |text| {
+        text.contains(&format!("{before} \u{b7} "))
+    });
+
+    assert!(
+        app.state
+            .save_project_as_to_path(&root.join("Amplifier.rspiceproj"))
+    );
+    let after = revision(&app);
+    assert_eq!(after, before, "a Save as keeps the project's revision");
+    let overview = paint_until(&ctx, &mut app, |text| text.contains("Amplifier.rspiceproj"));
+    assert!(
+        painted(&overview).contains(&format!("{after} \u{b7} ")),
+        "{}",
+        painted(&overview)
+    );
+    app.state.project.project_page = ProjectPage::Recovery;
+    paint_until(&ctx, &mut app, |text| text.lines().any(|line| line == after));
+    app.state.project.project_page = ProjectPage::Overview;
+    let overview = paint_until(&ctx, &mut app, |text| text.contains("Amplifier.rspiceproj"));
+    assert!(painted(&overview).contains(&format!("{after} \u{b7} ")));
+    let _ = std::fs::remove_dir_all(root);
+}
