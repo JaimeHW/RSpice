@@ -1717,6 +1717,7 @@ pub struct CommandForm<'a> {
     status: Result<Option<&'a str>, &'a str>,
     consequence: Option<&'a str>,
     primary_on_enter: bool,
+    cancel: &'a str,
     cancel_enabled: bool,
     size: DialogSize,
     first_field: Option<Id>,
@@ -1736,6 +1737,7 @@ impl<'a> CommandForm<'a> {
             status: Ok(None),
             consequence: None,
             primary_on_enter: true,
+            cancel: "Cancel",
             cancel_enabled: true,
             size: DialogSize::CommandForm,
             first_field: None,
@@ -1771,6 +1773,12 @@ impl<'a> CommandForm<'a> {
     /// whose values are paths and prose the narrower cards would elide.
     pub fn reading_column(mut self) -> Self {
         self.size = DialogSize::AccountManager;
+        self
+    }
+
+    /// Cancel's word in the language the rest of the form is written in.
+    pub fn cancel_label(mut self, label: &'a str) -> Self {
+        self.cancel = label;
         self
     }
 
@@ -1878,7 +1886,7 @@ impl<'a> CommandForm<'a> {
         let mut dialog = Dialog::new(self.title, self.primary)
             .size(self.size)
             .overlay_scrollbar()
-            .ghost("Cancel")
+            .ghost(self.cancel)
             .ghost_enabled(self.cancel_enabled)
             .primary_enabled(self.primary_enabled)
             .primary_on_enter(self.primary_on_enter)

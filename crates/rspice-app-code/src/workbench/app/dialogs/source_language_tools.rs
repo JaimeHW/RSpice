@@ -275,10 +275,13 @@ pub(in crate::workbench) fn render_rename_symbol_form(
     let primary = messages.text(MessageId::SourceRenamePrimary);
     let symbol = messages.text(MessageId::SourceRenameSymbol);
     let new_name_label = messages.text(MessageId::SourceRenameNewName);
+    let cancel = messages.text(MessageId::CommonCancel);
 
     let mut replacement = tools.replacement.clone();
     let mut edited = false;
     let choice = CommandForm::new(&title, &primary)
+        .cancel_label(&cancel)
+        .fit_labels(ctx, &[&symbol, &new_name_label])
         .primary_enabled(ready)
         .status(status)
         .show(ctx, |rows| {
@@ -427,6 +430,7 @@ pub(in crate::workbench) fn render_deck_rename_form(
     let title = messages.text(MessageId::SourceRenameTitle);
     let primary = messages.text(MessageId::SourceRenamePrimary);
     let new_name_label = messages.text(MessageId::SourceRenameNewName);
+    let cancel = messages.text(MessageId::CommonCancel);
     let headers = [
         MessageId::SourceRenameColumnFile,
         MessageId::SourceRenameColumnLine,
@@ -439,6 +443,8 @@ pub(in crate::workbench) fn render_deck_rename_form(
     let mut edited = false;
     let choice = CommandForm::new(&title, &primary)
         .wide()
+        .cancel_label(&cancel)
+        .fit_labels(ctx, &[&label, &new_name_label])
         .primary_enabled(plan.is_some())
         .status(status)
         .show(ctx, |rows| {

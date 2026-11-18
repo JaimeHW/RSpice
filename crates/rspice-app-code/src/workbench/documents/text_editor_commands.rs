@@ -363,8 +363,11 @@ pub(crate) fn show_go_to_line(
     let title = messages.text(MessageId::EditorGoToLineTitle);
     let go = messages.text(MessageId::EditorGoToLineGo);
     let field = messages.text(MessageId::EditorGoToLineField);
+    let cancel = messages.text(MessageId::CommonCancel);
     let input_id = editor_id.with("go-to-line-input");
     let choice = CommandForm::new(&title, &go)
+        .cancel_label(&cancel)
+        .fit_labels(ui.ctx(), &[&field])
         .primary_enabled(target.is_some())
         .show(ui.ctx(), |rows| {
             rows.text(&field, input_id, &mut state.input, "");
