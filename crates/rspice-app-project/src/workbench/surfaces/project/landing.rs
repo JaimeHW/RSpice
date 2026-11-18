@@ -929,7 +929,7 @@ fn recent_project_name(recent: &RecentFile) -> String {
 fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
     for (title, detail, icon, primary, next) in [
         (
-            "New project",
+            "New project…",
             if cfg!(target_arch = "wasm32") {
                 "Library, top cell and technology"
             } else {

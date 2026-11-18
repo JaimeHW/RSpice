@@ -827,7 +827,7 @@ fn project_heading_actions(
 ) {
     ui.spacing_mut().item_spacing.x = 6.0;
     if reverse_allocation {
-        if Button::new("New project")
+        if Button::new("New project…")
             .icon(Icon::Add)
             .accent()
             .show(ui)
@@ -856,7 +856,7 @@ fn project_heading_actions(
         {
             *action = Some(LauncherAction::OpenNetlist);
         }
-        if Button::new("New project")
+        if Button::new("New project…")
             .icon(Icon::Add)
             .accent()
             .show(ui)
@@ -1546,7 +1546,7 @@ fn empty_project_list(ui: &mut Ui, query_empty: bool, action: &mut Option<Launch
             .y
     };
     let browse = Button::new("Browse\u{2026}").icon(Icon::Folder);
-    let create = Button::new("New project").icon(Icon::Add).accent();
+    let create = Button::new("New project…").icon(Icon::Add).accent();
     let actions_h = if query_empty {
         EMPTY_ACTIONS_GAP + t.metrics.ctl_h
     } else {

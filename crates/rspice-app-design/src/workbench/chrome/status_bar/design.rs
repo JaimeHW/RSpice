@@ -79,7 +79,7 @@ pub fn selection_summary(
     symbol: &SymbolUiState,
 ) -> String {
     if !platform.project_lifecycle.is_open() {
-        return "No engineering object selected".to_owned();
+        return String::new();
     }
     if wb.workspace == Workspace::Results {
         // The run segment at the bar's right states the run; saying it here

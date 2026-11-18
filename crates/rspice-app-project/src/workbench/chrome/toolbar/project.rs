@@ -22,7 +22,7 @@ pub fn no_project_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout:
         app,
         ProjectCommand::NewProject.key(),
         WorkbenchIcon::Add,
-        "New project",
+        "New project…",
         layout,
     );
 }
