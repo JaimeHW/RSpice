@@ -633,11 +633,14 @@ pub(super) fn safe_mode_page(
     } else {
         "Start RSpice in safe mode"
     };
-    let footer_height = launcher_footer_reserve(
-        ui,
-        layout,
-        &[("Open diagnostic folder", false), (start_label, true)],
-    );
+    // A build with no folder to reveal (the browser) shows no button for it.
+    let diagnostics_button =
+        diagnostics_folder_supported().then_some(("Open diagnostic folder", false));
+    let footer_buttons: Vec<_> = diagnostics_button
+        .into_iter()
+        .chain([(start_label, true)])
+        .collect();
+    let footer_height = launcher_footer_reserve(ui, layout, &footer_buttons);
     let regions = launcher_page_regions(ui, footer_height);
     let mut body_ui = ui.new_child(
         egui::UiBuilder::new()
@@ -673,17 +676,9 @@ pub(super) fn safe_mode_page(
 
     let options = cx.model.safe_mode.draft;
     launcher_page_footer(ui, layout, regions.footer, |ui| {
-        let diagnostics = Button::new("Open diagnostic folder")
-            .enabled(diagnostics_folder_supported())
-            .show(ui);
-        let diagnostics = if diagnostics_folder_supported() {
-            diagnostics
-        } else {
-            diagnostics.on_disabled_hover_text(
-                "Diagnostic folders can be revealed only by supported desktop file managers",
-            )
-        };
-        if diagnostics.clicked() {
+        if diagnostics_folder_supported()
+            && Button::new("Open diagnostic folder").show(ui).clicked()
+        {
             *action = Some(LauncherAction::OpenDiagnosticsFolder);
         }
         let response = Button::new(start_label)
