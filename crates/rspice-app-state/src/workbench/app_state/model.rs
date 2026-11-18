@@ -44,8 +44,8 @@ pub use library_catalog::{
 pub use library_files::{
     CellViewStatus, FileRevision, FileSession, FileStamp, LibraryFile, LibraryFileLock,
     LibraryFileSession, LibraryMode, LibraryPath, LibraryPathChoice, LibraryReference, Missing,
-    OnDisk, ReferenceLoad, ReferenceSession, ReferenceStatus, RefreshRow, RelinkOutcome,
-    StatusMark,
+    OnDisk, PUBLICATION_STORE_FOLDER, ReferenceLoad, ReferenceSession, ReferenceStatus, RefreshRow,
+    RelinkOutcome, StatusMark, publication_store,
 };
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,

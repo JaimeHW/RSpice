@@ -401,3 +401,53 @@ fn a_project_whose_library_folder_is_gone_opens_with_the_library_not_found() {
         "a folder written again holds a library of another identity"
     );
 }
+
+#[test]
+fn a_publication_freezes_each_file_once_and_restores_the_library_as_published() {
+    let scratch = Scratch::new("publication");
+    let (mut owner, folder) = moved_out(&scratch);
+    let store = publication_store(&scratch.0.join("first").join("design.rspiceproj")).unwrap();
+    let frozen = owner.freeze_referenced_libraries(&store).unwrap();
+    assert_eq!(frozen.len(), 4, "the manifest, the cell and its two views");
+    let copies = std::fs::read_dir(&store).unwrap().count();
+    // A second publication of the same library shares every copy.
+    assert_eq!(owner.freeze_referenced_libraries(&store).unwrap(), frozen);
+    assert_eq!(std::fs::read_dir(&store).unwrap().count(), copies);
+
+    // The folder moves on after the publication.
+    annotate(&mut owner, "after");
+    let mut file = working_file(&owner);
+    owner.write_library_files(&mut file).unwrap();
+
+    let mut published = working_file(&owner).without_referenced_libraries();
+    let session = owner
+        .thaw_frozen_libraries(&mut published, &store, &frozen)
+        .unwrap();
+    assert!(published.libraries.get_library(LIBRARY).is_some());
+    assert!(
+        published.libraries.get_library(LIBRARY).unwrap().cells["amp"].views["schematic"]
+            .metadata
+            .get("note")
+            .is_none(),
+        "the library is restored as it was published"
+    );
+    let mut restored = project(&scratch.0.join("first").join("design.rspiceproj"));
+    restored.library_manager = published.libraries.clone();
+    restored.library_files = session;
+    assert_eq!(
+        restored.check_library_files(),
+        1,
+        "the moved-on file is named"
+    );
+
+    let altered = store.join(format!("{}.json", frozen[0].digest));
+    std::fs::write(&altered, b"{}").unwrap();
+    let mut again = working_file(&owner).without_referenced_libraries();
+    assert!(
+        owner
+            .thaw_frozen_libraries(&mut again, &store, &frozen)
+            .unwrap_err()
+            .contains("altered")
+    );
+    drop(folder);
+}

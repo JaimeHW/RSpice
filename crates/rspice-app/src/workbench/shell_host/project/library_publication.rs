@@ -828,7 +828,7 @@ pub(crate) fn prepare_project_library_publication(
             sha2::Sha256::digest(&bytes).into(),
         ),
         snapshot_byte_len,
-        frozen: Vec::new(),
+        frozen: freeze_referenced_libraries(state)?,
     };
     let mut descriptor_preflight = state.model.workspace.content.project.clone();
     descriptor_preflight
@@ -839,6 +839,55 @@ pub(crate) fn prepare_project_library_publication(
         artifact_bytes: bytes,
         source_project_revision: state.model.workspace.content.project.revision(),
     })
+}
+
+/// Freeze every file of each library the project keeps in a folder of its
+/// own into the publication store beside the project file, so the
+/// publication holds them.
+fn freeze_referenced_libraries(
+    state: &AppState,
+) -> Result<Vec<rspice_project::FrozenCellView>, String> {
+    if state.model.library_manager.references().next().is_none() {
+        return Ok(Vec::new());
+    }
+    let store = state
+        .model
+        .workspace
+        .content
+        .project
+        .path
+        .as_deref()
+        .and_then(rspice_app_state::workbench::app_state::model::publication_store)
+        .ok_or_else(|| {
+            "Save the project before publishing it: the libraries it keeps in folders of their own are frozen beside its file.".to_owned()
+        })?;
+    state.model.freeze_referenced_libraries(&store)
+}
+
+/// The libraries a publication froze, rebuilt in `file` from the store
+/// beside the project file.
+fn thaw_published_libraries(
+    state: &AppState,
+    file: &mut rspice_project::ProjectFile,
+    receipt: &ProjectLibraryPublicationReceipt,
+) -> Result<rspice_app_state::workbench::app_state::model::LibraryFileSession, String> {
+    if receipt.frozen().is_empty() {
+        return Ok(Default::default());
+    }
+    let store = state
+        .model
+        .workspace
+        .content
+        .project
+        .path
+        .as_deref()
+        .and_then(rspice_app_state::workbench::app_state::model::publication_store)
+        .ok_or_else(|| {
+            "The publication's libraries are frozen beside the project file, and this project has no file.".to_owned()
+        })?;
+    state
+        .model
+        .thaw_frozen_libraries(file, &store, receipt.frozen())
 }
 
 /// Commit a publication only after its exact artifact was durably
@@ -1008,6 +1057,9 @@ pub(crate) fn restore_project_from_publication(
     current_project.root_library = artifact.file.workspace.project.root_library.clone();
     current_project.top_cell = artifact.file.workspace.project.top_cell.clone();
     artifact.file.workspace.project = current_project;
+    // Libraries kept in folders of their own come back as published, from
+    // the copies the publication froze.
+    let library_files = thaw_published_libraries(state, &mut artifact.file, &receipt)?;
     candidate.clear_design_execution_context();
     candidate
         .model
@@ -1034,6 +1086,8 @@ pub(crate) fn restore_project_from_publication(
         .project
         .validate()
         .map_err(|error| format!("The restored project is not valid: {error}"))?;
+    state.model.release_library_locks();
+    candidate.model.library_files = library_files;
     state.commit_candidate(candidate);
     for warning in execution_warnings {
         state.record(

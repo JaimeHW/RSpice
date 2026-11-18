@@ -26,8 +26,10 @@ use rspice_vocabulary::product::ContentDigest;
 
 mod commands;
 mod folders;
+mod publication;
 mod saving;
 
+pub use publication::{PUBLICATION_STORE_FOLDER, publication_store};
 #[cfg(test)]
 mod tests;
 
