@@ -271,21 +271,18 @@ fn a_netlist_first_inspector_states_the_deck_as_the_overview_does() {
     }
 }
 
-/// Every string painted under the same clip as the rightmost `anchor`: the
-/// text of the panel that paints it.
+/// Every string painted from the left edge of the rightmost `anchor`
+/// rightwards and below it: the text of the panel at the window's right
+/// edge that paints it.
 fn painted_beside(output: &egui::FullOutput, anchor: &str) -> Vec<String> {
-    fn texts(
-        shape: &egui::epaint::Shape,
-        clip: egui::Rect,
-        out: &mut Vec<(egui::Rect, egui::Pos2, String)>,
-    ) {
+    fn texts(shape: &egui::epaint::Shape, out: &mut Vec<(egui::Pos2, String)>) {
         match shape {
             egui::epaint::Shape::Text(text) => {
-                out.push((clip, text.pos, text.galley.text().to_owned()));
+                out.push((text.pos, text.galley.text().to_owned()));
             }
             egui::epaint::Shape::Vec(shapes) => {
                 for shape in shapes {
-                    texts(shape, clip, out);
+                    texts(shape, out);
                 }
             }
             _ => {}
@@ -293,17 +290,17 @@ fn painted_beside(output: &egui::FullOutput, anchor: &str) -> Vec<String> {
     }
     let mut all = Vec::new();
     for clipped in &output.shapes {
-        texts(&clipped.shape, clipped.clip_rect, &mut all);
+        texts(&clipped.shape, &mut all);
     }
-    let clip = all
+    let corner = all
         .iter()
-        .filter(|(_, _, text)| text == anchor)
-        .max_by(|a, b| a.1.x.total_cmp(&b.1.x))
-        .map(|(clip, _, _)| *clip)
+        .filter(|(_, text)| text == anchor)
+        .map(|(at, _)| *at)
+        .max_by(|a, b| a.x.total_cmp(&b.x))
         .unwrap_or_else(|| panic!("something paints {anchor}"));
     all.into_iter()
-        .filter(|(painted, _, _)| *painted == clip)
-        .map(|(_, _, text)| text)
+        .filter(|(at, _)| at.x >= corner.x - 1.0 && at.y >= corner.y)
+        .map(|(_, text)| text)
         .collect()
 }
 
