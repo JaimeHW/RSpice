@@ -148,8 +148,21 @@ impl ShortcutStroke {
         if self.shift {
             parts.push("Shift");
         }
-        parts.push(self.key.get().symbol_or_name());
+        parts.push(key_name(self.key.get()));
         parts.join("+")
+    }
+}
+
+/// The key's name as Windows and Linux menus write it: an arrow by its
+/// direction, as egui names it by a triangle the interface fonts do not
+/// draw; any other key by its own symbol or name.
+fn key_name(key: Key) -> &'static str {
+    match key {
+        Key::ArrowUp => "Up",
+        Key::ArrowDown => "Down",
+        Key::ArrowLeft => "Left",
+        Key::ArrowRight => "Right",
+        _ => key.symbol_or_name(),
     }
 }
 
@@ -162,6 +175,10 @@ fn apple_key_symbol(key: Key) -> &'static str {
         Key::Escape => "\u{238B}",
         Key::Tab => "\u{21E5}",
         Key::Enter => "\u{21A9}",
+        Key::ArrowUp => "\u{2191}",
+        Key::ArrowDown => "\u{2193}",
+        Key::ArrowLeft => "\u{2190}",
+        Key::ArrowRight => "\u{2192}",
         _ => key.symbol_or_name(),
     }
 }
