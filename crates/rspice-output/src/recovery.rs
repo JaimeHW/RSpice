@@ -137,7 +137,7 @@ fn contains(name: &OsStr, marker: &str) -> bool {
 /// `Some(true)` when the process is running, `Some(false)` when it provably
 /// is not, and `None` when this host cannot answer.
 #[cfg(windows)]
-fn process_liveness(process_id: u32) -> Option<bool> {
+pub fn process_liveness(process_id: u32) -> Option<bool> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -186,7 +186,7 @@ fn process_liveness(process_id: u32) -> Option<bool> {
 /// of the Verilog-A built-ins generator and would force a restamp of the whole
 /// generated model tree for an unrelated fix.
 #[cfg(unix)]
-fn process_liveness(process_id: u32) -> Option<bool> {
+pub fn process_liveness(process_id: u32) -> Option<bool> {
     /// `kill` failed because the caller may not signal that process, which
     /// means the process exists.
     const EPERM: i32 = 1;
@@ -221,7 +221,7 @@ fn process_liveness(process_id: u32) -> Option<bool> {
 /// one this workspace builds — cannot be asked about process ids at all, so
 /// recovery keeps every staging file it finds.
 #[cfg(not(any(windows, unix)))]
-fn process_liveness(_process_id: u32) -> Option<bool> {
+pub fn process_liveness(_process_id: u32) -> Option<bool> {
     None
 }
 

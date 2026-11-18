@@ -24,6 +24,7 @@ mod project_root;
 mod properties;
 
 pub use copies::HierarchyCopy;
+pub(crate) use libraries::{conflicting_library_name, require_no_configuration_roots};
 
 use super::Model;
 use crate::state::workspace::{DeclaredModule, hdl_view, place_veriloga_view};

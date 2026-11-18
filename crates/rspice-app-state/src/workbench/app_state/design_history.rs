@@ -27,6 +27,7 @@ mod configuration_edit;
 mod hierarchy_extraction;
 mod instance_removal;
 mod library_operation;
+mod library_reference_edit;
 mod physical_layout_edit;
 mod project_properties_edit;
 mod reference_preparation;
@@ -113,6 +114,7 @@ pub enum ProjectDesignBody {
     ConfigurationEdit(Box<configuration_edit::ConfigurationEditRecord>),
     ProjectPropertiesEdit(Box<project_properties_edit::ProjectPropertiesEditRecord>),
     PhysicalLayoutEdit(Box<physical_layout_edit::PhysicalLayoutEditRecord>),
+    LibraryReferenceEdit(Box<library_reference_edit::LibraryReferenceEditRecord>),
 }
 
 /// Reference-changing history is prepared exactly once before navigation or a
@@ -1354,6 +1356,7 @@ impl ProjectDesignBody {
     fn validate_crossing(&self, state: &Model, forward: bool) -> Result<(), String> {
         match self {
             Self::LibraryOperation(record) => record.validate_crossing(state, forward),
+            Self::LibraryReferenceEdit(record) => record.validate_crossing(state, forward),
             _ => Ok(()),
         }
     }
@@ -1386,6 +1389,7 @@ impl ProjectDesignBody {
             Self::ConfigurationEdit(record) => record.after_design_matches(state),
             Self::ProjectPropertiesEdit(record) => record.after_design_matches(state),
             Self::PhysicalLayoutEdit(record) => record.after_design_matches(state),
+            Self::LibraryReferenceEdit(record) => record.after_design_matches(state),
         }
     }
 
@@ -1403,6 +1407,7 @@ impl ProjectDesignBody {
             Self::ConfigurationEdit(record) => record.before_design_matches(state),
             Self::ProjectPropertiesEdit(record) => record.before_design_matches(state),
             Self::PhysicalLayoutEdit(record) => record.before_design_matches(state),
+            Self::LibraryReferenceEdit(record) => record.before_design_matches(state),
         }
     }
 
@@ -1420,6 +1425,7 @@ impl ProjectDesignBody {
             Self::ConfigurationEdit(record) => record.validate_mutation(state, operation),
             Self::ProjectPropertiesEdit(record) => record.validate_mutation(state, operation),
             Self::PhysicalLayoutEdit(record) => record.validate_mutation(state, operation),
+            Self::LibraryReferenceEdit(record) => record.validate_mutation(state, operation),
         }
     }
 
@@ -1437,6 +1443,7 @@ impl ProjectDesignBody {
             Self::ConfigurationEdit(record) => record.description(),
             Self::ProjectPropertiesEdit(record) => record.description(),
             Self::PhysicalLayoutEdit(record) => record.description(),
+            Self::LibraryReferenceEdit(record) => record.description(),
         }
     }
 
@@ -1460,6 +1467,7 @@ impl ProjectDesignBody {
             Self::ConfigurationEdit(record) => record.apply_before(state),
             Self::ProjectPropertiesEdit(record) => record.apply_before(state),
             Self::PhysicalLayoutEdit(record) => record.apply_before(state),
+            Self::LibraryReferenceEdit(record) => record.apply_before(state),
         }
     }
 
@@ -1483,6 +1491,7 @@ impl ProjectDesignBody {
             Self::ConfigurationEdit(record) => record.apply_after(state),
             Self::ProjectPropertiesEdit(record) => record.apply_after(state),
             Self::PhysicalLayoutEdit(record) => record.apply_after(state),
+            Self::LibraryReferenceEdit(record) => record.apply_after(state),
         }
     }
 }

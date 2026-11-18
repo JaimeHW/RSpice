@@ -21,6 +21,15 @@ pub use rspice_design::library::folder::{
     LibraryPathChoice, Missing, ReferenceStatus, StatusMark,
 };
 pub use rspice_project::LibraryReference;
+pub use rspice_project::library_folder::FileStamp;
+use rspice_vocabulary::product::ContentDigest;
+
+mod commands;
+mod folders;
+mod saving;
+
+#[cfg(test)]
+mod tests;
 
 use super::Model;
 
@@ -92,8 +101,13 @@ pub enum ReferenceLoad {
 /// What this session read from one file and found there since.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileSession {
-    /// The revision and digest this session loaded; none when it could not.
+    /// The revision and digest this session loaded; none when it could not,
+    /// or for a file this session made that no save has written yet.
     pub loaded: Option<FileRevision>,
+    /// The digest of what this session loaded as this build writes it: the
+    /// file has edits here exactly when the project's parts encode to other
+    /// bytes. None for a file not loaded.
+    pub content: Option<ContentDigest>,
     /// The file's size and modification time when last read or checked: a
     /// check hashes the file only when these moved.
     pub stamp: Option<FileStamp>,
@@ -119,13 +133,6 @@ pub enum OnDisk {
     Unreadable(String),
     /// A layout drawn for another technology pin.
     TechnologyDiffers,
-}
-
-/// A file's size and modification time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileStamp {
-    pub len: u64,
-    pub modified_unix_ns: Option<u128>,
 }
 
 /// One row of the Refresh list: a file that changed on disk since this
@@ -312,8 +319,6 @@ impl Model {
     }
 }
 
-/// The commands a page calls. Each that changes the design is one step of
-/// the one Undo; Relink and Refresh are not steps.
 impl Model {
     /// The path Attach would store for `folder`, and the other forms that
     /// name the same folder, for the dialog to show before it attaches.
@@ -328,143 +333,8 @@ impl Model {
         .map_err(|error| error.to_string())
     }
 
-    /// Attach the library in `folder`, read-only, written as `path`.
-    /// Refused for a name already in the project, or a folder already
-    /// attached. Returns the library's name.
-    pub fn attach_library(&mut self, folder: &Path, path: LibraryPath) -> Result<String, String> {
-        let _ = (folder, path);
-        Err(not_yet("Attach library"))
-    }
-
-    /// Drop the reference to `library`. Its placements stay, unresolved;
-    /// returns the drawings that hold them. Refused for the top cell's
-    /// library.
-    pub fn detach_library(&mut self, library: &str) -> Result<Vec<String>, String> {
-        let _ = library;
-        Err(not_yet("Detach library"))
-    }
-
-    /// Write the embedded `library` to a folder of its own at `folder`, take
-    /// its parts out of the project and make it Editable.
-    pub fn move_library_to_folder(&mut self, library: &str, folder: &Path) -> Result<(), String> {
-        let _ = (library, folder);
-        Err(not_yet("Move to its own folder"))
-    }
-
-    /// Copy every file of the referenced `library` into the project and drop
-    /// the reference.
-    pub fn embed_library(&mut self, library: &str) -> Result<(), String> {
-        let _ = library;
-        Err(not_yet("Embed in project"))
-    }
-
-    /// Embed a copy of the library in `folder` straight away. Returns its
-    /// name.
-    pub fn embed_library_from_folder(&mut self, folder: &Path) -> Result<String, String> {
-        let _ = folder;
-        Err(not_yet("Embed library from folder"))
-    }
-
-    /// Embed a copy of a library from a browser's folder upload: each file
-    /// by its path inside the folder. Returns its name.
-    pub fn embed_library_from_files(
-        &mut self,
-        files: Vec<(String, Vec<u8>)>,
-    ) -> Result<String, String> {
-        let _ = files;
-        Err(not_yet("Embed library from folder"))
-    }
-
-    /// In a browser, read a referenced library from a picked folder for this
-    /// session only, read-only; the saved project is left as it was.
-    pub fn read_library_for_session(
-        &mut self,
-        library: &str,
-        folder_name: &str,
-        files: Vec<(String, Vec<u8>)>,
-    ) -> Result<(), String> {
-        let _ = (library, folder_name, files);
-        Err(not_yet("Read from folder"))
-    }
-
-    /// Make a referenced library Editable or Read-only. Make read-only is
-    /// refused while the library has unsaved edits.
-    pub fn set_library_mode(&mut self, library: &str, mode: LibraryMode) -> Result<(), String> {
-        let _ = (library, mode);
-        Err(not_yet("Changing a library's access"))
-    }
-
-    /// Point `library` at another folder whose manifest names the same
-    /// library. A folder holding it under another identity is relinked only
-    /// once `accept_other_identity` says the user agreed.
-    pub fn relink_library(
-        &mut self,
-        library: &str,
-        folder: &Path,
-        accept_other_identity: bool,
-    ) -> Result<RelinkOutcome, String> {
-        let _ = (library, folder, accept_other_identity);
-        Err(not_yet("Relink"))
-    }
-
-    /// Check every referenced file by size and time, hashing only those that
-    /// moved, and mark each that differs from what was loaded. Returns how
-    /// many differ. Runs on open, on focus and on Save; never on a frame.
-    pub fn check_library_files(&mut self) -> usize {
-        0
-    }
-
-    /// Reload the picked files from disk. A file with edits here is never
-    /// overwritten. Returns how many were reloaded.
-    pub fn refresh_library_files(
-        &mut self,
-        picked: &[(String, LibraryFile)],
-    ) -> Result<usize, String> {
-        let _ = picked;
-        Err(not_yet("Refresh"))
-    }
-
-    /// "Keep my version": the next save writes this session's edits over a
-    /// file that changed on disk since editing began.
-    pub fn keep_my_library_file(
-        &mut self,
-        library: &str,
-        file: &LibraryFile,
-    ) -> Result<(), String> {
-        let _ = (library, file);
-        Err(not_yet("Keep my version"))
-    }
-
-    /// "Take the file's version": discard this session's edits to the file
-    /// and load it as it is on disk.
-    pub fn take_library_file_from_disk(
-        &mut self,
-        library: &str,
-        file: &LibraryFile,
-    ) -> Result<(), String> {
-        let _ = (library, file);
-        Err(not_yet("Take the file's version"))
-    }
-
-    /// Remove another holder's lock on one file: "Break lock…", which names
-    /// the holder first.
-    pub fn break_library_lock(&mut self, library: &str, file: &LibraryFile) -> Result<(), String> {
-        let _ = (library, file);
-        Err(not_yet("Break lock"))
-    }
-
-    /// The edit gate for a file of a referenced library: the first edit
-    /// takes its lock. Refused when the library is read-only, the file is
-    /// locked elsewhere ("Being edited by jsmith on LAB-PC3"), it changed on
-    /// disk since it was loaded ("Refresh it first"), or it cannot be
-    /// written.
-    pub fn claim_library_file(&mut self, library: &str, file: &LibraryFile) -> Result<(), String> {
-        let _ = (library, file);
-        Ok(())
-    }
-
     /// The path-variable table: Preferences values, then the environment.
-    fn library_roots(&self) -> LibraryRoots {
+    pub(crate) fn library_roots(&self) -> LibraryRoots {
         LibraryRoots(
             self.pdk_config
                 .environment_variables
@@ -475,7 +345,7 @@ impl Model {
     }
 
     /// The folder the project file is in, which relative paths start from.
-    fn project_folder(&self) -> Option<PathBuf> {
+    pub(crate) fn project_folder(&self) -> Option<PathBuf> {
         self.workspace
             .content
             .project
@@ -488,10 +358,10 @@ impl Model {
 
 /// The path variables as Preferences states them; the environment answers
 /// a name Preferences leaves unset.
-struct LibraryRoots(BTreeMap<String, String>);
+pub(crate) struct LibraryRoots(BTreeMap<String, String>);
 
 impl LibraryRoots {
-    fn table(&self) -> rspice_design::library::folder::RootTable<'_> {
+    pub(crate) fn table(&self) -> rspice_design::library::folder::RootTable<'_> {
         rspice_design::library::folder::RootTable {
             preferences: &self.0,
             environment: &environment_variable,
@@ -507,9 +377,6 @@ fn environment_variable(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-fn not_yet(command: &str) -> String {
-    format!("{command} is not available in this build yet")
-}
 /// The revision the project last saved `file` with, when the file loaded
 /// here has moved on from it.
 fn saved_with(

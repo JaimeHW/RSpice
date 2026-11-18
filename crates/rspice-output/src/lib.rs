@@ -53,7 +53,9 @@ mod set;
 #[cfg(test)]
 mod transaction_properties;
 
-pub use recovery::{MAX_RECOVERY_ENTRIES, StagingRecovery, recover_stale_artifacts};
+pub use recovery::{
+    MAX_RECOVERY_ENTRIES, StagingRecovery, process_liveness, recover_stale_artifacts,
+};
 pub use set::{
     AtomicArtifactSet, AtomicArtifactSetError, RollbackOutcome, SetMembershipError, StagedArtifact,
 };

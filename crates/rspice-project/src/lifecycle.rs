@@ -69,6 +69,10 @@ pub enum ProjectLifecycleError {
     RevertReviewStale,
     #[error("project state is invalid: {0}")]
     InvalidState(String),
+    /// A library kept in a folder of its own could not be written, so the
+    /// project file was not either. The text names each file.
+    #[error("{0}")]
+    LibraryFiles(String),
     #[error(transparent)]
     Persistence(#[from] crate::persistence::PersistenceError),
 }

@@ -1370,6 +1370,7 @@ pub struct LoadedProjectInstall {
     workspace: crate::state::ProjectWorkspace,
     sim_setup: crate::workbench::app_state::SimSetupState,
     model_library_manager: crate::state::model_library::ModelLibraryManager,
+    library_files: rspice_app_state::workbench::app_state::model::LibraryFileSession,
 }
 
 /// What a loaded project brings back once it is installed.
@@ -1494,6 +1495,9 @@ pub fn prepare_loaded_project(
             platform.browser_project_save_name = Some(name.to_string());
         }
     }
+    // Libraries kept in folders of their own are read before anything is
+    // installed, so the open project and its saved baseline both hold them.
+    let library_files = model.read_referenced_libraries(&mut project.file);
     let mut accepted_baseline = project.clone();
     accepted_baseline.file.execution_context = accepted_execution_context;
     let announcement = format!(
@@ -1512,6 +1516,7 @@ pub fn prepare_loaded_project(
             ),
             sim_setup: simulation_plan,
             model_library_manager,
+            library_files,
         },
         restore: LoadedProjectRestore {
             simulation_results: project.file.simulation_results,
@@ -1531,6 +1536,8 @@ pub fn install_loaded_project(model: &mut Model, install: LoadedProjectInstall) 
     model.workspace = install.workspace;
     model.sim_setup = install.sim_setup;
     model.model_library_manager = install.model_library_manager;
+    model.release_library_locks();
+    model.library_files = install.library_files;
 }
 
 /// What an installed project's restore leaves for the shell and the report.
@@ -2161,7 +2168,9 @@ pub fn report_lifecycle_error(
     context: &str,
 ) {
     match error {
-        ProjectLifecycleError::InvalidState(_) | ProjectLifecycleError::Persistence(_) => {
+        ProjectLifecycleError::InvalidState(_)
+        | ProjectLifecycleError::Persistence(_)
+        | ProjectLifecycleError::LibraryFiles(_) => {
             model.report_failure(context, error.to_string());
         }
         _ => workbench.prompt(format!("{context}: {error}")),

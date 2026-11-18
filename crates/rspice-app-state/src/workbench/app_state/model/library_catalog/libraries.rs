@@ -357,7 +357,7 @@ pub(super) fn case_only_rename_refusal(kind: &str) -> String {
     format!("A {kind} cannot be renamed to a name that differs only in case.")
 }
 
-pub(super) fn conflicting_library_name(
+pub(crate) fn conflicting_library_name(
     libraries: &crate::state::LibraryManager,
     name: &str,
     vacating: Option<&str>,
@@ -374,7 +374,7 @@ pub(super) fn conflicting_library_name(
 
 /// Refuse an operation while a configuration set still names the scope as its
 /// executable root, so a valid catalog can never be left dangling.
-fn require_no_configuration_roots(
+pub(crate) fn require_no_configuration_roots(
     model: &Model,
     scope: &str,
     matches: impl Fn(&CellViewRef) -> bool,

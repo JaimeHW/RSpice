@@ -1010,9 +1010,13 @@ pub fn save_native(
                 .accepted_document_candidate(&working, &active_save_documents(state))?,
         };
         let ProjectSnapshot {
-            file,
+            mut file,
             workspace_session,
         } = candidate;
+        // A library kept in a folder of its own is written there first, so the project file
+        // never names a revision its folder does not hold; a file that cannot be written
+        // leaves the project file as it was.
+        write_library_files(state, &mut file, path)?;
         // The segments the file names are in its folder before the file is written, so a
         // project on disk never names results it cannot read.
         keep_result_segments(&file, path)?;
@@ -1043,6 +1047,36 @@ pub fn save_native(
         .authority
         .cancel_transaction();
     result
+}
+
+/// Write the changed files of each library `file` keeps in a folder of its own, its relative
+/// paths first rewritten for a project file saved into another folder than its own.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_library_files(
+    state: &mut dyn LifecycleHost,
+    file: &mut rspice_project::ProjectFile,
+    path: &Path,
+) -> Result<(), ProjectLifecycleError> {
+    if file.libraries.references().next().is_none() {
+        return Ok(());
+    }
+    let model = state.lifecycle_parts().model;
+    let from = model
+        .workspace
+        .content
+        .project
+        .path
+        .as_deref()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf);
+    if let (Some(from), Some(to)) = (from, path.parent()) {
+        model
+            .rebase_library_references(file, &from, to)
+            .map_err(ProjectLifecycleError::LibraryFiles)?;
+    }
+    model
+        .write_library_files(file)
+        .map_err(ProjectLifecycleError::LibraryFiles)
 }
 
 /// Each segment `file` reads: its runs', and those its result documents archived.
