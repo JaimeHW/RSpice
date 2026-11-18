@@ -6,6 +6,7 @@ use egui::{Color32, Ui};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens;
+use crate::ui::widgets::PROBLEM_MARK_ADVANCE;
 use crate::ui::widgets::table::{
     CELL_PAD, Cell, Column, DataTable, SortKey, TABLE_EDGE_INSET, TableState,
 };
@@ -71,7 +72,9 @@ fn activity_table(
     // column's least width gives up whole columns from its right, the detail
     // and then the elapsed time, never the configuration, rather than
     // scrolling sideways with its edge through a word; a detail given up is
-    // its operation's hint.
+    // its operation's hint. The room the shown columns leave goes to the
+    // operation's words, then to the detail's, until each reads whole, and
+    // what is left over is shared between them.
     let (when, elapsed) = fitted_widths(ui, operations, snapshot.now_ms);
     let configuration = configuration_width(ui, operations);
     let mut columns = vec![
@@ -92,6 +95,28 @@ fn activity_table(
         .rev()
         .find(|&count| least[..count].iter().sum::<f32>() <= room_wide)
         .unwrap_or(kept);
+    let mut spare = (room_wide - least[..shown].iter().sum::<f32>()).max(0.0);
+    let mut grow = |least: f32, need: f32| {
+        let grown = (need - least).clamp(0.0, spare);
+        spare -= grown;
+        least + grown
+    };
+    let operation_need = widest_words(
+        ui,
+        operations
+            .iter()
+            .map(|operation| (operation.event.as_str(), operation.tone.problem().is_some())),
+    );
+    columns[1] = Column::name("Operation", grow(OPERATION_LEAST_WIDTH, operation_need));
+    if shown == columns.len() {
+        let detail_need = widest_words(
+            ui,
+            operations
+                .iter()
+                .map(|operation| (operation.detail.as_str(), false)),
+        );
+        columns[shown - 1] = Column::name("Detail", grow(DETAIL_LEAST_WIDTH, detail_need));
+    }
     let response = DataTable::new(
         "workbench.project.overview.activity",
         &columns[..shown],
@@ -144,6 +169,24 @@ fn row_cells(operation: &OperationSnapshot, now_ms: u64, configuration: bool) ->
     }
     cells.extend([elapsed, Cell::text(&operation.detail)]);
     cells
+}
+
+/// How wide a column of words is made to read its widest row whole: the
+/// words, and the problem mark in front of a marked row's.
+fn widest_words<'a>(ui: &Ui, rows: impl Iterator<Item = (&'a str, bool)>) -> f32 {
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    rows.filter(|(words, _)| !words.is_empty())
+        .map(|(words, marked)| {
+            let width = ui
+                .painter()
+                .layout_no_wrap(words.to_owned(), font.clone(), Color32::PLACEHOLDER)
+                .size()
+                .x;
+            width + if marked { PROBLEM_MARK_ADVANCE } else { 0.0 }
+        })
+        .fold(0.0, f32::max)
+        + 2.0 * CELL_PAD
+        + 2.0
 }
 
 const CONFIGURATION_HEAD: &str = "Configuration";
