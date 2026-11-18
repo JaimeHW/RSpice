@@ -332,7 +332,6 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
         .insert_bundle(
             crate::state::ProjectSourceBundle::try_new(
                 crate::state::ProjectSourceOwner::cell_view(veriloga_reference.clone()),
-                crate::state::ProjectSourceLanguage::VerilogA,
                 "behavior.va",
                 "module behavior(p, n); inout p, n; electrical p, n; endmodule",
                 Vec::<crate::state::ProjectSourceFile>::new(),

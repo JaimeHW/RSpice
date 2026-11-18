@@ -1083,7 +1083,6 @@ pub fn state_with_populated_user_library() -> DesignTestHost {
 
     let bundle = crate::state::ProjectSourceBundle::try_new(
         crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("user", "amp", "behavior")),
-        crate::state::ProjectSourceLanguage::VerilogA,
         "behavior.va",
         "module behavior(p, n); inout p, n; endmodule",
         std::iter::empty(),
