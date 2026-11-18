@@ -5,8 +5,8 @@
 //! dispatches the same file and lifecycle workflows as the application menu.
 
 use egui::{
-    Align, Align2, Frame, Layout, Margin, Rect, Response, ScrollArea, Sense, Stroke, Ui, UiBuilder,
-    Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, FontId, Frame, Layout, Margin, Rect, Response, ScrollArea, Sense, Stroke, Ui,
+    UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::services::recent_files::{RecentFile, RecentKind};
@@ -289,7 +289,7 @@ fn recent_projects(
         if rows.is_empty() {
             222.0
         } else {
-            (142.0 + rows.len() as f32 * 58.0).clamp(250.0, 390.0)
+            (142.0 + rows.len() as f32 * compact_row_height(ui)).clamp(250.0, 390.0)
         }
     } else if table_height == TableHeight::FillColumn {
         ui.available_height().max(180.0)
@@ -549,17 +549,39 @@ fn compact_recent_header(ui: &mut Ui) {
     );
 }
 
+/// The space between a phone row's name and the path under it.
+const COMPACT_LINE_GAP: f32 = 4.0;
+
+/// A phone row's fonts: the project's name over its path.
+fn compact_row_fonts() -> (FontId, FontId) {
+    (
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+    )
+}
+
+/// A phone row's height: its name over its path with a bar's padding above
+/// and below, and never less than a touch target, so a larger target or
+/// larger text grows the row instead of crowding it.
+fn compact_row_height(ui: &Ui) -> f32 {
+    let metrics = Tokens::get(ui.ctx()).metrics;
+    let (name, location) = compact_row_fonts();
+    let lines = ui.fonts_mut(|fonts| fonts.row_height(&name) + fonts.row_height(&location));
+    (lines + COMPACT_LINE_GAP + 2.0 * metrics.bar_pad).max(metrics.touch_target())
+}
+
 /// A phone row: name over path at the left, the date and the pin at the
 /// right, and the missing strip under a file an open found gone.
 fn compact_recent_row(ui: &mut Ui, row: &RecentProjectRow) -> (Response, Option<RecentRowAction>) {
     let t = Tokens::get(ui.ctx());
+    let row_height = compact_row_height(ui);
     let strip_height = if row.recent.missing {
         recent_rows::missing_strip_height(ui)
     } else {
         0.0
     };
     let (rect, response) = ui.allocate_exact_size(
-        vec2(ui.available_width(), 58.0 + strip_height),
+        vec2(ui.available_width(), row_height + strip_height),
         Sense::click(),
     );
     if response.hovered() {
@@ -570,12 +592,22 @@ fn compact_recent_row(ui: &mut Ui, row: &RecentProjectRow) -> (Response, Option<
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    let main = Rect::from_min_size(rect.min, vec2(rect.width(), 58.0));
+    let main = Rect::from_min_size(rect.min, vec2(rect.width(), row_height));
     let pin_side = recent_rows::pin_side(ui);
     let right_width = 112.0 + pin_side;
     let left_width = (main.width() - right_width - 24.0).max(24.0);
-    let name_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-    let location_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    let (name_font, location_font) = compact_row_fonts();
+    // The two lines sit as one block in the middle of the row, the date
+    // level with the name and the missing word level with the path.
+    let (name_h, location_h) = ui.fonts_mut(|fonts| {
+        (
+            fonts.row_height(&name_font),
+            fonts.row_height(&location_font),
+        )
+    });
+    let block_top = main.center().y - (name_h + COMPACT_LINE_GAP + location_h) * 0.5;
+    let name_y = block_top + name_h * 0.5;
+    let location_y = block_top + name_h + COMPACT_LINE_GAP + location_h * 0.5;
     let name = super::elide_text(ui, &row.name, &name_font, left_width);
     let location = crate::workbench::design_system::elide_middle(
         ui,
@@ -584,14 +616,14 @@ fn compact_recent_row(ui: &mut Ui, row: &RecentProjectRow) -> (Response, Option<
         left_width,
     );
     ui.painter().text(
-        pos2(main.left() + 9.0, main.top() + 15.0),
+        pos2(main.left() + 9.0, name_y),
         Align2::LEFT_CENTER,
         name,
         name_font,
         t.color.text,
     );
     ui.painter().text(
-        pos2(main.left() + 9.0, main.bottom() - 15.0),
+        pos2(main.left() + 9.0, location_y),
         Align2::LEFT_CENTER,
         location,
         location_font,
@@ -599,14 +631,14 @@ fn compact_recent_row(ui: &mut Ui, row: &RecentProjectRow) -> (Response, Option<
     );
     let date_right = main.right() - 9.0 - pin_side - 4.0;
     ui.painter().text(
-        pos2(date_right, main.top() + 15.0),
+        pos2(date_right, name_y),
         Align2::RIGHT_CENTER,
         &row.last_opened,
         theme::mono(tokens::FS_MICRO, FontWeight::Regular),
         t.color.text_dim,
     );
     if row.recent.missing {
-        missing_word(ui, pos2(date_right, main.bottom() - 15.0));
+        missing_word(ui, pos2(date_right, location_y));
     }
     let pin_cell = Rect::from_min_max(
         pos2(main.right() - 9.0 - pin_side, main.top()),
