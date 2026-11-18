@@ -786,28 +786,32 @@ fn language_tools_menu(
                     ui.close();
                 }
                 ui.separator();
-                ui.menu_button(messages.text(MessageId::NetlistCodeActions), |ui| {
-                    if ui
-                        .add_enabled(
-                            editable && quick_fix_available,
-                            egui::Button::new(messages.text(MessageId::NetlistApplyQuickFix)),
-                        )
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::ApplyQuickFix);
-                        ui.close();
-                    }
-                    if ui
-                        .add_enabled(
-                            editable,
-                            egui::Button::new(messages.text(MessageId::NetlistFormatDocument)),
-                        )
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::FormatDocument);
-                        ui.close();
-                    }
-                });
+                rspice_ui_kit::widgets::menu_button(
+                    ui,
+                    messages.text(MessageId::NetlistCodeActions),
+                    |ui| {
+                        if ui
+                            .add_enabled(
+                                editable && quick_fix_available,
+                                egui::Button::new(messages.text(MessageId::NetlistApplyQuickFix)),
+                            )
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::ApplyQuickFix);
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                editable,
+                                egui::Button::new(messages.text(MessageId::NetlistFormatDocument)),
+                            )
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::FormatDocument);
+                            ui.close();
+                        }
+                    },
+                );
             })
         })
         .inner;
