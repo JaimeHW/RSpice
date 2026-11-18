@@ -1356,11 +1356,7 @@ impl<'a> Dialog<'a> {
                 let header_height = ui.cursor().top() - header_top;
                 let footer_height =
                     self.footer_height(hide_close_only_footer, large_targets, content.x);
-                let transaction_height = if self.transaction_state.is_some() {
-                    37.0
-                } else {
-                    0.0
-                };
+                let transaction_height = self.transaction_strip_height(ui, content.x);
                 let body_max_height =
                     (content.y - header_height - footer_height - transaction_height).max(1.0);
                 let requested_scroll_offset = self.body_scroll_offset.as_deref().copied();
@@ -1809,6 +1805,42 @@ impl<'a> Dialog<'a> {
         required > (surface_width - 2.0 * WORKFLOW_FOOTER_HORIZONTAL_MARGIN as f32).max(1.0)
     }
 
+    /// The transaction strip's height: its title and its detail as they wrap
+    /// across `surface_width`, so the strip holds every line it states and
+    /// the body above it gives up that much, never running under the footer.
+    fn transaction_strip_height(&self, ui: &Ui, surface_width: f32) -> f32 {
+        const PADDING_Y: f32 = 6.0;
+        let Some(transaction) = self.transaction_state.as_ref() else {
+            return 0.0;
+        };
+        let mark = if transaction.tone == DialogTransactionTone::Error {
+            PROBLEM_MARK_ADVANCE
+        } else {
+            0.0
+        };
+        let wrap = (surface_width - 24.0 - mark).max(1.0);
+        let lines = ui.fonts_mut(|fonts| {
+            [
+                (transaction.title.as_str(), FontWeight::SemiBold),
+                (transaction.detail.as_str(), FontWeight::Regular),
+            ]
+            .into_iter()
+            .map(|(text, weight)| {
+                fonts
+                    .layout(
+                        text.to_owned(),
+                        theme::sans(tokens::FS_0, weight),
+                        Color32::PLACEHOLDER,
+                        wrap,
+                    )
+                    .size()
+                    .y
+            })
+            .sum::<f32>()
+        });
+        (lines + 1.0 + 2.0 * PADDING_Y).max(37.0)
+    }
+
     fn transaction_strip(&self, ui: &mut Ui, t: &Tokens, surface_width: f32) {
         let Some(transaction) = self.transaction_state.as_ref() else {
             return;
@@ -1820,7 +1852,10 @@ impl<'a> Dialog<'a> {
         // inheriting the last body's content geometry.
         let strip_rect = Rect::from_min_size(
             egui::pos2(ui.max_rect().left(), ui.cursor().top()),
-            vec2(surface_width, 37.0),
+            vec2(
+                surface_width,
+                self.transaction_strip_height(ui, surface_width),
+            ),
         );
         let response = ui.allocate_rect(strip_rect, Sense::hover());
         ui.painter().rect_filled(strip_rect, 0.0, t.color.bg_panel);
