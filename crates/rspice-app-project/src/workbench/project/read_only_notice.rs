@@ -108,8 +108,7 @@ fn notice_font() -> egui::FontId {
 /// the mark and the button leave.
 fn notice_text_width(ui: &mut Ui, width: f32, action: ReadOnlyAction) -> f32 {
     let button_width = Button::new(action.label()).compact().measured_width(ui);
-    (width - 2.0 * panel_inset(ui) - PROBLEM_MARK_SIDE - 8.0 - button_width - NOTICE_GAP)
-        .max(24.0)
+    (width - 2.0 * panel_inset(ui) - PROBLEM_MARK_SIDE - 8.0 - button_width - NOTICE_GAP).max(24.0)
 }
 
 /// The mark, the sentence and the action. Under a pointer the sentence is

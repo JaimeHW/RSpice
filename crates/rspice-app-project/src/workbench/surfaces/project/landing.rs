@@ -516,10 +516,8 @@ fn recent_table_header(ui: &mut Ui) {
 
 fn compact_recent_header(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), t.metrics.row_h),
-        Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), t.metrics.row_h), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
     ui.painter().hline(
         rect.x_range(),

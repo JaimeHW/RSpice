@@ -370,7 +370,10 @@ fn marked_words(ui: &mut Ui, problem: Problem, words: &str) -> egui::Response {
     let galley = ui
         .painter()
         .layout_no_wrap(words.to_owned(), words_font(), t.color.text);
-    let size = vec2(MARK_ADVANCE + galley.size().x, galley.size().y.max(MARK_SIDE));
+    let size = vec2(
+        MARK_ADVANCE + galley.size().x,
+        galley.size().y.max(MARK_SIDE),
+    );
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     let announcement = problem.announce(words);
     response.widget_info(|| {
@@ -385,7 +388,10 @@ fn marked_words(ui: &mut Ui, problem: Problem, words: &str) -> egui::Response {
         problem,
     );
     ui.painter().galley(
-        pos2(rect.left() + MARK_ADVANCE, rect.center().y - galley.size().y * 0.5),
+        pos2(
+            rect.left() + MARK_ADVANCE,
+            rect.center().y - galley.size().y * 0.5,
+        ),
         galley,
         t.color.text,
     );
