@@ -37,7 +37,9 @@ use super::{
     diagnostics::{parser_diagnostics, unknown_reference_diagnostics},
     highlight,
 };
-use crate::state::netlist_diagnostics::{DeckReading, Diagnostic, NetlistDiagnosticCollection};
+use crate::state::netlist_diagnostics::{
+    CheckedInclude, DeckReading, Diagnostic, NetlistDiagnosticCollection,
+};
 use crate::workbench::documents::editor_font;
 
 const CODE_LEFT_PADDING: f32 = 12.0;
@@ -725,7 +727,12 @@ fn publish_check(netlist: &mut super::NetlistDocumentState, checked: CheckedSour
     // A check that could not read the text keeps the reading of the last one
     // that could, so a slip while typing does not flip the chip.
     let reading = checked.reading.or_else(|| netlist.diagnostics.reading());
-    netlist.diagnostics = Arc::new(checked.diagnostics.with_reading(reading));
+    netlist.diagnostics = Arc::new(
+        checked
+            .diagnostics
+            .with_reading(reading)
+            .with_includes(checked.includes.map_or_else(|| Arc::from([]), Arc::from)),
+    );
     if let Some(symbols) = checked.symbols {
         netlist.symbols = symbols;
     }
@@ -896,6 +903,10 @@ struct CheckedSource {
     /// How the engine read the text; absent when the check could not read
     /// it, so the last reading stands.
     reading: Option<DeckReading>,
+    /// The `.include` and `.lib` lines of the deck the check read, each with
+    /// the file it found; absent when the check did not read the buffer as
+    /// its own deck.
+    includes: Option<Vec<CheckedInclude>>,
 }
 
 /// What a check of the shown source reads, taken from the model at one
@@ -1056,11 +1067,12 @@ impl SourceCheck {
                     symbols: None,
                     unread: None,
                     reading: None,
+                    includes: None,
                 };
             }
         };
         let reads_buffer_as_root = composed.is_none() && !is_dependency;
-        let (mut diagnostics, symbols, unread, reading) = if buffer.trim().is_empty() {
+        let (mut diagnostics, symbols, unread, reading, includes) = if buffer.trim().is_empty() {
             let spectre = rspice_core::netlist::is_spectre_source(
                 source_path
                     .as_deref()
@@ -1073,30 +1085,44 @@ impl SourceCheck {
                 Some(Vec::new()),
                 Some(Vec::new()),
                 Some(DeckReading::of(&Default::default(), spectre)),
+                Some(Vec::new()),
             )
         } else {
             match materialized {
                 Ok(source) => {
-                    let (diagnostics, symbols, unread, reading) = parse_buffer_with_context(
-                        source,
-                        source_path.as_deref(),
-                        shown_path.as_deref(),
-                        &include_search,
-                        platform_include_access(),
-                        sealed_sources.as_ref(),
-                        stop,
-                    );
+                    let (diagnostics, symbols, unread, reading, includes) =
+                        parse_buffer_with_context(
+                            source,
+                            source_path.as_deref(),
+                            shown_path.as_deref(),
+                            &include_search,
+                            platform_include_access(),
+                            sealed_sources.as_ref(),
+                            stop,
+                        );
                     (
                         in_buffer(diagnostics),
                         symbols,
                         unread.filter(|_| reads_buffer_as_root),
                         reading,
+                        includes.filter(|_| reads_buffer_as_root),
                     )
                 }
-                Err(error) => (vec![Diagnostic::error(error)], None, None, None),
+                Err(error) => (vec![Diagnostic::error(error)], None, None, None, None),
             }
         };
-        diagnostics.extend(shadowed_include_diagnostics(&include_resolutions, &buffer));
+        // A shadowed include is reported from what this check walked when it
+        // read the deck's includes, else from the last run's walk.
+        let walked = includes.as_ref().map(|includes| {
+            includes
+                .iter()
+                .map(|include| (include.requested.clone(), include.resolution.clone()))
+                .collect::<BTreeMap<_, _>>()
+        });
+        diagnostics.extend(shadowed_include_diagnostics(
+            walked.as_ref().unwrap_or(&include_resolutions),
+            &buffer,
+        ));
         super::diagnostics::as_the_reader_sees_them(
             &mut diagnostics,
             &buffer,
@@ -1109,6 +1135,7 @@ impl SourceCheck {
             symbols,
             unread: Some(unread),
             reading,
+            includes,
         }
     }
 }
@@ -1139,7 +1166,7 @@ fn bounded_netlist_diagnostics(
 /// receives the exact active-document origin used by execution.
 #[cfg(test)]
 fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
-    let (diagnostics, symbols, _, _) = parse_buffer_with_context(
+    let (diagnostics, symbols, _, _, _) = parse_buffer_with_context(
         buffer,
         None,
         None,
@@ -1159,7 +1186,42 @@ type BufferParse = (
     Option<Vec<completion::SymbolEntry>>,
     Option<Vec<rspice_core::netlist::UnreadSourceRegion>>,
     Option<DeckReading>,
+    Option<Vec<CheckedInclude>>,
 );
+
+/// The `.include` and `.lib` lines a parse read, each with the file it
+/// found, and for a `.lib` line that selects a section, the sections that
+/// file declares: a library two lines name is read for them once.
+fn checked_includes(netlist: &rspice_core::Netlist) -> Vec<CheckedInclude> {
+    let mut sections: BTreeMap<PathBuf, Arc<[rspice_core::library::LibSectionSummary]>> =
+        BTreeMap::new();
+    netlist
+        .resolved_includes()
+        .iter()
+        .map(|edge| {
+            let declared = if edge.selected_section().is_some() {
+                sections
+                    .entry(edge.resolved_path().to_path_buf())
+                    .or_insert_with(|| {
+                        rspice_core::library::enumerate_lib_sections(edge.source().as_bytes())
+                            .into()
+                    })
+                    .clone()
+            } else {
+                Arc::from([])
+            };
+            CheckedInclude {
+                owner: edge.owner_path().to_path_buf(),
+                line: edge.directive_line(),
+                requested: edge.requested_path().to_owned(),
+                path: edge.resolved_path().to_path_buf(),
+                section: edge.selected_section().map(str::to_owned),
+                resolution: edge.resolution().clone(),
+                sections: declared,
+            }
+        })
+        .collect()
+}
 
 /// Check `buffer`, the text of the file `source_path`, or of no file and
 /// called `name`, as the engine reads it under that name: SPICE, or Spectre
@@ -1176,7 +1238,7 @@ fn parse_buffer_with_context(
     let external_line = first_external_dependency_line(buffer);
     let file = match source_path.map(editor_parse_source).transpose() {
         Ok(file) => file,
-        Err(error) => return (vec![Diagnostic::error(error)], None, None, None),
+        Err(error) => return (vec![Diagnostic::error(error)], None, None, None, None),
     };
     let spectre = rspice_core::netlist::is_spectre_source(
         file.as_deref().or(name).unwrap_or(Path::new("")),
@@ -1195,6 +1257,7 @@ fn parse_buffer_with_context(
                     "The deck has no file, so its .include and .lib lines have no folder to be read from.",
                 )
                 .with_line(Some(line))],
+                None,
                 None,
                 None,
                 None,
@@ -1226,7 +1289,15 @@ fn parse_buffer_with_context(
                 buffer.to_owned(),
             )]) {
                 Ok(bundle) => bundle,
-                Err(error) => return (parse_error_diagnostics_at(error, None), None, None, None),
+                Err(error) => {
+                    return (
+                        parse_error_diagnostics_at(error, None),
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                }
             };
             let parsed =
                 rspice_core::Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
@@ -1244,6 +1315,7 @@ fn parse_buffer_with_context(
                     None,
                     None,
                     None,
+                    None,
                 );
             };
             let bundle = match sealed_sources.bundle_for_root(&file, buffer) {
@@ -1251,6 +1323,7 @@ fn parse_buffer_with_context(
                 Err(error) => {
                     return (
                         vec![Diagnostic::error(error).with_line(external_line)],
+                        None,
                         None,
                         None,
                         None,
@@ -1278,10 +1351,12 @@ fn parse_buffer_with_context(
                 Some(harvest_symbols(&netlist)),
                 Some(unread),
                 Some(DeckReading::of(&netlist.options, spectre)),
+                Some(checked_includes(&netlist)),
             )
         }
         Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => (
             parse_error_diagnostics_at(error, parse_source),
+            None,
             None,
             None,
             None,
@@ -1296,6 +1371,7 @@ fn parse_buffer_with_context(
                 )
                 .with_source_path(source_path.map(Path::to_path_buf)),
             ],
+            None,
             None,
             None,
             None,

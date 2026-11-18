@@ -247,7 +247,7 @@ fn parse_native_fixture(
     source: &str,
     root: &Path,
 ) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
-    let (diagnostics, symbols, _, _) = parse_buffer_with_context(
+    let (diagnostics, symbols, _, _, _) = parse_buffer_with_context(
         source,
         Some(root),
         None,
@@ -405,7 +405,7 @@ fn live_lint_keeps_included_warning_off_the_root_gutter() {
 #[test]
 fn live_lint_fails_closed_when_browser_cannot_resolve_include() {
     let source = "browser include lint\n.include \"models/device.lib\"\n.end\n";
-    let (diagnostics, symbols, _, _) = parse_buffer_with_context(
+    let (diagnostics, symbols, _, _, _) = parse_buffer_with_context(
         source,
         Some(Path::new("project/root.cir")),
         None,
@@ -428,7 +428,7 @@ fn live_lint_fails_closed_when_browser_cannot_resolve_include() {
 #[test]
 fn live_lint_parses_dependency_free_browser_deck_without_a_bundle() {
     let source = "browser in-memory lint\nV1 input 0 5\nR1 input 0 1k\n.op\n.end\n";
-    let (diagnostics, symbols, _, _) = parse_buffer_with_context(
+    let (diagnostics, symbols, _, _, _) = parse_buffer_with_context(
         source,
         Some(Path::new("project/root.cir")),
         None,
@@ -463,7 +463,7 @@ fn live_lint_parses_authenticated_browser_model_bundle_without_filesystem_fallba
         .expect("seal authenticated model library");
     let source = "authenticated browser lint\n.lib \"device.lib\" TT\nD1 out 0 DSEALED\n.end\n";
 
-    let (diagnostics, symbols, _, _) = parse_buffer_with_context(
+    let (diagnostics, symbols, _, _, _) = parse_buffer_with_context(
         source,
         Some(&root),
         None,
@@ -485,7 +485,7 @@ fn live_lint_parses_authenticated_browser_model_bundle_without_filesystem_fallba
 #[test]
 fn live_lint_uses_abort_aware_parser_contract() {
     let source = "cancelled lint\nR1 out 0 1k\n.end\n";
-    let (diagnostics, symbols, _, _) = parse_buffer_with_context(
+    let (diagnostics, symbols, _, _, _) = parse_buffer_with_context(
         source,
         None,
         None,
@@ -1402,7 +1402,7 @@ fn a_spectre_deck_is_checked_as_spectre_under_its_own_name() {
         ),
         (None, None, IncludeAccess::NativeFilesystem, declared),
     ] {
-        let (diagnostics, symbols, _, reading) = parse_buffer_with_context(
+        let (diagnostics, symbols, _, reading, _) = parse_buffer_with_context(
             text,
             file,
             name,
@@ -1424,7 +1424,7 @@ fn a_spectre_deck_is_checked_as_spectre_under_its_own_name() {
 /// open: the check reads it under no name rather than a made-up one.
 #[test]
 fn a_finding_about_unnamed_text_names_no_file() {
-    let (diagnostics, _, _, _) = parse_buffer_with_context(
+    let (diagnostics, _, _, _, _) = parse_buffer_with_context(
         "deck\n.spef_include parasitics.spef\nR1 a 0 1k\n.end\n",
         None,
         None,

@@ -254,6 +254,28 @@ pub struct NetlistDiagnosticCollection {
     /// How the engine read the text these findings are about; `None` until a
     /// check has read it.
     reading: Option<DeckReading>,
+    /// The files the text's `.include` and `.lib` lines named, as the check
+    /// read them; empty until a check of a deck has read its includes.
+    includes: Arc<[CheckedInclude]>,
+}
+
+/// One `.include` or `.lib` line the check read, and the file it found.
+#[derive(Debug, Clone)]
+pub struct CheckedInclude {
+    /// The file whose line names the include: the deck, or an include of it.
+    pub owner: PathBuf,
+    /// The line of `owner` that names it, from 1.
+    pub line: usize,
+    /// The name as the line writes it.
+    pub requested: String,
+    /// The file the engine read for it.
+    pub path: PathBuf,
+    /// The section a `.lib` line selects.
+    pub section: Option<String>,
+    /// Where the engine looked, in order, and where it found the file.
+    pub resolution: rspice_core::netlist::IncludeResolution,
+    /// The sections the file declares, for a `.lib` line that selects one.
+    pub sections: Arc<[rspice_core::library::LibSectionSummary]>,
 }
 
 /// A lightweight projection of the canonical collection used by chrome that
@@ -349,6 +371,7 @@ impl NetlistDiagnosticCollection {
             interned_strings,
             summary,
             reading: None,
+            includes: Arc::from([]),
         })
     }
 
@@ -365,12 +388,28 @@ impl NetlistDiagnosticCollection {
         self.reading
     }
 
+    /// The same findings, about text whose includes the check read as
+    /// `includes`.
+    #[must_use]
+    pub fn with_includes(mut self, includes: Arc<[CheckedInclude]>) -> Self {
+        self.includes = includes;
+        self
+    }
+
+    /// The `.include` and `.lib` lines the check read, in the order it read
+    /// them: a file two lines name is here twice.
+    #[must_use]
+    pub fn includes(&self) -> &[CheckedInclude] {
+        &self.includes
+    }
+
     pub fn clear(&mut self) {
         self.records.clear();
         self.severity_by_line.clear();
         self.interned_strings.clear();
         self.summary = NetlistDiagnosticSummary::default();
         self.reading = None;
+        self.includes = Arc::from([]);
     }
 
     pub fn mark_all_stale(&mut self) {

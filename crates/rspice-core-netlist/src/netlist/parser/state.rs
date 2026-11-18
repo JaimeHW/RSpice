@@ -333,6 +333,7 @@ impl ParseState {
             monte_carlo_source_cards: self.monte_carlo_source_cards,
             source_path: None,
             included_source_paths: Default::default(),
+            resolved_includes: Default::default(),
             replay_context: None,
             ast_overlay: Default::default(),
             parameter_direction: self.parameter_direction,

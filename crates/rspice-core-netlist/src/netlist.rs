@@ -1295,6 +1295,10 @@ pub struct Netlist {
     /// Resolved `.INCLUDE`/`.LIB` source identities retained by the parser.
     /// Shared across clones; not part of electrical or checkpoint identity.
     pub(crate) included_source_paths: std::sync::Arc<[PathBuf]>,
+    /// Every `.INCLUDE`/`.LIB` edge the parser resolved, in the order it read
+    /// them: the line that names a file, the file it found and how. Shared
+    /// across clones; not part of electrical or checkpoint identity.
+    pub(crate) resolved_includes: std::sync::Arc<[ResolvedIncludeDependency]>,
     /// Resolver provenance for safe, behaviorally identical source replay.
     pub(crate) replay_context: Option<NetlistReplayContext>,
     /// Canonical electrical overrides layered over the parsed source AST.
@@ -1326,6 +1330,13 @@ impl Netlist {
     /// loaded later by device elaboration. Sealed inputs retain virtual paths.
     pub fn included_source_paths(&self) -> &[PathBuf] {
         &self.included_source_paths
+    }
+
+    /// Every `.INCLUDE`/`.LIB` edge the parser resolved, in the order it read
+    /// them: one per line that names a file, so a file two lines name is two
+    /// edges. Files loaded later by device elaboration are not listed.
+    pub fn resolved_includes(&self) -> &[ResolvedIncludeDependency] {
+        &self.resolved_includes
     }
 
     /// The lines of this deck's own source the parser skipped without reading
@@ -1434,6 +1445,7 @@ impl Netlist {
             paths.insert(dependency.resolved_path().to_path_buf());
         }
         self.included_source_paths = paths.into_iter().collect();
+        self.resolved_includes = processor.resolved_dependencies().into();
         ensure_parse_not_aborted(abort)
     }
 
@@ -4046,6 +4058,7 @@ impl Default for Netlist {
             monte_carlo_source_cards: Vec::new(),
             source_path: None,
             included_source_paths: Default::default(),
+            resolved_includes: Default::default(),
             replay_context: None,
             ast_overlay: NetlistAstOverlay::default(),
             parameter_direction: None,
