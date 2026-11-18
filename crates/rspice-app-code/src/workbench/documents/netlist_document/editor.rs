@@ -667,8 +667,12 @@ fn diagnostic_problem(severity: DiagnosticSeverity) -> Option<Problem> {
     }
 }
 
-/// Debounced re-parse: the squiggles, pips, and strip all derive from
-/// this one result.
+/// Debounced check of the shown source: the squiggles, pips, and strip all
+/// derive from its one result. Once typing pauses, the text as it stands is
+/// checked away from the editor's thread. Until that check reports, the
+/// findings of the text before are kept, marked stale so they never mark the
+/// newer text; a check of a text the editor has moved past is stopped and
+/// what it found is dropped.
 fn refresh_diagnostics(
     ui: &Ui,
     model: &super::Model,
@@ -676,176 +680,507 @@ fn refresh_diagnostics(
     include_resolutions: &BTreeMap<String, IncludeResolution>,
 ) {
     let revision = netlist.revision;
-    if netlist.diag_revision == Some(revision)
-        && netlist.diag_library_folders == model.library_folders()
-    {
+    let folders = model.library_folders();
+    if let Some(checked) = netlist.live_check.take_finished() {
+        receive_check(netlist, folders, checked);
+    }
+    if netlist.diag_revision == Some(revision) && netlist.diag_library_folders == folders {
+        return;
+    }
+    if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
+        validate_visible_source_in(model, netlist, include_resolutions, revision);
+        return;
+    }
+    netlist.live_check.stop_unless(revision, folders);
+    if netlist.diag_revision.is_some() && !netlist.diagnostics.is_empty() {
+        // Retain the prior records for Problems/history, but never decorate
+        // newer bytes with stale source ranges.
+        Arc::make_mut(&mut netlist.diagnostics).mark_all_stale();
+    }
+    if netlist.live_check.is_checking(revision, folders) {
         return;
     }
     let now = ui.input(|input| input.time);
     let settled = now - netlist.last_edit_time >= PARSE_DEBOUNCE;
     if !settled && netlist.diag_revision.is_some() {
-        // Retain the prior records for Problems/history, but never decorate
-        // newer bytes with stale source ranges.
-        Arc::make_mut(&mut netlist.diagnostics).mark_all_stale();
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(120));
         return;
     }
-    validate_visible_source_in(model, netlist, include_resolutions, revision);
+    let check = SourceCheck::of(model, netlist, include_resolutions, revision);
+    let wake = ui.ctx().clone();
+    netlist
+        .live_check
+        .start(check, move || wake.request_repaint());
+    // The application's tests read what a frame's text was found to hold in
+    // that same frame.
+    #[cfg(any(test, feature = "test-support"))]
+    if !netlist.live_check.detached {
+        netlist.live_check.wait();
+    }
+    if let Some(checked) = netlist.live_check.take_finished() {
+        receive_check(netlist, folders, checked);
+    }
+}
+
+/// Take what a check found: shown when it read the text as it stands
+/// through the library folders as they stand, dropped when either has moved
+/// on since.
+fn receive_check(
+    netlist: &mut super::NetlistDocumentState,
+    folders: &[PathBuf],
+    checked: CheckedSource,
+) {
+    if checked.revision == netlist.revision && checked.library_folders == folders {
+        publish_check(netlist, checked);
+    }
 }
 
 /// Validate the visible source as it stands and publish the result, bound to
 /// `revision`, over the model, the netlist editor's state and where the
-/// page's includes resolved.
+/// page's includes resolved. It runs here, on the caller's thread.
 fn validate_visible_source_in(
     model: &super::Model,
     netlist: &mut super::NetlistDocumentState,
     include_resolutions: &BTreeMap<String, IncludeResolution>,
     revision: u64,
 ) {
-    netlist.diag_library_folders = model.library_folders().to_vec();
     if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
+        netlist.diag_library_folders = model.library_folders().to_vec();
         Arc::make_mut(&mut netlist.diagnostics).clear();
         netlist.diag_revision = Some(revision);
         return;
     }
+    let checked = SourceCheck::of(model, netlist, include_resolutions, revision).run(&NoAbort);
+    publish_check(netlist, checked);
+}
 
-    let buffer = model.simulation.source.netlist_content.clone();
-    let materialized = if netlist.active_dependency_identity.is_some() {
-        Ok(buffer.clone())
-    } else if netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
-        rspice_simulation::netlist_preparation::owned_source::compose_owned_netlist_execution_source(
-            model.workspace.content.netlist_descriptor.as_ref(),
-            model
-                .workspace
-                .content
-                .netlist_document
-                .as_ref()
-                .and_then(|document| document.generated_artifact()),
-            &buffer,
-        )
-    } else {
-        Ok(buffer.clone())
-    };
-    let source_path = if let Some(dependency) = super::active_dependency_in(model, netlist) {
-        dependency.locator().native_origin().map(Path::new)
-    } else {
-        match netlist.active_document {
-            super::ActiveNetlistDocument::OwnedSource => {
-                model.workspace.content.netlist_source_path.as_deref()
-            }
-            super::ActiveNetlistDocument::Generated => {
-                model.schematic.session.current_file.as_deref()
-            }
-            super::ActiveNetlistDocument::GeneratedDiff
-            | super::ActiveNetlistDocument::RunSnapshot => None,
+/// Make what a check found the findings, symbols and unread lines of the
+/// text it read.
+fn publish_check(netlist: &mut super::NetlistDocumentState, checked: CheckedSource) {
+    netlist.diag_library_folders = checked.library_folders;
+    // A check that could not read the text keeps the reading of the last one
+    // that could, so a slip while typing does not flip the chip.
+    let reading = checked.reading.or_else(|| netlist.diagnostics.reading());
+    netlist.diagnostics = Arc::new(checked.diagnostics.with_reading(reading));
+    if let Some(symbols) = checked.symbols {
+        netlist.symbols = symbols;
+    }
+    if let Some(unread) = checked.unread {
+        netlist.unread_source = unread.map(|unread| (checked.revision, unread.into()));
+    }
+    netlist.diag_revision = Some(checked.revision);
+}
+
+/// The live check of the shown source, run away from the editor's thread.
+/// One runs at a time: the check of a newer text stops the one before, and
+/// what a stopped check found is never received. The browser build has no
+/// threads and checks in place.
+#[derive(Clone, Default)]
+pub(super) struct LiveCheck {
+    #[cfg(not(target_arch = "wasm32"))]
+    running: Option<RunningCheck>,
+    /// A check that finished before a frame took it.
+    finished: Option<CheckedSource>,
+    /// Whether a frame leaves the check it starts running, as the
+    /// application does. A test that leaves it so reads what was found
+    /// once it reports; the rest read it in the frame that starts it.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) detached: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+struct RunningCheck {
+    revision: u64,
+    library_folders: Vec<PathBuf>,
+    stop: Arc<rspice_core::abort_signal::AtomicAbort>,
+    receiver: Arc<std::sync::Mutex<std::sync::mpsc::Receiver<CheckedSource>>>,
+}
+
+impl std::fmt::Debug for LiveCheck {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[cfg(not(target_arch = "wasm32"))]
+        let running = self.running.as_ref().map(|running| running.revision);
+        #[cfg(target_arch = "wasm32")]
+        let running = None::<u64>;
+        formatter
+            .debug_struct("LiveCheck")
+            .field("running", &running)
+            .field(
+                "finished",
+                &self.finished.as_ref().map(|done| done.revision),
+            )
+            .finish()
+    }
+}
+
+impl LiveCheck {
+    /// Whether the check of `revision` through `folders` is running.
+    fn is_checking(&self, revision: u64, folders: &[PathBuf]) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.running.as_ref().is_some_and(|running| {
+                running.revision == revision && running.library_folders == folders
+            })
         }
-    };
-    let materialized_external_line = materialized
-        .as_ref()
-        .ok()
-        .and_then(|source| first_external_dependency_line(source));
-    // A narrow override is parsed as the deck it executes as: the generated
-    // base with the override spliced in. Every position the parse reports is
-    // a position in that deck, and has to be carried back into the text the
-    // editor shows and a fix edits.
-    let composed = materialized
-        .as_ref()
-        .ok()
-        .filter(|source| **source != buffer)
-        .cloned();
-    let in_buffer = |diagnostics: Vec<Diagnostic>| match composed.as_deref() {
-        Some(composed) => super::diagnostics::in_authored_text(diagnostics, composed, &buffer),
-        None => diagnostics,
-    };
-    let sealed_sources = if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly
-        && materialized_external_line.is_some()
-    {
-        match model.model_library_manager.seal_execution_sources() {
-            Ok(sources) => Some(sources),
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (revision, folders);
+            false
+        }
+    }
+
+    /// Stop a running check of any text but `revision` through `folders`.
+    fn stop_unless(&mut self, revision: u64, folders: &[PathBuf]) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(running) = self
+            .running
+            .take_if(|running| running.revision != revision || running.library_folders != folders)
+        {
+            running.stop.set();
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = (revision, folders);
+    }
+
+    /// Start `check`, stopping any check running; `wake` is called when it
+    /// is done.
+    fn start(&mut self, check: SourceCheck, wake: impl FnOnce() + Send + 'static) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use std::sync::{Mutex, mpsc};
+
+            if let Some(running) = self.running.take() {
+                running.stop.set();
+            }
+            let stop = Arc::new(rspice_core::abort_signal::AtomicAbort::new());
+            let (sender, receiver) = mpsc::channel();
+            let (revision, library_folders) = (check.revision, check.library_folders.clone());
+            let stopped = Arc::clone(&stop);
+            let spawned = std::thread::Builder::new()
+                .name("netlist-check".to_owned())
+                .spawn(move || {
+                    if sender.send(check.run(&stopped)).is_ok() {
+                        wake();
+                    }
+                });
+            if spawned.is_ok() {
+                self.running = Some(RunningCheck {
+                    revision,
+                    library_folders,
+                    stop,
+                    receiver: Arc::new(Mutex::new(receiver)),
+                });
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = wake;
+            self.finished = Some(check.run(&NoAbort));
+        }
+    }
+
+    /// What a check found, once it is done.
+    fn take_finished(&mut self) -> Option<CheckedSource> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(running) = self.running.take() {
+            use std::sync::mpsc::TryRecvError;
+
+            match running
+                .receiver
+                .lock()
+                .map_or(Err(TryRecvError::Disconnected), |receiver| {
+                    receiver.try_recv()
+                }) {
+                Ok(checked) => self.finished = Some(checked),
+                Err(TryRecvError::Empty) => self.running = Some(running),
+                Err(TryRecvError::Disconnected) => {}
+            }
+        }
+        self.finished.take()
+    }
+
+    /// Wait for the running check to finish.
+    #[cfg(any(test, feature = "test-support"))]
+    fn wait(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(running) = self.running.take() {
+            let received = running
+                .receiver
+                .lock()
+                .ok()
+                .and_then(|receiver| receiver.recv().ok());
+            if received.is_some() {
+                self.finished = received;
+            }
+        }
+    }
+}
+
+/// What a check found in one revision of the shown source.
+#[derive(Clone)]
+struct CheckedSource {
+    revision: u64,
+    library_folders: Vec<PathBuf>,
+    diagnostics: NetlistDiagnosticCollection,
+    /// The symbols the source defines; absent when the parse did not
+    /// complete, so the last ones found stand.
+    symbols: Option<Vec<completion::SymbolEntry>>,
+    /// The lines of the source the parse did not read; absent when the
+    /// check stopped before the parse and says nothing of them.
+    unread: Option<Option<Vec<rspice_core::netlist::UnreadSourceRegion>>>,
+    /// How the engine read the text; absent when the check could not read
+    /// it, so the last reading stands.
+    reading: Option<DeckReading>,
+}
+
+/// What a check of the shown source reads, taken from the model at one
+/// revision. Everything it needs travels with it, so it runs away from the
+/// editor's thread.
+struct SourceCheck {
+    revision: u64,
+    library_folders: Vec<PathBuf>,
+    buffer: String,
+    deck: CheckedDeck,
+    source_path: Option<PathBuf>,
+    include_search: rspice_simulation::netlist_preparation::IncludeSearchChain,
+    sealed_sources:
+        Option<Result<crate::state::model_library::SealedModelExecutionSources, String>>,
+    /// Only a parse of the buffer itself, as its own root, says which of its
+    /// lines a run reads. A dependency's sections are selected, and its
+    /// conditions decided, by the deck that includes it.
+    is_dependency: bool,
+    include_resolutions: BTreeMap<String, IncludeResolution>,
+    /// The name the page shows the text under: what a source with no file
+    /// is read as, and what its findings name.
+    shown_path: Option<PathBuf>,
+}
+
+/// The deck a check parses.
+enum CheckedDeck {
+    /// The buffer, as its own deck.
+    Buffer,
+    /// The buffer spliced into the generated base it narrowly overrides.
+    Override(
+        Box<(
+            crate::state::OwnedNetlistDescriptor,
+            Option<crate::state::GeneratedArtifact>,
+        )>,
+    ),
+    /// The deck as already composed: `None` when it is the buffer itself.
+    Composed(Result<Option<String>, String>),
+}
+
+impl CheckedDeck {
+    /// The deck composed over `buffer`: `None` when it is the buffer itself.
+    fn compose(self, buffer: &str) -> Result<Option<String>, String> {
+        match self {
+            Self::Buffer => Ok(None),
+            Self::Override(parts) => {
+                let (descriptor, generated) = *parts;
+                rspice_simulation::netlist_preparation::owned_source::compose_owned_netlist_execution_source(
+                    Some(&descriptor),
+                    generated.as_ref(),
+                    buffer,
+                )
+                .map(|deck| (deck != buffer).then_some(deck))
+            }
+            Self::Composed(composed) => composed,
+        }
+    }
+}
+
+impl SourceCheck {
+    /// The check of the visible source at `revision`, over the model, the
+    /// netlist editor's state and where the page's includes resolved.
+    fn of(
+        model: &super::Model,
+        netlist: &super::NetlistDocumentState,
+        include_resolutions: &BTreeMap<String, IncludeResolution>,
+        revision: u64,
+    ) -> Self {
+        let buffer = model.simulation.source.netlist_content.clone();
+        let is_dependency = netlist.active_dependency_identity.is_some();
+        let deck = match model.workspace.content.netlist_descriptor.as_ref() {
+            Some(descriptor)
+                if !is_dependency
+                    && netlist.active_document == super::ActiveNetlistDocument::OwnedSource
+                    && descriptor.strategy
+                        != crate::state::OwnedNetlistEditStrategy::OwnedSource =>
+            {
+                let generated = model
+                    .workspace
+                    .content
+                    .netlist_document
+                    .as_ref()
+                    .and_then(|document| document.generated_artifact())
+                    .cloned();
+                CheckedDeck::Override(Box::new((descriptor.clone(), generated)))
+            }
+            _ => CheckedDeck::Buffer,
+        };
+        let source_path = if let Some(dependency) = super::active_dependency_in(model, netlist) {
+            dependency.locator().native_origin().map(PathBuf::from)
+        } else {
+            match netlist.active_document {
+                super::ActiveNetlistDocument::OwnedSource => {
+                    model.workspace.content.netlist_source_path.clone()
+                }
+                super::ActiveNetlistDocument::Generated => {
+                    model.schematic.session.current_file.clone()
+                }
+                super::ActiveNetlistDocument::GeneratedDiff
+                | super::ActiveNetlistDocument::RunSnapshot => None,
+            }
+        };
+        // The browser build reads included sources from the libraries it
+        // sealed, and checks in place: whether the deck names one is read
+        // here, where the libraries can be sealed.
+        let (deck, sealed_sources) =
+            if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly {
+                let composed = deck.compose(&buffer);
+                let names_external = match &composed {
+                    Ok(Some(deck)) => first_external_dependency_line(deck).is_some(),
+                    Ok(None) => first_external_dependency_line(&buffer).is_some(),
+                    Err(_) => false,
+                };
+                let sealed =
+                    names_external.then(|| model.model_library_manager.seal_execution_sources());
+                (CheckedDeck::Composed(composed), sealed)
+            } else {
+                (deck, None)
+            };
+        Self {
+            revision,
+            library_folders: model.library_folders().to_vec(),
+            buffer,
+            deck,
+            source_path,
+            include_search: model.include_search_chain(),
+            sealed_sources,
+            is_dependency,
+            include_resolutions: include_resolutions.clone(),
+            shown_path: super::dialect::shown_source_in(model, netlist)
+                .map(|shown| shown.path)
+                .filter(|path| !path.as_os_str().is_empty()),
+        }
+    }
+
+    /// Check the source; `stop` ends the parse early once the text has moved
+    /// on.
+    fn run(self, stop: &dyn AbortSignal) -> CheckedSource {
+        let Self {
+            revision,
+            library_folders,
+            buffer,
+            deck,
+            source_path,
+            include_search,
+            sealed_sources,
+            is_dependency,
+            include_resolutions,
+            shown_path,
+        } = self;
+        // A narrow override is parsed as the deck it executes as: the
+        // generated base with the override spliced in. Every position the
+        // parse reports is a position in that deck, and has to be carried
+        // back into the text the editor shows and a fix edits.
+        let (composed, unmaterialized) = match deck.compose(&buffer) {
+            Ok(composed) => (composed, None),
+            Err(error) => (None, Some(error)),
+        };
+        let materialized = match (&composed, unmaterialized) {
+            (_, Some(error)) => Err(error),
+            (Some(deck), None) => Ok(deck.as_str()),
+            (None, None) => Ok(buffer.as_str()),
+        };
+        let in_buffer = |diagnostics: Vec<Diagnostic>| match composed.as_deref() {
+            Some(composed) => super::diagnostics::in_authored_text(diagnostics, composed, &buffer),
+            None => diagnostics,
+        };
+        let bound = |mut diagnostics: Vec<Diagnostic>| {
+            let validation_id = crate::state::content_digest(&buffer).to_string();
+            for diagnostic in &mut diagnostics {
+                diagnostic.bind_validation(revision, &validation_id);
+            }
+            bounded_netlist_diagnostics(diagnostics, &buffer, revision, &validation_id)
+        };
+        let sealed_sources = match sealed_sources.transpose() {
+            Ok(sources) => sources,
             Err(error) => {
-                let mut diagnostics = in_buffer(vec![
+                let line = materialized
+                    .as_ref()
+                    .ok()
+                    .and_then(|source| first_external_dependency_line(source));
+                let diagnostics = in_buffer(vec![
                     Diagnostic::error(format!(
                         "The imported browser source bundle is invalid: {error}"
                     ))
-                    .with_line(materialized_external_line),
+                    .with_line(line),
                 ]);
-                let validation_id = crate::state::content_digest(&buffer).to_string();
-                for diagnostic in &mut diagnostics {
-                    diagnostic.bind_validation(revision, &validation_id);
+                return CheckedSource {
+                    revision,
+                    library_folders,
+                    diagnostics: bound(diagnostics),
+                    symbols: None,
+                    unread: None,
+                    reading: None,
+                };
+            }
+        };
+        let reads_buffer_as_root = composed.is_none() && !is_dependency;
+        let (mut diagnostics, symbols, unread, reading) = if buffer.trim().is_empty() {
+            let spectre = rspice_core::netlist::is_spectre_source(
+                source_path
+                    .as_deref()
+                    .or(shown_path.as_deref())
+                    .unwrap_or(Path::new("")),
+                &buffer,
+            );
+            (
+                Vec::new(),
+                Some(Vec::new()),
+                Some(Vec::new()),
+                Some(DeckReading::of(&Default::default(), spectre)),
+            )
+        } else {
+            match materialized {
+                Ok(source) => {
+                    let (diagnostics, symbols, unread, reading) = parse_buffer_with_context(
+                        source,
+                        source_path.as_deref(),
+                        shown_path.as_deref(),
+                        &include_search,
+                        platform_include_access(),
+                        sealed_sources.as_ref(),
+                        stop,
+                    );
+                    (
+                        in_buffer(diagnostics),
+                        symbols,
+                        unread.filter(|_| reads_buffer_as_root),
+                        reading,
+                    )
                 }
-                netlist.diagnostics = Arc::new(
-                    bounded_netlist_diagnostics(diagnostics, &buffer, revision, &validation_id)
-                        .with_reading(netlist.diagnostics.reading()),
-                );
-                netlist.diag_revision = Some(revision);
-                return;
+                Err(error) => (vec![Diagnostic::error(error)], None, None, None),
             }
-        }
-    } else {
-        None
-    };
-    let include_search = model.include_search_chain();
-    // The name the page shows the text under: what a source with no file is
-    // read as, and what its findings name.
-    let shown = super::dialect::shown_source_in(model, netlist)
-        .map(|shown| shown.path)
-        .filter(|path| !path.as_os_str().is_empty());
-    // Only a parse of the buffer itself, as its own root, says which of its
-    // lines a run reads. A composed override's parse reads the lines of the
-    // composed deck, and a dependency's sections are selected, and its
-    // conditions decided, by the deck that includes it.
-    let reads_buffer_as_root = composed.is_none() && netlist.active_dependency_identity.is_none();
-    let (mut diagnostics, symbols, unread, reading) = if buffer.trim().is_empty() {
-        let spectre = rspice_core::netlist::is_spectre_source(
-            source_path.or(shown.as_deref()).unwrap_or(Path::new("")),
+        };
+        diagnostics.extend(shadowed_include_diagnostics(&include_resolutions, &buffer));
+        super::diagnostics::as_the_reader_sees_them(
+            &mut diagnostics,
             &buffer,
+            shown_path.as_deref(),
         );
-        (
-            Vec::new(),
-            Some(Vec::new()),
-            Some(Vec::new()),
-            Some(DeckReading::of(&Default::default(), spectre)),
-        )
-    } else {
-        match &materialized {
-            Ok(source) => {
-                let (diagnostics, symbols, unread, reading) = parse_buffer_with_context(
-                    source,
-                    source_path,
-                    shown.as_deref(),
-                    &include_search,
-                    platform_include_access(),
-                    sealed_sources.as_ref(),
-                    &NoAbort,
-                );
-                (
-                    in_buffer(diagnostics),
-                    symbols,
-                    unread.filter(|_| reads_buffer_as_root),
-                    reading,
-                )
-            }
-            Err(error) => (vec![Diagnostic::error(error.clone())], None, None, None),
+        CheckedSource {
+            revision,
+            library_folders,
+            diagnostics: bound(diagnostics),
+            symbols,
+            unread: Some(unread),
+            reading,
         }
-    };
-    diagnostics.extend(shadowed_include_diagnostics(include_resolutions, &buffer));
-    super::diagnostics::as_the_reader_sees_them(&mut diagnostics, &buffer, shown.as_deref());
-    let validation_id = crate::state::content_digest(&buffer).to_string();
-    for diagnostic in &mut diagnostics {
-        diagnostic.bind_validation(revision, &validation_id);
     }
-    // A check that could not read the text keeps the reading of the last one
-    // that could, so a slip while typing does not flip the chip.
-    netlist.diagnostics = Arc::new(
-        bounded_netlist_diagnostics(diagnostics, &buffer, revision, &validation_id)
-            .with_reading(reading.or_else(|| netlist.diagnostics.reading())),
-    );
-    if let Some(symbols) = symbols {
-        netlist.symbols = symbols;
-    }
-    netlist.unread_source = unread.map(|unread| (revision, unread.into()));
-    netlist.diag_revision = Some(revision);
 }
 
 fn bounded_netlist_diagnostics(

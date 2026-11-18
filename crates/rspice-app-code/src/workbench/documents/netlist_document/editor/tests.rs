@@ -1651,3 +1651,92 @@ fn closing_an_include_tab_lets_go_of_its_editor() {
         "the deck keeps its editor"
     );
 }
+
+/// A check that reports after the text moved on is dropped: what it found
+/// in the text before is never shown against the newer text, and the check
+/// of the text as it stands is.
+#[test]
+fn a_check_of_a_text_the_editor_moved_past_is_dropped() {
+    let mut harness = harness();
+    harness.model.simulation.source.netlist_content = "amp\nR1 a\n.op\n.end\n".to_owned();
+    harness.state.netlist.revision = 1;
+    let folders = harness.model.library_folders().to_vec();
+    let resolutions = BTreeMap::new();
+    let before =
+        SourceCheck::of(&harness.model, &harness.state.netlist, &resolutions, 1).run(&NoAbort);
+    assert!(
+        before
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error),
+        "the resistor that names one node is an error"
+    );
+
+    // The writer finishes the card before that check reports.
+    harness.model.simulation.source.netlist_content = "amp\nR1 a 0 1k\n.op\n.end\n".to_owned();
+    harness.state.netlist.revision = 2;
+    receive_check(&mut harness.state.netlist, &folders, before);
+    assert_eq!(harness.state.netlist.diag_revision, None);
+    assert!(harness.state.netlist.diagnostics.is_empty());
+
+    let after =
+        SourceCheck::of(&harness.model, &harness.state.netlist, &resolutions, 2).run(&NoAbort);
+    receive_check(&mut harness.state.netlist, &folders, after);
+    assert_eq!(harness.state.netlist.diag_revision, Some(2));
+    assert!(
+        !harness
+            .state
+            .netlist
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error),
+        "{:?}",
+        harness.state.netlist.diagnostics
+    );
+}
+
+/// In the application the check runs while the frame goes on: the deck is
+/// shown in the frame that opens it, and what the check found is shown in
+/// the first frame after it reports.
+#[test]
+fn the_deck_shows_at_once_and_its_findings_once_the_check_reports() {
+    let mut harness = harness();
+    harness.model.simulation.source.netlist_content = "amp\nR1 a\n.op\n.end\n".to_owned();
+    harness.state.netlist.live_check.detached = true;
+    let context = egui::Context::default();
+    crate::ui::Theme::default().apply(&context);
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let _ = context.clone().run_ui(input.clone(), |ui| {
+        show_state(ui, &mut harness);
+    });
+    let editor = editor_id_in(&harness.model, &harness.state.netlist);
+    assert_eq!(
+        crate::workbench::documents::virtual_text_editor::shown_source(&context, editor).as_deref(),
+        Some(harness.model.simulation.source.netlist_content.as_str()),
+        "the deck is shown in the frame that opens it"
+    );
+
+    harness.state.netlist.live_check.wait();
+    let _ = context.clone().run_ui(input, |ui| {
+        show_state(ui, &mut harness);
+    });
+    assert_eq!(
+        harness.state.netlist.diag_revision,
+        Some(harness.state.netlist.revision)
+    );
+    assert!(
+        harness
+            .state
+            .netlist
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error),
+        "the resistor that names one node is found"
+    );
+}

@@ -2326,6 +2326,9 @@ pub struct NetlistDocumentState {
     typed_revision: Option<u64>,
     /// Current parse diagnostics.
     pub diagnostics: std::sync::Arc<NetlistDiagnosticCollection>,
+    /// The check of the shown source running away from the editor's
+    /// thread, and what it found until a frame takes it.
+    live_check: editor::LiveCheck,
     /// Result data version last reconciled with the editor baseline.
     seen_data_version: u64,
     /// Working deck the run snapshot was opened from, so its comparison knows
