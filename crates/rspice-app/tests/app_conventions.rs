@@ -1463,6 +1463,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/project.rs", "workspace_state"),
             ("workbench/project/library_dialogs.rs", "cell_ops"),
             ("workbench/project/library_dialogs.rs", "deletion"),
+            ("workbench/project/library_dialogs.rs", "library_files"),
             ("workbench/project/library_dialogs.rs", "library_ops"),
             ("workbench/project/library_dialogs.rs", "new_cell"),
             ("workbench/project/library_dialogs.rs", "new_view"),
@@ -1607,6 +1608,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "download"),
             ("lib.rs", "export_workflow"),
             ("lib.rs", "file_import"),
+            ("lib.rs", "folder_upload"),
             ("lib.rs", "io"),
             ("lib.rs", "lifecycle"),
             ("lib.rs", "live_protocol"),
@@ -1653,6 +1655,10 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             (
                 "workbench/app/dialogs/preferences/preference_pages.rs",
                 "libraries",
+            ),
+            (
+                "workbench/app/dialogs/preferences/preference_pages.rs",
+                "paths",
             ),
             (
                 "workbench/app/dialogs/preferences/shortcut_preferences.rs",
