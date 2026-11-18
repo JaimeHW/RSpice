@@ -254,10 +254,13 @@ fn an_instance_inherits_in_the_order_the_resolver_binds() {
     );
 }
 
+/// The tree opens on the root and what it places; an instance shows what it
+/// places once it is opened, and a closed root shows only itself.
 #[test]
-fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
+fn the_tree_puts_children_under_their_parents_and_opens_an_instance_at_a_time() {
     use rspice_design::hierarchy::{
-        HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding, RowOccurrences,
+        HierarchyBindingRule, HierarchyBindingStatus, HierarchyOccurrences,
+        ResolvedHierarchyBinding, RowOccurrences,
     };
 
     let binding = |cell: &str, paths: &[&str]| ResolvedHierarchyBinding {
@@ -280,48 +283,71 @@ fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
         placed: None,
         placed_ports: Vec::new(),
     };
+    let occurrences = HierarchyOccurrences::from_paths(
+        [
+            (1, "/"),
+            (0, "/X1"),
+            (2, "/X1/XF1"),
+            (0, "/X2"),
+            (2, "/X2/XF1"),
+            (0, "/X3/XF1"),
+        ]
+        .map(|(row, path)| (row, InstancePath::parse(path).expect("a path"))),
+    );
     let hierarchy = HierarchyResolution {
         bindings: vec![
             binding("amp", &["/X2", "/X1"]),
             binding("top", &["/"]),
             binding("filter", &["/X1/XF1", "/X2/XF1"]),
         ],
-        total_instances: 5,
+        occurrences: Arc::new(occurrences),
+        total_instances: 6,
         resolved_instances: 5,
         configuration_id: None,
         configuration_revision: None,
         configuration_digest: None,
     };
-    let rows = instance_rows(&hierarchy);
-    let shape = rows
-        .iter()
-        .map(|row| (row.path.as_str(), row.depth, row.children))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        shape,
-        [
-            ("/", 0, 2),
-            ("/X1", 1, 1),
-            ("/X1/XF1", 2, 0),
-            ("/X2", 1, 1),
-            ("/X2/XF1", 2, 0),
-        ]
-    );
-
     let mut page = ConfigurationPageState::default();
     page.resolution.value = Some(Arc::new(ConfigurationResolution {
         hierarchy: Ok(hierarchy),
-        instances: rows,
         cells: Vec::new(),
         view_names: Vec::new(),
         tables: Default::default(),
     }));
-    assert_eq!(&*page.visible_instances(), [0, 1, 2, 3, 4]);
-    page.toggle_collapsed("/X1");
+    let shape = |page: &mut ConfigurationPageState| {
+        page.visible_instances()
+            .iter()
+            .map(|row| (row.path.clone(), row.name.clone(), row.depth, row.children))
+            .collect::<Vec<_>>()
+    };
+    let row = |path: &str, name: &str, depth: usize, children: usize| {
+        (path.to_owned(), name.to_owned(), depth, children)
+    };
+    // A path the design does not place shows under the root, named whole.
+    assert_eq!(
+        shape(&mut page),
+        [
+            row("/", "", 0, 3),
+            row("/X1", "X1", 1, 1),
+            row("/X2", "X2", 1, 1),
+            row("/X3/XF1", "/X3/XF1", 1, 0),
+        ]
+    );
     assert!(page.is_collapsed("/x1"));
-    assert_eq!(&*page.visible_instances(), [0, 1, 3, 4]);
+    page.toggle_collapsed("/X1");
+    assert!(!page.is_collapsed("/x1"));
+    assert_eq!(
+        shape(&mut page),
+        [
+            row("/", "", 0, 3),
+            row("/X1", "X1", 1, 1),
+            row("/X1/XF1", "XF1", 2, 0),
+            row("/X2", "X2", 1, 1),
+            row("/X3/XF1", "/X3/XF1", 1, 0),
+        ]
+    );
     page.toggle_collapsed("/");
-    assert_eq!(&*page.visible_instances(), [0]);
+    assert_eq!(shape(&mut page), [row("/", "", 0, 3)]);
 }
 
 #[test]

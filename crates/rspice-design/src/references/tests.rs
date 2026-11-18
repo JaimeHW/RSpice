@@ -55,6 +55,7 @@ fn shared_master_renames_prepare_probes_without_mutating_sources() {
             placed: None,
             placed_ports: Vec::new(),
         }],
+        occurrences: Default::default(),
         total_instances: 3,
         resolved_instances: 3,
         configuration_id: None,

@@ -1,7 +1,8 @@
 //! The tables under the global bindings, on the kit's row list. Instances
-//! lists the pattern bindings, since one names many instances, then every
-//! instance of the expanded design as a tree: what the shown configuration
-//! resolved it to, which list chose that, and the view it binds it to. Cells
+//! lists the pattern bindings, since one names many instances, then the
+//! expanded design as a tree that opens an instance at a time: what the shown
+//! configuration resolved each instance to, which list chose that, and the
+//! view it binds it to. Cells
 //! lists each library/cell once, with the cell binding every instance of it
 //! follows.
 //!
@@ -10,6 +11,8 @@
 //! selected rows' bindings in one edit.
 
 use super::*;
+
+use std::sync::Arc;
 
 use rspice_design::hierarchy::{
     HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding,
@@ -22,7 +25,7 @@ use crate::ui::widgets::table::{
 use crate::ui::widgets::{FILTER_CLEAR_INSET, SegmentedWidth, filter_field_clear, segmented};
 use crate::workbench::project::configuration_state::{
     ConfigurationPageState, ConfigurationRow, ConfigurationTab, ConfigurationTables, INHERITED,
-    InstanceRow, PatternRow,
+    InstanceRow, PatternRow, instance_key,
 };
 
 /// The widest the header's filter field grows.
@@ -75,7 +78,7 @@ pub(super) fn tables(
         .into_iter()
         .collect::<Vec<_>>();
     actions.extend(match page.tab {
-        ConfigurationTab::Instances => instance_table(ui, page, resolution, &visible),
+        ConfigurationTab::Instances => instance_table(ui, page, resolution, visible),
         ConfigurationTab::Cells => super::cells::cells_table(ui, page, &resolution.tables),
     });
     let mut menu_at = None;
@@ -136,7 +139,7 @@ fn tab_header(
     let tab = page.tab;
     let meta = match tab {
         ConfigurationTab::Instances => {
-            let count = resolution.instances.len();
+            let count = resolution.tables.instance_rows;
             format!("{count} instance{}", plural_suffix(count))
         }
         ConfigurationTab::Cells => {
@@ -358,7 +361,7 @@ fn instance_columns() -> [Column; 8] {
 enum Line {
     /// A pattern binding, by its place among the definition's patterns.
     Pattern(usize),
-    /// An instance, by its place in the tree.
+    /// An instance, by its place among the rows the tree shows.
     Instance(usize),
 }
 
@@ -367,7 +370,7 @@ enum Line {
 /// named by its whole path.
 struct InstanceLines<'a> {
     patterns: &'a [PatternRow],
-    instances: std::borrow::Cow<'a, [usize]>,
+    instances: Arc<[InstanceRow]>,
 }
 
 impl InstanceLines<'_> {
@@ -378,7 +381,7 @@ impl InstanceLines<'_> {
     fn line(&self, index: usize) -> Line {
         match index.checked_sub(self.patterns.len()) {
             None => Line::Pattern(index),
-            Some(at) => Line::Instance(self.instances[at]),
+            Some(at) => Line::Instance(at),
         }
     }
 }
@@ -387,15 +390,22 @@ fn instance_table(
     ui: &mut Ui,
     page: &mut ConfigurationPageState,
     resolution: &ConfigurationResolution,
-    visible: &[usize],
+    visible: Arc<[InstanceRow]>,
 ) -> Vec<TableAction> {
     let tables = &resolution.tables;
     let hierarchy = resolution.hierarchy.as_ref().ok();
-    let flat = !page.instances_table.filter.trim().is_empty();
+    let filter = page.instances_table.filter.trim().to_lowercase();
+    let flat = !filter.is_empty();
+    // A filter searches the whole design once, for the rows the table then
+    // shows; the table's own filter keeps the same rows.
     let instances = match hierarchy {
-        None => std::borrow::Cow::Borrowed(&[][..]),
-        Some(_) if flat => std::borrow::Cow::Owned((0..resolution.instances.len()).collect()),
-        Some(_) => std::borrow::Cow::Borrowed(visible),
+        None => Arc::from(Vec::new()),
+        Some(hierarchy) if flat => page.matching_instances(&filter, &|row| {
+            instance_cells(tables, &hierarchy.bindings, row, false, true)
+                .iter()
+                .any(|cell| cell.text.to_lowercase().contains(&filter))
+        }),
+        Some(_) => visible,
     };
     let lines = InstanceLines {
         patterns: &tables.patterns,
@@ -405,7 +415,7 @@ fn instance_table(
         .map(|index| {
             RowKey::Number(match lines.line(index) {
                 Line::Pattern(at) => tables.patterns[at].key,
-                Line::Instance(at) => tables.instance_keys[at],
+                Line::Instance(at) => instance_key(&lines.instances[at].path),
             })
         })
         .collect::<Vec<_>>();
@@ -432,26 +442,20 @@ fn instance_table(
         .show(ui, |index| match lines.line(index) {
             Line::Pattern(at) => pattern_cells(&tables.patterns[at]),
             Line::Instance(at) => hierarchy.map_or_else(Vec::new, |hierarchy| {
-                instance_cells(
-                    tables,
-                    &hierarchy.bindings,
-                    at,
-                    &resolution.instances[at],
-                    collapsed(&resolution.instances[at].path),
-                    flat,
-                )
+                let row = &lines.instances[at];
+                instance_cells(tables, &hierarchy.bindings, row, collapsed(&row.path), flat)
             }),
         });
     page.instances_table = state;
     let identity = |index: usize| match lines.line(index) {
         Line::Pattern(at) => ConfigurationRow::Pattern(tables.patterns[at].pattern.clone()),
-        Line::Instance(at) => ConfigurationRow::Instance(resolution.instances[at].path.clone()),
+        Line::Instance(at) => ConfigurationRow::Instance(lines.instances[at].path.clone()),
     };
     let mut actions = answer(&page.instances_table, &response, &identity);
     if let Some((index, open)) = response.expand
         && let Line::Instance(at) = lines.line(index)
     {
-        let row = &resolution.instances[at];
+        let row = &lines.instances[at];
         if row.children > 0 && page.is_collapsed(&row.path) == open {
             actions.push(TableAction::Toggle(row.path.clone()));
         }
@@ -560,7 +564,6 @@ fn unbound_reason(status: HierarchyBindingStatus) -> Option<&'static str> {
 fn instance_cells(
     tables: &ConfigurationTables,
     hierarchy: &[ResolvedHierarchyBinding],
-    index: usize,
     row: &InstanceRow,
     collapsed: bool,
     flat: bool,
@@ -575,7 +578,7 @@ fn instance_cells(
         let name = if row.depth == 0 {
             reference.cell.as_str()
         } else {
-            row.path.rsplit('/').next().unwrap_or(&row.path)
+            row.name.as_str()
         };
         let named = ident(name).indent(u8::try_from(row.depth).unwrap_or(u8::MAX));
         if row.children > 0 {
@@ -589,8 +592,8 @@ fn instance_cells(
     } else {
         Cell::absent()
     };
-    let to_use = tables.instance_to_use[index]
-        .as_deref()
+    let to_use = tables
+        .instance_to_use(&row.path)
         .map_or_else(|| Cell::text(INHERITED), ident);
     let status = match unbound_reason(binding.status) {
         Some(reason) => Cell::problem(reason, Problem::Failure),

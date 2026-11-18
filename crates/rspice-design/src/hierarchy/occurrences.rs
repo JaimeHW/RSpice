@@ -69,11 +69,114 @@ impl HierarchyOccurrences {
 
     /// The child of `node` named `folded`.
     pub(super) fn child(&self, node: usize, folded: &str) -> Option<usize> {
+        self.child_at(node, folded)
+            .map(|at| self.nodes[node].children[at].node)
+    }
+
+    /// Where among `node`'s children the one named `folded` is.
+    fn child_at(&self, node: usize, folded: &str) -> Option<usize> {
         let node = &self.nodes[node];
         node.by_name
             .binary_search_by(|&at| node.children[at].folded.as_str().cmp(folded))
             .ok()
-            .map(|at| node.children[node.by_name[at]].node)
+            .map(|at| node.by_name[at])
+    }
+
+    /// The design root's context, when the walk reached the root.
+    pub fn root(&self) -> Option<usize> {
+        (!self.nodes.is_empty()).then_some(0)
+    }
+
+    /// The context the occurrence at `path` resolved in, and its path as the
+    /// design spells it.
+    pub fn find(&self, path: &InstancePath) -> Option<(usize, InstancePath)> {
+        let mut node = self.root()?;
+        let mut spelled = InstancePath::root();
+        for segment in path.segments() {
+            let edge = &self.nodes[node].children[self.child_at(node, &fold(segment))?];
+            spelled = spelled.child(&edge.name).ok()?;
+            node = edge.node;
+        }
+        Some((node, spelled))
+    }
+
+    /// The instances an occurrence of `node` places, in the order its master
+    /// places them, each with the context it resolved in. A name placed
+    /// twice is the first placement of it, as a path finds it.
+    pub fn placed(&self, node: usize) -> impl Iterator<Item = (&str, usize)> + '_ {
+        self.nodes[node]
+            .children
+            .iter()
+            .enumerate()
+            .filter(move |(at, edge)| self.child_at(node, &edge.folded) == Some(*at))
+            .map(|(_, edge)| (edge.name.as_str(), edge.node))
+    }
+
+    /// The grouped row an occurrence of `node` counts in.
+    pub fn own_row(&self, node: usize) -> Option<usize> {
+        self.nodes[node].rows.first().copied()
+    }
+
+    /// How many occurrences resolved in `node`.
+    pub fn occurrences_of(&self, node: usize) -> usize {
+        self.nodes[node].multiplicity
+    }
+
+    /// How many occurrences the design places, the root among them.
+    pub fn len(&self) -> usize {
+        self.nodes.iter().fold(0_usize, |total, node| {
+            total.saturating_add(node.multiplicity)
+        })
+    }
+
+    /// Whether the walk reached no occurrence at all.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// Paths a configuration names that the design does not place, or a
+    /// refusal of the whole design at its root, each with its grouped row.
+    pub fn unplaced(&self) -> impl Iterator<Item = (usize, &InstancePath)> + '_ {
+        self.listed.iter().map(|(row, path)| (*row, path))
+    }
+
+    /// A hierarchy named by its occurrences' paths, each with its grouped
+    /// row and its own context, in the order the design places them: what a
+    /// test or an importer states. A path whose parent is not among them is
+    /// one the design does not place.
+    pub fn from_paths(paths: impl IntoIterator<Item = (usize, InstancePath)>) -> Self {
+        let mut graph = Self::default();
+        let mut at = std::collections::HashMap::new();
+        for (row, path) in paths {
+            if path.is_root() && graph.nodes.is_empty() {
+                graph.nodes.push(OccurrenceNode {
+                    rows: vec![row],
+                    ..OccurrenceNode::default()
+                });
+                at.insert(path.fold_key(), 0);
+                continue;
+            }
+            let parent = path
+                .parent()
+                .and_then(|parent| at.get(&parent.fold_key()).copied());
+            let (Some(parent), Some(name)) = (parent, path.segments().last()) else {
+                graph.listed.push((row, path));
+                continue;
+            };
+            let node = graph.nodes.len();
+            graph.nodes.push(OccurrenceNode {
+                rows: vec![row],
+                ..OccurrenceNode::default()
+            });
+            graph.nodes[parent].children.push(OccurrenceEdge {
+                name: name.clone(),
+                folded: fold(name),
+                node,
+            });
+            at.insert(path.fold_key(), node);
+        }
+        graph.seal();
+        graph
     }
 
     /// Order each node's children by name and count the occurrences that

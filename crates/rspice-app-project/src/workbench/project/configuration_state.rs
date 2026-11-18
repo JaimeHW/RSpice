@@ -142,8 +142,10 @@ pub struct ConfigurationPageState {
     /// The binding Copy binding put aside, for Paste binding.
     pub(crate) copied_binding: Option<CopiedBinding>,
     pub field_edit: Option<FieldEdit>,
-    /// Instances whose children the tree hides, by fold key.
-    collapsed: BTreeSet<String>,
+    /// Instances opened or closed against the tree's default, by fold key:
+    /// the design root is open, and an instance under it shows what it
+    /// places once it is opened, as the Hierarchy Editor's tree does.
+    toggled: BTreeSet<String>,
     /// Counts the changes to the edits, so the resolution is keyed on which
     /// edits it resolved without comparing them.
     draft_revision: u64,
@@ -364,13 +366,14 @@ impl ConfigurationPageState {
 
     /// Whether `path`'s children are hidden.
     pub(crate) fn is_collapsed(&self, path: &str) -> bool {
-        self.collapsed.contains(&fold(path))
+        let key = fold(path);
+        (key == "/") == self.toggled.contains(&key)
     }
 
     pub fn toggle_collapsed(&mut self, path: &str) {
         let key = fold(path);
-        if !self.collapsed.remove(&key) {
-            self.collapsed.insert(key);
+        if !self.toggled.remove(&key) {
+            self.toggled.insert(key);
         }
         self.resolution.visible = None;
     }
@@ -435,6 +438,7 @@ impl ConfigurationPageState {
             }),
             value: Some(Arc::clone(&value)),
             visible: None,
+            matching: None,
             builds: self.resolution.builds + 1,
         };
         value
@@ -446,35 +450,49 @@ impl ConfigurationPageState {
         self.resolution.value.clone()
     }
 
-    /// The tree rows not hidden under a collapsed instance, as indices into
-    /// [`ConfigurationResolution::instances`]. Kept until the tree or its
-    /// collapsed set changes, so a frame pays for the rows it draws.
-    pub fn visible_instances(&mut self) -> Arc<[usize]> {
+    /// The tree's rows down to the instances that are open: the design root,
+    /// and under each open instance what it places. Kept until the tree or
+    /// what is open changes, so a frame pays for the rows it draws, and there
+    /// are as many as are open, however many the design expands to.
+    pub fn visible_instances(&mut self) -> Arc<[InstanceRow]> {
         if let Some(visible) = &self.resolution.visible {
             return Arc::clone(visible);
         }
-        let rows = self
+        let visible: Arc<[InstanceRow]> = self
             .resolution
             .value
             .as_ref()
-            .map_or(&[][..], |value| value.instances.as_slice());
-        let mut visible = Vec::with_capacity(rows.len());
-        let mut hidden_below: Option<usize> = None;
-        for (index, row) in rows.iter().enumerate() {
-            if let Some(depth) = hidden_below {
-                if row.depth > depth {
-                    continue;
-                }
-                hidden_below = None;
-            }
-            visible.push(index);
-            if row.children > 0 && self.collapsed.contains(&fold(&row.path)) {
-                hidden_below = Some(row.depth);
-            }
-        }
-        let visible: Arc<[usize]> = visible.into();
+            .and_then(|value| value.tree())
+            .map(|tree| tree.walk(&|path| !self.is_collapsed(path), &|_| true))
+            .unwrap_or_default()
+            .into();
         self.resolution.visible = Some(Arc::clone(&visible));
         visible
+    }
+
+    /// Every instance `matches` keeps, opened or not, while a filter is set:
+    /// a search of the whole design, made once for each filter. Kept until
+    /// the tree or the filter changes.
+    pub(crate) fn matching_instances(
+        &mut self,
+        filter: &str,
+        matches: &dyn Fn(&InstanceRow) -> bool,
+    ) -> Arc<[InstanceRow]> {
+        if let Some((kept, rows)) = &self.resolution.matching
+            && kept == filter
+        {
+            return Arc::clone(rows);
+        }
+        let rows: Arc<[InstanceRow]> = self
+            .resolution
+            .value
+            .as_ref()
+            .and_then(|value| value.tree())
+            .map(|tree| tree.walk(&|_| true, matches))
+            .unwrap_or_default()
+            .into();
+        self.resolution.matching = Some((filter.to_owned(), Arc::clone(&rows)));
+        rows
     }
 
     /// How many times the candidate hierarchy was built.
@@ -491,7 +509,10 @@ struct ResolutionCache {
     candidates: Option<DesignProjectionCache>,
     key: Option<ResolutionKey>,
     value: Option<Arc<ConfigurationResolution>>,
-    visible: Option<Arc<[usize]>>,
+    visible: Option<Arc<[InstanceRow]>>,
+    /// The filter the Instances table was last searched with, and what it
+    /// found.
+    matching: Option<(String, Arc<[InstanceRow]>)>,
     builds: u64,
 }
 
@@ -513,8 +534,6 @@ struct ResolutionKey {
 pub struct ConfigurationResolution {
     /// The resolved hierarchy, or why the candidate cannot resolve one.
     pub(crate) hierarchy: Result<HierarchyResolution, String>,
-    /// Every expanded instance, parents before their children.
-    pub(crate) instances: Vec<InstanceRow>,
     /// Every distinct library/cell the expanded design instantiates, in
     /// library/cell order.
     pub(crate) cells: Vec<CellRow>,
@@ -545,10 +564,11 @@ pub(crate) struct ConfigurationTables {
     pub(crate) addable_stops: Vec<String>,
     /// The view list a cell without a binding inherits, in the page's words.
     pub(crate) inherited: String,
-    /// Per tree row: the views its own instance binding names, in order.
-    pub(crate) instance_to_use: Vec<Option<String>>,
-    /// Per tree row: the key the Instances table finds it by.
-    pub(crate) instance_keys: Vec<u64>,
+    /// The views each exact path's own instance binding names, by the
+    /// path's fold key: an instance's view to use.
+    instance_views: HashMap<String, String>,
+    /// How many rows the tree holds, opened or not.
+    pub(crate) instance_rows: usize,
     /// The pattern bindings of the shown definition, in its order.
     pub(crate) patterns: Vec<PatternRow>,
     /// Per hierarchy binding: its cell's view-to-use choices, an index into
@@ -565,8 +585,6 @@ pub(crate) struct ConfigurationTables {
     pub(crate) total_instances: usize,
     pub(crate) unbound_instances: usize,
     pub(crate) fallback_instances: usize,
-    /// Tree row by fold key.
-    index: HashMap<String, usize>,
 }
 
 /// One pattern binding, as the Instances table states it.
@@ -612,17 +630,183 @@ pub(crate) struct CellRow {
     pub(crate) views_found: Vec<String>,
 }
 
-/// One expanded instance in the tree.
+/// One instance in the tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct InstanceRow {
+pub struct InstanceRow {
     /// Canonical instance path; the design root is `/`.
     pub(crate) path: String,
-    /// Segments below the root.
+    /// What the tree calls it under its parent: its instance name, or its
+    /// whole path when the design does not place its parent.
+    pub(crate) name: String,
+    /// How far under the root the tree shows it.
     pub(crate) depth: usize,
     /// Index of its grouped binding in the hierarchy's bindings.
     pub(crate) binding: usize,
     /// How many rows sit directly under it.
     pub(crate) children: usize,
+}
+
+impl InstanceRow {
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+}
+
+/// The resolved hierarchy as the tree the Instances table shows: each
+/// occurrence under the one that places it, and each configured path the
+/// design does not place under its parent, or under the root when the design
+/// does not place that either. Rows are made for what is walked, so the
+/// tree costs what is open, not what the design expands to.
+pub(crate) struct InstanceTree<'a> {
+    hierarchy: &'a HierarchyResolution,
+    /// Configured paths the design does not place, once each, in the order
+    /// the hierarchy reports them.
+    unplaced: Vec<Unplaced>,
+}
+
+/// A configured path the design does not place, and where the tree shows it.
+struct Unplaced {
+    path: InstancePath,
+    /// The fold key of the row it shows under.
+    parent: String,
+    depth: usize,
+    binding: usize,
+}
+
+impl<'a> InstanceTree<'a> {
+    fn new(hierarchy: &'a HierarchyResolution) -> Self {
+        let graph = &hierarchy.occurrences;
+        let mut unplaced: Vec<Unplaced> = Vec::new();
+        for (binding, path) in graph.unplaced() {
+            if graph.find(path).is_some()
+                || unplaced
+                    .iter()
+                    .any(|shown| shown.path.fold_key() == path.fold_key())
+            {
+                continue;
+            }
+            let placed_parent = path.parent().filter(|parent| graph.find(parent).is_some());
+            let (parent, depth) = match (&placed_parent, graph.root()) {
+                (Some(parent), _) => (parent.fold_key(), parent.depth() + 1),
+                (None, Some(_)) => ("/".to_owned(), 1),
+                (None, None) => (String::new(), 0),
+            };
+            unplaced.push(Unplaced {
+                path: path.clone(),
+                parent,
+                depth,
+                binding,
+            });
+        }
+        Self {
+            hierarchy,
+            unplaced,
+        }
+    }
+
+    /// How many rows the tree holds, opened or not.
+    fn len(&self) -> usize {
+        self.hierarchy
+            .occurrences
+            .len()
+            .saturating_add(self.unplaced.len())
+    }
+
+    fn unplaced_under<'s>(&'s self, path: &InstancePath) -> impl Iterator<Item = &'s Unplaced> {
+        let key = path.fold_key();
+        self.unplaced
+            .iter()
+            .filter(move |shown| shown.parent == key)
+    }
+
+    fn placed_row(&self, node: usize, path: &InstancePath) -> InstanceRow {
+        let graph = &self.hierarchy.occurrences;
+        InstanceRow {
+            path: path.to_string(),
+            name: path.segments().last().cloned().unwrap_or_default(),
+            depth: path.depth(),
+            binding: graph.own_row(node).unwrap_or_default(),
+            children: graph.placed(node).count() + self.unplaced_under(path).count(),
+        }
+    }
+
+    fn unplaced_row(shown: &Unplaced) -> InstanceRow {
+        InstanceRow {
+            path: shown.path.to_string(),
+            name: if shown.path.depth() == shown.depth {
+                shown.path.segments().last().cloned().unwrap_or_default()
+            } else {
+                shown.path.to_string()
+            },
+            depth: shown.depth,
+            binding: shown.binding,
+            children: 0,
+        }
+    }
+
+    /// The rows from the root down, each under its parent, entering an
+    /// instance only when `open` says so, and keeping the rows `keep` keeps.
+    pub(crate) fn walk(
+        &self,
+        open: &dyn Fn(&str) -> bool,
+        keep: &dyn Fn(&InstanceRow) -> bool,
+    ) -> Vec<InstanceRow> {
+        let graph = &self.hierarchy.occurrences;
+        let mut rows = Vec::new();
+        let Some(root) = graph.root() else {
+            rows.extend(
+                self.unplaced
+                    .iter()
+                    .map(Self::unplaced_row)
+                    .filter(|row| keep(row)),
+            );
+            return rows;
+        };
+        enum Next<'u> {
+            Placed(usize, InstancePath),
+            Unplaced(&'u Unplaced),
+        }
+        let mut stack = vec![Next::Placed(root, InstancePath::root())];
+        while let Some(next) = stack.pop() {
+            let (node, path) = match next {
+                Next::Placed(node, path) => (node, path),
+                Next::Unplaced(shown) => {
+                    let row = Self::unplaced_row(shown);
+                    if keep(&row) {
+                        rows.push(row);
+                    }
+                    continue;
+                }
+            };
+            let row = self.placed_row(node, &path);
+            let enter = row.children > 0 && open(&row.path);
+            if keep(&row) {
+                rows.push(row);
+            }
+            if !enter {
+                continue;
+            }
+            let mut under = graph
+                .placed(node)
+                .filter_map(|(name, child)| Some(Next::Placed(child, path.child(name).ok()?)))
+                .collect::<Vec<_>>();
+            under.extend(self.unplaced_under(&path).map(Next::Unplaced));
+            stack.extend(under.into_iter().rev());
+        }
+        rows
+    }
+
+    /// The row for `path`, opened or not.
+    pub(crate) fn row_at(&self, path: &str) -> Option<InstanceRow> {
+        let parsed = InstancePath::parse(path).ok()?;
+        if let Some((node, spelled)) = self.hierarchy.occurrences.find(&parsed) {
+            return Some(self.placed_row(node, &spelled));
+        }
+        self.unplaced
+            .iter()
+            .find(|shown| shown.path.fold_key() == parsed.fold_key())
+            .map(Self::unplaced_row)
+    }
 }
 
 /// What a resolution reads: the design as it stands, and where candidate
@@ -667,7 +851,6 @@ impl ConfigurationResolution {
                 .map(|projection| projection.hierarchy_resolution().clone())
                 .map_err(|error| error.to_string())
         });
-        let instances = hierarchy.as_ref().map(instance_rows).unwrap_or_default();
         let cells = hierarchy.as_ref().map(cell_rows).unwrap_or_default();
         let top_cells = top_cell_choices(workspace, libraries);
         let view_names = project_view_names(libraries);
@@ -687,7 +870,6 @@ impl ConfigurationResolution {
         };
         let tables = ConfigurationTables::build(TableInputs {
             hierarchy: hierarchy.as_ref().ok(),
-            instances: &instances,
             cells: &cells,
             top_cells,
             view_names: &view_names,
@@ -697,26 +879,26 @@ impl ConfigurationResolution {
         });
         Self {
             hierarchy,
-            instances,
             cells,
             view_names,
             tables,
         }
     }
 
-    /// The tree row for `path`.
-    pub(crate) fn instance(&self, path: &str) -> Option<&InstanceRow> {
-        self.tables
-            .index
-            .get(&fold(path))
-            .map(|index| &self.instances[*index])
+    /// The instance tree of the resolved hierarchy.
+    pub(crate) fn tree(&self) -> Option<InstanceTree<'_>> {
+        self.hierarchy.as_ref().ok().map(InstanceTree::new)
+    }
+
+    /// The tree row for `path`, opened or not.
+    pub(crate) fn instance(&self, path: &str) -> Option<InstanceRow> {
+        self.tree()?.row_at(path)
     }
 }
 
 /// What the tables are built from.
 struct TableInputs<'a> {
     hierarchy: Option<&'a HierarchyResolution>,
-    instances: &'a [InstanceRow],
     cells: &'a [CellRow],
     top_cells: Vec<CellViewRef>,
     view_names: &'a [String],
@@ -730,7 +912,6 @@ impl ConfigurationTables {
         count_scan();
         let TableInputs {
             hierarchy,
-            instances,
             cells,
             top_cells,
             view_names,
@@ -738,17 +919,20 @@ impl ConfigurationTables {
             definition,
             dirty,
         } = inputs;
-        let index = instances
-            .iter()
-            .enumerate()
-            .map(|(row, instance)| (fold(&instance.path), row))
-            .collect::<HashMap<_, _>>();
+        let tree = hierarchy.map(InstanceTree::new);
 
         let mut top_cell_choices = top_cells;
-        let mut dut_choices = instances
-            .iter()
-            .filter(|row| row.depth <= 1)
-            .map(|row| row.path.clone())
+        // The root and what it places, whether a row shows them or not.
+        let mut dut_choices = tree
+            .as_ref()
+            .map(|tree| {
+                tree.walk(&|path| fold(path) == "/", &|row| {
+                    InstancePath::parse(&row.path).is_ok_and(|path| path.depth() <= 1)
+                })
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row| row.path)
             .collect::<Vec<_>>();
         let mut dut_in_design = false;
         let mut addable_views = Vec::new();
@@ -763,7 +947,9 @@ impl ConfigurationTables {
             {
                 dut_choices.insert(0, definition.dut_path.clone());
             }
-            dut_in_design = index.contains_key(&fold(&definition.dut_path));
+            dut_in_design = tree
+                .as_ref()
+                .is_some_and(|tree| tree.row_at(&definition.dut_path).is_some());
             let listed = |list: &[String], name: &str| {
                 list.iter().any(|listed| listed.eq_ignore_ascii_case(name))
             };
@@ -794,11 +980,8 @@ impl ConfigurationTables {
             |definition| definition.executable_view_policy.join(", then "),
         );
 
-        let instance_to_use = instance_bindings(instances, definition);
-        let instance_keys = instances
-            .iter()
-            .map(|instance| row_key("instance", &fold(&instance.path)))
-            .collect();
+        let instance_views = instance_views(definition);
+        let instance_rows = tree.as_ref().map_or(0, InstanceTree::len);
         let patterns = definition
             .into_iter()
             .flat_map(|definition| &definition.overrides)
@@ -920,8 +1103,8 @@ impl ConfigurationTables {
             addable_views,
             addable_stops,
             inherited,
-            instance_to_use,
-            instance_keys,
+            instance_views,
+            instance_rows,
             patterns,
             binding_options,
             view_options,
@@ -930,7 +1113,6 @@ impl ConfigurationTables {
             total_instances,
             unbound_instances,
             fallback_instances,
-            index,
         }
     }
 }
@@ -939,10 +1121,7 @@ impl ConfigurationTables {
     /// The key the tables find `row` by, wherever it is shown.
     pub(crate) fn row_key(&self, row: &ConfigurationRow) -> Option<u64> {
         match row {
-            ConfigurationRow::Instance(path) => self
-                .index
-                .get(&fold(path))
-                .map(|index| self.instance_keys[*index]),
+            ConfigurationRow::Instance(path) => Some(instance_key(path)),
             ConfigurationRow::Pattern(pattern) => Some(pattern_key(pattern)),
             ConfigurationRow::Cell { library, cell } => Some(cell_key(library, cell)),
         }
@@ -957,6 +1136,19 @@ fn row_key(kind: &str, name: &str) -> u64 {
     kind.hash(&mut hasher);
     name.to_ascii_lowercase().hash(&mut hasher);
     hasher.finish()
+}
+
+/// The key the Instances table finds the instance at `path` by.
+pub(crate) fn instance_key(path: &str) -> u64 {
+    row_key("instance", &fold(path))
+}
+
+impl ConfigurationTables {
+    /// The views the instance at `path`'s own binding names, in the page's
+    /// words, when it names any.
+    pub(crate) fn instance_to_use(&self, path: &str) -> Option<&str> {
+        self.instance_views.get(&fold(path)).map(String::as_str)
+    }
 }
 
 fn pattern_key(pattern: &str) -> u64 {
@@ -982,30 +1174,25 @@ fn cell_to_use(
         )
 }
 
-/// For each tree row, the views its own instance binding names, if it names
-/// any: every binding parsed once, every path once.
-fn instance_bindings(
-    instances: &[InstanceRow],
-    definition: Option<&ConfigurationSetDefinition>,
-) -> Vec<Option<String>> {
+/// The views each exact path's own instance binding names, by the path's
+/// fold key, for the paths whose binding names any: every binding parsed
+/// once.
+fn instance_views(definition: Option<&ConfigurationSetDefinition>) -> HashMap<String, String> {
     let Some(definition) = definition else {
-        return vec![None; instances.len()];
+        return HashMap::new();
     };
     // The first exact binding of a path is its own, as `instance_binding`
     // finds it.
     let mut exact = HashMap::new();
-    for (index, binding) in definition.overrides.iter().enumerate() {
+    for binding in &definition.overrides {
         if let Ok(path) = InstancePath::parse(&binding.instance_path) {
-            exact.entry(path.fold_key()).or_insert(index);
+            exact.entry(path.fold_key()).or_insert(binding);
         }
     }
-    instances
-        .iter()
-        .map(|row| {
-            let path = InstancePath::parse(&row.path).ok()?;
-            let views = &definition.overrides[*exact.get(&path.fold_key())?].executable_views;
-            (!views.is_empty()).then(|| view_list_label(views))
-        })
+    exact
+        .into_iter()
+        .filter(|(_, binding)| !binding.executable_views.is_empty())
+        .map(|(key, binding)| (key, view_list_label(&binding.executable_views)))
         .collect()
 }
 
@@ -1036,56 +1223,6 @@ fn candidate_catalog(
         }
     }
     Ok(candidate)
-}
-
-/// The grouped bindings expanded to one row per instance, ordered so every
-/// instance follows its parent.
-fn instance_rows(hierarchy: &HierarchyResolution) -> Vec<InstanceRow> {
-    let mut rows = hierarchy
-        .bindings
-        .iter()
-        .enumerate()
-        .flat_map(|(binding, row)| {
-            row.occurrences.iter().map(move |parsed| {
-                let order = parsed
-                    .segments()
-                    .iter()
-                    .map(|segment| segment.to_ascii_lowercase())
-                    .collect::<Vec<_>>();
-                (order, parsed.to_string(), binding)
-            })
-        })
-        .collect::<Vec<_>>();
-    rows.sort();
-    rows.dedup_by(|right, left| right.0 == left.0);
-    let mut instances = rows
-        .iter()
-        .map(|(order, path, binding)| InstanceRow {
-            path: path.clone(),
-            depth: order.len(),
-            binding: *binding,
-            children: 0,
-        })
-        .collect::<Vec<_>>();
-    // A parent is the nearest earlier row one level up; the order above puts
-    // it there.
-    let mut parents: Vec<usize> = Vec::new();
-    for index in 0..instances.len() {
-        let depth = instances[index].depth;
-        while parents
-            .last()
-            .is_some_and(|parent| instances[*parent].depth >= depth)
-        {
-            parents.pop();
-        }
-        if let Some(parent) = parents.last()
-            && rows[index].0.starts_with(&rows[*parent].0)
-        {
-            instances[*parent].children += 1;
-        }
-        parents.push(index);
-    }
-    instances
 }
 
 /// The grouped bindings regrouped by the library/cell the design places,

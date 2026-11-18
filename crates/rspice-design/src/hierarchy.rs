@@ -565,6 +565,9 @@ pub struct ResolvedHierarchyBinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HierarchyResolution {
     pub bindings: Vec<ResolvedHierarchyBinding>,
+    /// Every occurrence as the graph of the contexts it resolved in: the
+    /// tree a page opens an instance of at a time.
+    pub occurrences: Arc<HierarchyOccurrences>,
     pub total_instances: usize,
     pub resolved_instances: usize,
     pub configuration_id: Option<ConfigurationSetId>,
@@ -785,6 +788,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             });
         let resolution = HierarchyResolution {
             bindings: self.rows,
+            occurrences: Arc::clone(&graph),
             total_instances,
             resolved_instances,
             configuration_id: active_configuration.map(|configuration| configuration.id()),
