@@ -11,12 +11,39 @@ use std::sync::Arc;
 use super::derived::derived;
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
-use crate::ui::widgets::{field_label, name_control, text_field};
+use crate::ui::widgets::{CommandForm, FieldLine, FormRows, TableColumn};
 use crate::workbench::app::dialogs::project::{
     TechnologyAttachment, TechnologyChange, TechnologyChangeInFlight,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::project::commands::ProjectRequest;
+
+/// What attaching does, beside the buttons once nothing is left to choose.
+const TECHNOLOGY_CONSEQUENCE: &str = "Attaching a technology changes how this project simulates. A recovery checkpoint is saved first.";
+/// The rows of the attach form, which set its label column.
+const TECHNOLOGY_ATTACH_LABELS: [&str; 14] = [
+    "Model library",
+    "PDK package",
+    "Changed by",
+    "Approved by",
+    "Reason (optional)",
+    "Devices",
+    "Layers",
+    "Corners",
+    "Source closure",
+    "Package identity",
+    "Publisher",
+    "Revision diff",
+    "Reviewed diff",
+    "Migration copy",
+];
+/// The rows of the detach form, which set its label column.
+const TECHNOLOGY_DETACH_LABELS: [&str; 4] = [
+    "Technology",
+    "Changed by",
+    "Approved by",
+    "Reason (optional)",
+];
 
 #[derive(Debug, Clone)]
 pub(super) struct TechnologyCandidate {
@@ -477,225 +504,199 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     );
 
     let mut create_migration_copy = false;
-    let dialog = Dialog::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
-    .description(
-        "Choose a model library and one validated PDK revision. Attaching verifies both, writes a whole-project checkpoint and reads it back, then records the binding as a new project revision.",
-    )
-    .size(DialogSize::Transaction)
-    .ghost("Cancel")
-    .primary_enabled(primary.enabled);
-    let choice = technology_change_hint(dialog, checkpoint_pending, validation_error.as_deref())
-    .show(ctx, |ui| {
-        technology_warning(ui);
-        technology_dialog_label(ui, "Model library");
-        if let Some(index) = select(
-            ui,
-            "project-model-technology-library",
-            "Model library",
-            selected_label,
-            &options,
-            ui.available_width(),
-        ) {
-            cx.state.technology_attachment.selected_library =
-                Some(candidates[index].binding.model_library().to_owned());
-            cx.state.technology_attachment.validation_error = None;
-        }
+    let missing = technology_missing_inputs(
+        selected_index.is_some(),
+        selected_package_index.is_some(),
+        selected_binding.is_some(),
+        authority_ready,
+    );
+    let still_to_choose =
+        (!missing.is_empty()).then(|| format!("Still to choose: {}.", missing.join(", ")));
+    let refusal = validation_error.clone().or_else(|| {
+        selected_binding_error
+            .as_deref()
+            .map(|error| format!("Selected PDK cannot be attached: {error}"))
+    });
+    // One line beside the buttons: the checkpoint being written, else why
+    // the attachment is refused, else what is still to choose, else what
+    // attaching does.
+    let (status, consequence) = if checkpoint_pending {
+        (Ok(Some(TECHNOLOGY_CHECKPOINT_PENDING)), None)
+    } else if let Some(refusal) = refusal.as_deref() {
+        (Err(refusal), None)
+    } else if let Some(still) = still_to_choose.as_deref() {
+        (Ok(Some(still)), None)
+    } else {
+        (Ok(None), Some(TECHNOLOGY_CONSEQUENCE))
+    };
+    let choice = CommandForm::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
+        .describe(
+            "Choose a model library and one validated PDK revision. Attaching verifies both, writes a whole-project checkpoint and reads it back, then records the binding as a new project revision.",
+        )
+        .reading_column()
+        .fit_labels(ctx, &TECHNOLOGY_ATTACH_LABELS)
+        .primary_enabled(primary.enabled)
+        .primary_on_enter(false)
+        .fields_enabled(!checkpoint_pending)
+        .consequence(consequence)
+        .status(status)
+        .show(ctx, |rows| {
+            if let Some(index) =
+                rows.select("Model library", "project-model-technology-library", selected_label, &options)
+            {
+                cx.state.technology_attachment.selected_library =
+                    Some(candidates[index].binding.model_library().to_owned());
+                cx.state.technology_attachment.validation_error = None;
+            }
+            if let Some(index) =
+                rows.select("PDK package", "project-pdk-package", selected_package_label, &package_options)
+            {
+                cx.state.technology_attachment.selected_pdk_package =
+                    Some(pdk_package_key(&packages[index]));
+                cx.state.technology_attachment.migration_reviewed = false;
+                cx.state.technology_attachment.validation_error = None;
+            }
+            technology_change_rows(rows, &mut cx.state.technology_attachment);
 
-        ui.add_space(10.0);
-        technology_dialog_label(ui, "PDK package");
-        if let Some(index) = select(
-            ui,
-            "project-pdk-package",
-            "Validated PDK package",
-            selected_package_label,
-            &package_options,
-            ui.available_width(),
-        ) {
-            cx.state
-                .technology_attachment
-                .selected_pdk_package = Some(pdk_package_key(&packages[index]));
-            cx.state.technology_attachment.migration_reviewed = false;
-            cx.state.technology_attachment.validation_error = None;
-        }
-
-        ui.add_space(10.0);
-        technology_change_fields(ui, &mut cx.state.technology_attachment, !checkpoint_pending);
-
-        ui.add_space(10.0);
-        technology_dialog_label(ui, "Technology mapping");
-        if let Some(candidate) = selected_index.and_then(|index| candidates.get(index)) {
-            property_card(ui, "Resolved model library", |ui| {
-                property_row(
-                    ui,
+            rows.section("Technology mapping");
+            if let Some(candidate) = selected_index.and_then(|index| candidates.get(index)) {
+                rows.value(
                     "Devices",
                     &format!("{} parsed models", candidate.binding.model_count()),
                 );
-                property_row(
-                    ui,
+                rows.value(
                     "Layers",
-                    &selected_package_index
-                        .and_then(|index| packages.get(index))
+                    &selected_package
                         .map(|package| {
-                            format!(
-                                "{} PDK technology layers",
-                                package.manifest().layers.len()
-                            )
+                            format!("{} PDK technology layers", package.manifest().layers.len())
                         })
                         .unwrap_or_else(|| "No PDK layer catalog selected".to_owned()),
                 );
-                property_row(
-                    ui,
-                    "Corners",
-                    &format!("{} process sections", candidate.corner_count),
-                );
-                property_row(
-                    ui,
+                rows.value("Corners", &format!("{} process sections", candidate.corner_count));
+                rows.value(
                     "Source closure",
                     &format!(
                         "{} SHA-256 pinned files",
                         candidate.binding.source_closure().len()
                     ),
                 );
-                if let Some(package) =
-                    selected_package_index.and_then(|index| packages.get(index))
-                {
-                    property_row(
-                        ui,
+                if let Some(package) = selected_package {
+                    rows.value(
                         "Package identity",
                         &format!(
-                            "{} {} · manifest {} · archive {}",
+                            "{} {} \u{b7} manifest {} \u{b7} archive {}",
                             package.manifest().package_id,
                             package.manifest().revision,
                             short_identity(&package.manifest_digest().to_string()),
                             short_identity(&package.archive_digest().to_string())
                         ),
                     );
-                    property_row(ui, "Publisher", &package.manifest().publisher_id);
+                    rows.value("Publisher", &package.manifest().publisher_id);
                 }
-            });
-        } else {
-            technology_unavailable_message(ui);
-        }
+            } else {
+                rows.derived(
+                    "No model library can be attached. Configure and parse at least one external model library with a root source file and one device model.",
+                );
+            }
 
-        ui.add_space(10.0);
-        technology_dialog_label(ui, "Migration mode");
-        match migration_preview.as_ref() {
-            Ok(Some(diff)) => {
-                property_row(
-                    ui,
-                    "Mode",
-                    "Revision replacement · checkpointed · editable views unchanged",
-                );
-                property_row(
-                    ui,
-                    "Revision diff",
-                    &format!(
-                        "{} breaking · {} review · {} informational",
-                        diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking),
-                        diff.count(
-                            crate::state::pdk_config::PdkTechnologyDiffImpact::ReviewRequired,
-                        ),
-                        diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Informational),
-                    ),
-                );
-                if let Ok(Some(evidence)) = migration_evidence.as_ref() {
-                    property_row(
-                        ui,
-                        "Reviewed diff",
+            rows.section("Migration");
+            match migration_preview.as_ref() {
+                Ok(Some(diff)) => {
+                    rows.value(
+                        "Mode",
+                        "Revision replacement \u{b7} checkpointed \u{b7} editable views unchanged",
+                    );
+                    rows.value(
+                        "Revision diff",
                         &format!(
-                            "diff {} · {} entries",
-                            short_identity(&evidence.diff_digest().to_string()),
-                            evidence.entry_count()
+                            "{} breaking \u{b7} {} review \u{b7} {} informational",
+                            diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking),
+                            diff.count(
+                                crate::state::pdk_config::PdkTechnologyDiffImpact::ReviewRequired,
+                            ),
+                            diff.count(
+                                crate::state::pdk_config::PdkTechnologyDiffImpact::Informational,
+                            ),
                         ),
                     );
-                }
-                ScrollArea::vertical()
-                    .id_salt("project-technology-migration-preview")
-                    .auto_shrink([false, true])
-                    .max_height(150.0)
-                    .show(ui, |ui| {
-                        for entry in &diff.entries {
-                            ui.monospace(format!(
-                                "{} · {} · {}",
-                                diff_impact_label(entry.impact),
-                                diff_area_label(entry.area),
-                                entry.identity
-                            ));
-                        }
-                    });
-                if let Some(error) = migration_gate_error.as_deref() {
-                    technology_error(ui, error);
-                    if Button::new("Save independent migration copy…")
-                        .enabled(!checkpoint_pending)
-                        .accessible_label(
-                            "Save an independent project copy for explicit technology remapping",
-                        )
-                        .show(ui)
-                        .clicked()
-                    {
-                        create_migration_copy = true;
+                    if let Ok(Some(evidence)) = migration_evidence.as_ref() {
+                        rows.value(
+                            "Reviewed diff",
+                            &format!(
+                                "diff {} \u{b7} {} entries",
+                                short_identity(&evidence.diff_digest().to_string()),
+                                evidence.entry_count()
+                            ),
+                        );
                     }
-                    muted(
-                        ui,
-                        "The copy keeps the current PDK pin and starts a new project audit history. Open that copy, remap affected objects explicitly, validate it, then review the replacement again. The current project remains unchanged.",
+                    let entries = diff
+                        .entries
+                        .iter()
+                        .map(|entry| {
+                            vec![
+                                diff_impact_label(entry.impact).to_owned(),
+                                diff_area_label(entry.area).to_owned(),
+                                entry.identity.to_string(),
+                            ]
+                        })
+                        .collect::<Vec<_>>();
+                    rows.table(
+                        &[
+                            TableColumn { header: "Impact", mono: false },
+                            TableColumn { header: "Area", mono: false },
+                            TableColumn { header: "Identity", mono: true },
+                        ],
+                        &entries,
                     );
-                } else {
-                    ui.add_enabled(
-                        !checkpoint_pending,
-                        egui::Checkbox::new(
-                            &mut cx.state.technology_attachment.migration_reviewed,
-                            "I reviewed the PDK revision diff and approve this non-breaking replacement",
-                        ),
+                    if migration_gate_error.is_some() {
+                        if rows.value_action(
+                            "Migration copy",
+                            "Keeps the current PDK pin",
+                            "Save copy\u{2026}",
+                        ) {
+                            create_migration_copy = true;
+                        }
+                        rows.derived(
+                            "The copy keeps the current PDK pin and starts a new project audit history. Open that copy, remap affected objects explicitly, validate it, then review the replacement again. The current project remains unchanged.",
+                        );
+                    } else {
+                        rows.checks(
+                            "Review",
+                            &mut [(
+                                "I reviewed the PDK revision diff and approve this non-breaking replacement",
+                                &mut cx.state.technology_attachment.migration_reviewed,
+                            )],
+                        );
+                        rows.derived(
+                            "The project's audit record keeps the baseline and candidate revisions, archive identities, diff digest, impact counts, and recovery checkpoint.",
+                        );
+                    }
+                }
+                Ok(None) => {
+                    rows.value("Mode", "Attach only \u{b7} editable views unchanged");
+                    rows.derived(
+                        "Initial attachment changes the project execution contract only. Editable schematic and physical views are never migrated implicitly.",
                     );
-                    muted(
-                        ui,
-                        "The project's audit record keeps the baseline and candidate revisions, archive identities, diff digest, impact counts, and recovery checkpoint.",
+                }
+                Err(error) => rows.field_line(
+                    None,
+                    FieldLine::Error(&format!("Migration preview failed: {error}")),
+                ),
+            }
+            if !catalog.diagnostics.is_empty() {
+                rows.section("Library validation");
+                for diagnostic in &catalog.diagnostics {
+                    rows.field_line(
+                        None,
+                        FieldLine::Error(&format!(
+                            "Model library '{}' cannot be attached: {}",
+                            diagnostic.library_name, diagnostic.reason
+                        )),
                     );
                 }
             }
-            Ok(None) => {
-                property_row(ui, "Mode", "Attach only · editable views unchanged");
-                muted(
-                    ui,
-                    "Initial attachment changes the project execution contract only. Editable schematic and physical views are never migrated implicitly.",
-                );
-            }
-            Err(error) => technology_error(
-                ui,
-                &format!("Migration preview failed: {error}"),
-            ),
-        }
-
-        ui.add_space(10.0);
-        technology_binding_gates(
-            ui,
-            selected_index.is_some(),
-            selected_package_index.is_some(),
-            selected_binding.is_some(),
-            authority_ready,
-        );
-        if !catalog.diagnostics.is_empty() {
-            ui.add_space(10.0);
-            technology_dialog_label(ui, "Library validation");
-            for diagnostic in &catalog.diagnostics {
-                technology_error(
-                    ui,
-                    &format!(
-                        "Model library '{}' cannot be attached: {}",
-                        diagnostic.library_name, diagnostic.reason
-                    ),
-                );
-                ui.add_space(6.0);
-            }
-        }
-        if let Some(error) = selected_binding_error.as_deref() {
-            ui.add_space(8.0);
-            technology_error(
-                ui,
-                &format!("Selected PDK cannot be attached: {error}"),
-            );
-        }
-    });
+            None
+        });
 
     if create_migration_copy {
         cx.state.technology_attachment.close();
@@ -771,38 +772,36 @@ fn show_technology_detach_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>)
         .model
         .technology_inputs()
         .technology_demand()
-        .block_reason();
+        .block_reason()
+        .map(|demand| format!("{demand} Those runs are refused until another is attached."));
     let ready = label.is_some()
         && !pending
         && technology_authority_fields_ready(&cx.state.technology_attachment);
     let validation_error = cx.state.technology_attachment.validation_error.clone();
-    let dialog = Dialog::new(TECHNOLOGY_DETACH_TITLE, TECHNOLOGY_DETACH_PRIMARY)
-        .description(
+    let status = if pending {
+        Ok(Some(TECHNOLOGY_CHECKPOINT_PENDING))
+    } else {
+        validation_error.as_deref().map_or(Ok(None), Err)
+    };
+    let choice = CommandForm::new(TECHNOLOGY_DETACH_TITLE, TECHNOLOGY_DETACH_PRIMARY)
+        .describe(
             "The project stops simulating with this technology. A recovery checkpoint is saved first.",
         )
-        .size(DialogSize::Transaction)
-        .ghost("Cancel")
+        .fit_labels(ctx, &TECHNOLOGY_DETACH_LABELS)
         .primary_enabled(ready)
-        .destructive();
-    let choice =
-        technology_change_hint(dialog, pending, validation_error.as_deref()).show(ctx, |ui| {
-            property_row(
-                ui,
+        .primary_on_enter(false)
+        .fields_enabled(!pending)
+        .consequence(demand.as_deref().filter(|_| !pending))
+        .status(status)
+        .show(ctx, |rows| {
+            rows.value(
                 "Technology",
                 label
                     .as_deref()
                     .unwrap_or(crate::workbench::project::dependency_status::UNSET),
             );
-            if let Some(demand) = demand.as_deref() {
-                ui.add_space(8.0);
-                problem_line(
-                    ui,
-                    Problem::Warning,
-                    &format!("{demand} Those runs are refused until another is attached."),
-                );
-            }
-            ui.add_space(10.0);
-            technology_change_fields(ui, &mut cx.state.technology_attachment, !pending);
+            technology_change_rows(rows, &mut cx.state.technology_attachment);
+            None
         });
     match choice {
         DialogChoice::Primary => {
@@ -819,25 +818,6 @@ fn show_technology_detach_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>)
             }
         }
         DialogChoice::Secondary | DialogChoice::None => {}
-    }
-}
-
-/// A technology dialog's one line beside its buttons, where it stays in view
-/// however far the body is scrolled: the checkpoint being written, else why
-/// the last attempt was refused.
-pub(super) fn technology_change_hint<'a>(
-    dialog: Dialog<'a>,
-    pending: bool,
-    error: Option<&str>,
-) -> Dialog<'a> {
-    if pending {
-        dialog.hint(TECHNOLOGY_CHECKPOINT_PENDING)
-    } else if let Some(error) = error {
-        dialog
-            .hint(error)
-            .hint_tone(crate::ui::widgets::DialogHintTone::Error)
-    } else {
-        dialog
     }
 }
 
@@ -1325,40 +1305,6 @@ fn validate_migration_evidence_for_binding(
     Ok(())
 }
 
-/// What attaching a technology does to the project, before it is done.
-///
-/// The mark carries the severity; the sentence says the consequence and the
-/// safeguard. It used to be three clauses of implementation — which bytes are
-/// authenticated, what is read back, what is not migrated — behind a warning
-/// wash that made a routine dialog look like a failure.
-pub(super) fn technology_warning(ui: &mut Ui) {
-    problem_line(
-        ui,
-        Problem::Warning,
-        "Attaching a technology changes how this project simulates. A recovery checkpoint is saved first.",
-    );
-    ui.add_space(10.0);
-}
-
-pub(super) fn technology_dialog_label(ui: &mut Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
-    );
-    ui.add_space(3.0);
-}
-
-pub(super) fn technology_unavailable_message(ui: &mut Ui) {
-    property_card(ui, "No attachable model technology", |ui| {
-        muted(
-            ui,
-            "Configure and parse at least one external model library with a root source file and one device model.",
-        );
-    });
-}
-
 /// What the reader still has to supply before this attachment can commit.
 ///
 /// Seven dotted rows stood here: five internal checks the dialog reported
@@ -1390,69 +1336,44 @@ pub(super) fn technology_missing_inputs(
     missing
 }
 
-/// [`technology_missing_inputs`] as the one line the dialog paints.
-pub(super) fn technology_binding_gates(
-    ui: &mut Ui,
-    has_model_candidate: bool,
-    has_pdk_package: bool,
-    contract_ready: bool,
-    authority_ready: bool,
-) {
-    let missing = technology_missing_inputs(
-        has_model_candidate,
-        has_pdk_package,
-        contract_ready,
-        authority_ready,
-    );
-    if missing.is_empty() {
-        return;
-    }
-    muted(ui, &format!("Still to choose: {}.", missing.join(", ")));
-}
-
-/// Who makes a technology change, who approves it and why, each a labelled
-/// field: the first two start on the person at this application, and the
+/// Who makes a technology change, who approves it and why, each a row of
+/// the form: the first two start on the person at this application, and the
 /// reason may be left empty. All three go into the project's technology
 /// history with the checkpoint.
-pub(super) fn technology_change_fields(
-    ui: &mut Ui,
+pub(super) fn technology_change_rows(
+    rows: &mut FormRows<'_>,
     dialog: &mut crate::workbench::app::TechnologyAttachmentDialogState,
-    enabled: bool,
 ) {
-    let width = ui.available_width();
-    for (label, value, limit) in [
-        ("Changed by", &mut dialog.actor_id, 240),
-        ("Approved by", &mut dialog.authority_id, 240),
+    for (label, value) in [
+        ("Changed by", &mut dialog.actor_id),
+        ("Approved by", &mut dialog.authority_id),
     ] {
-        field_label(ui, label, |ui| {
-            let response = ui
-                .add_enabled_ui(enabled, |ui| {
-                    text_field(
-                        ui,
-                        egui::TextEdit::singleline(value).char_limit(limit),
-                        width,
-                    )
-                })
-                .inner;
-            name_control(ui, &response, label);
-        });
-        ui.add_space(8.0);
-    }
-    field_label(ui, "Reason (optional)", |ui| {
-        let response = ui.add_enabled(
-            enabled,
-            egui::TextEdit::multiline(&mut dialog.reason)
-                .char_limit(1_024)
-                .desired_rows(2)
-                .desired_width(width),
+        rows.text_sans(
+            label,
+            egui::Id::new(("technology-change", label)),
+            value,
+            "",
         );
-        name_control(ui, &response, "Reason");
-    });
-    ui.add_space(4.0);
-    muted(
-        ui,
+        keep_within(value, 240);
+    }
+    rows.text_multiline(
+        "Reason (optional)",
+        egui::Id::new("technology-change-reason"),
+        &mut dialog.reason,
+        "",
+        2,
+    );
+    keep_within(&mut dialog.reason, 1_024);
+    rows.derived(
         "Both names, the reason and the checkpoint are kept in the project's technology history.",
     );
+}
+
+/// Cut `value` to its first `limit` characters: what the history keeps.
+fn keep_within(value: &mut String, limit: usize) {
+    if let Some((cut, _)) = value.char_indices().nth(limit) {
+        value.truncate(cut);
+    }
 }
 
 fn technology_authority_fields_ready(
@@ -1470,20 +1391,4 @@ fn technology_change_authority(
         dialog.reason.trim(),
     )
     .map_err(|error| format!("Technology change authority is invalid: {error}"))
-}
-
-/// A refusal this dialog has to state.
-///
-/// The failure mark is the line's only colour: the error wash behind error
-/// text painted the same fact three times, and a dialog with two of them
-/// stacked read as a page in failure rather than a field that needs a choice.
-pub(super) fn technology_error(ui: &mut Ui, error: &str) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .fill(t.color.bg_panel_2)
-        .inner_margin(Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            problem_line(ui, Problem::Failure, error);
-        });
 }

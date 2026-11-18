@@ -29,7 +29,7 @@ use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark, problem_line, select,
+    Button, Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark, problem_line,
 };
 use crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page_in;
 use crate::workbench::framework::feature::Cx;
