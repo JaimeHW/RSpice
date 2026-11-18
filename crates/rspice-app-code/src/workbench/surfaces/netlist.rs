@@ -280,7 +280,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             ) {
                 let text = cx.wb.messages().format(
                     crate::workbench::MessageId::NetlistRunDeckUnavailable,
-                    &[("reason", &crate::state::absent_deck_reason())],
+                    &[("reason", crate::state::absent_deck_reason())],
                 );
                 cx.wb.prompt(text);
             }
@@ -308,7 +308,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                     crate::workbench::MessageId::NetlistRunSourceUnavailable,
                     &[
                         ("id", &run_id.to_string()),
-                        ("reason", &crate::state::absent_deck_reason()),
+                        ("reason", crate::state::absent_deck_reason()),
                     ],
                 );
                 cx.wb.prompt(text);
