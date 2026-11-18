@@ -296,17 +296,17 @@ fn run_input_facts(ui: &mut Ui, reads: &CodeInspector<'_>, run: u64, point: Opti
         return;
     };
     if let Some(receipt) = record.prepared_receipt() {
+        // A run of a plan names the plan, while the project still has it.
         let ran = if receipt.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
         {
-            MessageId::NetlistInspectorRanDeck
+            messages.text(MessageId::NetlistInspectorRanDeck)
         } else {
-            MessageId::NetlistInspectorRanPlan
+            receipt
+                .simulation_plan_id()
+                .and_then(|id| plan_name(reads.model, id))
+                .unwrap_or_else(|| messages.text(MessageId::NetlistInspectorRanPlan))
         };
-        property_row(
-            ui,
-            &messages.text(MessageId::NetlistInspectorRan),
-            &messages.text(ran),
-        );
+        property_row(ui, &messages.text(MessageId::NetlistInspectorRan), &ran);
     }
     if record.elapsed_time > 0.0
         && let Some(finished) = local_time(record.timestamp + record.elapsed_time)
@@ -317,6 +317,23 @@ fn run_input_facts(ui: &mut Ui, reads: &CodeInspector<'_>, run: u64, point: Opti
             &finished,
         );
     }
+}
+
+/// The name of the plan `id`, the active one or one put away; `None` when
+/// the project no longer has it.
+fn plan_name(model: &Model, id: crate::product::SimulationPlanId) -> Option<String> {
+    let setup = &model.sim_setup;
+    if setup
+        .stable_analysis_plan()
+        .is_ok_and(|plan| plan.id() == id)
+    {
+        return Some(setup.active_plan_name().as_str().to_owned());
+    }
+    setup
+        .inactive_plans()
+        .iter()
+        .find(|plan| plan.id() == id)
+        .map(|plan| plan.name().as_str().to_owned())
 }
 
 /// An instant on the reader's clock, `2026-10-16 14:03:12`; `None` when the
@@ -337,8 +354,8 @@ fn local_time(unix_seconds: f64) -> Option<String> {
     ))
 }
 
-/// The Added lines: the design they belong to, and that they run with the
-/// plan.
+/// The Added lines: the design they belong to, and the plan they run with,
+/// by its name.
 fn added_lines_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
     use crate::workbench::MessageId;
     let messages = reads.messages;
@@ -359,7 +376,7 @@ fn added_lines_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
     property_row(
         ui,
         &messages.text(MessageId::NetlistInspectorRunsWith),
-        &messages.text(MessageId::NetlistInspectorRunsWithPlan),
+        reads.model.sim_setup.active_plan_name().as_str(),
     );
 }
 

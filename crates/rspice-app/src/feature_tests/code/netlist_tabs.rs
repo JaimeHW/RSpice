@@ -386,14 +386,25 @@ fn a_run_input_opened_from_results_is_a_tab_that_keeps_its_text() {
     assert!(tab.active, "{tab:?}");
     assert_eq!(app.state.model.simulation.source.netlist_content, INPUT);
 
-    // The inspector states whose input it is.
+    // The inspector states whose input it is, naming the plan that ran.
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
     let painted = drawn_frame_at(&mut app, 0.0);
-    for row in ["Run input", "Run", &run.to_string(), "Ran", "The plan"] {
+    for row in ["Run input", "Run", &run.to_string(), "Ran", plan.as_str()] {
         assert!(
             painted.lines().any(|line| line == row),
             "the inspector shows {row}: {painted}"
         );
     }
+    assert!(
+        !painted.lines().any(|line| line == "The plan"),
+        "the plan is named, not called the plan: {painted}"
+    );
 }
 
 /// The deck compared with its file on disk shows what was typed since, on
@@ -492,7 +503,7 @@ fn a_comparison_tab_names_the_two_texts_it_compares() {
 }
 
 /// With the Added lines in front, the inspector names the design they
-/// belong to and says they run with the plan.
+/// belong to and the plan they run with, by the plan's name.
 #[test]
 fn the_inspector_says_whose_added_lines_are_in_front() {
     let mut app = plan_and_deck_session();
@@ -503,15 +514,26 @@ fn the_inspector_says_whose_added_lines_are_in_front() {
     let design = netlist_document::added_lines_design(&app.state.model)
         .expect("the reference design has a root")
         .display_path();
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
 
     let painted = drawn_frame_at(&mut app, 0.0);
 
-    for row in ["Design", design.as_str(), "Runs with", "The plan"] {
+    for row in ["Design", design.as_str(), "Runs with", plan.as_str()] {
         assert!(
             painted.lines().any(|line| line == row),
             "the inspector shows {row}: {painted}"
         );
     }
+    assert!(
+        !painted.lines().any(|line| line == "The plan"),
+        "the plan is named, not called the plan: {painted}"
+    );
 }
 
 /// A save dialog that answers with `self.0`, and writes that reach the disk.
