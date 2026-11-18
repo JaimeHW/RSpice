@@ -2,8 +2,9 @@
 //! whether the project holds unsaved work is compared once per edit, over
 //! the documents the edit moved; a frame that only paints compares nothing
 //! and writes nothing back from the editor; and a canvas gesture holds the
-//! answer, and the Design navigator its hierarchy, until the drop. None of
-//! this shows in what a frame paints, which is why it is counted.
+//! answer, the Design navigator its hierarchy and the project its drawing,
+//! until the drop. None of this shows in what a frame paints, which is why
+//! it is counted.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -25,7 +26,7 @@ use rspice_app_state::state::{
     Library, Point, UnresolvedBindingPolicy, View, ViewType,
 };
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
-use rspice_app_state::workbench::app_state::model::FRAME_SYNCS;
+use rspice_app_state::workbench::app_state::model::DRAWING_WRITES;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_design::projection::{
     document_digest_counts, materialization_count, reset_document_digest_counts,
@@ -56,8 +57,8 @@ struct EditWork {
     projection_sources_digested: u64,
     /// Whole working-project captures.
     captures: usize,
-    /// Frames that wrote the editor's drawing back to the project.
-    drawing_syncs: usize,
+    /// Copies of the editor's drawing written back to the project.
+    drawing_writes: usize,
 }
 
 fn take() -> EditWork {
@@ -71,7 +72,7 @@ fn take() -> EditWork {
             sources
         },
         captures: PROJECT_CAPTURES.with(|count| count.replace(0)),
-        drawing_syncs: FRAME_SYNCS.with(|count| count.replace(0)),
+        drawing_writes: DRAWING_WRITES.with(|count| count.replace(0)),
     }
 }
 
@@ -160,7 +161,7 @@ fn an_edit_is_compared_once_from_its_own_document_and_idle_frames_do_nothing() {
                 drawings_digested: 0,
                 projection_sources_digested: 0,
                 captures: 0,
-                drawing_syncs: 1,
+                drawing_writes: 1,
             },
             "{surface}: a placed part is compared once, from its drawing alone, which is not \
              digested, and written back once"
@@ -343,8 +344,9 @@ struct DragFrame {
 }
 
 /// A part dragged across the canvas: no frame of the drag compares the
-/// project or projects the design again until the drop, the project reads
-/// as edited from the first move, and the drop compares it once.
+/// project, projects the design again or copies the drawing into the
+/// project until the drop, the project reads as edited from the first move,
+/// and the drop compares it once and writes the drawing back once.
 #[test]
 fn a_drag_is_compared_and_projected_at_the_drop_not_on_each_move() {
     let (replay, folder) = saved_project("edit-work-drag");
@@ -497,6 +499,11 @@ fn drag_a_part(mut replay: Replay, folder: std::path::PathBuf, resolves: bool) {
             frame.name
         );
         assert_eq!(
+            frame.work.drawing_writes, 0,
+            "{}: no frame of the drag copies the drawing into the project: {frames:#?}",
+            frame.name
+        );
+        assert_eq!(
             frame.unsaved,
             frame.name.starts_with("move"),
             "{}: the project reads as edited from the first move on: {frames:#?}",
@@ -510,6 +517,14 @@ fn drag_a_part(mut replay: Replay, folder: std::path::PathBuf, resolves: bool) {
             .sum::<usize>(),
         1,
         "the drop is compared once: {frames:#?}"
+    );
+    assert_eq!(
+        settled
+            .iter()
+            .map(|frame| frame.work.drawing_writes)
+            .sum::<usize>(),
+        1,
+        "the drop writes the drawing back once: {frames:#?}"
     );
     assert!(
         settled.iter().any(|frame| frame.projections > 0),

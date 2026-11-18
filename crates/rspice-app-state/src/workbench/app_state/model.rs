@@ -51,7 +51,7 @@ pub use library_files::{
 pub use plan_outcome::AnalysisLifecycleOutcome;
 pub use project_technology::ProjectTechnologyVerdict;
 #[cfg(any(test, feature = "test-support"))]
-pub use schematic_sync::FRAME_SYNCS;
+pub use schematic_sync::DRAWING_WRITES;
 #[cfg(any(test, feature = "test-support"))]
 pub use source_drift::SOURCE_DRIFT_HASHES;
 pub use source_drift::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};

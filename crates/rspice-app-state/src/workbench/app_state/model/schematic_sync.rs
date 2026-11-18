@@ -43,17 +43,17 @@ impl SyncFailures {
 
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
-    /// How many frames this thread has run the drawing sync on, rather than
-    /// passed it by because nothing it writes had moved.
-    pub static FRAME_SYNCS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many times this thread has copied the editor's drawing into the
+    /// project, a gesture's runtime copy for another window included.
+    pub static DRAWING_WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// What the frame's drawing sync last left: the stamps of the editor's
-/// drawing, the workspace, the library catalog and the libraries it
-/// references, and the editor's unsaved, read-only and file marks, which a
-/// projection reads from the buffer. While all stand, the buffer already
-/// holds the drawing, and its sheets, bindings and generated symbol already
-/// follow it. Runtime only.
+/// What the drawing sync last left, by frame or by command: the stamps of
+/// the editor's drawing, the workspace, the library catalog and the
+/// libraries it references, and the editor's unsaved, read-only and file
+/// marks, which a projection reads from the buffer. While all stand, the
+/// buffer already holds the drawing, and its sheets, bindings and generated
+/// symbol already follow it. Runtime only.
 #[derive(Debug, Clone, Default)]
 pub struct FrameSync(Option<FrameSyncKey>);
 
@@ -73,16 +73,32 @@ fn is_schematic_like(view_type: ViewType) -> bool {
 impl Model {
     /// [`Self::sync_active_schematic_to_workspace`] for a frame: nothing is
     /// written, and the drawing is not copied, while the drawing, the
-    /// workspace and the libraries stand as the last frame's sync left them
-    /// and no annotation recovery waits.
+    /// workspace and the libraries stand as the last sync left them and no
+    /// annotation recovery waits, or while a gesture edits the drawing. The
+    /// gesture's drawing is written once, when it ends; until then the
+    /// buffer keeps the drawing as it stood before the gesture, which only
+    /// another window would read, and another window's projection writes
+    /// the gesture for itself.
     #[must_use]
     pub fn sync_active_schematic_for_frame(&mut self) -> Option<String> {
         if self.frame_sync_stands() && self.workspace.annotation_restoration_error().is_none() {
             return None;
         }
-        #[cfg(any(test, feature = "test-support"))]
-        FRAME_SYNCS.with(|count| count.set(count.get() + 1));
-        let prompt = self.sync_active_schematic_to_workspace();
+        if self.schematic.has_pending_operation()
+            && self
+                .workspace
+                .content
+                .active_view_type()
+                .is_some_and(is_schematic_like)
+        {
+            return None;
+        }
+        self.sync_active_schematic_to_workspace()
+    }
+
+    /// Remember what the sync just left, so that the frames after it pass it
+    /// by until something it writes moves.
+    fn record_frame_sync(&mut self) {
         let session = &self.schematic.session;
         self.frame_sync.0 = Some(FrameSyncKey {
             stamps: self.frame_sync_stamps(),
@@ -90,7 +106,6 @@ impl Model {
             read_only: session.read_only,
             current_file: session.current_file.clone(),
         });
-        prompt
     }
 
     fn frame_sync_stands(&self) -> bool {
@@ -116,7 +131,8 @@ impl Model {
     ///
     /// Answers the prompt the sync has for the reader, if it has one: a
     /// cross-sheet connection dropped with the objects it anchored to is
-    /// stated on the status bar, which the caller owns.
+    /// stated on the status bar, which the caller owns. The frame after a
+    /// sync does not write the drawing again unless something moved.
     #[must_use]
     pub fn sync_active_schematic_to_workspace(&mut self) -> Option<String> {
         let mut prompt = None;
@@ -130,6 +146,8 @@ impl Model {
             if self.schematic.has_pending_operation() {
                 // Window projection may retain a live gesture in a runtime
                 // buffer; it must not publish symbols or sheet transactions.
+                #[cfg(any(test, feature = "test-support"))]
+                DRAWING_WRITES.with(|count| count.set(count.get() + 1));
                 self.workspace
                     .insert_active_editor(active.key(), self.schematic.clone());
                 return None;
@@ -141,6 +159,8 @@ impl Model {
             // one way a deleted cell comes back looking resolved.
             self.schematic
                 .revalidate_instance_bindings(&self.library_manager);
+            #[cfg(any(test, feature = "test-support"))]
+            DRAWING_WRITES.with(|count| count.set(count.get() + 1));
             self.workspace.save_active_schematic(&self.schematic);
         }
         self.retry_annotation_restoration();
@@ -152,6 +172,7 @@ impl Model {
         {
             self.sync_generated_symbol_view();
         }
+        self.record_frame_sync();
         prompt
     }
 
