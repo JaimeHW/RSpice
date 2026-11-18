@@ -564,6 +564,52 @@ fn hdl_files_resolve_against_the_run_directory_and_stay_inside_it() {
     assert!(root.join("escape.txt").exists());
 }
 
+/// `.options hdl_rundir` written on Windows names the same directory on every
+/// host: a backslash separates its directories, as in an `.include`, and the
+/// quoted string keeps it, a trailing one included.
+#[test]
+fn a_backslash_in_hdl_rundir_separates_directories() {
+    let root = common::test_dir("hdl_rundir_backslash");
+    std::fs::create_dir_all(root.join("runs").join("x")).unwrap();
+    std::fs::write(
+        root.join("logger.va"),
+        "`timescale 1ns/1ns\n\
+         module logger(p, n);\n\
+         \x20 inout p, n;\n\
+         \x20 electrical p, n;\n\
+         \x20 integer fd;\n\
+         \x20 initial begin\n\
+         \x20   fd = $fopen(\"log.txt\", \"w\");\n\
+         \x20   $fdisplay(fd, \"logged %0d\", 3);\n\
+         \x20   $fclose(fd);\n\
+         \x20 end\n\
+         \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+         endmodule\n",
+    )
+    .unwrap();
+    for rundir in [r"runs\x", r"runs\x\", r".\runs\x"] {
+        std::fs::write(
+            root.join("logger.cir"),
+            format!(
+                "* HDL run directory\nx1 p 0 logger\nrp p 0 1k\n.va \"logger.va\" logger\n\
+                 .options hdl_rundir=\"{rundir}\"\n.tran 1n 5n\n.end\n"
+            ),
+        )
+        .unwrap();
+        let log = root.join("runs").join("x").join("log.txt");
+        let _ = std::fs::remove_file(&log);
+        let output = rspice_in(&root, &["--quiet", "run", "logger.cir"]);
+        assert_eq!(output.status.code(), Some(0), "{rundir}: {output:?}");
+        assert_eq!(
+            std::fs::read_to_string(&log).ok().as_deref(),
+            Some("logged 3\n"),
+            "{rundir}: {output:?}"
+        );
+        assert!(!root.join("runsx").exists(), "{rundir}");
+        assert!(!root.join("log.txt").exists(), "{rundir}");
+    }
+}
+
 /// A write to the standard-error descriptor (IEEE 1364-2005 section 17.2.1)
 /// reaches stderr and the transcript, never stdout; the standard-output
 /// descriptor's write stays on stdout.

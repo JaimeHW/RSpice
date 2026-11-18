@@ -56,6 +56,49 @@ fn pwl_sources_use_the_deck_directory_in_wrappers_and_nested_subcircuits() {
     }
 }
 
+/// A PWL file a deck names with Windows separators is found on every host:
+/// a backslash in the quoted name separates directories, as in an
+/// `.include`, and the string keeps it.
+#[test]
+fn a_backslash_in_a_pwl_file_name_separates_directories() {
+    let dir = common::test_dir("pwl_backslash");
+    std::fs::create_dir(dir.join("data")).unwrap();
+    std::fs::write(dir.join("data").join("wave.dat"), "0 3\n1 3\n").unwrap();
+    // The name a lexer that drops the backslash reads, with an unmistakable
+    // answer.
+    std::fs::write(dir.join("datawave.dat"), "0 9\n1 9\n").unwrap();
+    let cases = [
+        ("plain", "V1 in 0 PWL FILE=\"data\\wave.dat\""),
+        ("dotted", "V1 in 0 PWL(FILE=\".\\data\\wave.dat\")"),
+        (
+            "hierarchy",
+            ".subckt driver p\nV1 p 0 PWL FILE=\"data\\wave.dat\"\n.ends\nX1 in driver",
+        ),
+    ];
+    for (name, body) in cases {
+        let deck = dir.join(format!("{name}.cir"));
+        let output = dir.join(format!("{name}.csv"));
+        std::fs::write(&deck, format!("paths\n{body}\nR1 in 0 1k\n.op\n.end\n")).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "run"])
+            .arg(&deck)
+            .args(["-f", "csv", "-o"])
+            .arg(&output)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{name}: {result:?}");
+        let csv = std::fs::read_to_string(&output).unwrap();
+        let voltage = csv
+            .lines()
+            .find_map(|line| line.strip_prefix("V(IN),"))
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!((voltage - 3.0).abs() < 1e-10, "{name}: {csv}");
+    }
+}
+
 #[test]
 fn nested_pwl_data_remains_protected_from_output_outside_the_deck_directory() {
     let dir = common::test_dir("nested_pwl_source_protection");
