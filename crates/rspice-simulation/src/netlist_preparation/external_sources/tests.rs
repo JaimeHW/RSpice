@@ -40,10 +40,7 @@ fn every_runtime_external_input_category_fails_closed() {
             panic!("unsealed runtime input must be rejected: {line}");
         };
         assert_eq!(error.stage(), PreparationStage::SourceChecks, "{line}");
-        assert!(
-            error.message().contains("unsealed external dependency"),
-            "{line}"
-        );
+        assert!(error.message().contains("not kept with the run"), "{line}");
     }
 }
 
@@ -71,8 +68,7 @@ fn a_runtime_input_on_a_line_the_parser_skips_passes() {
             .err()
             .unwrap_or_else(|| panic!("a line in the branch taken is read: {taken}"));
         assert!(
-            error.message().contains("unsealed external dependency")
-                || error.message().contains("PATH"),
+            error.message().contains("not kept with the run") || error.message().contains("PATH"),
             "{taken}: {error}"
         );
     }
@@ -105,7 +101,7 @@ fn continuation_folding_cannot_hide_external_dependencies() {
             .expect_err("continued external dependency must fail closed");
         assert_eq!(error.stage(), PreparationStage::SourceChecks, "{source}");
         assert!(
-            error.message().contains("unsealed external dependency"),
+            error.message().contains("not kept with the run"),
             "{source}: {error}"
         );
     }

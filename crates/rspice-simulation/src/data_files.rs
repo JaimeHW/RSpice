@@ -180,7 +180,7 @@ impl PreparedDataFiles {
                 return Err(PreparationError::new(
                     PreparationStage::SourceChecks,
                     format!(
-                        "Executable netlist contains an unsealed external dependency (code-model data file): {}",
+                        "The netlist reads a code-model data file that is not kept with the run: {}",
                         describe(&named)
                     ),
                 ));
@@ -195,17 +195,17 @@ impl PreparedDataFiles {
         let mut total = 0usize;
         for file in self.files.iter() {
             if file.path.is_empty() {
-                return Err("A sealed code-model data file has no path".into());
+                return Err("A code-model data file kept with the run has no path".into());
             }
             if !paths.insert(file.path.as_str()) {
                 return Err(format!(
-                    "Code-model data file '{}' is sealed twice",
+                    "Code-model data file '{}' is kept with the run twice",
                     file.path
                 ));
             }
             if file.digest != file_digest(&file.contents) {
                 return Err(format!(
-                    "Sealed code-model data file '{}' does not match its digest",
+                    "Code-model data file '{}' changed after the run kept it",
                     file.path
                 ));
             }

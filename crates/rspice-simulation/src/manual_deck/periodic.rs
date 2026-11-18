@@ -424,7 +424,7 @@ fn driven_tone_sources(
 ) -> Result<Vec<String>, ManualDeckError> {
     let _installed = runtimes.install().map_err(|error| {
         vec![format!(
-            "the deck's sealed Verilog-A runtimes could not be installed: {error}"
+            "the deck's Verilog-A runtimes kept with the run could not be installed: {error}"
         )]
     })?;
     rspice_core::Engine::new(rspice_core::SimulationConfig::default())

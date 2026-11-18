@@ -1141,7 +1141,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         .hold(input.execution_limits)
         .map_err(|error| {
             SimulationError::CircuitError(format!(
-                "Could not install the run's sealed code-model data files: {error}"
+                "Could not install the code-model data files kept with the run: {error}"
             ))
         })?;
 

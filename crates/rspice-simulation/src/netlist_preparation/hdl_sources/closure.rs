@@ -192,7 +192,7 @@ pub(super) fn bundle(sources: &[HostSource]) -> Result<(VirtualSourceBundle, Vec
             for component in relative.components() {
                 let Component::Normal(part) = component else {
                     return Err(format!(
-                        "'{}' cannot be named inside a sealed bundle",
+                        "'{}' cannot be named among the files kept with the run",
                         source.path.display()
                     ));
                 };

@@ -162,7 +162,7 @@ impl std::fmt::Display for DeckHdlRefusal {
             ),
             _ => write!(
                 formatter,
-                "line {line}: the Verilog-A source {subject} cannot be sealed: {detail}"
+                "line {line}: the Verilog-A file {subject} cannot be kept with the run: {detail}"
             ),
         }
     }
@@ -913,7 +913,7 @@ impl Sealer<'_> {
                 path,
                 None,
                 format!(
-                    "the name '{alias}' already names a different Verilog-A master, sealed from line {first}"
+                    "the name '{alias}' already names a different Verilog-A master, read from line {first}"
                 ),
             )),
             None => {
@@ -930,7 +930,7 @@ impl Sealer<'_> {
 fn directive_text(site: &Site) -> String {
     let directive = &site.directive;
     format!(
-        ".hdl \"{}\" (sealed into the deck's Verilog unit)",
+        ".hdl \"{}\" (read into the deck's Verilog unit)",
         directive.file_path.display()
     )
 }

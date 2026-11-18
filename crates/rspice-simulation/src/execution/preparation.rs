@@ -1297,7 +1297,7 @@ pub(crate) fn reject_deferred_corner_model_sources_under<'a>(
                     return Err(PreparationError::new(
                         PreparationStage::ModelBindings,
                         format!(
-                            "Materialized corner model source '{}' contains an unsealed external dependency ({reason}) at line {line_number}: {logical_line}",
+                            "The corner's model file '{}' reads a file that is not kept with the run ({reason}) at line {line_number}: {logical_line}",
                             binding.source_label
                         ),
                     ));

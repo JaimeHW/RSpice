@@ -354,7 +354,7 @@ pub(crate) fn run_prepared_declaration(
             .and_then(|runtimes| {
                 let files = data_files.hold(limits).map_err(|error| {
                     SimulationError::CircuitError(format!(
-                        "Could not install the run's sealed code-model data files: {error}"
+                        "Could not install the code-model data files kept with the run: {error}"
                     ))
                 })?;
                 Ok((runtimes, files))

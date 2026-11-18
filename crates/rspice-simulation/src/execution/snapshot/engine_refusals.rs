@@ -227,7 +227,7 @@ impl PreparedRunSnapshot {
                     (Ok(_), Ok(())) => self.build_verdict(deck.source, deck.temperature, abort),
                     (Err(error), _) => Some(DeckVerdict::Refused(vec![EngineRefusalKind::Build {
                         message: format!(
-                            "Could not install the run's sealed code-model data files: {error}"
+                            "Could not install the code-model data files kept with the run: {error}"
                         ),
                         instance: None,
                     }])),

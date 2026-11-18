@@ -312,7 +312,7 @@ fn bind_transient_states(
                     .decode(limits, abort)
                     .map_err(|error| {
                         context(format!(
-                            "the checkpoint sealed for {name} does not read: {error}"
+                            "the checkpoint kept for {name} does not read: {error}"
                         ))
                     })?
                     .time;

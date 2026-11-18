@@ -109,7 +109,7 @@ impl PreparedMeasurementReferences {
                 .find(|entry| entry.measurement.eq_ignore_ascii_case(&measurement.name))
                 .ok_or_else(|| {
                     format!(
-                        "Measurement '{}' has an unsealed file-backed measurement reference: {}",
+                        "Measurement '{}' reads a reference file that is not kept with the run: {}",
                         measurement.name,
                         file.path()
                     )

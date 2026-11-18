@@ -165,7 +165,7 @@ pub(crate) fn reject_deferred_external_sources_for_host(
         .map_err(|error| {
             PreparationError::new(
                 PreparationStage::SourceChecks,
-                format!("Executable netlist contains an unsealed external dependency: {error}"),
+                format!("The netlist reads a file that is not kept with the run: {error}"),
             )
         })?;
     reject_deferred_external_sources_on(
@@ -223,7 +223,7 @@ fn reject_deferred_external_sources_on(
             return Err(PreparationError::new(
                 PreparationStage::SourceChecks,
                 format!(
-                    "Executable netlist contains an unsealed external dependency ({reason}) at line {}: {}",
+                    "Line {} reads a file that is not kept with the run ({reason}): {}",
                     line_number, logical_line
                 ),
             ));
@@ -279,17 +279,17 @@ fn admit_process_programs(
         Some(program) if process_programs::is_bare_program(program) => Err(PreparationError::new(
             PreparationStage::SourceChecks,
             format!(
-                "Executable netlist contains an unsealed external dependency ({PROCESS_PROGRAM}) at \
-                 line {line_number}: {record}; no file beside the deck and no directory on PATH \
+                "Line {line_number} names a program that is not kept with the run \
+                 ({PROCESS_PROGRAM}): {record}; no file beside the deck and no directory on PATH \
                  holds the program '{program}'"
             ),
         )),
         Some(program) => Err(PreparationError::new(
             PreparationStage::SourceChecks,
             format!(
-                "Executable netlist contains an unsealed external dependency ({PROCESS_PROGRAM}) at \
-                 line {line_number}: {record}; the program '{program}' is named relative to no \
-                 deck directory, so name it by an absolute path"
+                "Line {line_number} names a program that is not kept with the run \
+                 ({PROCESS_PROGRAM}): {record}; the program '{program}' is named relative to no \
+                 deck folder, so name it by an absolute path"
             ),
         )),
     }

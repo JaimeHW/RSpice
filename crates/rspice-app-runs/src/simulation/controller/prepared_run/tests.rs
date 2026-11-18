@@ -845,7 +845,7 @@ fn prepared_waveforms_distinguish_inline_names_from_file_inputs() {
             "{source}: {error}"
         );
         assert!(
-            error.message().contains("file-backed PWL source"),
+            error.message().contains("reads a PWL file"),
             "{source}: {error}"
         );
     }
@@ -1114,7 +1114,7 @@ fn statistical_deferred_file_waveforms_are_rejected_before_dispatch() {
             let error = result.expect_err("statistical deferral cannot hide an input file");
             assert_eq!(error.stage(), PreparationStage::SourceChecks);
             assert!(
-                error.message().contains("file-backed PWL source"),
+                error.message().contains("reads a PWL file"),
                 "{error}"
             );
         } else {
@@ -1161,7 +1161,7 @@ fn corner_waveforms_are_checked_after_materialization_and_scope_resolution() {
             let error = result.expect_err("corner-local data files must be sealed");
             assert_eq!(error.stage(), PreparationStage::ModelBindings);
             assert!(
-                error.message().contains("file-backed PWL source"),
+                error.message().contains("reads a PWL file"),
                 "{error}"
             );
         } else {
@@ -1202,7 +1202,7 @@ fn every_materialized_corner_binding_is_audited_before_dispatch() {
         .expect_err("non-reference corner source must be sealed");
     assert_eq!(error.stage(), PreparationStage::ModelBindings);
     assert!(error.message().contains("foundry.lib [FF]"));
-    assert!(error.message().contains("unsealed external dependency"));
+    assert!(error.message().contains("not kept with the run"));
 }
 
 #[test]

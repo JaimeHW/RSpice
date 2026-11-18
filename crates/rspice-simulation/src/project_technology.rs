@@ -58,7 +58,7 @@ impl ProjectTechnologyInputs<'_> {
             .registry
             .seal_model_sources_for_binding(&package_binding, pdk_pin.archive_digest())
             .map_err(|error| {
-                format!("PDK model sources cannot be sealed for project execution: {error}")
+                format!("The PDK's model files cannot be kept with the run: {error}")
             })?;
         crate::model_sources::seal_plan_execution_sources(
             self.models,

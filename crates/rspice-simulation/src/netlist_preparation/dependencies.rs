@@ -49,14 +49,14 @@ pub fn expand_generated_dependencies_with_sealed_sources(
         let origin = origin.ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::SourceChecks,
-                "Configured external SPICE sources require an imported root identity before browser execution",
+                "In the browser, a deck that reads other files runs only once it is imported with them",
             )
         })?;
         let origin = absolute_source_identity(origin)?;
         let sealed_sources = sealed_sources.ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::ModelBindings,
-                "Configured external SPICE sources have no authenticated browser source bundle",
+                "In the browser, the files this deck reads have not been imported",
             )
         })?;
         sealed_sources
@@ -76,7 +76,7 @@ pub fn expand_generated_dependencies_with_sealed_sources(
         let expanded = processor.expand_content(source, &owner).map_err(|error| {
             PreparationError::new(
                 PreparationStage::SourceChecks,
-                format!("Could not seal configured source dependencies: {error}"),
+                format!("Could not read the deck's includes: {error}"),
             )
         })?;
         Ok((expanded, processor.resolved_dependencies().to_vec()))
@@ -202,7 +202,7 @@ pub fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError
     let current = std::env::current_dir().map_err(|error| {
         PreparationError::new(
             PreparationStage::SourceChecks,
-            format!("Could not resolve manual deck origin: {error}"),
+            format!("Cannot tell which folder the deck is in: {error}"),
         )
     })?;
     let joined = current.join(path);
@@ -298,7 +298,7 @@ pub fn expand_manual_dependencies(
             .map_err(|error| {
                 PreparationError::new(
                     PreparationStage::SourceChecks,
-                    format!("Could not seal manual deck dependencies: {error}"),
+                    format!("Could not read the deck's includes: {error}"),
                 )
             })?;
         Ok(ExpandedManualDependencies {

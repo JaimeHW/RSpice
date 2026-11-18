@@ -102,5 +102,5 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     )
     .expect_err("case-altered project key must remain an external dependency");
     assert_eq!(error.stage(), PreparationStage::SourceChecks);
-    assert!(error.message().contains("unsealed external dependency"));
+    assert!(error.message().contains("not kept with the run"));
 }

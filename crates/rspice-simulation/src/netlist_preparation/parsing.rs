@@ -246,7 +246,7 @@ pub(crate) fn validated_parsed_hierarchy_with_limits_and_abort(
             return Err(PreparationError::new(
                 PreparationStage::SourceChecks,
                 format!(
-                    "Executable netlist contains an unsealed external dependency (file-backed PWL source) on element '{}': {path}",
+                    "Element '{}' reads a PWL file that is not kept with the run: {path}",
                     element.name
                 ),
             ));
