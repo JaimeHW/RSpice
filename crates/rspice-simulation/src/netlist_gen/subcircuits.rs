@@ -17,8 +17,7 @@ impl<'a> NetlistGenerator<'a> {
             &self.hierarchy_path,
         ));
         self.record_defects(index.defects().to_vec());
-        self.emission_map
-            .extend(index.emission_map().iter().cloned());
+        self.emission_map = index.emission_map().clone();
         let emission = MasterIndex::emit(&index, hierarchy, self.source_data);
         self.masters = Some(index);
 

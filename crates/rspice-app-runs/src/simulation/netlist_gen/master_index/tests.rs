@@ -810,6 +810,69 @@ fn emission_map_covers_every_occurrence() {
     );
 }
 
+/// A design whose expansion is past a million occurrences netlists as the
+/// four cells it is: each master is declared once, every occurrence names the
+/// master it was emitted against, and the walk visits each placement once.
+#[test]
+fn a_design_past_a_million_occurrences_netlists_as_its_masters() {
+    let names = ["l1", "l2", "l3", "l4"];
+    let mut cells = Vec::new();
+    for next in &names[1..] {
+        let mut cell = SchematicState::default();
+        place_port(&mut cell, "a", Point::new(20, 0));
+        place_port(&mut cell, "b", Point::new(60, 0));
+        for at in 0..32 {
+            cell.add_library_cell_component(
+                Point::new(100 + 200 * at, 0),
+                binding(next, &["a", "b"]),
+            );
+        }
+        cells.push(cell);
+    }
+    cells.push(div_master());
+    let hierarchy_buffers = names
+        .iter()
+        .zip(&cells)
+        .map(|(name, cell)| (format!("work/{name}/schematic"), cell))
+        .collect::<HashMap<_, _>>();
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
+    let mut top = SchematicState::default();
+    for at in 0..32 {
+        top.add_library_cell_component(Point::new(100 + 200 * at, 0), binding("l1", &["a", "b"]));
+    }
+
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
+    );
+
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    let headers = subckt_headers(&result.netlist);
+    assert_eq!(headers.len(), 4, "one body per cell: {headers:?}");
+    let expanded = 32 + 32 * 32 + 32 * 32 * 32 + 32 * 32 * 32 * 32;
+    assert!(expanded > 1_000_000);
+    assert_eq!(result.emission_map.len(), expanded);
+    assert_eq!(
+        result
+            .emission_map
+            .master_at(&instance_path("/X32/X32/X32/X32")),
+        Some("l4")
+    );
+    assert_eq!(
+        result.emission_map.master_at(&instance_path("/x1/x7")),
+        Some("l2")
+    );
+    assert_eq!(result.emission_map.master_at(&instance_path("/X33")), None);
+    let first = result.emission_map.iter().next().expect("a first row");
+    assert_eq!(first.occurrence.to_string(), "/X1/X1/X1/X1");
+    assert_eq!(first.engine_prefix, "X1.X1.X1.X1");
+    assert_eq!(first.master, "l4");
+}
+
 // =============================================================================
 // Configured hierarchies
 // =============================================================================

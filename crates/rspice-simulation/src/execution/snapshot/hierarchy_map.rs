@@ -11,14 +11,15 @@
 use rspice_results::run_receipt::HierarchyMapRow;
 
 use super::PreparedRunSnapshot;
-use crate::netlist_gen::EmissionRow;
+use crate::netlist_gen::EmissionMap;
 
 impl PreparedRunSnapshot {
     /// The master each occurrence was emitted against; a manual deck has none.
-    pub fn emission_map(&self) -> &[EmissionRow] {
+    pub fn emission_map(&self) -> EmissionMap {
         self.cross_probe
             .as_ref()
-            .map_or(&[], |design| design.emission_map.as_slice())
+            .map(|design| design.emission_map.clone())
+            .unwrap_or_default()
     }
 
     /// The same map in the form the run receipt seals.

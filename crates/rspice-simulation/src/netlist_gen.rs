@@ -63,7 +63,7 @@ pub use added_lines::{
 pub use instances::independent_source_card;
 pub use line_map::WrittenLine;
 use line_map::WrittenLines;
-pub use master_index::{EmissionRow, NetlistDefect};
+pub use master_index::{EmissionMap, EmissionRow, NetlistDefect};
 use master_index::{MasterIndex, validate_occurrence_interface};
 pub use rspice_design::connectivity::Net;
 use rspice_design::connectivity::deck_bit_name;
@@ -107,7 +107,7 @@ pub struct NetlistResult {
     /// Which master each occurrence was emitted against, for every occurrence
     /// in the deck. This is what lets a receipt name the executed hierarchy
     /// without re-deriving it from the netlist text.
-    pub emission_map: Vec<EmissionRow>,
+    pub emission_map: EmissionMap,
 
     /// What each line of `netlist` was written for, one entry per line.
     pub line_map: Vec<WrittenLine>,
@@ -125,7 +125,7 @@ pub struct CrossProbeSnapshot {
     pub topology_version: u64,
     /// The master each occurrence was emitted against. Cross probing never
     /// reads it; it is captured here because the same pass produces it.
-    pub emission_map: Vec<EmissionRow>,
+    pub emission_map: EmissionMap,
 }
 
 /// Generate a flat SPICE netlist from a schematic.
@@ -351,7 +351,7 @@ pub struct NetlistGenerator<'a> {
     /// Typed defects raised while generating.
     defects: Vec<NetlistDefect>,
     /// Which master each occurrence was emitted against.
-    emission_map: Vec<EmissionRow>,
+    emission_map: EmissionMap,
 }
 
 impl<'a> NetlistGenerator<'a> {
@@ -378,7 +378,7 @@ impl<'a> NetlistGenerator<'a> {
             hierarchy_path: InstancePath::root(),
             masters: None,
             defects: Vec::new(),
-            emission_map: Vec::new(),
+            emission_map: EmissionMap::default(),
         }
     }
 
@@ -485,7 +485,7 @@ impl<'a> NetlistGenerator<'a> {
         self.warnings.clear();
         self.errors.clear();
         self.defects.clear();
-        self.emission_map.clear();
+        self.emission_map = EmissionMap::default();
         self.masters = None;
     }
 

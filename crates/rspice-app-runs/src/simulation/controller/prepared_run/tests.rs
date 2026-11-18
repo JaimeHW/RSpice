@@ -2001,7 +2001,7 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("the authored hierarchy prepares");
 
-    let rows = |map: &[rspice_simulation::netlist_gen::EmissionRow]| {
+    let rows = |map: &rspice_simulation::netlist_gen::EmissionMap| {
         map.iter()
             .map(|row| {
                 (
@@ -2012,7 +2012,7 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
             })
             .collect::<Vec<_>>()
     };
-    let carried = rows(snapshot.emission_map());
+    let carried = rows(&snapshot.emission_map());
     assert_eq!(
         carried,
         rows(&generated.emission_map),

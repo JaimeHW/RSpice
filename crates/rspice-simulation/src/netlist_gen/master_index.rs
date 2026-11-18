@@ -10,7 +10,7 @@
 //! one's rendering as a string so existing consumers keep working, but the
 //! typed value is what a repair action can be attached to.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -24,13 +24,9 @@ use rspice_design::schematic::interface_repair::same_terminal_contract;
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_vocabulary::product::ContentDigest;
 
-/// Defensive bound on how many occurrences one deck may emit.
-///
-/// Masters are shared, but occurrences are not: a wide design that reuses one
-/// master everywhere still names every instantiation in the emission map. The
-/// recursion guard stops cycles; this stops a legal design from exhausting
-/// memory before it stops being useful.
-const MAX_EMITTED_OCCURRENCES: usize = 100_000;
+mod emission;
+pub use emission::EmissionMap;
+use emission::{EmissionEdge, EmissionNode, EmittedMaster};
 
 /// One thing that stopped the deck from describing the design.
 ///
@@ -223,21 +219,17 @@ pub(super) struct MasterIndex<'a> {
     names: BTreeMap<MasterKey, String>,
     /// Emission order, children before parents, each master once.
     order: Vec<MasterKey>,
-    /// Master name per occurrence, keyed by [`InstancePath::fold_key`].
-    occurrence_names: BTreeMap<String, String>,
-    emission_map: Vec<EmissionRow>,
+    emission_map: EmissionMap,
     defects: Vec<NetlistDefect>,
 }
 
 impl<'a> MasterIndex<'a> {
     /// The `.subckt` name one occurrence instantiates.
     pub(super) fn occurrence_name(&self, occurrence: &InstancePath) -> Option<&str> {
-        self.occurrence_names
-            .get(&occurrence.fold_key())
-            .map(String::as_str)
+        self.emission_map.master_at(occurrence)
     }
 
-    pub(super) fn emission_map(&self) -> &[EmissionRow] {
+    pub(super) const fn emission_map(&self) -> &EmissionMap {
         &self.emission_map
     }
 
@@ -246,7 +238,9 @@ impl<'a> MasterIndex<'a> {
     }
 
     /// Walk the design from `root`, deciding what every occurrence binds to and
-    /// what each master is called, without emitting anything.
+    /// what each master is called, without emitting anything. A placement is
+    /// walked once for each distinct way it is reached, however many times it
+    /// is: the occurrences under a repeated one resolve as its first did.
     pub(super) fn build(
         hierarchy: &'a HierarchySource<'a>,
         root: &'a SchematicDocument,
@@ -258,20 +252,22 @@ impl<'a> MasterIndex<'a> {
             discovered: Vec::new(),
             drafts: BTreeMap::new(),
             order: Vec::new(),
-            occurrences: Vec::new(),
+            nodes: vec![EmissionNode::default()],
+            keys: vec![None],
+            visits: HashMap::new(),
             reserved: HashSet::new(),
             ancestors: Vec::new(),
             defects: Vec::new(),
-            visited: 0,
         };
-        walk.visit(root, root_path);
+        walk.visit(root, root_path, 0);
 
         let MasterWalk {
             plan,
             discovered,
             drafts,
             order,
-            occurrences,
+            mut nodes,
+            keys,
             mut reserved,
             defects,
             ..
@@ -301,27 +297,27 @@ impl<'a> MasterIndex<'a> {
         }
         names.extend(assign_master_names(unnamed, &reserved));
 
-        let mut occurrence_names = BTreeMap::new();
-        let mut emission_map = Vec::with_capacity(occurrences.len());
-        for (occurrence, key) in occurrences {
-            let name = names[&key].clone();
-            occurrence_names.insert(occurrence.fold_key(), name.clone());
-            emission_map.push(EmissionRow {
-                engine_prefix: occurrence
-                    .to_engine_name()
-                    .map(|scope| scope.to_ascii_uppercase())
-                    .unwrap_or_default(),
-                master: name,
-                master_reference: drafts[&key].reference.clone(),
-                occurrence,
+        let mut masters = Vec::new();
+        let mut emitted = HashMap::new();
+        for (node, key) in nodes.iter_mut().zip(keys) {
+            let Some(key) = key else {
+                continue;
+            };
+            let master = *emitted.entry(key.clone()).or_insert_with(|| {
+                masters.push(EmittedMaster {
+                    name: names[&key].clone(),
+                    reference: drafts[&key].reference.clone(),
+                });
+                masters.len() - 1
             });
+            node.master = Some(master);
         }
+        let emission_map = EmissionMap::new(root_path.clone(), nodes, masters);
 
         Self {
             drafts,
             names,
             order,
-            occurrence_names,
             emission_map,
             defects,
         }
@@ -469,22 +465,37 @@ struct MasterWalk<'a> {
     discovered: Vec<(MasterKey, CellViewRef)>,
     drafts: BTreeMap<MasterKey, MasterDraft<'a>>,
     order: Vec<MasterKey>,
-    occurrences: Vec<(InstancePath, MasterKey)>,
+    /// One node per placement context walked; the top level is the first.
+    nodes: Vec<EmissionNode>,
+    /// The master each node was emitted against, when it was.
+    keys: Vec<Option<MasterKey>>,
+    /// The node and digest each placement context resolved to.
+    visits: HashMap<VisitContext, (Option<ContentDigest>, usize)>,
     /// Folded names already spoken for by model-bound engine modules.
     reserved: HashSet<String>,
     /// The cell views on the path from the root to here, folded key first.
     ancestors: Vec<(String, CellViewRef)>,
     defects: Vec<NetlistDefect>,
-    visited: usize,
+}
+
+/// Everything a placement's walk depends on besides its path: the drawn
+/// placement, the cells above it, and what the plan binds there. Two
+/// occurrences alike in these resolve alike, down to every one under them.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct VisitContext {
+    component: usize,
+    ancestors: String,
+    binding: usize,
 }
 
 impl<'a> MasterWalk<'a> {
-    /// Resolve every cell instance placed in `schematic`, returning the closure
-    /// digests of the masters they bind to.
+    /// Resolve every cell instance placed in `schematic`, as the children of
+    /// `node`, returning the closure digests of the masters they bind to.
     fn visit(
         &mut self,
         schematic: &'a SchematicDocument,
         path: &InstancePath,
+        node: usize,
     ) -> Vec<ContentDigest> {
         let mut digests = Vec::new();
         for component in &schematic.components {
@@ -501,23 +512,47 @@ impl<'a> MasterWalk<'a> {
                     continue;
                 }
             };
-            if let Some(digest) = self.visit_occurrence(component, &child_path) {
+            let context = VisitContext {
+                component: std::ptr::from_ref(component).addr(),
+                ancestors: self
+                    .ancestors
+                    .iter()
+                    .map(|(identity, _)| identity.as_str())
+                    .collect::<Vec<_>>()
+                    .join("|"),
+                binding: self
+                    .plan
+                    .and_then(|plan| plan.binding(&child_path))
+                    .map_or(0, |binding| std::ptr::from_ref(binding).addr()),
+            };
+            let (digest, child) = match self.visits.get(&context) {
+                Some(&visited) => visited,
+                None => {
+                    let child = self.nodes.len();
+                    self.nodes.push(EmissionNode::default());
+                    self.keys.push(None);
+                    let digest = self.visit_occurrence(component, &child_path, child);
+                    self.visits.insert(context, (digest, child));
+                    (digest, child)
+                }
+            };
+            self.nodes[node]
+                .children
+                .push(EmissionEdge::new(&component.name, child));
+            if let Some(digest) = digest {
                 digests.push(digest);
             }
         }
         digests
     }
 
+    /// Resolve the occurrence at `path` as `node`.
     fn visit_occurrence(
         &mut self,
         component: &Component,
         path: &InstancePath,
+        node: usize,
     ) -> Option<ContentDigest> {
-        if self.visited >= MAX_EMITTED_OCCURRENCES {
-            return None;
-        }
-        self.visited += 1;
-
         let binding = self.binding(component, path)?;
         // A source-backed, built-in, or template-bound master is an engine
         // module the deck references by its own name: it declares no `.subckt`
@@ -577,7 +612,7 @@ impl<'a> MasterWalk<'a> {
         }
 
         self.ancestors.push((identity, reference.clone()));
-        let children = self.visit(master, path);
+        let children = self.visit(master, path, node);
         self.ancestors.pop();
 
         let closure = self.plan.and_then(|plan| plan.binding(path)).map_or_else(
@@ -617,7 +652,7 @@ impl<'a> MasterWalk<'a> {
             // this one instantiates, so a definition precedes its first use.
             self.order.push(key.clone());
         }
-        self.occurrences.push((path.clone(), key));
+        self.keys[node] = Some(key);
         Some(closure)
     }
 
