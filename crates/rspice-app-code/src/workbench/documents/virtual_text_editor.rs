@@ -539,7 +539,8 @@ pub(crate) fn show_virtual_text_editor(
     advance_maximum_column_scan(&mut session);
 
     let initial_model_revision = session.model.revision();
-    if let Some(command) = take_queued_standard_command(ui.ctx(), editor_id) {
+    let commanded = take_queued_standard_command(ui.ctx(), editor_id);
+    if let Some(command) = commanded {
         handle_standard_command(ui, editor_id, &mut session, command, editable);
         reveal = reveal.or(Some(Reveal::Nearest));
     }
@@ -1245,6 +1246,15 @@ pub(crate) fn show_virtual_text_editor(
         style,
     );
     let response = scroll_output.inner.inner;
+    // A menu's command leaves the keyboard with the editor it acted on, so
+    // the next key, a Ctrl+V after a refused Paste included, reaches it.
+    // Asked once the editor has taken this pass's pointer: asked before, the
+    // click on the menu row that chose the command takes it away again.
+    // Asking again while focused would drop the key filter and interrupt a
+    // composition.
+    if commanded.is_some() && !response.has_focus() {
+        response.request_focus();
+    }
     if response.has_focus() {
         claim_editing_keys(ui, editor_id, editable && !tab_moves_focus);
         announce_tab_mode_change(ui, editor_id, &response, tab_moves_focus, style);
@@ -2147,12 +2157,6 @@ fn handle_standard_command(
             cursor: session.model.len_chars(),
         }]),
         _ => {}
-    }
-    // Asking again while focused would drop the key filter and interrupt a
-    // composition.
-    if !ui.memory(|memory| memory.has_focus(editor_id)) {
-        ui.ctx()
-            .memory_mut(|memory| memory.request_focus(editor_id));
     }
 }
 

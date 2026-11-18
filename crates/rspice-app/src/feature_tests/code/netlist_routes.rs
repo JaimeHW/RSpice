@@ -2,8 +2,9 @@
 //! key or a row in a menu shown there, Show value says at the caret what a
 //! hover says under the pointer, an include of a sectioned library binds its
 //! section from a select on its row, which Tab reaches as it reaches any
-//! control, and a menu's Paste the browser answers late or refuses still
-//! pastes or says how to.
+//! control, a menu's Paste the browser answers late or refuses still
+//! pastes or says how to, and a command chosen from a menu leaves the
+//! keyboard with the deck.
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
@@ -302,6 +303,48 @@ fn a_refused_paste_says_how_to_paste_from_the_keyboard() {
         "{}",
         app.state.model.simulation.source.netlist_content
     );
+}
+
+/// The centre of the node a frame labels `label`, the lowest when several
+/// are: an open menu's row sits below the bar that opened it.
+fn labelled(output: &egui::FullOutput, label: &str) -> Option<egui::Pos2> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()?
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.label() == Some(label))
+        .filter_map(|(_, node)| node.bounds())
+        .map(|bounds| {
+            egui::pos2(
+                (bounds.x0 + bounds.x1) as f32 / 2.0,
+                (bounds.y0 + bounds.y1) as f32 / 2.0,
+            )
+        })
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+}
+
+/// A command chosen from the Edit menu leaves the keyboard with the deck it
+/// acted on: after the menu's Select all the next key types over the whole
+/// deck, as the Ctrl+V a refused Paste asks for pastes into it.
+#[test]
+fn an_edit_menu_command_leaves_the_keyboard_with_the_deck() {
+    let (ctx, mut app) = deck_on_the_netlist_workspace(VALUE_DECK);
+    caret_at(&ctx, &mut app, 2);
+    for label in ["Edit", "Select all"] {
+        let output = frame(&ctx, &mut app, DESKTOP);
+        let at = labelled(&output, label).unwrap_or_else(|| panic!("no {label} in the frame"));
+        click(&ctx, &mut app, at);
+    }
+    frame_with(
+        &ctx,
+        &mut app,
+        DESKTOP,
+        vec![egui::Event::Text("Z".to_owned())],
+    );
+    frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(app.state.model.simulation.source.netlist_content, "Z");
 }
 
 /// The amplifier deck kept as text with its corner library, whose `.lib`
