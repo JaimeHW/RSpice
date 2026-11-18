@@ -316,7 +316,7 @@ impl ParseState {
                 self.temperature_options.retain_card_error(
                     ParseError::Syntax {
                         line: line_num,
-                        message: format!("invalid conditional expression `{text}`: {error}"),
+                        message: format!("invalid conditional expression '{text}': {error}"),
                     },
                     line_num,
                     origin,

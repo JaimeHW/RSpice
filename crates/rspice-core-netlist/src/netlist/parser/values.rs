@@ -2181,7 +2181,7 @@ pub(super) fn expect_u64_literal(
         ParseError::Syntax {
             line: line_num,
             message: format!(
-                "{field} requires an integer numeric literal from 0 to {}, found `{literal}`",
+                "{field} requires an integer numeric literal from 0 to {}, found '{literal}'",
                 u64::MAX
             ),
         }

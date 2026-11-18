@@ -2088,7 +2088,7 @@ fn lower_spectre_noise(
         return Err(error(
             line,
             format!(
-                "Spectre noise analysis '{}' must name its output node pair as `({}  p n)`; the canonical .NOISE card measures a node pair, and probe-instance output has no defined mapping",
+                "Spectre noise analysis '{}' must name its output node pair as '({}  p n)'; the canonical .NOISE card measures a node pair, and probe-instance output has no defined mapping",
                 instance.name, instance.name
             ),
         ));

@@ -1526,7 +1526,7 @@ fn parse_inline_current_probe(token: &str, line_num: usize) -> Result<String, Pa
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ParseError::Syntax {
             line: line_num,
-            message: format!("Invalid current probe `{token}` in .TF (expected I(element))"),
+            message: format!("Invalid current probe '{token}' in .TF (expected I(element))"),
         })?;
     Ok(inner.to_uppercase())
 }

@@ -452,7 +452,7 @@ pub(super) fn process_line_with_abort(
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: format!(
-                        ".ENDS `{end_name}` does not match open .SUBCKT `{}`",
+                        ".ENDS '{end_name}' does not match open .SUBCKT '{}'",
                         open_frame.def.name
                     ),
                 }
@@ -1633,7 +1633,7 @@ mod tests {
         assert!(matches!(
             error,
             ParseError::Syntax { message, .. }
-                if message.contains("does not match open .SUBCKT `rlclump`")
+                if message.contains("does not match open .SUBCKT 'rlclump'")
         ));
         assert_eq!(state.subckt_stack.len(), 1);
     }

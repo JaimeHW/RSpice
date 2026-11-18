@@ -194,7 +194,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     {
                         stream.advance();
                         log::warn!(
-                            "line {line_num}: `.options seed=random` is not supported; \
+                            "line {line_num}: '.options seed=random' is not supported; \
                              the existing deterministic seed is retained (set an explicit \
                              integer seed to vary the stream)"
                         );

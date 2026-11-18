@@ -177,7 +177,7 @@ fn inherit_ako_base(
         return Err(ParseError::Syntax {
             line,
             message: format!(
-                "AKO model `{}` declares type `{explicit}` but base `{base_name}` is `{}`",
+                "AKO model '{}' declares type '{explicit}' but base '{base_name}' is '{}'",
                 model.name, base.model_type
             ),
         });
@@ -261,7 +261,7 @@ pub(super) fn resolve_pending_ako_models(
                         located(
                             card,
                             format!(
-                                "AKO base model `{}` of `{}` is not defined",
+                                "AKO base model '{}' of '{}' is not defined",
                                 card.base_name, models[card.model_index].name
                             ),
                         )
@@ -309,7 +309,7 @@ pub(super) fn resolve_pending_ako_models(
             return Err(located(
                 card,
                 format!(
-                    "AKO model `{}` inherits from itself through base `{}`",
+                    "AKO model '{}' inherits from itself through base '{}'",
                     models[card.model_index].name, card.base_name
                 ),
             ));
