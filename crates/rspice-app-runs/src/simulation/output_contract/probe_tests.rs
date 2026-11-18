@@ -584,3 +584,85 @@ fn ground_and_spaced_probes_evaluate_after_project_reload() {
         }
     }
 }
+
+/// Save all keeps the transient's own waveforms, whose engine names a node's
+/// voltage by the node alone. It names each `V(<node>)` as the engine spells
+/// the node, an instance's `V(X1.N1)` too, as the plan's outputs and every
+/// reader of a run do; a branch current keeps its `I(...)`. A probe of a node
+/// named as its voltage keeps its own spelling and takes the engine's
+/// waveform: one trace for the node, not two differing only in case.
+#[test]
+fn save_all_names_each_transient_node_voltage_by_its_voltage() {
+    let deck = "Save all names\nV1 in 0 PULSE(0 1 0 1u 1u 4u 10u)\nX1 in out half\n\
+                .subckt half a b\nR1 a n1 1k\nR2 n1 b 1k\n.ends\nR3 out 0 2k\n.end\n";
+    let transient = AnalysisSpec::Transient {
+        stop_time: 1e-5,
+        step_time: 1e-6,
+        start_time: 0.0,
+        max_timestep: Some(1e-6),
+        uic: false,
+    };
+    let names = |run: &SimulationRun| {
+        run.analyses[0]
+            .waveforms
+            .iter()
+            .map(|wave| (wave.name.clone(), wave.visible))
+            .collect::<Vec<_>>()
+    };
+
+    let everything = run(deck, transient.clone(), &[], OutputSelectionMode::SaveAll);
+    let kept = names(&everything);
+    for voltage in ["V(IN)", "V(OUT)", "V(X1.N1)"] {
+        assert!(
+            kept.iter().any(|(name, _)| name == voltage),
+            "Save all keeps {voltage}: {kept:?}"
+        );
+    }
+    for current in ["I(V1)", "I(R3)", "I(X1.R1)"] {
+        assert!(
+            kept.iter().any(|(name, _)| name == current),
+            "Save all keeps {current}: {kept:?}"
+        );
+    }
+    assert!(
+        kept.iter().all(|(name, _)| name.ends_with(')')),
+        "no node voltage keeps the engine's bare name: {kept:?}"
+    );
+
+    let probe = output(SavedOutputKind::RawVoltageOrCurrent, "V(out)", "V(out)");
+    let probed = run(
+        deck,
+        transient.clone(),
+        std::slice::from_ref(&probe),
+        OutputSelectionMode::SaveAll,
+    );
+    let kept = names(&probed);
+    let out = kept
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        out,
+        [&("V(out)".to_owned(), true)],
+        "the probe takes the engine's waveform under its own spelling: {kept:?}"
+    );
+    let automatic = run(
+        deck,
+        transient,
+        std::slice::from_ref(&probe),
+        OutputSelectionMode::Automatic,
+    );
+    let wave = |run: &SimulationRun| {
+        run.analyses[0]
+            .waveforms
+            .iter()
+            .find(|wave| wave.name == "V(out)")
+            .map(|wave| (wave.x.to_vec(), wave.y.to_vec()))
+            .expect("the probe")
+    };
+    assert_eq!(
+        wave(&probed),
+        wave(&automatic),
+        "the same samples both ways"
+    );
+}

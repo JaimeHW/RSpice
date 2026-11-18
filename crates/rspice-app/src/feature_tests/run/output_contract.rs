@@ -65,9 +65,7 @@ fn complex_live_outputs_keep_aligned_components_and_full_precision_source_knots(
 fn out(run: &SimulationRun) -> (Vec<f64>, Vec<f64>) {
     let waves = || run.analyses.iter().flat_map(|analysis| &analysis.waveforms);
     let wave = waves()
-        .find(|wave| {
-            wave.name.eq_ignore_ascii_case("V(out)") || wave.name.eq_ignore_ascii_case("out")
-        })
+        .find(|wave| wave.name.eq_ignore_ascii_case("V(out)"))
         .unwrap_or_else(|| {
             panic!(
                 "no V(out) in the run: {:?}",
@@ -84,8 +82,99 @@ fn out(run: &SimulationRun) -> (Vec<f64>, Vec<f64>) {
 #[test]
 fn a_default_run_keeps_every_point_its_transient_accepted() {
     let mut engineer = Engineer::new_project("edge");
-    engineer.top_sheet();
     let e = &mut engineer;
+    edge(e);
+    let automatic = out(&e.run());
+
+    save_all(e);
+    let everything = out(&e.run());
+    assert!(
+        automatic.0.len() > 11,
+        "V(out) keeps {} samples",
+        automatic.0.len()
+    );
+    assert_eq!(automatic, everything, "V(out) as Save all keeps it");
+}
+
+/// A Save all run names each node voltage `V(<node>)`, as a default run does:
+/// the net selected on the schematic cross-probes to its trace, and the
+/// canvas badges its transient voltage. Under the engine's bare `OUT` neither
+/// found it.
+#[test]
+fn a_save_all_run_cross_probes_and_badges_its_nodes() {
+    use rspice_app_state::state::SchematicAnnotationVisibility;
+    use rspice_app_workbench::workbench::framework::feature::CodePort as _;
+
+    let mut engineer = Engineer::new_project("save-all-names");
+    let e = &mut engineer;
+    edge(e);
+    save_all(e);
+    let run = e.run();
+    let names = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.waveforms)
+        .map(|wave| wave.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        names.iter().any(|name| name.eq_ignore_ascii_case("V(out)")),
+        "{names:?}"
+    );
+    assert!(
+        !names.iter().any(|name| name.eq_ignore_ascii_case("out")),
+        "{names:?}"
+    );
+
+    let state = &mut e.replay.app.state;
+    let label = state
+        .model
+        .schematic
+        .document()
+        .net_labels
+        .iter()
+        .find(|label| label.name == "out")
+        .expect("the out label")
+        .id;
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_net_label(label);
+    let projection = rspice_app_design::workbench::cross_probe::synchronize_schematic_cross_probe(
+        &state.model,
+        &mut state.design.schematic_cross_probe,
+        state.code.shown_netlist_document_key(),
+    )
+    .expect("the selection changed");
+    let trace = projection
+        .trace
+        .expect("the out net cross-probes to a trace");
+    assert!(
+        trace.source_name().eq_ignore_ascii_case("V(out)"),
+        "{}",
+        trace.source_name()
+    );
+
+    state.design.schematic_visibility.annotations =
+        SchematicAnnotationVisibility::TransientVoltages;
+    let badges = rspice_app_design::schematic::view::scene::operating_point_annotations(
+        &state.canvas_facts(),
+    );
+    assert!(
+        badges.iter().any(|badge| badge.key == "out"),
+        "the out net has a transient voltage badge: {:?}",
+        badges
+            .iter()
+            .map(|badge| (&badge.key, &badge.lines))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// An RC driven through a 1 ns edge, `in` to `out`, and a transient over it.
+fn edge(e: &mut Engineer) {
+    e.top_sheet();
     let pins = e.place(
         "pulse",
         "Pulse Voltage Source",
@@ -117,16 +206,11 @@ fn a_default_run_keeps_every_point_its_transient_accepted() {
     );
     e.connect(&pins, &["out", "0"]);
     e.transient("1u", "10u");
-    let automatic = out(&e.run());
+}
 
+/// The plan's output selection set to Save all on its Save page.
+fn save_all(e: &mut Engineer) {
     e.setup_page("Save, streaming & retention policy");
     e.press("Plan output selection mode", Role::ComboBox);
     e.press("Save all", Role::ListBoxOption);
-    let everything = out(&e.run());
-    assert!(
-        automatic.0.len() > 11,
-        "V(out) keeps {} samples",
-        automatic.0.len()
-    );
-    assert_eq!(automatic, everything, "V(out) as Save all keeps it");
 }

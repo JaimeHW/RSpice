@@ -278,9 +278,46 @@ pub fn apply_saved_output_policy<W: OutputWaveform>(
         for waveform in &mut analysis.waveforms {
             waveform.set_visible(false);
         }
+        name_transient_node_voltages(analysis, contracts);
         materialize_saved_outputs_preserving_engine(analysis, contracts);
     } else {
         retain_plan_saved_outputs(analysis, contracts);
+    }
+}
+
+/// Name each node voltage a transient's engine kept by the voltage, `V(OUT)` or
+/// `V(X1.N1)`, as every other analysis, the plan's own outputs and every reader of a run
+/// do; the transient's engine names it by the node alone. Save all keeps the engine's
+/// waveforms, so without this a cross-probe, a voltage badge or a check looking for
+/// `V(OUT)` found nothing in a Save all run.
+///
+/// It runs before the plan's outputs resolve. A probe of the node that is named as its
+/// voltage, `V(out)` for the engine's `OUT`, lends the waveform its own spelling, so the
+/// probe takes the engine's waveform instead of standing beside it under a name that
+/// differs only in case: one trace, one badge.
+fn name_transient_node_voltages<W: OutputWaveform>(
+    analysis: &mut AnalysisResult<W>,
+    contracts: &[PreparedSavedOutput],
+) {
+    if analysis.analysis_type != rspice_results::analysis_type::AnalysisType::Transient {
+        return;
+    }
+    for waveform in &mut analysis.waveforms {
+        let name = &waveform.as_ref().name;
+        // A branch current is `I(V1)` already; a device quantity is `@M1[id]`.
+        if name.contains(['(', ')', '|', '@']) || name.trim().is_empty() {
+            continue;
+        }
+        let voltage = format!("V({name})");
+        let named = contracts
+            .iter()
+            .find(|contract| {
+                contract.kind() == SavedOutputKind::RawVoltageOrCurrent
+                    && contract.name().eq_ignore_ascii_case(&voltage)
+                    && waveform_matches_requested(waveform, contract.source_expression())
+            })
+            .map_or(voltage, |probe| probe.name().to_owned());
+        waveform.as_mut().name = named;
     }
 }
 
