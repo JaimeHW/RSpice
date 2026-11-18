@@ -315,3 +315,22 @@ fn every_comparison_and_restore_is_reached_by_taps_alone() {
         );
     }
 }
+
+/// A project saved but never checked lists no design revision, and the
+/// history says so: what it does list, how a revision is recorded, and
+/// where the versions its saves replaced are kept.
+#[test]
+fn a_history_with_no_revision_says_what_it_lists_and_where_saves_are() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Project);
+    app.execute_command_key(ProjectCommand::RevisionHistory.key());
+    assert!(app.state.project.project_revision_history.open);
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let shown = settle(&ctx, &mut app, egui::vec2(1600.0, 900.0));
+    let text = said(&shown);
+    assert!(text.contains("No design revision is recorded yet"), "{text}");
+    assert!(text.contains("checkpoint on the Recovery page"), "{text}");
+    assert!(!text.contains("Select a revision"), "{text}");
+}

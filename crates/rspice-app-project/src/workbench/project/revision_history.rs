@@ -47,6 +47,12 @@ use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::state::workbench_session::WidthClass;
 
 const TITLE: &str = "Project revision and audit history";
+/// What the history says while it lists no revision: what it does list, and
+/// where the saved versions are.
+pub(crate) const NO_REVISIONS_NOTE: &str = "No design revision is recorded yet: Check and save \
+     records one, with its note. A plain Save records none; the version each save replaced is \
+     kept as a checkpoint on the Recovery page. Listed here are the simulation plans and model \
+     sources the project keeps.";
 /// What a cell says, on hover over its absent mark, when the record's owner
 /// keeps no such fact.
 const NOT_RECORDED: &str = "Not recorded";
@@ -889,10 +895,21 @@ fn record_pane(
     refresh_comparison(dialog, model, rows);
     let Some(row) = selected_row(dialog, rows) else {
         band_header(ui, "No record selected", None);
+        // The list holds what the project records, not every save: a
+        // revision is recorded by Check and save, and the version a save
+        // replaced is a checkpoint. Saying so is what the empty list owes.
+        let revisions = rows
+            .iter()
+            .any(|row| row.kind == ProjectAuditArtifactKind::Schematic);
         inset(ui, |ui| {
             note(
                 ui,
-                "Select a revision to see what changed since it and to restore it, or another record to see what it keeps.",
+                if revisions {
+                    "Select a revision to see what changed since it and to restore it, or \
+                     another record to see what it keeps."
+                } else {
+                    NO_REVISIONS_NOTE
+                },
             );
         });
         return false;
