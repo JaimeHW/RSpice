@@ -31,6 +31,7 @@ impl Model {
         #[cfg(not(target_arch = "wasm32"))]
         self.check_library_files_on_disk();
         self.refresh_library_edits();
+        self.hold_library_edit_locks(false);
         self.library_files
             .libraries()
             .flat_map(|(_, session)| session.files.values())
@@ -94,8 +95,8 @@ impl Model {
     /// `file` holds, before the project file itself is written, and record
     /// in `file` and in the open project the revision each file now has.
     /// Refused, writing nothing, while a changed file cannot be written: a
-    /// read-only library's, or one changed on disk since editing began with
-    /// no Keep mine. A write that fails names its file, and the project file
+    /// read-only library's, one locked elsewhere, or one changed on disk
+    /// since editing began with no Keep mine. A write that fails names its file, and the project file
     /// must then stay as it was.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn write_library_files(&mut self, file: &mut ProjectFile) -> Result<(), String> {
@@ -103,6 +104,7 @@ impl Model {
         // it is never written over unasked.
         self.check_library_files_on_disk();
         self.refresh_library_edits();
+        self.hold_library_edit_locks(true);
         let planned = self.plan_library_writes(file)?;
         let mut failures = Vec::new();
         for planned in planned {
@@ -264,6 +266,13 @@ impl Model {
                 let shown = format!("{}/{library_file}", reference.name);
                 if !reference.mode.is_editable() {
                     refused.push(format!("{shown}: the library is read-only"));
+                    continue;
+                }
+                if let Some(holder) = state
+                    .filter(|state| state.lock.is_none())
+                    .and_then(|state| state.locked_by.as_ref())
+                {
+                    refused.push(format!("{shown}: being edited by {}", holder.holder()));
                     continue;
                 }
                 let on_disk = state.and_then(|state| match state.on_disk {

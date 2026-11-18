@@ -126,6 +126,12 @@ pub struct FileSession {
     pub on_disk: OnDisk,
     /// Whether the file has edits here not yet saved.
     pub edited: bool,
+    /// What this session's parts of the file encode to, as the last look
+    /// found: other than `content` exactly when the file has edits here.
+    pub encoded: Option<ContentDigest>,
+    /// `encoded` as the last check found it, once one has: an edit made
+    /// since is the user editing the file, which takes its lock.
+    pub checked: Option<Option<ContentDigest>>,
     /// The lock this session holds on the file, while it holds one.
     pub lock: Option<LibraryFileLock>,
     /// Someone else's lock on the file, as the last check found it: the

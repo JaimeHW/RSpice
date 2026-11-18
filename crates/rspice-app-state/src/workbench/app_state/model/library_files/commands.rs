@@ -661,14 +661,26 @@ impl Model {
             &rspice_output::process_liveness,
         )
         .map_err(|error| format!("{library}/{file} cannot be written: {error}"))?;
+        let state = self
+            .library_files
+            .library_mut(library)
+            .map(|session| session.files.entry(file.clone()).or_default());
         match outcome {
             LockOutcome::Taken | LockOutcome::AlreadyHeld | LockOutcome::TakenOver(_) => {
-                if let Some(session) = self.library_files.library_mut(library) {
-                    session.files.entry(file.clone()).or_default().lock = Some(lock);
+                if let Some(state) = state {
+                    state.lock = Some(lock);
+                    state.locked_by = None;
                 }
                 Ok(())
             }
-            LockOutcome::HeldBy(holder) => Err(format!("Being edited by {}", holder.holder())),
+            LockOutcome::HeldBy(holder) => {
+                let refusal = format!("Being edited by {}", holder.holder());
+                // The holder is kept where the pages read it.
+                if let Some(state) = state {
+                    state.locked_by = Some(holder);
+                }
+                Err(refusal)
+            }
         }
     }
 
@@ -709,6 +721,53 @@ impl Model {
             .unwrap_or_default();
         for file in files {
             self.release_library_lock(library, &file);
+        }
+    }
+
+    /// Take the lock of each file the user edits here, in an editable
+    /// library read from its folder, and let go of each whose edits are
+    /// gone, so a lock is held while its cellview has unsaved changes. A
+    /// check takes it for each file edited since the last check: an edit a
+    /// restore put back holds none until the user edits that cellview
+    /// again. A Save takes it for every file it is to write. A file locked
+    /// elsewhere keeps its edits and reads "Being edited by …", and Save
+    /// refuses it, so the holder's work is never written over.
+    pub(super) fn hold_library_edit_locks(&mut self, for_save: bool) {
+        let mut take = Vec::new();
+        let mut release = Vec::new();
+        let names = self
+            .library_files
+            .libraries()
+            .map(|(name, _)| name.to_owned())
+            .collect::<Vec<_>>();
+        for library in names {
+            let editable = self
+                .library_manager
+                .reference(&library)
+                .is_some_and(|reference| reference.mode.is_editable());
+            let Some(session) = self.library_files.library_mut(&library) else {
+                continue;
+            };
+            let writable = editable && matches!(session.load, ReferenceLoad::Loaded);
+            for (file, state) in &mut session.files {
+                let edited_since = state
+                    .checked
+                    .is_some_and(|checked| checked != state.encoded);
+                state.checked = Some(state.encoded);
+                let unsaved = writable && state.edited;
+                if unsaved && state.lock.is_none() && (for_save || edited_since) {
+                    take.push((library.clone(), file.clone()));
+                } else if !unsaved && state.lock.is_some() {
+                    release.push((library.clone(), file.clone()));
+                }
+            }
+        }
+        for (library, file) in release {
+            self.release_library_lock(&library, &file);
+        }
+        for (library, file) in take {
+            // A refusal records the holder, which the row and Save state.
+            let _ = self.take_library_lock(&library, &file);
         }
     }
 
@@ -773,6 +832,7 @@ impl Model {
                     .and_then(Result::ok)
                     .map(|encoded| encoded.digest);
                 state.edited = now != state.content;
+                state.encoded = now;
             }
         }
     }

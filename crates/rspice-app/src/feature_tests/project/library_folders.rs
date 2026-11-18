@@ -1,7 +1,9 @@
 //! Libraries kept in folders of their own, through the application: the
 //! window regaining focus marks what another writer saved and reloads
 //! nothing, Refresh… reads again only the cellviews picked, Save refuses a
-//! cellview edited here that changed on disk until the reader chooses, every
+//! cellview edited here that changed on disk until the reader chooses, a
+//! cellview with edits here holds its lock and one locked elsewhere is
+//! never written, every
 //! status reads alike on the Dependencies page's rail, table and inspector
 //! and in the Overview, and a reference this session cannot read is saved
 //! back as it was.
@@ -20,7 +22,9 @@ use rspice_app_project::workbench::surfaces::project::overview::{OverviewSnapsho
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{Cell, CellViewRef, Library, SchematicState, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_design::library::folder::{CellViewStatus, LibraryFile, LibraryMode, ReferenceStatus};
+use rspice_design::library::folder::{
+    CellViewStatus, LibraryFile, LibraryFileLock, LibraryMode, ReferenceStatus,
+};
 
 use super::dependencies::said_about;
 use super::recovery_frames::{app_frame, click_on, offscreen};
@@ -339,6 +343,113 @@ fn an_edited_cellview_changed_on_disk_is_never_overwritten_and_each_choice_acts_
         status(&app, "stage"),
         Some(CellViewStatus::Found { revision: 2, .. })
     ));
+}
+
+/// Take back the edit `annotate` made to `cell`'s schematic.
+fn unannotate(app: &mut RSpiceApp, cell: &str) {
+    app.state
+        .model
+        .library_manager
+        .get_library_mut(LIBRARY)
+        .expect("work is in the catalog")
+        .cells
+        .get_mut(cell)
+        .expect("the cell")
+        .views
+        .get_mut("schematic")
+        .expect("its schematic")
+        .metadata
+        .remove("note");
+}
+
+/// Spec test 4, the locks: a cellview with edits here holds its lock while
+/// they are unsaved and lets go once they are gone; one another project
+/// holds reads "Being edited by …" on its row, and Save refuses it, writing
+/// nothing.
+#[test]
+fn an_edited_cellview_holds_its_lock_and_one_locked_elsewhere_is_never_written() {
+    let (mut app, folders) = kept_in_a_folder("library-edit-locks");
+    let lock = |cell: &str| folders.folder.join(file(cell).lock_path());
+
+    annotate(&mut app, "amp", "mine");
+    focus(&mut app);
+    assert!(lock("amp").exists(), "the edit holds its lock");
+    assert!(!lock("stage").exists(), "a cellview not edited takes none");
+    unannotate(&mut app, "amp");
+    focus(&mut app);
+    assert!(!lock("amp").exists(), "the edit gone, so is its lock");
+
+    let holder = LibraryFileLock {
+        user: "jsmith".to_owned(),
+        computer: "LAB-PC3".to_owned(),
+        process: 4242,
+        project: "elsewhere.rspiceproj".to_owned(),
+        since_unix_ms: 0,
+    };
+    rspice_project::library_folder::take_library_lock(
+        &folders.folder,
+        &file("stage"),
+        &holder,
+        &|_| None,
+    )
+    .expect("another project locks the stage");
+    annotate(&mut app, "amp", "mine");
+    annotate(&mut app, "stage", "mine");
+    let theirs = CELLS.map(|cell| folders.bytes(cell));
+    let project = std::fs::read(&folders.project).expect("the project file");
+    focus(&mut app);
+    assert!(lock("amp").exists(), "amp is locked here");
+    assert_eq!(
+        app.state
+            .model
+            .library_lock_elsewhere(LIBRARY, &file("stage")),
+        Some(&holder),
+        "the stage stays the other project's"
+    );
+
+    app.state.project.project_page = ProjectPage::Library;
+    app.state
+        .model
+        .library_manager
+        .select_view(LIBRARY, "stage", "schematic");
+    let ctx = offscreen();
+    app_frame(&ctx, &mut app, Vec::new());
+    let output = app_frame(&ctx, &mut app, Vec::new());
+    let announced = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| node.label().map(str::to_owned))
+        .collect::<Vec<_>>();
+    assert!(
+        announced
+            .iter()
+            .any(|label| label == "schematic, schematic, Being edited by jsmith on LAB-PC3"),
+        "the stage's view row names its holder: {announced:#?}"
+    );
+
+    assert!(
+        !app.state.save_project_to_path(&folders.project),
+        "Save refuses"
+    );
+    assert_eq!(
+        CELLS.map(|cell| folders.bytes(cell)),
+        theirs,
+        "nothing is written over"
+    );
+    assert_eq!(
+        std::fs::read(&folders.project).expect("the project file"),
+        project,
+        "nor the project file"
+    );
+    assert_eq!(
+        note(&app, "stage").as_deref(),
+        Some("mine"),
+        "the edit stays"
+    );
 }
 
 /// What the Dependencies page's rail, table and inspector say about `work`,
