@@ -546,6 +546,60 @@ pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
     Ok(())
 }
 
+/// Save As: write the open deck to `path`, in its own encoding and line
+/// endings, and read it from there from now on. The project lists the new
+/// file; the old one stays as it was. The new file's name.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_deck_as(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    path: &Path,
+) -> Result<String, String> {
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let folder = model
+        .workspace
+        .content
+        .project
+        .data_root()
+        .map(Path::to_path_buf);
+    let deck = netlist
+        .open_deck
+        .as_mut()
+        .filter(|deck| !deck.is_stored())
+        .ok_or_else(|| "Open a deck file to save it as another.".to_owned())?;
+    let was = (deck.root.path.clone(), deck.root.disk.take());
+    deck.root.path = path.clone();
+    deck.root.disk_change = None;
+    if let Err(error) = save_file(&mut deck.root) {
+        (deck.root.path, deck.root.disk) = was;
+        return Err(error);
+    }
+    let id = deck.id;
+    let name = deck.root.name();
+    let content = &mut *model.workspace.content;
+    if let Some(entry) = content.decks.iter_mut().find(|entry| entry.id == id) {
+        entry.source = crate::state::ProjectDeck::for_file(&path, folder.as_deref()).source;
+        content.decks_dirty = true;
+    }
+    // The deck is read under its new name, and its includes from its new
+    // folder.
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
+    Ok(name)
+}
+
+/// The text of a deck saved from the generated netlist `source`: a first
+/// line naming the design and when, then the netlist as generated.
+#[must_use]
+pub fn deck_from_generated(source: &str, design: &str, when: &str) -> String {
+    let mut deck = format!("* {design} netlist, saved as a deck {when}\n");
+    deck.push_str(source);
+    if !deck.ends_with('\n') {
+        deck.push('\n');
+    }
+    deck
+}
+
 /// Before a run of the open deck: look at the disk, then save each of its
 /// files that holds edits, so the run reads what its tabs show. The notices
 /// to show, or why the run waits.
@@ -817,13 +871,15 @@ pub fn keep_stored_edit(model: &mut Model, deck: &mut OpenDeck, include: Option<
 
 /// Add a new deck the project keeps as text, named `deck<N>.cir` after the
 /// first number no deck has, and bring it to the front: what New deck makes
-/// where there is no file system. Its name, or why there is none: the deck
-/// open before it goes, so one with unsaved edits stops this.
+/// where there is no file system, a title line and `.end`, or `text`. Its
+/// name, or why there is none: the deck open before it goes, so one with
+/// unsaved edits stops this.
 pub fn new_stored_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
+    text: Option<String>,
 ) -> Result<String, String> {
     if let Some(unsaved) = netlist.open_deck.as_ref().and_then(OpenDeck::unsaved) {
         return Err(format!(
@@ -838,7 +894,10 @@ pub fn new_stored_deck(
         .map(crate::state::ProjectDeck::name)
         .collect::<Vec<_>>();
     let name = crate::state::new_stored_deck_name(names.iter().map(String::as_str));
-    let stored = StoredDeck::new(&name);
+    let mut stored = StoredDeck::new(&name);
+    if let Some(text) = text {
+        stored.text = text;
+    }
     let deck = crate::state::ProjectDeck::stored(stored.clone());
     let open = OpenDeck::from_stored(deck.id, &stored);
     content.decks.push(deck);

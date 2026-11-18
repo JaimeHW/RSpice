@@ -29,6 +29,8 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
     match request {
         CodeRequest::OpenNetlist => return Some(CodeHandOff::OpenNetlist),
         CodeRequest::NewDeck => return Some(CodeHandOff::NewDeck),
+        CodeRequest::SaveDeckAs => return Some(CodeHandOff::SaveDeckAs),
+        CodeRequest::SaveNetlistAsDeck => return Some(CodeHandOff::SaveNetlistAsDeck),
         CodeRequest::ImportVerilogA => return Some(CodeHandOff::ImportVerilogA),
         CodeRequest::ImportLtspiceSchematic => return Some(CodeHandOff::ImportLtspiceSchematic),
         CodeRequest::ImportQspiceSchematic => return Some(CodeHandOff::ImportQspiceSchematic),

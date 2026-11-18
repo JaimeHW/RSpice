@@ -33,6 +33,12 @@ pub enum CodeCommand {
     /// New deck: a new deck of the project, a file on the desktop and text
     /// the project keeps where there is no file system.
     NewDeck,
+    /// Save deck as…: the open deck written to a new file, which the
+    /// project reads it from from then on.
+    SaveDeckAs,
+    /// Save netlist as deck…: the generated netlist written to a new deck
+    /// file and opened as a deck of the project; nothing links it back.
+    SaveNetlistAsDeck,
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
@@ -115,6 +121,8 @@ pub enum CodeCommand {
 pub enum CodeRequest {
     OpenNetlist,
     NewDeck,
+    SaveDeckAs,
+    SaveNetlistAsDeck,
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
@@ -194,6 +202,8 @@ impl Request for CodeRequest {
 pub enum CodeHandOff {
     OpenNetlist,
     NewDeck,
+    SaveDeckAs,
+    SaveNetlistAsDeck,
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
@@ -412,10 +422,12 @@ pub const fn new_deck_label(browser: bool) -> &'static str {
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 43] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::NewDeck,
+        Self::SaveDeckAs,
+        Self::SaveNetlistAsDeck,
         Self::ImportVerilogA,
         Self::ImportLtspiceSchematic,
         Self::ImportQspiceSchematic,
@@ -462,6 +474,8 @@ impl CodeCommand {
             Self::NewVerilogADevice => ids::NEW_VERILOGA_DEVICE,
             Self::OpenNetlist => ids::OPEN_NETLIST,
             Self::NewDeck => CommandKey::new("new-deck"),
+            Self::SaveDeckAs => CommandKey::new("save-deck-as"),
+            Self::SaveNetlistAsDeck => CommandKey::new("save-netlist-as-deck"),
             Self::ImportVerilogA => CommandKey::new("import-veriloga"),
             Self::ImportLtspiceSchematic => CommandKey::new("import-ltspice-schematic"),
             Self::ImportQspiceSchematic => CommandKey::new("import-qspice-schematic"),
@@ -638,6 +652,8 @@ impl CodeCommand {
                 "File",
                 opens_file,
             ),
+            Self::SaveDeckAs => ("Save deck as\u{2026}", "File", imports),
+            Self::SaveNetlistAsDeck => ("Save netlist as deck\u{2026}", "File", imports),
             Self::ImportVerilogA => ("Import Verilog/Verilog-A/AMS\u{2026}", "File", imports),
             Self::ImportLtspiceSchematic => ("Import LTspice schematic\u{2026}", "File", imports),
             Self::ImportQspiceSchematic => ("Import QSPICE schematic\u{2026}", "File", imports),

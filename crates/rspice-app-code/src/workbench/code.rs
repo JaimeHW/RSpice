@@ -245,6 +245,28 @@ impl CommandSet for CodeCommand {
                 !execution_active,
                 "an active simulation execution still owns the project",
             ),
+            Self::SaveDeckAs => (
+                cfg!(not(target_arch = "wasm32"))
+                    && reads
+                        .state
+                        .netlist
+                        .open_deck
+                        .as_ref()
+                        .is_some_and(|deck| !deck.is_stored()),
+                if cfg!(target_arch = "wasm32") {
+                    "decks are saved as files on the desktop"
+                } else {
+                    "no deck file is open"
+                },
+            ),
+            Self::SaveNetlistAsDeck => (
+                !execution_active && !model.netlist_artifacts.generated_source.trim().is_empty(),
+                if execution_active {
+                    "an active simulation execution still owns the project"
+                } else {
+                    "the netlist has not been generated"
+                },
+            ),
             Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
                 match foreign_import_refusal_in(model, reads.platform) {
                     Some(refusal) => (false, refusal),
@@ -422,6 +444,8 @@ impl CommandSet for CodeCommand {
             // table did, straight after this call returns.
             Self::OpenNetlist => cx.wb.outbox.push(CodeRequest::OpenNetlist),
             Self::NewDeck => cx.wb.outbox.push(CodeRequest::NewDeck),
+            Self::SaveDeckAs => cx.wb.outbox.push(CodeRequest::SaveDeckAs),
+            Self::SaveNetlistAsDeck => cx.wb.outbox.push(CodeRequest::SaveNetlistAsDeck),
             Self::ImportVerilogA => cx.wb.outbox.push(CodeRequest::ImportVerilogA),
             Self::ImportLtspiceSchematic => {
                 cx.wb.outbox.push(CodeRequest::ImportLtspiceSchematic);

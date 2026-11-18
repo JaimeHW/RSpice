@@ -16,10 +16,22 @@ pub fn show_open_deck_dialog() -> Option<std::path::PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 #[must_use]
 pub fn show_new_deck_dialog(folder: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    show_deck_save_dialog("New Deck", "deck.cir", folder)
+}
+
+/// Ask where a deck's file goes under `title`, offering `file_name` in
+/// `folder`; `None` when the picker was closed.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn show_deck_save_dialog(
+    title: &str,
+    file_name: &str,
+    folder: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
     let dialog = rfd::FileDialog::new()
         .add_filter(super::NETLIST_FILTER.0, super::NETLIST_FILTER.1)
-        .set_title("New Deck")
-        .set_file_name("deck.cir");
+        .set_title(title)
+        .set_file_name(file_name);
     match folder {
         Some(folder) => dialog.set_directory(folder),
         None => dialog,

@@ -187,7 +187,7 @@ pub(super) fn overview_header(
                     }
                     let (open_deck_enabled, open_deck_disabled_reason) =
                         command_gate(cx, ids::OPEN_NETLIST);
-                    let import_deck = Button::new("Import deck…")
+                    let import_deck = Button::new("Open deck…")
                         .enabled(open_deck_enabled)
                         .show(ui);
                     let import_deck = open_deck_disabled_reason

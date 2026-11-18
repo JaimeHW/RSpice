@@ -64,6 +64,153 @@ impl AppState {
         }
     }
 
+    /// Save deck as…: ask where the open deck goes, write it there and read
+    /// it from there from now on.
+    pub(crate) fn save_deck_as(&mut self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.prompt("Decks are saved as files on the desktop.");
+            false
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some(root) = self
+                .code
+                .netlist
+                .open_deck
+                .as_ref()
+                .filter(|deck| !deck.is_stored())
+                .map(|deck| &deck.root)
+            else {
+                self.prompt("Open a deck file to save it as another.");
+                return false;
+            };
+            let Some(path) =
+                rspice_app_code::workbench::workflows::netlist_workflow::show_deck_save_dialog(
+                    "Save Deck As",
+                    &root.name(),
+                    root.path.parent(),
+                )
+            else {
+                return false;
+            };
+            self.save_deck_as_at(&path)
+        }
+    }
+
+    /// Write the open deck to `path` and read it from there from now on.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn save_deck_as_at(&mut self, path: &std::path::Path) -> bool {
+        match rspice_app_code::workbench::documents::deck_files::save_deck_as(
+            &mut self.model,
+            &mut self.code.netlist,
+            path,
+        ) {
+            Ok(name) => {
+                self.prompt(format!(
+                    "Saved the deck as {name}; it is read from there now."
+                ));
+                true
+            }
+            Err(error) => {
+                self.prompt(error);
+                false
+            }
+        }
+    }
+
+    /// Save netlist as deck…: write the generated netlist to a new deck and
+    /// open it; on the desktop a file, asked where, and in the browser text
+    /// the project keeps. Nothing links the deck back to the design.
+    pub(crate) fn save_generated_as_deck(&mut self) -> bool {
+        if self
+            .model
+            .netlist_artifacts
+            .generated_source
+            .trim()
+            .is_empty()
+        {
+            self.prompt("Generate the netlist before saving it as a deck.");
+            return false;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let text = self.generated_deck_text();
+            self.add_stored_deck(Some(text))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(reason) = self.generated_deck_refusal() {
+                self.prompt(reason);
+                return false;
+            }
+            let folder = self
+                .model
+                .workspace
+                .content
+                .project
+                .data_root()
+                .map(std::path::Path::to_path_buf)
+                .or_else(dirs::document_dir);
+            let name = format!("{}.cir", self.model.export_file_stem("deck"));
+            let Some(path) =
+                rspice_app_code::workbench::workflows::netlist_workflow::show_deck_save_dialog(
+                    "Save Netlist As Deck",
+                    &name,
+                    folder.as_deref(),
+                )
+            else {
+                return false;
+            };
+            self.save_generated_as_deck_at(&path)
+        }
+    }
+
+    /// Write the generated netlist to `path` as a deck, its first line
+    /// naming the design and when, and open it as a deck of the project.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn save_generated_as_deck_at(&mut self, path: &std::path::Path) -> bool {
+        if let Some(reason) = self.generated_deck_refusal() {
+            self.prompt(reason);
+            return false;
+        }
+        if let Err(error) = std::fs::write(path, self.generated_deck_text()) {
+            self.prompt(format!("{} could not be written: {error}", path.display()));
+            return false;
+        }
+        let new_project = !self.platform.project_lifecycle.is_open();
+        self.open_deck_at(path, new_project)
+    }
+
+    /// Why the generated netlist cannot become a deck now: a run in
+    /// progress, a project open read-only, or a deck open with edits, which
+    /// the new deck would put away.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn generated_deck_refusal(&self) -> Option<String> {
+        if let Some(reason) = self.deck_open_refusal(false) {
+            return Some(reason.to_owned());
+        }
+        self.code
+            .netlist
+            .open_deck
+            .as_ref()
+            .and_then(|deck| deck.unsaved())
+            .map(|unsaved| format!("Save {} before opening another deck.", unsaved.name()))
+    }
+
+    /// The generated netlist as a deck: a first line naming the design and,
+    /// in UTC since the file travels, when it was saved.
+    fn generated_deck_text(&self) -> String {
+        use rspice_app_state::time_compat::{checked_unix_time_ms, utc_stamp};
+        rspice_app_code::workbench::documents::deck_files::deck_from_generated(
+            &self.model.netlist_artifacts.generated_source,
+            &self
+                .model
+                .export_file_stem(self.model.workspace.content.project.name()),
+            &utc_stamp(checked_unix_time_ms().unwrap_or(0)),
+        )
+    }
+
     /// Write a new deck, a title line and `.end`, to `path` and open it, in a
     /// new project around it when `new_project` says so.
     #[cfg(not(target_arch = "wasm32"))]
@@ -85,6 +232,14 @@ impl AppState {
     /// where there is no file system.
     #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn new_stored_deck(&mut self) -> bool {
+        self.add_stored_deck(None)
+    }
+
+    /// Add a deck the project keeps as text, a title line and `.end` or
+    /// `text`, and bring it to the front, in a new project around it when
+    /// none is open.
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn add_stored_deck(&mut self, text: Option<String>) -> bool {
         let new_project = !self.platform.project_lifecycle.is_open();
         if let Some(reason) = self.deck_open_refusal(new_project) {
             self.prompt(reason);
@@ -101,6 +256,7 @@ impl AppState {
             &mut candidate.code.netlist,
             &mut candidate.code.netlist_open_documents,
             &mut candidate.runs,
+            text,
         ) {
             Ok(name) => name,
             Err(error) => {
