@@ -751,12 +751,12 @@ const DOCUMENTATION: &[(&str, Option<&str>, &str)] = &[
     (
         "$fopen",
         Some("name, [mode]"),
-        "Opens a file; a descriptor, or 0 when it cannot be opened.",
+        "Opens a file; a descriptor, or 0 when it cannot be opened. The name may be a string literal, a string parameter or a string variable.",
     ),
     (
         "$fscanf",
         Some("fd, format, variable…"),
-        "Reads formatted fields from a file; how many it assigned, or -1 at the end.",
+        "Reads formatted fields from a file; how many it assigned, or -1 at the end. The format may be a string literal, a string parameter or a string variable.",
     ),
     (
         "$strobe",

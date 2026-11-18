@@ -431,3 +431,61 @@ fn a_resumed_run_draws_what_the_uninterrupted_run_draws() {
     let resumed = draws_by_instance("resumed", instances, 6e-9, Some(2.5e-9));
     assert_eq!(resumed, whole);
 }
+
+/// A module that opens files and reads one through names and formats held in
+/// string parameters and string variables.
+const STRING_NAMES: &str = "`include \"disciplines.vams\"\nmodule names(x); inout x; electrical x;\n\
+     parameter string out_name = \"out.txt\"; parameter string in_name = \"in.txt\";\n\
+     parameter string fmt = \"%d %d %d\"; parameter string other = \"other.txt\";\n\
+     parameter integer pick = 1;\n\
+     string s, f; integer fd, k, n, a, b, c;\nanalog begin\n@(initial_step) begin\n\
+     fd = $fopen(out_name, \"w\"); $fdisplay(fd, \"parameter\"); $fclose(fd);\n\
+     s = pick ? \"variable.txt\" : other;\n\
+     fd = $fopen(s, \"w\"); $fdisplay(fd, \"variable\"); $fclose(fd);\n\
+     f = fmt; k = $fopen(in_name, \"r\"); n = $fscanf(k, f, a, b, c); $fclose(k);\n\
+     $display(\"n=%0d a=%0d b=%0d c=%0d\", n, a, b, c);\n\
+     k = $fopen(in_name, \"r\"); n = $fscanf(k, fmt, a, b); $fclose(k);\n\
+     $display(\"n=%0d a=%0d b=%0d\", n, a, b);\nend\n\
+     I(x) <+ V(x) / 1k;\nend\nendmodule\n";
+
+/// LRM 2.4 section 9.5.1: `$fopen`'s file name "is an expression that is a
+/// string literal, string data type, or an integral data type containing a
+/// character string". A name or a `$fscanf` format comes from a string
+/// parameter, fixed when the module is elaborated, or from a string
+/// variable, read when the call runs; an instance's override of the
+/// parameter names its own file.
+#[test]
+fn file_names_and_formats_come_from_string_parameters_and_variables() {
+    let directory = scratch("names");
+    std::fs::write(directory.join("names.va"), STRING_NAMES).unwrap();
+    std::fs::write(directory.join("in.txt"), "1 2 3\n").unwrap();
+    let deck = directory.join("deck.cir");
+    std::fs::write(
+        &deck,
+        "* string names\n.hdl \"names.va\"\nv1 x 0 1\nxa x names\n\
+         xb x names out_name=\"override.txt\" other=\"chosen.txt\" pick=0\n.end\n",
+    )
+    .unwrap();
+    let netlist = Netlist::parse_file(&deck).unwrap();
+    let collector = Arc::new(HdlOutputCollector::new());
+    let mut config = rspice_core::SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    config.hdl.deck_directory = Some(directory.clone());
+    Engine::new(config).run_dc_op(&netlist).unwrap();
+    let read = |file: &str| std::fs::read_to_string(directory.join(file)).unwrap();
+    assert_eq!(read("out.txt"), "parameter\n");
+    assert_eq!(read("variable.txt"), "variable\n");
+    // `xb` names its overrides: one through the parameter, the other
+    // through the variable the condition assigned it to.
+    assert_eq!(read("override.txt"), "parameter\n");
+    assert_eq!(read("chosen.txt"), "variable\n");
+    assert_eq!(
+        stdout(&collector.take()),
+        [
+            "n=3 a=1 b=2 c=3\n",
+            "n=2 a=1 b=2\n",
+            "n=3 a=1 b=2 c=3\n",
+            "n=2 a=1 b=2\n"
+        ]
+    );
+}

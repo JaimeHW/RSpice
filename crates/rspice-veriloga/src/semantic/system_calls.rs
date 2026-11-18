@@ -12,13 +12,17 @@
 //! evaluates the call, with its source order and its guard, as a statement.
 //!
 //! The call's site holds what is not a number: the function, where its seed
-//! lives, and its string literals. The module keeps one site per call.
+//! lives, and its strings. `$fopen`'s file name and `$fscanf`'s format may be
+//! a string literal, a string parameter or a string variable; a mode, a
+//! plusarg name and a `$value$plusargs` format, a literal or a string
+//! parameter (see `string_variables`). The module keeps one site per call.
 
 use rspice_veriloga_runtime::{
     AnalogDrawScope, AnalogSeed, AnalogSystemFunction, AnalogSystemSite,
 };
 use smol_str::SmolStr;
 
+use super::string_variables::StringArgument;
 use super::{AnalyzedModule, AnalyzedStatement, SemanticAnalyzer, SymbolKind};
 use crate::analog_tasks::{AnalogSystemCall, SYSTEM_CALL, SYSTEM_OUTPUT};
 use crate::ast::{
@@ -126,6 +130,7 @@ impl SemanticAnalyzer {
         let mut text = Vec::new();
         let mut seed = AnalogSeed::Stream;
         let mut scope = AnalogDrawScope::Unscoped;
+        let mut text_variable = None;
         match kind {
             _ if kind.is_random() => {
                 let parameters = kind.distribution_parameters();
@@ -211,13 +216,13 @@ impl SemanticAnalyzer {
                 let [argument] = args else {
                     return Err(arity(name, "1", args.len(), span));
                 };
-                text.push(literal(name, argument, "the plusarg name")?);
+                text.push(self.fixed_string_argument(name, argument, "the plusarg name")?);
             }
             AnalogSystemFunction::ValuePlusargs => {
                 let [format, target] = args else {
                     return Err(arity(name, "2", args.len(), span));
                 };
-                let format_text = literal(name, format, "the format")?;
+                let format_text = self.fixed_string_argument(name, format, "the format")?;
                 let target = self.assigned_variable(name, target)?;
                 let conversion = format_text
                     .split_once('%')
@@ -245,9 +250,16 @@ impl SemanticAnalyzer {
                     [file, mode] => (file, Some(mode)),
                     _ => return Err(arity(name, "1..2", args.len(), span)),
                 };
-                text.push(literal(name, file, "the file name")?);
+                match self.string_argument(name, file, "the file name")? {
+                    StringArgument::Fixed(file) => text.push(file),
+                    StringArgument::Variable => {
+                        text.push(String::new());
+                        text_variable = Some(0);
+                        operands.push(self.materialize_output_function_calls(file, module, sink)?);
+                    }
+                }
                 if let Some(mode) = mode {
-                    let mode_text = literal(name, mode, "the mode")?;
+                    let mode_text = self.fixed_string_argument(name, mode, "the mode")?;
                     if !FILE_MODES.contains(&mode_text.as_str()) {
                         return Err(refuse(
                             name,
@@ -266,7 +278,15 @@ impl SemanticAnalyzer {
                     return Err(arity(name, "2+", args.len(), span));
                 };
                 operands.push(self.materialize_output_function_calls(descriptor, module, sink)?);
-                text.push(literal(name, format, "the format")?);
+                match self.string_argument(name, format, "the format")? {
+                    StringArgument::Fixed(format) => text.push(format),
+                    StringArgument::Variable => {
+                        text.push(String::new());
+                        text_variable = Some(0);
+                        operands
+                            .push(self.materialize_output_function_calls(format, module, sink)?);
+                    }
+                }
                 for target in targets {
                     outputs.push(self.assigned_variable(name, target)?);
                 }
@@ -287,6 +307,8 @@ impl SemanticAnalyzer {
                 seed,
                 scope,
                 text,
+                text_variable,
+                strings: Vec::new(),
                 targets,
                 file: String::new(),
                 line: 0,
@@ -408,17 +430,5 @@ impl SemanticAnalyzer {
             "the argument it assigns must be an integer or real variable",
             argument.span(),
         ))
-    }
-}
-
-/// A string literal argument's text.
-fn literal(name: &str, argument: &Expression, what: &str) -> CompileResult<String> {
-    match argument {
-        Expression::StringLit(literal) => Ok(literal.value.to_string()),
-        _ => Err(refuse(
-            name,
-            format!("{what} must be a string literal"),
-            argument.span(),
-        )),
     }
 }

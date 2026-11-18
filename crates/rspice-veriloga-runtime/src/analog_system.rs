@@ -248,8 +248,16 @@ pub struct AnalogSystemSite {
     /// A random call's type string.
     pub scope: AnalogDrawScope,
     /// `$fopen`'s name and mode, `$fscanf`'s format, or the plusarg name or
-    /// format.
+    /// format: a string literal, or a string parameter's value, which is
+    /// fixed when the module is elaborated.
     pub text: Vec<String>,
+    /// The entry of `text` a string variable supplies instead, when one does:
+    /// the call's last operand then holds the index into `strings` of the
+    /// string the variable holds when the call runs.
+    pub text_variable: Option<usize>,
+    /// Every string the module's string variables can hold, by the index
+    /// their slots hold; empty unless `text_variable` is set.
+    pub strings: Vec<String>,
     /// `$fscanf` and `$value$plusargs` targets, `true` for an integer one.
     pub targets: Vec<bool>,
     /// Where the call was written, for messages.
@@ -262,6 +270,29 @@ impl AnalogSystemSite {
     /// `file:line: $name`, the way a message names the call.
     pub fn label(&self) -> String {
         format!("{}:{}: {}", self.file, self.line, self.function.name())
+    }
+
+    /// Entry `slot` of the call's text: the string written there, or the
+    /// one the string variable there holds, which the last of `operands`
+    /// indexes.
+    fn text<'a>(&'a self, slot: usize, operands: &[f64]) -> Result<&'a str, String> {
+        if self.text_variable != Some(slot) {
+            return Ok(self.text.get(slot).map(String::as_str).unwrap_or_default());
+        }
+        let index = operands
+            .last()
+            .copied()
+            .filter(|index| index.is_finite() && *index >= 0.0)
+            .ok_or_else(|| format!("{} has no string operand", self.label()))?;
+        self.strings
+            .get(index as usize)
+            .map(String::as_str)
+            .ok_or_else(|| {
+                format!(
+                    "{} reads string {index}, which the module never holds",
+                    self.label()
+                )
+            })
     }
 }
 
@@ -457,10 +488,10 @@ impl AnalogSystemState {
                 Ok(if value.is_some() { 1.0 } else { 0.0 })
             }
             AnalogSystemFunction::Fopen => {
+                let name = call.text(0, operands)?;
                 let Some(table) = self.files(files) else {
                     return Ok(0.0);
                 };
-                let name = call.text.first().map(String::as_str).unwrap_or_default();
                 let mode = call.text.get(1).map(String::as_str);
                 Ok(match table.open(name, mode) {
                     AnalogFileOpen::Opened(descriptor) => f64::from(descriptor as i32),
@@ -469,11 +500,11 @@ impl AnalogSystemState {
             }
             AnalogSystemFunction::Fscanf => {
                 let descriptor = integer(operand(0)?) as u32;
+                let format = call.text(0, operands)?;
                 let Some(table) = self.files(files) else {
                     self.outputs.resize(call.targets.len(), None);
                     return Ok(-1.0);
                 };
-                let format = call.text.first().map(String::as_str).unwrap_or_default();
                 let scan = table.scan(descriptor, format, &call.targets);
                 self.outputs.extend(scan.values.iter().map(|value| {
                     Some(match *value {
@@ -690,6 +721,8 @@ mod tests {
             seed,
             scope: AnalogDrawScope::Unscoped,
             text: Vec::new(),
+            text_variable: None,
+            strings: Vec::new(),
             targets: Vec::new(),
             file: "t.va".into(),
             line: 1,

@@ -426,6 +426,7 @@ pub(crate) mod parameter_given;
 mod retained_inputs;
 pub(crate) mod source_references;
 mod string_parameters;
+mod string_variables;
 mod switch_branches;
 mod symbols;
 mod system_calls;
@@ -496,6 +497,13 @@ pub struct SemanticAnalyzer {
     /// instances may override parameters, so these must never influence
     /// generated code)
     param_consts: HashMap<SmolStr, ConstantValue>,
+    /// The module's string parameters and the values they closed to when it
+    /// was elaborated.
+    string_parameter_values: HashMap<SmolStr, SmolStr>,
+    /// Every string the module's string variables can hold. A string
+    /// variable's slot holds the index of its string here, so a variable that
+    /// was never assigned holds the empty string.
+    string_table: Vec<SmolStr>,
     /// External parameter queries resolve aliases and ASCII case once.
     external_parameter_names: HashMap<String, SmolStr>,
     /// Immutable packed parameters and closed local literals. Public numeric
@@ -625,6 +633,8 @@ impl SemanticAnalyzer {
             assignment_events: Default::default(),
             occurrence_source: None,
             param_consts: HashMap::new(),
+            string_parameter_values: HashMap::new(),
+            string_table: vec![SmolStr::default()],
             external_parameter_names: HashMap::new(),
             exact_parameter_constants: Default::default(),
             invariant_consts: HashMap::new(),
@@ -1183,6 +1193,8 @@ impl SemanticAnalyzer {
     ) -> CompileResult<AnalyzedModule> {
         let substituted = string_parameters::substituted(module)?;
         let module = substituted.as_ref().unwrap_or(module);
+        self.string_parameter_values = string_parameters::closed_values(module)?;
+        self.string_table = vec![SmolStr::default()];
         let original_source = module;
         self.in_connect_module = self.connect_modules.contains(&module.name);
         let (expanded, mut physical_nodes) = node_vectors::declarations(module, &self.disciplines)?;
@@ -2640,6 +2652,7 @@ impl SemanticAnalyzer {
             }
         }
         analyzed.parameter_locals = std::sync::Arc::new(local_defaults);
+        self.close_system_call_strings(&mut analyzed.analog_system_calls);
         self.protect_physical_parameters(original_source, &mut analyzed)?;
         self.promote_node_aliases(&mut analyzed)?;
         analyzed.formal_ports = self.formal_ports(&analyzed);
@@ -6355,15 +6368,20 @@ impl SemanticAnalyzer {
             return Ok(());
         }
 
-        let expression = self.lower_expression_with_side_effects(&assign.value, module, sink)?;
         let target_type = self
             .symbols
             .lookup(&symbol_name)
             .map_or(ValueType::Unknown, |symbol| symbol.value_type);
+        let held_string = (target_type == ValueType::String)
+            .then(|| self.string_variable_value(&assign.value))
+            .transpose()?;
+        let assigned = held_string.as_ref().unwrap_or(&assign.value);
+        let expression = self.lower_expression_with_side_effects(assigned, module, sink)?;
         let (expression, value_type) =
             self.coerce_assignment_expression(expression, target_type)?;
 
         if let Some(sym) = self.symbols.lookup(&symbol_name)
+            && held_string.is_none()
             && !value_type.can_coerce_to(&sym.value_type)
         {
             self.record_error_at(
