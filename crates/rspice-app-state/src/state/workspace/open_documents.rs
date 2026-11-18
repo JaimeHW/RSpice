@@ -188,6 +188,22 @@ impl ProjectWorkspace {
             .insert_schematic_editor(self.content.unstamped_mut(), key, schematic);
     }
 
+    /// Mark the active drawing's buffer and tab unsaved or not. Neither is
+    /// content: the project's stamp, and the answer held for it, stay.
+    pub fn mark_active_drawing(&mut self, dirty: bool) {
+        let key = self.content.active_key();
+        if let Some(session) = self.session.schematic_sessions.get_mut(&key) {
+            session.is_dirty = dirty;
+        }
+        if self
+            .content
+            .active_dirty()
+            .is_some_and(|marked| marked != dirty)
+        {
+            self.content.unstamped_mut().set_active_dirty(dirty);
+        }
+    }
+
     pub fn mark_all_clean(&mut self) {
         self.content.mark_all_clean();
         for session in self.session.schematic_sessions.values_mut() {

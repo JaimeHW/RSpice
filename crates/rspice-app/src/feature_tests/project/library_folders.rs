@@ -520,8 +520,10 @@ fn the_first_edit_takes_the_lock_and_another_session_sees_the_holder_before_edit
         Some(format!("Being edited by {holder} - read only until they save or close it").as_str()),
         "an edit there is refused, naming the holder"
     );
+    // Its drawing is unsaved there all the same: that project's file does
+    // not hold the cell yet. The refusal leaves the drawing as it was.
     assert!(
-        !other.state.model.schematic.session.is_dirty,
+        !other.state.model.schematic.can_undo(),
         "and nothing changes"
     );
 

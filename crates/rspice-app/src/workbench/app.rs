@@ -629,6 +629,17 @@ impl RSpiceApp {
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+        // One read of the answer held for the working state serves the
+        // drawing's unsaved mark and the window title.
+        let (project_has_unsaved_changes, front_differs_from_saved) =
+            rspice_app_services::workbench::lifecycle::project_lifecycle::unsaved_work(&self.state);
+        // The drawing's mark reads where the project does, from where the
+        // drawing stands in its history against the saved project: an undo
+        // back to the save clears it. Before a first save, the editor's own
+        // mark stands.
+        if let Some(dirty) = front_differs_from_saved {
+            self.state.model.mark_active_drawing(dirty);
+        }
         // The tab's mark is no working content: writing it leaves the
         // project's stamp, and the dirty answer held for it, as it was.
         let editor_dirty = self.state.model.schematic.session.is_dirty;
@@ -653,22 +664,20 @@ impl RSpiceApp {
                 .unstamped_mut()
                 .set_active_dirty(editor_dirty);
         }
-        self.sync_window_title(ctx);
+        self.sync_window_title(ctx, project_has_unsaved_changes);
         self.handle_image_export();
     }
 
     /// Keep the OS window title (or browser tab title) in sync with the
     /// active document: `cell* — project — RSpice`, or `cell in place on
     /// X1* — project — RSpice` while a symbol is edited in place.
-    fn sync_window_title(&mut self, ctx: &Context) {
-        // The answer held for the working state, made again whenever its
-        // stamp moves. The browser's before-unload guard arms from it too:
-        // the browser asks while the tab closes, when nothing can be
-        // captured, so the last frame's answer is the one there is.
-        let project_has_unsaved_changes =
-            rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
-                &self.state,
-            );
+    ///
+    /// `project_has_unsaved_changes` is the answer held for the working
+    /// state, made again whenever its stamp moves. The browser's
+    /// before-unload guard arms from it too: the browser asks while the tab
+    /// closes, when nothing can be captured, so the last frame's answer is
+    /// the one there is.
+    fn sync_window_title(&mut self, ctx: &Context, project_has_unsaved_changes: bool) {
         let authoring_has_unsaved_changes =
             ModelsPort::has_unsaved_authoring_changes(&*self.state.models);
         let should_warn_before_unload = should_warn_before_browser_unload(

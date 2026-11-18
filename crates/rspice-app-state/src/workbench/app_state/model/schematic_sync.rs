@@ -96,6 +96,30 @@ impl Model {
         self.sync_active_schematic_to_workspace()
     }
 
+    /// Mark the drawing in front unsaved or not, as the project reads it
+    /// from where the drawing stands in its history: an undo back to where
+    /// the save left it clears the mark its edit set. The editor's mark, its
+    /// buffer's and its tab's move together. None is content, so a sync that
+    /// stood for the drawing still stands, and the drawing is not written
+    /// again for its mark.
+    pub fn mark_active_drawing(&mut self, dirty: bool) {
+        if !self
+            .workspace
+            .content
+            .active_view_type()
+            .is_some_and(is_schematic_like)
+            || self.schematic.session.is_dirty == dirty
+        {
+            return;
+        }
+        let stood = self.frame_sync_stands();
+        self.schematic.session.is_dirty = dirty;
+        self.workspace.mark_active_drawing(dirty);
+        if stood && let Some(key) = &mut self.frame_sync.0 {
+            key.dirty = dirty;
+        }
+    }
+
     /// Remember what the sync just left, so that the frames after it pass it
     /// by until something it writes moves.
     fn record_frame_sync(&mut self) {

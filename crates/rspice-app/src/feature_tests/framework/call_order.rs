@@ -173,8 +173,13 @@ const PREPARE_FRAME: &[Step] = &[
             "ctx.request_repaint_after(std::time::Duration::from_millis(50))",
         ],
     ),
+    ("5.30.1", &["project_lifecycle::unsaved_work(&self.state)"]),
+    ("5.30.2", &[".mark_active_drawing(dirty)"]),
     ("5.31", &[".set_active_dirty(editor_dirty)"]),
-    ("5.32", &["self.sync_window_title(ctx)"]),
+    (
+        "5.32",
+        &["self.sync_window_title(ctx, project_has_unsaved_changes)"],
+    ),
     ("5.33", &["self.handle_image_export()"]),
 ];
 
@@ -1183,12 +1188,9 @@ const END_FRAME: &[Step] = &[
 
 /// `sync_window_title`, step 5.32 of the frame: the title's dirty mark and
 /// the browser's leave-page guard read the models feature's unsaved
-/// authoring beside the project's own unsaved changes.
+/// authoring beside the project's own unsaved changes, which step 5.30.1
+/// read.
 const SYNC_WINDOW_TITLE: &[Step] = &[
-    (
-        "5.32.1",
-        &["project_lifecycle::has_unsaved_changes(&self.state,)"],
-    ),
     (
         "5.32.2",
         &["ModelsPort::has_unsaved_authoring_changes(&*self.state.models)"],

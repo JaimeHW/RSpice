@@ -378,6 +378,20 @@ pub fn active_document_is_dirty(state: &dyn LifecycleSource) -> bool {
     })
 }
 
+/// Whether the project holds unsaved work, and whether the document in front
+/// differs from the saved project (`None` before the first save, or when
+/// the working project could not be compared): one read of the answer held
+/// for the working state, for a frame that shows both.
+pub fn unsaved_work(state: &dyn LifecycleSource) -> (bool, Option<bool>) {
+    let view = state.lifecycle_view();
+    dirty_answer::read(&view, |comparison| {
+        (
+            comparison.has_unsaved_changes(),
+            comparison.document_differs_from_saved(&active_document(&view)),
+        )
+    })
+}
+
 /// [`active_document_is_dirty`] from the working project as captured now.
 pub fn active_document_is_dirty_fresh(state: &dyn LifecycleSource) -> bool {
     let view = state.lifecycle_view();

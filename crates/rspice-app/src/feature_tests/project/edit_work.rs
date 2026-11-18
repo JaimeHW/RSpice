@@ -198,9 +198,10 @@ fn an_edit_and_its_undo_are_read_from_the_history_without_a_digest() {
             (
                 has_unsaved_changes(&app.state),
                 active_document_is_dirty(&app.state),
+                app.state.model.workspace.content.active_dirty(),
                 app.last_window_title.contains('*'),
             ),
-            (unsaved, unsaved, unsaved),
+            (unsaved, unsaved, Some(unsaved), unsaved),
             "{step}: the toolbar, the drawing's tab and the title read {}: {}",
             if unsaved { "unsaved" } else { "clean" },
             app.last_window_title

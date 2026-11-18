@@ -73,6 +73,16 @@ impl DirtyComparison {
         }
     }
 
+    /// Whether `document` differs from the saved project, when it was
+    /// compared with one: `None` before the first save, and when the working
+    /// content could not be compared.
+    pub fn document_differs_from_saved(&self, document: &ProjectDocumentId) -> Option<bool> {
+        match &self.documents {
+            ComparedDocuments::Accepted(Some(_)) => Some(self.document_is_dirty(document)),
+            ComparedDocuments::Unaccepted | ComparedDocuments::Accepted(None) => None,
+        }
+    }
+
     /// The configuration represents the whole unsaved project when there is
     /// no accepted baseline or the working content cannot be compared.
     pub fn dirty_documents(&self) -> Vec<ProjectDocumentId> {
