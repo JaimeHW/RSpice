@@ -12,9 +12,11 @@ impl Schematic {
         points: Vec<Point>,
         declaration: Option<BusDeclaration>,
     ) -> Result<DocumentEdit<u64>, BusParseError> {
+        let state = self.name_current();
         let placement =
             BusPlacement::prepare(&mut self.document, &mut self.identity, points, declaration)?;
-        self.history.begin(placement.document(), "draw bus");
+        self.history
+            .begin(placement.document(), Some(state), "draw bus");
         let id = placement.commit();
         self.invalidate_topology();
         Ok(DocumentEdit {
@@ -28,9 +30,11 @@ impl Schematic {
         geometry: BusTapGeometry,
         slice: BusSlice,
     ) -> Result<DocumentEdit<u64>, BusParseError> {
+        let state = self.name_current();
         let placement =
             BusTapPlacement::prepare(&mut self.document, &mut self.identity, geometry, slice)?;
-        self.history.begin(placement.document(), "place bus tap");
+        self.history
+            .begin(placement.document(), Some(state), "place bus tap");
         let id = placement.commit();
         self.invalidate_topology();
         Ok(DocumentEdit {
@@ -45,6 +49,7 @@ impl Schematic {
         declaration: &BusDeclaration,
         slice: &BusSlice,
     ) -> Result<DocumentEdit<u64>, BusParseError> {
+        let state = self.name_current();
         let placement = BusTapPlacement::prepare_configured(
             &mut self.document,
             &mut self.identity,
@@ -52,7 +57,8 @@ impl Schematic {
             declaration,
             slice,
         )?;
-        self.history.begin(placement.document(), "place bus tap");
+        self.history
+            .begin(placement.document(), Some(state), "place bus tap");
         let id = placement.commit();
         self.invalidate_topology();
         Ok(DocumentEdit {
@@ -68,12 +74,14 @@ impl Schematic {
         declaration: Option<BusDeclaration>,
         on_sheet: &dyn Fn(u64) -> bool,
     ) -> Result<Option<DocumentEdit<()>>, BusParseError> {
+        let state = self.name_current();
         let Some(change) =
             BusPropertyEdit::prepare(&mut self.document, expected, declaration.as_ref(), on_sheet)?
         else {
             return Ok(None);
         };
-        self.history.begin(change.document(), "edit bus properties");
+        self.history
+            .begin(change.document(), Some(state), "edit bus properties");
         change.commit();
         self.invalidate_topology();
         Ok(Some(DocumentEdit {
@@ -88,13 +96,14 @@ impl Schematic {
         geometry: BusTapGeometry,
         slice: BusSlice,
     ) -> Result<Option<DocumentEdit<()>>, BusParseError> {
+        let state = self.name_current();
         let Some(change) =
             BusTapPropertyEdit::prepare(&mut self.document, expected, geometry, slice)?
         else {
             return Ok(None);
         };
         self.history
-            .begin(change.document(), "edit bus tap properties");
+            .begin(change.document(), Some(state), "edit bus tap properties");
         change.commit();
         self.invalidate_topology();
         Ok(Some(DocumentEdit {

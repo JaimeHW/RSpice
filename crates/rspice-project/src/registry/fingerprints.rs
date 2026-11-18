@@ -27,6 +27,9 @@ thread_local! {
     pub static PROJECT_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Project documents digested from their content, one by one.
     pub static DOCUMENT_DIGESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Drawings the working project's held digests digested from their
+    /// content, rather than read from where they stand in their history.
+    pub static DRAWING_DIGESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Set while a check recomputes work that was already counted.
     static UNOBSERVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

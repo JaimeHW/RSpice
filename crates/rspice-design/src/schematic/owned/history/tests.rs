@@ -85,7 +85,7 @@ fn nested_begin_joins_the_outer_atomic_transaction() {
     assert!(created);
     assert_eq!(history.committed.undo_count(), 1);
     assert_eq!(history.committed.undo_description(), Some("First"));
-    let (restored, _) = history.committed.undo(snapshot_with(2)).unwrap();
+    let restored = history.committed.undo(snapshot_with(2), None).unwrap().snapshot;
     assert!(restored.is_equal(&snapshot_with(0)));
 }
 
@@ -140,7 +140,7 @@ fn clear_resets_everything_including_initialized() {
     history.initialize();
     history.begin_from(snapshot_with(0), "Add R1");
     history.end(&document_with(1));
-    history.committed.undo(snapshot_with(1)).unwrap();
+    history.committed.undo(snapshot_with(1), None).unwrap();
     history.begin_from(snapshot_with(0), "Pending");
 
     history.clear();
@@ -149,4 +149,76 @@ fn clear_resets_everything_including_initialized() {
     assert_eq!(history.committed.redo_count(), 0);
     assert!(history.pending_operation_id().is_none());
     assert!(!history.committed.is_initialized());
+}
+
+fn edited(schematic: &mut Schematic, parts: usize) {
+    schematic.begin_operation("Edit");
+    schematic.apply_snapshot(&snapshot_with(parts));
+    assert!(schematic.end_operation());
+}
+
+/// A commit names the content it leaves afresh; an undo gives the drawing
+/// back the name it had before the edit, and a redo the name it had after.
+#[test]
+fn undo_and_redo_give_the_drawing_back_its_name() {
+    let mut schematic = Schematic::from_document(document_with(1));
+    edited(&mut schematic, 2);
+    let after = schematic
+        .history_state()
+        .expect("a commit names what it leaves");
+
+    assert!(schematic.undo().is_some());
+    let before = schematic
+        .history_state()
+        .expect("an undo gives back the name of what it restores");
+    assert_ne!(before, after, "an edit is content of a name of its own");
+    assert!(schematic.redo().is_some());
+    assert_eq!(schematic.history_state(), Some(after));
+    assert!(schematic.undo().is_some());
+    assert_eq!(schematic.history_state(), Some(before));
+
+    edited(&mut schematic, 2);
+    assert_ne!(
+        schematic.history_state(),
+        Some(after),
+        "the same edit made again is a new name"
+    );
+}
+
+/// An operation that changes nothing, or is cancelled, leaves the drawing
+/// the name it began with.
+#[test]
+fn an_operation_that_leaves_the_drawing_as_it_was_keeps_its_name() {
+    let mut schematic = Schematic::from_document(document_with(1));
+    edited(&mut schematic, 2);
+    let named = schematic.history_state();
+    assert!(named.is_some());
+
+    schematic.begin_operation("Nothing");
+    assert!(!schematic.end_operation());
+    assert_eq!(schematic.history_state(), named);
+
+    schematic.begin_operation("Cancelled");
+    schematic.apply_snapshot(&snapshot_with(3));
+    assert!(schematic.cancel_operation().is_some());
+    assert_eq!(schematic.history_state(), named);
+}
+
+/// An edit outside the history leaves the drawing without a name, and no
+/// step recorded before it returns to a name: it restores the drawing it
+/// holds, not what moved beside it.
+#[test]
+fn an_edit_outside_the_history_leaves_no_name_to_return_to() {
+    let mut schematic = Schematic::from_document(document_with(1));
+    edited(&mut schematic, 2);
+    schematic.apply_snapshot(&snapshot_with(3));
+    assert_eq!(schematic.history_state(), None);
+
+    assert!(schematic.undo().is_some());
+    assert_eq!(schematic.history_state(), None);
+    assert!(schematic.redo().is_some());
+    assert!(
+        schematic.history_state().is_some(),
+        "a redo returns to the content the undo named"
+    );
 }

@@ -4,10 +4,17 @@
 //! A capture clones the whole project to digest it, and an edit to one
 //! drawing of a project of thousands of cells paid for every cell. Here
 //! each document, and each share of a cell view, keeps its digest while the
-//! stamps of what it reads stand: an edit in the editor digests its one
-//! drawing again, and a library edit its catalog and views. The digests are
-//! the ones a capture of the same working state gets, which debug builds
-//! check on every held answer.
+//! stamps of what it reads stand, and a library edit digests its catalog and
+//! views again. The digests are the ones a capture of the same working state
+//! gets, which debug builds check on every held answer.
+//!
+//! A drawing is read from where it stands in its history instead: at a
+//! position it was digested at, its share is that digest; at any other
+//! position the history named, once the position the baseline left it at is
+//! known, it reads unsaved with no digest at all, as an edit that moved it
+//! there. An edit costs no digest, an undo back to where the save left the
+//! drawing reads clean, and only content the history cannot name, and the
+//! drawings at a save, are digested.
 
 use std::collections::{HashMap, HashSet};
 
@@ -48,6 +55,27 @@ pub struct WorkingSource<'a> {
 pub struct WorkingDocuments {
     documents: HashMap<ProjectDocumentId, ContentDigest>,
     held: Option<Held>,
+    positions: Positions,
+}
+
+/// The drawing share digested at each position of a drawing's history.
+#[derive(Debug, Clone, Default)]
+struct Positions {
+    digests: HashMap<u64, ContentDigest>,
+    /// The cell views whose drawing stood, when the baseline was last
+    /// settled, at a position `digests` holds and with the content the
+    /// baseline holds: that is where the baseline left it, and the drawing
+    /// at any other named position was edited since.
+    settled: HashSet<CellViewRef>,
+}
+
+/// Where a drawing stood in its history when its share was taken, and
+/// whether the share is its digest rather than the mark of a position no
+/// digest was taken at, which reads unsaved.
+#[derive(Debug, Clone, Copy)]
+struct DrawingPosition {
+    name: u64,
+    digested: bool,
 }
 
 /// The stamps the digests were taken under, and the shares they compose.
@@ -73,6 +101,8 @@ struct Held {
 #[derive(Debug, Clone, Copy)]
 struct CellViewShares {
     drawing: Option<u64>,
+    /// Where that drawing stood in its history.
+    position: Option<DrawingPosition>,
     shares: [ContentDigest; 4],
 }
 
@@ -82,9 +112,91 @@ impl WorkingDocuments {
         &self.documents
     }
 
-    /// The working project's fingerprints, as a capture would take them.
+    /// The working project's fingerprints, as a capture would take them,
+    /// but for the documents [`Self::read_unsaved`] names.
     pub fn fingerprints(&self) -> DocumentFingerprints {
         DocumentFingerprints::from_documents(self.documents.clone())
+    }
+
+    /// The documents whose drawing stands at a position named since the
+    /// baseline was settled: each reads unsaved, from its history, with no
+    /// digest of its content.
+    pub fn read_unsaved(&self) -> Vec<ProjectDocumentId> {
+        self.held.as_ref().map_or_else(Vec::new, |held| {
+            held.cell_views
+                .iter()
+                .filter(|(_, shares)| shares.position.is_some_and(|position| !position.digested))
+                .map(|(reference, _)| ProjectDocumentId::CellView(reference.clone()))
+                .collect()
+        })
+    }
+
+    /// Settle the digests on a new `baseline`, as a save, an open or a
+    /// revert takes one: every drawing read unsaved from its position is
+    /// digested, and each drawing whose cell view the baseline holds as it
+    /// stands is known to stand where the baseline left it. Returns the
+    /// documents whose digest changed. A failure forgets every digest.
+    pub fn settle(
+        &mut self,
+        source: &WorkingSource<'_>,
+        baseline: Option<&DocumentFingerprints>,
+    ) -> Result<Vec<ProjectDocumentId>, String> {
+        let settled = self.settle_drawings(source, baseline);
+        if settled.is_err() {
+            self.clear();
+        }
+        settled
+    }
+
+    fn settle_drawings(
+        &mut self,
+        source: &WorkingSource<'_>,
+        baseline: Option<&DocumentFingerprints>,
+    ) -> Result<Vec<ProjectDocumentId>, String> {
+        let mut changed = Vec::new();
+        if let Some(held) = self.held.as_mut() {
+            for (reference, shares) in &mut held.cell_views {
+                let Some(position) = shares
+                    .position
+                    .as_mut()
+                    .filter(|position| !position.digested)
+                else {
+                    continue;
+                };
+                let key = reference.key();
+                let schematic = if held.active.as_deref() == Some(key.as_str()) {
+                    Some(source.active_schematic)
+                } else {
+                    source.workspace.schematic_buffers.get(&key)
+                }
+                .ok_or_else(|| format!("the drawing of '{key}' is no longer held"))?;
+                let drawing = drawing_digest(Some(schematic))?;
+                drawing_digested();
+                digested();
+                self.positions.digests.insert(position.name, drawing);
+                position.digested = true;
+                shares.shares[0] = drawing;
+                let id = ProjectDocumentId::CellView(reference.clone());
+                let digest = cell_view_digest(&shares.shares);
+                if self.documents.insert(id.clone(), digest) != Some(digest) {
+                    changed.push(id);
+                }
+            }
+        }
+        self.positions.settled = self.held.as_ref().map_or_else(HashSet::new, |held| {
+            held.cell_views
+                .iter()
+                .filter(|(reference, shares)| {
+                    let id = ProjectDocumentId::CellView((*reference).clone());
+                    shares.position.is_some()
+                        && baseline.and_then(|baseline| baseline.get(&id))
+                            == self.documents.get(&id)
+                })
+                .map(|(reference, _)| reference.clone())
+                .collect()
+        });
+        changed.sort_by_cached_key(ProjectDocumentId::stable_key);
+        Ok(changed)
     }
 
     /// Forget every digest: the next update digests every document.
@@ -138,18 +250,21 @@ impl WorkingDocuments {
             return Some(Ok(Vec::new()));
         }
         Some(
-            drawing_digest(Some(source.active_schematic)).map(|drawing| {
-                shares.drawing = Some(stamp);
-                shares.shares[0] = drawing;
-                digested();
-                let id = ProjectDocumentId::CellView(reference);
-                let digest = cell_view_digest(&shares.shares);
-                if self.documents.insert(id.clone(), digest) == Some(digest) {
-                    Vec::new()
-                } else {
-                    vec![id]
-                }
-            }),
+            self.positions
+                .share(&reference, source.active_schematic)
+                .map(|(drawing, position)| {
+                    shares.drawing = Some(stamp);
+                    shares.position = Some(position);
+                    shares.shares[0] = drawing;
+                    digested();
+                    let id = ProjectDocumentId::CellView(reference);
+                    let digest = cell_view_digest(&shares.shares);
+                    if self.documents.insert(id.clone(), digest) == Some(digest) {
+                        Vec::new()
+                    } else {
+                        vec![id]
+                    }
+                }),
         )
     }
 
@@ -292,6 +407,7 @@ impl WorkingDocuments {
             }
         }
         let owns_sources = owns_cell_view_sources(&workspace.project_sources);
+        let positions = &mut self.positions;
         let nothing = digest(&())?;
         let mut cell_views = HashMap::with_capacity(references.len());
         for reference in references {
@@ -315,8 +431,14 @@ impl WorkingDocuments {
                 Ok(())
             };
             let drawing_kept = before.is_some_and(|before| before.drawing == stamp);
+            let mut position = before
+                .filter(|_| drawing_kept)
+                .and_then(|before| before.position);
             share(0, drawing_kept, &mut || match schematic {
-                Some(schematic) => drawing_digest(Some(schematic)),
+                Some(schematic) => positions.share(&reference, schematic).map(|(drawing, at)| {
+                    position = Some(at);
+                    drawing
+                }),
                 None => Ok(nothing),
             })?;
             share(
@@ -355,6 +477,7 @@ impl WorkingDocuments {
                 reference,
                 CellViewShares {
                     drawing: stamp,
+                    position,
                     shares,
                 },
             );
@@ -387,6 +510,50 @@ impl WorkingDocuments {
             cell_views,
         });
         Ok(changed)
+    }
+}
+
+impl Positions {
+    /// The drawing share of `reference`'s `schematic` and where it stands:
+    /// the digest taken at its position when one was; the mark of an unsaved
+    /// drawing when the history named a position other than the one the
+    /// baseline left it at; else its digest, taken now and kept for its
+    /// position. Content the history gave no name stands at its stamp.
+    fn share(
+        &mut self,
+        reference: &CellViewRef,
+        schematic: &Schematic,
+    ) -> Result<(ContentDigest, DrawingPosition), String> {
+        let named = schematic.history_state();
+        let name = named.unwrap_or_else(|| schematic.content_stamp());
+        if let Some(drawing) = self.digests.get(&name) {
+            return Ok((
+                *drawing,
+                DrawingPosition {
+                    name,
+                    digested: true,
+                },
+            ));
+        }
+        if named.is_some() && self.settled.contains(reference) {
+            return Ok((
+                digest(&("unsaved drawing position", name))?,
+                DrawingPosition {
+                    name,
+                    digested: false,
+                },
+            ));
+        }
+        let drawing = drawing_digest(Some(schematic))?;
+        drawing_digested();
+        self.digests.insert(name, drawing);
+        Ok((
+            drawing,
+            DrawingPosition {
+                name,
+                digested: true,
+            },
+        ))
     }
 }
 
@@ -424,4 +591,10 @@ fn plan_digest(
 fn digested() {
     #[cfg(any(test, feature = "document-fingerprint-observation"))]
     super::observe(&super::DOCUMENT_DIGESTS);
+}
+
+/// Count one drawing digested from its content.
+fn drawing_digested() {
+    #[cfg(any(test, feature = "document-fingerprint-observation"))]
+    super::observe(&super::DRAWING_DIGESTS);
 }

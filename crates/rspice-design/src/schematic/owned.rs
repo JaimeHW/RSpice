@@ -2,7 +2,7 @@
 
 use super::component_type::ComponentType;
 use super::document::SchematicDocument;
-use super::history::{SchematicHistory, SchematicSnapshot};
+use super::history::{Restored, SchematicHistory, SchematicSnapshot};
 use history::EditHistory;
 mod history;
 use super::identity::{DocumentRepair, SchematicIdentity};
@@ -46,6 +46,29 @@ pub struct Schematic {
     topology_version: u64,
     content_version: u64,
     history: EditHistory,
+    /// Where the content stands in its history.
+    position: Position,
+}
+
+/// The name of the content the last step through the history left, with
+/// the stamp it left it under. Equal stamps say the content is still that
+/// one; any other edit moves the stamp and leaves the content unnamed.
+#[derive(Debug, Clone, Copy)]
+struct Position {
+    state: u64,
+    stamp: u64,
+    /// Whether the history gave `state`, rather than the stamp standing in
+    /// for a name it could not give.
+    named: bool,
+}
+
+impl Position {
+    /// No content: no stamp is ever 0, so nothing stands here.
+    const UNNAMED: Self = Self {
+        state: 0,
+        stamp: 0,
+        named: false,
+    };
 }
 
 impl AsRef<SchematicDocument> for Schematic {
@@ -82,6 +105,7 @@ impl Schematic {
             topology_version: 0,
             content_version: 0,
             history: EditHistory::default(),
+            position: Position::UNNAMED,
         }
     }
 
@@ -107,6 +131,76 @@ impl Schematic {
     }
     pub fn history(&self) -> &SchematicHistory {
         &self.history.committed
+    }
+
+    /// The name of the content as it stands, when the history gave it: the
+    /// content is exactly what the last commit, undo, redo or cancel left
+    /// under that name. `None` once anything else moved it, or when the
+    /// step could not say which content it left. Two equal names are equal
+    /// content: a commit names what it leaves afresh, and an undo or redo
+    /// gives back the name of the content it restores. A drawing undone
+    /// back to the content it was saved with therefore carries the name it
+    /// was saved under, and one edited anew carries a name no save has seen.
+    pub fn history_state(&self) -> Option<u64> {
+        (self.position.named && self.position.stamp == self.content_stamp())
+            .then_some(self.position.state)
+    }
+
+    /// The name of the content as it stands, for a step that may return to
+    /// it. Content that moved outside the history since its last step is
+    /// named by its stamp, and every step recorded before loses the name it
+    /// returns to: a step restores the drawing it holds, not what moved
+    /// beside it.
+    fn name_current(&mut self) -> u64 {
+        if self.position.stamp != self.content_stamp() {
+            self.history.committed.forget_states();
+            self.stand_unnamed();
+        }
+        self.position.state
+    }
+
+    /// Stand at content the history gave no name, named by its stamp for a
+    /// later step to return to.
+    fn stand_unnamed(&mut self) {
+        let stamp = self.content_stamp();
+        self.position = Position {
+            state: stamp,
+            stamp,
+            named: false,
+        };
+    }
+
+    /// Stand at the content named `state` as it stands now, or at content
+    /// with no name.
+    fn arrive(&mut self, state: Option<u64>) {
+        match state {
+            Some(state) => {
+                self.position = Position {
+                    state,
+                    stamp: self.content_stamp(),
+                    named: true,
+                };
+            }
+            None => self.stand_unnamed(),
+        }
+    }
+
+    /// Stand at `state` after restoring `restored`, when the content is
+    /// exactly that snapshot's: a repair after the restore can move it.
+    fn arrive_restored(&mut self, restored: &SchematicSnapshot, state: Option<u64>) {
+        let exact = state.filter(|_| restored.is_equal_document(&self.document));
+        self.arrive(exact);
+    }
+
+    /// Close the pending operation's scope: a commit names the content it
+    /// leaves afresh, and an operation that changed nothing leaves the
+    /// content it began on.
+    fn close_scope(&mut self, closing: Option<Option<u64>>, committed: bool) {
+        match closing {
+            Some(_) if committed => self.arrive(Some(crate::stamped::issue())),
+            Some(before_state) => self.arrive(before_state),
+            None => {}
+        }
     }
     pub const fn topology_version(&self) -> u64 {
         self.topology_version
@@ -175,7 +269,8 @@ impl Schematic {
 
     /// Begin or join an atomic document edit, preserving the outer baseline.
     pub fn begin_operation(&mut self, description: impl Into<String>) -> u64 {
-        self.history.begin(&self.document, description)
+        let state = self.name_current();
+        self.history.begin(&self.document, Some(state), description)
     }
 
     /// Copy the baseline [`Self::begin_operation`] would capture, ahead of an
@@ -199,7 +294,9 @@ impl Schematic {
     ) -> u64 {
         match prepared {
             Some(prepared) if prepared.stamp == self.content_stamp() => {
-                self.history.begin_from(prepared.snapshot, description)
+                let state = self.name_current();
+                self.history
+                    .begin_named_from(prepared.snapshot, Some(state), description)
             }
             _ => self.begin_operation(description),
         }
@@ -211,14 +308,33 @@ impl Schematic {
         before: SchematicSnapshot,
         description: impl Into<String>,
     ) -> u64 {
+        // The baseline was taken before the content moved to where it
+        // stands, so the content it holds has no name to return to; what
+        // moved since moved outside the history.
+        let _ = self.name_current();
         self.history.begin_from(before, description)
     }
 
+    /// [`Self::begin_operation_from`] for a baseline taken from the
+    /// content named `state`, which [`Self::name_current`] gave just before
+    /// it moved.
+    fn begin_named_operation_from(
+        &mut self,
+        before: SchematicSnapshot,
+        state: u64,
+        description: impl Into<String>,
+    ) -> u64 {
+        self.history
+            .begin_named_from(before, Some(state), description)
+    }
+
     pub fn end_operation(&mut self) -> bool {
+        let closing = self.history.closing_state();
         let committed = self.history.end(&self.document);
         if committed {
             self.content_version = self.content_version.wrapping_add(1);
         }
+        self.close_scope(closing, committed);
         committed
     }
 
@@ -228,13 +344,16 @@ impl Schematic {
 
     /// Restore an aborted edit; editor cancellation metadata is held by its caller.
     pub fn cancel_operation(&mut self) -> Option<CancelledOperation> {
-        let (operation_id, before) = self.history.cancel()?;
+        let (operation_id, before, before_state) = self.history.cancel()?;
         let repaired = if before.is_equal_document(&self.document) {
+            self.arrive(before_state);
             None
         } else {
             self.apply_snapshot(&before);
             self.reconcile_grid_pitch();
-            Some(self.repair_document())
+            let repaired = self.repair_document();
+            self.arrive_restored(&before, before_state);
+            Some(repaired)
         };
         Some(CancelledOperation {
             operation_id,
@@ -252,26 +371,30 @@ impl Schematic {
         if !self.history.committed.can_undo() {
             return None;
         }
+        let state = self.name_current();
         let current = SchematicSnapshot::capture(&self.document);
-        let (snapshot, _) = self.history.committed.undo(current)?;
-        self.apply_snapshot(&snapshot);
-        self.reconcile_grid_pitch();
-        let repaired = self.repair_document();
-        self.content_version = self.content_version.wrapping_add(1);
-        Some(repaired)
+        let restored = self.history.committed.undo(current, Some(state))?;
+        Some(self.restore(&restored))
     }
 
     pub fn redo(&mut self) -> Option<DocumentRepair> {
         if !self.history.committed.can_redo() {
             return None;
         }
+        let state = self.name_current();
         let current = SchematicSnapshot::capture(&self.document);
-        let (snapshot, _) = self.history.committed.redo(current)?;
-        self.apply_snapshot(&snapshot);
+        let restored = self.history.committed.redo(current, Some(state))?;
+        Some(self.restore(&restored))
+    }
+
+    /// Make the content what an undo or redo restores, and stand at its name.
+    fn restore(&mut self, restored: &Restored) -> DocumentRepair {
+        self.apply_snapshot(&restored.snapshot);
         self.reconcile_grid_pitch();
         let repaired = self.repair_document();
         self.content_version = self.content_version.wrapping_add(1);
-        Some(repaired)
+        self.arrive_restored(&restored.snapshot, restored.state);
+        repaired
     }
 
     #[cfg(feature = "schematic-test-fixtures")]

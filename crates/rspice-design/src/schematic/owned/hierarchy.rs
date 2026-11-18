@@ -28,6 +28,7 @@ impl Schematic {
                 .wrapping_add(candidate.topology_changes),
             content_version: self.content_version,
             history: self.history.clone(),
+            position: super::Position::UNNAMED,
         }
     }
 
@@ -38,6 +39,7 @@ impl Schematic {
             topology_version: candidate.topology_changes,
             content_version: 0,
             history: EditHistory::default(),
+            position: super::Position::UNNAMED,
         }
     }
 }

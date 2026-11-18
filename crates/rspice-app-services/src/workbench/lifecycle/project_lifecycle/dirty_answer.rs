@@ -6,9 +6,12 @@
 //! moved compares again. A comparison digests again only the documents
 //! whose own stamps moved, from the working project as its owners hold it,
 //! and compares only those with the accepted baseline: an edit costs what
-//! it changed, not what the project holds. A decision that can drop work —
-//! save, close, quit, replacing the project — reads [`fresh`], which
-//! captures the whole project and never trusts what is held.
+//! it changed, not what the project holds. A drawing is read from where it
+//! stands in its history: an edit moves it to a position no save left it at,
+//! which reads unsaved with no digest, and an undo back to where the save
+//! left it reads clean. A decision that can drop work — save, close, quit,
+//! replacing the project — reads [`fresh`], which captures the whole project
+//! and never trusts what is held.
 //!
 //! While a canvas gesture edits the drawing, the answer held before it
 //! started stands, with the drawing's document read as unsaved from the
@@ -110,6 +113,9 @@ pub struct DirtyAnswer {
     /// Whether the working project, as last captured, was one a save could
     /// write, with the stamp it was captured under.
     validity: RefCell<Option<(WorkingStamp, Result<(), String>)>>,
+    /// The baseline the held digests were settled on: where it left each
+    /// drawing in its history.
+    settled: RefCell<Option<DirtyBaseline>>,
 }
 
 #[derive(Debug, Clone)]
@@ -260,7 +266,9 @@ pub(super) fn fresh<R>(state: &LifecycleView<'_>, answer: impl FnOnce(&DirtyComp
     #[cfg(debug_assertions)]
     audit(&held, dirty_answer, &working);
     if agrees(&held, dirty_answer, &working) {
-        return answer(&comparison);
+        // The capture's comparison reads a drawing by its content; the held
+        // one by where it stands in its history, as every surface reads it.
+        return answer(&held.comparison);
     }
     // The digests held are not the ones the capture took: the next
     // comparison digests and compares every document.
@@ -278,7 +286,8 @@ pub(super) fn fresh<R>(state: &LifecycleView<'_>, answer: impl FnOnce(&DirtyComp
 }
 
 /// Whether the working project `held` was compared from is the one
-/// captured as `current`.
+/// captured as `current`, but for the drawings read unsaved from their
+/// history, which carry no digest of their content.
 fn agrees(
     held: &Compared,
     answer: &DirtyAnswer,
@@ -290,7 +299,12 @@ fn agrees(
         .as_ref()
         .map(|working| working.get_or_init(|| documents.fingerprints()));
     match (working, current) {
-        (Ok(held), Ok(current)) => held.content_digest() == current.content_digest(),
+        (Ok(held), Ok(current)) => {
+            let unsaved = documents.read_unsaved();
+            held.differing_documents(current)
+                .iter()
+                .all(|id| unsaved.contains(id))
+        }
         (Err(_), Err(_)) => true,
         _ => false,
     }
@@ -335,26 +349,40 @@ fn compare(
     // Over no held digests, every document is compared.
     let previous = previous.filter(|_| !documents.documents().is_empty());
     let changed = match validity(state, &stamp).and(stamp.presentation.clone()) {
-        Ok(presentation) => documents.update(
-            &working_source(state, &stamp, presentation),
-            || {
-                crate::io::capture_execution_context(
-                    &state.model.sim_setup,
-                    &state.model.model_library_manager,
+        Ok(presentation) => {
+            let source = working_source(state, &stamp, presentation);
+            documents
+                .update(
+                    &source,
+                    || {
+                        crate::io::capture_execution_context(
+                            &state.model.sim_setup,
+                            &state.model.model_library_manager,
+                        )
+                    },
+                    || {
+                        let workspace = &state.model.workspace.content;
+                        lifecycle.authority.result_fingerprints().digest(
+                            &lifecycle.result_cache.capture(&state.model.simulation),
+                            &workspace.report_documents,
+                            &workspace.visualization_documents,
+                            &state
+                                .presentation
+                                .project_presentation(&state.model.simulation),
+                        )
+                    },
                 )
-            },
-            || {
-                let workspace = &state.model.workspace.content;
-                lifecycle.authority.result_fingerprints().digest(
-                    &lifecycle.result_cache.capture(&state.model.simulation),
-                    &workspace.report_documents,
-                    &workspace.visualization_documents,
-                    &state
-                        .presentation
-                        .project_presentation(&state.model.simulation),
-                )
-            },
-        ),
+                .and_then(|mut changed| {
+                    changed.extend(settle(
+                        state,
+                        dirty_answer,
+                        &mut documents,
+                        &source,
+                        &baseline,
+                    )?);
+                    Ok(changed)
+                })
+        }
         Err(error) => Err(error),
     };
     let comparison = match &changed {
@@ -375,6 +403,32 @@ fn compare(
         compared: Rc::clone(&compared),
     });
     compared
+}
+
+/// Settle the held digests on `baseline` when it is compared for the first
+/// time: each drawing the baseline holds as it stands is where the baseline
+/// left it, so an undo back to there reads clean, and any other position the
+/// history names since reads unsaved with no digest. A drawing edited before
+/// the first comparison is digested until the next baseline. Returns the
+/// documents whose digest changed.
+fn settle(
+    state: &LifecycleView<'_>,
+    answer: &DirtyAnswer,
+    documents: &mut WorkingDocuments,
+    source: &WorkingSource<'_>,
+    baseline: &DirtyBaseline,
+) -> Result<Vec<ProjectDocumentId>, String> {
+    let mut settled = answer.settled.borrow_mut();
+    if settled.as_ref() == Some(baseline) {
+        return Ok(Vec::new());
+    }
+    let accepted = state.platform.project_lifecycle.authority.accepted();
+    let changed = documents.settle(
+        source,
+        accepted.and_then(|accepted| accepted.fingerprints().ok()),
+    )?;
+    *settled = Some(baseline.clone());
+    Ok(changed)
 }
 
 /// Whether the working project is one a save could write, as a capture
@@ -604,10 +658,13 @@ fn audit(held: &Compared, answer: &DirtyAnswer, current: &Result<DocumentFingerp
         .working
         .as_ref()
         .map(|working| working.get_or_init(|| documents.fingerprints()));
+    // A drawing read unsaved from its history carries no digest to check.
+    let unsaved = documents.read_unsaved();
     let differing = match (working, current) {
         (Ok(held), Ok(current)) => held
             .differing_documents(current)
             .iter()
+            .filter(|id| !unsaved.contains(id))
             .map(rspice_project::registry::ProjectDocumentId::stable_key)
             .collect::<Vec<_>>(),
         (Err(_), Err(_)) => Vec::new(),

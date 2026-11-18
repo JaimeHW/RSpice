@@ -28,6 +28,7 @@ impl Schematic {
         pos: Point,
         hidden: impl Fn(u64) -> bool,
     ) -> Result<Option<DocumentEdit<PastedObjects<'_>>>, String> {
+        let state = self.name_current();
         let Some(paste) = ClipboardPaste::prepare(
             &mut self.document,
             &mut self.identity,
@@ -38,14 +39,20 @@ impl Schematic {
         else {
             return Ok(None);
         };
-        self.history.begin(paste.document(), "paste");
+        self.history.begin(paste.document(), Some(state), "paste");
         let pasted = paste.commit();
         if pasted.has_content() {
             self.topology_version = self.topology_version.wrapping_add(pasted.topology_changes);
         }
+        let closing = self.history.closing_state();
         let committed = self.history.end(pasted.document());
         if committed {
             self.content_version = self.content_version.wrapping_add(1);
+        }
+        if closing.is_some() {
+            // The pasted objects hold the document, so the stamp they leave
+            // cannot be read: the content stands unnamed.
+            self.position = super::Position::UNNAMED;
         }
         Ok(Some(DocumentEdit {
             value: pasted,
@@ -60,7 +67,8 @@ impl Schematic {
         if let Some(refusal) = find_replace::refusal(&self.document, matches) {
             return Err(refusal);
         }
-        self.history.begin(&self.document, "replace");
+        let state = self.name_current();
+        self.history.begin(&self.document, Some(state), "replace");
         let changed = find_replace::replace_in_document(&mut self.document, matches);
         if matches
             .iter()
@@ -78,8 +86,10 @@ impl Schematic {
         &mut self,
         selection: DeletionSelection<'_, impl Iterator<Item = Point> + Clone>,
     ) -> Option<DocumentEdit<()>> {
+        let state = self.name_current();
         let deletion = ObjectDeletion::prepare(&mut self.document, selection)?;
-        self.history.begin(deletion.document(), "delete selection");
+        self.history
+            .begin(deletion.document(), Some(state), "delete selection");
         let removes_electrical_object = deletion.commit();
         if removes_electrical_object {
             self.invalidate_topology();
@@ -97,6 +107,7 @@ impl Schematic {
         terminal_points_for: impl FnMut(&Component) -> Vec<(String, Point)>,
         component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
     ) -> Result<DocumentEdit<(SchematicArrayImpact, ArrayObjectIds)>, SchematicArrayError> {
+        let state = self.name_current();
         let array = ArrayEdit::prepare(
             &mut self.document,
             &mut self.identity,
@@ -106,7 +117,8 @@ impl Schematic {
             component_bounds_for,
         )?;
         let impact = array.impact();
-        self.history.begin(array.document(), "create array");
+        self.history
+            .begin(array.document(), Some(state), "create array");
         let objects = array.commit();
         if impact.electrical {
             self.invalidate_topology();
@@ -139,7 +151,9 @@ impl Schematic {
             };
         }
         let count = swapped.len();
-        self.history.begin(&self.document, "swap to RSpice symbols");
+        let state = self.name_current();
+        self.history
+            .begin(&self.document, Some(state), "swap to RSpice symbols");
         for (index, component) in swapped {
             self.document.components[index] = component;
         }
@@ -159,12 +173,13 @@ impl Schematic {
             selected_component,
             topology_version: self.topology_version,
         };
+        let state = self.name_current();
         let replacement =
             InstanceReplacement::prepare(&mut self.document, context, authority, target)?;
         let impact = replacement.impact();
         let reference_counter = replacement.reference_counter();
         self.history
-            .begin(replacement.document(), "replace instance");
+            .begin(replacement.document(), Some(state), "replace instance");
         replacement.commit();
         if let Some((prefix, number)) = reference_counter {
             self.identity.record_component_number(prefix, number);
@@ -182,6 +197,7 @@ impl Schematic {
         master_ports: &'ports [PortSpec],
         resolve_binding: impl FnMut(&LibraryCellInstance) -> Option<ResolvedCellSymbol>,
     ) -> Result<DocumentEdit<RepairedInterface<'ports>>, SchematicReplacementError> {
+        let state = self.name_current();
         let repair = InstanceInterfaceRepair::prepare(
             &mut self.document,
             component_id,
@@ -189,7 +205,7 @@ impl Schematic {
             resolve_binding,
         )?;
         self.history
-            .begin(repair.document(), "update instance interface");
+            .begin(repair.document(), Some(state), "update instance interface");
         let repaired = repair.commit();
         self.invalidate_topology();
         Ok(DocumentEdit {

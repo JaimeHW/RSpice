@@ -6,7 +6,7 @@ mod working;
 #[cfg(any(test, feature = "document-fingerprint-observation"))]
 pub(crate) use fingerprints::observe;
 #[cfg(any(test, feature = "document-fingerprint-observation"))]
-pub use fingerprints::{DOCUMENT_DIGESTS, FINGERPRINT_PASSES, PROJECT_CAPTURES};
+pub use fingerprints::{DOCUMENT_DIGESTS, DRAWING_DIGESTS, FINGERPRINT_PASSES, PROJECT_CAPTURES};
 pub use fingerprints::{
     content_digest, document_digests, document_fingerprints,
     document_fingerprints_with_results_cache, unobserved,

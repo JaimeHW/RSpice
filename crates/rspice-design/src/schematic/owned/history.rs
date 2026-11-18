@@ -9,6 +9,9 @@ static NEXT_OPERATION_ID: AtomicU64 = AtomicU64::new(1);
 struct PendingOperation {
     id: u64,
     before_snapshot: SchematicSnapshot,
+    /// The name of the content `before_snapshot` was taken from, when it
+    /// has one.
+    before_state: Option<u64>,
     description: String,
     nesting_depth: usize,
 }
@@ -31,20 +34,36 @@ impl EditHistory {
         self.pending = None;
     }
 
+    /// Begin or join an operation on `document`, whose content is named
+    /// `state`.
     pub(super) fn begin(
         &mut self,
         document: &SchematicDocument,
+        state: Option<u64>,
         description: impl Into<String>,
     ) -> u64 {
         if !self.committed.is_initialized() {
             self.initialize();
         }
-        self.begin_from(SchematicSnapshot::capture(document), description)
+        self.begin_named_from(SchematicSnapshot::capture(document), state, description)
     }
 
+    /// Begin or join an operation from a baseline taken earlier, whose
+    /// content has no name the history can return to.
     pub(super) fn begin_from(
         &mut self,
+        before_snapshot: SchematicSnapshot,
+        description: impl Into<String>,
+    ) -> u64 {
+        self.begin_named_from(before_snapshot, None, description)
+    }
+
+    /// Begin or join an operation from a baseline taken earlier, from the
+    /// content named `before_state`.
+    pub(super) fn begin_named_from(
+        &mut self,
         mut before_snapshot: SchematicSnapshot,
+        before_state: Option<u64>,
         description: impl Into<String>,
     ) -> u64 {
         if !self.committed.is_initialized() {
@@ -64,6 +83,7 @@ impl EditHistory {
         self.pending = Some(PendingOperation {
             id,
             before_snapshot,
+            before_state,
             description: description.into(),
             nesting_depth: 0,
         });
@@ -87,16 +107,26 @@ impl EditHistory {
         };
         self.committed.commit(
             pending.before_snapshot,
+            pending.before_state,
             &after_snapshot,
             pending.description,
         )
     }
 
-    pub(super) fn cancel(&mut self) -> Option<(u64, SchematicSnapshot)> {
+    pub(super) fn cancel(&mut self) -> Option<(u64, SchematicSnapshot, Option<u64>)> {
         let pending = self.pending.take()?;
         self.committed
             .adopt_restored_sheet_assignments(&pending.before_snapshot.sheet_assignments);
-        Some((pending.id, pending.before_snapshot))
+        Some((pending.id, pending.before_snapshot, pending.before_state))
+    }
+
+    /// The name of the content the pending operation began on, when the
+    /// next [`Self::end`] closes it rather than a scope nested in it.
+    pub(super) fn closing_state(&self) -> Option<Option<u64>> {
+        self.pending
+            .as_ref()
+            .filter(|pending| pending.nesting_depth == 0)
+            .map(|pending| pending.before_state)
     }
 
     /// The document as the pending operation found it.

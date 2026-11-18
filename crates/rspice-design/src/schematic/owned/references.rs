@@ -20,10 +20,12 @@ impl PreparedComponentTransaction<'_> {
         self.schematic.pending_operation_id().is_some()
     }
     pub fn commit_local(self, description: &str) {
+        let state = self.schematic.name_current();
         let before = SchematicSnapshot::capture(&self.schematic.document);
         self.schematic.document.components = self.components;
         self.schematic.invalidate_topology();
-        self.schematic.begin_operation_from(before, description);
+        self.schematic
+            .begin_named_operation_from(before, state, description);
         self.schematic.end_operation();
     }
     pub fn into_reference_candidate(self) -> Schematic {

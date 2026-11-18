@@ -203,6 +203,18 @@ struct UndoEntry {
     /// [`SchematicHistory::stamped`] produces an entry, so the value is never
     /// [`UNSTAMPED_UNDO_SEQUENCE`].
     sequence: UndoSequence,
+    /// The name of the content `before` restores, as the document's owner
+    /// gave it when that content was live; `None` when it has none.
+    state: Option<u64>,
+}
+
+/// What an undo or redo restores: the snapshot, the step's description and
+/// the name of the content the snapshot was taken from, when it has one.
+#[derive(Debug)]
+pub struct Restored {
+    pub snapshot: SchematicSnapshot,
+    pub description: String,
+    pub state: Option<u64>,
 }
 
 /// Bounded committed schematic history with shared immutable snapshots.
@@ -273,9 +285,11 @@ impl SchematicHistory {
     }
 
     /// Retain an actual document change and start a new undo branch.
+    /// `before_state` names the content `before_snapshot` was taken from.
     pub fn commit(
         &mut self,
         before_snapshot: SchematicSnapshot,
+        before_state: Option<u64>,
         after_snapshot: &SchematicSnapshot,
         description: String,
     ) -> bool {
@@ -285,7 +299,7 @@ impl SchematicHistory {
         }
 
         // Create undo entry with the "before" snapshot
-        let entry = Self::stamped(before_snapshot, description);
+        let entry = Self::stamped(before_snapshot, before_state, description);
         self.committed = entry.sequence;
 
         self.undo_stack.push_back(entry);
@@ -310,11 +324,12 @@ impl SchematicHistory {
 
     /// The only way an [`UndoEntry`] comes into existence, so no stack can
     /// hold one that arbitration would sort as oldest by accident.
-    fn stamped(before: SchematicSnapshot, description: String) -> UndoEntry {
+    fn stamped(before: SchematicSnapshot, state: Option<u64>, description: String) -> UndoEntry {
         let entry = UndoEntry {
             before: Arc::new(before),
             description,
             sequence: next_undo_sequence(),
+            state,
         };
         debug_assert_ne!(
             entry.sequence, UNSTAMPED_UNDO_SEQUENCE,
@@ -327,13 +342,16 @@ impl SchematicHistory {
     ///
     /// # Arguments
     /// * `current_snapshot` - Current state snapshot (for redo)
+    /// * `current_state` - The name of the current content, for redo
     ///
     /// # Returns
-    /// The snapshot to restore to, and the description of what was undone
+    /// The snapshot to restore to, the description of what was undone and
+    /// the name of the content restored
     pub fn undo(
         &mut self,
         mut current_snapshot: SchematicSnapshot,
-    ) -> Option<(SchematicSnapshot, String)> {
+        current_state: Option<u64>,
+    ) -> Option<Restored> {
         if self.undo_stack.is_empty() {
             return None;
         }
@@ -348,24 +366,30 @@ impl SchematicHistory {
         // Save current state for redo. The redo entry takes a fresh sequence:
         // Redo has to reverse the order things were undone in, which is not
         // the order they were authored in.
-        self.redo_stack
-            .push(Self::stamped(current_snapshot, entry.description.clone()));
+        self.redo_stack.push(Self::stamped(
+            current_snapshot,
+            current_state,
+            entry.description.clone(),
+        ));
 
         self.adopt_restored_sheet_assignments(&entry.before.sheet_assignments);
-        Some((unwrap_snapshot(entry.before), entry.description))
+        Some(entry.restored())
     }
 
     /// Redo the last undone operation
     ///
     /// # Arguments
     /// * `current_snapshot` - Current state snapshot (for undo)
+    /// * `current_state` - The name of the current content, for undo
     ///
     /// # Returns
-    /// The snapshot to restore to, and the description of what was redone
+    /// The snapshot to restore to, the description of what was redone and
+    /// the name of the content restored
     pub fn redo(
         &mut self,
         mut current_snapshot: SchematicSnapshot,
-    ) -> Option<(SchematicSnapshot, String)> {
+        current_state: Option<u64>,
+    ) -> Option<Restored> {
         if self.redo_stack.is_empty() {
             return None;
         }
@@ -379,11 +403,24 @@ impl SchematicHistory {
 
         // Save current state for undo, freshly stamped for the same reason
         // `undo` restamps: the redone step is now the most recent one.
-        self.undo_stack
-            .push_back(Self::stamped(current_snapshot, entry.description.clone()));
+        self.undo_stack.push_back(Self::stamped(
+            current_snapshot,
+            current_state,
+            entry.description.clone(),
+        ));
 
         self.adopt_restored_sheet_assignments(&entry.before.sheet_assignments);
-        Some((unwrap_snapshot(entry.before), entry.description))
+        Some(entry.restored())
+    }
+
+    /// Drop the name of every content this history can restore, for a
+    /// document whose content moved outside it: a step restores the drawing
+    /// it holds, not what moved beside it, so none returns to exactly the
+    /// content it was named after.
+    pub fn forget_states(&mut self) {
+        for entry in self.undo_stack.iter_mut().chain(self.redo_stack.iter_mut()) {
+            entry.state = None;
+        }
     }
 
     /// Check if undo is available
@@ -467,6 +504,16 @@ impl SchematicHistory {
     }
 }
 
+impl UndoEntry {
+    fn restored(self) -> Restored {
+        Restored {
+            snapshot: unwrap_snapshot(self.before),
+            description: self.description,
+            state: self.state,
+        }
+    }
+}
+
 /// Take the snapshot out of its `Arc` — zero-copy when this history holds
 /// the only reference (the common case; clones exist only in workspace
 /// buffers).
@@ -502,9 +549,13 @@ mod tests {
         let mut history = SchematicHistory::default();
         history.initialize();
 
-        history.commit(snapshot_with(0), &snapshot_with(1), "Add R1".into());
+        history.commit(snapshot_with(0), None, &snapshot_with(1), "Add R1".into());
 
-        let (restored, desc) = history.undo(snapshot_with(1)).expect("undo entry");
+        let Restored {
+            snapshot: restored,
+            description: desc,
+            ..
+        } = history.undo(snapshot_with(1), None).expect("undo entry");
         assert!(restored.is_equal(&snapshot_with(0)));
         assert_eq!(desc, "Add R1");
         assert_eq!(history.undo_count(), 0);
@@ -517,10 +568,14 @@ mod tests {
         let mut history = SchematicHistory::default();
         history.initialize();
 
-        history.commit(snapshot_with(0), &snapshot_with(1), "Add R1".into());
-        let (restored, _) = history.undo(snapshot_with(1)).unwrap();
+        history.commit(snapshot_with(0), None, &snapshot_with(1), "Add R1".into());
+        let restored = history.undo(snapshot_with(1), None).unwrap().snapshot;
 
-        let (redone, desc) = history.redo(restored).expect("redo entry");
+        let Restored {
+            snapshot: redone,
+            description: desc,
+            ..
+        } = history.redo(restored, None).expect("redo entry");
         assert!(redone.is_equal(&snapshot_with(1)));
         assert_eq!(desc, "Add R1");
         assert_eq!(history.undo_count(), 1);
@@ -532,11 +587,11 @@ mod tests {
         let mut history = SchematicHistory::default();
         history.initialize();
 
-        history.commit(snapshot_with(0), &snapshot_with(1), "Add R1".into());
-        history.undo(snapshot_with(1)).unwrap();
+        history.commit(snapshot_with(0), None, &snapshot_with(1), "Add R1".into());
+        history.undo(snapshot_with(1), None).unwrap();
         assert!(history.can_redo());
 
-        history.commit(snapshot_with(0), &snapshot_with(2), "Add C1".into());
+        history.commit(snapshot_with(0), None, &snapshot_with(2), "Add C1".into());
 
         assert!(!history.can_redo());
         assert_eq!(history.undo_count(), 1);
@@ -548,8 +603,8 @@ mod tests {
         let mut history = SchematicHistory::default();
         history.initialize();
 
-        assert!(history.undo(snapshot_with(0)).is_none());
-        assert!(history.redo(snapshot_with(0)).is_none());
+        assert!(history.undo(snapshot_with(0), None).is_none());
+        assert!(history.redo(snapshot_with(0), None).is_none());
         // A failed undo must not pollute the redo stack.
         assert_eq!(history.redo_count(), 0);
         assert_eq!(history.undo_count(), 0);
@@ -562,7 +617,12 @@ mod tests {
 
         // Push 105 distinct operations; the 5 oldest must be evicted.
         for i in 0..105 {
-            assert!(history.commit(snapshot_with(i), &snapshot_with(i + 1), format!("Op {i}")));
+            assert!(history.commit(
+                snapshot_with(i),
+                None,
+                &snapshot_with(i + 1),
+                format!("Op {i}")
+            ));
         }
         assert_eq!(history.undo_count(), MAX_UNDO_STEPS);
         assert_eq!(history.undo_description(), Some("Op 104"));
@@ -570,10 +630,14 @@ mod tests {
         // Unwind the full depth; the oldest surviving entry is op 5.
         let mut last = None;
         for _ in 0..MAX_UNDO_STEPS {
-            last = history.undo(snapshot_with(0));
+            last = history.undo(snapshot_with(0), None);
             assert!(last.is_some());
         }
-        let (oldest, desc) = last.unwrap();
+        let Restored {
+            snapshot: oldest,
+            description: desc,
+            ..
+        } = last.unwrap();
         assert_eq!(desc, "Op 5");
         assert!(oldest.is_equal(&snapshot_with(5)));
         assert!(!history.can_undo());
@@ -585,11 +649,11 @@ mod tests {
         let mut history = SchematicHistory::default();
         history.initialize();
 
-        assert!(history.commit(snapshot_with(0), &snapshot_with(1), "Add R1".into()));
+        assert!(history.commit(snapshot_with(0), None, &snapshot_with(1), "Add R1".into()));
         let commit = history.undo_sequence().expect("the commit is stamped");
         assert_ne!(commit, UNSTAMPED_UNDO_SEQUENCE);
 
-        assert!(history.commit(snapshot_with(1), &snapshot_with(2), "Add C1".into()));
+        assert!(history.commit(snapshot_with(1), None, &snapshot_with(2), "Add C1".into()));
         let later = history
             .undo_sequence()
             .expect("the second commit is stamped");
@@ -604,22 +668,49 @@ mod tests {
         let mut history = SchematicHistory::default();
         history.initialize();
 
-        history.commit(snapshot_with(0), &snapshot_with(1), "Add R1".into());
+        history.commit(snapshot_with(0), None, &snapshot_with(1), "Add R1".into());
         let committed = history.undo_sequence().expect("commit");
 
-        history.undo(snapshot_with(1)).expect("undo entry");
+        history.undo(snapshot_with(1), None).expect("undo entry");
         let undone = history.redo_sequence().expect("the redo entry is stamped");
         assert!(
             undone > committed,
             "the record that just moved to the redo stack is the newest one"
         );
 
-        history.redo(snapshot_with(0)).expect("redo entry");
+        history.redo(snapshot_with(0), None).expect("redo entry");
         let redone = history.undo_sequence().expect("the undo entry is stamped");
         assert!(
             redone > undone,
             "the record that just moved back is newer than when it was undone"
         );
+    }
+
+    #[test]
+    fn undo_and_redo_return_the_name_of_the_content_they_restore() {
+        let mut history = SchematicHistory::default();
+        history.initialize();
+        history.commit(
+            snapshot_with(0),
+            Some(10),
+            &snapshot_with(1),
+            "Add R1".into(),
+        );
+
+        let undone = history
+            .undo(snapshot_with(1), Some(20))
+            .expect("undo entry");
+        assert_eq!(undone.state, Some(10), "undo returns to the content before");
+        let redone = history
+            .redo(snapshot_with(0), Some(10))
+            .expect("redo entry");
+        assert_eq!(redone.state, Some(20), "redo returns to the content after");
+
+        history.forget_states();
+        let undone = history
+            .undo(snapshot_with(1), Some(20))
+            .expect("undo entry");
+        assert_eq!(undone.state, None, "a forgotten name is not restored");
     }
 
     #[test]

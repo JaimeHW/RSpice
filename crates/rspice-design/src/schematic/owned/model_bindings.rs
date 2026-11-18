@@ -11,6 +11,7 @@ impl Schematic {
         candidate_name: String,
         candidate_source: Option<PathBuf>,
     ) -> bool {
+        let state = self.name_current();
         let before = SchematicSnapshot::capture(&self.document);
         let component = self
             .document
@@ -31,7 +32,7 @@ impl Schematic {
         }
         if changed {
             self.invalidate_topology();
-            self.begin_operation_from(before, "select instance model");
+            self.begin_named_operation_from(before, state, "select instance model");
             self.end_operation();
         }
         changed
@@ -43,6 +44,7 @@ impl Schematic {
         component_id: u64,
         selected: Option<String>,
     ) -> bool {
+        let state = self.name_current();
         let before = SchematicSnapshot::capture(&self.document);
         let Some(binding) = self
             .document
@@ -58,7 +60,7 @@ impl Schematic {
         }
         binding.model_card = selected;
         self.invalidate_topology();
-        self.begin_operation_from(before, "select instance model card");
+        self.begin_named_operation_from(before, state, "select instance model card");
         self.end_operation();
         true
     }
@@ -68,6 +70,7 @@ impl Schematic {
         component_id: u64,
         selected: Option<String>,
     ) -> bool {
+        let state = self.name_current();
         let before = SchematicSnapshot::capture(&self.document);
         let Some(binding) = self
             .document
@@ -83,7 +86,7 @@ impl Schematic {
         }
         binding.model_section = selected;
         self.invalidate_topology();
-        self.begin_operation_from(before, "select instance model section");
+        self.begin_named_operation_from(before, state, "select instance model section");
         self.end_operation();
         true
     }

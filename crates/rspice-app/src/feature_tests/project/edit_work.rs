@@ -15,7 +15,7 @@ use crate::feature_tests::replay::Replay;
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
-    DIRTY_RECOMPUTES, has_unsaved_changes,
+    DIRTY_RECOMPUTES, active_document_is_dirty, has_unsaved_changes,
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{
@@ -27,7 +27,7 @@ use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 use rspice_app_state::workbench::app_state::model::FRAME_SYNCS;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_design::projection::{materialization_count, reset_materialization_count};
-use rspice_project::registry::{DOCUMENT_DIGESTS, PROJECT_CAPTURES};
+use rspice_project::registry::{DOCUMENT_DIGESTS, DRAWING_DIGESTS, PROJECT_CAPTURES};
 
 /// Frames a surface is given to lay itself out before counting starts.
 const WARM_UP_FRAMES: usize = 3;
@@ -44,6 +44,9 @@ struct EditWork {
     comparisons: usize,
     /// Project documents digested from their content.
     documents_digested: usize,
+    /// Drawings digested from their content, rather than read from where
+    /// they stand in their history.
+    drawings_digested: usize,
     /// Whole working-project captures.
     captures: usize,
     /// Frames that wrote the editor's drawing back to the project.
@@ -54,6 +57,7 @@ fn take() -> EditWork {
     EditWork {
         comparisons: DIRTY_RECOMPUTES.with(|count| count.replace(0)),
         documents_digested: DOCUMENT_DIGESTS.with(|count| count.replace(0)),
+        drawings_digested: DRAWING_DIGESTS.with(|count| count.replace(0)),
         captures: PROJECT_CAPTURES.with(|count| count.replace(0)),
         drawing_syncs: FRAME_SYNCS.with(|count| count.replace(0)),
     }
@@ -109,7 +113,8 @@ fn place(app: &mut RSpiceApp) {
 
 /// Idle frames compare nothing and write nothing back, on the canvas and on
 /// the Project pages; a part placed on the drawing is compared once, from
-/// that one drawing's digest, and written back once.
+/// that one drawing, read unsaved from where it stands in its history with
+/// no digest of its content, and written back once.
 #[test]
 fn an_edit_is_compared_once_from_its_own_document_and_idle_frames_do_nothing() {
     let (mut replay, folder) = saved_project("edit-work-idle");
@@ -139,17 +144,85 @@ fn an_edit_is_compared_once_from_its_own_document_and_idle_frames_do_nothing() {
             EditWork {
                 comparisons: 1,
                 documents_digested: 1,
+                drawings_digested: 0,
                 captures: 0,
                 drawing_syncs: 1,
             },
-            "{surface}: a placed part is compared once, from its drawing alone, and written \
-             back once"
+            "{surface}: a placed part is compared once, from its drawing alone, which is not \
+             digested, and written back once"
         );
         assert!(
             replay.app.last_window_title.contains('*'),
             "{surface}: the title marks the edit: {}",
             replay.app.last_window_title
         );
+    }
+    drop(replay);
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// Whether the drawing is unsaved is read from where it stands in its
+/// history: an edit, its undo back to where the save left it and its redo
+/// are each read without digesting the drawing, and the undo reads clean in
+/// the title, the toolbar and the drawing's tab. Saved where a redo leaves
+/// it, an undo past the save reads unsaved and the redo back clean.
+#[test]
+fn an_edit_and_its_undo_are_read_from_the_history_without_a_digest() {
+    let (mut replay, folder) = saved_project("edit-work-undo");
+    replay.app.state.workbench.activate(Workspace::Design);
+    idle(&mut replay, WARM_UP_FRAMES);
+    let undo = |app: &mut RSpiceApp| assert!(app.state.model.schematic.undo(), "undone");
+    let redo = |app: &mut RSpiceApp| assert!(app.state.model.schematic.redo(), "redone");
+    let read = |replay: &Replay, step: &str, unsaved: bool| {
+        let app = &replay.app;
+        assert_eq!(
+            (
+                has_unsaved_changes(&app.state),
+                active_document_is_dirty(&app.state),
+                app.last_window_title.contains('*'),
+            ),
+            (unsaved, unsaved, unsaved),
+            "{step}: the toolbar, the drawing's tab and the title read {}: {}",
+            if unsaved { "unsaved" } else { "clean" },
+            app.last_window_title
+        );
+    };
+    let steps: [(&str, &dyn Fn(&mut RSpiceApp), bool); 4] = [
+        ("place", &place, true),
+        ("undo", &undo, false),
+        ("redo", &redo, true),
+        ("undo", &undo, false),
+    ];
+    for (step, edit, unsaved) in steps {
+        let work = work_of(&mut replay, edit);
+        assert_eq!(
+            work.drawings_digested, 0,
+            "{step}: the drawing is read from its history, not digested: {work:?}"
+        );
+        read(&replay, step, unsaved);
+    }
+
+    work_of(&mut replay, redo);
+    assert!(
+        replay
+            .app
+            .state
+            .save_project_to_path(&folder.join("edits.rspiceproj")),
+        "the project saves"
+    );
+    idle(&mut replay, WARM_UP_FRAMES);
+    read(&replay, "the save", false);
+    let steps: [(&str, &dyn Fn(&mut RSpiceApp), bool); 2] = [
+        ("undo past the save", &undo, true),
+        ("redo back to it", &redo, false),
+    ];
+    for (step, edit, unsaved) in steps {
+        let work = work_of(&mut replay, edit);
+        assert_eq!(
+            work.drawings_digested, 0,
+            "{step}: the drawing is read from its history, not digested: {work:?}"
+        );
+        read(&replay, step, unsaved);
     }
     drop(replay);
     let _ = std::fs::remove_dir_all(folder);
