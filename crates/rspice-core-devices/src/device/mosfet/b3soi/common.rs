@@ -3,6 +3,7 @@
 //! Values are transcribed from ngspice-46 `b3soiddld.c` / `b3soiddset.c` /
 //! `b3soiddtemp.c` (the FD and PD sources use the same numeric constants).
 
+use crate::device::mosfet::bsim_junction_depletion;
 use crate::op_label::OpLabel;
 use crate::{NodeId, Value, device::traits::MatrixStamper};
 use std::collections::HashMap;
@@ -782,15 +783,33 @@ pub(crate) fn junction_t3(
     phi_bswg: Value,
     mjswg: Value,
 ) -> (Value, Value) {
-    let arg = 1.0 - v.min(dio_max) / phi_bswg;
-    let dt3_dvb = if mjswg == 0.5 {
-        1.0 / arg.sqrt()
-    } else {
-        (-mjswg * arg.ln()).exp()
-    };
-    let mut t3 = (1.0 - arg * dt3_dvb) * phi_bswg / (1.0 - mjswg);
+    let (mut t3, dt3_dvb) = bsim_junction_depletion(v.min(dio_max), phi_bswg, mjswg);
     if v > dio_max {
         t3 += dt3_dvb * (v - dio_max);
     }
     (t3, dt3_dvb)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::junction_t3;
+
+    /// Near zero bias the gate-sidewall junction charge per unit capacitance
+    /// is `v*(1 + MJSWG*v/(2*PBSWG))` to second order, and it keeps that
+    /// relative precision however small the bias: a companion divides the
+    /// charge's absolute error by dt, so a charge rounded to a quantum of
+    /// `PBSWG*EPSILON` left a 1e-19 s step unable to move it at all.
+    #[test]
+    fn gate_sidewall_junction_charge_keeps_its_relative_precision_near_zero_bias() {
+        for (phi, grading) in [(0.7, 0.5), (0.3, 0.33), (0.9, 1.0), (9.99, 1.2861)] {
+            for v in [1e-18, -1e-18, 3.4e-18, -3.4e-18, 1e-12, -1e-9] {
+                let (t3, _) = junction_t3(v, 0.9 * phi, phi, grading);
+                let expected = v * (1.0 + 0.5 * grading * v / phi);
+                assert!(
+                    (t3 - expected).abs() <= expected.abs() * 1e-12,
+                    "T3({v:e}) = {t3:e}, expected {expected:e} (PBSWG={phi}, MJSWG={grading})"
+                );
+            }
+        }
+    }
 }

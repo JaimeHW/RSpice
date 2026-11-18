@@ -44,6 +44,7 @@ use super::super::common::{
 };
 use super::temp::B3SoiDdSized;
 use crate::Value;
+use crate::device::mosfet::bsim_junction_depletion;
 
 /// Linearized DC operating point of one B3SOIDD instance.
 ///
@@ -3232,14 +3233,7 @@ fn eval_charges_capmod2_or_3(
 
     let (t3, dt3_dvb_s);
     if i.vbs < 0.0 {
-        let arg = 1.0 - i.vbs / phi_bswg;
-        let d = if mjswg == 0.5 {
-            1.0 / arg.sqrt()
-        } else {
-            (-mjswg * arg.ln()).exp()
-        };
-        t3 = (1.0 - arg * d) * phi_bswg / (1.0 - mjswg);
-        dt3_dvb_s = d;
+        (t3, dt3_dvb_s) = bsim_junction_depletion(i.vbs, phi_bswg, mjswg);
     } else {
         t3 = i.vbs * (1.0 + 0.5 * mjswg * i.vbs / phi_bswg);
         dt3_dvb_s = 1.0 + mjswg * i.vbs / phi_bswg;
@@ -3249,14 +3243,7 @@ fn eval_charges_capmod2_or_3(
 
     let (t3, dt3_dvb_d);
     if i.vbd < 0.0 {
-        let arg = 1.0 - i.vbd / phi_bswg;
-        let d = if mjswg == 0.5 {
-            1.0 / arg.sqrt()
-        } else {
-            (-mjswg * arg.ln()).exp()
-        };
-        t3 = (1.0 - arg * d) * phi_bswg / (1.0 - mjswg);
-        dt3_dvb_d = d;
+        (t3, dt3_dvb_d) = bsim_junction_depletion(i.vbd, phi_bswg, mjswg);
     } else {
         t3 = i.vbd * (1.0 + 0.5 * mjswg * i.vbd / phi_bswg);
         dt3_dvb_d = 1.0 + mjswg * i.vbd / phi_bswg;
