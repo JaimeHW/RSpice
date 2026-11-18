@@ -45,14 +45,14 @@ const COLUMN_OVERSCAN: usize = 24;
 const MAXIMUM_COLUMN_SCAN_LINES_PER_FRAME: usize = 16_384;
 const RIGHT_PADDING: f32 = 24.0;
 const BOTTOM_PADDING: f32 = 32.0;
-/// Side of a diagnostic's mark in the gutter, between the line number and the
-/// code: small enough to sit in the number's right padding.
+/// Side of a problem's mark in the gutter at the editor's 17-point row; it
+/// grows and shrinks with the row.
 const GUTTER_MARK_SIDE: f32 = 8.0;
+const GUTTER_MARK_ROW: f32 = 17.0;
+/// Room either side of a mark in its lane.
+const GUTTER_LANE_PADDING: f32 = 2.5;
 /// Width of the change bar an edited line carries at the gutter's edge.
 const CHANGE_BAR_WIDTH: f32 = 2.0;
-/// The digits of the line numbers a style's gutter width holds; a text of
-/// more lines widens the gutter by a character for each digit more.
-const GUTTER_DIGITS: u32 = 5;
 /// Keep the accessibility tree proportional to what assistive technology can
 /// use interactively. Exposing an entire release-scale source file would make
 /// every caret move rebuild millions of characters of AccessKit state.
@@ -791,6 +791,7 @@ pub(crate) fn show_virtual_text_editor(
             );
             let sticky_gutter_left = origin.x + viewport.left();
             let sticky_separator = sticky_gutter_left + style.gutter_width;
+            let lanes = GutterLanes::of(style);
             let code_clip = ui.clip_rect().intersect(egui::Rect::from_min_max(
                 egui::pos2(sticky_separator + 1.0, ui.clip_rect().top()),
                 ui.clip_rect().right_bottom(),
@@ -907,17 +908,17 @@ pub(crate) fn show_virtual_text_editor(
                 }
 
                 // The line number is neutral. A warning or an error on
-                // the line is a mark between the number and the code; an
-                // edited line is a change bar at the gutter's edge.
+                // the line is a mark in its own lane left of the number; an
+                // edited line is a change bar at the gutter's edge; a
+                // folded line's mark is in the lane at the code's edge.
                 let problem = line_problem(line.logical_line);
                 let number_color = if is_active {
                     style.text_dim
                 } else {
                     style.text_faint
                 };
-                let number_right = sticky_separator - 10.0;
                 ui.painter().text(
-                    egui::pos2(number_right, row_rect.center().y),
+                    egui::pos2(sticky_gutter_left + lanes.number_right, row_rect.center().y),
                     egui::Align2::RIGHT_CENTER,
                     one_based_line.to_string(),
                     style.font.clone(),
@@ -927,12 +928,13 @@ pub(crate) fn show_virtual_text_editor(
                     paint_problem_mark(
                         &gutter_mark_painter,
                         egui::Rect::from_center_size(
-                            egui::pos2(sticky_separator - 4.5, row_rect.center().y),
-                            Vec2::splat(GUTTER_MARK_SIDE),
+                            egui::pos2(sticky_gutter_left + lanes.mark_center, row_rect.center().y),
+                            Vec2::splat(lanes.mark_side),
                         ),
                         problem,
                     );
-                } else if style.edited_lines.contains(&line.logical_line) {
+                }
+                if style.edited_lines.contains(&line.logical_line) {
                     ui.painter().rect_filled(
                         egui::Rect::from_min_max(
                             egui::pos2(sticky_separator - 1.0 - CHANGE_BAR_WIDTH, row_top),
@@ -943,33 +945,36 @@ pub(crate) fn show_virtual_text_editor(
                     );
                 }
                 if line.folded_line_count > 0 {
+                    // A box with a plus: the lines it holds open on a click.
                     let marker = egui::Rect::from_center_size(
-                        egui::pos2(sticky_gutter_left + 28.0, row_rect.center().y),
-                        Vec2::splat(9.0),
+                        egui::pos2(sticky_gutter_left + lanes.fold_center, row_rect.center().y),
+                        Vec2::splat(lanes.mark_side + 1.0),
                     );
-                    ui.painter().rect_stroke(
-                        marker,
-                        1.0,
-                        Stroke::new(1.0, style.text_dim),
-                        egui::StrokeKind::Inside,
-                    );
+                    let ink = Stroke::new(1.0, style.text_dim);
+                    ui.painter()
+                        .rect_stroke(marker, 1.0, ink, egui::StrokeKind::Inside);
                     ui.painter().hline(
                         (marker.left() + 2.0)..=(marker.right() - 2.0),
                         marker.center().y,
-                        Stroke::new(1.0, style.text_dim),
+                        ink,
+                    );
+                    ui.painter().vline(
+                        marker.center().x,
+                        (marker.top() + 2.0)..=(marker.bottom() - 2.0),
+                        ink,
                     );
                 }
             }
 
+            // A folded line opens on a click anywhere in its row of the
+            // gutter, a row tall and the gutter wide whatever the text size.
             if response.clicked_by(egui::PointerButton::Primary)
                 && let Some(pointer) = response.interact_pointer_pos()
+                && pointer.x <= sticky_separator
             {
                 let (line, _) =
                     hit_test(&session.model, pointer, origin, viewport, style, char_width);
-                let local_x = pointer.x - sticky_gutter_left;
-                if (20.0..=36.0).contains(&local_x) {
-                    session.model.unfold_at_line(line);
-                }
+                session.model.unfold_at_line(line);
             }
 
             caret_anchor = primary_caret_anchor(&session, origin, code_origin_x, char_width, style);
@@ -1413,20 +1418,53 @@ fn advance_maximum_column_scan(session: &mut VirtualEditorSession) {
     }
 }
 
-/// `style` with a gutter wide enough for the number of the last of `lines`,
-/// in characters `char_width` wide: a deck past line 99,999 shows its line
-/// numbers whole.
+/// Where the gutter's parts sit, as distances from its left edge: a
+/// problem's mark in a lane of its own, clear of the line number; the
+/// number, right-aligned; and a folded line's mark in a lane at the code's
+/// edge. Each lane is as wide as a mark of the text's size and its room.
+#[derive(Clone, Copy, Debug)]
+struct GutterLanes {
+    mark_side: f32,
+    mark_center: f32,
+    number_right: f32,
+    fold_center: f32,
+}
+
+impl GutterLanes {
+    fn lane(style: &VirtualEditorStyle<'_>) -> f32 {
+        Self::mark_side(style) + 2.0 * GUTTER_LANE_PADDING
+    }
+
+    fn mark_side(style: &VirtualEditorStyle<'_>) -> f32 {
+        (GUTTER_MARK_SIDE * style.line_height / GUTTER_MARK_ROW).round()
+    }
+
+    fn of(style: &VirtualEditorStyle<'_>) -> Self {
+        let lane = Self::lane(style);
+        Self {
+            mark_side: Self::mark_side(style),
+            mark_center: lane * 0.5,
+            number_right: style.gutter_width - lane,
+            fold_center: style.gutter_width - lane * 0.5,
+        }
+    }
+}
+
+/// `style` with a gutter wide enough for its two lanes and the number of the
+/// last of `lines`, in characters `char_width` wide: a deck of hundreds of
+/// thousands of lines shows its line numbers whole.
 fn gutter_fitting<'s, 'a>(
     style: &'s VirtualEditorStyle<'a>,
     lines: usize,
     char_width: f32,
 ) -> std::borrow::Cow<'s, VirtualEditorStyle<'a>> {
     let digits = lines.max(1).ilog10() + 1;
-    if digits <= GUTTER_DIGITS {
+    let needed = 2.0 * GutterLanes::lane(style) + digits as f32 * char_width;
+    if needed <= style.gutter_width {
         return std::borrow::Cow::Borrowed(style);
     }
     let mut fitted = style.clone();
-    fitted.gutter_width += (digits - GUTTER_DIGITS) as f32 * char_width;
+    fitted.gutter_width = needed.ceil();
     std::borrow::Cow::Owned(fitted)
 }
 

@@ -4,7 +4,8 @@
 
 use super::*;
 use crate::workbench::documents::text_editor_commands::{
-    queue_caret_position, queue_go_to_line, queue_reveal_line, show_go_to_line, take_reveal_line,
+    queue_caret_position, queue_go_to_line, queue_reveal_line, queue_source_editor_request,
+    show_go_to_line, take_reveal_line,
 };
 
 const SCREEN: Vec2 = Vec2::new(900.0, 600.0);
@@ -680,6 +681,45 @@ fn a_click_places_the_caret_and_a_drag_selects() {
     let _ = bench.frame(pointer(to, None, false));
     let dragged = bench.frame(pointer(to, Some(false), false));
     assert_eq!(dragged.selected, Some((0, 5)));
+}
+
+/// A folded line opens on a click anywhere in its row of the gutter, at its
+/// left edge as well as beside the code.
+#[test]
+fn a_click_anywhere_in_a_folded_line_s_gutter_opens_it() {
+    let source = "module m;
+  analog begin
+    x = 1;
+  end
+endmodule
+";
+    for gutter_x in [3.0, 40.0] {
+        let mut bench = Bench::new(source, true);
+        let _ = bench.frame(Vec::new());
+        queue_source_editor_request(
+            &bench.context,
+            bench.id,
+            crate::workbench::framework::requests::SourceEditorRequest::View(
+                EditorViewCommand::FoldAll,
+            ),
+        );
+        let _ = bench.frame(Vec::new());
+        let editor = bench
+            .context
+            .read_response(bench.id)
+            .expect("the editor is on screen")
+            .interact_rect;
+        let at = egui::pos2(editor.left() + gutter_x, cell(&bench, 0, 0).y);
+        let _ = bench.frame(pointer(at, Some(true), false));
+        let _ = bench.frame(pointer(at, Some(false), false));
+        let second_row = cell(&bench, 1, 0);
+        let _ = bench.frame(pointer(second_row, Some(true), false));
+        let clicked = bench.frame(pointer(second_row, Some(false), false));
+        assert_eq!(
+            clicked.cursor_char_index, 10,
+            "a click {gutter_x} px into the gutter opens the module, so its second line is on row 1"
+        );
+    }
 }
 
 /// A tab runs to the next tab stop and a wide glyph takes two cells, for a
