@@ -542,7 +542,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Excitations", 2),
     ("Variables", 2),
     ("Outputs", 0),
-    ("RunSet", 31),
+    ("RunSet", 30),
     ("Models", 1),
     ("ConnectRules", 2),
     ("Solver", 34),
@@ -623,7 +623,11 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// inspector, which edits them beside the specifications they judge, and
 /// the AC form, the solver page and the analysis catalogue each publish one
 /// more control than was recorded (354).
-const PRESSED_FLOOR: usize = 354;
+///
+/// The Run Set page's Maximum storage field went: what a run may store is
+/// the plan's storage budget on the Save page, which the store holds it to
+/// as it writes, and the Run Set page only forecasts it (353).
+const PRESSED_FLOOR: usize = 353;
 
 /// Controls that are wired to nothing.
 ///
