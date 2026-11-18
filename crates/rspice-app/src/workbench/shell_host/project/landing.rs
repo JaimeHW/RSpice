@@ -33,15 +33,7 @@ pub(crate) fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
             app.execute_command_key(ProjectCommand::OpenSchematic.key())
         }
         LandingAction::Examples => app.state.project.open_examples(),
-        LandingAction::OpenRecent(recent) => {
-            #[cfg(not(target_arch = "wasm32"))]
-            app.open_recent_file(recent);
-            #[cfg(target_arch = "wasm32")]
-            {
-                let _ = recent;
-                app.execute_command_key(ProjectCommand::OpenProject.key());
-            }
-        }
+        LandingAction::OpenRecent(recent) => app.open_recent_file(recent),
         LandingAction::Recent(RecentRowAction::Locate(recent)) => {
             if let Some(located) = app.pick_located_recent(&recent) {
                 app.open_recent_file(located);
