@@ -119,7 +119,7 @@ impl PreparedDataFiles {
                 return Err(PreparationError::new(
                     PreparationStage::SourceChecks,
                     format!(
-                        "{}, and this deck has no directory of its own to read it from",
+                        "{}, and this deck has no folder of its own to read it from",
                         describe(&named)
                     ),
                 ));

@@ -280,7 +280,7 @@ fn admit_process_programs(
             PreparationStage::SourceChecks,
             format!(
                 "Line {line_number} names a program that is not kept with the run \
-                 ({PROCESS_PROGRAM}): {record}; no file beside the deck and no directory on PATH \
+                 ({PROCESS_PROGRAM}): {record}; no file beside the deck and no folder on PATH \
                  holds the program '{program}'"
             ),
         )),

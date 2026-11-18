@@ -221,7 +221,7 @@ pub fn execution_current_directory() -> Result<PathBuf, PreparationError> {
         #[cfg(not(target_arch = "wasm32"))]
         Err(error) => Err(PreparationError::new(
             PreparationStage::AnalysisPlan,
-            format!("Could not resolve the automatic export directory: {error}"),
+            format!("Could not resolve the automatic export folder: {error}"),
         )),
     }
 }

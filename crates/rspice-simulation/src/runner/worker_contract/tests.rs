@@ -72,7 +72,12 @@ fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
     );
     let mut missing = transport.clone();
     missing.request.request.measurement_references = Default::default();
-    assert!(missing.into_request().unwrap_err().contains("unsealed"));
+    assert!(
+        missing
+            .into_request()
+            .unwrap_err()
+            .contains("not kept with the run")
+    );
     let mut wrong_column = transport.clone();
     wrong_column.request.request.netlist = source.replace("DEPVARCOL=1", "DEPVARCOL=7");
     assert!(wrong_column.into_request().is_err());
@@ -151,7 +156,10 @@ fn sealed_code_model_data_files_travel_with_the_worker_request() {
         serde_json::json!(vcd.replace("#1500\n1!\n", ""));
     tampered.request = serde_json::from_value(json).unwrap();
     let refusal = tampered.into_request().unwrap_err();
-    assert!(refusal.contains("does not match its digest"), "{refusal}");
+    assert!(
+        refusal.contains("changed after the run kept it"),
+        "{refusal}"
+    );
 
     let restored = transport.into_request().unwrap();
     assert_eq!(restored, wire);

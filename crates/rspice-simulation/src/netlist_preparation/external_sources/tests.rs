@@ -230,8 +230,8 @@ fn a_d_process_program_named_absolutely_passes_where_programs_start() {
     assert!(
         error
             .message()
-            .contains("'peers/toggle' is named relative to no deck directory")
-            && error.message().contains("line 2"),
+            .contains("'peers/toggle' is named relative to no deck folder")
+            && error.message().contains("Line 2"),
         "{error}"
     );
 }
@@ -266,9 +266,9 @@ fn a_bare_d_process_program_on_the_search_path_passes_and_one_found_nowhere_is_r
     assert_eq!(error.stage(), PreparationStage::SourceChecks);
     assert!(
         error.message().contains(
-            "no file beside the deck and no directory on PATH holds the program \
+            "no file beside the deck and no folder on PATH holds the program \
              'rspice-absent-peer'"
-        ) && error.message().contains("line 2"),
+        ) && error.message().contains("Line 2"),
         "{error}"
     );
     // A FIFO pair names files, never a program to look up.
@@ -278,11 +278,9 @@ fn a_bare_d_process_program_on_the_search_path_passes_and_one_found_nowhere_is_r
         true,
         Some(&search_path),
     )
-    .expect_err("a FIFO pair no deck directory resolved is refused");
+    .expect_err("a FIFO pair no deck folder resolved is refused");
     assert!(
-        error
-            .message()
-            .contains("named relative to no deck directory"),
+        error.message().contains("named relative to no deck folder"),
         "{error}"
     );
     std::fs::remove_dir_all(&directory).unwrap();

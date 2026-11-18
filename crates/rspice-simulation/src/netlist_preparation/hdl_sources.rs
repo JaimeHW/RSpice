@@ -542,7 +542,7 @@ fn read_source(
                 ElaborationErrorKind::MissingSource,
                 &directive.file_path,
                 None,
-                "the deck has not been saved to a file, so a relative path has no directory to \
+                "the deck has not been saved to a file, so a relative path has no folder to \
                  resolve from; save the deck or name the source by its full path",
             ));
         }
