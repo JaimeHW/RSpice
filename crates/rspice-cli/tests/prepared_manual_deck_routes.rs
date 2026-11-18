@@ -434,8 +434,19 @@ fn a_decks_analyses_write_one_file_the_same_on_the_cli_and_the_prepared_route() 
     );
     let deck = dir.path().join("deck.cir");
     let log = dir.path().join("log.txt");
-    passed(&run_to_json(&deck, &dir.path().join("deck.json")));
-    let cli = std::fs::read(&log).expect("the CLI's run wrote log.txt");
+    let run = run_to_json(&deck, &dir.path().join("deck.json"));
+    passed(&run);
+    let cli = std::fs::read(&log).unwrap_or_else(|error| {
+        let beside: Vec<_> = std::fs::read_dir(dir.path())
+            .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+            .unwrap_or_default();
+        panic!(
+            "the CLI's run wrote no log.txt beside the deck ({error}); the deck's folder \
+             holds {beside:?}; log.txt in the working directory: {}; stderr: {}",
+            Path::new("log.txt").exists(),
+            String::from_utf8_lossy(&run.stderr)
+        )
+    });
     std::fs::remove_file(&log).expect("clear the CLI's file");
     assert_eq!(prepared_manual_run(&deck).len(), 2);
     let prepared = std::fs::read(&log).expect("the prepared run wrote log.txt");
