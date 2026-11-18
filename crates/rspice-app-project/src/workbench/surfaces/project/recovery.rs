@@ -1395,6 +1395,16 @@ fn checkpoint_row(
     intent
 }
 
+/// The rules automatic checkpoints are kept under. A browser writes no
+/// autosave: its working session is what it keeps between visits.
+#[cfg(not(target_arch = "wasm32"))]
+const AUTOMATIC_SPACE_HELP: &str = "Automatic checkpoints are kept inside this space, the \
+     oldest dropped first. Only the newest autosave is kept, and a save removes it. Set the \
+     space in Preferences, under Projects and files.";
+#[cfg(target_arch = "wasm32")]
+const AUTOMATIC_SPACE_HELP: &str = "Automatic checkpoints are kept inside this space, the \
+     oldest dropped first. Set the space in Preferences, under Projects and files.";
+
 /// Where checkpoints live and the rules they are kept under.
 fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
     page::card(ui, "Storage", "", None, |ui| {
@@ -1414,11 +1424,7 @@ fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
             )
         };
         property_row(ui, "Space used", &space_used);
-        property_row(ui, "Automatic space", &budget).on_hover_text(
-            "Automatic checkpoints are kept inside this space, the oldest dropped first. \
-             Only the newest autosave is kept, and a save removes it. Set the space in \
-             Preferences, under Projects and files.",
-        );
+        property_row(ui, "Automatic space", &budget).on_hover_text(AUTOMATIC_SPACE_HELP);
         // Integrity is a row only when it is not in order. "All checkpoints
         // verified" and "Nothing to check" were the card reporting that
         // nothing had gone wrong, which is what the absence of the row says.

@@ -578,7 +578,7 @@ fn launcher_nav(
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_selected(selected);
             node.set_position_in_set(page_index(page) + 1);
-            node.set_size_of_set(ProjectLauncherPage::ALL.len());
+            node.set_size_of_set(ProjectLauncherPage::SHOWN.len());
             if selected {
                 node.set_aria_current(egui::accesskit::AriaCurrent::Page);
             }
@@ -593,15 +593,15 @@ fn launcher_nav(
     if compact {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            for page in ProjectLauncherPage::ALL {
-                render(ui, page, action);
+            for page in ProjectLauncherPage::SHOWN {
+                render(ui, *page, action);
             }
         });
     } else {
         ui.vertical(|ui| {
             ui.add_space(8.0);
-            for page in ProjectLauncherPage::ALL {
-                render(ui, page, action);
+            for page in ProjectLauncherPage::SHOWN {
+                render(ui, *page, action);
             }
         });
     }
@@ -616,6 +616,9 @@ fn launcher_page(
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     match cx.state.project_launcher_page {
         ProjectLauncherPage::Projects => launcher_body(ui, cx, action, layout),
+        page if !ProjectLauncherPage::SHOWN.contains(&page) => {
+            launcher_body(ui, cx, action, layout);
+        }
         ProjectLauncherPage::Recovery => recovery_page(ui, cx, action, layout),
         ProjectLauncherPage::SafeMode => safe_mode_page(ui, cx, action, layout),
     }
@@ -1688,12 +1691,11 @@ fn project_search_id() -> Id {
     Id::new("workbench.project_launcher.search")
 }
 
-const fn page_index(page: ProjectLauncherPage) -> usize {
-    match page {
-        ProjectLauncherPage::Projects => 0,
-        ProjectLauncherPage::Recovery => 1,
-        ProjectLauncherPage::SafeMode => 2,
-    }
+fn page_index(page: ProjectLauncherPage) -> usize {
+    ProjectLauncherPage::SHOWN
+        .iter()
+        .position(|shown| *shown == page)
+        .unwrap_or_default()
 }
 
 fn response_activated(ui: &mut Ui, response: &Response) -> bool {
@@ -1913,5 +1915,19 @@ mod tests {
         ));
         assert_eq!(project_group(true), ProjectGroup::Pinned);
         assert_eq!(project_group(false), ProjectGroup::Recent);
+    }
+
+    /// A browser keeps nothing for the Recovery page to list, so its
+    /// launcher lists no such page rather than one that never finds work.
+    #[test]
+    fn the_browser_launcher_lists_no_recovery_page() {
+        assert_eq!(
+            ProjectLauncherPage::shown(false),
+            ProjectLauncherPage::ALL.as_slice()
+        );
+        assert_eq!(
+            ProjectLauncherPage::shown(true),
+            [ProjectLauncherPage::Projects, ProjectLauncherPage::SafeMode].as_slice()
+        );
     }
 }

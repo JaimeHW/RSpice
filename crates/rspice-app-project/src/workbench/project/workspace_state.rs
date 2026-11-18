@@ -63,6 +63,20 @@ pub enum ProjectLauncherPage {
 impl ProjectLauncherPage {
     pub const ALL: [Self; 3] = [Self::Projects, Self::Recovery, Self::SafeMode];
 
+    /// The pages the launcher lists. A browser keeps no autosave or
+    /// checkpoint beside a file for Recovery to list: the work it has not
+    /// saved comes back with its session, and a project's own checkpoints
+    /// are on that project's Recovery page.
+    pub const SHOWN: &'static [Self] = Self::shown(cfg!(target_arch = "wasm32"));
+
+    pub const fn shown(browser: bool) -> &'static [Self] {
+        if browser {
+            &[Self::Projects, Self::SafeMode]
+        } else {
+            &Self::ALL
+        }
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Projects => "Projects",
