@@ -14,12 +14,14 @@
 //! identity is a hash of the workbench as JSON, so they also write the same
 //! JSON: a difference would give every such project a new identity.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap};
 
 use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
 use crate::workbench::app_state::AppState;
+use rspice_app_code::workbench::documents::netlist_document::session::NetlistSession;
 use rspice_app_code::workbench::slots::code::CodeState;
 use rspice_app_design::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
@@ -45,8 +47,8 @@ use rspice_app_workbench::ui::Theme;
 use rspice_app_workbench::workbench::lifecycle::window_session::WindowSessionRegistry;
 use rspice_app_workbench::workbench::routing::navigation::SurfaceNavigation;
 use rspice_app_workbench::workbench::state::workbench_session::{
-    ConsolePage, WorkbenchSession, WorkspaceDocumentId, WorkspaceDocumentRegistry,
-    WorkspaceLayoutState, default_console_height, default_inspector_width, default_navigator_width,
+    ConsolePage, WorkbenchSession, WorkspaceDocumentRegistry, WorkspaceLayoutState,
+    default_console_height, default_inspector_width, default_navigator_width,
 };
 
 /// What a session keeps of the document engines' session state, which the
@@ -331,7 +333,7 @@ pub(crate) struct WorkbenchWire {
     #[serde(default)]
     documents: WorkspaceDocumentRegistry,
     #[serde(default)]
-    netlist_open_documents: HashSet<WorkspaceDocumentId>,
+    netlist: NetlistSession,
     #[serde(default)]
     project_page: ProjectPage,
     #[serde(default)]
@@ -432,7 +434,7 @@ pub(crate) struct WorkbenchWireRef<'a> {
     #[serde(default)]
     documents: &'a WorkspaceDocumentRegistry,
     #[serde(default)]
-    netlist_open_documents: &'a HashSet<WorkspaceDocumentId>,
+    netlist: Cow<'a, NetlistSession>,
     #[serde(default)]
     project_page: &'a ProjectPage,
     #[serde(default)]
@@ -488,6 +490,12 @@ impl<'a> WorkbenchWireRef<'a> {
             &state.simulate,
             &state.models,
             &state.hardcopy,
+            state
+                .model
+                .netlist_artifacts
+                .generated_document
+                .as_ref()
+                .map(|document| document.id()),
         )
     }
 
@@ -502,6 +510,7 @@ impl<'a> WorkbenchWireRef<'a> {
         simulate: &'a SimulateState,
         models: &'a ModelsState,
         hardcopy: &'a HardcopyState,
+        generated_netlist: Option<rspice_app_state::state::NetlistDocumentId>,
     ) -> Self {
         // No `..`: a field added to `WorkbenchSession` does not compile until it
         // is either kept here or named as runtime-only.
@@ -579,7 +588,7 @@ impl<'a> WorkbenchWireRef<'a> {
             console_page,
             design_panel: &design.design_panel,
             documents,
-            netlist_open_documents: &code.netlist_open_documents,
+            netlist: Cow::Owned(code.netlist_session(generated_netlist)),
             project_page: &project.project_page,
             project_library_filter: &project.project_library_filter,
             project_checkpoint_selection: &project.project_checkpoint_selection,
@@ -628,7 +637,7 @@ impl<'a> WorkbenchWireRef<'a> {
             console_page: *self.console_page,
             design_panel: *self.design_panel,
             documents: self.documents.clone(),
-            netlist_open_documents: self.netlist_open_documents.clone(),
+            netlist: self.netlist.clone().into_owned(),
             project_page: *self.project_page,
             project_library_filter: self.project_library_filter.clone(),
             project_checkpoint_selection: self.project_checkpoint_selection.clone(),
@@ -678,7 +687,7 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
             console_page: &wire.console_page,
             design_panel: &wire.design_panel,
             documents: &wire.documents,
-            netlist_open_documents: &wire.netlist_open_documents,
+            netlist: Cow::Borrowed(&wire.netlist),
             project_page: &wire.project_page,
             project_library_filter: &wire.project_library_filter,
             project_checkpoint_selection: &wire.project_checkpoint_selection,
@@ -717,6 +726,7 @@ impl Default for WorkbenchWire {
             &Box::<SimulateState>::default(),
             &Box::<ModelsState>::default(),
             &Box::<HardcopyState>::default(),
+            None,
         )
         .to_wire()
     }
@@ -805,7 +815,7 @@ impl WorkbenchWire {
         *console_page = self.console_page;
         state.design.design_panel = self.design_panel;
         *documents = self.documents;
-        state.code.netlist_open_documents = self.netlist_open_documents;
+        state.code.restore_netlist_session(self.netlist);
         state.project.project_page = self.project_page;
         state.project.project_library_filter = self.project_library_filter;
         state.project.project_checkpoint_selection = self.project_checkpoint_selection;

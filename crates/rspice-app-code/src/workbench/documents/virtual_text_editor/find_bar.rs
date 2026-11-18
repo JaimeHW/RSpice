@@ -51,6 +51,20 @@ pub(super) struct FindBar {
     found: Found,
 }
 
+/// What a session keeps of the bar: whether it is open, with its replace
+/// row, the search and the replacement, and the options.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct FindView {
+    pub(super) open: bool,
+    replacing: bool,
+    pub(super) query: String,
+    replacement: String,
+    match_case: bool,
+    whole_word: bool,
+    regular_expression: bool,
+}
+
 /// The matches of one search in one revision of the text.
 #[derive(Clone, Debug, Default)]
 struct Found {
@@ -65,6 +79,35 @@ struct Found {
 }
 
 impl FindBar {
+    /// What a session keeps of the bar.
+    pub(super) fn view(&self) -> FindView {
+        FindView {
+            open: self.open,
+            replacing: self.replacing,
+            query: self.query.clone(),
+            replacement: self.replacement.clone(),
+            match_case: self.match_case,
+            whole_word: self.whole_word,
+            regular_expression: self.regular_expression,
+        }
+    }
+
+    /// Put the bar back as a session kept it, without the keyboard: the
+    /// reader is given back the text, not the search. Its replace row comes
+    /// back only over text that can be edited.
+    pub(super) fn restore(&mut self, view: FindView, editable: bool) {
+        *self = Self {
+            open: view.open,
+            replacing: view.replacing && editable,
+            query: view.query,
+            replacement: view.replacement,
+            match_case: view.match_case,
+            whole_word: view.whole_word,
+            regular_expression: view.regular_expression,
+            ..Self::default()
+        };
+    }
+
     fn options(&self) -> FindOptions {
         FindOptions {
             match_case: self.match_case,

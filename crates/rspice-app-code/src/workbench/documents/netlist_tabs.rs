@@ -27,7 +27,7 @@ pub enum RunTarget {
 }
 
 /// The document in front of the Netlist page.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum NetlistTab {
     /// The deck the active plan's root design netlists to.
     #[default]
@@ -50,7 +50,7 @@ pub enum NetlistTab {
 }
 
 /// One side of a comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CompareSide {
     /// The generated netlist as it is now.
     Generated,

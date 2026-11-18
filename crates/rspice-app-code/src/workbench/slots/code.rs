@@ -5,6 +5,7 @@
 
 use crate::workbench::app::dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
+use crate::workbench::documents::netlist_document::session::NetlistSession;
 use crate::workbench::documents::netlist_document::{NetlistDocumentState, NetlistRoot};
 use crate::workbench::framework::feature::{CodePort, NetlistDocumentKey};
 use rspice_app_runs::simulation::{DeckOrigin, ManualDeck};
@@ -78,6 +79,22 @@ impl CodeState {
         self.netlist = Default::default();
         self.deck_rename = None;
         self.netlist_open_documents.clear();
+    }
+
+    /// What a session keeps of the Netlist workspace, with `generated` the
+    /// generated netlist the model holds.
+    #[must_use]
+    pub fn netlist_session(
+        &self,
+        generated: Option<crate::state::NetlistDocumentId>,
+    ) -> NetlistSession {
+        NetlistSession::of(&self.netlist, &self.netlist_open_documents, generated)
+    }
+
+    /// Take back what a session kept of the Netlist workspace: the page
+    /// reopens it the next time it is shown.
+    pub fn restore_netlist_session(&mut self, session: NetlistSession) {
+        crate::workbench::documents::netlist_document::session::restore(&mut self.netlist, session);
     }
 
     /// The deck in front, which a manual run reads.

@@ -30,6 +30,7 @@ pub mod language;
 mod navigation;
 mod param_scan;
 pub(crate) mod references;
+pub mod session;
 mod source_index;
 pub use navigation::{open_diagnostic_location, open_source_location};
 pub use references::open_deck_place;
@@ -708,6 +709,13 @@ pub struct NetlistDocumentState {
     /// The tab in front before the run's input, which closing it brings
     /// back and which its comparison compares against.
     pub(crate) run_input_return: NetlistTab,
+    /// The session restored at launch, until the page reopens it.
+    pending_session: Option<session::NetlistSession>,
+    /// Each document's view in its editor, as last drawn.
+    editor_views: Vec<(NetlistTab, super::virtual_text_editor::EditorView)>,
+    /// The views the last launch left documents in, each handed to its
+    /// editor the first time it draws the document.
+    restore_views: Vec<(NetlistTab, super::virtual_text_editor::EditorView)>,
     /// Which executed deck the run-snapshot document is showing.
     ///
     /// Absent means it is showing this session's manual-deck baseline: the

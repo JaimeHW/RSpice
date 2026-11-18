@@ -201,17 +201,28 @@ pub fn reveal_in_netlist(
 pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::netlist_document::{
         active_netlist_source_is_editable_in, can_redo_netlist_edit, can_undo_netlist_edit,
-        editor_id_in,
+        editor_id_in, session,
     };
 
-    // A project with decks opens its first one, which the page then shows.
-    crate::workbench::documents::deck_files::open_project_deck(
+    // A project with decks opens its first one, which the page then shows,
+    // unless the session the application was restored with opens another.
+    if !session::restores_a_deck(&cx.state.netlist) {
+        crate::workbench::documents::deck_files::open_project_deck(
+            cx.model,
+            &mut cx.state.netlist,
+            &mut cx.state.netlist_open_documents,
+            cx.runs,
+        );
+    }
+    generation::reconcile_documents(cx);
+    // The tabs the last launch left open reopen once, over the generated
+    // netlist just built, whose includes are among them.
+    session::reopen(
         cx.model,
         &mut cx.state.netlist,
         &mut cx.state.netlist_open_documents,
         cx.runs,
     );
-    generation::reconcile_documents(cx);
     crate::workbench::documents::netlist_document::prepare(
         cx.model,
         &mut cx.state.netlist,

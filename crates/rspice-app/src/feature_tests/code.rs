@@ -20,6 +20,8 @@ mod netlist_first;
 mod netlist_first_drawn;
 mod netlist_generation;
 mod netlist_language;
+#[cfg(not(target_arch = "wasm32"))]
+mod netlist_session;
 mod netlist_source_menu;
 mod netlist_surface;
 mod netlist_tabs;

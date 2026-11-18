@@ -1312,3 +1312,89 @@ fn structural_commands_on_the_lines_they_touch_match_the_whole_text() {
         assert_eq!(model.selections(), expected.selections(), "{context}");
     }
 }
+
+/// Draw the editor `id` over `source` once in `context`, and say what it
+/// shows of its document.
+fn drawn_view(
+    context: &egui::Context,
+    id: egui::Id,
+    source: &mut TextSnapshot,
+    style: &VirtualEditorStyle<'_>,
+) -> EditorView {
+    let mut view = None;
+    let raw_input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            Vec2::new(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let _ = context.run_ui(raw_input, |ui| {
+        let output = show_virtual_text_editor(
+            ui,
+            id,
+            source,
+            true,
+            EditorSyntax::Spice,
+            None,
+            style,
+            |_, row, font| {
+                egui::text::LayoutJob::simple_singleline(row.text.to_owned(), font, Color32::WHITE)
+            },
+            |_| None,
+            |_| None,
+        );
+        view = Some(output.view);
+    });
+    view.expect("the editor draws")
+}
+
+/// A view taken from one editor and handed to a new one, as the next launch
+/// hands it, shows the document as it was left: the selection, what is
+/// folded, how far it is scrolled and what the find bar searches for.
+#[test]
+fn a_view_handed_back_shows_the_document_as_it_was_left() {
+    let text = format!(
+        ".subckt amp a b\nR1 a b 1k\n.ends\n{}",
+        (0..400)
+            .map(|line| format!("R{line} n{line} 0 1k\n"))
+            .collect::<String>()
+    );
+    let edited = std::collections::HashSet::new();
+    let style = test_style(&edited);
+    let id = egui::Id::new("handed-back-view-test");
+    let left = egui::Context::default();
+    let mut source = TextSnapshot::new(&text);
+    drawn_view(&left, id, &mut source, &style);
+    // Far down the document, with "R300" selected on its line.
+    let selected = text.find("R300 ").expect("the line is there");
+    queue_caret_char_index(&left, id, selected);
+    drawn_view(&left, id, &mut source, &style);
+    let session_id = id.with("virtual-session");
+    left.data_mut(|data| {
+        let mut session = data
+            .remove_temp::<VirtualEditorSession>(session_id)
+            .expect("the editor keeps its session");
+        session.model.fold_lines(0, 3);
+        session.model.set_selections(vec![TextSelection {
+            anchor: selected,
+            cursor: selected + 4,
+        }]);
+        data.insert_temp(session_id, session);
+    });
+    queue_find_bar(&left, id, false);
+    drawn_view(&left, id, &mut source, &style);
+    let view = drawn_view(&left, id, &mut source, &style);
+    assert_eq!(view.folded(), 1, "{view:?}");
+    assert_eq!(view.caret(), Some(selected + 4));
+    assert!(view.scrolled_down() > 0.0, "{view:?}");
+    assert_eq!(view.searching_for(), Some("R300"));
+
+    let next = egui::Context::default();
+    let mut source = TextSnapshot::new(&text);
+    queue_view(&next, id, view.clone());
+    drawn_view(&next, id, &mut source, &style);
+    let shown = drawn_view(&next, id, &mut source, &style);
+
+    assert_eq!(shown, view);
+}

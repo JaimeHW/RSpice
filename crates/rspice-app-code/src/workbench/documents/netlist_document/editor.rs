@@ -248,6 +248,11 @@ pub fn show(
     let editor_response;
     let anchor;
     let unanswered_history;
+    let view;
+    // The first time a document draws after a launch, its editor shows it
+    // as the last launch left it.
+    let front = netlist.front.clone();
+    super::session::hand_back_view(ui.ctx(), netlist, &front, editor_id);
 
     {
         let messages = workbench.messages();
@@ -353,6 +358,7 @@ pub fn show(
         selected_char_range = output.selected_char_range;
         hover_char_index = output.hover_char_index;
         unanswered_history = output.unanswered_history;
+        view = output.view;
         editor_response = output.response.clone();
         anchor = completion::CompletionAnchor {
             focused: output.response.has_focus(),
@@ -363,6 +369,7 @@ pub fn show(
     ui.ctx()
         .data_mut(|data| data.insert_temp(comments_id, source_comments));
 
+    super::session::keep_view(netlist, &front, view);
     let now = ui.input(|input| input.time);
     netlist.cursor_line = cursor_line;
     netlist.cursor_char_index = cursor_char_index;

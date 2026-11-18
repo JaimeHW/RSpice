@@ -11,6 +11,7 @@ mod context_menu;
 mod find_bar;
 mod keymap;
 mod touch;
+mod view;
 mod wrap;
 
 pub(crate) use accessibility::bounded_accessible_text;
@@ -20,6 +21,8 @@ use accessibility::{consume_accesskit_text_selection, update_accesskit_text_stat
 use context_menu::{context_menu_id, take_menu_keys};
 pub use context_menu::{context_menu_may_show, context_menu_open};
 pub(crate) use find_bar::queue_open as queue_find_bar;
+pub use view::EditorView;
+pub(crate) use view::queue_view;
 
 /// The search field of the find bar over the editor `editor_id`, which has
 /// the keyboard while the reader types a search.
@@ -105,6 +108,9 @@ struct VirtualEditorSession {
     find: find_bar::FindBar,
     /// The rows the text is laid into, one a line or wrapped.
     rows: wrap::Rows,
+    /// Where a view handed back from an earlier launch scrolled the text,
+    /// until the next frame scrolls there.
+    restore_scroll: Option<Vec2>,
 }
 
 /// How a caret that moved is brought into view.
@@ -163,6 +169,7 @@ impl Default for VirtualEditorSession {
             touch: touch::TouchGesture::default(),
             find: find_bar::FindBar::default(),
             rows: wrap::Rows::default(),
+            restore_scroll: None,
         }
     }
 }
@@ -290,6 +297,8 @@ pub(crate) struct VirtualEditorOutput {
     /// there is something on screen to anchor to, so a caller never has to
     /// guess a position. Independent of the blink phase.
     pub caret_anchor: Option<egui::Pos2>,
+    /// What the editor shows of its document, for a session to keep.
+    pub view: EditorView,
     pub response: Response,
 }
 
@@ -462,6 +471,10 @@ pub(crate) fn show_virtual_text_editor(
         session.ime = None;
     }
     session.bound_revision = source.revision();
+    if let Some(view) = view::take_queued_view(ui.ctx(), editor_id) {
+        view.apply(&mut session, editable);
+        restart_maximum_column_scan(&mut session);
+    }
     let mut fitted = gutter_fitting(
         style,
         session.model.line_count(),
@@ -625,6 +638,7 @@ pub(crate) fn show_virtual_text_editor(
             session.caret_moved_at = ui.input(|input| input.time);
         }
         session.rows.refresh(&session.model);
+        let restored_scroll = session.restore_scroll.take();
         let scroll_offset = planned_scroll_offset(
             ui.ctx(),
             &session,
@@ -632,7 +646,8 @@ pub(crate) fn show_virtual_text_editor(
             char_width,
             reveal,
             input.page_rows,
-        );
+        )
+        .or(restored_scroll);
         let mut scroll_area = egui::ScrollArea::both()
             .id_salt(editor_id.with("scroll"))
             .auto_shrink([false, false]);
@@ -1271,6 +1286,7 @@ pub(crate) fn show_virtual_text_editor(
         );
     }
     let unanswered_history = session.unanswered_history.take();
+    let view = EditorView::of(&session, scroll_output.inner.state.offset);
     crate::workbench::documents::text_editor_commands::publish_history_steps(
         ui.ctx(),
         editor_id,
@@ -1287,6 +1303,7 @@ pub(crate) fn show_virtual_text_editor(
         selected_char_range,
         unanswered_history,
         caret_anchor,
+        view,
         response,
     }
 }
