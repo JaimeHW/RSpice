@@ -366,7 +366,7 @@ const VIEW_MENU: &[MenuEntry] = &[
 /// names.
 const PROJECT_PAGES_MENU: &[MenuEntry] = &[
     project(ProjectCommand::Page(ProjectPage::Overview)).access('O'),
-    project(ProjectCommand::Page(ProjectPage::Library)).access('L'),
+    MenuEntry::command_as(ProjectCommand::Page(ProjectPage::Library).key(), "Library").access('L'),
     project(ProjectCommand::Page(ProjectPage::Configuration)).access('C'),
     project(ProjectCommand::Page(ProjectPage::Dependencies)).access('D'),
     project(ProjectCommand::Page(ProjectPage::Recovery)).access('R'),
@@ -704,7 +704,7 @@ const VERIFY_MENU: &[MenuEntry] = &[
 
 /// Tools: the libraries and models a design draws on, then the netlist.
 const TOOLS_MENU: &[MenuEntry] = &[
-    models(ModelsCommand::Page(ModelsPage::Models)).access('L'),
+    models(ModelsCommand::Page(ModelsPage::Models)).access('O'),
     models(ModelsCommand::ModelBrowser).access('B'),
     models(ModelsCommand::ModelNew).access('W'),
     models(ModelsCommand::ModelEditor).access('E'),

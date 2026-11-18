@@ -65,7 +65,7 @@ fn a_build_without_cloud_endpoints_fetches_no_catalog_and_reports_no_error() {
         "a test build carries no cloud endpoints, as the browser IDE's build does not"
     );
     replay.frames(Vec::new());
-    replay.choose_command("Library manager");
+    replay.choose_command("Models");
     let shown = settled(&mut replay);
     assert_eq!(
         replay.app.state.models.models_view.attempted_operation, None,
@@ -111,7 +111,7 @@ fn a_build_without_cloud_endpoints_fetches_no_catalog_and_reports_no_error() {
 fn the_arrow_keys_walk_the_catalog_from_a_pressed_row() {
     let mut replay = Replay::new();
     replay.frames(Vec::new());
-    replay.choose_command("Library manager");
+    replay.choose_command("Models");
     only(
         &replay.frames(Vec::new()),
         "RSPICE_DIODE in RSpice Foundation",

@@ -40,7 +40,8 @@ const TAB_HEIGHT: f32 = 34.0;
 const PIN_TABLE_MIN_WIDTH: f32 = 690.0;
 const FORM_TABLE_MIN_WIDTH: f32 = 900.0;
 
-const SURFACE_TITLE: &str = "Library, cellview, symbol and form authoring";
+/// The manager goes by one name, Virtuoso's, wherever it is named.
+const SURFACE_TITLE: &str = "Library Manager";
 
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
@@ -137,7 +138,7 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> LibraryCellviewPage
             });
             ui.ctx().accesskit_node_builder(panel.response.id, |node| {
                 node.set_role(egui::accesskit::Role::TabPanel);
-                node.set_label(format!("Library Cellview Manager {}", page.label()));
+                node.set_label(format!("{SURFACE_TITLE} {}", page.label()));
             });
             page
         })
@@ -176,7 +177,7 @@ fn surface_header(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) {
     );
     ui.ctx().accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::Region);
-        node.set_label("Library Cellview Manager identity");
+        node.set_label(SURFACE_TITLE);
     });
 }
 
@@ -328,7 +329,7 @@ fn page_tabs(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     );
     ui.ctx().accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::TabList);
-        node.set_label("Library Cellview Manager pages");
+        node.set_label(format!("{SURFACE_TITLE} pages"));
     });
 }
 

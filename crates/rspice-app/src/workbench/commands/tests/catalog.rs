@@ -261,7 +261,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         ModelsCommand::Page(ModelsPage::Models)
             .declared_spec()
             .label,
-        "Library manager"
+        "Models"
     );
 }
 

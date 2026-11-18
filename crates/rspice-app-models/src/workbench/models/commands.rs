@@ -94,7 +94,9 @@ impl ModelsCommand {
         let open = CommandFlags::PALETTE_VISIBLE.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
         let writes = open.with(CommandFlags::BLOCKED_BY_PROJECT_OPERATION, true);
         let (label, flags) = match self {
-            Self::Page(ModelsPage::Models) => ("Library manager", page),
+            // A page goes by the name its tab shows. "Library Manager" is the
+            // Project workspace's Library page, as Virtuoso names it.
+            Self::Page(ModelsPage::Models) => ("Models", page),
             Self::Page(ModelsPage::Symbols) => ("Symbols & CDF", page),
             Self::Page(ModelsPage::Corners) => ("Corners & sections", page),
             Self::Page(ModelsPage::Bins) => ("Bins & geometry", page),

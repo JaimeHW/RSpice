@@ -862,3 +862,25 @@ fn a_filter_states_what_it_hides_and_never_acts_on_a_hidden_cell() {
     app.state.project.on_project_changed();
     assert!(app.state.project.project_library_filter.is_empty());
 }
+
+/// The Library page is the Library Manager, under Virtuoso's name for it:
+/// "Library Manager" chosen in the palette from another workspace opens the
+/// Project workspace on the Library page, and the Models page is found under
+/// its own name, not under the manager's.
+#[test]
+fn the_palettes_library_manager_opens_the_library_page() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project.project_page = ProjectPage::Overview;
+    app.state.workbench.activate(Workspace::Models);
+    let mut replay = super::super::replay::Replay::of(app);
+    replay.frames(Vec::new());
+
+    replay.choose_command("Library Manager");
+    replay.frames(Vec::new());
+    assert_eq!(replay.app.state.workbench.workspace, Workspace::Project);
+    assert_eq!(replay.app.state.project.project_page, ProjectPage::Library);
+
+    replay.choose_command("Models");
+    replay.frames(Vec::new());
+    assert_eq!(replay.app.state.workbench.workspace, Workspace::Models);
+}

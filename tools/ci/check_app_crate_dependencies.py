@@ -153,7 +153,7 @@ ALLOWED: dict[str, set[str]] = {
     # it registers with, and the design, design-management, project,
     # simulation and painting crates its pages, Library browser and dialogs
     # are built on, with the schematic editor whose symbol preview the
-    # Library and cellview manager draws.
+    # Library Manager draws.
     "rspice-app-project": {
         "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
         "rspice-design", "rspice-design-model", "rspice-project", "rspice-schematic-editor",

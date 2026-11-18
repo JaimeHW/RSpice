@@ -964,7 +964,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
 /// share, and the page has its own answered as it returns; the inspector has
 /// what it raised answered once it has drawn, before the next point draws.
 /// The navigator and the toolbars raise nothing, so they answer nothing
-/// where they draw. The Library and cellview manager draws in the feature's
+/// where they draw. The Library Manager draws in the feature's
 /// context too, and has what it raised, the symbol editor or a symbol
 /// dialog to open, answered as it returns, so a dialog draws in the frame
 /// that asked for it; on its Libraries page the Library page's dialogs

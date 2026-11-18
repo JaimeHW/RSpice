@@ -19,7 +19,7 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
 /// The dialogs of a page that draws the Library browser, once what the page
 /// raised has been answered: the publication dialogs, which write their
 /// file through the application, then the membership dialogs. The Project
-/// workspace's Library page and the Library and cellview manager's
+/// workspace's Library page and the Library Manager's
 /// Libraries page draw them.
 pub(in crate::workbench) fn dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
     super::library_publication::show(ctx, app);

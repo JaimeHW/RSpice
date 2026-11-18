@@ -191,7 +191,7 @@ pub struct PaletteRegions {
 /// the waveforms of the active run. A command is found under the menu that
 /// holds its row, and one no menu lists under the menu that holds its
 /// group's; a cell view under Design and a model under Tools, beside the
-/// Library manager.
+/// Models page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum PaletteScope {

@@ -1,7 +1,7 @@
 //! Models › New model on the running application: the device type picked
 //! first, the card created with that type's parameters at the engine's own
 //! defaults and opened in the model editor, bound to a placed transistor
-//! from the Library manager, run, and kept by a save.
+//! from the Models page, run, and kept by a save.
 
 use super::*;
 use crate::feature_tests::replay::Replay;
@@ -194,7 +194,7 @@ fn saved_and_reopened(app: &mut RSpiceApp) -> AppState {
 
 /// A level-1 NMOS made through New model is the engine's own level-1
 /// device: the editor opens on every parameter of the type at its default,
-/// the Library manager binds it to the placed transistor, the run draws
+/// the Models page binds it to the placed transistor, the run draws
 /// the square-law current of those defaults, and the same card written by
 /// hand in a deck draws the same. A save keeps the card and the binding.
 #[test]
@@ -242,7 +242,7 @@ fn a_new_level_one_nmos_is_created_bound_run_and_kept() {
         "the card is published as a project revision"
     );
 
-    replay.choose_command("Library manager");
+    replay.choose_command("Models");
     replay.click("Bind to MN…", Role::Button);
     // The binding names the card and the library that holds it.
     let bound = |state: &AppState| {

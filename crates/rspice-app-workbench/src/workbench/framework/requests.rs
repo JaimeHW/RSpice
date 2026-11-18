@@ -511,8 +511,8 @@ impl Request for BindComponentModel {
 }
 
 /// Open one of the schematic's symbol-authoring dialogs. Raised by the
-/// models feature's symbol pages and actions and by the Library and cellview
-/// manager's symbol page, and taken straight after the call that raised it.
+/// models feature's symbol pages and actions and by the Library Manager's
+/// symbol page, and taken straight after the call that raised it.
 #[derive(Clone, Debug)]
 pub enum OpenSymbolAuthoring {
     /// Create a symbol bound to the model the Models workspace selected.

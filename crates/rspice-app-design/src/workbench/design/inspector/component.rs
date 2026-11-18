@@ -539,7 +539,7 @@ pub fn bind_component_model_from_catalog(
     if let Some(binding) = component.library_cell.as_ref() {
         if !binding.library.eq_ignore_ascii_case(library_name) {
             return Err(format!(
-                "The selected cell instance is bound to library '{}'; cross-library rebinding requires the Library/Cellview Manager.",
+                "The selected cell instance is bound to library '{}'; cross-library rebinding requires the Library Manager.",
                 binding.library
             ));
         }
