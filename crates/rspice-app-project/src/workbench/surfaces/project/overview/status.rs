@@ -233,7 +233,9 @@ fn finding_rows(
             || Cell::text(&problem.message),
             |mark| Cell::problem(&problem.message, mark),
         );
-        vec![message.hint(&problem.message), Cell::text(&problem.path)]
+        // A message cut short shows whole under the pointer, as every cut
+        // cell does: a hint of its own words would say it twice.
+        vec![message, Cell::text(&problem.path)]
     });
     response
         .activate
