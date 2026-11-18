@@ -17,6 +17,7 @@ mod page_solver;
 mod page_variables;
 pub mod pages;
 pub mod participation;
+pub mod plan_configuration;
 mod plan_issue_wording;
 pub mod plan_manager;
 pub mod transient_checkpoint_exchange;
@@ -73,6 +74,8 @@ use crate::workbench::simulate::commands::SimulateCommand;
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
 const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
 const TITLE_ACTION_SPACING: f32 = 6.0;
+/// Air between the plan's name and the configuration row under it.
+const CONFIGURATION_ROW_GAP: f32 = 4.0;
 /// The narrowest the plan heading is allowed to become before the title row
 /// gives up on holding the actions beside it.
 const TITLE_HEADING_MIN_WIDTH: f32 = 220.0;
@@ -1228,6 +1231,8 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
     // will dispatch was the one page that never said whether the report
     // authorizing it still held.
     let mut rerun_preflight = false;
+    let configuration_choices = plan_configuration::ConfigurationChoices::of(cx.model);
+    let mut picked_configuration = None;
     let chip = pages::PreflightChip::resolve(cx.model, cx.runs);
     let chip_reserve = chip.as_ref().map_or(0.0, |chip| chip.reserve(ui));
     let actions_width =
@@ -1252,6 +1257,9 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
                     // instead of running under the group.
                     ui.set_width(heading_width);
                     heading(ui, &plan_name, None);
+                    ui.add_space(CONFIGURATION_ROW_GAP);
+                    picked_configuration =
+                        plan_configuration::configuration_row(ui, &configuration_choices);
                 },
             );
             if let Some(chip) = &chip {
@@ -1277,6 +1285,8 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
         });
     } else {
         heading(ui, &plan_name, None);
+        ui.add_space(CONFIGURATION_ROW_GAP);
+        picked_configuration = plan_configuration::configuration_row(ui, &configuration_choices);
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;
@@ -1308,6 +1318,12 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
                 .show(ui)
                 .clicked();
         });
+    }
+    if let Some(design) = picked_configuration
+        && let Err(error) = plan_configuration::commit_design_configuration(cx, design)
+    {
+        cx.wb
+            .prompt(format!("The plan's configuration was not changed: {error}"));
     }
     if manage_plans {
         cx.execute(SimulateCommand::ManagePlans.key());

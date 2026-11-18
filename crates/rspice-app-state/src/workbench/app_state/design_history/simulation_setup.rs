@@ -18,6 +18,7 @@ use super::*;
 use crate::product::SimulationPlanId;
 use crate::simulation::plan::{OptionsDialogState, SimulationPlan};
 use rspice_model_library::SimulationPlanModelBinding;
+use rspice_simulation_contract::design_configuration::DesignConfiguration;
 use rspice_simulation_contract::options::SimulationOptions;
 use rspice_simulation_contract::output_policy::SimulationSavePolicy;
 use rspice_simulation_contract::plan_payload::{
@@ -46,6 +47,8 @@ impl SetupParts {
     pub const RUN_SET: Self = Self(1 << 5);
     /// The reference process and temperature the nominal run takes.
     pub const REFERENCE_PVT: Self = Self(1 << 6);
+    /// The hierarchy configuration the plan's design elaborates under.
+    pub const DESIGN_CONFIGURATION: Self = Self(1 << 7);
 
     #[must_use]
     pub const fn and(self, other: Self) -> Self {
@@ -70,6 +73,7 @@ pub struct SetupSnapshot {
     analyses: Option<Box<SimulationPlan>>,
     run_set: Option<Box<RunSetSnapshot>>,
     reference_pvt: Option<ReferencePoint>,
+    design_configuration: Option<DesignConfiguration>,
 }
 
 /// One committed setup edit.
@@ -113,6 +117,9 @@ impl Model {
             reference_pvt: parts
                 .has(SetupParts::REFERENCE_PVT)
                 .then_some(setup.reference_pvt),
+            design_configuration: parts
+                .has(SetupParts::DESIGN_CONFIGURATION)
+                .then_some(setup.design_configuration),
         }
     }
 
@@ -279,6 +286,9 @@ fn restore(
     }
     if let Some(run_set) = &side.run_set {
         setup.run_set.restore_snapshot((**run_set).clone());
+    }
+    if let Some(design) = side.design_configuration {
+        setup.design_configuration = design;
     }
     let workspace = match &side.plan_data {
         Some(payload) => {
