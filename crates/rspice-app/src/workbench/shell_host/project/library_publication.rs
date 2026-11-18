@@ -828,6 +828,7 @@ pub(crate) fn prepare_project_library_publication(
             sha2::Sha256::digest(&bytes).into(),
         ),
         snapshot_byte_len,
+        frozen: Vec::new(),
     };
     let mut descriptor_preflight = state.model.workspace.content.project.clone();
     descriptor_preflight

@@ -17,6 +17,7 @@ mod export_name;
 mod generated_instance;
 mod in_place_layout;
 mod library_catalog;
+mod library_files;
 mod owned_source;
 mod physical_layout;
 mod plan_outcome;
@@ -39,6 +40,12 @@ pub use generated_instance::GeneratedInstanceLocation;
 pub use in_place_layout::InPlaceLayout;
 pub use library_catalog::{
     HierarchyCopy, LibraryRemoval, PreparedLibraryOperation, WorkspacePruned,
+};
+pub use library_files::{
+    CellViewStatus, FileRevision, FileSession, FileStamp, LibraryFile, LibraryFileLock,
+    LibraryFileSession, LibraryMode, LibraryPath, LibraryPathChoice, LibraryReference, Missing,
+    OnDisk, ReferenceLoad, ReferenceSession, ReferenceStatus, RefreshRow, RelinkOutcome,
+    StatusMark,
 };
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
@@ -157,6 +164,10 @@ pub struct Model {
     /// The technology contract as last proven, for the surfaces that show it
     /// on every frame. Runtime only.
     pub technology_verdict: ProjectTechnologyVerdict,
+    /// What this session read from each library kept in a folder of its
+    /// own, and the locks it holds there. Runtime only: opening a project
+    /// reads the folders again.
+    pub library_files: LibraryFileSession,
 }
 
 impl Model {

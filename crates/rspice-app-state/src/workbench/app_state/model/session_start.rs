@@ -73,6 +73,7 @@ impl Model {
             generated_symbol_ports: Default::default(),
             source_drift: Default::default(),
             technology_verdict: Default::default(),
+            library_files: Default::default(),
         };
         let startup_errors = pdk_load_error
             .map(|error| {

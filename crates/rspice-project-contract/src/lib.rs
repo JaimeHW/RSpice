@@ -7,4 +7,4 @@ pub use descriptor::*;
 pub use library_publication::*;
 
 mod libraries;
-pub use libraries::ProjectLibraries;
+pub use libraries::{LibraryReference, ProjectLibraries};

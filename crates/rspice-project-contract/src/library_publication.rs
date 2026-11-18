@@ -15,6 +15,7 @@ use uuid::Uuid;
 use rspice_vocabulary::product::{ContentDigest, ObjectRevision, ProjectId};
 
 use super::{ProjectDescriptor, ProjectDescriptorError};
+use rspice_design::library::folder::LibraryFile;
 use rspice_design::library::validate_library_audit_text;
 
 pub const PROJECT_LIBRARY_PUBLICATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
@@ -33,6 +34,21 @@ pub struct ProjectLibraryPublicationDraft {
     pub library_revision: u64,
     pub snapshot_digest: ContentDigest,
     pub snapshot_byte_len: u64,
+    /// The referenced cellviews the design uses, each frozen in the
+    /// publication store under its digest.
+    pub frozen: Vec<FrozenCellView>,
+}
+
+/// One referenced cellview a publication keeps a frozen copy of, by the
+/// digest the project's publication store keeps that copy under. A copy is
+/// kept once per digest, so publications share it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrozenCellView {
+    pub library: String,
+    pub file: LibraryFile,
+    pub revision: u64,
+    pub digest: ContentDigest,
 }
 
 impl ProjectLibraryPublicationDraft {
@@ -89,6 +105,8 @@ pub struct ProjectLibraryPublicationReceipt {
     snapshot_byte_len: u64,
     previous_receipt_digest: Option<ContentDigest>,
     receipt_digest: ContentDigest,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    frozen: Vec<FrozenCellView>,
 }
 
 #[derive(Serialize)]
@@ -108,6 +126,12 @@ struct ProjectLibraryPublicationReceiptPayload<'a> {
     snapshot_digest: ContentDigest,
     snapshot_byte_len: u64,
     previous_receipt_digest: Option<ContentDigest>,
+    #[serde(skip_serializing_if = "no_frozen")]
+    frozen: &'a [FrozenCellView],
+}
+
+fn no_frozen(frozen: &&[FrozenCellView]) -> bool {
+    frozen.is_empty()
 }
 
 impl ProjectLibraryPublicationReceipt {
@@ -128,9 +152,16 @@ impl ProjectLibraryPublicationReceipt {
             snapshot_digest: self.snapshot_digest,
             snapshot_byte_len: self.snapshot_byte_len,
             previous_receipt_digest: self.previous_receipt_digest,
+            frozen: &self.frozen,
         })
         .map_err(|error| ProjectDescriptorError::Serialization(error.to_string()))?;
         Ok(ContentDigest::from_bytes(Sha256::digest(bytes).into()))
+    }
+
+    /// The referenced cellviews this publication froze.
+    #[must_use]
+    pub fn frozen(&self) -> &[FrozenCellView] {
+        &self.frozen
     }
 
     #[must_use]
@@ -270,6 +301,7 @@ impl ProjectDescriptor {
                 .last()
                 .map(ProjectLibraryPublicationReceipt::receipt_digest),
             receipt_digest: ContentDigest::from_bytes([0; 32]),
+            frozen: draft.frozen,
         };
         receipt.receipt_digest = receipt.calculate_digest()?;
 

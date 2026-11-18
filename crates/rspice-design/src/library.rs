@@ -3,6 +3,7 @@
 mod catalog;
 mod cell;
 mod edit;
+pub mod folder;
 pub mod metadata;
 mod mutation;
 mod record;

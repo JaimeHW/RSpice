@@ -11,7 +11,9 @@ use std::path::PathBuf;
 // =============================================================================
 
 /// Standard view types matching Cadence conventions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 pub enum ViewType {
     /// Schematic view (circuit diagram)
     #[default]

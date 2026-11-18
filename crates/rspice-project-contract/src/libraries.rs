@@ -1,13 +1,16 @@
 //! Project library catalog and its persisted selection.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rspice_design::library::{Cell, Library, LibraryCatalog, View};
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_vocabulary::stamped::Stamped;
 
 mod bootstrap;
+mod references;
+
+pub use references::LibraryReference;
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +22,10 @@ pub struct ProjectLibraries {
     /// names the catalog it leaves behind, process-wide: unlike the
     /// persisted revision, a stamp is never carried by another catalog.
     catalog: Stamped<LibraryCatalog>,
+    /// The libraries read from folders of their own, by name. Their cells,
+    /// once read, sit in the catalog beside the embedded libraries'; the
+    /// project file keeps only these records of them.
+    references: Stamped<BTreeMap<String, LibraryReference>>,
     pub selected_library: Option<String>,
     pub selected_cell: Option<String>,
     pub selected_view: Option<String>,
@@ -28,12 +35,17 @@ pub struct ProjectLibraries {
 // Serialization borrows the catalog; it does not clone engineering content.
 impl Serialize for ProjectLibraries {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut record = serializer.serialize_struct("LibraryManager", 5)?;
+        let mut record = serializer.serialize_struct("LibraryManager", 6)?;
         record.serialize_field("libraries", self.catalog.libraries())?;
         record.serialize_field("selected_library", &self.selected_library)?;
         record.serialize_field("selected_cell", &self.selected_cell)?;
         record.serialize_field("selected_view", &self.selected_view)?;
         record.serialize_field("revision", &self.catalog.revision())?;
+        if self.references.is_empty() {
+            record.skip_field("references")?;
+        } else {
+            record.serialize_field("references", &self.references.values().collect::<Vec<_>>())?;
+        }
         record.end()
     }
 }
@@ -49,10 +61,22 @@ impl<'de> Deserialize<'de> for ProjectLibraries {
             selected_view: Option<String>,
             #[serde(default)]
             revision: u64,
+            #[serde(default)]
+            references: Vec<LibraryReference>,
         }
         let record = Record::deserialize(deserializer)?;
+        let mut references = BTreeMap::new();
+        for reference in record.references {
+            let name = reference.name.clone();
+            if references.insert(name.clone(), reference).is_some() {
+                return Err(serde::de::Error::custom(format!(
+                    "library '{name}' is referenced twice"
+                )));
+            }
+        }
         Ok(Self {
             catalog: LibraryCatalog::from_persisted(record.libraries, record.revision).into(),
+            references: references.into(),
             selected_library: record.selected_library,
             selected_cell: record.selected_cell,
             selected_view: record.selected_view,
@@ -79,6 +103,49 @@ impl ProjectLibraries {
     /// See [`rspice_vocabulary::stamped`].
     pub const fn content_stamp(&self) -> u64 {
         self.catalog.stamp()
+    }
+
+    /// The libraries read from folders of their own, by name.
+    pub fn references(&self) -> impl Iterator<Item = &LibraryReference> {
+        self.references.values()
+    }
+
+    pub fn reference(&self, name: &str) -> Option<&LibraryReference> {
+        self.references.get(name)
+    }
+
+    /// Whether `name` is read from a folder of its own rather than held in
+    /// the project file.
+    pub fn is_referenced(&self, name: &str) -> bool {
+        self.references.contains_key(name)
+    }
+
+    pub fn reference_mut(&mut self, name: &str) -> Option<&mut LibraryReference> {
+        self.references.get_mut(name)
+    }
+
+    /// Name a library by folder; returns the record it replaces.
+    pub fn insert_reference(&mut self, reference: LibraryReference) -> Option<LibraryReference> {
+        self.references.insert(reference.name.clone(), reference)
+    }
+
+    pub fn remove_reference(&mut self, name: &str) -> Option<LibraryReference> {
+        self.references.remove(name)
+    }
+
+    /// The stamp of the references as they stand: equal stamps, equal
+    /// references.
+    pub const fn references_stamp(&self) -> u64 {
+        self.references.stamp()
+    }
+
+    /// The libraries the project file holds whole, sorted by name.
+    pub fn embedded_libraries(&self) -> Vec<&Library> {
+        self.catalog
+            .libraries_sorted()
+            .into_iter()
+            .filter(|library| !self.is_referenced(&library.name))
+            .collect()
     }
 
     /// Add a library
@@ -204,6 +271,7 @@ impl ProjectLibraries {
     /// Clear all libraries
     pub fn clear(&mut self) {
         self.catalog.clear();
+        self.references.clear();
         self.selected_library = None;
         self.selected_cell = None;
         self.selected_view = None;
@@ -216,6 +284,9 @@ impl ProjectLibraries {
         let revision = self
             .catalog
             .replace_catalog_from_snapshot(&snapshot.catalog)?;
+        if *self.references != *snapshot.references {
+            *self.references = (*snapshot.references).clone();
+        }
         self.selected_library = snapshot.selected_library.clone();
         self.selected_cell = snapshot.selected_cell.clone();
         self.selected_view = snapshot.selected_view.clone();
