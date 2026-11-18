@@ -99,12 +99,21 @@ impl LibraryStatus {
 /// Where `library` stands in `model`.
 pub fn library_status(model: &Model, library: &DependencyLibrary) -> LibraryStatus {
     match library.kind {
-        // The library's cells are read from the project file with the rest
-        // of the project; a path it records is not where they come from.
-        DependencyKind::Design => match model.library_manager.get_library(&library.name) {
-            Some(_) => LibraryStatus::neutral("In project", None),
-            None => not_in_project(),
-        },
+        // A library held in the project reads In project; one kept in a
+        // folder of its own reads where its folder stands.
+        DependencyKind::Design => {
+            model
+                .reference_status(&library.name)
+                .map_or_else(not_in_project, |status| LibraryStatus {
+                    mark: match status.mark() {
+                        rspice_design::library::folder::StatusMark::None => Tone::Neutral,
+                        rspice_design::library::folder::StatusMark::Caution => Tone::Warn,
+                        rspice_design::library::folder::StatusMark::Error => Tone::Error,
+                    },
+                    label: status.label(),
+                    detail: status.detail(),
+                })
+        }
         DependencyKind::Model => model
             .model_library_manager
             .get_library(&library.name)
@@ -334,10 +343,14 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
                 // A design library has no version; the technology it is
                 // drawn for is the inspector's to state.
                 version: UNSET.to_owned(),
-                source: library
-                    .path
-                    .as_deref()
-                    .map_or_else(|| "Project file".to_owned(), shown_path),
+                source: model.library_manager.reference(&library.name).map_or_else(
+                    || "Project file".to_owned(),
+                    |reference| {
+                        reference
+                            .path
+                            .shown(rspice_design::library::folder::HostPlatform::current())
+                    },
+                ),
                 digest: UNSET.to_owned(),
             }
         });

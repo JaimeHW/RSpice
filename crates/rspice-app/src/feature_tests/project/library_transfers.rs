@@ -228,7 +228,7 @@ fn a_copied_library_places_its_own_cells() {
             .library_manager
             .get_library("parts_v2")
             .expect("the copy is in the catalog");
-        assert!(!copy.read_only && copy.path.is_none());
+        assert!(!copy.read_only);
         assert_eq!(cells(app, "parts_v2"), ["amp", "leaf", "stage"]);
         assert_eq!(placed(app, "parts_v2", "amp"), pair("parts_v2", "stage"));
         assert_eq!(placed(app, "parts_v2", "stage"), pair("parts_v2", "leaf"));

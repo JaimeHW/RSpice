@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use super::Cell;
 
@@ -14,8 +13,6 @@ use super::Cell;
 pub struct Library {
     /// Library name (e.g., "my_designs", "analog_lib")
     pub name: String,
-    /// Path to library directory on disk
-    pub path: Option<PathBuf>,
     /// Cells within this library
     pub cells: HashMap<String, Cell>,
     /// Library technology/PDK name

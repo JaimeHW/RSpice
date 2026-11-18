@@ -783,7 +783,6 @@ fn configuration_definitions(
 fn library_record(library: &Library) -> Library {
     Library {
         name: library.name.clone(),
-        path: library.path.clone(),
         cells: Default::default(),
         technology: library.technology.clone(),
         read_only: library.read_only,
@@ -797,7 +796,6 @@ fn library_records_match(left: Option<&Library>, right: Option<&Library>) -> boo
         (None, None) => true,
         (Some(left), Some(right)) => {
             left.name == right.name
-                && left.path == right.path
                 && left.technology == right.technology
                 && left.read_only == right.read_only
                 && left.metadata == right.metadata

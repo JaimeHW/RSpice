@@ -97,10 +97,15 @@ impl ProjectFeature {
             return;
         };
         // Only a library the project keeps has an access of its own.
-        let access_editable = library.path.is_none() && form.cell.is_none();
-        let location = library.path.as_ref().map_or_else(
+        let reference = cx.model.library_manager.reference(&form.library);
+        let access_editable = reference.is_none() && form.cell.is_none();
+        let location = reference.map_or_else(
             || "In this project".to_owned(),
-            |path| path.display().to_string(),
+            |reference| {
+                reference
+                    .path
+                    .shown(rspice_design::library::folder::HostPlatform::current())
+            },
         );
         let technology = library.technology.trim().to_owned();
         let views = form

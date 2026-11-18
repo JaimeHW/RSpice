@@ -35,10 +35,16 @@ pub fn project_library(
     }
     let model = inspector.model;
     let library = model.library_manager.current_library();
-    let library_path = library.and_then(|item| item.path.as_ref()).map_or_else(
-        || "In this project".to_owned(),
-        |path| path.display().to_string(),
-    );
+    let library_path = library
+        .and_then(|item| model.library_manager.reference(&item.name))
+        .map_or_else(
+            || "In this project".to_owned(),
+            |reference| {
+                reference
+                    .path
+                    .shown(rspice_design::library::folder::HostPlatform::current())
+            },
+        );
     let technology = library.map_or("unbound", |item| {
         if item.technology.trim().is_empty() {
             "unbound"

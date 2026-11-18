@@ -25,9 +25,9 @@ impl Model {
         if !description_changed && !access_changed {
             return Ok(());
         }
-        if access_changed && found.path.is_some() {
+        if access_changed && self.library_manager.is_referenced(library) {
             return Err(format!(
-                "Library '{library}' is read from outside the project; its access is its source's."
+                "Library '{library}' is kept in a folder of its own; change its access with Make editable or Make read-only."
             ));
         }
         if description_changed && found.read_only && !access_changed {

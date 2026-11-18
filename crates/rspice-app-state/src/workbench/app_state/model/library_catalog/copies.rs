@@ -524,7 +524,6 @@ impl Model {
         // The copy is the project's own: writable, kept in the project, and
         // known by its own name.
         copy.name = new_name.to_owned();
-        copy.path = None;
         copy.read_only = false;
         copy.metadata
             .remove(rspice_design::library::LIBRARY_DISPLAY_NAME);
