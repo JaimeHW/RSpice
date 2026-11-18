@@ -11,6 +11,7 @@ use std::sync::Arc;
 use super::derived::derived;
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
+use crate::state::workspace::TechnologyBindingError;
 use crate::ui::widgets::{CommandForm, FormRows, TableColumn};
 use crate::workbench::app::dialogs::project::{
     TechnologyAttachment, TechnologyChange, TechnologyChangeInFlight,
@@ -99,7 +100,7 @@ pub(super) fn technology_candidates(model: &Model) -> TechnologyCandidateCatalog
         match ProjectTechnologyBinding::from_model_library(library) {
             Ok(binding) => {
                 let option_label = format!(
-                    "{} · {} model{} · {} source file{}",
+                    "{} · {} model{} · {} model file{}",
                     binding.display_label(),
                     binding.model_count(),
                     plural_suffix(binding.model_count()),
@@ -119,15 +120,37 @@ pub(super) fn technology_candidates(model: &Model) -> TechnologyCandidateCatalog
                     library.name.clone()
                 };
                 catalog.diagnostics.push(TechnologyCandidateDiagnostic {
-                    reason: format!(
-                        "{error}. Configure, refresh, or re-import this library so it has a root source file, the files it includes, and at least one parsed device model."
-                    ),
+                    reason: unattachable_reason(&error).to_owned(),
                     library_name,
                 });
             }
         }
     }
     catalog
+}
+
+/// Why a model library cannot be attached, and what to do, in the words of
+/// someone choosing a PDK: which model files it was read from and what they
+/// hold, never how the project records them.
+fn unattachable_reason(error: &TechnologyBindingError) -> &'static str {
+    use TechnologyBindingError as Why;
+    match error {
+        Why::MissingRootSource | Why::EmptySourceClosure => {
+            "not read from a model file. A technology is attached from a PDK's model \
+             files: import them as a library and attach that."
+        }
+        Why::NoModels => "its model files define no device models. Check them in Models.",
+        Why::RequiredField(_)
+        | Why::SurroundingWhitespace(_)
+        | Why::FieldTooLong(_)
+        | Why::ControlCharacter(_) => {
+            "its name, PDK name or version cannot be recorded as written. Correct it in Models."
+        }
+        _ => {
+            "its model files changed, or could not all be read, after it was loaded. \
+             Reload it from its model files in Models."
+        }
+    }
 }
 
 /// A technology a project can be attached to as it stands: an attachable

@@ -122,6 +122,18 @@ fn the_attach_dialog_starts_on_the_user_and_needs_no_reason() {
     assert_eq!(announced_value(&dialog, "Changed by"), Some(user.clone()));
     assert_eq!(announced_value(&dialog, "Approved by"), Some(user.clone()));
     assert!(!text.contains("Still to choose"), "{text}");
+    // A library that cannot be attached says why and what to do, in the
+    // words of the model files it was read from.
+    assert!(
+        text.contains("RSpice Foundation: not read from a model file."),
+        "{text}"
+    );
+    for internal in ["binding", "canonical", "source file"] {
+        assert!(
+            !text.contains(internal),
+            "the dialog says {internal:?}: {text}"
+        );
+    }
 
     app_frame(&ctx, &mut app, click_on(&dialog, "Attach"));
     paint_until_attached(&ctx, &mut app);
