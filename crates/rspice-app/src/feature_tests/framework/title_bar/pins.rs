@@ -651,7 +651,7 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
             "Go to definition | go-to-definition | F12 | on",
             "Find references | find-references | Shift+F12 | on",
             "Rename symbol… | rename-symbol | F2 | on",
-            "Format document | format-document |  | on",
+            "Format document | format-document | Ctrl+Shift+I | on",
             "---",
             "Next problem | next-problem | F8 | on",
             "Previous problem | previous-problem | Shift+F8 | on",

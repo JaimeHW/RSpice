@@ -286,4 +286,63 @@ mod tests {
             Some(KeyAction::Outdent)
         );
     }
+
+    /// No key of a command the source editor answers is one the editor
+    /// keeps for itself, on any desktop system: neither one of this map's
+    /// nor one its completion, find or zoom takes before a command could.
+    #[test]
+    fn no_editor_command_key_is_one_the_editor_keeps_for_itself() {
+        use crate::workbench::code::commands::CodeCommand;
+
+        let control = |os: OperatingSystem| {
+            if os == OperatingSystem::Mac {
+                MAC_COMMAND
+            } else {
+                Modifiers::COMMAND
+            }
+        };
+        // Completion, signature help, find across the bundle and the text
+        // size, as the editor and its assist read them.
+        let kept = |os: OperatingSystem| {
+            [
+                (Key::Space, Modifiers::CTRL),
+                (Key::Space, Modifiers::CTRL | Modifiers::SHIFT),
+                (Key::H, control(os) | Modifiers::SHIFT),
+                (Key::Equals, control(os)),
+                (Key::Plus, control(os)),
+                (Key::Minus, control(os)),
+                (Key::F10, Modifiers::SHIFT),
+            ]
+        };
+        let mut clashes = Vec::new();
+        let commands = CodeCommand::ALL.into_iter().filter(|command| {
+            command.source_editor_only() || *command == CodeCommand::FindCodeDocument
+        });
+        for command in commands {
+            let spec = command.declared_spec();
+            for binding in spec.bindings {
+                let chord = binding.chord;
+                for os in [
+                    OperatingSystem::Windows,
+                    OperatingSystem::Nix,
+                    OperatingSystem::Mac,
+                ] {
+                    let mut modifiers = Modifiers {
+                        alt: chord.alt,
+                        shift: chord.shift,
+                        ..Modifiers::NONE
+                    };
+                    if chord.primary {
+                        modifiers = modifiers | control(os);
+                    }
+                    let taken = key_action(os, chord.key, modifiers).is_some()
+                        || kept(os).contains(&(chord.key, modifiers));
+                    if taken {
+                        clashes.push(format!("{} {} on {os:?}", spec.label, chord.label));
+                    }
+                }
+            }
+        }
+        assert!(clashes.is_empty(), "{clashes:?}");
+    }
 }

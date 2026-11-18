@@ -364,6 +364,13 @@ const GO_TO_MATCHING_BRACKET: &[ShortcutBinding] = &[primary(
     ALL,
 )];
 const GO_TO_LINE: &[ShortcutBinding] = &[primary(chord(Key::G, true, false, false, "Ctrl+G"), ALL)];
+// VS Code's format key on Linux. Alt+Shift+F, its key elsewhere, types a
+// letter on macOS as well as formatting; Ctrl+Shift+I opens a browser's
+// developer tools, so, as with F12, it is a desktop key.
+const FORMAT_DOCUMENT: &[ShortcutBinding] = &[primary(
+    chord(Key::I, true, false, true, "Ctrl+Shift+I"),
+    DESKTOP,
+)];
 const FOLD_SELECTION: &[ShortcutBinding] = &[primary(
     chord(Key::OpenBracket, true, false, true, "Ctrl+Shift+["),
     ALL,
@@ -618,6 +625,7 @@ impl CodeCommand {
             Self::MoveLineDown => MOVE_LINE_DOWN,
             Self::GoToMatchingBracket => GO_TO_MATCHING_BRACKET,
             Self::GoToLine => GO_TO_LINE,
+            Self::FormatDocument => FORMAT_DOCUMENT,
             Self::NextProblem => NEXT_PROBLEM,
             Self::PreviousProblem => PREVIOUS_PROBLEM,
             Self::FoldSelection => FOLD_SELECTION,

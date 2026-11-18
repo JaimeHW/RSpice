@@ -705,6 +705,47 @@ fn every_source_editor_command_has_a_row_in_a_menu() {
     assert!(missing.is_empty(), "no menu row for {missing:?}");
 }
 
+/// No key of a command the source editor answers is a key another command
+/// answers where the editor is: the shell's, the command palette's or
+/// another feature's, on any platform the two share. Whichever would win, a
+/// chord two commands share there is one the reader loses.
+#[test]
+fn the_source_editors_keys_clash_with_no_other_command() {
+    use crate::workbench::commands::vocabulary::command_registry;
+    use rspice_app_state::state::command_catalog::ShortcutContext;
+    use rspice_app_state::state::shortcuts::shortcut_contexts_overlap;
+
+    let registry = command_registry();
+    let mut clashes = Vec::new();
+    for editor in registry
+        .ordered()
+        .filter(|spec| spec.context == ShortcutContext::SourceEditor)
+    {
+        for other in registry.ordered().filter(|other| {
+            other.key != editor.key && shortcut_contexts_overlap(editor.context, other.context)
+        }) {
+            for mine in editor.bindings {
+                for theirs in other.bindings {
+                    let (a, b) = (mine.chord, theirs.chord);
+                    let same_chord =
+                        (a.key, a.primary, a.alt, a.shift) == (b.key, b.primary, b.alt, b.shift);
+                    let shared_platform = mine
+                        .platforms
+                        .iter()
+                        .any(|platform| theirs.platforms.contains(platform));
+                    if same_chord && shared_platform {
+                        clashes.push(format!(
+                            "{} and {} share {}",
+                            editor.label, other.label, a.label
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(clashes.is_empty(), "{clashes:#?}");
+}
+
 #[test]
 fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
     let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
