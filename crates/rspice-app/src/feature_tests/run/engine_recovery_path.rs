@@ -20,17 +20,19 @@ use rspice_app_workbench::ui::widgets::{NotificationAction, NotificationCategory
 /// The deck the script types into the open deck.
 const DECK: &str = "* Engine recovery analytic check\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";
 
-/// The script's `author_deck`, from the deck being open on the Netlist
-/// page: the editor takes the typed deck.
+/// The script's `author_deck`: on the Netlist workspace the browser's New
+/// deck makes a deck the project keeps as text and puts it in front, and the
+/// editor takes the typed deck. The desktop's New deck asks where a file
+/// goes, so the replay makes the deck as the browser's command does.
 pub(super) fn author_deck(replay: &mut Replay) {
     replay.frames(Vec::new());
 
+    replay.click("Netlist", Role::Button);
+    assert!(replay.app.state.new_stored_deck(), "New deck makes a deck");
+    let decks = &replay.app.state.model.workspace.content.decks;
     assert!(
-        replay
-            .app
-            .state
-            .open_test_deck("* recovery\n.end\n".to_owned(), None, "recovery.cir"),
-        "the deck opens"
+        decks.len() == 1 && decks[0].stored_deck().is_some(),
+        "the project keeps the new deck as text: {decks:?}"
     );
     replay.frames(Vec::new());
     replay.click("Project SPICE netlist editor", Role::MultilineTextInput);
@@ -40,6 +42,28 @@ pub(super) fn author_deck(replay: &mut Replay) {
     assert_eq!(
         replay.app.state.model.simulation.source.netlist_content, DECK,
         "select-all then typing replaces the new deck's text"
+    );
+    assert_eq!(
+        replay.app.state.model.workspace.content.decks[0]
+            .stored_deck()
+            .map(|deck| deck.text.as_str()),
+        Some(DECK),
+        "what is typed is the project's at once"
+    );
+}
+
+/// The browser's New deck is the command the script presses: there it asks
+/// nothing, so its name has no ellipsis.
+#[test]
+fn the_browser_names_new_deck_as_the_script_presses_it() {
+    assert_eq!(
+        rspice_app_code::workbench::code::commands::new_deck_label(true),
+        "New deck"
+    );
+    let script = include_str!("../../../../../tools/ci/check_browser_engine_recovery.py");
+    assert!(
+        script.contains(r#"choose_command(browser, "New deck")"#),
+        "the script presses New deck"
     );
 }
 

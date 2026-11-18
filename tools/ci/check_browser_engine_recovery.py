@@ -65,14 +65,10 @@ def has_control(browser, label):
 
 def author_deck(browser):
     browser.click("Netlist", "button")
-    browser.click("New source document", "button")
-    browser.click("Logical path", "textInput")
-    # The creation form's Create action follows the field in keyboard order;
-    # Enter on it creates the deck and closes the form.
-    browser.keys("\ue004")
-    browser.snapshot()
-    browser.keys("\ue007")
-    browser.snapshot()
+    # The browser has no file system: New deck makes a deck the project keeps
+    # as text and puts it in front of the editor.
+    choose_command(browser, "New deck")
+    wait_for(lambda: has_control(browser, "Project SPICE netlist editor"), "the new deck's editor")
     browser.click("Project SPICE netlist editor", "multilineTextInput")
     browser.keys("a", ("\ue009",))
     browser.snapshot()
