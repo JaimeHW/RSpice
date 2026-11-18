@@ -62,9 +62,7 @@ impl fmt::Display for BrowserWriteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Platform(error) => f.write_str(error),
-            Self::ExternalChange(_) => {
-                f.write_str("canonical browser project changed outside RSpice")
-            }
+            Self::ExternalChange(_) => f.write_str("the project file changed outside RSpice"),
             Self::OperationFailed {
                 operation,
                 error,

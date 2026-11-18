@@ -1446,18 +1446,18 @@ pub fn prepare_loaded_project(
                     Ok((manager, loaded)) => (
                         manager,
                         vec![format!(
-                            "This legacy project predates durable simulation plans; RSpice initialized the documented default Transient plan and restored {loaded} configured PDK model source{}",
-                            if loaded == 1 { "" } else { "s" }
+                            "This project has no saved simulation setup, so it starts on a Transient analysis with the {loaded} model librar{} from PDK and model paths\u{2026}.",
+                            if loaded == 1 { "y" } else { "ies" }
                         )],
                     ),
                     Err(errors) => {
                         let mut warnings = vec![
-                                "This legacy project predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
+                                "This project has no saved simulation setup, so it starts on a Transient analysis with the built-in models."
                                     .to_owned(),
                             ];
                         warnings.extend(errors.into_iter().map(|error| {
                                 format!(
-                                    "Configured PDK model catalog could not be restored while opening the legacy project: {error}"
+                                    "A model library from PDK and model paths\u{2026} could not be read: {error}"
                                 )
                             }));
                         (
@@ -1960,7 +1960,11 @@ pub(crate) fn poll_browser_project_import(
                                 platform,
                                 transaction,
                             );
-                            model.report_failure("Project open failed", error.to_string());
+                            model.report_failure_with_cause(
+                                "Project open failed",
+                                error.to_string(),
+                                error.cause(),
+                            );
                             None
                         }
                     }

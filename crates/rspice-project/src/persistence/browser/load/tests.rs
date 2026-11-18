@@ -130,7 +130,7 @@ fn restore_checks_bytes_before_decoding_and_project_identity_before_acceptance()
             } => {
                 assert_eq!(binding.receipt, receipt);
                 assert_eq!(observed_digest, digest_bytes(&invalid));
-                assert_eq!(reason, "canonical browser project changed outside RSpice");
+                assert_eq!(reason, "the project file changed outside RSpice");
             }
             other => panic!("unexpected disposition: {other:?}"),
         }

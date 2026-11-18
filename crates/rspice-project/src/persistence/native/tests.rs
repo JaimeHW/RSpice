@@ -414,7 +414,7 @@ fn native_restore_checks_receipt_recovery_bytes_and_decoded_identity_in_order() 
         };
         assert!(matches!(
             NativeBinding::restore(&storage, path, &project_id, &matching, NoSourceFiles),
-            Err(PersistenceError::Project(ProjectIoError::ParseError(_)))
+            Err(PersistenceError::Project(ProjectIoError::ParseError { .. }))
         ));
         assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
     }

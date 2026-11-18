@@ -118,6 +118,16 @@ pub enum PersistenceError {
     Platform(String),
 }
 
+impl PersistenceError {
+    /// The technical cause behind the message, for the log.
+    pub fn cause(&self) -> Option<&str> {
+        match self {
+            Self::Project(error) => error.cause(),
+            _ => None,
+        }
+    }
+}
+
 pub fn serialized_project(
     project: &ProjectFile,
 ) -> Result<(Vec<u8>, ContentDigest), PersistenceError> {

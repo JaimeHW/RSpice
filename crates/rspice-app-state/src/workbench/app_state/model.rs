@@ -272,26 +272,42 @@ impl Model {
     /// Report a failure of something the user asked for, as
     /// [`AppState::report_failure`](super::AppState::report_failure) states it.
     pub fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
-        self.report(NoticeKind::Error, title.into(), detail.into());
+        self.report(NoticeKind::Error, title.into(), detail.into(), None);
+    }
+
+    /// [`Self::report_failure`], with the technical `cause` behind `detail`
+    /// (what a file reader said) in the Console line only: the toast says
+    /// what is wrong in the reader's terms and what to do.
+    pub fn report_failure_with_cause(
+        &mut self,
+        title: impl Into<String>,
+        detail: impl Into<String>,
+        cause: Option<&str>,
+    ) {
+        self.report(NoticeKind::Error, title.into(), detail.into(), cause);
     }
 
     /// Report something that completed, but not the way the user asked: saved
     /// as a download, not kept for the next session.
     pub fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
-        self.report(NoticeKind::Warning, title.into(), detail.into());
+        self.report(NoticeKind::Warning, title.into(), detail.into(), None);
     }
 
     /// The line is written first, so its identity is the one the toast offers;
     /// the toast itself is raised by the shell's next
     /// [`AppState::drain_notices`](super::AppState::drain_notices).
-    fn report(&mut self, kind: NoticeKind, title: String, detail: String) {
+    fn report(&mut self, kind: NoticeKind, title: String, detail: String, cause: Option<&str>) {
         use crate::diagnostics::{LogSeverity, LogSource};
 
         let severity = match kind {
             NoticeKind::Error => LogSeverity::Error,
             NoticeKind::Warning => LogSeverity::Warning,
         };
-        let log_id = self.record(severity, LogSource::Studio, format!("{title}: {detail}"));
+        let line = match cause {
+            Some(cause) => format!("{title}: {detail} ({cause})"),
+            None => format!("{title}: {detail}"),
+        };
+        let log_id = self.record(severity, LogSource::Studio, line);
         self.notices.push(Notice {
             kind,
             title,

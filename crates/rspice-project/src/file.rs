@@ -1497,6 +1497,39 @@ fn authored_instance_for_task(
     Ok(derived.authored_instance_id)
 }
 
+/// How a project file that does not read as a project is damaged, in the
+/// reader's terms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileDamage {
+    /// The file stops before the project does: a write that was cut short.
+    Truncated,
+    /// The file is not text a project is written in.
+    Unreadable,
+    /// The file reads, but part of what it holds is not a project this
+    /// RSpice knows: a newer RSpice wrote it, or it was changed by hand.
+    Content,
+}
+
+impl FileDamage {
+    /// What is wrong and what to do, as the reader is told it.
+    pub const fn sentence(self) -> &'static str {
+        match self {
+            Self::Truncated => {
+                "The project file is damaged or incomplete: it ends before the project does. \
+                 Open its latest checkpoint from Recovery."
+            }
+            Self::Unreadable => {
+                "The project file is damaged: it does not read as a project. Open its latest \
+                 checkpoint from Recovery."
+            }
+            Self::Content => {
+                "The project file holds something this RSpice cannot read: a newer RSpice saved \
+                 it, or it is damaged. Update RSpice, or open its latest checkpoint from Recovery."
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ProjectIoError {
     #[cfg(not(target_arch = "wasm32"))]
@@ -1506,7 +1539,12 @@ pub enum ProjectIoError {
         file_version: ProjectVersion,
         app_version: ProjectVersion,
     },
-    ParseError(String),
+    /// The file does not read as a project. `cause` is the reader's own
+    /// account, for the log; the message says `damage` in the reader's terms.
+    ParseError {
+        damage: FileDamage,
+        cause: String,
+    },
     SerializeError(String),
     InvalidData(String),
     Io(String),
@@ -1536,7 +1574,7 @@ impl std::fmt::Display for ProjectIoError {
                  version reads {app_version}) and cannot be converted. Open it in the RSpice \
                  that saved it."
             ),
-            Self::ParseError(error) => write!(f, "Project parse error: {}", error),
+            Self::ParseError { damage, .. } => f.write_str(damage.sentence()),
             Self::SerializeError(error) => write!(f, "Project serialize error: {}", error),
             Self::InvalidData(error) => write!(f, "Project data error: {}", error),
             Self::Io(error) => write!(f, "Project I/O error: {}", error),
@@ -1545,6 +1583,32 @@ impl std::fmt::Display for ProjectIoError {
 }
 
 impl std::error::Error for ProjectIoError {}
+
+impl ProjectIoError {
+    /// A project file whose JSON did not read, as `error` says why.
+    pub fn unreadable_json(error: &serde_json::Error) -> Self {
+        let damage = match error.classify() {
+            serde_json::error::Category::Eof => FileDamage::Truncated,
+            serde_json::error::Category::Data => FileDamage::Content,
+            serde_json::error::Category::Syntax | serde_json::error::Category::Io => {
+                FileDamage::Unreadable
+            }
+        };
+        Self::ParseError {
+            damage,
+            cause: error.to_string(),
+        }
+    }
+
+    /// The technical cause behind the message, for the log: what the
+    /// reader of the file said, where the message says what is wrong.
+    pub fn cause(&self) -> Option<&str> {
+        match self {
+            Self::ParseError { cause, .. } => Some(cause),
+            _ => None,
+        }
+    }
+}
 
 impl From<std::io::Error> for ProjectIoError {
     fn from(error: std::io::Error) -> Self {
@@ -1638,8 +1702,8 @@ pub fn decode_project_text(
     if let Some(path) = source_path {
         rspice_results::store_reader::keep_segments_in(&crate::results::segment_folder(path));
     }
-    let mut project: ProjectFile = serde_json::from_str(contents)
-        .map_err(|error| ProjectIoError::ParseError(error.to_string()))?;
+    let mut project: ProjectFile =
+        serde_json::from_str(contents).map_err(|error| ProjectIoError::unreadable_json(&error))?;
     let mut load_repairs = Vec::new();
     let repaired_markers = project
         .result_presentation

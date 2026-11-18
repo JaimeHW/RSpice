@@ -782,12 +782,19 @@ fn project_load_rejects_unsupported_descriptor_schema() {
     let error = load_project_text(&contents, None)
         .expect_err("future project descriptor schema must fail closed");
 
-    assert!(matches!(error, ProjectIoError::ParseError(_)));
+    assert!(matches!(
+        error,
+        ProjectIoError::ParseError {
+            damage: rspice_project::FileDamage::Content,
+            ..
+        }
+    ));
     assert!(
         error
-            .to_string()
-            .contains("unsupported project descriptor schema version")
+            .cause()
+            .is_some_and(|cause| cause.contains("unsupported project descriptor schema version"))
     );
+    assert!(error.to_string().contains("a newer RSpice saved it"));
 }
 
 #[test]
@@ -1127,7 +1134,7 @@ fn project_text_load_reports_parse_errors_without_filesystem() {
     let err = load_project_text("{not valid json", Some(Path::new("bad.rspiceproj")))
         .expect_err("invalid project text fails");
 
-    assert!(matches!(err, ProjectIoError::ParseError(_)));
+    assert!(matches!(err, ProjectIoError::ParseError { .. }));
 }
 
 #[test]

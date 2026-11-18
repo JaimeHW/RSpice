@@ -348,6 +348,17 @@ impl AppState {
         self.model.report_failure(title, detail);
     }
 
+    /// [`Self::report_failure`], with the technical cause in the Console
+    /// line only.
+    pub(crate) fn report_failure_with_cause(
+        &mut self,
+        title: impl Into<String>,
+        detail: impl Into<String>,
+        cause: Option<&str>,
+    ) {
+        self.model.report_failure_with_cause(title, detail, cause);
+    }
+
     /// [`WorkbenchSession::show_problem_findings`] for the session.
     ///
     /// [`WorkbenchSession::show_problem_findings`]: rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession::show_problem_findings

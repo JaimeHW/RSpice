@@ -1979,6 +1979,46 @@ fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
     );
 }
 
+/// A project file cut short says so in the reader's terms, with what to do;
+/// what the file reader said is kept in the Console line only.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_damaged_project_file_says_what_is_wrong_and_the_console_keeps_the_parser_text() {
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-open-truncated-{}-{}",
+        std::process::id(),
+        rspice_app_state::time_compat::unix_epoch().as_nanos()
+    ));
+    std::fs::create_dir_all(&folder).expect("the test folder is made");
+    let path = folder.join("cut.rspiceproj");
+    assert!(AppState::default().save_project_to_path(&path));
+    let bytes = std::fs::read(&path).expect("the saved project reads");
+    std::fs::write(&path, &bytes[..bytes.len() / 2]).expect("the project is cut short");
+
+    let mut state = AppState::default();
+    let opened = state.load_project_from_path(&path);
+    let _ = std::fs::remove_dir_all(&folder);
+
+    assert!(!opened);
+    state.drain_notices(&egui::Context::default());
+    let activity = state.workbench.toasts.activity();
+    assert_eq!(activity.len(), 1, "an open that failed is said now");
+    assert_eq!(activity[0].title(), "Project open failed");
+    assert_eq!(
+        activity[0].message(),
+        "The project file is damaged or incomplete: it ends before the project does. Open its \
+         latest checkpoint from Recovery."
+    );
+    let line = state
+        .model
+        .log_buffer
+        .entries()
+        .find(|entry| entry.message.starts_with("Project open failed"))
+        .map(|entry| entry.message.clone())
+        .expect("the failure is in the Console");
+    assert!(line.contains("EOF while parsing"), "{line}");
+}
+
 #[test]
 fn a_named_new_project_seeds_every_owner_of_its_identity() {
     let mut state = AppState::default();

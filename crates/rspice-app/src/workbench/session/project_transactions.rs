@@ -938,7 +938,11 @@ impl AppState {
                     &mut self.platform,
                 );
                 rspice_app_services::workbench::app_state::session::autosave::start_unopened_project_search(&mut self.platform, path, error.to_string());
-                self.report_failure("Project open failed", error.to_string());
+                self.report_failure_with_cause(
+                    "Project open failed",
+                    error.to_string(),
+                    error.cause(),
+                );
                 false
             }
         }

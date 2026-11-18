@@ -74,9 +74,11 @@ impl ProjectBytes {
         source_path: Option<&Path>,
         source_files: impl HierarchySourceFiles,
     ) -> Result<DecodedProject, ProjectIoError> {
-        let contents = std::str::from_utf8(&self.bytes).map_err(|error| {
-            ProjectIoError::ParseError(format!("project is not valid UTF-8: {error}"))
-        })?;
+        let contents =
+            std::str::from_utf8(&self.bytes).map_err(|error| ProjectIoError::ParseError {
+                damage: crate::FileDamage::Unreadable,
+                cause: format!("project is not valid UTF-8: {error}"),
+            })?;
         decode_project_text(contents, source_path, source_files)
     }
 

@@ -77,6 +77,16 @@ pub enum ProjectLifecycleError {
     Persistence(#[from] crate::persistence::PersistenceError),
 }
 
+impl ProjectLifecycleError {
+    /// The technical cause behind the message, for the log.
+    pub fn cause(&self) -> Option<&str> {
+        match self {
+            Self::Persistence(error) => error.cause(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserOperationContext {
     epoch: u64,

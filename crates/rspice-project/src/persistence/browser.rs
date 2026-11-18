@@ -165,12 +165,13 @@ pub fn validate_browser_restore_facts(
 ) -> Result<ContentDigest, String> {
     let accepted = validate_browser_binding_metadata(metadata, receipt)?;
     if permission != "granted" {
-        return Err(format!(
-            "browser file permission is {permission}; select the canonical project again"
-        ));
+        return Err(
+            "the browser no longer lets RSpice read this project file; open the file again"
+                .to_owned(),
+        );
     }
     if actual_digest != accepted {
-        return Err("canonical browser project changed outside RSpice".to_owned());
+        return Err("the project file changed outside RSpice".to_owned());
     }
     Ok(accepted)
 }
