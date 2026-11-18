@@ -99,6 +99,7 @@ const PREPARE_FRAME: &[Step] = &[
         &[
             "egui::Event::WindowFocused(true)",
             "self.state.model.check_library_files()",
+            "self.state.model.watch_library_edits()",
         ],
     ),
     (

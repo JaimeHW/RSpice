@@ -3,11 +3,12 @@
 //! nothing, Refresh… reads again only the cellviews picked, Save refuses a
 //! cellview edited here that changed on disk until the reader chooses, a
 //! cellview with edits here holds its lock and one locked elsewhere is
-//! never written, an edit a crash recovery puts back counts as unsaved and
-//! takes its lock once edited again, every
-//! status reads alike on the Dependencies page's rail, table and inspector
-//! and in the Overview, and a reference this session cannot read is saved
-//! back as it was.
+//! never written, the first edit takes the lock and another session sees
+//! who holds it before it edits, an edit a crash recovery puts back counts
+//! as unsaved and takes its lock once edited again, every status reads
+//! alike on the Dependencies page's rail, table and inspector and in the
+//! Overview, and a reference this session cannot read is saved back as it
+//! was.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -16,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::DependencyLibrary;
+use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_project::workbench::project::library_dialogs::library_files::{
     LibraryFileIntent, run_library_file_intent,
 };
@@ -25,8 +27,9 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     ProjectCloseDestination, has_unsaved_changes_fresh,
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
-use rspice_app_state::state::{Cell, CellViewRef, Library, SchematicState, View, ViewType};
+use rspice_app_state::state::{Cell, CellViewRef, Library, Point, SchematicState, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_design::library::folder::{
     CellViewStatus, LibraryFile, LibraryFileLock, LibraryMode, ReferenceStatus,
 };
@@ -454,6 +457,94 @@ fn an_edited_cellview_holds_its_lock_and_one_locked_elsewhere_is_never_written()
         note(&app, "stage").as_deref(),
         Some("mine"),
         "the edit stays"
+    );
+}
+
+/// Bring `cell`'s schematic to the front of the Design workspace, opened to
+/// edit, as the Library page's Open does.
+fn open(app: &mut RSpiceApp, cell: &str) {
+    let schematic = CellViewRef::new(LIBRARY, cell, "schematic");
+    app.state
+        .workbench
+        .outbox
+        .push(ProjectRequest::OpenView(schematic, ViewType::Schematic));
+    app.after_contribution();
+}
+
+/// Draw a wire in the schematic in front, as the canvas does.
+fn draw(app: &mut RSpiceApp) -> bool {
+    app.state
+        .model
+        .schematic
+        .with_undo("draw a wire", |schematic| {
+            schematic.add_wire(vec![Point::new(0, 0), Point::new(100, 0)]);
+        })
+}
+
+/// The first edit of a cellview takes its file's lock, before any check or
+/// Save. Another session that brings the same cellview to the front reads
+/// "Being edited by …" over the canvas and refuses an edit there, naming
+/// the holder, before any work is made to lose. Once the holder closes it,
+/// that session can edit it, and its own first edit takes the lock.
+#[test]
+fn the_first_edit_takes_the_lock_and_another_session_sees_the_holder_before_editing() {
+    let (mut app, folders) = kept_in_a_folder("library-first-edit-lock");
+    let lock = folders.folder.join(file("amp").lock_path());
+    let ctx = offscreen();
+    open(&mut app, "amp");
+    app_frame(&ctx, &mut app, Vec::new());
+    assert!(!lock.exists(), "opening the cellview takes no lock");
+    assert!(draw(&mut app), "the cellview is editable");
+    app_frame(&ctx, &mut app, Vec::new());
+    assert!(lock.exists(), "the first edit takes the lock");
+    let holder = rspice_project::library_folder::read_library_lock(&folders.folder, &file("amp"))
+        .expect("the lock names its holder")
+        .holder();
+
+    let mut other = another_writer(&folders);
+    open(&mut other, "amp");
+    let other_ctx = offscreen();
+    let banner = format!("Being edited by {holder}. Read only until they save or close it.");
+    paint_until(&other_ctx, &mut other, |text| text.contains(&banner));
+    assert!(other.state.model.active_view_read_only());
+    other.execute_command_key(WorkbenchCommand::Delete.key());
+    assert_eq!(
+        other
+            .state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.text.trim_end_matches('\u{a0}')),
+        Some(format!("Being edited by {holder} - read only until they save or close it").as_str()),
+        "an edit there is refused, naming the holder"
+    );
+    assert!(
+        !other.state.model.schematic.session.is_dirty,
+        "and nothing changes"
+    );
+
+    assert!(
+        app.state
+            .close_project_discard(ProjectCloseDestination::EmptyWorkbench)
+    );
+    assert!(!lock.exists(), "closing it lets the lock go");
+    focus(&mut other);
+    assert!(
+        !other.state.model.active_view_read_only(),
+        "the other session can edit it now"
+    );
+    let output = app_frame(&other_ctx, &mut other, Vec::new());
+    assert!(!painted(&output).contains(&banner), "the banner is gone");
+    assert!(draw(&mut other), "it edits");
+    app_frame(&other_ctx, &mut other, Vec::new());
+    assert!(
+        other
+            .state
+            .model
+            .held_library_lock(LIBRARY, &file("amp"))
+            .is_some()
+            && lock.exists(),
+        "its first edit takes the lock"
     );
 }
 

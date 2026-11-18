@@ -397,7 +397,9 @@ pub fn build_new_project(model: &mut Model, params: &NewProjectParams) -> NewPro
 }
 
 /// Make a replacement project's libraries and workspace the open ones, with
-/// `schematic` as the drawing in front, saved into the workspace.
+/// `schematic` as the drawing in front, saved into the workspace. It keeps
+/// no library in a folder of its own, so every lock the replaced project
+/// held on a library file is let go.
 pub fn install_project_drawing(
     model: &mut Model,
     library_manager: crate::state::LibraryManager,
@@ -405,6 +407,8 @@ pub fn install_project_drawing(
     schematic: crate::state::SchematicState,
 ) {
     workspace.save_active_schematic(&schematic);
+    model.release_library_locks();
+    model.library_files = Default::default();
     model.library_manager = library_manager;
     model.workspace = workspace;
     model.schematic = schematic;

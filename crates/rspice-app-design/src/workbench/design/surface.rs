@@ -38,7 +38,7 @@ fn show_document(
     // it, under the toolbar; "make an editable copy" is not the way out of
     // that, so the document's banner waits until the project is writable.
     if cx.model.active_view_read_only() && cx.model.safe_mode.opened_read_only.is_none() {
-        read_only_banner(ui);
+        read_only_banner(ui, cx.model);
     }
     occurrence_scope_banner(ui, cx.model);
     tool_options::show(ui, cx.model, cx.state);
@@ -514,12 +514,19 @@ pub fn master_occurrence_paths(model: &Model) -> Vec<String> {
 ///
 /// The tab already names the document, so the banner states the condition and
 /// the route out of it rather than repeating the path.
-fn read_only_banner(ui: &mut Ui) {
-    canvas_banner(
-        ui,
-        Problem::Warning,
-        "Read only. Make an editable copy to edit.",
+/// Why the view in front refuses edits: another session editing its
+/// library file names its holder, until they let go.
+fn read_only_banner(ui: &mut Ui, model: &Model) {
+    let message = model.active_view_locked_elsewhere().map_or_else(
+        || "Read only. Make an editable copy to edit.".to_owned(),
+        |lock| {
+            format!(
+                "Being edited by {}. Read only until they save or close it.",
+                lock.holder()
+            )
+        },
     );
+    canvas_banner(ui, Problem::Warning, &message);
 }
 
 /// One banner over the canvas: a problem's mark, then the words in the

@@ -729,12 +729,18 @@ impl Model {
     /// gone, so a lock is held while its cellview has unsaved changes. A
     /// check takes it for each file edited since the last check: an edit a
     /// restore put back holds none until the user edits that cellview
-    /// again. A Save takes it for every file it is to write. A file locked
+    /// again. A Save takes it for every file it is to write. A cellview open
+    /// with unsaved edits keeps the lock its first edit took. A file locked
     /// elsewhere keeps its edits and reads "Being edited by …", and Save
     /// refuses it, so the holder's work is never written over.
     pub(super) fn hold_library_edit_locks(&mut self, for_save: bool) {
         let mut take = Vec::new();
         let mut release = Vec::new();
+        let open_with_edits = self
+            .cellviews_edited_here()
+            .iter()
+            .filter_map(|cellview| self.editable_cellview_file(cellview))
+            .collect::<Vec<_>>();
         let names = self
             .library_files
             .libraries()
@@ -755,9 +761,12 @@ impl Model {
                     .is_some_and(|checked| checked != state.encoded);
                 state.checked = Some(state.encoded);
                 let unsaved = writable && state.edited;
+                let open = open_with_edits
+                    .iter()
+                    .any(|(open, open_file)| *open == library && open_file == file);
                 if unsaved && state.lock.is_none() && (for_save || edited_since) {
                     take.push((library.clone(), file.clone()));
-                } else if !unsaved && state.lock.is_some() {
+                } else if !unsaved && !open && state.lock.is_some() {
                     release.push((library.clone(), file.clone()));
                 }
             }

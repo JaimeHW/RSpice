@@ -370,6 +370,12 @@ pub(crate) fn read_only_master_message(model: &Model) -> String {
         return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
             .to_owned();
     }
+    if let Some(lock) = model.active_view_locked_elsewhere() {
+        return format!(
+            "Being edited by {} - read only until they save or close it",
+            lock.holder()
+        );
+    }
     let library = &model.workspace.content.active_view.library;
     format!("Read-only - '{library}' masters cannot be edited")
 }

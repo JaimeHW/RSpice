@@ -58,8 +58,8 @@ impl Model {
             for (file, state) in &mut session.files {
                 // Who else is editing the file is read on every check: a lock
                 // comes and goes without the file itself moving.
-                state.locked_by = rspice_project::library_folder::read_library_lock(&folder, file)
-                    .filter(|lock| state.lock.as_ref() != Some(lock));
+                state.locked_by =
+                    super::folders::lock_elsewhere(&folder, file, state.lock.as_ref());
                 if matches!(state.on_disk, OnDisk::TechnologyDiffers) || state.loaded.is_none() {
                     continue;
                 }

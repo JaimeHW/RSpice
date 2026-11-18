@@ -520,6 +520,9 @@ impl RSpiceApp {
         }) {
             self.state.model.check_library_files();
         }
+        // The cellview in front shows who else is editing it before an edit
+        // is made, and the first edit here takes its lock.
+        self.state.model.watch_library_edits();
 
         #[cfg(target_arch = "wasm32")]
         synchronize_browser_surface_navigation(&mut self.state);

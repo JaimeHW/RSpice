@@ -9,9 +9,11 @@
 //!
 //! One status function, [`Model::reference_status`], says where a library
 //! stands, and [`Model::library_file_status`] where one of its files does,
-//! for the rail, the table, the inspector and the Overview alike. Nothing
-//! here reads the disk on a frame: a check runs on open, when the window
-//! regains focus and on Save.
+//! for the rail, the table, the inspector and the Overview alike. A check
+//! reads the folders on open, when the window regains focus and on Save. A
+//! frame reads one lock at most: that of a cellview just brought to the
+//! front, or of one in front someone else holds, every few seconds; and a
+//! cellview's first edit takes its lock.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -29,6 +31,7 @@ mod folders;
 mod publication;
 mod recovery;
 mod saving;
+mod watch;
 
 pub use publication::{PUBLICATION_STORE_FOLDER, publication_store};
 #[cfg(test)]
@@ -45,6 +48,7 @@ pub struct LibraryFileSession {
     /// and every checkpoint carries them until a reading takes them.
     pending: Vec<rspice_project::UnsavedLibraryFile>,
     stamp: u64,
+    watch: watch::EditWatch,
 }
 
 impl LibraryFileSession {

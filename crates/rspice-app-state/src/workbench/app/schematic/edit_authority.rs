@@ -14,11 +14,12 @@ impl Model {
     /// Whether the active cellview refuses writes, whatever kind of document
     /// it is.
     ///
-    /// Safe mode is one of the three owners of that refusal, alongside a
-    /// read-only library master and a read-only hierarchy reference. It
-    /// belongs here rather than only in the schematic gate because every
-    /// document class — symbol, layout, hierarchy reference, review comment —
-    /// writes into the same project that safe mode opened read-only.
+    /// Safe mode is one of the four owners of that refusal, alongside a
+    /// read-only library master, a read-only hierarchy reference and a
+    /// library file another session holds the lock of. It belongs here
+    /// rather than only in the schematic gate because every document class
+    /// — symbol, layout, hierarchy reference, review comment — writes into
+    /// the same project that safe mode opened read-only.
     pub fn active_view_read_only(&self) -> bool {
         self.safe_mode.project_read_only()
             || self.workspace.content.active_read_only_reference()
@@ -26,6 +27,7 @@ impl Model {
                 .library_manager
                 .get_library(&self.workspace.content.active_view.library)
                 .is_some_and(|library| library.read_only)
+            || self.active_view_locked_elsewhere().is_some()
     }
 
     /// Single late-bound authority for every schematic mutation surface.

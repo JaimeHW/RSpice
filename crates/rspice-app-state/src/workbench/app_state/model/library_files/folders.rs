@@ -236,19 +236,9 @@ impl Model {
 /// The lock this session writes on a file it edits, for the project at
 /// `project`.
 pub(super) fn own_lock(project: String) -> LibraryFileLock {
-    let first = |names: &[&str], otherwise: &str| {
-        names
-            .iter()
-            .find_map(|name| {
-                std::env::var(name)
-                    .ok()
-                    .filter(|value| !value.trim().is_empty())
-            })
-            .unwrap_or_else(|| otherwise.to_owned())
-    };
     LibraryFileLock {
-        user: first(&["USERNAME", "USER", "LOGNAME"], "someone"),
-        computer: first(&["COMPUTERNAME", "HOSTNAME"], "this computer"),
+        user: first_set(&["USERNAME", "USER", "LOGNAME"], "someone"),
+        computer: this_computer(),
         process: std::process::id(),
         project,
         since_unix_ms: std::time::SystemTime::now()
@@ -257,6 +247,38 @@ pub(super) fn own_lock(project: String) -> LibraryFileLock {
                 u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
             }),
     }
+}
+
+/// The first of `names` the environment sets, or `otherwise`.
+fn first_set(names: &[&str], otherwise: &str) -> String {
+    names
+        .iter()
+        .find_map(|name| {
+            std::env::var(name)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| otherwise.to_owned())
+}
+
+/// The name a lock gives this computer.
+fn this_computer() -> String {
+    first_set(&["COMPUTERNAME", "HOSTNAME"], "this computer")
+}
+
+/// Someone else's lock on `file`, as its folder holds it now: none when
+/// there is none, when it is `own`, or when it was left on this computer
+/// by a process that is provably gone, which the first edit takes over.
+pub(super) fn lock_elsewhere(
+    folder: &Path,
+    file: &LibraryFile,
+    own: Option<&LibraryFileLock>,
+) -> Option<LibraryFileLock> {
+    let found = rspice_project::library_folder::read_library_lock(folder, file)?;
+    let left_behind = found.is_on(&this_computer())
+        && found.process != std::process::id()
+        && rspice_output::process_liveness(found.process) == Some(false);
+    (own != Some(&found) && !left_behind).then_some(found)
 }
 
 /// Whether two paths name one folder, as far as this computer can tell.
