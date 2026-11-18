@@ -50,6 +50,7 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
         &mut harness.state.netlist,
         &harness.state.code_workspace.include_resolutions,
         revision,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
     assert!(
         !errors(&harness).is_empty(),
@@ -71,6 +72,9 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
             &harness.model,
             &mut harness.state.netlist,
             &harness.state.code_workspace.include_resolutions,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
         );
     });
     assert_eq!(errors(&harness), Vec::<String>::new());

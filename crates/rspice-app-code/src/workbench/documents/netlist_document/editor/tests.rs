@@ -511,6 +511,7 @@ fn validated(deck: &str) -> CodeHarness {
         &mut harness.state.netlist,
         &harness.state.code_workspace.include_resolutions,
         revision,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
     harness
 }
@@ -669,6 +670,7 @@ fn value_hover_waits_for_the_parse_that_decides_the_branches() {
         &mut harness.state.netlist,
         &harness.state.code_workspace.include_resolutions,
         revision,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
     assert_eq!(
         hover_on(&mut harness, deck, "{vth}", 1).and_then(|hover| hover.value),
@@ -1558,8 +1560,14 @@ fn a_check_of_a_text_the_editor_moved_past_is_dropped() {
     harness.state.netlist.revision = 1;
     let folders = harness.model.library_folders().to_vec();
     let resolutions = BTreeMap::new();
-    let before =
-        SourceCheck::of(&harness.model, &harness.state.netlist, &resolutions, 1).run(&NoAbort);
+    let before = SourceCheck::of(
+        &harness.model,
+        &harness.state.netlist,
+        &resolutions,
+        1,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
+    .run(&NoAbort);
     assert!(
         before
             .diagnostics
@@ -1575,8 +1583,14 @@ fn a_check_of_a_text_the_editor_moved_past_is_dropped() {
     assert_eq!(harness.state.netlist.diag_revision, None);
     assert!(harness.state.netlist.diagnostics.is_empty());
 
-    let after =
-        SourceCheck::of(&harness.model, &harness.state.netlist, &resolutions, 2).run(&NoAbort);
+    let after = SourceCheck::of(
+        &harness.model,
+        &harness.state.netlist,
+        &resolutions,
+        2,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
+    .run(&NoAbort);
     receive_check(&mut harness.state.netlist, &folders, after);
     assert_eq!(harness.state.netlist.diag_revision, Some(2));
     assert!(

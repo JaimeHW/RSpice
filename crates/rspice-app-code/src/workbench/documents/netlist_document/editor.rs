@@ -161,7 +161,13 @@ pub fn show(
     let editable = super::active_netlist_source_is_editable_in(model, netlist);
     let editor_id = editor_id_in(model, netlist);
 
-    refresh_diagnostics(ui, model, netlist, include_resolutions);
+    refresh_diagnostics(
+        ui,
+        model,
+        netlist,
+        include_resolutions,
+        workbench.messages(),
+    );
     super::references::settle_deck_references(model, netlist, workbench);
     // Hover, completion and the navigator read the project index of the deck
     // as it stands; its build starts once the text changes, off this thread.
@@ -646,12 +652,13 @@ fn diagnostic_problem(severity: DiagnosticSeverity) -> Option<Problem> {
 /// checked away from the editor's thread. Until that check reports, the
 /// findings of the text before are kept, marked stale so they never mark the
 /// newer text; a check of a text the editor has moved past is stopped and
-/// what it found is dropped.
+/// what it found is dropped. Findings are worded in `messages`.
 fn refresh_diagnostics(
     ui: &Ui,
     model: &super::Model,
     netlist: &mut super::NetlistDocumentState,
     include_resolutions: &BTreeMap<String, IncludeResolution>,
+    messages: crate::workbench::MessageCatalog,
 ) {
     let revision = netlist.revision;
     let folders = model.library_folders();
@@ -662,7 +669,7 @@ fn refresh_diagnostics(
         return;
     }
     if netlist.front.is_comparison() {
-        validate_visible_source_in(model, netlist, include_resolutions, revision);
+        validate_visible_source_in(model, netlist, include_resolutions, revision, messages);
         return;
     }
     netlist.live_check.stop_unless(revision, folders);
@@ -681,7 +688,7 @@ fn refresh_diagnostics(
             .request_repaint_after(std::time::Duration::from_millis(120));
         return;
     }
-    let check = SourceCheck::of(model, netlist, include_resolutions, revision);
+    let check = SourceCheck::of(model, netlist, include_resolutions, revision, messages);
     let wake = ui.ctx().clone();
     netlist
         .live_check
@@ -712,12 +719,14 @@ fn receive_check(
 
 /// Validate the visible source as it stands and publish the result, bound to
 /// `revision`, over the model, the netlist editor's state and where the
-/// page's includes resolved. It runs here, on the caller's thread.
+/// page's includes resolved, its findings worded in `messages`. It runs
+/// here, on the caller's thread.
 fn validate_visible_source_in(
     model: &super::Model,
     netlist: &mut super::NetlistDocumentState,
     include_resolutions: &BTreeMap<String, IncludeResolution>,
     revision: u64,
+    messages: crate::workbench::MessageCatalog,
 ) {
     if netlist.front.is_comparison() {
         netlist.diag_library_folders = model.library_folders().to_vec();
@@ -725,7 +734,8 @@ fn validate_visible_source_in(
         netlist.diag_revision = Some(revision);
         return;
     }
-    let checked = SourceCheck::of(model, netlist, include_resolutions, revision).run(&NoAbort);
+    let checked =
+        SourceCheck::of(model, netlist, include_resolutions, revision, messages).run(&NoAbort);
     publish_check(netlist, checked);
 }
 
@@ -945,6 +955,8 @@ struct SourceCheck {
     /// The name the page shows the text under: what a source with no file
     /// is read as, and what its findings name.
     shown_path: Option<PathBuf>,
+    /// The words the findings the application states itself are put in.
+    messages: crate::workbench::MessageCatalog,
 }
 
 /// The deck a check parses.
@@ -967,12 +979,14 @@ impl CheckedDeck {
 
 impl SourceCheck {
     /// The check of the visible source at `revision`, over the model, the
-    /// netlist editor's state and where the page's includes resolved.
+    /// netlist editor's state and where the page's includes resolved, its
+    /// findings worded in `messages`.
     fn of(
         model: &super::Model,
         netlist: &super::NetlistDocumentState,
         include_resolutions: &BTreeMap<String, IncludeResolution>,
         revision: u64,
+        messages: crate::workbench::MessageCatalog,
     ) -> Self {
         let buffer = model.simulation.source.netlist_content.clone();
         let is_dependency = netlist.front.include().is_some();
@@ -1030,6 +1044,7 @@ impl SourceCheck {
             shown_path: super::dialect::shown_source_in(model, netlist)
                 .map(|shown| shown.path)
                 .filter(|path| !path.as_os_str().is_empty()),
+            messages,
         }
     }
 
@@ -1049,6 +1064,7 @@ impl SourceCheck {
             added_lines,
             include_resolutions,
             shown_path,
+            messages,
         } = self;
         if added_lines {
             let validation_id = crate::state::content_digest(&buffer).to_string();
@@ -1140,7 +1156,7 @@ impl SourceCheck {
                 Ok(source) => {
                     let (diagnostics, symbols, unread, reading, includes) = match &stored {
                         Some((at, files)) => {
-                            parse_stored(source, at, files, sealed_sources.as_ref(), stop)
+                            parse_stored(source, at, files, sealed_sources.as_ref(), messages, stop)
                         }
                         None => parse_buffer_with_context(
                             source,
@@ -1406,6 +1422,7 @@ fn parse_stored(
     at: &Path,
     files: &[(PathBuf, String)],
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
+    messages: crate::workbench::MessageCatalog,
     abort: &dyn AbortSignal,
 ) -> BufferParse {
     let spectre = rspice_core::netlist::is_spectre_source(at, buffer);
@@ -1436,16 +1453,22 @@ fn parse_stored(
         _ => None,
     };
     let mut found = parse_findings(parsed, Some(at), buffer, spectre, None);
-    // The line that names a file the deck does not keep offers to add it.
+    // The line that names a file the deck does not keep says so in the
+    // reader's words, and offers to add it.
     if let Some((origin, requested, outside)) = missing
-        && let Some(fix) = add_file_fix(files, &origin, &requested, outside)
         && let Some(diagnostic) = found.0.iter_mut().find(|diagnostic| {
             diagnostic.fix.is_none()
                 && diagnostic.source_path == origin.path
                 && diagnostic.source_line == origin.line.checked_sub(1)
         })
     {
-        diagnostic.fix = Some(fix);
+        let id = if outside {
+            MessageId::NetlistFileOutsideDeck
+        } else {
+            MessageId::NetlistFileNotInDeck
+        };
+        diagnostic.message = messages.format(id, &[("path", &requested)]);
+        diagnostic.fix = add_file_fix(files, &origin, &requested, outside, messages);
         diagnostic.refresh_canonical_location();
     }
     found
@@ -1460,6 +1483,7 @@ fn add_file_fix(
     origin: &rspice_core::netlist::NetlistSourceLocation,
     requested: &str,
     outside: bool,
+    messages: crate::workbench::MessageCatalog,
 ) -> Option<crate::state::netlist_diagnostics::DiagnosticFix> {
     let owner = rspice_design::deck::stored_file_path(origin.path.as_deref()?);
     let line = origin.line.checked_sub(1)?;
@@ -1477,8 +1501,7 @@ fn add_file_fix(
             .to_owned()
     });
     Some(crate::state::netlist_diagnostics::DiagnosticFix {
-        label: crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::default())
-            .text(MessageId::NetlistAddFileToDeck),
+        label: messages.text(MessageId::NetlistAddFileToDeck),
         replacement: rewrite_to
             .clone()
             .unwrap_or_else(|| text[span.clone()].to_owned()),
@@ -1685,20 +1708,18 @@ fn parse_error_diagnostic_at(
             let (message, origin) = mapped_syntax_origin(message, line, editor_source_path);
             Diagnostic::error(message).with_source_location(&origin, editor_source_path)
         }
+        // The check of a deck kept as text words it from the catalogue.
         ParseError::SourceNotInDeck {
             origin,
             requested,
             outside,
         } => {
-            let id = if outside {
-                crate::workbench::MessageId::NetlistFileOutsideDeck
-            } else {
-                crate::workbench::MessageId::NetlistFileNotInDeck
-            };
-            let message = crate::workbench::MessageCatalog::new(
-                crate::workbench::UiTextLocale::default(),
-            )
-            .format(id, &[("path", &requested)]);
+            let message = ParseError::SourceNotInDeck {
+                origin: None,
+                requested,
+                outside,
+            }
+            .to_string();
             let origin = origin.unwrap_or_else(|| match editor_source_path {
                 Some(path) => rspice_core::netlist::NetlistSourceLocation::in_file(path, 0),
                 None => rspice_core::netlist::NetlistSourceLocation::in_memory(0),
