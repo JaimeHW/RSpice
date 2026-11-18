@@ -2,7 +2,9 @@
 //! the docks that draw them.
 
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
-use crate::workbench::docks::inspector::code_workspace::{CodeInspector, code_workspace_inspector};
+use crate::workbench::docks::inspector::code_workspace::{
+    CodeInspector, FindingPress, code_workspace_inspector,
+};
 use crate::workbench::docks::inspector::veriloga;
 use crate::workbench::docks::navigator::netlist::{NetlistNavigator, netlist as netlist_navigator};
 use crate::workbench::docks::navigator::source_bundle::{RailAction, SourceRail};
@@ -122,10 +124,18 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
             messages: cx.wb.messages(),
         },
     );
-    // A pressed finding takes the road a Problems row takes to its line.
-    if let Some(finding) = pressed {
-        cx.model
-            .diagnostics
-            .request_route(DiagnosticRoute::NetlistDiagnostic(finding));
+    match pressed {
+        // A pressed finding takes the road a Problems row takes to its line.
+        Some(FindingPress::Row(finding)) => {
+            cx.model
+                .diagnostics
+                .request_route(DiagnosticRoute::NetlistDiagnostic(finding));
+        }
+        Some(FindingPress::Fix(finding)) => {
+            cx.wb
+                .outbox
+                .push(CodeRequest::ApplyNetlistFindingFix(finding));
+        }
+        None => {}
     }
 }

@@ -197,6 +197,19 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             );
             cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
+        CodeRequest::ApplyNetlistFindingFix(finding) => {
+            if let Some(request) =
+                netlist_document::language::add_file_request_for_finding(&cx.state.netlist, finding)
+            {
+                return Some(CodeHandOff::AddDeckFile(request));
+            }
+            let answer = netlist_document::language::apply_quick_fix_for_finding(
+                cx.model,
+                &mut cx.state.netlist,
+                finding,
+            );
+            cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
+        }
         CodeRequest::FormatNetlistDocument => {
             crate::workbench::code::netlist_format::format_owned_netlist(cx);
         }

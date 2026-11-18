@@ -24,12 +24,22 @@ pub(crate) struct CodeInspector<'a> {
     pub(crate) messages: MessageCatalog,
 }
 
-/// Draw the deck's inspector. Returns the finding whose row was pressed, which
-/// the caller sends down the route a Problems row takes.
+/// What the reader pressed on one of the inspector's findings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workbench) enum FindingPress {
+    /// The finding's row, which goes to its line as a Problems row does.
+    Row(uuid::Uuid),
+    /// The fix the finding offers, applied as a Problems row applies it.
+    Fix(uuid::Uuid),
+}
+
+/// Draw the deck's inspector. Returns what was pressed on a finding: its
+/// row, which the caller sends down the route a Problems row takes, or the
+/// fix it offers.
 pub(in crate::workbench) fn code_workspace_inspector(
     ui: &mut Ui,
     reads: &CodeInspector<'_>,
-) -> Option<uuid::Uuid> {
+) -> Option<FindingPress> {
     use crate::workbench::documents::netlist_document::{DiagnosticSeverity, NetlistRoot};
 
     let messages = reads.messages;
@@ -52,8 +62,8 @@ pub(in crate::workbench) fn code_workspace_inspector(
                     })
                     .take(DIAGNOSTIC_PREVIEW_LIMIT)
                 {
-                    if diagnostic_row(ui, diagnostic, messages) {
-                        pressed = Some(diagnostic.canonical.diagnostic_id);
+                    if let Some(press) = diagnostic_row(ui, diagnostic, messages) {
+                        pressed = Some(press);
                     }
                 }
                 if summary.current_errors > DIAGNOSTIC_PREVIEW_LIMIT {
@@ -90,8 +100,8 @@ pub(in crate::workbench) fn code_workspace_inspector(
                     })
                     .take(DIAGNOSTIC_PREVIEW_LIMIT)
                 {
-                    if diagnostic_row(ui, diagnostic, messages) {
-                        pressed = Some(diagnostic.canonical.diagnostic_id);
+                    if let Some(press) = diagnostic_row(ui, diagnostic, messages) {
+                        pressed = Some(press);
                     }
                 }
                 if advisories > DIAGNOSTIC_PREVIEW_LIMIT {
@@ -130,13 +140,13 @@ pub(in crate::workbench) fn code_workspace_inspector(
     pressed
 }
 
-/// One finding: its message, and the file and line it is on. Pressing it goes
-/// there; returns whether it was pressed.
+/// One finding: its message, the file and line it is on, and the fix it
+/// offers. Pressing the row goes there; what was pressed.
 fn diagnostic_row(
     ui: &mut Ui,
     diagnostic: &crate::state::netlist_diagnostics::Diagnostic,
     messages: MessageCatalog,
-) -> bool {
+) -> Option<FindingPress> {
     const ICON_COLUMN_W: f32 = 14.0;
     const COLUMN_GAP: f32 = 7.0;
     const PADDING_Y: f32 = 8.0;
@@ -176,11 +186,6 @@ fn diagnostic_row(
     if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
     rspice_ui_kit::theme::paint_focus_ring(ui, &response, rect);
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
 
@@ -214,7 +219,39 @@ fn diagnostic_row(
         location_galley,
         t.color.text_faint,
     );
-    response.clicked()
+    let id = diagnostic.canonical.diagnostic_id;
+    let mut pressed = response.clicked().then_some(FindingPress::Row(id));
+    // The fix a finding offers stands under it, as on its Problems row: a
+    // current finding's only, since a fix reads the text it was found in.
+    let mut bottom = rect.bottom();
+    if let Some(fix) = diagnostic
+        .is_current()
+        .then(|| diagnostic.canonical.quick_fixes.first())
+        .flatten()
+    {
+        let control_h = crate::ui::widgets::compact_height(&t.metrics);
+        let (band, _) =
+            ui.allocate_exact_size(Vec2::new(width, control_h + PADDING_Y), Sense::hover());
+        let mut strip = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_min_max(
+                    Pos2::new(text_x, band.top()),
+                    Pos2::new(band.right() - padding_x, band.top() + control_h),
+                ))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        if crate::ui::widgets::Button::new(&fix.label)
+            .compact()
+            .show(&mut strip)
+            .clicked()
+        {
+            pressed = Some(FindingPress::Fix(id));
+        }
+        bottom = band.bottom();
+    }
+    ui.painter()
+        .hline(rect.x_range(), bottom, Stroke::new(1.0, t.color.border));
+    pressed
 }
 
 fn empty_diagnostic_row(ui: &mut Ui, message: &str) {

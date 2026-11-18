@@ -185,6 +185,8 @@ pub enum CodeRequest {
     },
     /// Apply the preferred quick fix at the netlist editor's caret.
     ApplyNetlistQuickFix,
+    /// Apply the fix the netlist finding offers, pressed on its row.
+    ApplyNetlistFindingFix(uuid::Uuid),
     /// Format the deck or the include the netlist editor shows.
     FormatNetlistDocument,
     /// Save the file in front: the deck, or the include on its tab.
