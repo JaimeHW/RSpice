@@ -1032,7 +1032,9 @@ pub struct HirDiscreteSelection {
 pub struct HirDiscreteEdge {
     pub value: VariableId,
     pub signal: SmolStr,
-    pub edge: super::digital::DigitalEdge,
+    /// The event it waits on: an edge, or any change of the signal's value
+    /// (`@(d)`, Verilog-AMS LRM 2.4 section 5.10.5).
+    pub edge: super::digital::AnalogDigitalEvent,
 }
 
 /// An analog-owned integer output port: the analog `integer` variable that is

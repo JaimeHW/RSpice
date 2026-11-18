@@ -4493,7 +4493,9 @@ fn collect_analog_names_impl(
                 }
             },
             Work::Event(event) => match event {
-                EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
+                EventExpr::Posedge { signal, .. }
+                | EventExpr::Negedge { signal, .. }
+                | EventExpr::Change { signal, .. } => {
                     pending.push(Work::Expression(signal));
                 }
                 EventExpr::Cross {

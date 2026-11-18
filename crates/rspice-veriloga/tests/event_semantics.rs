@@ -703,5 +703,11 @@ fn assert_digital_edge(
         .iter()
         .map(|discrete| (discrete.signal.as_str(), discrete.edge))
         .collect();
-    assert_eq!(edges, [("clk", edge)]);
+    assert_eq!(
+        edges,
+        [(
+            "clk",
+            rspice_veriloga::canonical_ir::digital::AnalogDigitalEvent::from(edge)
+        )]
+    );
 }

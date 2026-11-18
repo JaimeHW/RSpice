@@ -3073,7 +3073,10 @@ fn an_analog_edge_on_a_discrete_signal_lowers_to_a_digital_edge_flag() {
         .collect();
     assert_eq!(
         edges,
-        [("clk", DigitalEdge::Posedge), ("clk", DigitalEdge::Negedge)]
+        [
+            ("clk", AnalogDigitalEvent::Posedge),
+            ("clk", AnalogDigitalEvent::Negedge)
+        ]
     );
     for edge in &module.discrete_edges {
         let flag = &module.variables[edge.value];
@@ -3106,6 +3109,87 @@ fn analog_edges_of_reals_and_of_discrete_expressions_are_refused() {
             "reg a, b; initial begin a = 0; b = 0; end",
             "negedge (a & b)",
             "takes a discrete signal by name",
+        ),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "{declaration} real x; analog begin @({event}) x = 1; I(p, n) <+ x * V(p, n); end"
+        )))
+        .map(|_| ())
+        .expect_err(event)
+        .to_string();
+        assert!(error.contains(expected), "{event}: {error}");
+    }
+}
+
+/// Verilog-AMS LRM 2.4 sections 5.10.5 and 7.3.4: a bare `@(d)` in an analog
+/// event control on a discrete signal is a state change event, a flag the
+/// host raises on any change of the value. A vector, a real variable and a
+/// named event's storage each take one, shared by every control on it, and
+/// none is compiled as `cross`.
+#[test]
+fn an_analog_change_event_on_a_discrete_signal_lowers_to_a_change_flag() {
+    let file = analyze(&module_src(
+        r#"
+        reg [3:0] bus;
+        real level;
+        event ev;
+        real seen;
+        initial begin bus = 0; level = 0.0; #5 bus = 4'b10xz; level = 1.5; -> ev; end
+        analog begin
+            @(bus) seen = seen + 1;
+            @(bus or posedge bus) seen = seen + 2;
+            @(level) seen = seen + 4;
+            @(ev) seen = seen + 8;
+            I(p, n) <+ seen * V(p, n);
+        end
+    "#,
+    ))
+    .expect("a change of a discrete signal is a digital event");
+    assert!(
+        file.warnings
+            .iter()
+            .all(|warning| warning.code != EDGE_EVENT_AS_CROSS_CODE),
+        "{:?}",
+        file.warnings
+    );
+    let module = file.modules.into_values().next().unwrap();
+    let events: Vec<_> = module
+        .discrete_edges
+        .iter()
+        .map(|edge| (edge.signal.as_str(), edge.edge))
+        .collect();
+    assert_eq!(
+        events,
+        [
+            ("bus", AnalogDigitalEvent::Change),
+            ("bus", AnalogDigitalEvent::Posedge),
+            ("level", AnalogDigitalEvent::Change),
+            ("ev", AnalogDigitalEvent::Change),
+        ]
+    );
+    for edge in &module.discrete_edges {
+        assert_eq!(module.variables[edge.value].value_type, ValueType::Integer);
+        assert_eq!(module.discrete_bindings[&edge.value], edge.signal);
+    }
+}
+
+/// What a bare analog event operand cannot be: a continuous quantity, which
+/// no analog event of LRM 2.4 section 5.10 describes, and a select of or an
+/// expression over a discrete signal, which is not a signal named whole.
+#[test]
+fn analog_change_events_on_continuous_or_computed_operands_are_refused() {
+    for (declaration, event, expected) in [
+        ("", "V(p, n)", "this operand is continuous"),
+        ("real r;", "r", "this operand is continuous"),
+        (
+            "reg [3:0] bus; initial bus = 0;",
+            "bus[1]",
+            "selects from or computes over the discrete signal `bus`",
+        ),
+        (
+            "reg a, b; initial begin a = 0; b = 0; end",
+            "a & b",
+            "selects from or computes over the discrete signal `",
         ),
     ] {
         let error = analyze(&module_src(&format!(

@@ -24,6 +24,8 @@ mod veriloga_source_fixture;
 #[cfg(feature = "veriloga")]
 mod analog_case_equality;
 #[cfg(feature = "veriloga")]
+mod analog_change_events;
+#[cfg(feature = "veriloga")]
 mod analog_event_subscriptions;
 mod assertions;
 #[cfg(feature = "veriloga")]

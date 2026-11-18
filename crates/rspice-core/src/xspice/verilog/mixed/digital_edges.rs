@@ -1,8 +1,10 @@
-//! Analog event controls on digital edges: `@(posedge d)` and `@(negedge d)`
-//! on a discrete signal inside an `analog` block.
+//! Analog event controls on digital events: `@(posedge d)`, `@(negedge d)`
+//! and `@(d)` on a discrete signal inside an `analog` block.
 //!
-//! Verilog-AMS LRM 2.4 section 7.3.4 lists `posedge expression` beside the
-//! analog event functions, and section 7.3.6.2 runs the guarded statement "at
+//! Verilog-AMS LRM 2.4 section 7.3.4 lists `posedge expression` and a bare
+//! `expression` beside the analog event functions, section 5.10.5 names the
+//! bare one a state change event, and section 7.3.6.2 runs the guarded
+//! statement "at
 //! the time corresponding to a real promotion of the digital time". The engine
 //! already lands an accepted timepoint on every digital tick it schedules, and
 //! an edge an interior A/D crossing causes is refined to that crossing, so the
@@ -11,10 +13,12 @@
 //! discrete input carrying [`DiscreteAnalogInput::edge`]); this module raises
 //! it for exactly that trial.
 //!
-//! The edge itself is classified where the value changed — one entry of the
+//! The event itself is classified where the value changed — one entry of the
 //! store's transition list, by the canonical IR's IEEE 1364-2005 section 9.7.2
-//! rule on the signal's least significant bit — so a pulse that rises and
-//! falls inside one settle is still a rising edge, as it is for a process.
+//! rule on the signal's least significant bit for an edge, and section 9.7.1's
+//! for a change: any difference of the value, into or out of `x` or `z`, or of
+//! a real net's value — so a pulse that rises and falls inside one settle is
+//! still a rising edge, and still a change, as it is for a process.
 //!
 //! Every piece of this state is trial-scoped and none of it is checkpointed:
 //!
@@ -31,15 +35,16 @@
 
 use super::super::store::TransitionValues;
 use super::*;
-use rspice_veriloga::canonical_ir::digital::{DigitalEdge, DigitalSensitivityTerm};
-use rspice_veriloga::canonical_ir::digital_eval::any_term_is_satisfied;
+use rspice_veriloga::canonical_ir::digital::{AnalogDigitalEvent, DigitalSensitivityTerm};
+use rspice_veriloga::canonical_ir::digital_eval::{real_term_is_satisfied, term_is_satisfied};
 use rspice_veriloga::canonical_ir::digital_link::DigitalLinkedInstance;
 
-/// The latch bit for one edge.
-const fn edge_bit(edge: DigitalEdge) -> u8 {
-    match edge {
-        DigitalEdge::Posedge => 1,
-        DigitalEdge::Negedge => 2,
+/// The latch bit for one event.
+const fn edge_bit(event: AnalogDigitalEvent) -> u8 {
+    match event {
+        AnalogDigitalEvent::Posedge => 1,
+        AnalogDigitalEvent::Negedge => 2,
+        AnalogDigitalEvent::Change => 4,
     }
 }
 
@@ -84,19 +89,29 @@ impl AnalogEdgeLatch {
         let Some(&watched) = self.watched.get(index) else {
             return;
         };
-        let TransitionValues::FourState { previous, next } = values else {
-            return;
-        };
         let mut edges = 0;
-        for edge in [DigitalEdge::Posedge, DigitalEdge::Negedge] {
+        for event in [
+            AnalogDigitalEvent::Posedge,
+            AnalogDigitalEvent::Negedge,
+            AnalogDigitalEvent::Change,
+        ] {
+            if watched & edge_bit(event) == 0 {
+                continue;
+            }
             let term = DigitalSensitivityTerm {
                 signal,
-                edge: Some(edge),
+                edge: event.edge(),
             };
-            if watched & edge_bit(edge) != 0
-                && any_term_is_satisfied(&[term], signal, previous, next)
-            {
-                edges |= edge_bit(edge);
+            let seen = match values {
+                TransitionValues::FourState { previous, next } => {
+                    term_is_satisfied(&term, previous, next)
+                }
+                TransitionValues::Real { previous, next } => {
+                    real_term_is_satisfied(&term, *previous, *next)
+                }
+            };
+            if seen {
+                edges |= edge_bit(event);
             }
         }
         if edges != 0 {
@@ -193,9 +208,9 @@ pub(super) fn refresh_view(view: &mut Vec<u8>, map: &[DigitalSignalId], latch: &
     }
 }
 
-/// The flag an edge input reads: one when the trial saw that edge.
-pub(super) fn flag(seen: u8, edge: DigitalEdge) -> f64 {
-    f64::from(u8::from(seen & edge_bit(edge) != 0))
+/// The flag an edge input reads: one when the trial saw that event.
+pub(super) fn flag(seen: u8, event: AnalogDigitalEvent) -> f64 {
+    f64::from(u8::from(seen & edge_bit(event) != 0))
 }
 
 impl MixedSignalHost {

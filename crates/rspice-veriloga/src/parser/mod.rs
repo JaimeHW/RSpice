@@ -3096,14 +3096,13 @@ impl<'a> Parser<'a> {
                             span: start.extend(self.previous_span()),
                         })
                     }
+                    // A bare operand: the state change event of Verilog-AMS
+                    // LRM 2.4 section 5.10.5, which semantic analysis binds
+                    // to a discrete signal or refuses.
                     _ => {
                         let signal = self.parse_expression()?;
-                        Ok(EventExpr::Cross {
+                        Ok(EventExpr::Change {
                             signal,
-                            direction: None,
-                            time_tol: None,
-                            expr_tol: None,
-                            enable: None,
                             span: start.extend(self.previous_span()),
                         })
                     }
@@ -3111,12 +3110,8 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 let signal = self.parse_expression()?;
-                Ok(EventExpr::Cross {
+                Ok(EventExpr::Change {
                     signal,
-                    direction: None,
-                    time_tol: None,
-                    expr_tol: None,
-                    enable: None,
                     span: start.extend(self.previous_span()),
                 })
             }

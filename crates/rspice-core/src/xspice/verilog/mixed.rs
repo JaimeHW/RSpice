@@ -1844,9 +1844,10 @@ struct DiscreteAnalogInput {
     validity: usize,
     /// (least-significant storage position, width, encoded chunk), before numeric conversion.
     selection: Option<(i64, u32, bool)>,
-    /// The digital edge an analog event control waits on. Such an input is
-    /// a flag rather than a value; see `digital_edges.rs`.
-    edge: Option<rspice_veriloga::canonical_ir::digital::DigitalEdge>,
+    /// The digital event (an edge, or a change of value) an analog event
+    /// control waits on. Such an input is a flag rather than a value; see
+    /// `digital_edges.rs`.
+    edge: Option<rspice_veriloga::canonical_ir::digital::AnalogDigitalEvent>,
     /// Whether this input is read inside an analog event body, which sees the
     /// value the open transient trial's digital activity settled rather than
     /// the left limit every other read takes. See

@@ -296,9 +296,9 @@ impl Unroller<'_> {
 
     fn substitute_event(&self, event: &mut EventExpr) {
         match event {
-            EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
-                self.substitute(signal)
-            }
+            EventExpr::Posedge { signal, .. }
+            | EventExpr::Negedge { signal, .. }
+            | EventExpr::Change { signal, .. } => self.substitute(signal),
             EventExpr::Cross {
                 signal,
                 direction,

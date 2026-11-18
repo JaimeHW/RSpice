@@ -199,9 +199,9 @@ pub struct AnalyzedModule {
     pub discrete_bindings: HashMap<usize, SmolStr>,
     /// Explicit packed selection behind a numeric input; whole-value inputs omit it.
     pub discrete_selections: Vec<AnalyzedDiscreteSelection>,
-    /// Digital edges analog event controls wait on (`@(posedge d)` on a
-    /// discrete signal). Each value slot is also a discrete input, bound to the
-    /// edge's signal through [`Self::discrete_bindings`].
+    /// Digital events analog event controls wait on (`@(posedge d)` or
+    /// `@(d)` on a discrete signal). Each value slot is also a discrete input,
+    /// bound to the event's signal through [`Self::discrete_bindings`].
     pub discrete_edges: Vec<AnalyzedDiscreteEdge>,
     /// Analog-owned integer output ports: (analog variable slot, discrete
     /// signal). The variable is the port's one driver; the mixed host
@@ -213,13 +213,14 @@ pub struct AnalyzedModule {
     pub discrete_event_reads: Vec<usize>,
 }
 
-/// One digital edge an analog event control waits on.
+/// One digital event an analog event control waits on: an edge, or a change
+/// of the signal's value.
 #[derive(Debug, Clone)]
 pub struct AnalyzedDiscreteEdge {
-    /// The integer flag the mixed host raises for the trial that saw the edge.
+    /// The integer flag the mixed host raises for the trial that saw the event.
     pub value: usize,
     pub signal: SmolStr,
-    pub edge: crate::canonical_ir::digital::DigitalEdge,
+    pub edge: crate::canonical_ir::digital::AnalogDigitalEvent,
 }
 
 #[derive(Debug, Clone)]

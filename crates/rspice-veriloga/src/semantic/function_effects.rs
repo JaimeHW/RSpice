@@ -157,7 +157,9 @@ impl Effects {
 
     fn event(&mut self, event: &EventExpr) {
         match event {
-            EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
+            EventExpr::Posedge { signal, .. }
+            | EventExpr::Negedge { signal, .. }
+            | EventExpr::Change { signal, .. } => {
                 self.expression(signal);
             }
             EventExpr::Cross {
@@ -498,9 +500,9 @@ fn event_may_write_variable(
     let mut expressions = Vec::new();
     match event {
         EventExpr::InitialStep { .. } | EventExpr::FinalStep { .. } => return false,
-        EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
-            expressions.push(signal)
-        }
+        EventExpr::Posedge { signal, .. }
+        | EventExpr::Negedge { signal, .. }
+        | EventExpr::Change { signal, .. } => expressions.push(signal),
         EventExpr::Cross {
             signal,
             direction,

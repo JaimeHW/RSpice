@@ -296,7 +296,11 @@ use smol_str::SmolStr;
 /// declares no discipline converts as, and gives a hoisted port with no
 /// declared discipline its module's default. An earlier artifact converted
 /// every such port as `logic`.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 198;
+/// Version 199 records the digital event an analog event control waits on as
+/// an [`AnalogDigitalEvent`](super::digital::AnalogDigitalEvent)
+/// (`HirDiscreteEdge::edge`), which adds a change of the signal's value
+/// (`@(d)`). An earlier artifact compiled a bare `@(d)` as `cross(d)`.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 199;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

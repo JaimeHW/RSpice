@@ -8,7 +8,7 @@
 //! - Parameter range checking
 
 use crate::ast::*;
-use crate::canonical_ir::digital::DigitalEdge;
+use crate::canonical_ir::digital::{AnalogDigitalEvent, DigitalEdge};
 use crate::disciplines::{Discipline, DisciplineDb, Domain, Nature};
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
@@ -546,9 +546,9 @@ pub struct SemanticAnalyzer {
     /// Analog reads of discrete signals so far (`AnalyzedModule::discrete_reads`).
     discrete_reads: Vec<(SmolStr, Span)>,
     discrete_projection: discrete_projection::ProjectionBuilder,
-    /// Digital edges the module's analog event controls wait on, as (flag
-    /// name, signal, edge). Storage is allocated after the body's locals.
-    digital_edges: Vec<(SmolStr, SmolStr, DigitalEdge)>,
+    /// Digital events the module's analog event controls wait on, as (flag
+    /// name, signal, event). Storage is allocated after the body's locals.
+    digital_edges: Vec<(SmolStr, SmolStr, AnalogDigitalEvent)>,
     /// Integer output ports the module's analog body writes and no discrete
     /// process does: the analog variable drives the port's discrete net.
     analog_owned_ports: HashSet<SmolStr>,
@@ -5011,12 +5011,6 @@ impl SemanticAnalyzer {
                 enable,
                 span,
             } => {
-                // `@(absdelta(...))` parses as a bare event expression here.
-                if let Expression::Call(call) = signal
-                    && call.name == "absdelta"
-                {
-                    return Err(absdelta_outside_digital_event(call.span, true));
-                }
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
                 let direction = direction
                     .as_deref()
@@ -5061,6 +5055,15 @@ impl SemanticAnalyzer {
                     args: vec![signal, Self::number_expr(direction, *span)],
                     span: *span,
                 }))
+            }
+            EventExpr::Change { signal, span } => {
+                // `@(absdelta(...))` parses as a bare event expression here.
+                if let Expression::Call(call) = signal
+                    && call.name == "absdelta"
+                {
+                    return Err(absdelta_outside_digital_event(call.span, true));
+                }
+                EventLowering::Guard(self.change_event_flag(signal, *span, module)?)
             }
             EventExpr::Above {
                 signal,
@@ -5195,7 +5198,7 @@ impl SemanticAnalyzer {
                     ));
                 }
                 return self
-                    .digital_edge_flag(edge, &identifier.name, span)
+                    .digital_edge_flag(edge.into(), &identifier.name, span)
                     .map(Some);
             }
             if let Some(net) = self.discrete_net_operand(signal) {
@@ -5239,13 +5242,91 @@ impl SemanticAnalyzer {
         Ok(None)
     }
 
+    /// `@(signal)` in an analog event control: a change of a discrete signal's
+    /// value. Verilog-AMS LRM 2.4 section 5.10.5 makes analog behaviour
+    /// sensitive to digital "state change events", and section 7.3.4 puts the
+    /// operand of a discrete event in the discrete context, so the event is
+    /// IEEE 1364-2005 section 9.7.1's: any change of the value, into or out of
+    /// `x` or `z` included, and of a real net's value (LRM section 3.7). A
+    /// named event's storage toggles at each trigger, so `@(ev)` waits on its
+    /// triggers (LRM section 5.10.4). The guard is a flag the mixed host raises
+    /// for the coupled trial whose digital settle changed the value, as for an
+    /// edge.
+    ///
+    /// Refused: a continuous operand, which none of section 5.10's analog
+    /// events (global, monitored, named) or section 5.10.5's digital ones
+    /// describes — a continuous quantity is watched through `cross`, `above` or
+    /// `timer`; a discrete-discipline net with no digital storage here; and an
+    /// operand that selects from or computes over a discrete signal rather than
+    /// naming one.
+    fn change_event_flag(
+        &mut self,
+        signal: &Expression,
+        span: Span,
+        module: &AnalyzedModule,
+    ) -> CompileResult<Expression> {
+        let refuse = |detail: String| {
+            Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(detail),
+                span,
+            )))
+        };
+        let declared = |name: &str| {
+            module
+                .digital
+                .signals
+                .iter()
+                .any(|declared| declared.name == name)
+        };
+        if let Expression::Identifier(identifier) = signal {
+            if declared(&identifier.name) {
+                return self.digital_edge_flag(AnalogDigitalEvent::Change, &identifier.name, span);
+            }
+            if let Some(net) = self.discrete_net_operand(signal) {
+                return refuse(format!(
+                    "`@({net})` in an analog event control waits on a change of a discrete \
+                     signal, and `{net}` has a discrete discipline but no digital storage in \
+                     this module; declare it as a net or variable of the module's discrete half"
+                ));
+            }
+        }
+        let mut named = None;
+        visit_expression(signal, &mut |expression| {
+            let name = match expression {
+                Expression::Identifier(identifier) => &identifier.name,
+                Expression::ArrayAccess(access) => &access.array,
+                Expression::Digital(DigitalExpr::PartSelect(select)) => &select.name,
+                _ => return,
+            };
+            if named.is_none() && (declared(name) || self.is_discrete_net(name)) {
+                named = Some(name.clone());
+            }
+        });
+        if let Some(name) = named {
+            return refuse(format!(
+                "`@(...)` in an analog event control waits on a change of a discrete signal \
+                 named whole, and this operand selects from or computes over the discrete \
+                 signal `{name}`; wait on `@({name})` and compare inside the body"
+            ));
+        }
+        refuse(
+            "`@(...)` in an analog event control with a bare operand waits on a change of a \
+             discrete signal (Verilog-AMS LRM 2.4 sections 5.10.5 and 7.3.4), and this operand \
+             is continuous: section 5.10's analog events are the global `initial_step` and \
+             `final_step`, the monitored `cross`, `above` and `timer`, and named events, none \
+             of which is a bare continuous expression; watch it with `cross`, `above` or \
+             `timer`"
+                .into(),
+        )
+    }
+
     /// The flag an analog event control on `edge` of `signal` reads, shared by
-    /// every control on the same edge of the same signal. Its storage — the
+    /// every control on the same event of the same signal. Its storage — the
     /// flag and the validity lane every discrete input carries — is allocated
     /// by [`Self::finish_digital_edges`] after the body's locals.
     fn digital_edge_flag(
         &mut self,
-        edge: DigitalEdge,
+        edge: AnalogDigitalEvent,
         signal: &SmolStr,
         span: Span,
     ) -> CompileResult<Expression> {

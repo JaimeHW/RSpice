@@ -305,6 +305,38 @@ impl DigitalEdge {
     }
 }
 
+/// The digital event an analog event control waits on (Verilog-AMS LRM 2.4
+/// section 5.10.5): an IEEE 1364-2005 section 9.7.2 edge of the signal's
+/// least significant bit, or any change of its value (section 9.7.1), `x`
+/// and `z` included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AnalogDigitalEvent {
+    Posedge,
+    Negedge,
+    Change,
+}
+
+impl AnalogDigitalEvent {
+    /// The event as a sensitivity term's qualifier: its edge, or `None` for a
+    /// change, which a level-sensitive term waits on.
+    pub const fn edge(self) -> Option<DigitalEdge> {
+        match self {
+            Self::Posedge => Some(DigitalEdge::Posedge),
+            Self::Negedge => Some(DigitalEdge::Negedge),
+            Self::Change => None,
+        }
+    }
+}
+
+impl From<DigitalEdge> for AnalogDigitalEvent {
+    fn from(edge: DigitalEdge) -> Self {
+        match edge {
+            DigitalEdge::Posedge => Self::Posedge,
+            DigitalEdge::Negedge => Self::Negedge,
+        }
+    }
+}
+
 /// One term of a sensitivity list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DigitalSensitivityTerm {

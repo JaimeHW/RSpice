@@ -1483,6 +1483,9 @@ pub enum EventExpr {
     Posedge { signal: Expression, span: Span },
     /// Negedge of a signal
     Negedge { signal: Expression, span: Span },
+    /// A bare expression: a change of its value, the state change event of
+    /// Verilog-AMS LRM 2.4 section 5.10.5 (IEEE 1364-2005 section 9.7.1).
+    Change { signal: Expression, span: Span },
     /// Cross event
     Cross {
         signal: Expression,
