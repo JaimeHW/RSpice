@@ -173,7 +173,7 @@ fn external_input_audit_ignores_comments_and_inline_data() {
     for line in [
         "Aco $G_DPWR [in] [out] null cosim simulation=provider",
         ".model source d_source (input_file='stimulus;production.txt')",
-        ".model source d_source (input_file=\"stimulus\\\"production.txt\")",
+        ".model source d_source (input_file=\"C:\\stimuli\\a;b.txt\")",
     ] {
         assert!(
             deferred_external_source_reason(line).is_some(),

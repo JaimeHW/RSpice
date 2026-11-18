@@ -228,7 +228,8 @@ impl<'a> NetlistGenerator<'a> {
                 // The path is always quoted: the reader refuses a bare path
                 // containing '=', and a directory name may hold spaces.
                 let (route, _) = self.source_table_route(component, &path);
-                let mut specification = format!("PWL FILE=\"{}\"", route.path());
+                let mut specification =
+                    format!("PWL FILE={}", Self::quote_path_for_netlist(route.path()));
 
                 // TSCALE has no zero-valued spelling and the offsets have no
                 // unit one, so each modifier states its own unset value rather
