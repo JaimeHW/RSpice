@@ -1635,9 +1635,8 @@ pub(crate) fn void_veriloga_evidence(
 /// session, then its inbound half, then the host's snapshot replacing a
 /// guest's mirror, then its outbound half. Between the phases the shell
 /// closes a mirror whose session ended without a copy kept, at once or once
-/// the local run that held it has stopped, has the netlist editor adopt the
-/// project source a participant's update replaced, before a snapshot can
-/// replace that project, and applies the host's project snapshot.
+/// the local run that held it has stopped, and applies the host's project
+/// snapshot.
 pub(crate) fn pump_live_session(state: &mut AppState, cloud: &mut CloudHandles) {
     let CloudHandles {
         account,

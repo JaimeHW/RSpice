@@ -586,7 +586,7 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
         baseline.file.workspace.project_sources
     );
     assert!(!state.model.workspace.content.project_sources_dirty);
-    assert!(!state.model.workspace.content.netlist_source_dirty);
+    assert!(!state.model.workspace.content.decks_dirty);
 }
 
 #[test]

@@ -130,9 +130,6 @@ fn prepared_manual_snapshot(
         &inputs,
         ManualSourceInputs {
             source: &source,
-            descriptor: None,
-            generated_artifact: None,
-            owned: false,
             origin: Some(origin),
         },
     )

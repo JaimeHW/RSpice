@@ -14,7 +14,7 @@ use egui::{Key, Modifiers};
 use super::engine_recovery_path::author_deck;
 use crate::feature_tests::replay::{PRIMARY, Replay};
 use rspice_app_code::workbench::documents::netlist_document::{
-    OwnedNetlistReplacement, replace_owned_sources_atomically,
+    OwnedNetlistReplacement, replace_deck_files,
 };
 
 /// A key pressed and released.
@@ -45,17 +45,19 @@ fn redo(replay: &mut Replay) {
     replay.frame(key(Key::Z, PRIMARY | Modifiers::SHIFT));
 }
 
-/// The project's copy of the deck.
+/// The open deck's text, as the session holds it.
 fn committed(replay: &Replay) -> String {
     replay
         .app
         .state
-        .model
-        .workspace
-        .content
-        .netlist_source
+        .code
+        .netlist
+        .open_deck
+        .as_ref()
+        .expect("the deck is open")
+        .root
+        .text
         .clone()
-        .expect("the project owns the deck")
 }
 
 /// The deck the editor shows.
@@ -185,13 +187,12 @@ fn undo_past_the_editor_history_steps_the_decks_own_edit() {
     let before = committed(&replay);
     let replaced = before.replace("R1 in 0 1k", "R1 in 0 2k");
     assert_ne!(replaced, before);
-    replace_owned_sources_atomically(
+    replace_deck_files(
         &mut replay.app.state.model,
         &mut replay.app.state.code.netlist,
-        &mut replay.app.state.code.netlist_open_documents,
         vec![OwnedNetlistReplacement::root(&before, replaced.clone(), 1)],
     )
-    .expect("the project owns the deck");
+    .expect("the deck is open");
     replay.frames(Vec::new());
     assert_eq!(
         shown(&replay),
@@ -212,68 +213,4 @@ fn undo_past_the_editor_history_steps_the_decks_own_edit() {
     assert_eq!(committed(&replay), replaced, "redo applies it again");
     replay.frame(Vec::new());
     assert_eq!(shown(&replay), replaced, "the next frame draws it");
-}
-
-/// An edit the project refuses is not kept: its frame says why, and the
-/// next frame draws the deck as the project holds it, with the caret where
-/// it was before the refused edit and the history as it was.
-#[test]
-fn a_refused_edit_reverts_on_the_next_frame() {
-    let mut replay = Replay::new();
-    author_deck(&mut replay);
-    let before = committed(&replay);
-    let end = before.chars().count();
-    assert!(before.ends_with('\n'), "the deck ends its last line");
-    typed(&mut replay, "x");
-    let with_x = format!("{before}x");
-    assert_eq!(committed(&replay), with_x);
-
-    // The caret steps back before the deck's last line break, and the edit
-    // made there is refused.
-    replay.frame(key(Key::ArrowLeft, Modifiers::NONE));
-    replay.frame(key(Key::ArrowLeft, Modifiers::NONE));
-    assert_eq!(caret(&replay), end - 1);
-    replay.app.state.model.live_write_locks.netlist = Some("Another session".to_owned());
-    let output = replay.frame(vec![egui::Event::Text("a".to_owned())]);
-    assert_eq!(committed(&replay), with_x, "the project refuses the edit");
-    assert!(
-        repaints_at_once(&output),
-        "the frame of the refusal asks for the next one at once"
-    );
-    assert_eq!(
-        replay.app.state.prompt_text(),
-        Some("Another session holds the netlist write lease; no source was changed."),
-        "the frame of the refusal says why"
-    );
-    assert_eq!(
-        shown(&replay),
-        format!("{}a\nx", &before[..before.len() - 1]),
-        "the frame of the refusal still draws what was typed"
-    );
-
-    replay.frame(Vec::new());
-    assert_eq!(
-        shown(&replay),
-        with_x,
-        "the next frame draws the project's deck"
-    );
-    assert_eq!(
-        caret(&replay),
-        end - 1,
-        "the caret is where it was before the refused edit"
-    );
-    replay.frame(Vec::new());
-    assert_eq!(shown(&replay), with_x, "and the frame after it");
-
-    // Once the lease is let go, undo steps back through what was typed
-    // before the refusal, and redo applies it again.
-    replay.app.state.model.live_write_locks.netlist = None;
-    undo(&mut replay);
-    assert_eq!(
-        committed(&replay),
-        before,
-        "the typing before the refusal is undone"
-    );
-    redo(&mut replay);
-    assert_eq!(committed(&replay), with_x, "and redone");
 }

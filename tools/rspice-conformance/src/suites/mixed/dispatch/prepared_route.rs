@@ -98,9 +98,6 @@ fn prepared_manual_run(source: &str, origin: &Path) -> Vec<Observation> {
         &inputs,
         ManualSourceInputs {
             source,
-            descriptor: None,
-            generated_artifact: None,
-            owned: false,
             origin: Some(origin),
         },
     )

@@ -1,7 +1,7 @@
 //! A file dropped on the window through whole application frames: a project
 //! opens wherever it lands, after the review of any unsaved work it would
-//! replace, and a SPICE deck dropped on the start screen opens as a netlist
-//! project.
+//! replace, and a SPICE deck dropped on the start screen opens in a project
+//! of its own.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -116,31 +116,30 @@ fn a_dropped_project_asks_about_unsaved_work_first() {
     let _ = std::fs::remove_dir_all(other);
 }
 
-/// A deck dropped on the start screen opens as a netlist project, as File >
-/// Open netlist does.
+/// A deck dropped on the start screen opens in a project of its own, as
+/// File > Open deck does with no project open.
 #[test]
-fn a_deck_dropped_on_the_landing_opens_as_a_netlist_project() {
+fn a_deck_dropped_on_the_landing_opens_in_a_project_of_its_own() {
+    let folder = unique_temp_dir("dropped-deck");
+    let deck = folder.join("divider.cir");
+    std::fs::write(
+        &deck,
+        "* divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n",
+    )
+    .expect("the deck is written");
     let mut app = start_screen();
-    drop_on(
-        &mut app,
-        egui::DroppedFile {
-            name: "divider.cir".to_owned(),
-            bytes: Some(
-                b"* divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n"
-                    .as_slice()
-                    .into(),
-            ),
-            ..Default::default()
-        },
-    );
-    let review = app
+    drop_on(&mut app, dropped(&deck));
+    assert!(app.state.platform.project_lifecycle.is_open());
+    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    let open = app
         .state
         .code
         .netlist
-        .import_review
+        .open_deck
         .as_ref()
-        .expect("the deck is staged for its review");
-    assert_eq!(review.display_name, "divider.cir");
+        .expect("the deck is open");
+    assert_eq!(open.root.name(), "divider.cir");
+    let _ = std::fs::remove_dir_all(folder);
 }
 
 /// A file RSpice does not open, dropped on the start screen, is answered.

@@ -114,7 +114,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
         .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some("Manual reference\nV1 out 0 2.5\nR1 out 0 1k\n.tran 100n 1u\n.MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n".into());
+    state.seed_test_deck("Manual reference\nV1 out 0 2.5\nR1 out 0 1k\n.tran 100n 1u\n.MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n");
     let manual =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .unwrap();

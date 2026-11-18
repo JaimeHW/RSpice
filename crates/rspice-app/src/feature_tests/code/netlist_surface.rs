@@ -3,7 +3,6 @@
 
 use crate::workbench::{RSpiceApp, features};
 use egui::vec2;
-use rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use rspice_app_code::workbench::surfaces::netlist::{
     RUN_STRIP_HEIGHT, RunStripPhase, reveal_in_netlist, run_strip_projection, show_prepared,
@@ -22,10 +21,7 @@ fn a_problem_step_in_the_deck_goes_to_the_finding_and_says_which() {
 
     let deck = "deck\nR1 1 0 1k\nC1 1 0 1pp\n.end\n";
     let mut app = RSpiceApp::test_instance();
-    app.state.model.workspace.content.netlist_source = Some(deck.to_owned());
-    app.state.model.simulation.source.netlist_content = deck.to_owned();
-    app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    app.state.code.netlist.active_document_initialized = true;
+    app.state.seed_test_deck(deck.to_owned());
     let mut root = Diagnostic::current("lint", "UNITS", DiagnosticSeverity::Warning, "1pp");
     root.source_path = Some(std::path::PathBuf::from("deck.cir"));
     root.column = Some(7);
@@ -114,10 +110,7 @@ fn run_strip_band(
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
-    app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
-    app.state.model.simulation.source.netlist_content = DECK.to_owned();
-    app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    app.state.code.netlist.active_document_initialized = true;
+    app.state.seed_test_deck(DECK.to_owned());
     app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
     app.state.runs.manual_run.last_run_id = Some(7);
     seal_manual_run(&mut app.state.model, 7, 0xAB, 4);
@@ -133,8 +126,13 @@ fn run_strip_band(
             );
         }
         RunStripPhase::Edited => {
-            app.state.model.workspace.content.netlist_source = Some(EDITED.to_owned());
-            app.state.model.simulation.source.netlist_content = EDITED.to_owned();
+            assert!(
+                rspice_app_code::workbench::documents::netlist_document::edit_deck_file(
+                    &mut app.state.model,
+                    &mut app.state.code.netlist,
+                    EDITED.to_owned()
+                )
+            );
         }
         RunStripPhase::Running => {
             seal_manual_run(&mut app.state.model, 8, 0xCD, 5);

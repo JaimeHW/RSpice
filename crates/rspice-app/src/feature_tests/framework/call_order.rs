@@ -1111,8 +1111,8 @@ const CODE_POLL: &[Step] = &[
     (
         "5.6.4",
         &[
-            "let shown = cx.state.netlist_shown()",
-            "consume_veriloga_compile_request(cx.model, &mut cx.state.code_workspace, shown, ctx)",
+            "let deck = crate::workbench::slots::code::manual_deck_in(&cx.state.netlist)",
+            "consume_veriloga_compile_request(cx.model, &mut cx.state.code_workspace, deck, ctx)",
         ],
     ),
     ("5.6.5", &["refresh_symbol_standing("]),
@@ -1145,20 +1145,12 @@ const LIVE_SESSION_PUMP: &[Step] = &[
     (
         "4",
         &[
-            "requests::drain(",
-            "|state, AdoptLiveOwnedSource(document)|",
-            "adopt_live_owned_source(&mut state.code.netlist, document)",
-        ],
-    ),
-    (
-        "5",
-        &[
             "live_session.take_mirror_snapshot()",
             "state.apply_live_project_snapshot(snapshot.bytes(), snapshot.host_label())",
             "live_session.mirror_snapshot_applied(&mut live_host(state), snapshot, outcome)",
         ],
     ),
-    ("6", &["live_session.pump_outbound(&mut live_host(state))"]),
+    ("5", &["live_session.pump_outbound(&mut live_host(state))"]),
 ];
 
 /// `end_frame`, step 16 of the frame: the models feature's authoring
@@ -1487,10 +1479,9 @@ fn the_live_session_runs_its_phases_and_project_transactions_in_todays_order() {
         "pub(crate) fn pump_live_session(state",
     );
     assert_runs_in_order("pump_live_session", &pump, LIVE_SESSION_PUMP);
-    assert_eq!(
-        pump.matches("requests::drain(").count(),
-        1,
-        "the live session answers only the netlist source adoption in its pump"
+    assert!(
+        !pump.contains("requests::drain("),
+        "the live session answers no request in its pump"
     );
 }
 

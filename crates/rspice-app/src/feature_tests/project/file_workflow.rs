@@ -134,7 +134,10 @@ fn browser_import_filename_is_used_for_next_schematic_save_as_dialog() {
 }
 
 fn seed_stale_design_execution_context(state: &mut AppState) {
-    state.model.workspace.content.netlist_source = Some("old manual deck\n.end\n".to_owned());
+    state.model.workspace.content.decks = vec![rspice_app_state::state::ProjectDeck::for_file(
+        std::path::Path::new("old.cir"),
+        None,
+    )];
     state.model.simulation.source.netlist_content = "old generated deck\n.end\n".to_owned();
     state
         .model
@@ -152,7 +155,7 @@ fn seed_stale_design_execution_context(state: &mut AppState) {
 }
 
 fn assert_design_execution_context_cleared(state: &AppState) {
-    assert!(state.model.workspace.content.netlist_source.is_none());
+    assert!(state.model.workspace.content.decks.is_empty());
     assert!(state.model.simulation.source.netlist_content.is_empty());
     assert!(!state.model.simulation.retained.has_results());
     assert!(state.runs.manual_run.last_run_buffer.is_none());

@@ -8,8 +8,8 @@ use crate::workbench::app::veriloga_design_tests::{add_veriloga_cell, open_in_de
 use egui::Context;
 use rspice_app_code::workbench::app::dialogs::source_document::fixtures::facts_of;
 use rspice_app_code::workbench::app::dialogs::source_document::{
-    apply_lifecycle_action, begin_new_top_deck_in, netlist_lifecycle_facts,
-    open_source_document_dialog_in, source_document_dialog_is_available,
+    apply_lifecycle_action, netlist_lifecycle_facts, open_source_document_dialog_in,
+    source_document_dialog_is_available,
 };
 use rspice_app_code::workbench::code::commands::LifecycleAction;
 use rspice_app_code::workbench::documents::code_workspace::CodeSourceFileAction;
@@ -102,10 +102,10 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
     assert_eq!(renamed, "models/renamed_gain.va");
 }
 
-/// An empty project exposes the lifecycle manager so the first top deck
-/// can be created without a generated or imported predecessor.
+/// The generated netlist is read-only, so the dialog has nothing to manage
+/// until a deck is open.
 #[test]
-fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
+fn a_generated_netlist_page_refuses_the_dialog_until_a_deck_is_open() {
     let mut app = RSpiceApp::test_instance();
     // The generated deck is read-only and the project owns no other:
     // there is nothing to manage, and the refusal says so.
@@ -119,18 +119,7 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     assert!(refusal.contains("read-only"), "{refusal}");
     assert!(!app.state.code.code_workspace.source_document_dialog);
 
-    rspice_app_code::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
-        &app.state.model,
-        &mut app.state.code.netlist,
-        CodeSourceFileAction::New,
-    )
-    .unwrap();
-    rspice_app_code::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
-        &mut app.state.model,
-        &mut app.state.code.netlist,
-        &mut app.state.code.netlist_open_documents,
-    )
-    .unwrap();
+    app.state.seed_test_deck("* deck\nR1 a 0 1k\n.end\n");
     assert!(source_document_dialog_is_available(
         app.state.workbench.workspace,
         &app.state.model,
@@ -139,38 +128,7 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     ));
     open_source_document_dialog(&mut app.state).unwrap();
     assert!(app.state.code.code_workspace.source_document_dialog);
-    let facts = netlist_lifecycle_facts(&app.state.model, &app.state.code.netlist).unwrap();
-    assert!(facts.deck_id.is_some());
-    assert_eq!(facts.decks.len(), 1);
-}
-
-/// The page's New source document and New top deck make the deck that
-/// refusal asks for, so they open the dialog on its review where Manage
-/// source document refuses. They opened nothing but the refusal while
-/// they went through Manage's route.
-#[test]
-fn new_source_document_opens_on_a_project_that_owns_no_deck() {
-    let mut app = RSpiceApp::test_instance();
-    assert!(open_source_document_dialog(&mut app.state).is_err());
-
-    begin_new_top_deck_in(
-        &app.state.model,
-        &mut app.state.code.code_workspace,
-        &mut app.state.code.netlist,
-        &app.state.platform,
-    )
-    .unwrap();
-    assert!(app.state.code.code_workspace.source_document_dialog);
-    let transaction = app
-        .state
-        .code
-        .netlist
-        .lifecycle_dialog
-        .transaction
-        .as_ref()
-        .expect("the dialog reviews the new deck");
-    assert_eq!(transaction.action, CodeSourceFileAction::New);
-    assert!(!transaction.proposed_path.is_empty());
+    assert!(netlist_lifecycle_facts(&app.state.model, &app.state.code.netlist).is_some());
 }
 
 /// The deck's properties are its name, where it is on disk and its line
@@ -178,11 +136,11 @@ fn new_source_document_opens_on_a_project_that_owns_no_deck() {
 /// identity, a line and byte count, "Not published to a reopenable
 /// native path" and a count of the project's decks.
 #[test]
-fn an_owned_deck_states_its_properties_without_identity_jargon() {
+fn an_open_deck_states_its_properties_without_identity_jargon() {
     let ctx = Context::default();
     ctx.enable_accesskit();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut app = owned_deck_app();
+    let mut app = deck_app();
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..3 {
         let output = ctx.run_ui(
@@ -267,25 +225,14 @@ fn a_source_document_states_its_properties_without_identity_jargon() {
     }
 }
 
-/// A project that owns one authored top deck, on the netlist page.
-fn owned_deck_app() -> RSpiceApp {
+/// A project with one deck open, on the netlist page.
+fn deck_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.model.preferences.set_toggle(
         rspice_app_state::workbench::preferences::TogglePreference::ReducedMotion,
         true,
     );
-    rspice_app_code::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
-        &app.state.model,
-        &mut app.state.code.netlist,
-        CodeSourceFileAction::New,
-    )
-    .unwrap();
-    rspice_app_code::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
-        &mut app.state.model,
-        &mut app.state.code.netlist,
-        &mut app.state.code.netlist_open_documents,
-    )
-    .unwrap();
+    app.state.seed_test_deck("* deck\nR1 a 0 1k\n.end\n");
     open_source_document_dialog(&mut app.state).unwrap();
     app
 }
@@ -324,75 +271,12 @@ fn node_left(nodes: &[egui::accesskit::Node], label: &str) -> f64 {
         .x0
 }
 
-/// On a project that owns no deck, New source document is a form that
-/// makes one: its path, what it is made against, Create and Cancel. It
-/// was Manage source document with "No top deck", every file operation
-/// disabled and a Create button inside the body above a footer Close.
-#[test]
-fn new_source_document_on_a_deckless_project_is_a_creation_form() {
-    let mut app = RSpiceApp::test_instance();
-    begin_new_top_deck_in(
-        &app.state.model,
-        &mut app.state.code.code_workspace,
-        &mut app.state.code.netlist,
-        &app.state.platform,
-    )
-    .unwrap();
-    let nodes = dialog_nodes(&mut app);
-    let says = |text: &str| {
-        nodes.iter().any(|node| {
-            node.label().is_some_and(|label| label.contains(text))
-                || node.value().is_some_and(|value| value.contains(text))
-        })
-    };
-    assert!(
-        nodes
-            .iter()
-            .any(|node| node.role() == egui::accesskit::Role::Dialog
-                && node.label() == Some("New source document")),
-        "the dialog is not titled New source document"
-    );
-    assert!(says("Logical path") && says("Against"));
-    for gone in [
-        "Manage source document",
-        "Current document",
-        "File operations",
-        "No top deck",
-        "Include search paths",
-    ] {
-        assert!(!says(gone), "the creation form states {gone:?}");
-    }
-    assert!(says("Cancel"), "the form has no Cancel");
-
-    // Create says why it is refused while there is no path.
-    app.state
-        .code
-        .netlist
-        .lifecycle_dialog
-        .transaction
-        .as_mut()
-        .unwrap()
-        .proposed_path
-        .clear();
-    let nodes = dialog_nodes(&mut app);
-    let create = nodes
-        .iter()
-        .find(|node| node.role() == egui::accesskit::Role::Button && node.label() == Some("Create"))
-        .expect("the footer's Create");
-    assert!(create.is_disabled());
-    assert!(nodes.iter().any(|node| {
-        node.label()
-            .or_else(|| node.value())
-            .is_some_and(|text| text.contains("Enter a logical path"))
-    }));
-}
-
 /// Manage source document's rows start where its title does. Its
 /// sections were panel sections inside the padded dialog body, so every
 /// row stood 10 points right of the title and the footer.
 #[test]
 fn the_lifecycle_rows_share_the_dialog_titles_left_edge() {
-    let mut app = owned_deck_app();
+    let mut app = deck_app();
     let nodes = dialog_nodes(&mut app);
     // The title and the footer stand as far in from the surface's left
     // edge as the footer's last button does from its right.

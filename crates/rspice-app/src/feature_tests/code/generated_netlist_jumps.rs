@@ -8,7 +8,9 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
 use crate::workbench::examples::hierarchy_reference;
 use rspice_app_code::workbench::code::commands::CodeCommand;
-use rspice_app_code::workbench::documents::netlist_document::fixtures::seed_owned_dependency;
+use rspice_app_code::workbench::documents::netlist_document::fixtures::{
+    DECK_INCLUDE, seed_deck_with_include,
+};
 use rspice_app_code::workbench::documents::netlist_document::{
     ActiveNetlistDocument, open_netlist_dependency_from_root_in,
 };
@@ -23,7 +25,7 @@ const DECK: &str = "engineer's deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
 fn design_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state = hierarchy_reference::build().state;
-    app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
+    app.state.seed_test_deck(DECK);
     app.state.workbench.activate(Workspace::Design);
     app
 }
@@ -44,7 +46,7 @@ fn deck_in_front_app() -> RSpiceApp {
 /// Netlist page, drawn.
 fn include_in_front_app() -> RSpiceApp {
     let mut app = design_app();
-    seed_owned_dependency(&mut app.state.model, &mut app.state.code.netlist);
+    seed_deck_with_include(&mut app.state.model, &mut app.state.code.netlist);
     app.state.workbench.activate(Workspace::Netlist);
     let state = &mut app.state;
     open_netlist_dependency_from_root_in(
@@ -53,7 +55,7 @@ fn include_in_front_app() -> RSpiceApp {
         &mut state.code.netlist_open_documents,
         &mut state.runs,
         ActiveNetlistDocument::OwnedSource,
-        "models/resistor.inc",
+        DECK_INCLUDE,
     )
     .expect("the include opens");
     let ctx = themed_context();

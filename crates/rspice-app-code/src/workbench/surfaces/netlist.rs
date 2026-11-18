@@ -1198,8 +1198,24 @@ mod tests {
         (harness, source_key)
     }
 
+    /// Open `text` as the deck at `C:/p/amp.cir`, in front.
+    fn open_test_deck(harness: &mut CodeHarness, text: &str) {
+        harness.state.netlist.open_deck = Some(
+            crate::workbench::documents::deck_files::OpenDeck::in_memory("C:/p/amp.cir", text),
+        );
+        assert!(crate::workbench::documents::deck_files::show_deck(
+            &mut harness.model,
+            &mut harness.state.netlist
+        ));
+    }
+
+    /// The open deck's text, as the session holds it.
+    fn deck_text(harness: &CodeHarness) -> &str {
+        &harness.state.netlist.open_deck.as_ref().unwrap().root.text
+    }
+
     #[test]
-    fn editable_source_and_generated_primary_coexist_without_overwrite() {
+    fn the_open_deck_and_the_generated_primary_coexist_without_overwrite() {
         let mut harness = harness();
         retain_generated(
             &mut harness.model,
@@ -1207,27 +1223,12 @@ mod tests {
             "generated\n.end\n",
         );
         let retained_generated = harness.model.netlist_artifacts.generated_source.clone();
-        harness.model.simulation.source.netlist_content =
-            harness.model.netlist_artifacts.generated_source.clone();
-
-        ownership::create_owned_source(
-            &mut harness.model,
-            &mut harness.state.netlist,
-            "top_override.sp",
-            crate::state::OwnedNetlistEditStrategy::OwnedSource,
-        )
-        .expect("create owned source");
-        assert_eq!(
-            harness.model.workspace.content.netlist_source.as_deref(),
-            Some(retained_generated.as_str())
-        );
+        open_test_deck(&mut harness, "deck\n.end\n");
         assert!(
-            crate::workbench::documents::netlist_document::replace_owned_source(
+            crate::workbench::documents::netlist_document::edit_deck_file(
                 &mut harness.model,
                 &mut harness.state.netlist,
-                &mut harness.state.netlist_open_documents,
-                &mut harness.wb,
-                "owned edit\n.end\n".to_owned()
+                "deck edit\n.end\n".to_owned()
             )
         );
 
@@ -1241,10 +1242,7 @@ mod tests {
             harness.model.simulation.source.netlist_content,
             retained_generated
         );
-        assert_eq!(
-            harness.model.workspace.content.netlist_source.as_deref(),
-            Some("owned edit\n.end\n")
-        );
+        assert_eq!(deck_text(&harness), "deck edit\n.end\n");
         assert!(
             !crate::workbench::documents::netlist_document::open_generated_primary_in(
                 &mut harness.model,
@@ -1254,29 +1252,30 @@ mod tests {
     }
 
     #[test]
-    fn opening_existing_owned_source_never_overwrites_its_bytes() {
+    fn showing_the_open_deck_never_overwrites_its_text() {
         let mut harness = harness();
         retain_generated(
             &mut harness.model,
             &mut harness.state.netlist,
             "new generated\n.end\n",
         );
-        harness.model.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
-
+        open_test_deck(&mut harness, "the deck\n.end\n");
         assert!(
-            crate::workbench::documents::netlist_document::open_owned_source_in(
+            crate::workbench::documents::netlist_document::open_generated_primary_in(
                 &mut harness.model,
                 &mut harness.state.netlist
             )
         );
+
+        assert!(crate::workbench::documents::deck_files::show_deck(
+            &mut harness.model,
+            &mut harness.state.netlist
+        ));
         assert_eq!(
             harness.model.simulation.source.netlist_content,
-            "retained owned\n.end\n"
+            "the deck\n.end\n"
         );
-        assert_eq!(
-            harness.model.workspace.content.netlist_source.as_deref(),
-            Some("retained owned\n.end\n")
-        );
+        assert_eq!(deck_text(&harness), "the deck\n.end\n");
     }
 
     #[test]
@@ -1362,10 +1361,7 @@ mod tests {
 
     fn ran_owned_deck(deck: &str) -> CodeHarness {
         let mut harness = harness();
-        harness.model.workspace.content.netlist_source = Some(deck.to_owned());
-        harness.model.simulation.source.netlist_content = deck.to_owned();
-        harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        harness.state.netlist.active_document_initialized = true;
+        open_test_deck(&mut harness, deck);
         harness.runs.manual_run.last_run_buffer = Some(deck.to_owned());
         harness.runs.manual_run.last_run_id = Some(7);
         seal_manual_run(&mut harness.model, 7, 0xAB, 4);
@@ -1395,10 +1391,13 @@ mod tests {
     #[test]
     fn run_strip_warns_once_the_working_deck_moves_past_the_run() {
         let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        harness.model.workspace.content.netlist_source =
-            Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
-        harness.model.simulation.source.netlist_content =
-            "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
+        assert!(
+            crate::workbench::documents::netlist_document::edit_deck_file(
+                &mut harness.model,
+                &mut harness.state.netlist,
+                "deck\nR1 out 0 2k\n.op\n.end\n".to_owned()
+            )
+        );
 
         assert_eq!(
             run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
@@ -1410,8 +1409,8 @@ mod tests {
     #[test]
     fn run_strip_states_the_run_in_flight_and_never_the_stale_baseline() {
         let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        harness.model.workspace.content.netlist_source =
-            Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
+        harness.state.netlist.open_deck.as_mut().unwrap().root.text =
+            "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
         seal_manual_run(&mut harness.model, 8, 0xCD, 5);
         harness.runs.manual_run.pending_manual_run_id = Some(8);
 

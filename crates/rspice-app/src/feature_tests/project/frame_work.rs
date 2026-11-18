@@ -474,18 +474,17 @@ fn the_overview_follows_what_changed_since_its_last_frame() {
 #[test]
 fn the_overview_counts_the_lines_of_the_deck_in_front() {
     let mut app = overview_app();
-    assert!(app.state.apply_imported_netlist(
-        "V1 out 0 1\n.op\n.end\n".to_owned(),
-        None,
-        "front_end.sp"
-    ));
+    assert!(
+        app.state
+            .open_test_deck("V1 out 0 1\n.op\n.end\n".to_owned(), None, "front_end.sp")
+    );
     // Importing a deck opens it in the netlist editor.
     show_overview(&mut app);
     let ctx = offscreen();
     let first = painted(&app_frame(&ctx, &mut app, Vec::new()));
     assert!(first.contains("SPICE \u{b7} 3 lines"), "{first}");
 
-    assert!(app.state.apply_imported_netlist(
+    assert!(app.state.open_test_deck(
         "* front end\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
         None,
         "front_end.sp"

@@ -16,7 +16,7 @@ use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::netlist_document::language::show_signature_help_at_cursor;
 use rspice_app_code::workbench::documents::netlist_document::{
-    OwnedNetlistReplacement, editor_id_in, replace_owned_sources_atomically,
+    OwnedNetlistReplacement, editor_id_in, replace_deck_files,
 };
 use rspice_app_code::workbench::documents::virtual_text_editor::context_menu_may_show;
 use rspice_app_workbench::workbench::framework::feature::{Cx, Feature};
@@ -35,19 +35,20 @@ fn deck_page() -> Replay {
     let typed = replay
         .app
         .state
-        .model
-        .workspace
-        .content
-        .netlist_source
-        .clone()
-        .expect("the project owns the deck");
-    replace_owned_sources_atomically(
+        .code
+        .netlist
+        .open_deck
+        .as_ref()
+        .expect("the deck is open")
+        .root
+        .text
+        .clone();
+    replace_deck_files(
         &mut replay.app.state.model,
         &mut replay.app.state.code.netlist,
-        &mut replay.app.state.code.netlist_open_documents,
         vec![OwnedNetlistReplacement::root(&typed, DECK.to_owned(), 1)],
     )
-    .expect("the project owns the deck");
+    .expect("the deck is open");
     replay.frames(Vec::new());
     assert_eq!(
         replay.app.state.model.simulation.source.netlist_content, DECK,

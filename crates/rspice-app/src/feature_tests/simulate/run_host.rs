@@ -113,8 +113,10 @@ fn a_frozen_host_keeps_the_compilation_and_the_netlist_code_shows() {
 
     let frozen = frozen_from(&mut app);
 
-    let shown = frozen.netlist_shown();
-    assert!(shown.settled && shown.comparison && !shown.owned_source);
+    assert!(
+        frozen.manual_deck().is_none(),
+        "a comparison in front is no deck to run"
+    );
     let held = app
         .state
         .code

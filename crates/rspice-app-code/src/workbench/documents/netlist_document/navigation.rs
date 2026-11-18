@@ -79,24 +79,29 @@ pub fn open_source_location(
         .active_dependency_root
         .unwrap_or(netlist.active_document);
     if let Some(source_path) = included_source {
-        let dependency_identity = canonical_root_document_in(model, netlist, root)
-            .and_then(|document| {
-                document.dependencies().iter().find(|dependency| {
-                    let locator = dependency.locator();
-                    locator
-                        .native_origin()
-                        .is_some_and(|origin| std::path::Path::new(origin) == source_path)
-                        || std::path::Path::new(locator.logical_identity()) == source_path
-                        || std::path::Path::new(locator.locator()) == source_path
+        // An include of the open deck is a file, named by its path.
+        let dependency_identity = if root == super::ActiveNetlistDocument::OwnedSource {
+            Ok(source_path.to_string_lossy().into_owned())
+        } else {
+            canonical_root_document_in(model, netlist, root)
+                .and_then(|document| {
+                    document.dependencies().iter().find(|dependency| {
+                        let locator = dependency.locator();
+                        locator
+                            .native_origin()
+                            .is_some_and(|origin| std::path::Path::new(origin) == source_path)
+                            || std::path::Path::new(locator.logical_identity()) == source_path
+                            || std::path::Path::new(locator.locator()) == source_path
+                    })
                 })
-            })
-            .map(|dependency| dependency.locator().logical_identity().to_owned())
-            .ok_or_else(|| {
-                format!(
-                    "Diagnostic source {} is no longer among the deck's included files.",
-                    source_path.display()
-                )
-            })?;
+                .map(|dependency| dependency.locator().logical_identity().to_owned())
+                .ok_or_else(|| {
+                    format!(
+                        "Diagnostic source {} is no longer among the deck's included files.",
+                        source_path.display()
+                    )
+                })
+        }?;
         open_netlist_dependency_from_root_in(
             model,
             netlist,

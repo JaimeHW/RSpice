@@ -1,5 +1,5 @@
-//! A diagnostic's place is stated one-based, and a deck's provenance speaks
-//! only when the deck needs attention.
+//! A diagnostic's place is stated one-based, and the generated deck's
+//! provenance speaks only when it needs attention.
 
 use super::*;
 use crate::workbench::code::tests::harness;
@@ -47,48 +47,5 @@ fn generated_provenance_speaks_only_when_the_deck_is_not_the_schematic() {
     assert_eq!(
         generated_state(&harness.model),
         Some(("Not generated yet", Problem::Warning))
-    );
-}
-
-#[test]
-fn owned_provenance_requires_exact_saved_and_validated_bytes() {
-    let mut harness = harness();
-    harness.model.simulation.source.netlist_content = "owned\n.end\n".to_owned();
-    let project_revision = harness.model.workspace.content.project.revision().get();
-    let digest = crate::state::content_digest(&harness.model.simulation.source.netlist_content);
-    harness.state.netlist.externally_saved_content_digest = Some(digest);
-    harness.model.netlist_artifacts.validation = Some(crate::state::NetlistValidationReceipt {
-        visible_content_digest: digest,
-        executable_source_digest: digest,
-        prepared_snapshot_digest: digest,
-        project_revision,
-        task_count: 1,
-        advisory_count: 0,
-    });
-
-    // Saved and validated is the ordinary state, and so is a dirty project —
-    // the document tab's marker owns that one.
-    assert_eq!(
-        owned_source_state(&harness.model, &harness.state.netlist, digest),
-        None
-    );
-    harness.model.workspace.content.netlist_source_dirty = true;
-    assert_eq!(
-        owned_source_state(&harness.model, &harness.state.netlist, digest),
-        None
-    );
-
-    // Edited since the validation receipt was taken: the receipt no longer
-    // describes these bytes, and the panel says so.
-    harness
-        .model
-        .simulation
-        .source
-        .netlist_content
-        .push_str("* edit\n");
-    let edited = crate::state::content_digest(&harness.model.simulation.source.netlist_content);
-    assert_eq!(
-        owned_source_state(&harness.model, &harness.state.netlist, edited),
-        Some("Not checked yet")
     );
 }

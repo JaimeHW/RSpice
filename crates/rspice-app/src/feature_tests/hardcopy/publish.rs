@@ -327,36 +327,21 @@ fn project_print_mapping_stage_is_transactional_until_publication_commit() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const PEER_DECK: &str = "* owned deck\n* a peer's edit\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+const DECK: &str = "* deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
 
 #[cfg(not(target_arch = "wasm32"))]
-const EDITED_DECK: &str = "* owned deck\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n";
+const EDITED_DECK: &str = "* deck\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n";
 
-/// Export open on the active schematic of a project that owns a top deck,
-/// with a sealed preview plan and no publication started.
+/// Export open on the active schematic of a project with a deck open, with
+/// a sealed preview plan and no publication started.
 #[cfg(not(target_arch = "wasm32"))]
-fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
-    use rspice_app_code::workbench::documents::netlist_document::{
-        begin_netlist_lifecycle_action_in, commit_netlist_lifecycle_action,
-    };
+fn export_open_on_a_project_with_a_deck() -> RSpiceApp {
     use rspice_app_state::state::{Point, Wire};
     use rspice_app_state::workbench::workspace::Workspace;
-    use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
     use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     let mut app = RSpiceApp::test_instance();
-    begin_netlist_lifecycle_action_in(
-        &app.state.model,
-        &mut app.state.code.netlist,
-        CodeSourceFileAction::New,
-    )
-    .expect("a new top deck is offered");
-    commit_netlist_lifecycle_action(
-        &mut app.state.model,
-        &mut app.state.code.netlist,
-        &mut app.state.code.netlist_open_documents,
-    )
-    .expect("the project owns a top deck");
+    app.state.seed_test_deck(DECK);
     app.state
         .model
         .schematic
@@ -395,16 +380,14 @@ fn assert_export_survived(app: &RSpiceApp, plan: &std::sync::Arc<HardcopyPlan>, 
     );
 }
 
-/// A live-session update and a netlist editor edit each commit a project
-/// transaction. Neither may take the export the operator started with it.
+/// An edit of the open deck may not take the export the operator started
+/// with it.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn netlist_transactions_keep_an_export_in_flight() {
-    use rspice_app_code::workbench::documents::netlist_document::replace_owned_source;
-    use rspice_app_state::workbench::app_state::model::LiveOwnedSource;
-    use rspice_app_workbench::workbench::framework::feature::CodePort;
+fn a_deck_edit_keeps_an_export_in_flight() {
+    use rspice_app_code::workbench::documents::netlist_document::edit_deck_file;
 
-    let mut app = export_open_on_a_netlist_owned_project();
+    let mut app = export_open_on_a_project_with_a_deck();
     app.state.hardcopy.hardcopy.busy = true;
     let plan = app
         .state
@@ -414,31 +397,21 @@ fn netlist_transactions_keep_an_export_in_flight() {
         .clone()
         .expect("sealed preview");
 
-    let shows_owned_root = app.state.code.shows_owned_root();
-    assert!(matches!(
-        app.state
-            .model
-            .apply_live_owned_source(PEER_DECK.to_owned(), shows_owned_root),
-        LiveOwnedSource::Applied(_)
-    ));
-    assert_eq!(
-        app.state.model.workspace.content.netlist_source.as_deref(),
-        Some(PEER_DECK)
-    );
-    assert_export_survived(&app, &plan, "a live-session update");
-
-    assert!(replace_owned_source(
+    assert!(edit_deck_file(
         &mut app.state.model,
         &mut app.state.code.netlist,
-        &mut app.state.code.netlist_open_documents,
-        &mut app.state.workbench,
         EDITED_DECK.to_owned()
     ));
     assert_eq!(
-        app.state.model.workspace.content.netlist_source.as_deref(),
+        app.state
+            .code
+            .netlist
+            .open_deck
+            .as_ref()
+            .map(|deck| deck.root.text.as_str()),
         Some(EDITED_DECK)
     );
-    assert_export_survived(&app, &plan, "a netlist editor edit");
+    assert_export_survived(&app, &plan, "a deck edit");
 }
 
 /// Reverting a document is a project transaction too, and one with nothing
@@ -454,7 +427,7 @@ fn reverting_a_document_keeps_an_export_in_flight() {
     };
     use rspice_app_state::state::{Point, Wire};
 
-    let mut app = export_open_on_a_netlist_owned_project();
+    let mut app = export_open_on_a_project_with_a_deck();
     let baseline = snapshot(&app.state).expect("the project snapshots");
     accept_loaded_project(&mut app.state, baseline, None);
     app.state
@@ -483,21 +456,21 @@ fn reverting_a_document_keeps_an_export_in_flight() {
     assert_export_survived(&app, &plan, "a revert");
 }
 
-/// An export started before a live-session update still writes its file and
-/// records its receipt, frame by frame, the way the application drives it.
+/// An export started before a deck edit still writes its file and records
+/// its receipt, frame by frame, the way the application drives it.
 ///
 /// The export starts where `publish_export` hands over once the save picker
 /// has answered: the destination is observed by the application's own export
 /// backend and the publication is authenticated from the sealed plan.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
+fn an_export_started_before_a_deck_edit_lands_its_file_and_receipt() {
     let path = std::env::temp_dir().join(format!(
         "rspice-hardcopy-live-update-{}-{}.pdf",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
-    let mut app = export_open_on_a_netlist_owned_project();
+    let mut app = export_open_on_a_project_with_a_deck();
     let destination = app
         .export_workflow_io
         .observe_destination(&path)
@@ -536,16 +509,13 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
     )
     .expect("the export starts");
 
-    let shows_owned_root =
-        rspice_app_workbench::workbench::framework::feature::CodePort::shows_owned_root(
-            &*app.state.code,
-        );
-    assert!(matches!(
-        app.state
-            .model
-            .apply_live_owned_source(PEER_DECK.to_owned(), shows_owned_root),
-        rspice_app_state::workbench::app_state::model::LiveOwnedSource::Applied(_)
-    ));
+    assert!(
+        rspice_app_code::workbench::documents::netlist_document::edit_deck_file(
+            &mut app.state.model,
+            &mut app.state.code.netlist,
+            EDITED_DECK.to_owned()
+        )
+    );
 
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
@@ -564,7 +534,7 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
         || FINALIZATION.with(|slot| slot.borrow().is_some());
     assert!(
         app.state.hardcopy.hardcopy.open && app.state.hardcopy.hardcopy.busy && job_active,
-        "the frame after the live update cancelled the export: {:?}",
+        "the frame after the deck edit cancelled the export: {:?}",
         app.state.hardcopy.hardcopy.error
     );
 

@@ -172,9 +172,9 @@ mod tests {
         NetlistDocument, NetlistDocumentId, SourceLocator,
     };
     use crate::workbench::code::tests::{CodeHarness, harness};
+    use crate::workbench::documents::deck_files::{OpenDeck, show_deck};
     use crate::workbench::documents::netlist_document::{
-        ActiveNetlistDocument, OwnedNetlistReplacement, replace_owned_sources_atomically,
-        undo_netlist_edit,
+        ActiveNetlistDocument, OwnedNetlistReplacement, replace_deck_files, undo_netlist_edit,
     };
 
     /// Choosing `section` for the card at `line`, as the shell commits it.
@@ -193,13 +193,13 @@ mod tests {
             ),
             None => OwnedNetlistReplacement::root(&rewrite.original, rewrite.replacement, 1),
         };
-        replace_owned_sources_atomically(
-            &mut harness.model,
-            &mut harness.state.netlist,
-            &mut harness.state.netlist_open_documents,
-            vec![edit],
-        )?;
+        replace_deck_files(&mut harness.model, &mut harness.state.netlist, vec![edit])?;
         Ok(rewrite.selected)
+    }
+
+    /// The open deck's text, as the session holds it.
+    fn deck_text(harness: &CodeHarness) -> &str {
+        &harness.state.netlist.open_deck.as_ref().unwrap().root.text
     }
 
     const ROOT: &str =
@@ -236,34 +236,12 @@ mod tests {
         .unwrap();
         let generated =
             NetlistDocument::from_generated(NetlistDocumentId::new(), artifact).unwrap();
-        let owned = generated
-            .create_editable_copy(NetlistDocumentId::new(), generated.content_digest())
-            .unwrap();
 
         let mut harness = harness();
-        harness.model.workspace.content.netlist_source = Some(root.to_owned());
-        harness.model.workspace.content.netlist_document = Some(owned.clone());
-        harness.model.workspace.content.netlist_descriptor =
-            Some(crate::state::OwnedNetlistDescriptor {
-                deck_id: uuid::Uuid::new_v4(),
-                artifact_name: "owned.cir".to_owned(),
-                strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
-                source_encoding: crate::state::NetlistTextEncoding::Utf8,
-                source_line_ending: crate::state::NetlistLineEnding::Lf,
-                imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
-                compatibility_reviewed: true,
-                execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-                external_file_sha256: None,
-                save_history: Vec::new(),
-                revision_history: Vec::new(),
-                owned_includes: Vec::new(),
-            });
         harness.model.netlist_artifacts.generated_source = root.to_owned();
         harness.model.netlist_artifacts.generated_document = Some(generated);
-        harness.state.netlist.owned_document = Some(owned);
-        harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        harness.state.netlist.active_document_initialized = true;
-        harness.model.simulation.source.netlist_content = root.to_owned();
+        harness.state.netlist.open_deck = Some(OpenDeck::in_memory("C:/p/corner.cir", root));
+        assert!(show_deck(&mut harness.model, &mut harness.state.netlist));
         harness
             .model
             .workspace
@@ -279,6 +257,7 @@ mod tests {
     #[test]
     fn sections_are_enumerated_from_retained_bytes_once_per_revision() {
         let mut harness = corner_deck_state(ROOT);
+        harness.state.netlist.active_document = ActiveNetlistDocument::Generated;
         refresh(
             &harness.model,
             &harness.state.netlist,
@@ -310,8 +289,7 @@ mod tests {
         );
 
         // A locator that leaves the closure leaves the cache with it.
-        harness.state.netlist.owned_document = None;
-        harness.model.workspace.content.netlist_document = None;
+        harness.model.netlist_artifacts.generated_document = None;
         refresh(
             &harness.model,
             &harness.state.netlist,
@@ -324,27 +302,23 @@ mod tests {
     fn choosing_a_section_rewrites_only_the_section_token_and_can_be_undone() {
         let mut harness = corner_deck_state(ROOT);
 
-        use_section(&mut harness, 2, "ff").expect("the owned root is editable");
+        use_section(&mut harness, 2, "ff").expect("the open deck is editable");
         assert_eq!(
-            harness.model.workspace.content.netlist_source.as_deref(),
-            Some("corner deck\n.lib \"corners.lib\" ff\nV1 out 0 1\nR1 out 0 rmodel\n.op\n.end\n"),
+            deck_text(&harness),
+            "corner deck\n.lib \"corners.lib\" ff\nV1 out 0 1\nR1 out 0 rmodel\n.op\n.end\n",
             "the locator, its quotes, and every other card stay exactly as \
              written"
         );
         assert!(
-            harness.model.workspace.content.netlist_source_dirty,
+            harness.state.netlist.open_deck.as_ref().unwrap().root.dirty,
             "a rewritten card is an unsaved change"
         );
 
-        undo_netlist_edit(
-            &mut harness.model,
-            &mut harness.state.netlist,
-            &mut harness.state.netlist_open_documents,
-        )
-        .expect("the rewrite is one journal entry");
+        undo_netlist_edit(&mut harness.model, &mut harness.state.netlist)
+            .expect("the rewrite is one journal entry");
         assert_eq!(
-            harness.model.workspace.content.netlist_source.as_deref(),
-            Some(ROOT),
+            deck_text(&harness),
+            ROOT,
             "undo must restore the card the deck was authored with"
         );
     }
@@ -370,8 +344,8 @@ mod tests {
             "a generated document is reviewed, not authored"
         );
         assert_eq!(
-            harness.model.workspace.content.netlist_source.as_deref(),
-            Some(ROOT),
+            deck_text(&harness),
+            ROOT,
             "a refused rewrite changes nothing"
         );
     }

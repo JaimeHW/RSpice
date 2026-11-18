@@ -249,11 +249,10 @@ fn run_checks_opens_and_checks_the_root_its_row_describes() {
 #[test]
 fn a_netlist_first_inspector_states_the_deck_as_the_overview_does() {
     let mut app = RSpiceApp::test_instance();
-    assert!(app.state.apply_imported_netlist(
-        "V1 out 0 1\n.op\n.end\n".to_owned(),
-        None,
-        "front_end.sp"
-    ));
+    assert!(
+        app.state
+            .open_test_deck("V1 out 0 1\n.op\n.end\n".to_owned(), None, "front_end.sp")
+    );
     let (state, _, _) = row(&mut app, "Source deck");
     assert_eq!(state, "Not validated");
 

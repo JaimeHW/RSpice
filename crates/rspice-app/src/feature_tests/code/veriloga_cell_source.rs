@@ -251,6 +251,7 @@ fn an_edited_project_wide_source_becomes_a_cell_view_once() {
 /// the move: the key it was written with names the same bytes.
 #[test]
 fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration() {
+    let mut deck = String::new();
     let text = legacy_project_text(EDITED_MODULE, |state| {
         let bundle = state
             .model
@@ -269,21 +270,17 @@ fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration
             &key,
             "sensor_bridge",
         );
-        state.model.workspace.content.netlist_source = Some(format!(
+        deck = format!(
             "bridge deck\nV1 inp 0 DC 1\nV2 inn 0 DC 0\nR1 out 0 1k\nX1 out inp inn sensor_bridge\n{directive}\n.op\n.end\n"
-        ));
+        );
     });
-    let deck = load(&text)
-        .file
-        .workspace
-        .netlist_source
-        .expect("the deck is kept as written");
     assert!(
         deck.contains("__rspice_project__/"),
         "the deck still names the source by the key it was written with"
     );
 
-    let app = install(load(&text));
+    let mut app = install(load(&text));
+    app.state.seed_test_deck(deck);
     let mut controller = rspice_app_runs::simulation::controller::SimulationController::new();
     controller
         .validate_manual_deck_document(&app.state)
@@ -1091,7 +1088,8 @@ fn deck_naming(app: &RSpiceApp, reference: &CellViewRef, module: &str) -> String
 fn open_in_design_from_a_netlist_dependency_row_opens_the_tab() {
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
-    app.state.model.workspace.content.netlist_source = Some(deck_naming(&app, &reference, "gain"));
+    app.state
+        .seed_test_deck(deck_naming(&app, &reference, "gain"));
     app.state.workbench.activate(Workspace::Netlist);
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);

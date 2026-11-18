@@ -1822,8 +1822,7 @@ mod tests {
     #[test]
     fn generated_and_manual_runs_have_separate_drc_readiness() {
         let mut state = runnable_state();
-        state.model.workspace.content.netlist_source =
-            Some("V1 in 0 1\nR1 in 0 1k\n.end\n".to_string());
+        state.seed_test_deck("V1 in 0 1\nR1 in 0 1k\n.end\n");
         publish_drc_result(
             &mut state,
             drc_result(DrcViolationType::MissingGround, None),
@@ -1943,17 +1942,9 @@ mod tests {
         assert!(state.application_modal_open());
         state.code.netlist.find.open = false;
 
-        state.code.netlist.ownership_dialog.open = true;
-        assert!(state.application_modal_open());
-        state.code.netlist.ownership_dialog.open = false;
-
         state.code.netlist.comparison_dialog.open = true;
         assert!(state.application_modal_open());
         state.code.netlist.comparison_dialog.open = false;
-
-        state.code.netlist.save_dialog.open = true;
-        assert!(state.application_modal_open());
-        state.code.netlist.save_dialog.open = false;
 
         state.code.netlist.export_dialog.open = true;
         assert!(state.application_modal_open());

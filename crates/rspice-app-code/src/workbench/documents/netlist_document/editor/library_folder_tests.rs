@@ -38,9 +38,12 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
     std::fs::write(&path, source).expect("write deck");
 
     let mut harness = harness();
-    harness.model.workspace.content.netlist_source_path = Some(path);
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.model.simulation.source.netlist_content = source.to_owned();
+    harness.state.netlist.open_deck =
+        Some(crate::workbench::documents::deck_files::OpenDeck::in_memory(path, source));
+    assert!(crate::workbench::documents::deck_files::show_deck(
+        &mut harness.model,
+        &mut harness.state.netlist
+    ));
     let revision = harness.state.netlist.revision;
     validate_visible_source_in(
         &harness.model,

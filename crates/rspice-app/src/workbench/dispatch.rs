@@ -743,7 +743,7 @@ mod tests {
         assert!(!app.state.model.simulation.execution.trigger_simulation);
         assert!(!app.state.runs.preflight.take_run_and_queue_request());
 
-        assert!(app.state.apply_imported_netlist(
+        assert!(app.state.open_test_deck(
             "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
             None,
             "standalone.cir"

@@ -199,11 +199,7 @@ fn open_in_results_opens_the_run_in_the_frame_it_is_released() {
     const DECK: &str = "* strip check\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";
     let mut app = app_with_prepared_run(RunOrigin::ManualDeck);
     let run = app.state.model.simulation.retained.runs[0].id;
-    app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
-    app.state.model.simulation.source.netlist_content = DECK.to_owned();
-    app.state.code.netlist.active_document =
-        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
-    app.state.code.netlist.active_document_initialized = true;
+    app.state.seed_test_deck(DECK);
     app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
     app.state.runs.manual_run.last_run_id = Some(run);
     app.state.model.simulation.view.active_run_idx = None;

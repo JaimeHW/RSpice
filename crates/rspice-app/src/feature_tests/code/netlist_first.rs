@@ -27,7 +27,7 @@ pub(super) fn netlist_first_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     assert!(
         app.state
-            .apply_imported_netlist(DECK.to_owned(), None, "front_end.sp")
+            .open_test_deck(DECK.to_owned(), None, "front_end.sp")
     );
     assert!(app.state.is_netlist_first_without_schematic());
     app
@@ -49,7 +49,7 @@ fn truncated_netlist_first_app() -> RSpiceApp {
     }
     deck.push_str(".op\n.end\n");
     let mut app = RSpiceApp::test_instance();
-    assert!(app.state.apply_imported_netlist(deck, None, "ladder.sp"));
+    assert!(app.state.open_test_deck(deck, None, "ladder.sp"));
     assert!(app.state.is_netlist_first_without_schematic());
     app
 }

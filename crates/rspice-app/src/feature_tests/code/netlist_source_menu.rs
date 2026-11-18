@@ -4,9 +4,7 @@
 use crate::workbench::{RSpiceApp, features};
 use egui::os::OperatingSystem;
 use rspice_app_code::workbench::code::CodeFeature;
-use rspice_app_code::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, open_run_deck_snapshot_in,
-};
+use rspice_app_code::workbench::documents::netlist_document::open_run_deck_snapshot_in;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use rspice_app_code::workbench::surfaces::netlist::source_menu::SourceMenuLookup;
 use rspice_app_code::workbench::surfaces::netlist::{prepare_workspace, show_prepared};
@@ -61,10 +59,7 @@ fn deck_page(page: DeckPage, project_open: bool) -> RSpiceApp {
     }
     app.state.workbench.workspace = Workspace::Netlist;
     if !matches!(page, DeckPage::Empty) {
-        app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
-        app.state.model.simulation.source.netlist_content = DECK.to_owned();
-        app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        app.state.code.netlist.active_document_initialized = true;
+        app.state.seed_test_deck(DECK.to_owned());
     }
     if matches!(page, DeckPage::RunSnapshot) {
         app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());

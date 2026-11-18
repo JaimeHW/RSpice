@@ -17,6 +17,16 @@ fn show_state(ui: &mut Ui, harness: &mut CodeHarness) -> egui::Response {
     )
 }
 
+/// Open `text` as the deck at `path`, in front of the editor.
+fn open_deck(harness: &mut CodeHarness, path: impl Into<PathBuf>, text: impl Into<String>) {
+    harness.state.netlist.open_deck =
+        Some(crate::workbench::documents::deck_files::OpenDeck::in_memory(path, text));
+    assert!(crate::workbench::documents::deck_files::show_deck(
+        &mut harness.model,
+        &mut harness.state.netlist
+    ));
+}
+
 /// The editor's layout at the size it opens at.
 const FONT_SIZE: f32 = 11.0;
 const GUTTER_W: f32 = 47.0;
@@ -52,10 +62,7 @@ fn hover_rasters(
     Option<super::super::language::NetlistValueHover>,
 ) {
     let mut harness = harness();
-    harness.model.workspace.content.netlist_source = Some(HOVER_DECK.to_owned());
-    harness.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.state.netlist.active_document_initialized = true;
+    open_deck(&mut harness, "C:/p/deck.cir", HOVER_DECK.to_owned());
 
     let geometry = std::cell::Cell::new((egui::Pos2::ZERO, 0.0_f32));
     let size = egui::vec2(width, 220.0);
@@ -161,13 +168,10 @@ fn editor_diagnostic_pipeline_has_no_panic_shortcuts() {
 fn completion_reaches_a_document_that_has_content_in_it() {
     let mut harness = harness();
     let source = "test deck\n.tr";
-    harness.model.workspace.content.netlist_source = Some(source.to_owned());
-    harness.model.simulation.source.netlist_content = source.to_owned();
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.state.netlist.active_document_initialized = true;
+    open_deck(&mut harness, "C:/p/deck.cir", source.to_owned());
     assert!(
         super::super::active_netlist_source_is_editable_in(&harness.model, &harness.state.netlist),
-        "fixture must be an editable owned document"
+        "the open deck is editable"
     );
 
     let context = egui::Context::default();
@@ -495,94 +499,6 @@ fn live_lint_uses_abort_aware_parser_contract() {
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
     assert!(diagnostics[0].message.contains("cancelled"));
-}
-
-/// A parameter override, shown in the editor as its own lines, over a
-/// retained generated base.
-fn parameter_override_state(base: &str, authored: &str) -> CodeHarness {
-    let provenance = crate::state::GeneratedProvenance::try_new(
-        "netlist-editor-override-test",
-        crate::state::GenerationInput::new(
-            crate::product::ObjectRevision::INITIAL,
-            crate::state::content_digest("netlist-editor-override-input"),
-        ),
-    )
-    .unwrap();
-    let artifact = crate::state::GeneratedArtifact::try_from_utf8(
-        provenance,
-        base.as_bytes().to_vec(),
-        Vec::new(),
-        Vec::new(),
-    )
-    .unwrap();
-    let generated = crate::state::NetlistDocument::from_generated(
-        crate::state::NetlistDocumentId::new(),
-        artifact,
-    )
-    .unwrap();
-    let mut owned = generated
-        .create_editable_copy(
-            crate::state::NetlistDocumentId::new(),
-            generated.content_digest(),
-        )
-        .unwrap();
-    owned
-        .replace_editable_source(owned.content_digest(), authored.as_bytes().to_vec())
-        .unwrap();
-    let mut harness = harness();
-    harness.model.workspace.content.netlist_source = Some(authored.to_owned());
-    harness.model.workspace.content.netlist_document = Some(owned.clone());
-    harness.model.workspace.content.netlist_descriptor =
-        Some(crate::state::OwnedNetlistDescriptor {
-            deck_id: uuid::Uuid::new_v4(),
-            artifact_name: "corner.cir".to_owned(),
-            strategy: crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
-            source_encoding: crate::state::NetlistTextEncoding::Utf8,
-            source_line_ending: crate::state::NetlistLineEnding::Lf,
-            imported_dialect: None,
-            compatibility_reviewed: false,
-            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-            external_file_sha256: None,
-            save_history: Vec::new(),
-            revision_history: Vec::new(),
-            owned_includes: Vec::new(),
-        });
-    harness.state.netlist.owned_document = Some(owned);
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.model.simulation.source.netlist_content = authored.to_owned();
-    harness
-}
-
-/// A parameter override is validated as the deck it executes as — the
-/// base with the override spliced in before `.end` — and its error is
-/// reported on the override's own line, not on the line it lands on in
-/// that deck.
-#[test]
-fn a_parameter_override_error_is_reported_on_its_own_line() {
-    let base = "* generated\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
-    let authored = "* corner\n.temp -273.15\n";
-    let mut harness = parameter_override_state(base, authored);
-
-    let revision = harness.state.netlist.revision;
-    validate_visible_source_in(
-        &harness.model,
-        &mut harness.state.netlist,
-        &harness.state.code_workspace.include_resolutions,
-        revision,
-    );
-    let error = harness
-        .state
-        .netlist
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-        .expect("a temperature below absolute zero is refused");
-    assert_eq!(
-        error.line,
-        Some(1),
-        "the override's second line, not the composed deck's sixth: {error:?}",
-    );
-    assert!(error.is_current());
 }
 
 /// A deck in the editor, validated the way the editor validates it.
@@ -1165,64 +1081,50 @@ fn editor_commit_rejects_generated_artifact_mutation() {
     harness.model.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();
     harness.state.netlist.revision = 4;
 
-    assert!(!commit_owned_source_edit(
+    commit_edit(
         &mut harness.model,
         &mut harness.state.netlist,
-        &mut harness.state.netlist_open_documents,
-        &mut harness.wb,
         &mut harness.runs,
         "silently edited\n.end\n",
         1,
-        2.5
-    ));
-    assert!(harness.model.workspace.content.netlist_source.is_none());
+        2.5,
+    );
+    assert!(harness.state.netlist.open_deck.is_none());
     assert_eq!(
         harness.model.simulation.source.netlist_content,
         "generated\n.op\n.end\n"
     );
-    assert!(!harness.model.workspace.content.netlist_source_dirty);
     assert_eq!(harness.state.netlist.revision, 4);
     assert!(harness.runs.manual_run.edited_lines.is_empty());
 }
 
 #[test]
-fn editor_commit_updates_only_an_existing_owned_source() {
+fn editor_commit_edits_the_open_deck_and_keeps_its_file() {
     let mut harness = harness();
-    harness.model.workspace.content.netlist_source = Some("owned\n.op\n.end\n".to_owned());
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.model.workspace.content.netlist_source_path =
-        Some(std::path::PathBuf::from("imported/owned.cir"));
-    harness.model.simulation.source.netlist_content = "owned\n.op\n.end\n".to_owned();
+    open_deck(&mut harness, "C:/p/amp.cir", "deck\n.op\n.end\n");
     harness.state.netlist.revision = 9;
 
-    assert!(commit_owned_source_edit(
+    commit_edit(
         &mut harness.model,
         &mut harness.state.netlist,
-        &mut harness.state.netlist_open_documents,
-        &mut harness.wb,
         &mut harness.runs,
-        "owned\n.tran 1n 1u\n.end\n",
+        "deck\n.tran 1n 1u\n.end\n",
         1,
-        7.25
-    ));
-    assert_eq!(
-        harness.model.workspace.content.netlist_source.as_deref(),
-        Some("owned\n.tran 1n 1u\n.end\n")
+        7.25,
     );
+    let deck = harness
+        .state
+        .netlist
+        .open_deck
+        .as_ref()
+        .expect("the deck stays open");
+    assert_eq!(deck.root.text, "deck\n.tran 1n 1u\n.end\n");
+    assert_eq!(deck.root.path, std::path::Path::new("C:/p/amp.cir"));
+    assert!(deck.root.dirty);
     assert_eq!(
         harness.model.simulation.source.netlist_content,
-        "owned\n.tran 1n 1u\n.end\n"
+        "deck\n.tran 1n 1u\n.end\n"
     );
-    assert_eq!(
-        harness
-            .model
-            .workspace
-            .content
-            .netlist_source_path
-            .as_deref(),
-        Some(std::path::Path::new("imported/owned.cir"))
-    );
-    assert!(harness.model.workspace.content.netlist_source_dirty);
     assert_eq!(harness.state.netlist.revision, 10);
     assert_eq!(harness.state.netlist.last_edit_time, 7.25);
     assert!(harness.runs.manual_run.edited_lines.contains(&1));
@@ -1233,10 +1135,7 @@ fn editor_commit_updates_only_an_existing_owned_source() {
 fn the_netlist_editor_draws_at_the_preferred_text_size() {
     let deck = "sized deck\nR1 a 0 1k\n.end\n".to_owned();
     let mut harness = harness();
-    harness.model.workspace.content.netlist_source = Some(deck.clone());
-    harness.model.simulation.source.netlist_content = deck;
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.state.netlist.active_document_initialized = true;
+    open_deck(&mut harness, "C:/p/deck.cir", deck);
     let context = egui::Context::default();
     crate::ui::Theme::default().apply(&context);
     crate::workbench::documents::editor_font::publish(&context, 18.0);
@@ -1277,10 +1176,7 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
         .chain(std::iter::once(".end\n".to_owned()))
         .collect();
     let mut harness = harness();
-    harness.model.workspace.content.netlist_source = Some(deck.clone());
-    harness.model.simulation.source.netlist_content = deck;
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.state.netlist.active_document_initialized = true;
+    open_deck(&mut harness, "C:/p/deck.cir", deck);
     let editor_id = editor_id_in(&harness.model, &harness.state.netlist);
 
     let context = egui::Context::default();
@@ -1358,11 +1254,7 @@ fn drawn_deck(
     mut each: impl FnMut(usize, &egui::Context, egui::Id),
 ) -> CodeHarness {
     let mut harness = harness();
-    harness.model.workspace.content.netlist_source = Some(source.to_owned());
-    harness.model.workspace.content.netlist_source_path = Some(PathBuf::from(path));
-    harness.model.simulation.source.netlist_content = source.to_owned();
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.state.netlist.active_document_initialized = true;
+    open_deck(&mut harness, path, source.to_owned());
     let context = egui::Context::default();
     crate::ui::Theme::default().apply(&context);
     let input = egui::RawInput {

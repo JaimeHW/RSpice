@@ -10,39 +10,29 @@
 //! here first. The engine's start, failure and retry belong to the browser's
 //! worker and are not replayed; the native engine is always ready.
 
+use egui::Key;
 use egui::accesskit::Role;
-use egui::{Key, Modifiers};
 
 use crate::feature_tests::replay::{PRIMARY, Replay, only};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 
-/// The deck the script types into its new source document.
+/// The deck the script types into the open deck.
 const DECK: &str = "* Engine recovery analytic check\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";
 
-/// The script's `author_deck`: the Netlist workspace's New source
-/// document opens its Logical path, Tab then Enter creates the deck and closes
-/// the form, and the editor takes the typed deck.
+/// The script's `author_deck`, from the deck being open on the Netlist
+/// page: the editor takes the typed deck.
 pub(super) fn author_deck(replay: &mut Replay) {
     replay.frames(Vec::new());
 
-    replay.click("Netlist", Role::Button);
-    replay.click("New source document", Role::Button);
-    replay.click("Logical path", Role::TextInput);
-    // The Create action follows the field in keyboard order.
-    replay.key(Key::Tab, Modifiers::NONE);
-    replay.key(Key::Enter, Modifiers::NONE);
     assert!(
         replay
             .app
             .state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .is_some(),
-        "Tab then Enter from Logical path creates the deck"
+            .open_test_deck("* recovery\n.end\n".to_owned(), None, "recovery.cir"),
+        "the deck opens"
     );
+    replay.frames(Vec::new());
     replay.click("Project SPICE netlist editor", Role::MultilineTextInput);
     replay.key(Key::A, PRIMARY);
     replay.type_text(DECK);
@@ -53,9 +43,8 @@ pub(super) fn author_deck(replay: &mut Replay) {
     );
 }
 
-/// `author_deck` and the native half of `run`: the Netlist workspace's
-/// New source document opens its Logical path, Tab then Enter creates the
-/// deck and closes the form, the editor takes the typed deck, Validate
+/// `author_deck` and the native half of `run`: the editor takes the typed
+/// deck, Validate
 /// source and Run deck run it, the finished run opens in Results, a press of
 /// the Task log tab shows its DONE row there, and the palette opens the
 /// Recovery page on its Create checkpoint.

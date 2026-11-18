@@ -119,11 +119,10 @@ fn revision_history_is_available_from_project_overview() {
 #[test]
 fn netlist_first_latest_run_leads_to_the_deck_rather_than_a_blocked_simulate() {
     let mut app = RSpiceApp::test_instance();
-    assert!(app.state.apply_imported_netlist(
-        "V1 out 0 1\n.op\n.end\n".to_owned(),
-        None,
-        "front_end.sp"
-    ));
+    assert!(
+        app.state
+            .open_test_deck("V1 out 0 1\n.op\n.end\n".to_owned(), None, "front_end.sp")
+    );
     app.state.workbench.workspace = Workspace::Project;
 
     let snapshot = snapshot_of(&mut app);
@@ -173,11 +172,10 @@ fn overview_run_action_opens_the_plan_without_starting_execution() {
 #[test]
 fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
     let mut app = RSpiceApp::test_instance();
-    assert!(app.state.apply_imported_netlist(
-        "V1 out 0 1\n.op\n.end\n".to_owned(),
-        None,
-        "front_end.sp"
-    ));
+    assert!(
+        app.state
+            .open_test_deck("V1 out 0 1\n.op\n.end\n".to_owned(), None, "front_end.sp")
+    );
     app.state.workbench.workspace = Workspace::Project;
 
     let snapshot = snapshot_of(&mut app);

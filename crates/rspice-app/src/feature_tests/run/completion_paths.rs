@@ -8,8 +8,7 @@ use rspice_app_state::state::{AnalysisResult, AnalysisResultSourceDomain, Analys
 #[test]
 fn controller_manual_run_receipt_survives_production_project_round_trip() {
     let mut state = AppState::default();
-    state.model.workspace.content.netlist_source =
-        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    state.seed_test_deck("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n");
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller

@@ -591,7 +591,7 @@ pub(super) fn populated_project_app() -> RSpiceApp {
 
 fn netlist_first_project_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    assert!(app.state.apply_imported_netlist(
+    assert!(app.state.open_test_deck(
         "Front-end bias ladder\nV1 in 0 1.8\nR1 in out 4.7k\nR2 out 0 12k\n.op\n.end\n".to_owned(),
         None,
         "front_end.sp"

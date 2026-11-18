@@ -63,7 +63,7 @@ fn project_operation_gate_covers_every_mutating_project_command() {
             "ungated: {command:?}"
         );
     }
-    for command in [CodeCommand::ImportNetlist, CodeCommand::ImportVerilogA] {
+    for command in [CodeCommand::OpenNetlist, CodeCommand::ImportVerilogA] {
         assert!(
             command
                 .declared_spec()
@@ -150,7 +150,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         );
     }
     for command in [
-        CodeCommand::ImportNetlist,
         CodeCommand::ImportVerilogA,
         CodeCommand::ExportNetlist,
         CodeCommand::GenerateNetlist,

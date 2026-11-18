@@ -13,10 +13,7 @@ fn netlist_first_app() -> RSpiceApp {
     const DECK: &str = "toolbar fixture\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
-    app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
-    app.state.model.simulation.source.netlist_content = DECK.to_owned();
-    app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    app.state.code.netlist.active_document_initialized = true;
+    app.state.seed_test_deck(DECK.to_owned());
     app
 }
 

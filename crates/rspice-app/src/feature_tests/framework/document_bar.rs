@@ -4,13 +4,11 @@
 
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
-use rspice_app_design::workbench::chrome::document_bar::design::icon_for_view;
-use rspice_app_state::product::ObjectRevision;
-use rspice_app_state::state::ViewType;
-use rspice_app_state::state::{
-    DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
-    NetlistDocumentId, SimulationRun, SourceLocator,
+use rspice_app_code::workbench::documents::netlist_document::fixtures::{
+    DECK_INCLUDE, seed_deck_with_include,
 };
+use rspice_app_design::workbench::chrome::document_bar::design::icon_for_view;
+use rspice_app_state::state::{SimulationRun, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::panels::WorkbenchIcon;
 use rspice_app_workbench::workbench::chrome::document_bar::*;
@@ -19,40 +17,9 @@ use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocument
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
 fn multi_document_netlist_state() -> AppState {
-    const ROOT: &str = "tabs\n.include \"models/resistor.inc\"\n.end\n";
-    const INCLUDE: &str = ".param r=1k\n";
-    let locator = SourceLocator::try_new("models/resistor.inc", "resistor.inc").unwrap();
-    let dependency = DependencyMetadata::unresolved_direct_to(0, "models/resistor.inc", locator)
-        .unwrap()
-        .resolve_utf8(INCLUDE.as_bytes().to_vec())
-        .unwrap();
-    let provenance = GeneratedProvenance::try_new(
-        "document-bar-test",
-        GenerationInput::new(
-            ObjectRevision::INITIAL,
-            rspice_app_state::state::content_digest("document-bar-input"),
-        ),
-    )
-    .unwrap();
-    let artifact = GeneratedArtifact::try_from_utf8(
-        provenance,
-        ROOT.as_bytes().to_vec(),
-        vec![dependency],
-        Vec::new(),
-    )
-    .unwrap();
-    let generated = NetlistDocument::from_generated(NetlistDocumentId::new(), artifact).unwrap();
-    let owned = generated
-        .create_editable_copy(NetlistDocumentId::new(), generated.content_digest())
-        .unwrap();
     let mut state = AppState::default();
     state.workbench.workspace = Workspace::Netlist;
-    state.model.netlist_artifacts.generated_source = ROOT.to_owned();
-    state.model.netlist_artifacts.generated_document = Some(generated);
-    state.code.netlist.owned_document = Some(owned.clone());
-    state.model.workspace.content.netlist_source = Some(ROOT.to_owned());
-    state.model.workspace.content.netlist_document = Some(owned);
-    state.model.simulation.source.netlist_content = ROOT.to_owned();
+    seed_deck_with_include(&mut state.model, &mut state.code.netlist);
     state
 }
 
@@ -125,7 +92,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
         &mut state.code.netlist_open_documents,
         &mut state.runs,
         rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource,
-        "models/resistor.inc",
+        DECK_INCLUDE,
     )
     .unwrap();
     rspice_app_code::workbench::documents::netlist_document::open_generated_primary_in(
@@ -152,17 +119,17 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
     ));
     assert!(descriptors[0].active);
 
-    let owned_dependency = descriptors[3].id.clone();
-    assert!(activate_document(&mut state, &owned_dependency));
+    let deck_include = descriptors[3].id.clone();
+    assert!(activate_document(&mut state, &deck_include));
     assert_eq!(
         state.code.netlist.active_document,
         rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
     );
     assert_eq!(
         state.code.netlist.active_dependency_identity.as_deref(),
-        Some("models/resistor.inc")
+        Some(DECK_INCLUDE)
     );
-    assert_eq!(active_document_id(&state), Some(owned_dependency.clone()));
+    assert_eq!(active_document_id(&state), Some(deck_include.clone()));
 
     let generated_dependency = descriptors[1].id.clone();
     let documents = netlist_workspace_documents(state.code.netlist_tabs(
@@ -177,7 +144,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
     ));
     assert_eq!(
         active_document_id(&state),
-        Some(owned_dependency),
+        Some(deck_include),
         "closing an inactive include must not switch the active editor"
     );
 }

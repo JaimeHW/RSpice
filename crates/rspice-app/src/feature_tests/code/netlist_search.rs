@@ -53,22 +53,11 @@ fn a_read_only_deck_is_found_in_but_offers_no_replace() {
         "a second status line in the body"
     );
 
-    rspice_app_code::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
-        &app.state.model,
-        &mut app.state.code.netlist,
-        rspice_app_code::workbench::documents::code_workspace::CodeSourceFileAction::New,
-    )
-    .unwrap();
-    rspice_app_code::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
-        &mut app.state.model,
-        &mut app.state.code.netlist,
-        &mut app.state.code.netlist_open_documents,
-    )
-    .unwrap();
+    app.state.seed_test_deck("* deck\nR1 a 0 1k\n.end\n");
     let names = find_dialog_names(&mut app);
     let says = |text: &str| names.iter().any(|name| name == text);
     assert!(says("Find and replace in source"), "{names:?}");
-    assert!(says("Replace"), "an owned deck offers no Replace");
+    assert!(says("Replace"), "an open deck offers no Replace");
 }
 
 /// The Find field is a control's height like the Scope select beside it,

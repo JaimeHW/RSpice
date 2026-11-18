@@ -507,13 +507,13 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
     };
     app.state.model.simulation.execution.run_intent =
         rspice_app_state::state::SimulationRunIntent::ManualDeck;
-    app.state.model.workspace.content.netlist_source = Some(deck(&app));
+    app.state.seed_test_deck(deck(&app));
 
     let ctx = themed_context();
     app.execute_command_key(CodeCommand::CompileVerilogA.key());
     frame(&ctx, &mut app, DESKTOP);
     wait_for_compile(&ctx, &mut app);
-    app.state.model.workspace.content.netlist_source = Some(deck(&app));
+    app.state.seed_test_deck(deck(&app));
     assert!(
         app.state
             .model

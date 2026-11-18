@@ -619,58 +619,17 @@ fn cursor_symbol_is_unicode_indexed_and_accepts_spice_identifier_punctuation() {
 
 const FIX_DECK: &str = "quick fix\nV1 out 0 1\nR1 out 0 1kk\n.op\n.end\n";
 
-/// An editable project-owned deck, validated as the editor validates it:
-/// one finding on `1kk` whose fix is bound to this exact revision and
-/// buffer. Returns the finding's identity.
+/// The open deck, validated as the editor validates it: one finding on
+/// `1kk` whose fix is bound to this exact revision and buffer. Returns the
+/// finding's identity.
 fn validated_fix_state() -> (CodeHarness, uuid::Uuid) {
-    let provenance = crate::state::GeneratedProvenance::try_new(
-        "language-quick-fix-test",
-        crate::state::GenerationInput::new(
-            crate::product::ObjectRevision::INITIAL,
-            crate::state::content_digest("language-quick-fix-input"),
-        ),
-    )
-    .unwrap();
-    let artifact = crate::state::GeneratedArtifact::try_from_utf8(
-        provenance,
-        FIX_DECK.as_bytes().to_vec(),
-        Vec::new(),
-        Vec::new(),
-    )
-    .unwrap();
-    let generated = crate::state::NetlistDocument::from_generated(
-        crate::state::NetlistDocumentId::new(),
-        artifact,
-    )
-    .unwrap();
-    let owned = generated
-        .create_editable_copy(
-            crate::state::NetlistDocumentId::new(),
-            generated.content_digest(),
-        )
-        .unwrap();
     let mut harness = harness();
-    harness.model.workspace.content.netlist_source = Some(FIX_DECK.to_owned());
-    harness.model.workspace.content.netlist_document = Some(owned.clone());
-    harness.model.workspace.content.netlist_descriptor =
-        Some(crate::state::OwnedNetlistDescriptor {
-            deck_id: uuid::Uuid::new_v4(),
-            artifact_name: "fix.sp".to_owned(),
-            strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
-            source_encoding: crate::state::NetlistTextEncoding::Utf8,
-            source_line_ending: crate::state::NetlistLineEnding::Lf,
-            imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
-            compatibility_reviewed: true,
-            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-            external_file_sha256: None,
-            save_history: Vec::new(),
-            revision_history: Vec::new(),
-            owned_includes: Vec::new(),
-        });
-    harness.model.netlist_artifacts.generated_document = Some(generated);
-    harness.state.netlist.owned_document = Some(owned);
-    harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    harness.model.simulation.source.netlist_content = FIX_DECK.to_owned();
+    harness.state.netlist.open_deck =
+        Some(crate::workbench::documents::deck_files::OpenDeck::in_memory("C:/p/fix.sp", FIX_DECK));
+    assert!(crate::workbench::documents::deck_files::show_deck(
+        &mut harness.model,
+        &mut harness.state.netlist
+    ));
     harness.state.netlist.revision = 7;
 
     let start = FIX_DECK.find("1kk").unwrap();

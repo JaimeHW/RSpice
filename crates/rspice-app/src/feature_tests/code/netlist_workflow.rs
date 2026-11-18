@@ -1,986 +1,332 @@
-//! The netlist workflow through the whole application: imports staged,
-//! reviewed and committed over a project replacement, decks opened as
-//! netlist-first projects, and imported decks applied to the open one.
+//! Decks through the whole application: a deck opens from its file, in a
+//! project of its own when none is open; Save writes it at once, in its own
+//! encoding and line endings; the project keeps where the deck is, never its
+//! text or its includes'; and the deck runs as the engine reads it, whatever
+//! dialect it is written in.
 
+#![cfg(not(target_arch = "wasm32"))]
+
+use std::path::{Path, PathBuf};
+
+use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use rspice_app_code::workbench::workflows::netlist_workflow::bundle::parse_generated_netlist_bundle;
-use rspice_app_code::workbench::workflows::netlist_workflow::fixtures::generated_bundle_fixture;
-use rspice_app_code::workbench::workflows::netlist_workflow::{
-    NetlistImportMetadata, NetlistImportMode, cancel_staged_netlist_import,
-    save_owned_netlist_source, sha256,
-};
+use rspice_app_code::workbench::documents::deck_files::LineEnding;
+use rspice_app_code::workbench::documents::netlist_document::edit_deck_file;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_runs::simulation::controller::SimulationController;
+use rspice_app_state::state::TextEncoding;
+use rspice_app_state::workbench::workspace::Workspace;
 
-#[test]
-fn launcher_drop_stages_a_new_netlist_project_review() {
-    let mut state = AppState::default();
-    let source = b"dropped deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+/// A folder of one test's files, removed with it.
+struct Folder(PathBuf);
 
-    assert!(state.stage_dropped_netlist_project(source.to_vec(), None, "dropped.cir".to_owned()));
+impl Folder {
+    fn new() -> Self {
+        Self(rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir("decks"))
+    }
 
-    let review = state
-        .code
-        .netlist
-        .import_review
-        .as_ref()
-        .expect("launcher drop owns a staged review");
-    assert_eq!(
-        review.operation,
-        rspice_app_code::workbench::documents::netlist_document::NetlistImportOperation::OpenProject
-    );
-    assert_eq!(review.display_name, "dropped.cir");
-    assert_eq!(review.source.as_bytes(), source);
-    assert_eq!(review.blocking_issue_count(), 0);
+    /// Write `bytes` to `name` in the folder; the file's path.
+    fn write(&self, name: &str, bytes: impl AsRef<[u8]>) -> PathBuf {
+        let path = self.0.join(name);
+        std::fs::create_dir_all(path.parent().expect("a folder")).expect("the folder");
+        std::fs::write(&path, bytes).expect("the file is written");
+        path
+    }
 }
 
+impl Drop for Folder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A session with the deck at `path` open in a project of its own.
+fn opened(path: &Path) -> AppState {
+    let mut state = AppState::default();
+    assert!(
+        state.open_deck_at(path, true),
+        "the deck opens: {:?}",
+        state.prompt_text()
+    );
+    state
+}
+
+/// The application with the deck at `path` open in its project.
+fn app_with_deck(path: &Path) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let new_project = !app.state.platform.project_lifecycle.is_open();
+    assert!(
+        app.state.open_deck_at(path, new_project),
+        "the deck opens: {:?}",
+        app.state.prompt_text()
+    );
+    app
+}
+
+/// The deck in front prepared as Run deck prepares it and handed to the
+/// engine: the netlist the engine reads, or why it was refused.
+fn dispatched(state: &mut AppState) -> Result<String, String> {
+    state.model.simulation.execution.run_intent =
+        rspice_app_state::state::SimulationRunIntent::ManualDeck;
+    let mut controller = SimulationController::new();
+    controller
+        .validate_manual_deck_document(state)
+        .map_err(|error| error.to_string())?;
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(state)
+        .map_err(|error| error.to_string())?;
+    Ok(dispatch.executable_netlist().to_owned())
+}
+
+/// Save writes a Latin-1 deck with CRLF line endings back as Latin-1 with
+/// CRLF, the edit in it, at once: no dialog asks anything first.
 #[test]
-fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
-    use std::cell::RefCell;
-    use std::path::{Path, PathBuf};
-    use std::rc::Rc;
-
-    #[derive(Debug)]
-    struct CaptureIo {
-        bytes: Rc<RefCell<Vec<u8>>>,
-    }
-
-    impl rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo for CaptureIo {
-        fn show_save_dialog(
-            &self,
-            _config: rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig<
-                '_,
-            >,
-        ) -> Result<Option<PathBuf>, String> {
-            Ok(Some(PathBuf::from("converted.cir")))
-        }
-
-        fn write_text_file(&self, _path: &Path, contents: &str) -> Result<(), String> {
-            self.bytes.replace(contents.as_bytes().to_vec());
-            Ok(())
-        }
-
-        fn write_bytes_file_observed(
-            &self,
-            _destination: &rspice_app_services::workbench::workflows::export_workflow::ObservedExportDestination,
-            contents: &[u8],
-            _mime_type: &str,
-        ) -> Result<(), String> {
-            self.bytes.replace(contents.to_vec());
-            Ok(())
-        }
-
-        fn write_waveform_csv(
-            &self,
-            _dataset: &rspice_app_services::io::WaveformDataset,
-            _path: &Path,
-        ) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn saved_paths_are_reopenable(&self) -> bool {
-            false
-        }
-    }
-
-    let mut app = crate::workbench::RSpiceApp::test_instance();
-    let latin1_source = "* caf\u{00e9}\nV1 out 0 1\n.op\n.end\n";
-    assert!(
-        app.state
-            .apply_imported_netlist(latin1_source.to_owned(), None, "legacy.cir")
+fn a_latin1_crlf_deck_saves_as_latin1_crlf_with_the_edit_and_no_dialog() {
+    let folder = Folder::new();
+    let path = folder.write(
+        "legacy.cir",
+        b"* r\xe9sistance\r\nV1 out 0 1\r\nR1 out 0 1k\r\n.op\r\n.end\r\n",
     );
-    app.state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_mut()
-        .unwrap()
-        .source_encoding = rspice_app_state::state::NetlistTextEncoding::Latin1;
-    let utf8_source = "* caf\u{00e9} and \u{03a9}\nV1 out 0 1\n.op\n.end\n";
-    assert!(
-        rspice_app_code::workbench::documents::netlist_document::replace_owned_source(
-            &mut app.state.model,
-            &mut app.state.code.netlist,
-            &mut app.state.code.netlist_open_documents,
-            &mut app.state.workbench,
-            utf8_source.to_owned()
-        )
+    let mut app = app_with_deck(&path);
+    let deck = app.state.code.netlist.open_deck.as_ref().expect("open");
+    assert_eq!(deck.root.encoding, TextEncoding::Latin1);
+    assert_eq!(deck.root.line_ending, LineEnding::CrLf);
+    assert_eq!(
+        app.state.model.simulation.source.netlist_content,
+        "* r\u{e9}sistance\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+        "the editor's lines end as the editor ends them"
     );
-    assert!(app.state.model.netlist_artifacts.validation.is_none());
-    let imported_digest = app.state.code.netlist.externally_saved_content_digest;
-    let bytes = Rc::new(RefCell::new(Vec::new()));
-    let io = CaptureIo {
-        bytes: Rc::clone(&bytes),
-    };
-
-    assert!(save_owned_netlist_source(
+    assert!(edit_deck_file(
         &mut app.state.model,
         &mut app.state.code.netlist,
-        &mut app.state.workbench,
-        &io,
-        true,
-        rspice_app_state::state::NetlistTextEncoding::Utf8,
-        "",
+        "* r\u{e9}sistance\nV1 out 0 1\nR1 out 0 2k\n.op\n.end\n".to_owned()
     ));
 
-    assert_eq!(bytes.borrow().as_slice(), utf8_source.as_bytes());
-    assert!(app.state.model.netlist_artifacts.validation.is_none());
-    assert_eq!(
-        app.state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .unwrap()
-            .source_encoding,
-        rspice_app_state::state::NetlistTextEncoding::Latin1,
-    );
-    assert_eq!(
-        app.state.code.netlist.externally_saved_content_digest, imported_digest,
-        "a browser download is an independent copy, not a canonical save acknowledgement"
-    );
-}
+    app.execute_command_key(ProjectCommand::Save.key());
 
-#[test]
-fn authenticated_generated_bundle_stages_and_commits_retained_closure() {
-    let bytes = generated_bundle_fixture();
-    let parsed = parse_generated_netlist_bundle(&bytes).expect("authenticated bundle");
-    assert_eq!(parsed.dependencies.len(), 2);
     assert_eq!(
-        parsed.dependencies[0].authority(),
-        rspice_app_state::state::DependencySourceAuthority::Vendor
+        std::fs::read(&path).expect("the deck"),
+        b"* r\xe9sistance\r\nV1 out 0 1\r\nR1 out 0 2k\r\n.op\r\n.end\r\n".to_vec()
     );
-    assert_eq!(
-        parsed.dependencies[1].authority(),
-        rspice_app_state::state::DependencySourceAuthority::TechnologyPackage
-    );
-    assert!(parsed.expanded_source.contains(".model base nmos level=1"));
+    assert!(!app.state.application_modal_open(), "Save opened a dialog");
+    assert!(!app.state.workbench.confirmation_dialog.visible);
     assert!(
-        parsed
-            .expanded_source
-            .contains(".model core nmos level=1 vto=0.45")
-    );
-    assert!(
-        !parsed
-            .expanded_source
-            .to_ascii_lowercase()
-            .contains(".include")
-    );
-
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        bytes,
-        None,
-        "portable-run.zip".to_owned()
-    ));
-    let review = state.code.netlist.import_review.as_ref().unwrap();
-    assert!(review.archive_import);
-    assert_eq!(review.display_name, "portable-run.spice");
-    assert!(review.source_path.is_none());
-    assert_eq!(review.dependencies.len(), 2);
-
-    assert!(state.commit_staged_netlist_import());
-    assert!(state.model.workspace.content.netlist_source_path.is_none());
-    assert_eq!(
-        state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .map(|descriptor| descriptor.artifact_name.as_str()),
-        Some("portable-run.spice")
-    );
-    let document = state
-        .model
-        .workspace
-        .content
-        .netlist_document
-        .as_ref()
-        .unwrap();
-    assert!(document.dependency_graph_is_sealed());
-    assert_eq!(document.dependencies().len(), 2);
-}
-
-#[test]
-fn staged_import_is_cancel_safe_and_commits_only_the_reviewed_snapshot() {
-    let mut state = AppState::default();
-    let original_project = state.model.workspace.content.project.id();
-    let original_source = state.model.workspace.content.netlist_source.clone();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source = b"* staged\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
-
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source.clone(),
-        None,
-        "staged.cir".to_owned()
-    ));
-    assert_eq!(state.model.workspace.content.project.id(), original_project);
-    assert_eq!(
-        state.model.workspace.content.netlist_source,
-        original_source
-    );
-    assert!(state.code.netlist.import_review.is_some());
-
-    assert!(state.commit_staged_netlist_import());
-    assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
-        std::str::from_utf8(&source).ok()
-    );
-    assert!(state.code.netlist.import_review.is_none());
-    assert_eq!(
-        state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .and_then(|descriptor| descriptor.imported_dialect),
-        Some(rspice_app_state::state::NetlistSourceDialect::RSpice)
-    );
-}
-
-#[test]
-fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
-    let original = "* baseline\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
-    let modified = "* modified\nV1 out 0 2\nR1 out 0 2k\n.op\n.end\n";
-    let mut state = AppState::default();
-    assert!(state.apply_imported_netlist(original.to_owned(), None, "history.cir"));
-    let baseline_revision = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap()
-        .revision_history[0]
-        .document_revision;
-    assert!(
-        rspice_app_code::workbench::documents::netlist_document::replace_owned_source(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
-            &mut state.workbench,
-            modified.to_owned()
-        )
-    );
-    let modified_revision = state
-        .model
-        .workspace
-        .content
-        .netlist_document
-        .as_ref()
-        .unwrap()
-        .revision()
-        .get();
-    assert!(modified_revision > baseline_revision);
-
-    rspice_app_code::workbench::documents::netlist_document::compare_owned_revision(
-        &mut state.model,
-        &mut state.code.netlist,
-        0,
-    )
-    .expect("comparison opens");
-    assert!(
-        state
-            .model
-            .simulation
-            .source
-            .netlist_content
-            .contains("-V1 out 0 1")
-    );
-    rspice_app_code::workbench::documents::netlist_document::close_revision_comparison(
-        &mut state.model,
-        &mut state.code.netlist,
-    );
-    assert_eq!(state.model.simulation.source.netlist_content, modified);
-
-    rspice_app_code::workbench::documents::netlist_document::restore_owned_revision(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        0,
-    )
-    .expect("history restore commits");
-    assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
-        Some(original)
-    );
-    let restored_revision = state
-        .model
-        .workspace
-        .content
-        .netlist_document
-        .as_ref()
-        .unwrap()
-        .revision()
-        .get();
-    assert!(restored_revision > modified_revision);
-    let history = &state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap()
-        .revision_history;
-    assert_eq!(history.len(), 3);
-    assert_eq!(history[1].source, modified);
-    assert_eq!(history[2].source, original);
-    state
-        .model
-        .workspace
-        .content
-        .validate_simulation_configuration()
-        .expect("restored workspace validates");
-
-    let persisted = serde_json::to_vec(&state.model.workspace).expect("serialize workspace");
-    let restored: rspice_app_state::state::ProjectWorkspace =
-        serde_json::from_slice(&persisted).expect("deserialize workspace");
-    restored
-        .content
-        .validate_simulation_configuration()
-        .expect("persisted history validates");
-    assert_eq!(
-        restored
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .unwrap()
-            .revision_history,
-        *history
-    );
-}
-
-/// The import review starts from the dialect Preferences sets only when the
-/// deck names none; markers in the deck win over the preference.
-#[test]
-fn a_deck_naming_no_dialect_starts_from_the_preferred_one() {
-    for (source, expected) in [
-        (
-            &b"* plain\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"[..],
-            rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice,
-        ),
-        (
-            &b"* hspice deck\n.option post=2\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"[..],
-            rspice_app_state::state::NetlistSourceDialect::Hspice,
-        ),
-    ] {
-        let mut state = AppState::default();
-        state
-            .model
-            .preferences
-            .set_choice(
-                rspice_app_state::workbench::preferences::ChoicePreference::ImportedNetlistDialect,
-                1,
-            )
-            .expect("SPICE3 / ngspice is an importable dialect");
-        let transaction =
-            rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-                .expect("replacement transaction starts");
-        assert!(state.stage_netlist_import(
-            transaction,
-            NetlistImportMode::ImportIntoProject,
-            source.to_vec(),
-            None,
-            "deck.cir".to_owned()
-        ));
-        let review = state.code.netlist.import_review.as_ref().unwrap();
-        assert_eq!(review.selected_dialect, expected);
-    }
-}
-
-#[test]
-fn detected_foreign_dialect_requires_explicit_acceptance() {
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source = b"* hspice deck\n.option post=2\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
-    let retained_source = String::from_utf8(source.clone()).unwrap();
-
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source,
-        None,
-        "foreign.sp".to_owned()
-    ));
-    let review = state.code.netlist.import_review.as_ref().unwrap();
-    assert_eq!(
-        review.detected_dialect,
-        rspice_app_state::state::NetlistSourceDialect::Hspice
-    );
-    assert!(!review.can_commit());
-    assert_eq!(review.blocking_issue_count(), 0);
-
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.compatibility_accepted = true;
-    assert!(review.dialect_qualification().is_ok());
-    assert!(review.can_commit());
-    review.selected_dialect = rspice_app_state::state::NetlistSourceDialect::RSpice;
-    assert!(review.dialect_qualification().is_err());
-    assert!(!review.can_commit());
-    review.selected_dialect = rspice_app_state::state::NetlistSourceDialect::Hspice;
-    assert!(state.commit_staged_netlist_import());
-    assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
-        Some(retained_source.as_str())
-    );
-    let descriptor = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        descriptor.imported_dialect,
-        Some(rspice_app_state::state::NetlistSourceDialect::Hspice)
-    );
-    assert_eq!(
-        descriptor.execution_profile,
-        Some(rspice_app_state::state::NetlistExecutionProfile::HspiceDeclarativeV1)
-    );
-}
-
-#[test]
-fn only_source_authenticated_import_dialects_can_commit_after_acceptance() {
-    use rspice_app_state::state::NetlistSourceDialect;
-
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source = b"* standard subset\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source,
-        None,
-        "standard-subset.cir".to_owned()
-    ));
-
-    {
-        let review = state.code.netlist.import_review.as_mut().unwrap();
-        review.selected_dialect = NetlistSourceDialect::Spice3Ngspice;
-        review.compatibility_accepted = true;
-        assert!(review.dialect_qualification().is_ok());
-        assert!(review.can_commit());
-    }
-
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.selected_dialect = NetlistSourceDialect::Hspice;
-    review.compatibility_accepted = true;
-    assert!(review.dialect_qualification().is_err());
-    assert!(!review.can_commit());
-
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.selected_dialect = NetlistSourceDialect::Spectre;
-    review.compatibility_accepted = true;
-    assert!(review.dialect_qualification().is_err());
-    assert!(!review.can_commit());
-
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.selected_dialect = NetlistSourceDialect::Ads;
-    review.compatibility_accepted = true;
-    assert!(review.dialect_qualification().is_err());
-    assert!(!review.can_commit());
-
-    let dialect = NetlistSourceDialect::Unknown;
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.selected_dialect = dialect;
-    review.compatibility_accepted = true;
-    assert!(review.dialect_qualification().is_err(), "{dialect:?}");
-    assert!(!review.can_commit(), "{dialect:?}");
-
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.selected_dialect = NetlistSourceDialect::Pspice;
-    review.compatibility_accepted = true;
-    assert!(review.dialect_qualification().is_err());
-    assert!(!review.can_commit());
-
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.selected_dialect = NetlistSourceDialect::RSpice;
-    review.compatibility_accepted = false;
-    assert!(review.dialect_qualification().is_ok());
-    assert!(review.can_commit());
-    cancel_staged_netlist_import(&mut state.code.netlist, &mut state.platform);
-}
-
-#[test]
-fn spectre_spice_interoperability_import_preserves_source_and_profile() {
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source = b"simulator lang=spice\n* SPICE interoperability deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
-    let retained_source = String::from_utf8(source.clone()).unwrap();
-
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source,
-        None,
-        "spectre-spice.scs".to_owned()
-    ));
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    assert_eq!(
-        review.detected_dialect,
-        rspice_app_state::state::NetlistSourceDialect::Spectre
-    );
-    assert_eq!(review.blocking_issue_count(), 0);
-    review.compatibility_accepted = true;
-    assert!(review.can_commit());
-    assert!(state.commit_staged_netlist_import());
-    assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
-        Some(retained_source.as_str())
-    );
-    let descriptor = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        descriptor.imported_dialect,
-        Some(rspice_app_state::state::NetlistSourceDialect::Spectre)
-    );
-    assert_eq!(
-        descriptor.execution_profile,
-        Some(rspice_app_state::state::NetlistExecutionProfile::SpectreSpiceV1)
-    );
-}
-
-#[test]
-fn ads_spice_export_import_preserves_source_and_profile() {
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source = b"Options ResourceUsage=yes UseNutmegFormat=no TopDesignName=\"divider\"\n* ADS SPICE export\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
-    let retained_source = String::from_utf8(source.clone()).unwrap();
-
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source,
-        None,
-        "ads-spice-export.net".to_owned()
-    ));
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    assert_eq!(
-        review.detected_dialect,
-        rspice_app_state::state::NetlistSourceDialect::Ads
-    );
-    assert_eq!(review.blocking_issue_count(), 0);
-    review.compatibility_accepted = true;
-    assert!(review.can_commit());
-    assert!(state.commit_staged_netlist_import());
-    assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
-        Some(retained_source.as_str())
-    );
-    let descriptor = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        descriptor.imported_dialect,
-        Some(rspice_app_state::state::NetlistSourceDialect::Ads)
-    );
-    assert_eq!(
-        descriptor.execution_profile,
-        Some(rspice_app_state::state::NetlistExecutionProfile::AdsSpiceExportV1)
-    );
-}
-
-#[test]
-fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source = b"* declarative SPICE3 subset\n.param gain=2\nV1 in 0 1\nB1 out 0 V=log(exp({gain}))\nR1 out 0 1k\n.control\nop\nsave v(out)\n.endc\n.end\n".to_vec();
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source,
-        None,
-        "declarative-spice3.cir".to_owned()
-    ));
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    assert_eq!(
-        review.detected_dialect,
-        rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice
-    );
-    assert_eq!(review.blocking_issue_count(), 0);
-    review.selected_dialect = rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice;
-    review.compatibility_accepted = true;
-    assert!(review.can_commit());
-    assert!(state.commit_staged_netlist_import());
-
-    let descriptor = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        descriptor.imported_dialect,
-        Some(rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice)
-    );
-    assert!(descriptor.compatibility_reviewed);
-    assert_eq!(
-        descriptor.execution_profile,
-        Some(rspice_app_state::state::NetlistExecutionProfile::Spice3NgspiceV2)
-    );
-    let persisted = serde_json::to_vec(&state.model.workspace).unwrap();
-    let restored: rspice_app_state::state::ProjectWorkspace =
-        serde_json::from_slice(&persisted).unwrap();
-    assert_eq!(
-        restored
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .and_then(|descriptor| descriptor.execution_profile),
-        Some(rspice_app_state::state::NetlistExecutionProfile::Spice3NgspiceV2)
-    );
-}
-
-#[test]
-fn qualified_pspice_import_persists_exact_versioned_profile() {
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source = b"* PSpice declarative subset\nV1 in 0 AC 1\nE1 out 0 CHEBYSHEV {V(in)} = BP (800Hz 1.2kHz 2kHz 3kHz) .1dB 50dB\nR1 out 0 1k\n.probe V(out)\n.ac dec 10 100 10k\n.end\n"
-            .to_vec();
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source,
-        None,
-        "declarative-pspice.cir".to_owned()
-    ));
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    assert_eq!(
-        review.detected_dialect,
-        rspice_app_state::state::NetlistSourceDialect::Pspice
-    );
-    assert!(
-        review
-            .transformations
-            .iter()
-            .any(|entry| entry.contains("CHEBYSHEV"))
-    );
-    review.compatibility_accepted = true;
-    assert!(
-        review.can_commit(),
-        "issues={:?}; qualification={:?}",
-        review.issues,
-        review.dialect_qualification()
-    );
-    assert!(state.commit_staged_netlist_import());
-
-    let descriptor = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        descriptor.imported_dialect,
-        Some(rspice_app_state::state::NetlistSourceDialect::Pspice)
-    );
-    assert!(descriptor.compatibility_reviewed);
-    assert_eq!(
-        descriptor.execution_profile,
-        Some(rspice_app_state::state::NetlistExecutionProfile::PspiceDeclarativeV2)
-    );
-    let persisted = serde_json::to_vec(&state.model.workspace).unwrap();
-    let restored: rspice_app_state::state::ProjectWorkspace =
-        serde_json::from_slice(&persisted).unwrap();
-    assert_eq!(
-        restored
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .and_then(|descriptor| descriptor.execution_profile),
-        Some(rspice_app_state::state::NetlistExecutionProfile::PspiceDeclarativeV2)
-    );
-}
-
-fn quarantined_owned_ngspice_state() -> AppState {
-    let source = "* retained declarative source\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
-    let mut state = AppState::default();
-    state.open_project_session();
-    assert!(state.apply_imported_netlist(source.to_owned(), None, "legacy-ngspice.cir"));
-    let descriptor = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_mut()
-        .unwrap();
-    descriptor.imported_dialect =
-        Some(rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice);
-    descriptor.compatibility_reviewed = false;
-    descriptor.execution_profile = None;
-    state.model.workspace.content.netlist_source_dirty = false;
-    state.model.workspace.content.project_metadata_dirty = false;
-    state
-        .model
-        .workspace
-        .content
-        .validate_simulation_configuration()
-        .expect("quarantined source remains a valid, non-executable project");
-    state
-}
-
-#[test]
-fn quarantined_owned_source_requalifies_without_external_file_or_source_replacement() {
-    let mut state = quarantined_owned_ngspice_state();
-    let source = state.model.workspace.content.netlist_source.clone();
-    let history = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap()
-        .revision_history
-        .clone();
-
-    assert!(state.begin_owned_netlist_profile_review());
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    assert_eq!(
-        review.operation,
-        rspice_app_code::workbench::documents::netlist_document::NetlistImportOperation::RequalifyOwnedSource
-    );
-    assert!(review.selected_file_path.is_none());
-    assert_eq!(review.source, source.as_deref().unwrap());
-    review.compatibility_accepted = true;
-    assert!(review.can_commit());
-    assert!(state.commit_staged_netlist_import());
-
-    let descriptor = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        descriptor.execution_profile,
-        Some(rspice_app_state::state::NetlistExecutionProfile::Spice3NgspiceV2)
-    );
-    assert!(descriptor.compatibility_reviewed);
-    assert!(!descriptor.execution_profile_review_required());
-    assert_eq!(descriptor.revision_history, history);
-    assert_eq!(state.model.workspace.content.netlist_source, source);
-    assert!(state.model.workspace.content.project_metadata_dirty);
-    assert!(state.code.netlist.import_review.is_none());
-}
-
-#[test]
-fn owned_profile_review_rejects_source_revision_change_transactionally() {
-    let mut state = quarantined_owned_ngspice_state();
-    assert!(state.begin_owned_netlist_profile_review());
-    state
-        .code
-        .netlist
-        .import_review
-        .as_mut()
-        .unwrap()
-        .compatibility_accepted = true;
-    assert!(
-        rspice_app_code::workbench::documents::netlist_document::replace_owned_source(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
-            &mut state.workbench,
-            "* changed after review\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n".to_owned()
-        )
-    );
-
-    assert!(!state.commit_staged_netlist_import());
-    let descriptor = state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .unwrap();
-    assert!(descriptor.execution_profile.is_none());
-    assert!(!descriptor.compatibility_reviewed);
-    assert!(
-        state
+        !app.state
             .code
             .netlist
-            .import_review
+            .open_deck
             .as_ref()
-            .and_then(|review| review.error.as_deref())
-            .is_some_and(|error| error.contains("project changed"))
+            .unwrap()
+            .root
+            .dirty
     );
 }
 
+/// A deck something else changed since it was opened is not overwritten:
+/// Save says so and keeps the edit.
 #[test]
-fn imperative_ngspice_control_command_cannot_use_declarative_profile() {
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source =
-        b"* imperative ngspice\nV1 out 0 1\n.control\nop\nwrdata out.txt v(out)\n.endc\n.end\n"
-            .to_vec();
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source,
-        None,
-        "imperative-ngspice.cir".to_owned()
+fn a_deck_changed_on_disk_is_never_overwritten() {
+    let folder = Folder::new();
+    let path = folder.write("amp.cir", "* amp\nR1 out 0 1k\n.op\n.end\n");
+    let mut app = app_with_deck(&path);
+    assert!(edit_deck_file(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        "* amp\nR1 out 0 2k\n.op\n.end\n".to_owned()
     ));
-    let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.selected_dialect = rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice;
-    review.compatibility_accepted = true;
-    let error = review.dialect_qualification().unwrap_err();
-    assert!(error.contains("spice3-ngspice/2"));
-    assert!(error.contains("wrdata"));
-    assert!(!review.can_commit());
-    cancel_staged_netlist_import(&mut state.code.netlist, &mut state.platform);
+    std::fs::write(&path, "* amp\nR1 out 0 10k\n.op\n.end\n").expect("another writer");
+
+    app.execute_command_key(ProjectCommand::Save.key());
+
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the deck"),
+        "* amp\nR1 out 0 10k\n.op\n.end\n"
+    );
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("amp.cir changed on disk since you opened it, so it was not saved.")
+    );
+    assert!(
+        app.state
+            .code
+            .netlist
+            .open_deck
+            .as_ref()
+            .unwrap()
+            .root
+            .dirty
+    );
 }
 
+/// The project keeps where its deck is, relative to the project's folder
+/// when the deck is under it.
 #[test]
-fn semantic_loss_parser_diagnostics_block_import() {
-    let mut state = AppState::default();
-    let transaction =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
-            &mut state,
-        )
-        .expect("replacement transaction starts");
-    let source = b"* ignored option is unsafe\n.options definitely_unknown=7\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
-    assert!(state.stage_netlist_import(
-        transaction,
-        NetlistImportMode::ImportIntoProject,
-        source,
-        None,
-        "unknown-option.cir".to_owned()
-    ));
-    let review = state.code.netlist.import_review.as_ref().unwrap();
-    assert!(review.blocking_issue_count() > 0);
-    assert!(review.issues.iter().any(|issue| {
-        issue.severity
-            == rspice_app_code::workbench::documents::netlist_document::NetlistImportIssueSeverity::Blocking
-            && issue.message.contains("unknown-option")
-    }));
-    assert!(!review.can_commit());
-    cancel_staged_netlist_import(&mut state.code.netlist, &mut state.platform);
+fn the_project_file_keeps_a_deck_under_its_folder_by_its_relative_path() {
+    let folder = Folder::new();
+    let project = folder.0.join("amp.rspiceproj");
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project saves"
+    );
+    let deck = folder.write("decks/amp.cir", "* amp\nR1 out 0 1k\n.op\n.end\n");
+    assert!(app.state.open_deck_at(&deck, false));
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project saves"
+    );
+
+    let stored: String = std::fs::read_to_string(&project)
+        .expect("the project file")
+        .split_whitespace()
+        .collect();
+    assert!(
+        stored.contains(r#"{"kind":"file","path":"decks/amp.cir"}"#),
+        "the deck is stored by its relative path: {stored}"
+    );
+    assert!(
+        !stored.contains("R1out01k"),
+        "the deck's text is not in the project"
+    );
 }
 
+/// A deck that reads one library twice, for two of its sections, runs
+/// (NL-3).
 #[test]
-fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs() {
+fn a_deck_reading_two_sections_of_one_library_runs() {
+    let folder = Folder::new();
+    folder.write(
+        "m.lib",
+        "* corners\n.lib tt\n.model dmod d is=1e-14\n.endl tt\n\
+         .lib res\n.model dbig d is=1e-12\n.endl res\n",
+    );
+    let deck = folder.write(
+        "two.cir",
+        "* two sections\n.lib m.lib tt\n.lib m.lib res\nV1 in 0 1\nR1 in a 1k\n\
+         D1 a 0 dmod\nD2 a 0 dbig\n.op\n.end\n",
+    );
+    let mut state = opened(&deck);
+    let netlist = dispatched(&mut state).expect("the deck runs");
+    let netlist = netlist.to_lowercase();
+    assert!(
+        netlist.contains("dmod") && netlist.contains("dbig"),
+        "both sections are read: {netlist}"
+    );
+}
+
+/// A library whose section selects another section of itself is what the
+/// engine reads, not a cycle (NL-6).
+#[test]
+fn a_library_selecting_its_own_section_runs() {
+    let folder = Folder::new();
+    folder.write(
+        "m.lib",
+        "* corners\n.lib tt\n.lib m.lib common\n.model dmod d is=1e-14\n.endl tt\n\
+         .lib common\n.model dcom d is=2e-14\n.endl common\n",
+    );
+    let deck = folder.write(
+        "own.cir",
+        "* own section\n.lib m.lib tt\nV1 in 0 1\nR1 in a 1k\nD1 a 0 dmod\nD2 a 0 dcom\n.op\n.end\n",
+    );
+    let mut state = opened(&deck);
+    let netlist = dispatched(&mut state).expect("the deck runs");
+    assert!(netlist.to_lowercase().contains("dcom"), "{netlist}");
+}
+
+/// A 20 MiB include runs, and the project keeps none of its text (NL-4).
+#[test]
+fn a_large_include_runs_and_stays_out_of_the_project_file() {
+    const MARKER: &str = "* padding line of the large include\n";
+    let folder = Folder::new();
+    let mut include = MARKER.repeat(20 * 1024 * 1024 / MARKER.len() + 1);
+    include.push_str(".model dbig d is=1e-14\n");
+    folder.write("big.inc", include);
+    let deck = folder.write(
+        "big.cir",
+        "* big include\n.include big.inc\nV1 in 0 1\nR1 in a 1k\nD1 a 0 dbig\n.op\n.end\n",
+    );
+    let project = folder.0.join("big.rspiceproj");
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project saves"
+    );
+    assert!(app.state.open_deck_at(&deck, false));
+
+    dispatched(&mut app.state).expect("the deck runs");
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project saves"
+    );
+    let stored = std::fs::read_to_string(&project).expect("the project file");
+    assert!(
+        !stored.contains("padding line of the large include"),
+        "the include's text is not in the project"
+    );
+    assert!(stored.len() < 1024 * 1024, "{} bytes", stored.len());
+}
+
+/// An ngspice deck with a `.control` block and an HSPICE deck with
+/// `.option post=2` reach the engine as written: no profile stands between
+/// a deck and the engine (NL-5).
+#[test]
+fn ngspice_and_hspice_decks_reach_the_engine_as_written() {
+    for (name, deck) in [
+        (
+            "ngspice.cir",
+            "* ngspice\nV1 out 0 1\nR1 out 0 1k\n.op\n.control\nrun\nprint v(out)\n.endc\n.end\n",
+        ),
+        (
+            "hspice.sp",
+            "* hspice\n.option post=2\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+        ),
+    ] {
+        let folder = Folder::new();
+        let mut state = opened(&folder.write(name, deck));
+        let netlist = dispatched(&mut state).unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert!(
+            !netlist.to_lowercase().contains("profile"),
+            "{name}: {netlist}"
+        );
+    }
+}
+
+/// Opening a deck adds it to the open project and puts it in front; the
+/// project's runs stay.
+#[test]
+fn opening_a_deck_adds_it_to_the_open_project_and_keeps_its_runs() {
+    const DECK: &str = "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+    let folder = Folder::new();
+    let path = folder.write("bias.cir", DECK);
     let mut state = AppState::default();
     state.model.simulation.start_run();
-    assert!(state.model.simulation.retained.has_results());
 
-    let imported = state.apply_imported_netlist(
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
-        Some(std::path::PathBuf::from("bias.cir")),
-        "bias.cir",
-    );
+    assert!(state.open_deck_at(&path, false));
 
-    assert!(imported);
-    assert_eq!(
-        state.workbench.workspace,
-        rspice_app_state::workbench::workspace::Workspace::Netlist
-    );
-    assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
-        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n")
-    );
-    assert_eq!(
-        state.model.workspace.content.netlist_source_path.as_deref(),
-        Some(std::path::Path::new("bias.cir"))
-    );
-    assert!(state.model.workspace.content.netlist_source_dirty);
+    assert_eq!(state.workbench.workspace, Workspace::Netlist);
+    assert_eq!(state.model.simulation.source.netlist_content, DECK);
+    assert_eq!(state.model.workspace.content.decks.len(), 1);
+    assert!(state.model.workspace.content.decks_dirty);
     assert!(state.model.workspace.any_dirty());
-    assert!(state.model.workspace.content.netlist_document.is_some());
-    assert_eq!(
-        state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .map(|descriptor| descriptor.artifact_name.as_str()),
-        Some("bias.cir")
-    );
     state
         .model
         .workspace
         .content
         .validate_simulation_configuration()
-        .expect("imported canonical source must satisfy project persistence invariants");
-    assert!(state.model.simulation.retained.has_results());
+        .expect("a project with a deck is a valid project");
     assert_eq!(state.model.simulation.retained.runs.len(), 1);
-    assert!(state.platform.recent_files.is_empty());
 }
 
+/// With no project open, a deck opens in a new project named after it.
 #[test]
-fn opening_a_netlist_commits_an_independent_netlist_first_project() {
+fn opening_a_deck_with_no_project_makes_a_project_around_it() {
+    let folder = Folder::new();
+    let path = folder.write("bias.cir", "new\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n");
     let mut state = AppState::default();
     let original_project_id = state.model.workspace.content.project.id();
     state.model.simulation.start_run();
-    state.model.workspace.content.netlist_source = Some("old\n.op\n.end\n".to_owned());
 
-    assert!(state.apply_opened_netlist_project(
-        "new\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
-        Some(std::path::PathBuf::from("bias.cir")),
-        "bias.cir",
-        NetlistImportMetadata {
-            encoding: rspice_app_state::state::NetlistTextEncoding::Utf8,
-            line_ending: rspice_app_state::state::NetlistLineEnding::Lf,
-            dialect: rspice_app_state::state::NetlistSourceDialect::RSpice,
-            compatibility_reviewed: false,
-            raw_sha256: sha256(b"new\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"),
-        },
-        Vec::new()
-    ));
+    assert!(state.open_deck_at(&path, true));
 
     assert_ne!(
         state.model.workspace.content.project.id(),
@@ -988,102 +334,64 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
     );
     assert_eq!(state.model.workspace.content.project.name(), "bias");
     assert!(!state.model.simulation.retained.has_results());
-    assert_eq!(
-        state.model.workspace.content.netlist_source_path.as_deref(),
-        Some(std::path::Path::new("bias.cir"))
-    );
-    assert_eq!(
-        state.workbench.workspace,
-        rspice_app_state::workbench::workspace::Workspace::Netlist
-    );
+    assert_eq!(state.workbench.workspace, Workspace::Netlist);
 }
 
-/// The deck is installed into a candidate project that a failure discards,
-/// so the reason has to be carried out of it to reach the reader at all.
+/// A deck that cannot be read says why and leaves the project as it was.
 #[test]
-fn a_netlist_project_that_cannot_open_states_why() {
+fn a_deck_that_cannot_be_read_says_why_and_changes_nothing() {
+    let folder = Folder::new();
     let mut state = AppState::default();
     let original_project_id = state.model.workspace.content.project.id();
-    let source = "deck\nR1 out 0 1k\n.op\n.end\n";
 
-    assert!(!state.apply_opened_netlist_project(
-        source.to_owned(), // A path with no name gives the deck no identity to be filed under.
-        Some(std::path::PathBuf::new()),
-        "bias.cir",
-        NetlistImportMetadata {
-            encoding: rspice_app_state::state::NetlistTextEncoding::Utf8,
-            line_ending: rspice_app_state::state::NetlistLineEnding::Lf,
-            dialect: rspice_app_state::state::NetlistSourceDialect::RSpice,
-            compatibility_reviewed: false,
-            raw_sha256: sha256(source.as_bytes()),
-        },
-        Vec::new()
-    ));
+    assert!(!state.open_deck_at(&folder.0.join("missing.cir"), true));
 
     assert_eq!(
         state.model.workspace.content.project.id(),
         original_project_id
     );
-    let line = state
-        .model
-        .log_buffer
-        .entries()
-        .last()
-        .expect("the failure is recorded");
-    assert_eq!(
-        line.severity,
-        rspice_app_state::diagnostics::LogSeverity::Error
-    );
-    let reason = line
-        .message
-        .strip_prefix("Netlist project open failed: ")
-        .and_then(|rest| rest.strip_suffix(". The current project was left unchanged."))
-        .unwrap_or_else(|| panic!("the line states the failure: {}", line.message));
-    assert!(
-        reason.contains("logical identity"),
-        "the line states why: {}",
-        line.message
-    );
+    let prompt = state.prompt_text().expect("the reason is shown");
+    assert!(prompt.contains("could not be read"), "{prompt}");
 }
 
+/// A project open read-only takes no deck.
 #[test]
-fn importing_a_deck_refuses_read_only_projects_without_mutation() {
+fn opening_a_deck_refuses_a_read_only_project_without_change() {
+    let folder = Folder::new();
+    let path = folder.write("new.cir", "new\n.op\n.end\n");
     let mut state = AppState::default();
     state.model.safe_mode.active = true;
     state.model.safe_mode.applied = rspice_app_state::state::write_policy::LocalSafeModeOptions {
         open_project_read_only: true,
         ..Default::default()
     };
-    state.model.workspace.content.netlist_source = Some("old\n.op\n.end\n".to_owned());
 
-    assert!(!state.apply_imported_netlist("new\n.op\n.end\n".to_owned(), None, "new.cir"));
-    assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
-        Some("old\n.op\n.end\n")
-    );
+    assert!(!state.open_deck_at(&path, false));
+    assert!(state.model.workspace.content.decks.is_empty());
+    assert!(state.code.netlist.open_deck.is_none());
 }
 
+/// The open deck's unsaved edits are never dropped by opening another.
 #[test]
-fn empty_netlist_import_is_rejected_without_clearing_existing_state() {
-    let mut state = AppState::default();
-    state.model.workspace.content.netlist_source = Some("existing\n.op\n.end\n".to_owned());
-    state.model.workspace.content.netlist_source_path =
-        Some(std::path::PathBuf::from("existing.cir"));
-    state.model.simulation.source.netlist_content = "existing\n.op\n.end\n".to_owned();
+fn another_deck_waits_for_the_open_decks_edits_to_be_saved() {
+    let folder = Folder::new();
+    let first = folder.write("first.cir", "first\n.op\n.end\n");
+    let second = folder.write("second.cir", "second\n.op\n.end\n");
+    let mut state = opened(&first);
+    assert!(edit_deck_file(
+        &mut state.model,
+        &mut state.code.netlist,
+        "first edited\n.op\n.end\n".to_owned()
+    ));
 
-    let imported = state.apply_imported_netlist(" \n\t".to_owned(), None, "empty.cir");
+    assert!(!state.open_deck_at(&second, false));
 
-    assert!(!imported);
     assert_eq!(
-        state.model.workspace.content.netlist_source.as_deref(),
-        Some("existing\n.op\n.end\n")
+        state.prompt_text(),
+        Some("Save first.cir before opening another deck.")
     );
     assert_eq!(
-        state.model.workspace.content.netlist_source_path.as_deref(),
-        Some(std::path::Path::new("existing.cir"))
-    );
-    assert_eq!(
-        state.model.simulation.source.netlist_content,
-        "existing\n.op\n.end\n"
+        state.code.netlist.open_deck.as_ref().unwrap().root.text,
+        "first edited\n.op\n.end\n"
     );
 }
