@@ -98,6 +98,35 @@ impl StoredDeck {
     }
 }
 
+/// Where the engine reads a file of a deck the project keeps as text: the
+/// deck by its name, and each of its files by its path from the deck, all
+/// under one folder, `/`, that no disk has. An include line's relative path
+/// then names the file it names beside the deck, and nothing else.
+#[must_use]
+pub fn stored_file_identity(path: &str) -> PathBuf {
+    PathBuf::from(format!("/{}", path.trim_start_matches(['/', '\\'])))
+}
+
+/// The deck `name`, written `text`, and the files kept with it, as the
+/// engine reads them: the deck's identity, and every file, the deck first,
+/// at its identity.
+#[must_use]
+pub fn stored_deck_sources(
+    name: &str,
+    text: &str,
+    files: &[StoredDeckFile],
+) -> (PathBuf, Vec<(PathBuf, String)>) {
+    let root = stored_file_identity(name);
+    let mut sources = Vec::with_capacity(files.len() + 1);
+    sources.push((root.clone(), text.to_owned()));
+    sources.extend(
+        files
+            .iter()
+            .map(|file| (stored_file_identity(&file.path), file.text.clone())),
+    );
+    (root, sources)
+}
+
 /// The first `deck<N>.cir` that none of `taken` is called: the name a new
 /// stored deck takes.
 #[must_use]

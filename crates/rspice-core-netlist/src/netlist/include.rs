@@ -120,6 +120,9 @@ pub struct SealedSourceBundle {
     /// Native Unix paths remain case-sensitive; Windows drive/UNC identities
     /// are separator-normalized and case-folded.
     portable_identities: BTreeMap<String, PathBuf>,
+    /// Whether a request no edge names is looked for among the members from
+    /// its owner's folder: a deck kept as text, whose files carry no edges.
+    relative: bool,
 }
 
 impl std::fmt::Debug for SealedSourceBundle {
@@ -239,6 +242,28 @@ impl SealedSourceBundle {
         Ok(bundle)
     }
 
+    /// Construct a bundle that also resolves a request no edge names, from
+    /// its owner's folder among the members: a deck the project keeps as
+    /// text and the files kept beside it, by their paths from the deck,
+    /// which carry no edges. A request for a file that is not a member, an
+    /// absolute path among them, is not found.
+    pub fn try_new_relative(
+        sources: impl IntoIterator<Item = (PathBuf, String)>,
+    ) -> Result<Self, ParseError> {
+        Self::try_new_relative_with_edges(sources, std::iter::empty())
+    }
+
+    /// [`Self::try_new_relative`], with authenticated edges that resolve
+    /// first: the model sources a deck kept as text reads beside its own.
+    pub fn try_new_relative_with_edges(
+        sources: impl IntoIterator<Item = (PathBuf, String)>,
+        edges: impl IntoIterator<Item = SealedSourceEdge>,
+    ) -> Result<Self, ParseError> {
+        let mut bundle = Self::try_new_with_edges(sources, edges)?;
+        bundle.relative = true;
+        Ok(bundle)
+    }
+
     /// Number of authenticated source members in this bundle.
     pub fn len(&self) -> usize {
         self.sources.len()
@@ -276,15 +301,42 @@ impl SealedSourceBundle {
                 ),
             })?;
         let requested_path = normalize_source_path_literal(requested_path)?;
-        self.edges
-            .get(&(owner.clone(), requested_path.clone()))
-            .cloned()
+        if let Some(target) = self.edges.get(&(owner.clone(), requested_path.clone())) {
+            return Ok(target.clone());
+        }
+        if self.relative {
+            return self.resolve_relative(&owner, &requested_path);
+        }
+        Err(ParseError::Syntax {
+            line: 0,
+            message: format!(
+                "Dependency '{}' referenced by '{}' is not present in the authenticated sealed resolution graph",
+                requested_path,
+                owner.display()
+            ),
+        })
+    }
+
+    /// The member `requested` names from the folder of `owner`. An absolute
+    /// path names a file outside the members, which only a file on disk
+    /// could be.
+    fn resolve_relative(&self, owner: &Path, requested: &str) -> Result<PathBuf, ParseError> {
+        if is_portable_absolute_source_path(Path::new(requested))
+            || windows_drive_relative_suffix(requested).is_some()
+        {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "a deck kept in the project cannot read {requested}; add the file to this deck"
+                ),
+            });
+        }
+        let folder = owner.parent().unwrap_or(Path::new("/"));
+        self.canonical_member(&folder.join(requested))
             .ok_or_else(|| ParseError::Syntax {
                 line: 0,
                 message: format!(
-                    "Dependency '{}' referenced by '{}' is not present in the authenticated sealed resolution graph",
-                    requested_path,
-                    owner.display()
+                    "Include file not found: {requested} (searched the files kept with this deck)"
                 ),
             })
     }
@@ -3152,6 +3204,66 @@ R1 1 0 {selected}
         assert!(expanded.lines().all(|line| {
             parse_include_directive(line).is_none() && parse_lib_directive(line).is_none()
         }));
+    }
+
+    /// A deck kept as text reads the files kept beside it by their paths
+    /// from the file that names them, a section of a library too; an
+    /// absolute path, or a file it does not keep, is the error on the line
+    /// that names it.
+    #[test]
+    fn a_relative_bundle_reads_its_members_from_the_folder_of_the_file_naming_them() {
+        let root = PathBuf::from("/amp.cir");
+        let bundle = |deck: &str| {
+            SealedSourceBundle::try_new_relative([
+                (root.clone(), deck.to_owned()),
+                (
+                    PathBuf::from("/models/opamp.inc"),
+                    ".include \"../common/r.inc\"\nRop a 0 1k\n".to_owned(),
+                ),
+                (
+                    PathBuf::from("/common/r.inc"),
+                    "Rcommon a 0 2k\n".to_owned(),
+                ),
+                (
+                    PathBuf::from("/models/corners.lib"),
+                    ".lib tt\nRtt a 0 3k\n.endl tt\n.lib ff\nRff a 0 4k\n.endl ff\n".to_owned(),
+                ),
+            ])
+            .expect("the deck and its files")
+        };
+        let deck = "* amp\n.include models\\opamp.inc\n.lib \"models/corners.lib\" ff\n";
+
+        let expanded = IncludeProcessor::new_sealed(&root, bundle(deck))
+            .expand_content_with_abort(deck, &root, &NoAbort)
+            .expect("the deck's files are read from its folder");
+
+        for read in ["Rop", "Rcommon", "Rff"] {
+            assert!(expanded.contains(read), "{read} missing:\n{expanded}");
+        }
+        assert!(!expanded.contains("Rtt"), "{expanded}");
+
+        for (line, expected) in [
+            (
+                ".include \"C:/pdk/models.lib\"",
+                "a deck kept in the project cannot read C:/pdk/models.lib; add the file to this deck",
+            ),
+            (
+                ".include /pdk/models.lib",
+                "a deck kept in the project cannot read /pdk/models.lib; add the file to this deck",
+            ),
+            (
+                ".include models/absent.inc",
+                "Include file not found: models/absent.inc (searched the files kept with this deck)",
+            ),
+        ] {
+            let deck = format!("* amp\nR1 a 0 1k\n{line}\n");
+            let error = IncludeProcessor::new_sealed(&root, bundle(&deck))
+                .expand_content_with_abort(&deck, &root, &NoAbort)
+                .expect_err("the line names no file of the deck");
+            let message = error.to_string();
+            assert!(message.contains(expected), "{message}");
+            assert!(message.contains("amp.cir:3"), "{message}");
+        }
     }
 
     #[test]
