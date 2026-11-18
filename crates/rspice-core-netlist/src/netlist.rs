@@ -2445,7 +2445,7 @@ impl Netlist {
                     error => ParseError::Syntax {
                         line: 0,
                         message: format!(
-                            "failed to read SPEF file `{}`: {error}",
+                            "failed to read SPEF file {}: {error}",
                             display_source_path(&path)
                         ),
                     },
@@ -2460,13 +2460,13 @@ impl Netlist {
                 ParseWithAbortError::Parse(ParseError::Syntax { line, message }) => {
                     ParseError::Syntax {
                         line,
-                        message: format!("SPEF `{}`: {message}", display_source_path(&path)),
+                        message: format!("SPEF {}: {message}", display_source_path(&path)),
                     }
                     .into()
                 }
                 ParseWithAbortError::Parse(error) => ParseError::Syntax {
                     line: 0,
-                    message: format!("SPEF `{}`: {error}", display_source_path(&path)),
+                    message: format!("SPEF {}: {error}", display_source_path(&path)),
                 }
                 .into(),
             };
@@ -2476,7 +2476,7 @@ impl Netlist {
                 .apply_path_backed_with_abort(netlist, abort)
                 .map_err(contextualize)?;
             log::info!(
-                "SPEF `{}`: {} net(s), {} pin(s) rewired ({} skipped), {} R + {} L + {} C added",
+                "SPEF {}: {} net(s), {} pin(s) rewired ({} skipped), {} R + {} L + {} C added",
                 path.display(),
                 report.nets,
                 report.rewired_pins,

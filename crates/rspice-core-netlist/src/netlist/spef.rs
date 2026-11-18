@@ -304,7 +304,7 @@ impl SpefFile {
                             return Err(spef_annotation_error(
                                 conn.line,
                                 format!(
-                                    "*P connection on net `{}` is not a top-level node",
+                                    "*P connection on net '{}' is not a top-level node",
                                     net.name
                                 ),
                             ));
@@ -313,7 +313,7 @@ impl SpefFile {
                             return Err(spef_annotation_error(
                                 conn.line,
                                 format!(
-                                    "top-level port `{port}` on net `{}` is absent from the deck",
+                                    "top-level port '{port}' on net '{}' is absent from the deck",
                                     net.name
                                 ),
                             ));
@@ -327,7 +327,7 @@ impl SpefFile {
                     if strict {
                         return Err(spef_annotation_error(
                             conn.line,
-                            format!("*I connection on net `{}` is not an instance pin", net.name),
+                            format!("*I connection on net '{}' is not an instance pin", net.name),
                         ));
                     }
                     continue;
@@ -355,7 +355,7 @@ impl SpefFile {
                         if strict {
                             return Err(spef_annotation_error(
                                 conn.line,
-                                format!("pin {inst}:{pin} on net `{}`: {reason}", net.name),
+                                format!("pin {inst}:{pin} on net '{}': {reason}", net.name),
                             ));
                         }
                         report.skipped_pins += 1;
@@ -410,7 +410,7 @@ impl SpefFile {
                         return Err(spef_annotation_error(
                             cap.line,
                             format!(
-                                "capacitance on net `{}` must be finite and positive, got {}",
+                                "capacitance on net '{}' must be finite and positive, got {}",
                                 net.name, cap.farads
                             ),
                         ));
@@ -450,7 +450,7 @@ impl SpefFile {
                     return Err(spef_annotation_error(
                         cap.line,
                         format!(
-                            "capacitance record {} on net `{}` collapses to one node `{n1}`",
+                            "capacitance record {} on net '{}' collapses to one node '{n1}'",
                             cap.id, net.name
                         ),
                     ));
@@ -481,7 +481,7 @@ impl SpefFile {
                         return Err(spef_annotation_error(
                             res.line,
                             format!(
-                                "resistance on net `{}` must be finite and positive, got {}",
+                                "resistance on net '{}' must be finite and positive, got {}",
                                 net.name, res.ohms
                             ),
                         ));
@@ -514,7 +514,7 @@ impl SpefFile {
                     return Err(spef_annotation_error(
                         res.line,
                         format!(
-                            "resistance record {} on net `{}` collapses to one node `{n1}`",
+                            "resistance record {} on net '{}' collapses to one node '{n1}'",
                             res.id, net.name
                         ),
                     ));
@@ -548,7 +548,7 @@ impl SpefFile {
                         return Err(spef_annotation_error(
                             inductor.line,
                             format!(
-                                "inductance on net `{}` must be finite and positive, got {}",
+                                "inductance on net '{}' must be finite and positive, got {}",
                                 net.name, inductor.henries
                             ),
                         ));
@@ -587,7 +587,7 @@ impl SpefFile {
                     return Err(spef_annotation_error(
                         inductor.line,
                         format!(
-                            "inductance record {} on net `{}` collapses to one node `{n1}`",
+                            "inductance record {} on net '{}' collapses to one node '{n1}'",
                             inductor.id, net.name
                         ),
                     ));
@@ -627,7 +627,7 @@ impl SpefFile {
                 return Err(spef_annotation_error(
                     net.line,
                     format!(
-                        "net `{}` has no matching deck node, top-level port, or rewired instance pin",
+                        "net '{}' has no matching deck node, top-level port, or rewired instance pin",
                         net.name
                     ),
                 ));
@@ -636,7 +636,7 @@ impl SpefFile {
                 return Err(spef_annotation_error(
                     net.line,
                     format!(
-                        "net `{}` did not apply any supported R/L/C parasitic",
+                        "net '{}' did not apply any supported R/L/C parasitic",
                         net.name
                     ),
                 ));
@@ -659,7 +659,7 @@ impl SpefFile {
                 if strict {
                     return Err(spef_annotation_error(
                         net.line,
-                        format!("reduced net `{}` is absent from the deck", net.name),
+                        format!("reduced net '{}' is absent from the deck", net.name),
                     ));
                 }
                 continue;
@@ -687,7 +687,7 @@ impl SpefFile {
                     return Err(spef_annotation_error(
                         driver.line,
                         format!(
-                            "reduced-net driver on `{}` is not an instance pin",
+                            "reduced-net driver on '{}' is not an instance pin",
                             net.name
                         ),
                     ));
@@ -707,7 +707,7 @@ impl SpefFile {
                     return Err(spef_annotation_error(
                         driver.line,
                         format!(
-                            "driver {driver_instance}:{driver_pin} on reduced net `{}`: {reason}",
+                            "driver {driver_instance}:{driver_pin} on reduced net '{}': {reason}",
                             net.name
                         ),
                     ));
@@ -725,7 +725,7 @@ impl SpefFile {
                     if strict {
                         return Err(spef_annotation_error(
                             load.line,
-                            format!("load on reduced net `{}` is not an instance pin", net.name),
+                            format!("load on reduced net '{}' is not an instance pin", net.name),
                         ));
                     }
                     continue;
@@ -736,7 +736,7 @@ impl SpefFile {
                         return Err(spef_annotation_error(
                             load.line,
                             format!(
-                                "duplicate load `{instance}:{pin}` on reduced net `{}`",
+                                "duplicate load '{instance}:{pin}' on reduced net '{}'",
                                 net.name
                             ),
                         ));
@@ -750,7 +750,7 @@ impl SpefFile {
                         return Err(spef_annotation_error(
                             load.line,
                             format!(
-                                "driver `{driver_instance}:{driver_pin}` is also listed as a load on reduced net `{}`",
+                                "driver '{driver_instance}:{driver_pin}' is also listed as a load on reduced net '{}'",
                                 net.name
                             ),
                         ));
@@ -771,7 +771,7 @@ impl SpefFile {
                         return Err(spef_annotation_error(
                             load.line,
                             format!(
-                                "load {instance}:{pin} on reduced net `{}`: {reason}",
+                                "load {instance}:{pin} on reduced net '{}': {reason}",
                                 net.name
                             ),
                         ));
@@ -789,7 +789,7 @@ impl SpefFile {
                 if strict {
                     return Err(spef_annotation_error(
                         driver.line,
-                        format!("reduced net `{}` did not resolve any load pins", net.name),
+                        format!("reduced net '{}' did not resolve any load pins", net.name),
                     ));
                 }
                 continue;
@@ -974,7 +974,7 @@ fn next_reduced_node_name(
         suffix = suffix.checked_add(1).ok_or_else(|| {
             spef_annotation_error(
                 0,
-                format!("too many node-name collisions while lowering reduced net `{net}`"),
+                format!("too many node-name collisions while lowering reduced net '{net}'"),
             )
         })?;
     }
@@ -1016,7 +1016,7 @@ fn validate_node_reference(
             if !original_nodes.contains(&name.to_ascii_uppercase()) {
                 return Err(spef_annotation_error(
                     line,
-                    format!("node `{name}` is absent from the deck"),
+                    format!("node '{name}' is absent from the deck"),
                 ));
             }
         }
@@ -1024,7 +1024,7 @@ fn validate_node_reference(
             if index.is_empty() || !declared_nets.contains(&net.to_ascii_uppercase()) {
                 return Err(spef_annotation_error(
                     line,
-                    format!("subnode `{net}:{index}` does not belong to a declared *D_NET"),
+                    format!("subnode '{net}:{index}' does not belong to a declared *D_NET"),
                 ));
             }
         }
@@ -1033,7 +1033,7 @@ fn validate_node_reference(
             if !declared_pins.contains(&key) {
                 return Err(spef_annotation_error(
                     line,
-                    format!("pin node `{instance}:{pin}` has no matching *I connection"),
+                    format!("pin node '{instance}:{pin}' has no matching *I connection"),
                 ));
             }
         }
@@ -1056,20 +1056,20 @@ fn rewire_pin(
         .get(&upper)
         .or_else(|| element_index.get(&format!("X{upper}")))
         .copied()
-        .ok_or_else(|| format!("no element named `{inst}` in the deck"))?;
+        .ok_or_else(|| format!("no element named '{inst}' in the deck"))?;
 
     let element = &netlist.elements[element_idx];
     let terminal = terminal_index(element, subckt_ports, pin)
-        .ok_or_else(|| format!("pin `{pin}` not resolvable on `{}`", element.name))?;
+        .ok_or_else(|| format!("pin '{pin}' not resolvable on '{}'", element.name))?;
 
     let element = &mut netlist.elements[element_idx];
     let current = element
         .nodes
         .get(terminal)
-        .ok_or_else(|| format!("terminal {terminal} out of range on `{}`", element.name))?;
+        .ok_or_else(|| format!("terminal {terminal} out of range on '{}'", element.name))?;
     if !current.eq_ignore_ascii_case(net) {
         return Err(format!(
-            "terminal `{pin}` of `{}` connects to `{current}`, not net `{net}`",
+            "terminal '{pin}' of '{}' connects to '{current}', not net '{net}'",
             element.name
         ));
     }
@@ -1103,7 +1103,7 @@ fn validate_reduced_driver(
         .get(&upper)
         .or_else(|| element_index.get(&format!("X{upper}")))
         .copied()
-        .ok_or_else(|| format!("no element named `{instance}` in the deck"))?;
+        .ok_or_else(|| format!("no element named '{instance}' in the deck"))?;
     let element = &netlist.elements[element_idx];
     let expected_cell = match &element.kind {
         ElementKind::Subcircuit { subckt_name, .. } => subckt_name.as_str(),
@@ -1116,14 +1116,14 @@ fn validate_reduced_driver(
         ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => "CURRENT_SOURCE",
         _ => {
             return Err(format!(
-                "element `{}` cannot be qualified as a reduced-net driver cell",
+                "element '{}' cannot be qualified as a reduced-net driver cell",
                 element.name
             ));
         }
     };
     if !expected_cell.eq_ignore_ascii_case(cell) {
         return Err(format!(
-            "*CELL `{cell}` does not match driver type `{expected_cell}`"
+            "*CELL '{cell}' does not match driver type '{expected_cell}'"
         ));
     }
     Ok(())
@@ -1338,7 +1338,7 @@ impl<'a> Parser<'a> {
                         if reduced.drivers.len() > 1 {
                             return Err(self
                                 .error(format!(
-                                    "reduced net `{}` has multiple driver views; they cannot be materialized as parallel physical networks",
+                                    "reduced net '{}' has multiple driver views; they cannot be materialized as parallel physical networks",
                                     reduced.name
                                 ))
                                 .into());
@@ -1500,7 +1500,7 @@ impl<'a> Parser<'a> {
                     _ => {
                         return Err(self
                             .error(format!(
-                                "unexpected record `{}` inside {}",
+                                "unexpected record '{}' inside {}",
                                 fields[0],
                                 if reduced.kind == ReducedNetKind::Resistance {
                                     "*R_NET"
@@ -1584,7 +1584,7 @@ impl<'a> Parser<'a> {
                     if let Some(net) = current.as_ref() {
                         return Err(self
                             .error(format!(
-                                "detailed net `{}` is missing its terminating *END",
+                                "detailed net '{}' is missing its terminating *END",
                                 net.name
                             ))
                             .into());
@@ -1617,7 +1617,7 @@ impl<'a> Parser<'a> {
                         .map_err(ParseWithAbortError::from)?;
                     if !declared_net_names.insert(name.to_ascii_uppercase()) {
                         return Err(self
-                            .error(format!("duplicate net annotation `{name}`"))
+                            .error(format!("duplicate net annotation '{name}'"))
                             .into());
                     }
                     current = Some(DNet {
@@ -1642,7 +1642,7 @@ impl<'a> Parser<'a> {
                     if let Some(net) = current.as_ref() {
                         return Err(self
                             .error(format!(
-                                "detailed net `{}` is missing its terminating *END",
+                                "detailed net '{}' is missing its terminating *END",
                                 net.name
                             ))
                             .into());
@@ -1666,7 +1666,7 @@ impl<'a> Parser<'a> {
                         .map_err(ParseWithAbortError::from)?;
                     if !declared_net_names.insert(name.to_ascii_uppercase()) {
                         return Err(self
-                            .error(format!("duplicate net annotation `{name}`"))
+                            .error(format!("duplicate net annotation '{name}'"))
                             .into());
                     }
                     let total_capacitance = self
@@ -1705,7 +1705,7 @@ impl<'a> Parser<'a> {
                             if !self.induc_unit_seen {
                                 return Err(self
                                     .error(format!(
-                                        "*INDUC on net `{}` requires an explicit *L_UNIT header",
+                                        "*INDUC on net '{}' requires an explicit *L_UNIT header",
                                         net.name
                                     ))
                                     .into());
@@ -1718,7 +1718,7 @@ impl<'a> Parser<'a> {
                     if seen_sections & bit != 0 {
                         return Err(self
                             .error(format!(
-                                "duplicate {} section on net `{}`",
+                                "duplicate {} section on net '{}'",
                                 next.keyword(),
                                 net.name
                             ))
@@ -1727,7 +1727,7 @@ impl<'a> Parser<'a> {
                     if next.rank() < section.rank() {
                         return Err(self
                             .error(format!(
-                                "{} section on net `{}` is out of order after {}",
+                                "{} section on net '{}' is out of order after {}",
                                 next.keyword(),
                                 net.name,
                                 section.keyword()
@@ -1737,7 +1737,7 @@ impl<'a> Parser<'a> {
                     if section != NetSection::None && section_entries == 0 {
                         return Err(self
                             .error(format!(
-                                "{} section on net `{}` must contain at least one record",
+                                "{} section on net '{}' must contain at least one record",
                                 section.keyword(),
                                 net.name
                             ))
@@ -1754,7 +1754,7 @@ impl<'a> Parser<'a> {
                     if section != NetSection::None && section_entries == 0 {
                         return Err(self
                             .error(format!(
-                                "{} section on net `{}` must contain at least one record",
+                                "{} section on net '{}' must contain at least one record",
                                 section.keyword(),
                                 net.name
                             ))
@@ -1773,14 +1773,14 @@ impl<'a> Parser<'a> {
                     if fields.len() < 3 {
                         return Err(self
                             .error(format!(
-                                "malformed {keyword} connection `{line}` (expected node and direction)"
+                                "malformed {keyword} connection '{line}' (expected node and direction)"
                             ))
                             .into());
                     }
                     if !matches!(fields[2].to_ascii_uppercase().as_str(), "I" | "O" | "B") {
                         return Err(self
                             .error(format!(
-                                "connection direction `{}` must be I, O, or B",
+                                "connection direction '{}' must be I, O, or B",
                                 fields[2]
                             ))
                             .into());
@@ -1841,7 +1841,7 @@ impl<'a> Parser<'a> {
                             if !net.cap_ids.insert(id) {
                                 return Err(self
                                     .error(format!(
-                                        "duplicate capacitance id {id} on net `{}`",
+                                        "duplicate capacitance id {id} on net '{}'",
                                         net.name
                                     ))
                                     .into());
@@ -1867,7 +1867,7 @@ impl<'a> Parser<'a> {
                             if !net.cap_ids.insert(id) {
                                 return Err(self
                                     .error(format!(
-                                        "duplicate capacitance id {id} on net `{}`",
+                                        "duplicate capacitance id {id} on net '{}'",
                                         net.name
                                     ))
                                     .into());
@@ -1892,7 +1892,7 @@ impl<'a> Parser<'a> {
                         _ => {
                             return Err(self
                                 .error(format!(
-                                    "malformed *CAP entry `{line}` (expected 3 or 4 fields)"
+                                    "malformed *CAP entry '{line}' (expected 3 or 4 fields)"
                                 ))
                                 .into());
                         }
@@ -1906,7 +1906,7 @@ impl<'a> Parser<'a> {
                         .map_err(ParseWithAbortError::from)?;
                     if fields.len() != 4 {
                         return Err(self
-                            .error(format!("malformed *RES entry `{line}` (expected 4 fields)"))
+                            .error(format!("malformed *RES entry '{line}' (expected 4 fields)"))
                             .into());
                     }
                     let id = self
@@ -1915,7 +1915,7 @@ impl<'a> Parser<'a> {
                     if !net.res_ids.insert(id) {
                         return Err(self
                             .error(format!(
-                                "duplicate resistance id {id} on net `{}`",
+                                "duplicate resistance id {id} on net '{}'",
                                 net.name
                             ))
                             .into());
@@ -1946,7 +1946,7 @@ impl<'a> Parser<'a> {
                     if fields.len() != 4 {
                         return Err(self
                             .error(format!(
-                                "malformed *INDUC entry `{line}` (expected 4 fields)"
+                                "malformed *INDUC entry '{line}' (expected 4 fields)"
                             ))
                             .into());
                     }
@@ -1956,7 +1956,7 @@ impl<'a> Parser<'a> {
                     if !net.inductor_ids.insert(id) {
                         return Err(self
                             .error(format!(
-                                "duplicate inductance id {id} on net `{}`",
+                                "duplicate inductance id {id} on net '{}'",
                                 net.name
                             ))
                             .into());
@@ -1982,7 +1982,7 @@ impl<'a> Parser<'a> {
                 _ if current.is_some() => {
                     return Err(self
                         .error(format!(
-                            "unexpected record `{}` inside detailed net",
+                            "unexpected record '{}' inside detailed net",
                             fields[0]
                         ))
                         .into());
@@ -1994,7 +1994,7 @@ impl<'a> Parser<'a> {
         if let Some(reduced) = current_reduced {
             return Err(self
                 .error(format!(
-                    "reduced net `{}` is missing its terminating *END",
+                    "reduced net '{}' is missing its terminating *END",
                     reduced.name
                 ))
                 .into());
@@ -2002,7 +2002,7 @@ impl<'a> Parser<'a> {
         if let Some(net) = current {
             return Err(self
                 .error(format!(
-                    "detailed net `{}` is missing its terminating *END",
+                    "detailed net '{}' is missing its terminating *END",
                     net.name
                 ))
                 .into());
@@ -2035,7 +2035,7 @@ impl<'a> Parser<'a> {
             let attribute = fields[index].to_ascii_uppercase();
             if !seen.insert(attribute.clone()) {
                 return Err(self.error(format!(
-                    "duplicate connection attribute `{}`",
+                    "duplicate connection attribute '{}'",
                     fields[index]
                 )));
             }
@@ -2115,7 +2115,7 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     return Err(self.error(format!(
-                        "unsupported connection attribute `{}`",
+                        "unsupported connection attribute '{}'",
                         fields[index]
                     )));
                 }
@@ -2128,7 +2128,7 @@ impl<'a> Parser<'a> {
         let parts: Vec<_> = field.split(':').collect();
         if parts.len() != 1 && parts.len() != 3 {
             return Err(self.error(format!(
-                "{quantity} `{field}` must be one value or a min:typ:max triplet"
+                "{quantity} '{field}' must be one value or a min:typ:max triplet"
             )));
         }
         parts
@@ -2205,7 +2205,7 @@ impl<'a> Parser<'a> {
             .iter()
             .find(|(name, _)| *name == unit)
             .map(|(_, scale)| *scale)
-            .ok_or_else(|| self.error(format!("unsupported unit `{unit}`")))?;
+            .ok_or_else(|| self.error(format!("unsupported unit '{unit}'")))?;
         let resolved = multiplier * scale;
         if !resolved.is_finite() || resolved <= 0.0 {
             return Err(self.error(format!("unit scale is invalid or non-finite ({resolved})")));
@@ -2216,9 +2216,9 @@ impl<'a> Parser<'a> {
     fn parse_value(&self, field: &str) -> Result<Value, ParseError> {
         let value: Value = field
             .parse()
-            .map_err(|_| self.error(format!("`{field}` is not a number")))?;
+            .map_err(|_| self.error(format!("'{field}' is not a number")))?;
         if !value.is_finite() {
-            return Err(self.error(format!("`{field}` is not finite")));
+            return Err(self.error(format!("'{field}' is not finite")));
         }
         Ok(value)
     }
@@ -2226,12 +2226,12 @@ impl<'a> Parser<'a> {
     fn parse_positive_id(&self, field: &str, quantity: &str) -> Result<u64, ParseError> {
         let id: u64 = field.parse().map_err(|_| {
             self.error(format!(
-                "{quantity} id `{field}` must be a positive integer"
+                "{quantity} id '{field}' must be a positive integer"
             ))
         })?;
         if id == 0 {
             return Err(self.error(format!(
-                "{quantity} id `{field}` must be a positive integer"
+                "{quantity} id '{field}' must be a positive integer"
             )));
         }
         Ok(id)
@@ -2269,7 +2269,7 @@ impl<'a> Parser<'a> {
                 .name_map
                 .get(&index)
                 .cloned()
-                .ok_or_else(|| self.error(format!("name-map reference `{field}` is undefined"))),
+                .ok_or_else(|| self.error(format!("name-map reference '{field}' is undefined"))),
             None if field.is_empty() => Err(self.error("empty SPEF name")),
             None => Ok(field.to_owned()),
         }
@@ -2282,7 +2282,7 @@ impl<'a> Parser<'a> {
             Some((base, sub)) => {
                 let base = self.resolve_name(base)?;
                 if sub.is_empty() {
-                    return Err(self.error(format!("node reference `{field}` has an empty suffix")));
+                    return Err(self.error(format!("node reference '{field}' has an empty suffix")));
                 }
                 if parse_map_index(sub).is_some() {
                     return Ok(NodeRef::Pin(base, self.resolve_name(sub)?));
@@ -2322,13 +2322,13 @@ impl<'a> Parser<'a> {
     fn parse_pin_ref(&self, field: &str) -> Result<NodeRef, ParseError> {
         let (instance, pin) = field.split_once(self.delimiter).ok_or_else(|| {
             self.error(format!(
-                "instance pin `{field}` is missing delimiter `{}`",
+                "instance pin '{field}' is missing delimiter '{}'",
                 self.delimiter
             ))
         })?;
         let instance = self.resolve_name(instance)?;
         if pin.is_empty() {
-            return Err(self.error(format!("instance pin `{field}` has an empty pin name")));
+            return Err(self.error(format!("instance pin '{field}' has an empty pin name")));
         }
         let pin = if parse_map_index(pin).is_some() {
             self.resolve_name(pin)?
