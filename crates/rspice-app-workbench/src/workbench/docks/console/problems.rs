@@ -210,6 +210,7 @@ pub fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
         let columns = Columns::measure(
             ui,
             &arrangement.tally.widest,
+            &arrangement.tally.longest_message,
             ui.available_rect_before_wrap().x_range(),
         );
         let note = note(&listed);

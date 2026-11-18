@@ -9,7 +9,13 @@
 //!
 //! Every column but the message is as wide as the widest cell the listed rows
 //! give it, in the face the cells are printed in, with its heading as a floor
-//! and a share of the room as a ceiling. The message takes what is left.
+//! and a share of the room as a ceiling. The message is the column a reader
+//! reads, so it is the one that keeps its words: where the longest listed
+//! message would be cut, the other columns give way to it first, the widest
+//! first, down to sixteen characters each, and the message takes what is
+//! left; the row's tooltip says the whole finding. The message is a sentence
+//! and is printed in the face the rest of the application's sentences are;
+//! rules, subjects and locations are names and stay in the monospace face.
 //! Nothing is a pixel count somebody typed: the first version of this page
 //! fixed two columns at 58 px and 62 px — eight characters — and could not
 //! print a location at all, and the next gave the subject and the location
@@ -61,6 +67,12 @@ const FITTED_MAX_SHARE: f32 = 0.24;
 /// leave it less give way, the widest first.
 const MESSAGE_MIN_CHARACTERS: f32 = 16.0;
 
+/// How far a fitted column gives way to let the message print whole, in
+/// characters: as many as the message keeps at least. A short name stays
+/// whole, and past it a rule or a path is cut too far to be read, so the
+/// message is cut instead.
+const FITTED_LEAST_CHARACTERS: f32 = 16.0;
+
 /// The least a column can be dragged to, in characters of its face.
 const RESIZED_MIN_CHARACTERS: f32 = 3.0;
 
@@ -109,11 +121,17 @@ pub(super) struct Columns {
 }
 
 impl Columns {
-    /// Measure the columns against the font, the table's edges, and the widest
+    /// Measure the columns against the font, the table's edges, the widest
     /// cell each fitted column lists, in characters in [`FITTED`] order — the
-    /// face is monospace, so a count of characters is a width. The severity
-    /// column's widest cell is its word; the mark before it is added here.
-    pub(super) fn measure(ui: &Ui, widest: &[usize; FITTED.len()], band: egui::Rangef) -> Self {
+    /// face is monospace, so a count of characters is a width — and the
+    /// longest message listed. The severity column's widest cell is its word;
+    /// the mark before it is added here.
+    pub(super) fn measure(
+        ui: &Ui,
+        widest: &[usize; FITTED.len()],
+        message: &str,
+        band: egui::Rangef,
+    ) -> Self {
         let advance = text_width(ui, "M", FontWeight::Regular).max(1.0);
         let ellipsis = text_width(ui, "…", FontWeight::Regular);
         // The body's scrollbar is allowed for whether or not it is showing.
@@ -127,6 +145,7 @@ impl Columns {
         let resized = Resized::load(ui.ctx());
 
         let mut floors = [0.0; FITTED.len()];
+        let mut legible = [0.0; FITTED.len()];
         let mut widths = [0.0; 6];
         for (index, column) in FITTED.into_iter().enumerate() {
             // A column that cannot print its own heading says nothing, so
@@ -141,6 +160,9 @@ impl Columns {
             };
             let content = mark + widest[index] as f32 * advance;
             floors[index] = heading + 2.0 * CONSOLE_CELL_INSET;
+            legible[index] = (content.min(mark + FITTED_LEAST_CHARACTERS * advance)
+                + 2.0 * CONSOLE_CELL_INSET)
+                .max(floors[index]);
             widths[index] = match resized.0[index] {
                 Some(width) => width.max(resized_least(advance)),
                 None => (content.max(heading) + 2.0 * CONSOLE_CELL_INSET)
@@ -148,50 +170,26 @@ impl Columns {
                     .max(floors[index]),
             };
         }
-        // Columns that would leave the message less than its least give way,
-        // the widest first: one ceiling is lowered over them until the
-        // excess is taken, none below its heading. A short column — the
+        // The message wants the longest listed message whole, in its own
+        // face. Columns that would cut it give way, the widest first, while
+        // they stay legible; then, where the message would keep less than
+        // its least, further, none below its heading. A short column — the
         // severity word, a net's name — keeps its cells whole while a long
         // rule or path is cut; taking from every column in proportion cut
         // "Critical" to "Critic…" to spare a forty-character rule two
         // characters. A width a reader set is theirs, and stays.
         let message_least = MESSAGE_MIN_CHARACTERS * advance + 2.0 * CONSOLE_CELL_INSET;
-        let fitted: f32 = widths[..FITTED.len()].iter().sum();
-        let excess = fitted + message_least - room;
-        let yielding = |index: &usize| resized.0[*index].is_none();
-        if excess > 0.0 {
-            let under = |ceiling: f32, index: usize| widths[index].min(ceiling).max(floors[index]);
-            let taken = |ceiling: f32| -> f32 {
-                (0..FITTED.len())
-                    .filter(yielding)
-                    .map(|index| widths[index] - under(ceiling, index))
-                    .sum()
-            };
-            let (mut low, mut high) = (
-                0.0_f32,
-                widths[..FITTED.len()]
-                    .iter()
-                    .copied()
-                    .fold(0.0_f32, f32::max),
-            );
-            for _ in 0..32 {
-                let ceiling = (low + high) * 0.5;
-                if taken(ceiling) > excess {
-                    low = ceiling;
-                } else {
-                    high = ceiling;
-                }
-            }
-            let capped: [f32; FITTED.len()] = std::array::from_fn(|index| {
-                if yielding(&index) {
-                    under(high, index)
-                } else {
-                    widths[index]
-                }
-            });
-            widths[..FITTED.len()].copy_from_slice(&capped);
-        }
-        let fitted: f32 = widths[..FITTED.len()].iter().sum();
+        let message_whole = message_width(ui, message) + 2.0 * CONSOLE_CELL_INSET;
+        let fitted = &mut widths[..FITTED.len()];
+        give_way(
+            fitted,
+            &legible,
+            &resized,
+            message_whole.max(message_least),
+            room,
+        );
+        give_way(fitted, &floors, &resized, message_least, room);
+        let fitted: f32 = fitted.iter().sum();
         widths[5] = (room - fitted).max(message_least);
 
         let mut starts = [0.0; 6];
@@ -255,9 +253,69 @@ impl Columns {
     }
 }
 
+/// Lower one ceiling over the fitted columns' `widths` until the message's
+/// `wanted` width fits the `room` beside them, the widest column giving way
+/// first and none below its `least`. A width a reader set is not lowered.
+fn give_way(
+    widths: &mut [f32],
+    least: &[f32; FITTED.len()],
+    resized: &Resized,
+    wanted: f32,
+    room: f32,
+) {
+    let excess = widths.iter().sum::<f32>() + wanted - room;
+    if excess <= 0.0 {
+        return;
+    }
+    let yielding = |index: &usize| resized.0[*index].is_none();
+    let under = |ceiling: f32, index: usize| widths[index].min(ceiling).max(least[index]);
+    let taken = |ceiling: f32| -> f32 {
+        (0..FITTED.len())
+            .filter(yielding)
+            .map(|index| widths[index] - under(ceiling, index))
+            .sum()
+    };
+    let (mut low, mut high) = (0.0_f32, widths.iter().copied().fold(0.0_f32, f32::max));
+    for _ in 0..32 {
+        let ceiling = (low + high) * 0.5;
+        if taken(ceiling) > excess {
+            low = ceiling;
+        } else {
+            high = ceiling;
+        }
+    }
+    let capped: [f32; FITTED.len()] = std::array::from_fn(|index| {
+        if yielding(&index) {
+            under(high, index)
+        } else {
+            widths[index]
+        }
+    });
+    widths.copy_from_slice(&capped);
+}
+
 /// The least a reader can drag a column to.
 fn resized_least(advance: f32) -> f32 {
     RESIZED_MIN_CHARACTERS * advance + 2.0 * CONSOLE_CELL_INSET
+}
+
+/// The face a message is printed in: the one the application's sentences
+/// are printed in.
+fn message_font() -> egui::FontId {
+    theme::sans(CONSOLE_FONT_SIZE, FontWeight::Regular)
+}
+
+/// How wide `message` prints in [`message_font`].
+fn message_width(ui: &Ui, message: &str) -> f32 {
+    if message.is_empty() {
+        return 0.0;
+    }
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(message.to_owned(), message_font(), egui::Color32::WHITE)
+            .size()
+            .x
+    })
 }
 
 fn text_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
@@ -740,12 +798,18 @@ pub(super) fn row(
         // A path is read from its tail: the file and the object at the end of
         // it are what say where to go, and the directories above them are not,
         // so those columns drop their head. A sentence is read from its start.
-        let printed = match column {
-            ProblemColumn::Subject | ProblemColumn::Producer | ProblemColumn::Location => {
-                elide_head(text, room, columns)
-            }
-            ProblemColumn::Severity | ProblemColumn::Code | ProblemColumn::Message => {
-                elide_tail(text, room, columns)
+        let (printed, font) = match column {
+            ProblemColumn::Subject | ProblemColumn::Producer | ProblemColumn::Location => (
+                elide_head(text, room, columns),
+                theme::mono(CONSOLE_FONT_SIZE, weight),
+            ),
+            ProblemColumn::Severity | ProblemColumn::Code => (
+                elide_tail(text, room, columns),
+                theme::mono(CONSOLE_FONT_SIZE, weight),
+            ),
+            ProblemColumn::Message => {
+                let font = message_font();
+                (crate::ui::panels::elide_text(ui, text, &font, room), font)
             }
         };
         rspice_ui_kit::text::paint_text(
@@ -753,7 +817,7 @@ pub(super) fn row(
             egui::pos2(rect.left() + columns.text_offset(column), center_y),
             egui::Align2::LEFT_CENTER,
             printed,
-            theme::mono(CONSOLE_FONT_SIZE, weight),
+            font,
             if column == ProblemColumn::Message {
                 body
             } else {
@@ -994,7 +1058,7 @@ mod tests {
             let scrollbar = ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_inner_margin;
             let band = ui.available_rect_before_wrap().x_range();
             measured = Some(Measured {
-                columns: Columns::measure(ui, &widest, band),
+                columns: Columns::measure(ui, &widest, "", band),
                 end: band.span() - scrollbar,
             });
         });

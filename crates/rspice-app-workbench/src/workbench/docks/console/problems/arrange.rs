@@ -118,6 +118,9 @@ pub struct Tally {
     /// is monospace, so a character count is what the column measurement
     /// needs.
     pub widest: [usize; super::grid::FITTED.len()],
+    /// The listed message of the most characters, which the message column
+    /// measures to print whole where it can.
+    pub longest_message: String,
 }
 
 impl Tally {
@@ -138,6 +141,7 @@ impl Tally {
             waived,
             producers,
             widest: [0; super::grid::FITTED.len()],
+            longest_message: String::new(),
         }
     }
 }
@@ -275,6 +279,7 @@ impl Arrangement {
         let mut waived = 0;
         let mut producers: BTreeMap<&str, usize> = BTreeMap::new();
         let mut widest = [0_usize; super::grid::FITTED.len()];
+        let mut longest_message = ("", 0_usize);
         let mut admitted: Vec<usize> = Vec::new();
         let mut count = 0;
 
@@ -314,6 +319,10 @@ impl Arrangement {
                     for (widest, cell) in widest.iter_mut().zip(cells) {
                         *widest = (*widest).max(cell);
                     }
+                    let message = row.message.chars().count();
+                    if message > longest_message.1 {
+                        longest_message = (row.message, message);
+                    }
                 }
                 admitted.push(index);
             }
@@ -333,6 +342,7 @@ impl Arrangement {
                     .map(|(producer, count)| (producer.to_owned(), count))
                     .collect(),
                 widest,
+                longest_message: longest_message.0.to_owned(),
             },
             view: view.clone(),
             needle,
