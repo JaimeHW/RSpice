@@ -90,6 +90,41 @@ fn compare_exchange_publishes_exact_successor_and_releases_predecessor_evidence(
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
+/// A streamed publication writes what its writer makes, piece by piece, and
+/// answers the digest of exactly that; a writer that stops leaves the
+/// destination as it was.
+#[test]
+fn compare_exchange_with_publishes_what_its_writer_streams() {
+    let root = unique_temp_dir("cas-stream");
+    let target = root.join("state.json");
+    std::fs::write(&target, b"accepted").expect("write accepted bytes");
+    let accepted: [u8; 32] = Sha256::digest(b"accepted").into();
+
+    let stopped = compare_exchange_with(&target, ExpectedContent::Digest(accepted), |writer| {
+        writer.write_all(b"half a file")?;
+        Err(io::Error::other("the writer stopped"))
+    });
+    assert!(stopped.is_err(), "a writer that stops publishes nothing");
+    assert_eq!(std::fs::read(&target).expect("read target"), b"accepted");
+    assert_only_target(&root, &target);
+
+    let pieces = (0..10_000)
+        .map(|index| format!("line {index}\n").into_bytes())
+        .collect::<Vec<_>>();
+    let digest = compare_exchange_with(&target, ExpectedContent::Digest(accepted), |writer| {
+        for piece in &pieces {
+            writer.write_all(piece)?;
+        }
+        Ok(())
+    })
+    .expect("publish the stream");
+    let expected = pieces.concat();
+    assert_eq!(std::fs::read(&target).expect("read successor"), expected);
+    assert_eq!(digest, <[u8; 32]>::from(Sha256::digest(&expected)));
+    assert_only_target(&root, &target);
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
 /// Every pathname a publication derives hangs off the destination's parent,
 /// and the longest of them — a lease name carrying a staging suffix — adds 126
 /// characters to it. The classic Windows pathname limit would refuse those

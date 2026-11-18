@@ -1,7 +1,7 @@
 //! Native save rules exercised through an in-memory compare-and-swap adapter.
 
 use super::*;
-use crate::persistence::digest_bytes;
+use crate::persistence::{digest_bytes, serialized_project};
 use crate::{ProjectLibraries, ProjectWorkspace};
 use std::cell::{Cell, RefCell};
 
@@ -36,13 +36,13 @@ impl NativeProjectStorage for Storage {
         }
         Ok(())
     }
-    fn read_project(&self, path: &Path) -> Result<ProjectBytes, ProjectIoError> {
+    fn read_project(&self, path: &Path) -> Result<ProjectRead, ProjectIoError> {
         self.steps.borrow_mut().push("read");
         let current = self.bytes.borrow();
         let bytes = current
             .as_deref()
             .ok_or_else(|| ProjectIoError::NotFound(path.to_path_buf()))?;
-        ProjectBytes::read(bytes, bytes.len() as u64)
+        ProjectRead::read(bytes, Some(path))
     }
     fn same_file(&self, _: &Path, _: &Path) -> Result<bool, PersistenceError> {
         Ok(self.alias.get())
@@ -57,12 +57,15 @@ impl NativeProjectStorage for Storage {
     fn accepted_content(&self, digest: ContentDigest) -> Self::ExpectedContent {
         Some(digest)
     }
-    fn publish(
+    fn publish_with(
         &self,
         _: &Path,
         expected: Self::ExpectedContent,
-        bytes: &[u8],
+        write: &dyn Fn(&mut dyn std::io::Write) -> std::io::Result<()>,
     ) -> Result<ContentDigest, PersistenceError> {
+        let mut bytes = Vec::new();
+        write(&mut bytes).map_err(PersistenceError::Io)?;
+        let bytes = bytes.as_slice();
         self.publications.set(self.publications.get() + 1);
         if let Some(error) = self.publication_error.borrow_mut().take() {
             if self.publish_before_error {
@@ -589,4 +592,80 @@ fn uncertain_native_publication_never_returns_save_or_copy_acceptance() {
             }
         }
     }
+}
+
+/// A reader that hands over at most two bytes a read, and fails once it has
+/// been asked `fail_after` times.
+struct ShortReader<'a> {
+    bytes: &'a [u8],
+    reads: usize,
+    fail_after: Option<usize>,
+}
+
+impl std::io::Read for ShortReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.reads += 1;
+        if self.fail_after.is_some_and(|limit| self.reads > limit) {
+            return Err(std::io::Error::other("interrupted project read"));
+        }
+        let len = 2.min(self.bytes.len()).min(buffer.len());
+        buffer[..len].copy_from_slice(&self.bytes[..len]);
+        self.bytes = &self.bytes[len..];
+        Ok(len)
+    }
+}
+
+/// A file read in pieces is parsed and identified by exactly the bytes it
+/// holds, however the reads fall.
+#[test]
+fn a_streamed_read_parses_and_identifies_exactly_the_bytes_read() {
+    let text = crate::serialize_project_file(&project()).expect("the project serializes");
+    let mut reader = ShortReader {
+        bytes: text.as_bytes(),
+        reads: 0,
+        fail_after: None,
+    };
+    let read = ProjectRead::read(&mut reader, None).expect("the file is read");
+    assert_eq!(read.digest(), digest_bytes(text.as_bytes()));
+    assert!(reader.reads > 2);
+    let decoded = read.decode(NoSourceFiles).expect("the project decodes");
+    assert_eq!(
+        crate::serialize_project_file(&decoded.file).expect("it serializes again"),
+        text
+    );
+}
+
+/// A file cut short still has a digest of what it holds, so a changed file
+/// is told apart from a damaged one, and decoding says it is incomplete.
+#[test]
+fn a_truncated_file_is_read_to_its_end_and_decodes_as_incomplete() {
+    let text = crate::serialize_project_file(&project()).expect("the project serializes");
+    let cut = &text.as_bytes()[..text.len() / 2];
+    let read = ProjectRead::read(cut, None).expect("a damaged file is still read");
+    assert_eq!(read.digest(), digest_bytes(cut));
+    let error = read
+        .decode(NoSourceFiles)
+        .expect_err("half a project does not decode");
+    assert!(matches!(
+        error,
+        ProjectIoError::ParseError {
+            damage: crate::FileDamage::Truncated,
+            ..
+        }
+    ));
+}
+
+/// A read the disk interrupts is an I/O failure, never a partial project.
+#[test]
+fn an_interrupted_read_is_an_io_failure() {
+    let text = crate::serialize_project_file(&project()).expect("the project serializes");
+    let mut reader = ShortReader {
+        bytes: text.as_bytes(),
+        reads: 0,
+        fail_after: Some(1),
+    };
+    assert!(matches!(
+        ProjectRead::read(&mut reader, None),
+        Err(ProjectIoError::Io(message)) if message.contains("interrupted project read")
+    ));
 }

@@ -891,11 +891,6 @@ fn validate_manifest(manifest: &ProjectCheckpointManifest) -> Result<(), String>
     if manifest.snapshot_byte_len == 0 {
         return Err("project checkpoint snapshot is empty".to_owned());
     }
-    if manifest.snapshot_byte_len > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
-        return Err(
-            "project checkpoint snapshot exceeds the supported project-size limit".to_owned(),
-        );
-    }
     let expected_name = format!(
         "{}-{}{}",
         manifest.created_unix_ms, manifest.checkpoint_id, SNAPSHOT_SUFFIX

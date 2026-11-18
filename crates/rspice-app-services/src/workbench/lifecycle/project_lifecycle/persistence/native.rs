@@ -6,9 +6,7 @@ use crate::io::durable_file::CompareExchangeError;
 use crate::product::ContentDigest;
 use rspice_project::ProjectIoError;
 use rspice_project::persistence::native::NativeProjectStorage;
-use rspice_project::persistence::{
-    NativeBindingReceipt, PersistenceError, ProjectBytes, digest_bytes,
-};
+use rspice_project::persistence::{NativeBindingReceipt, PersistenceError, ProjectRead};
 use std::path::{Path, PathBuf};
 
 pub struct NativeStorage;
@@ -48,8 +46,8 @@ impl NativeProjectStorage for NativeStorage {
         crate::io::durable_file::reconcile_publication(path).map_err(native_storage_error)
     }
 
-    fn read_project(&self, path: &Path) -> Result<ProjectBytes, ProjectIoError> {
-        crate::io::project_io::read_project_bytes(path)
+    fn read_project(&self, path: &Path) -> Result<ProjectRead, ProjectIoError> {
+        crate::io::project_io::read_project_file(path)
     }
 
     fn accepted_content(&self, digest: ContentDigest) -> Self::ExpectedContent {
@@ -63,14 +61,14 @@ impl NativeProjectStorage for NativeStorage {
         crate::io::durable_file::observe_expected_content(path).map_err(native_storage_error)
     }
 
-    fn publish(
+    fn publish_with(
         &self,
         path: &Path,
         expected: crate::io::durable_file::ExpectedContent,
-        bytes: &[u8],
+        write: &dyn Fn(&mut dyn std::io::Write) -> std::io::Result<()>,
     ) -> Result<ContentDigest, PersistenceError> {
-        match crate::io::durable_file::compare_exchange_bytes(path, expected, bytes) {
-            Ok(()) => Ok(digest_bytes(bytes)),
+        match crate::io::durable_file::compare_exchange_with(path, expected, write) {
+            Ok(digest) => Ok(ContentDigest::from_bytes(digest)),
             Err(CompareExchangeError::Conflict { .. }) => Err(PersistenceError::ExternalChange),
             Err(error) => Err(native_storage_error(error)),
         }

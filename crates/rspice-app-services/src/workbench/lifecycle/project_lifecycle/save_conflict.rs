@@ -104,12 +104,10 @@ pub fn conflict_for(
 fn prepare(state: &LifecycleParts<'_>, path: &Path) -> Result<SaveConflict, ProjectLifecycleError> {
     let opened = state.platform.project_lifecycle.accepted_snapshot()?;
     let here = snapshot(state)?;
-    let bytes =
-        crate::io::project_io::read_project_bytes(path).map_err(PersistenceError::Project)?;
-    let observed = bytes.digest();
+    let read = crate::io::project_io::read_project_file(path).map_err(PersistenceError::Project)?;
+    let observed = read.digest();
     let saved = crate::io::ProjectSnapshot::from_decoded(
-        bytes
-            .decode(Some(path), crate::state::workspace::WorkspaceSourceFiles)
+        read.decode(crate::state::workspace::WorkspaceSourceFiles)
             .map_err(PersistenceError::Project)?,
     );
     let changed_here =

@@ -2,8 +2,8 @@
 
 pub use crate::state::project_snapshot::ProjectSnapshot;
 pub use rspice_formats::project_results::*;
-use rspice_project::persistence::ProjectBytes;
-pub use rspice_project::{MAX_PROJECT_FILE_BYTES, ProjectIoError};
+pub use rspice_project::ProjectIoError;
+use rspice_project::persistence::ProjectRead;
 use rspice_vocabulary::product::ContentDigest;
 #[cfg(any(not(target_arch = "wasm32"), test))]
 use std::path::PathBuf;
@@ -60,26 +60,36 @@ pub fn load_project_file(path: &Path) -> Result<ProjectSnapshot, ProjectIoError>
     load_project_file_with_digest(path).map(|(project, _)| project)
 }
 
-/// Read, hash, parse, migrate, and validate one immutable byte snapshot.
-/// The returned digest is therefore the exact persistence identity accepted
-/// by the caller, not a later re-read that could race an external editor.
+/// Read, hash, parse, migrate, and validate one read of the file. The
+/// returned digest is therefore the exact persistence identity accepted by
+/// the caller, not a later re-read that could race an external editor.
 pub(crate) fn load_project_file_with_digest(
     path: &Path,
 ) -> Result<(ProjectSnapshot, ContentDigest), ProjectIoError> {
-    let bytes = read_project_bytes(path)?;
-    let digest = bytes.digest();
-    let project = bytes.decode(Some(path), crate::state::workspace::WorkspaceSourceFiles)?;
+    let read = read_project_file(path)?;
+    let digest = read.digest();
+    let project = read.decode(crate::state::workspace::WorkspaceSourceFiles)?;
     Ok((ProjectSnapshot::from_decoded(project), digest))
 }
 
-pub(crate) fn read_project_bytes(path: &Path) -> Result<ProjectBytes, ProjectIoError> {
+/// Read the project file at `path` once, parsing it as it is read, so its
+/// size costs memory only in the project it holds.
+pub(crate) fn read_project_file(path: &Path) -> Result<ProjectRead, ProjectIoError> {
     if !path.exists() {
         return Err(ProjectIoError::NotFound(path.to_path_buf()));
     }
-    let file = File::open(path)?;
-    let advertised = file.metadata()?.len();
-    ProjectBytes::read(file, advertised)
+    ProjectRead::read(File::open(path)?, Some(path))
 }
+
+/// The most of one file a browser build can hold: its memory is addressed
+/// in 32 bits.
+#[cfg(target_arch = "wasm32")]
+pub const BROWSER_FILE_BYTES: u64 = u32::MAX as u64;
+
+/// What the browser says of a file larger than it can hold.
+#[cfg(target_arch = "wasm32")]
+pub const BROWSER_FILE_TOO_LARGE: &str =
+    "This file is larger than a browser can hold. Open it in RSpice for desktop.";
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod fixtures;

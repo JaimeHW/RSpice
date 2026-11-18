@@ -589,15 +589,6 @@ fn pick_native_restore_file(
     else {
         return Ok(None);
     };
-    let metadata = std::fs::metadata(&path)
-        .map_err(|error| format!("Could not read '{}': {error}", path.display()))?;
-    if metadata.len() > rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES {
-        return Err(format!(
-            "'{}' is larger than a project file can be ({} bytes).",
-            path.display(),
-            rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES
-        ));
-    }
     let bytes = std::fs::read(&path)
         .map_err(|error| format!("Could not read '{}': {error}", path.display()))?;
     validate_restore_file(&app.state, draft.publication_id, &bytes)?;

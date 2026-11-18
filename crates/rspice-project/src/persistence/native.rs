@@ -1,6 +1,6 @@
 //! Native destination authority and project publication through host storage.
 
-use super::{NativeBindingReceipt, PersistenceError, ProjectBytes, serialized_project};
+use super::{NativeBindingReceipt, PersistenceError, ProjectRead};
 use crate::lifecycle::ProjectLifecycleError;
 use crate::registry::DocumentRegistry;
 use crate::{DecodedProject, ProjectFile, ProjectIoError};
@@ -35,9 +35,9 @@ impl NativeBinding {
     ) -> Result<(DecodedProject, Self), PersistenceError> {
         let canonical_path = storage.normalize_path(path)?;
         reconcile_where_writable(storage, &canonical_path)?;
-        let bytes = storage.read_project(&canonical_path)?;
-        let accepted_digest = bytes.digest();
-        let project = bytes.decode(Some(&canonical_path), source_files)?;
+        let read = storage.read_project(&canonical_path)?;
+        let accepted_digest = read.digest();
+        let project = read.decode(source_files)?;
         Ok((
             project,
             Self {
@@ -60,11 +60,9 @@ impl NativeBinding {
         let canonical_path = storage.normalize_path(path)?;
         receipt.validate_canonical_path(&canonical_path)?;
         reconcile_where_writable(storage, &canonical_path)?;
-        let Some(project) = storage.read_project(&canonical_path)?.decode_if_digest(
-            receipt.accepted_digest,
-            Some(&canonical_path),
-            source_files,
-        )?
+        let Some(project) = storage
+            .read_project(&canonical_path)?
+            .decode_if_digest(receipt.accepted_digest, source_files)?
         else {
             return Err(PersistenceError::ExternalChange);
         };
@@ -113,20 +111,32 @@ pub trait NativeProjectStorage {
 
     fn normalize_path(&self, path: &Path) -> Result<PathBuf, PersistenceError>;
     fn reconcile_publication(&self, path: &Path) -> Result<(), PersistenceError>;
-    fn read_project(&self, path: &Path) -> Result<ProjectBytes, ProjectIoError>;
+    /// Read the project file at `path` once, parsing it as it is read.
+    fn read_project(&self, path: &Path) -> Result<ProjectRead, ProjectIoError>;
     fn same_file(&self, left: &Path, right: &Path) -> Result<bool, PersistenceError>;
     fn observe_destination(&self, path: &Path) -> Result<Self::ExpectedContent, PersistenceError>;
     fn accepted_content(&self, digest: ContentDigest) -> Self::ExpectedContent;
 
-    /// Compare and publish under the writer's lease/recovery protocol. Errors
-    /// must retain conflicts and publication uncertainty; success identifies
-    /// the exact bytes durably published at this path.
+    /// Compare and publish what `write` makes under the writer's
+    /// lease/recovery protocol, the bytes going to storage as they are made.
+    /// Errors must retain conflicts and publication uncertainty; success
+    /// identifies the exact bytes durably published at this path.
+    fn publish_with(
+        &self,
+        path: &Path,
+        expected: Self::ExpectedContent,
+        write: &dyn Fn(&mut dyn std::io::Write) -> std::io::Result<()>,
+    ) -> Result<ContentDigest, PersistenceError>;
+
+    /// Publish bytes already made, as [`Self::publish_with`] does.
     fn publish(
         &self,
         path: &Path,
         expected: Self::ExpectedContent,
         bytes: &[u8],
-    ) -> Result<ContentDigest, PersistenceError>;
+    ) -> Result<ContentDigest, PersistenceError> {
+        self.publish_with(path, expected, &|writer| writer.write_all(bytes))
+    }
 }
 
 /// Destination authority captured before transaction entry or content capture.
@@ -176,8 +186,12 @@ impl<E> NativeSaveDestination<E> {
     ) -> Result<NativeSavePublication, ProjectLifecycleError> {
         candidate.workspace.project.set_path(self.path.clone());
         let registry = prepare_registry(&candidate)?;
-        let (bytes, _) = serialized_project(&candidate)?;
-        let accepted_digest = storage.publish(&self.path, self.expected, &bytes)?;
+        let accepted_digest = {
+            let savable = candidate.savable().map_err(PersistenceError::from)?;
+            storage.publish_with(&self.path, self.expected, &|writer| {
+                savable.write_to(writer)
+            })?
+        };
         Ok(NativeSavePublication {
             candidate,
             binding: NativeBinding {
@@ -225,10 +239,12 @@ impl<E> NativeCopyDestination<E> {
         mut candidate: ProjectFile,
     ) -> Result<(), ProjectLifecycleError> {
         candidate.workspace.project = candidate.workspace.project.fork_copy_at(self.path.clone());
-        let (bytes, _) = serialized_project(&candidate)?;
+        let savable = candidate.savable().map_err(PersistenceError::from)?;
         // Retain picker-time expectations even for an independent copy.
         // No canonical binding or accepted baseline is returned to the caller.
-        storage.publish(&self.path, self.expected, &bytes)?;
+        storage.publish_with(&self.path, self.expected, &|writer| {
+            savable.write_to(writer)
+        })?;
         Ok(())
     }
 }

@@ -300,11 +300,8 @@ pub(super) async fn read_browser_handle_bytes(
         .map_err(js_error)?
         .as_f64()
         .ok_or("browser file size is unavailable")?;
-    if !size.is_finite()
-        || size < 0.0
-        || size > crate::io::project_io::MAX_PROJECT_FILE_BYTES as f64
-    {
-        return Err("browser project exceeds the supported project-size limit".to_owned());
+    if !size.is_finite() || size < 0.0 || size > crate::io::project_io::BROWSER_FILE_BYTES as f64 {
+        return Err(crate::io::project_io::BROWSER_FILE_TOO_LARGE.to_owned());
     }
     let array_buffer = await_browser_promise(
         call_promise_method(&file, "arrayBuffer", &[])?,
@@ -312,9 +309,6 @@ pub(super) async fn read_browser_handle_bytes(
     )
     .await?;
     let array = js_sys::Uint8Array::new(&array_buffer);
-    if array.length() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
-        return Err("browser project exceeds the supported project-size limit".to_owned());
-    }
     let mut bytes = vec![0_u8; array.length() as usize];
     array.copy_to(&mut bytes);
     Ok(bytes)

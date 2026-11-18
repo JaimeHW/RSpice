@@ -1616,11 +1616,6 @@ impl From<std::io::Error> for ProjectIoError {
     }
 }
 
-/// Hard boundary for one project container. It prevents corrupt or hostile
-/// files from causing unbounded allocation while retaining ample headroom for
-/// large retained result histories.
-pub const MAX_PROJECT_FILE_BYTES: u64 = 512 * 1024 * 1024;
-
 impl ProjectFile {
     /// The project as its file holds it: a library read from a folder of its
     /// own keeps only its reference there, and its cells, drawings, layouts
@@ -1661,35 +1656,51 @@ impl ProjectFile {
     }
 }
 
-pub fn serialize_project_file(project: &ProjectFile) -> Result<String, ProjectIoError> {
-    let without_references;
-    let project = if project.libraries.references().next().is_some() {
-        without_references = project.without_referenced_libraries();
-        &without_references
-    } else {
+/// A project checked for saving, as its file holds it: what a save writes.
+pub struct SavableProject<'a> {
+    project: std::borrow::Cow<'a, ProjectFile>,
+}
+
+impl ProjectFile {
+    /// The project as its file holds it, once it passes every check a save
+    /// makes, so nothing is written for a project that cannot be saved.
+    pub fn savable(&self) -> Result<SavableProject<'_>, ProjectIoError> {
+        let project = if self.libraries.references().next().is_some() {
+            std::borrow::Cow::Owned(self.without_referenced_libraries())
+        } else {
+            std::borrow::Cow::Borrowed(self)
+        };
+        project.validate()?;
         project
-    };
-    project.validate()?;
-    project
-        .simulation_results
-        .validate()
-        .map_err(ProjectIoError::InvalidData)?;
-    project
-        .validate_result_plan_references()
-        .map_err(ProjectIoError::InvalidData)?;
-    project
-        .validate_regression_baseline_eligibility()
-        .map_err(ProjectIoError::InvalidData)?;
-    let mut contents = serde_json::to_string_pretty(project)
-        .map_err(|error| ProjectIoError::SerializeError(error.to_string()))?;
-    contents.push('\n');
-    if contents.len() as u64 > MAX_PROJECT_FILE_BYTES {
-        return Err(ProjectIoError::InvalidData(format!(
-            "serialized project is {} bytes; the supported maximum is {MAX_PROJECT_FILE_BYTES} bytes",
-            contents.len()
-        )));
+            .simulation_results
+            .validate()
+            .map_err(ProjectIoError::InvalidData)?;
+        project
+            .validate_result_plan_references()
+            .map_err(ProjectIoError::InvalidData)?;
+        project
+            .validate_regression_baseline_eligibility()
+            .map_err(ProjectIoError::InvalidData)?;
+        Ok(SavableProject { project })
     }
-    Ok(contents)
+}
+
+impl SavableProject<'_> {
+    /// Write the file to `writer` as it is made, a piece at a time, so the
+    /// whole file is never held in memory.
+    pub fn write_to(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
+        serde_json::to_writer_pretty(&mut *writer, &*self.project)?;
+        writer.write_all(b"\n")
+    }
+}
+
+pub fn serialize_project_file(project: &ProjectFile) -> Result<String, ProjectIoError> {
+    let savable = project.savable()?;
+    let mut contents = Vec::new();
+    savable
+        .write_to(&mut contents)
+        .map_err(|error| ProjectIoError::SerializeError(error.to_string()))?;
+    String::from_utf8(contents).map_err(|error| ProjectIoError::SerializeError(error.to_string()))
 }
 
 pub fn decode_project_text(
@@ -1697,13 +1708,26 @@ pub fn decode_project_text(
     source_path: Option<&Path>,
     source_files: impl rspice_design::hierarchy::HierarchySourceFiles,
 ) -> Result<DecodedProject, ProjectIoError> {
-    validate_project_text_size(contents.len())?;
-    // A stored run's results are read from the segments the project keeps beside its file.
+    keep_segments_beside(source_path);
+    let project: ProjectFile =
+        serde_json::from_str(contents).map_err(|error| ProjectIoError::unreadable_json(&error))?;
+    finish_decoding(project, source_path, source_files)
+}
+
+/// A stored run's results are read from the segments the project keeps
+/// beside its file, so the folder is named before the file is parsed.
+pub(crate) fn keep_segments_beside(source_path: Option<&Path>) {
     if let Some(path) = source_path {
         rspice_results::store_reader::keep_segments_in(&crate::results::segment_folder(path));
     }
-    let mut project: ProjectFile =
-        serde_json::from_str(contents).map_err(|error| ProjectIoError::unreadable_json(&error))?;
+}
+
+/// Restore, repair and check a project just parsed from its file.
+pub(crate) fn finish_decoding(
+    mut project: ProjectFile,
+    source_path: Option<&Path>,
+    source_files: impl rspice_design::hierarchy::HierarchySourceFiles,
+) -> Result<DecodedProject, ProjectIoError> {
     let mut load_repairs = Vec::new();
     let repaired_markers = project
         .result_presentation
@@ -1798,16 +1822,6 @@ pub fn decode_project_text(
     })
 }
 
-fn validate_project_text_size(byte_len: usize) -> Result<(), ProjectIoError> {
-    if byte_len as u64 > MAX_PROJECT_FILE_BYTES {
-        return Err(ProjectIoError::InvalidData(format!(
-            "project text is {} bytes; the supported maximum is {MAX_PROJECT_FILE_BYTES} bytes",
-            byte_len
-        )));
-    }
-    Ok(())
-}
-
 /// Canonical content and the document changes produced while opening it.
 #[derive(Debug, Clone)]
 pub struct DecodedProject {
@@ -1830,6 +1844,3 @@ impl rspice_design::projection::ProjectionSources for DecodedSources {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

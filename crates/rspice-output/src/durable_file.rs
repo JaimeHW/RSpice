@@ -15,7 +15,6 @@ use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 const UNIQUE_TEMP_ATTEMPTS: usize = 16;
-const MAX_HASHED_FILE_BYTES: u64 = 512 * 1024 * 1024;
 const LEASE_HEADER_MAGIC: [u8; 16] = *b"RSPICE-LEASE-V2!";
 const LEASE_HEADER_PREFIX_LEN: usize = 64;
 const LEASE_HEADER_LEN: usize = 96;
@@ -540,7 +539,7 @@ where
         return Err(error);
     }
 
-    let staged_digest = match hash_file_bounded(&temp) {
+    let staged_digest = match hash_file(&temp) {
         Ok(digest) => digest,
         Err(error) => {
             remove_unpublished_temp(&temp);
@@ -669,7 +668,19 @@ pub fn compare_exchange_bytes(
     expected: ExpectedContent,
     bytes: &[u8],
 ) -> Result<(), CompareExchangeError> {
-    compare_exchange_bytes_impl(path, expected, bytes, false)
+    compare_exchange_impl(path, expected, |writer| writer.write_all(bytes), false).map(|_| ())
+}
+
+/// Durably publish what `write` makes, as [`compare_exchange_bytes`] does,
+/// and return the digest of what was published. The bytes go to the staged
+/// file as they are made, so a file of any size costs no more memory than
+/// its writer holds.
+pub fn compare_exchange_with(
+    path: &Path,
+    expected: ExpectedContent,
+    write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
+) -> Result<[u8; 32], CompareExchangeError> {
+    compare_exchange_impl(path, expected, write, false)
 }
 
 /// Unix-only publication for secret material. Both the staged successor and
@@ -681,15 +692,33 @@ pub fn compare_exchange_bytes_owner_only(
     expected: ExpectedContent,
     bytes: &[u8],
 ) -> Result<(), CompareExchangeError> {
-    compare_exchange_bytes_impl(path, expected, bytes, true)
+    compare_exchange_impl(path, expected, |writer| writer.write_all(bytes), true).map(|_| ())
 }
 
-fn compare_exchange_bytes_impl(
+/// A writer that hashes what passes through it.
+struct HashingWriter<W> {
+    inner: W,
+    hasher: Sha256,
+}
+
+impl<W: Write> Write for HashingWriter<W> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buffer)?;
+        self.hasher.update(&buffer[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn compare_exchange_impl(
     path: &Path,
     expected: ExpectedContent,
-    bytes: &[u8],
+    write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
     owner_only: bool,
-) -> Result<(), CompareExchangeError> {
+) -> Result<[u8; 32], CompareExchangeError> {
     std::fs::create_dir_all(parent_directory(path))?;
     let destination = resolved_destination(path);
     let path = destination.as_path();
@@ -710,7 +739,6 @@ fn compare_exchange_bytes_impl(
             actual: initially_observed,
         });
     }
-    let staged_digest: [u8; 32] = Sha256::digest(bytes).into();
     let predecessor_permissions = std::fs::metadata(path)
         .ok()
         .map(|metadata| metadata.permissions());
@@ -739,8 +767,16 @@ fn compare_exchange_bytes_impl(
         .into());
     }
 
-    let staged = (|| -> io::Result<()> {
-        file.write_all(bytes)?;
+    let staged = (|| -> io::Result<[u8; 32]> {
+        let hasher = {
+            let mut staging = HashingWriter {
+                inner: io::BufWriter::new(&mut file),
+                hasher: Sha256::new(),
+            };
+            write(&mut staging)?;
+            staging.inner.flush()?;
+            staging.hasher
+        };
         file.flush()?;
         #[cfg(unix)]
         {
@@ -756,13 +792,17 @@ fn compare_exchange_bytes_impl(
         if let Some(permissions) = predecessor_permissions.as_ref() {
             file.set_permissions(permissions.clone())?;
         }
-        file.sync_all()
+        file.sync_all()?;
+        Ok(hasher.finalize().into())
     })();
     drop(file);
-    if let Err(error) = staged {
-        remove_unpublished_temp(&temp);
-        return Err(error.into());
-    }
+    let staged_digest = match staged {
+        Ok(digest) => digest,
+        Err(error) => {
+            remove_unpublished_temp(&temp);
+            return Err(error.into());
+        }
+    };
 
     let displaced = match publish_retaining_predecessor(&temp, path, staged_digest) {
         Ok(displaced) => displaced,
@@ -792,7 +832,7 @@ fn compare_exchange_bytes_impl(
     };
 
     let actual = match displaced.as_deref() {
-        Some(predecessor) => match hash_file_bounded(predecessor) {
+        Some(predecessor) => match hash_file(predecessor) {
             Ok(digest) => Some(digest),
             Err(error) => {
                 return rollback_after_publication_failure(
@@ -800,7 +840,8 @@ fn compare_exchange_bytes_impl(
                     displaced,
                     staged_digest,
                     format!("displaced predecessor could not be verified: {error}"),
-                );
+                )
+                .map(|()| staged_digest);
             }
         },
         None => None,
@@ -810,7 +851,8 @@ fn compare_exchange_bytes_impl(
         ExpectedContent::Digest(digest) => actual == Some(digest),
     };
     if !matches {
-        return rollback_conflict(path, displaced, expected, actual, staged_digest);
+        return rollback_conflict(path, displaced, expected, actual, staged_digest)
+            .map(|()| staged_digest);
     }
 
     if let Err(error) = sync_parent_directory(parent) {
@@ -819,7 +861,8 @@ fn compare_exchange_bytes_impl(
             displaced,
             staged_digest,
             format!("containing directory could not be synchronized: {error}"),
-        );
+        )
+        .map(|()| staged_digest);
     }
 
     match current_digest(path) {
@@ -853,7 +896,8 @@ fn compare_exchange_bytes_impl(
                 displaced,
                 staged_digest,
                 format!("owner-only publication produced mode {mode:#05o} instead of 0o600"),
-            );
+            )
+            .map(|()| staged_digest);
         }
     }
 
@@ -869,7 +913,8 @@ fn compare_exchange_bytes_impl(
             displaced,
             staged_digest,
             format!("published target file could not be synchronized: {error}"),
-        );
+        )
+        .map(|()| staged_digest);
     }
 
     #[cfg(windows)]
@@ -908,7 +953,7 @@ fn compare_exchange_bytes_impl(
         }
     }
     retire_publication_recovery(path).map_err(PublicationFailure::into_compare_exchange)?;
-    Ok(())
+    Ok(staged_digest)
 }
 
 fn rollback_conflict(
@@ -940,7 +985,7 @@ fn rollback_conflict(
                     recovery_paths: vec![target.to_path_buf(), successor],
                 });
             }
-            match hash_file_bounded(&successor) {
+            match hash_file(&successor) {
                 Ok(digest) if digest == staged_digest => {}
                 Ok(digest) => {
                     return Err(CompareExchangeError::PublicationUncertain {
@@ -1006,7 +1051,7 @@ fn rollback_created_target(
     let recovery = unique_sibling(target);
     match move_no_replace_checked(target, &recovery, staged_digest) {
         Ok(()) => {
-            match hash_file_bounded(&recovery) {
+            match hash_file(&recovery) {
                 Ok(digest) if digest == staged_digest => {}
                 Ok(_) | Err(_) => {
                     return Err(CompareExchangeError::PublicationUncertain {
@@ -1043,7 +1088,7 @@ fn rollback_after_publication_failure(
     match displaced {
         Some(predecessor) => match rollback_retaining_successor(target, &predecessor) {
             Ok(successor) => {
-                match hash_file_bounded(&successor) {
+                match hash_file(&successor) {
                     Ok(digest) if digest == staged_digest => {}
                     Ok(digest) => {
                         return Err(CompareExchangeError::PublicationUncertain {
@@ -1178,37 +1223,28 @@ fn retire_publication_recovery(target: &Path) -> Result<(), PublicationFailure> 
 }
 
 fn current_digest(path: &Path) -> io::Result<Option<[u8; 32]>> {
-    match hash_file_bounded(path) {
+    match hash_file(path) {
         Ok(digest) => Ok(Some(digest)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
 }
 
-fn hash_file_bounded(path: &Path) -> io::Result<[u8; 32]> {
+fn hash_file(path: &Path) -> io::Result<[u8; 32]> {
     let mut file = File::open(path)?;
-    hash_open_file_bounded(&mut file)
+    hash_open_file(&mut file)
 }
 
-fn hash_open_file_bounded(file: &mut File) -> io::Result<[u8; 32]> {
+/// The file's digest, read a buffer at a time, so a file of any size costs
+/// one buffer of memory.
+fn hash_open_file(file: &mut File) -> io::Result<[u8; 32]> {
     file.seek(std::io::SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
-    let mut total = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
-        }
-        total = total.saturating_add(read as u64);
-        if total > MAX_HASHED_FILE_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::FileTooLarge,
-                format!(
-                    "file exceeds the {} byte project publication limit",
-                    MAX_HASHED_FILE_BYTES
-                ),
-            ));
         }
         hasher.update(&buffer[..read]);
     }
@@ -1222,7 +1258,7 @@ fn sync_windows_published_successor(
     permissions: Option<&std::fs::Permissions>,
 ) -> io::Result<()> {
     let mut file = OpenOptions::new().read(true).write(true).open(path)?;
-    let actual = hash_open_file_bounded(&mut file)?;
+    let actual = hash_open_file(&mut file)?;
     if actual != expected_digest {
         return Err(io::Error::other(format!(
             "published handle for '{}' does not contain the staged successor",

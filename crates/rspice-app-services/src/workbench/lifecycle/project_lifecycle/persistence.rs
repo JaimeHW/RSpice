@@ -239,8 +239,8 @@ pub(crate) fn start_browser_write(
 ) -> Result<(), String> {
     use wasm_bindgen::JsCast as _;
 
-    if bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
-        return Err("project exceeds the browser project-size limit".to_owned());
+    if bytes.len() as u64 > crate::io::project_io::BROWSER_FILE_BYTES {
+        return Err(crate::io::project_io::BROWSER_FILE_TOO_LARGE.to_owned());
     }
     target.intent.validate_generation()?;
     let operation = if let Some(handle_id) = target.handle_id {

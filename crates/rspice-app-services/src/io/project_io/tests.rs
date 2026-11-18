@@ -371,13 +371,9 @@ fn expected_digest_gate_rejects_replaced_bytes_before_parsing() {
         load_project_file_with_digest(&path).expect("load accepted fixture identity");
 
     assert!(
-        read_project_bytes(&path)
-            .expect("read exact byte snapshot")
-            .decode_if_digest(
-                accepted,
-                Some(&path),
-                crate::state::workspace::WorkspaceSourceFiles,
-            )
+        read_project_file(&path)
+            .expect("read the file once")
+            .decode_if_digest(accepted, crate::state::workspace::WorkspaceSourceFiles)
             .expect("matching project loads")
             .is_some()
     );
@@ -385,14 +381,10 @@ fn expected_digest_gate_rejects_replaced_bytes_before_parsing() {
     std::fs::write(&path, b"replacement bytes are intentionally not JSON")
         .expect("replace fixture");
     assert!(
-        read_project_bytes(&path)
-            .expect("read exact byte snapshot")
-            .decode_if_digest(
-                accepted,
-                Some(&path),
-                crate::state::workspace::WorkspaceSourceFiles,
-            )
-            .expect("digest mismatch is rejected without parsing")
+        read_project_file(&path)
+            .expect("read the file once")
+            .decode_if_digest(accepted, crate::state::workspace::WorkspaceSourceFiles)
+            .expect("digest mismatch is rejected before its damage is reported")
             .is_none()
     );
 

@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::io::durable_file::{self, ExpectedContent};
+use rspice_project::persistence::digest_bytes;
 
 fn with_destination(test: impl FnOnce(&Path, &Path)) {
     let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
@@ -100,7 +101,11 @@ fn storage_reports_the_owned_lease_and_recovers_after_release() {
                 .map(|entry| entry.unwrap().file_name())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(beside(), [target.file_name().unwrap()], "no lock file outlives a read");
+        assert_eq!(
+            beside(),
+            [target.file_name().unwrap()],
+            "no lock file outlives a read"
+        );
         let owned = durable_file::hold_lease(target).unwrap();
         let raw = durable_file::reconcile_publication(target).unwrap_err();
         let diagnostic = raw.to_string();
@@ -126,7 +131,11 @@ fn storage_reports_the_owned_lease_and_recovers_after_release() {
             digest_bytes(successor)
         );
         assert_eq!(std::fs::read(target).unwrap(), successor);
-        assert_eq!(beside(), [target.file_name().unwrap()], "nothing beside the save");
+        assert_eq!(
+            beside(),
+            [target.file_name().unwrap()],
+            "nothing beside the save"
+        );
     });
 }
 

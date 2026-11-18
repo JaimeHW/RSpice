@@ -72,15 +72,6 @@ pub(super) fn read_windows_recovery_record(path: &Path) -> io::Result<Option<Rec
     let mut successor_len = [0_u8; 8];
     successor_len.copy_from_slice(&header[104..112]);
     let successor_len = u64::from_le_bytes(successor_len);
-    if predecessor_len > MAX_HASHED_FILE_BYTES || successor_len > MAX_HASHED_FILE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "recovery bundle '{}' declares an image larger than the supported {MAX_HASHED_FILE_BYTES} byte limit",
-                path.display()
-            ),
-        ));
-    }
     let mut predecessor_digest = [0_u8; 32];
     predecessor_digest.copy_from_slice(&header[112..144]);
     let mut successor_digest = [0_u8; 32];
@@ -173,15 +164,6 @@ pub(super) fn seal_file_image(
         total = total.checked_add(read as u64).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "recovery image size overflow")
         })?;
-        if total > MAX_HASHED_FILE_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "recovery image '{}' exceeds the supported {MAX_HASHED_FILE_BYTES} byte limit",
-                    source_path.display()
-                ),
-            ));
-        }
         hasher.update(&buffer[..read]);
         destination.write_all(&buffer[..read])?;
     }
@@ -358,14 +340,6 @@ pub(super) fn install_recovery_bundle(
         .as_ref()
         .map_or(0, std::fs::Metadata::len);
     let successor_len = successor_metadata.len();
-    if predecessor_len > MAX_HASHED_FILE_BYTES || successor_len > MAX_HASHED_FILE_BYTES {
-        return Err(PublicationFailure::Safe(io::Error::new(
-            io::ErrorKind::FileTooLarge,
-            format!(
-                "recovery images exceed the supported {MAX_HASHED_FILE_BYTES} byte per-image limit"
-            ),
-        )));
-    }
     let predecessor_read_only = predecessor_metadata
         .as_ref()
         .is_some_and(|metadata| metadata.permissions().readonly());

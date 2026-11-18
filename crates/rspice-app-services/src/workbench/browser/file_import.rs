@@ -50,7 +50,7 @@ impl BrowserTextImportKind {
             Self::ResultDataset => crate::io::file_exchange::MAX_RESULT_DATASET_BYTES,
             Self::SymbolDefinition => crate::io::file_exchange::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
             Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA => {
-                crate::io::project_io::MAX_PROJECT_FILE_BYTES
+                crate::io::project_io::BROWSER_FILE_BYTES
             }
         }
     }
@@ -213,7 +213,7 @@ pub fn pick_text_file(
     let import_kind = active_text_import_kind();
     let max_bytes = import_kind
         .map(BrowserTextImportKind::max_bytes)
-        .unwrap_or(crate::io::project_io::MAX_PROJECT_FILE_BYTES);
+        .unwrap_or(crate::io::project_io::BROWSER_FILE_BYTES);
     wasm_bindgen_futures::spawn_local(async move {
         let file = rfd::AsyncFileDialog::new()
             .add_filter(filter_name, filter_extensions)
