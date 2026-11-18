@@ -539,11 +539,21 @@ impl TestRunner {
         &self.config
     }
 
+    /// Read a deck as ngspice reads it: in the ngspice dialect, the parse-time
+    /// half of the dialect the regression engines run in, as
+    /// `--spice-dialect ngspice` selects both.
     fn parse_regression_source(
         source: &str,
         source_path: &Path,
     ) -> Result<Netlist, rspice_core::netlist::ParseError> {
-        Netlist::parse_with_path(source, source_path)
+        Netlist::parse_with_path_and_options(
+            source,
+            source_path,
+            rspice_core::netlist::NetlistParseOptions {
+                spice_dialect: Some(rspice_core::engine::SpiceDialect::Ngspice),
+                ..Default::default()
+            },
+        )
     }
 }
 
