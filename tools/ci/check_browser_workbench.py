@@ -93,15 +93,25 @@ def verify_age(browser, name, now_ms):
     for value, expected, suffix in ((now_ms - 86_400_000, "clock skew", "rollback"),
                                     (now_ms + 86_400_000, "yesterday", "forward"),
                                     ("nonfinite", "time unavailable", "unavailable")):
-        if name == "checkpoint":
-            expected = {"clock skew": "time unavailable"}.get(expected, expected)
         with wall_clock(browser, value):
             snapshot = browser.capture(f"{name}-age-{suffix}")
-            if not any(control["value"] == expected or (
-                    name == "checkpoint" and
-                    control["label"].startswith(f"Manual checkpoint, {expected} · revision 1 ·"))
-                    for control in controls(snapshot)):
+            if not any(control["value"] == expected for control in controls(snapshot)):
                 raise AssertionError(f"{name} did not report {expected!r} after a clock adjustment")
+
+
+def verify_checkpoint_time(browser, manifest, now_ms):
+    """A checkpoint row states when the checkpoint was made, as a date and time
+    no clock fault moves or hides, and then its age, which a fault makes
+    unknown or moves the way the clock moved."""
+    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(manifest["created_unix_ms"] // 1000))
+    for value, age, suffix in ((now_ms - 86_400_000, "time unavailable", "rollback"),
+                               (now_ms + 86_400_000, "yesterday", "forward"),
+                               ("nonfinite", "time unavailable", "unavailable")):
+        row = f"Manual checkpoint, {stamp} · {age} · revision {manifest['project_revision']},"
+        with wall_clock(browser, value):
+            snapshot = browser.capture(f"checkpoint-age-{suffix}")
+            if not any(control["label"].startswith(row) for control in controls(snapshot)):
+                raise AssertionError(f"The checkpoint row did not read {row!r} after a clock adjustment")
 
 
 def verify_revision_time(browser, record, note):
@@ -686,7 +696,7 @@ def run(browser):
     verify_review(project, review_intervals)
     browser.capture("checkpoint-created")
     reject_checkpoint_clock(browser, "retained-checkpoint-store")
-    verify_age(browser, "checkpoint", time.time_ns() // 1_000_000)
+    verify_checkpoint_time(browser, manifest, time.time_ns() // 1_000_000)
     browser.click("Restore Manual checkpoint as a new project", "button")
 
     def download():
