@@ -5,12 +5,9 @@
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 
-use super::engine_recovery_path::author_deck;
 use crate::feature_tests::replay::{Replay, only};
 use rspice_app_code::workbench::code::commands::CodeCommand;
-use rspice_app_code::workbench::documents::netlist_document::{
-    OwnedNetlistReplacement, editor_id_in, replace_owned_sources_atomically,
-};
+use rspice_app_code::workbench::documents::netlist_document::editor_id_in;
 use rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
@@ -21,27 +18,18 @@ const DECK: &str = "* rc low-pass\nV1 in 0 PULSE(0 1 0 1n 1n 5u 10u)\nR1 in out 
 /// The resistor's card, whose second node is `out`.
 const CARD: &str = "R1 in out 1k";
 
-/// The deck page showing `DECK`, put in place whole, with the caret on
+/// The deck page showing `DECK`, opened from its file, with the caret on
 /// `out` in the resistor's card.
 fn deck_page_at_out() -> Replay {
     let mut replay = Replay::new();
-    author_deck(&mut replay);
-    let typed = replay
-        .app
-        .state
-        .model
-        .workspace
-        .content
-        .netlist_source
-        .clone()
-        .expect("the project owns the deck");
-    replace_owned_sources_atomically(
-        &mut replay.app.state.model,
-        &mut replay.app.state.code.netlist,
-        &mut replay.app.state.code.netlist_open_documents,
-        vec![OwnedNetlistReplacement::root(&typed, DECK.to_owned(), 1)],
-    )
-    .expect("the project owns the deck");
+    replay.frames(Vec::new());
+    assert!(
+        replay
+            .app
+            .state
+            .open_test_deck(DECK.to_owned(), None, "rc.cir"),
+        "the deck opens"
+    );
     replay.frames(Vec::new());
     let line_start = DECK.find(CARD).expect("the deck writes the card");
     let caret = DECK[..line_start].chars().count() + CARD.find("out").expect("out") + 1;
