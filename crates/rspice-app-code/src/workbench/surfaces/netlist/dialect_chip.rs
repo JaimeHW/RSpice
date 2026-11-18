@@ -118,7 +118,7 @@ fn dialect_chip(
     }
     let options = Dialect::CHOICES.map(|dialect| messages.text(dialect_name(dialect)));
     let width = DeckChip { reading, menu }.width(ui, messages);
-    let output = crate::ui::widgets::select_with_response(
+    let output = crate::ui::widgets::compact_select_with_response(
         ui,
         "netlist-dialect",
         &messages.text(MessageId::NetlistDialect),
@@ -196,8 +196,17 @@ fn dialect_hint_band(
         let read_label =
             messages.format(MessageId::NetlistDialectHintRead, &[("program", &program)]);
         let dismiss_label = messages.text(MessageId::NetlistDialectHintDismiss);
-        read = Button::new(&read_label).compact().show(ui).clicked();
-        dismiss = Button::new(&dismiss_label).compact().show(ui).clicked();
+        let read_button = Button::new(&read_label).compact();
+        let dismiss_button = Button::new(&dismiss_label).compact();
+        // The pair wraps as one: on a narrow page both go under the
+        // sentence, never one beside it and the other alone below.
+        let pair =
+            read_button.measured_width(ui) + HINT_BUTTON_GAP + dismiss_button.measured_width(ui);
+        if ui.available_width() < pair {
+            ui.end_row();
+        }
+        read = read_button.show(ui).clicked();
+        dismiss = dismiss_button.show(ui).clicked();
     });
     if dismiss {
         ui.ctx()

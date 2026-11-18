@@ -255,9 +255,15 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     actions.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
     // Every labelled button in the strip stands at the kit's compact control
     // height, so the run and save buttons sit level, an equal gap above and
-    // below them in the row.
+    // below them in the row. A button is as tall as its label and padding
+    // when that is more than the interact height, so the padding is what
+    // brings it down to the height. egui rounds a button's padding to whole
+    // points, so it is floored here: half a point rounded up made the button
+    // a point taller than the row allows.
     let control_h = crate::ui::widgets::compact_height(&t.metrics);
+    let label_h = actions.text_style_height(&egui::TextStyle::Button);
     actions.spacing_mut().interact_size.y = control_h;
+    actions.spacing_mut().button_padding.y = ((control_h - label_h) / 2.0).floor().max(0.0);
     if compact {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let mut find_clicked = false;
@@ -439,7 +445,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                     WorkbenchIcon::Search,
                     &messages.text(MessageId::NetlistFindActiveDocument),
                     false,
-                    vec2(28.0, 28.0),
+                    vec2(control_h, control_h),
                 )
                 .clicked();
             })
@@ -453,7 +459,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 WorkbenchIcon::Folder,
                 &messages.text(MessageId::CodeSourceLifecycleTitle),
                 false,
-                vec2(28.0, 28.0),
+                vec2(control_h, control_h),
             );
             if manage_source.clicked() {
                 action = Some(NetlistToolbarAction::ManageTopDecks);
@@ -496,7 +502,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                                     WorkbenchIcon::More,
                                     "Create a narrow generated-source override",
                                     false,
-                                    vec2(28.0, 28.0),
+                                    vec2(control_h, control_h),
                                 )
                                 .clicked();
                             })
@@ -531,10 +537,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                             || generated_ready
                             || cx.platform.project_lifecycle.is_open();
                         let response = ui
-                            .add_enabled(
-                                primary_ready,
-                                egui::Button::new(&label),
-                            )
+                            .add_enabled(primary_ready, egui::Button::new(&label))
                             .on_disabled_hover_text(generation_block_reason(cx.model, messages));
                         if response.clicked() {
                             action = Some(candidate);
@@ -889,10 +892,7 @@ fn run_control(
         .unwrap_or_else(|| messages.text(MessageId::NetlistGenerateBeforeAction))
     };
     let response = ui
-        .add_enabled_ui(enabled, |ui| {
-            ui.add(egui::Button::new(&label))
-        })
-        .inner
+        .add_enabled(enabled, egui::Button::new(&label))
         .on_disabled_hover_text(blocked);
     response.clicked().then_some(action)
 }
@@ -907,11 +907,13 @@ fn language_tools_menu(
     let mut action = None;
     let (response, _) = ui
         .add_enabled_ui(enabled, |ui| {
+            // Square, at the strip's control height like the icons beside it.
+            let side = ui.spacing().interact_size.y;
             ui.spacing_mut().button_padding = vec2(0.0, 0.0);
             MenuButton::from_button(
                 egui::Button::new(egui::WidgetText::default())
                     .frame(false)
-                    .min_size(vec2(28.0, 28.0)),
+                    .min_size(vec2(side, side)),
             )
             .ui(ui, |ui| {
                 ui.set_min_width(180.0);

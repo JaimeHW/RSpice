@@ -95,6 +95,7 @@ pub fn select_with_disabled_response(
         options,
         width,
         false,
+        false,
         disabled,
         &[],
         None,
@@ -118,6 +119,34 @@ pub fn select_with_response(
         options,
         width,
         false,
+        false,
+        &[],
+        &[],
+        None,
+    )
+    .0
+}
+
+/// [`select_with_response`] at the height of a compact button, for a select
+/// that stands among the compact buttons of a header row: the row's
+/// controls are one height, its select no taller than its buttons.
+pub fn compact_select_with_response(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    width: f32,
+) -> SelectOutput {
+    select_with_font(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        width,
+        false,
+        true,
         &[],
         &[],
         None,
@@ -148,6 +177,7 @@ pub fn select_with_details(
         options,
         width,
         false,
+        false,
         &[],
         details,
         None,
@@ -174,6 +204,7 @@ pub fn select_mono_with_response(
         options,
         width,
         true,
+        false,
         &[],
         &[],
         None,
@@ -323,6 +354,7 @@ pub fn select_with_switch(
         options,
         width,
         false,
+        false,
         &[],
         &[],
         Some(switch),
@@ -342,6 +374,7 @@ fn select_with_font(
     options: &[String],
     width: f32,
     mono: bool,
+    compact: bool,
     disabled: &[(usize, &'static str)],
     details: &[String],
     switch: Option<SelectSwitch<'_>>,
@@ -355,7 +388,12 @@ fn select_with_font(
     };
 
     let width = width.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 });
-    let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
+    let height = if compact {
+        super::compact_height(&t.metrics)
+    } else {
+        t.metrics.ctl_h
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     response.widget_info(|| {
         WidgetInfo::labeled(WidgetType::ComboBox, ui.is_enabled(), accessible_label)
     });
