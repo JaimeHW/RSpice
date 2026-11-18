@@ -343,6 +343,9 @@ fn publish_prepared_pdk_configuration_with_persistence(
     }
 
     model.pdk_config = config;
+    // A library kept in a folder its path variables did not name until now
+    // is read at once, with no reopen or refresh.
+    model.resolve_library_references();
     Ok(loaded)
 }
 

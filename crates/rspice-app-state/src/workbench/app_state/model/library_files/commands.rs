@@ -497,6 +497,87 @@ impl Model {
         }
     }
 
+    /// Read again each referenced library whose folder was not found, now
+    /// that the path variables may name it, as a change on the Paths page
+    /// does: one found loads at once, with no reopen or Refresh, and takes
+    /// the unsaved edits a restore held for it. One still missing states
+    /// where it was looked for now. Returns the libraries read.
+    pub fn resolve_library_references(&mut self) -> Vec<String> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Vec::new()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let missing = self
+                .library_files
+                .libraries()
+                .filter(|(_, session)| matches!(session.load, ReferenceLoad::NotFound(_)))
+                .filter_map(|(name, _)| self.library_manager.reference(name).cloned())
+                .collect::<Vec<_>>();
+            let roots = self.library_roots();
+            let project_folder = self.project_folder();
+            let technology = self.project_technology();
+            let mut read = Vec::new();
+            for reference in missing {
+                let folder = folders::resolve_folder(&reference, project_folder.as_deref(), &roots);
+                let reading = folders::read_folder(&reference, folder, &technology);
+                if matches!(reading.session.load, ReferenceLoad::NotFound(_)) {
+                    self.library_files.insert(reference.name, reading.session);
+                    continue;
+                }
+                self.put_found_reading(&reference, reading);
+                read.push(reference.name);
+            }
+            read
+        }
+    }
+
+    /// Put the reading of a library found since it was missing into the
+    /// project, with the unsaved edits held for it put back over it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn put_found_reading(&mut self, reference: &LibraryReference, mut reading: FolderReading) {
+        let name = reference.name.as_str();
+        let (edits, others): (Vec<_>, Vec<_>) = std::mem::take(&mut self.library_files.pending)
+            .into_iter()
+            .partition(|edit| edit.library == name);
+        self.library_files.pending = others;
+        let put_back = reading.image.as_ref().and_then(|image| {
+            let mut edited = image.clone();
+            edits
+                .iter()
+                .try_for_each(|edit| edited.put(&edit.file, edit.edited.clone()))
+                .ok()
+                .map(|()| edited)
+        });
+        let edits = match put_back {
+            Some(edited) if !edits.is_empty() => {
+                reading.image = Some(edited);
+                edits
+            }
+            _ => {
+                // What cannot be put back stays held, never lost.
+                self.library_files.pending.extend(edits);
+                Vec::new()
+            }
+        };
+        if let Err(reason) = self.put_reading(name, reading, !reference.mode.is_editable()) {
+            self.library_files.pending.extend(edits);
+            if self.library_manager.get_library(name).is_none() {
+                self.library_manager
+                    .add_library(folders::unread_library(name));
+            }
+            if let Some(session) = self.library_files.library_mut(name) {
+                session.load = ReferenceLoad::Unreadable(reason);
+                session.files.clear();
+            }
+            return;
+        }
+        if let Some(session) = self.library_files.library_mut(name) {
+            super::recovery::mark_put_back(session, edits);
+        }
+    }
+
     /// "Keep my version": the next save writes this session's edits over a
     /// file that changed on disk since editing began.
     pub fn keep_my_library_file(

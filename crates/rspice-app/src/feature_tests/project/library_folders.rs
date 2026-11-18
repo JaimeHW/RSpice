@@ -5,7 +5,8 @@
 //! cellview with edits here holds its lock and one locked elsewhere is
 //! never written, the first edit takes the lock and another session sees
 //! who holds it before it edits, an edit a crash recovery puts back counts
-//! as unsaved and takes its lock once edited again, every status reads
+//! as unsaved and takes its lock once edited again, naming a missing
+//! library's root on the Paths page reads it at once, every status reads
 //! alike on the Dependencies page's rail, table and inspector and in the
 //! Overview, and a reference this session cannot read is saved back as it
 //! was.
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_models::workbench::models::pdk_workflow::apply_pdk_configuration_with_persistence;
 use rspice_app_project::workbench::project::DependencyLibrary;
 use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_project::workbench::project::library_dialogs::library_files::{
@@ -31,7 +33,7 @@ use rspice_app_state::state::{Cell, CellViewRef, Library, Point, SchematicState,
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_design::library::folder::{
-    CellViewStatus, LibraryFile, LibraryFileLock, LibraryMode, ReferenceStatus,
+    CellViewStatus, LibraryFile, LibraryFileLock, LibraryMode, LibraryPath, ReferenceStatus,
 };
 
 use super::dependencies::said_about;
@@ -713,6 +715,110 @@ fn a_recovered_edit_to_a_library_out_of_reach_counts_as_unsaved() {
     assert!(
         review.contains(&named("amp")),
         "the review names amp:\n{review}"
+    );
+}
+
+/// The path variable the tests name the folder of `work` by.
+const ROOT: &str = "RSPICE_TEST_LIBRARY_ROOT";
+
+/// As [`kept_in_a_folder`], with `work` saved as found under the path
+/// variable [`ROOT`], which nothing here names yet.
+fn kept_under_a_root(label: &str) -> (RSpiceApp, Folders) {
+    let (mut app, folders) = kept_in_a_folder(label);
+    let model = &mut app.state.model;
+    let mut reference = model
+        .library_manager
+        .reference(LIBRARY)
+        .cloned()
+        .expect("work is kept in a folder of its own");
+    reference.path = LibraryPath::new(&format!("${ROOT}/{LIBRARY}")).expect("a path");
+    model.library_manager.insert_reference(reference);
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "the project is saved naming the library by its root"
+    );
+    (app, folders)
+}
+
+/// Name [`ROOT`] on the Paths page, as Apply does.
+fn name_the_root(app: &mut RSpiceApp, folders: &Folders) {
+    let mut config = app.state.model.pdk_config.clone();
+    config.environment_variables.insert(
+        ROOT.to_owned(),
+        folders
+            .folder
+            .parent()
+            .expect("the libraries' folder")
+            .display()
+            .to_string(),
+    );
+    apply_pdk_configuration_with_persistence(
+        &mut app.state.model,
+        &app.state.platform,
+        config,
+        |_| Ok(()),
+    )
+    .expect("the paths apply");
+}
+
+/// A library whose root no path variable names here reads Not found;
+/// naming it on the Paths page reads it at once, with its cells, and every
+/// place says Found, with no reopen or Refresh.
+#[test]
+fn naming_a_missing_librarys_root_on_the_paths_page_reads_it_at_once() {
+    let (app, folders) = kept_under_a_root("library-paths-root");
+    let mut app = reopened(app, &folders);
+    assert!(
+        matches!(
+            app.state.model.reference_status(LIBRARY),
+            Some(ReferenceStatus::NotFound(_))
+        ),
+        "nothing names the root yet"
+    );
+
+    name_the_root(&mut app, &folders);
+    let library = app
+        .state
+        .model
+        .library_manager
+        .get_library(LIBRARY)
+        .expect("work is in the catalog");
+    assert!(
+        CELLS.iter().all(|cell| library.cells.contains_key(*cell)),
+        "its cells are read"
+    );
+    assert_every_place_says(&mut app, "Found", None);
+}
+
+/// An edit a recovery held for a library out of reach is put back over it,
+/// unsaved, once the Paths page names its root.
+#[test]
+fn a_held_edit_goes_back_over_a_library_the_paths_page_finds() {
+    let (mut app, folders) = kept_under_a_root("library-paths-held-edit");
+    annotate(&mut app, "amp", "mine");
+    autosave_and_crash(app);
+    let mut app = recovered(&folders);
+    assert_eq!(
+        app.state.model.library_files.pending().len(),
+        1,
+        "the edit is held"
+    );
+
+    name_the_root(&mut app, &folders);
+    assert!(
+        app.state.model.library_files.pending().is_empty(),
+        "the reading takes it"
+    );
+    assert_eq!(
+        note(&app, "amp").as_deref(),
+        Some("mine"),
+        "the edit is back"
+    );
+    assert_eq!(note(&app, "stage"), None);
+    assert_eq!(
+        app.state.model.unsaved_library_files(),
+        [(LIBRARY.to_owned(), file("amp"))],
+        "unsaved, on amp alone"
     );
 }
 

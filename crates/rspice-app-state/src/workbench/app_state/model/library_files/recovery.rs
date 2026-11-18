@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use rspice_design::library::folder::{LibraryFile, Missing};
 use rspice_project::{ProjectFile, UnsavedLibraryFile};
 
-use super::{LibraryFileSession, Model, OnDisk, ReferenceLoad};
+use super::{LibraryFileSession, Model, OnDisk, ReferenceLoad, ReferenceSession};
 
 impl Model {
     /// Every file of each library kept in a folder of its own that `file`
@@ -126,18 +126,23 @@ impl Model {
                 session.pending.extend(edits);
                 continue;
             }
-            let Some(read) = session.library_mut(&library) else {
-                continue;
-            };
-            for edit in edits {
-                let state = read.files.entry(edit.file.clone()).or_default();
-                state.on_disk = on_disk_since(&edit.file, &state.on_disk, state.loaded, &edit);
-                state.loaded = edit.loaded;
-                state.content = edit.content;
-                state.edited = true;
-                state.keep_mine = false;
+            if let Some(read) = session.library_mut(&library) {
+                mark_put_back(read, edits);
             }
         }
+    }
+}
+
+/// Mark each file `edits` put back over what `read` found of its folder as
+/// edited here, from the revision each edit started from.
+pub(super) fn mark_put_back(read: &mut ReferenceSession, edits: Vec<UnsavedLibraryFile>) {
+    for edit in edits {
+        let state = read.files.entry(edit.file.clone()).or_default();
+        state.on_disk = on_disk_since(&edit.file, &state.on_disk, state.loaded, &edit);
+        state.loaded = edit.loaded;
+        state.content = edit.content;
+        state.edited = true;
+        state.keep_mine = false;
     }
 }
 
