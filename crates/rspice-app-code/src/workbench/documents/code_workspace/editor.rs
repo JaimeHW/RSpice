@@ -415,7 +415,7 @@ fn show_code_document_impl(
     let announcement = take_problem_step(ui.ctx(), editor_id)
         .map(|step| step_to_problem(ui.ctx(), editor_id, source, &held, step, messages));
     let revealed = take_reveal_line(ui, editor_id, source);
-    let requested_line = revealed.or_else(|| show_go_to_line(ui, editor_id, source));
+    let requested_line = revealed.or_else(|| show_go_to_line(ui, editor_id, source, messages));
     let tokens = Tokens::get(ui.ctx());
     let colors = tokens.color;
     let text_size = editor_font::text_size(ui.ctx());

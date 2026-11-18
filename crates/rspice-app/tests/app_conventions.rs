@@ -2099,6 +2099,177 @@ fn every_submenu_row_draws_the_workbench_chevron() {
     );
 }
 
+/// The source editor's own words, and the words of Rename and Find
+/// references over a deck or a source bundle, come from the message
+/// catalogue: a reader in another language, or in the pseudo-locale that
+/// stands for one, sees none of them in English.
+///
+/// A string literal in these files' production code that reads as words (a
+/// capitalised word, or two words) is a sentence the catalogue does not
+/// hold. Identifiers, test code and panic messages are not read.
+#[test]
+fn the_source_editor_writes_its_words_from_the_catalogue() {
+    const FILES: [&str; 7] = [
+        "rspice-app-code/src/workbench/documents/text_editor_commands.rs",
+        "rspice-app-code/src/workbench/documents/virtual_text_editor.rs",
+        "rspice-app-code/src/workbench/documents/virtual_text_editor/accessibility.rs",
+        "rspice-app-code/src/workbench/documents/virtual_text_editor/context_menu.rs",
+        "rspice-app-code/src/workbench/documents/virtual_text_editor/touch.rs",
+        "rspice-app-code/src/workbench/documents/netlist_document/references.rs",
+        "rspice-app-code/src/workbench/app/dialogs/source_language_tools.rs",
+    ];
+    // A literal on a line that names an id, a panic or an assertion is
+    // never shown to a reader.
+    const NOT_SHOWN: [&str; 8] = [
+        "Id::new(",
+        ".with(",
+        "expect(",
+        "panic!(",
+        "unreachable!(",
+        "assert",
+        "#[error(",
+        "include_str!(",
+    ];
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the crates directory");
+    let mut offenders = Vec::new();
+    for file in FILES {
+        let path = crates.join(file);
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let code = without_test_items(&source);
+        let lines = code.lines().collect::<Vec<_>>();
+        for (line, text) in string_literals(&code) {
+            let written = lines.get(line - 1).copied().unwrap_or_default();
+            if reads_as_words(&text) && !NOT_SHOWN.iter().any(|mark| written.contains(mark)) {
+                offenders.push(format!("{file}:{line}: {text:?}"));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these words are written in English in the code rather than taken from the \
+         message catalogue:\n  {}\nAdd a MessageId for each and write it with \
+         MessageCatalog::text or format.",
+        offenders.join("\n  ")
+    );
+}
+
+/// Whether a string literal's text reads as words a reader sees: it starts
+/// with a capital and a small letter, or holds two words of letters.
+fn reads_as_words(text: &str) -> bool {
+    let mut chars = text.chars();
+    let capitalised = chars.next().is_some_and(char::is_uppercase)
+        && chars.next().is_some_and(char::is_lowercase);
+    let words = text
+        .split(' ')
+        .filter(|word| word.chars().count() > 1 && word.chars().all(char::is_alphabetic))
+        .count();
+    capitalised || words >= 2
+}
+
+/// The string literals of `code`, each with the one-based line it starts
+/// on; comments, character literals and lifetimes are passed over, and a
+/// raw string is read to its closing quote and hashes.
+fn string_literals(code: &str) -> Vec<(usize, String)> {
+    let chars = code.chars().collect::<Vec<_>>();
+    let at = |index: usize| chars.get(index).copied();
+    let mut literals = Vec::new();
+    let mut line = 1;
+    let mut index = 0;
+    while let Some(ch) = at(index) {
+        match ch {
+            '\n' => {
+                line += 1;
+                index += 1;
+            }
+            '/' if at(index + 1) == Some('/') => {
+                while at(index).is_some_and(|ch| ch != '\n') {
+                    index += 1;
+                }
+            }
+            '/' if at(index + 1) == Some('*') => {
+                index += 2;
+                while at(index).is_some() && !(at(index) == Some('*') && at(index + 1) == Some('/'))
+                {
+                    if at(index) == Some('\n') {
+                        line += 1;
+                    }
+                    index += 1;
+                }
+                index += 2;
+            }
+            '\'' if at(index + 1) == Some('\\') => {
+                // An escaped character: past the escape, then to the quote.
+                index += 3;
+                while at(index).is_some_and(|ch| ch != '\'') {
+                    index += 1;
+                }
+                index += 1;
+            }
+            '\'' if at(index + 2) == Some('\'') => index += 3,
+            'r' if index == 0
+                || !at(index - 1)
+                    .is_some_and(|before| before.is_alphanumeric() || before == '_') =>
+            {
+                let mut open = index + 1;
+                while at(open) == Some('#') {
+                    open += 1;
+                }
+                if at(open) != Some('"') {
+                    index += 1;
+                    continue;
+                }
+                let hashes = open - index - 1;
+                let start = line;
+                let mut end = open + 1;
+                let mut text = String::new();
+                while let Some(ch) = at(end) {
+                    if ch == '"' && (1..=hashes).all(|offset| at(end + offset) == Some('#')) {
+                        break;
+                    }
+                    if ch == '\n' {
+                        line += 1;
+                    }
+                    text.push(ch);
+                    end += 1;
+                }
+                literals.push((start, text));
+                index = end + 1 + hashes;
+            }
+            '"' => {
+                let start = line;
+                let mut text = String::new();
+                index += 1;
+                while let Some(ch) = at(index) {
+                    match ch {
+                        '"' => break,
+                        '\\' => {
+                            if let Some(escaped) = at(index + 1) {
+                                if escaped == '\n' {
+                                    line += 1;
+                                }
+                                text.push(escaped);
+                            }
+                            index += 2;
+                            continue;
+                        }
+                        '\n' => line += 1,
+                        _ => {}
+                    }
+                    text.push(ch);
+                    index += 1;
+                }
+                literals.push((start, text));
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    literals
+}
+
 /// Every module says what it is.
 ///
 /// A module with no `//!` header fails the build.

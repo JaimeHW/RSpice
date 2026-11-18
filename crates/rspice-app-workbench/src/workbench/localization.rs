@@ -635,6 +635,74 @@ define_messages! {
     NetlistSignatureNoIndex => "The active source has no project index.",
     NetlistSignaturePlaceCaret => "Place the caret on a directive, an instance, or a subcircuit, model, parameter or function name.",
     NetlistSignatureShowing => "Showing signature help for {name}",
+    NetlistSignatureHelpHint => "Signature help · Esc to close",
+    EditorGoToLineTitle => "Go to line",
+    EditorGoToLineGo => "Go",
+    EditorGoToLineField => "Line",
+    EditorGoToLineRange => "1 to {count}",
+    EditorGoToLineRefusal => "Enter a line from 1 to {count}.",
+    CountOneReference => "1 reference",
+    CountReferences => "{count} references",
+    CountOneFile => "1 file",
+    CountFiles => "{count} files",
+    CountOneOccurrence => "1 occurrence",
+    CountOccurrences => "{count} occurrences",
+    CountOnePlace => "1 place",
+    CountPlaces => "{count} places",
+    SourceExtent => "{occurrences} in {files}",
+    SourceRenameTitle => "Rename symbol",
+    SourceRenamePrimary => "Rename",
+    SourceRenameSymbol => "Symbol",
+    SourceRenameNewName => "New name",
+    SourceRenameEnterName => "Enter a new name.",
+    SourceRenameExtent => "Renames {extent}",
+    SourceRenamed => "Renamed {old} to {new}: {extent}.",
+    SourceRenameReadOnly => "{file} is read-only, so nothing in it is renamed.",
+    SourceRenameSourceChanged => "The source changed after Rename opened. Close it and rename again.",
+    SourceRenameDeckChanged => "The deck changed after Rename opened. Close it and rename again.",
+    SourceRenameColumnFile => "File",
+    SourceRenameColumnLine => "Line",
+    SourceRenameColumnBefore => "Before",
+    SourceRenameColumnAfter => "After",
+    SourceNoBundle => "This project owns no {language} source yet.",
+    SourcePlaceCaretToRename => "Place the caret on a name to rename it.",
+    SourceIndexUnavailable => "The source index could not be built.",
+    SourcePlaceCaretToFindReferences => "Place the caret on a name to find its references.",
+    SourcePlaceCaretToGoToDefinition => "Place the caret on a name to go to its definition.",
+    SourceNoDefinition => "No definition of {name} exists in this source bundle.",
+    SourceNoReferences => "No references to {name} in this source bundle.",
+    SourceReferencesFound => "{references} to {name} in {files}.",
+    NetlistKindNode => "node",
+    NetlistKindName => "name",
+    NetlistKindParameter => "parameter",
+    NetlistKindFunction => "function",
+    NetlistKindSubcircuit => "subcircuit",
+    NetlistKindModel => "model",
+    NetlistKindInstance => "instance",
+    NetlistKindNodeLabel => "Node",
+    NetlistKindNameLabel => "Name",
+    NetlistKindParameterLabel => "Parameter",
+    NetlistKindFunctionLabel => "Function",
+    NetlistKindSubcircuitLabel => "Subcircuit",
+    NetlistKindModelLabel => "Model",
+    NetlistKindInstanceLabel => "Instance",
+    NetlistFollowPlaceCaret => "Place the caret on a parameter, model, subcircuit, function or node.",
+    NetlistFollowNoNames => "This document has no names to follow.",
+    NetlistFollowStillReading => "The deck is still being read; try again in a moment.",
+    NetlistFollowUndefined => "Nothing in scope defines {name}, so it has no places to follow.",
+    NetlistReferencesFound => "{kind} {name} is written in {places} in {files}.",
+    NetlistRenameGeneratedDeck => "This netlist is written from the schematic; rename the name there.",
+    NetlistRenameGround => "Ground keeps its name.",
+    NetlistRenameUnreadableNode => "A deck cannot read {name} as one name: a name holds no spaces or {characters}.",
+    NetlistRenameUnreadableName => "A deck cannot read {name} as one name: a name holds no spaces or {characters}, and does not start with a digit.",
+    NetlistRenameCollision => "{name} is already a {kind} where {old} is read: {place} defines it.",
+    NetlistRenameIncludeNotOpen => "{file} is not open beside the deck, so {old} cannot be renamed in it.",
+    NetlistRenameUnbound => "{place} names {old} {inside}, which Rename cannot follow. Change it there by hand first.",
+    NetlistInsideControl => "in a .control block",
+    NetlistInsideString => "inside a string",
+    NetlistInsideExpression => "inside an expression",
+    NetlistRenameStep => "rename {old} to {new}",
+    NetlistRenamed => "Renamed {old} to {new} in {places} in {files}.",
     StimulusLibraryEmpty => "No stimulus definitions",
     StimulusLibraryEmptyDetail => "This project has no stimulus definitions yet. Definitions are authored here or saved from a placed source's properties.",
     StimulusDefinitionSection => "Definition",
@@ -742,6 +810,17 @@ impl MessageCatalog {
             debug_assert!(false, "invalid localized message: {error}");
             id.english_template().to_owned()
         })
+    }
+
+    /// A counted word in its two forms, `one` for a count of one, else
+    /// `many` with the count as `{count}`: "1 file", "3 files".
+    #[must_use]
+    pub fn counted(self, count: usize, one: MessageId, many: MessageId) -> String {
+        if count == 1 {
+            self.text(one)
+        } else {
+            self.format(many, &[("count", &count.to_string())])
+        }
     }
 }
 

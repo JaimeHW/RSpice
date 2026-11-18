@@ -21,6 +21,7 @@ use super::{
     ActiveNetlistDocument, Model, NetlistDocumentState, OwnedNetlistReplacement,
     canonical_root_document_in,
 };
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// What a name under the caret names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,16 +51,14 @@ pub(crate) struct NameAtCaret {
 }
 
 impl NameAtCaret {
-    /// What the name is, in a word.
-    pub(crate) fn kind_word(&self) -> &'static str {
+    /// What the name is, in a word, and the same word heading a row.
+    pub(crate) fn kind_words(&self) -> (MessageId, MessageId) {
         match &self.name {
-            DeckName::Node { .. } => "node",
-            DeckName::Symbol(symbol) => self
-                .index
-                .deck()
-                .symbols()
-                .get(*symbol)
-                .map_or("name", |symbol| kind_word(symbol.kind)),
+            DeckName::Node { .. } => (MessageId::NetlistKindNode, MessageId::NetlistKindNodeLabel),
+            DeckName::Symbol(symbol) => self.index.deck().symbols().get(*symbol).map_or(
+                (MessageId::NetlistKindName, MessageId::NetlistKindNameLabel),
+                |symbol| kind_words(symbol.kind),
+            ),
         }
     }
 
@@ -69,13 +68,30 @@ impl NameAtCaret {
     }
 }
 
-const fn kind_word(kind: DeckSymbolKind) -> &'static str {
+/// What a definition of `kind` is, in a word, and the same word heading a
+/// row.
+const fn kind_words(kind: DeckSymbolKind) -> (MessageId, MessageId) {
     match kind {
-        DeckSymbolKind::Parameter => "parameter",
-        DeckSymbolKind::Function => "function",
-        DeckSymbolKind::Subcircuit => "subcircuit",
-        DeckSymbolKind::Model => "model",
-        DeckSymbolKind::Instance => "instance",
+        DeckSymbolKind::Parameter => (
+            MessageId::NetlistKindParameter,
+            MessageId::NetlistKindParameterLabel,
+        ),
+        DeckSymbolKind::Function => (
+            MessageId::NetlistKindFunction,
+            MessageId::NetlistKindFunctionLabel,
+        ),
+        DeckSymbolKind::Subcircuit => (
+            MessageId::NetlistKindSubcircuit,
+            MessageId::NetlistKindSubcircuitLabel,
+        ),
+        DeckSymbolKind::Model => (
+            MessageId::NetlistKindModel,
+            MessageId::NetlistKindModelLabel,
+        ),
+        DeckSymbolKind::Instance => (
+            MessageId::NetlistKindInstance,
+            MessageId::NetlistKindInstanceLabel,
+        ),
     }
 }
 
@@ -127,17 +143,17 @@ fn file_text(
 pub(crate) fn name_at_caret(
     model: &Model,
     netlist: &mut NetlistDocumentState,
+    messages: MessageCatalog,
 ) -> Result<NameAtCaret, String> {
-    const PLACE_CARET: &str =
-        "Place the caret on a parameter, model, subcircuit, function or node.";
+    let place_caret = || messages.text(MessageId::NetlistFollowPlaceCaret);
+    let still_reading = || messages.text(MessageId::NetlistFollowStillReading);
     let index = project_index_now(model, netlist)
-        .ok_or_else(|| "This document has no names to follow.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistFollowNoNames))?;
     let buffer = &model.simulation.source.netlist_content;
     let file = index
         .file_holding(netlist.active_dependency_identity.as_deref(), buffer)
-        .ok_or_else(|| "The deck is still being read; try again in a moment.".to_owned())?;
-    let texts = indexed_texts(model, netlist, &index)
-        .ok_or_else(|| "The deck is still being read; try again in a moment.".to_owned())?;
+        .ok_or_else(still_reading)?;
+    let texts = indexed_texts(model, netlist, &index).ok_or_else(still_reading)?;
     let byte = buffer
         .char_indices()
         .nth(netlist.cursor_char_index)
@@ -148,10 +164,7 @@ pub(crate) fn name_at_caret(
         Some(DeckNameAt::Reference(reference)) => {
             let read = &deck.references()[reference];
             DeckName::Symbol(read.target.ok_or_else(|| {
-                format!(
-                    "Nothing in scope defines {}, so it has no places to follow.",
-                    read.name
-                )
+                messages.format(MessageId::NetlistFollowUndefined, &[("name", &read.name)])
             })?)
         }
         None => deck
@@ -166,13 +179,13 @@ pub(crate) fn name_at_caret(
                 name: node.name.clone(),
                 scope: node.scope,
             })
-            .ok_or_else(|| PLACE_CARET.to_owned())?,
+            .ok_or_else(place_caret)?,
     };
     let written = match &name {
         DeckName::Symbol(symbol) => {
             let symbol = &deck.symbols()[*symbol];
             if symbol.kind == DeckSymbolKind::Instance {
-                return Err(PLACE_CARET.to_owned());
+                return Err(place_caret());
             }
             symbol.name.clone()
         }
@@ -314,6 +327,8 @@ pub(crate) struct DeckRename {
     /// The includes open beside the deck, which a rename may change.
     writable: Vec<String>,
     planned: Option<(String, Result<RenamePlan, String>)>,
+    /// The catalogue its refusals and receipt are written from.
+    messages: MessageCatalog,
 }
 
 /// What a rename does: one row to each line it changes, and the new text of
@@ -348,17 +363,16 @@ impl DeckRename {
     pub(crate) fn at_caret(
         model: &Model,
         netlist: &mut NetlistDocumentState,
+        messages: MessageCatalog,
     ) -> Result<Self, String> {
         if netlist
             .active_dependency_root
             .unwrap_or(netlist.active_document)
             != ActiveNetlistDocument::OwnedSource
         {
-            return Err(
-                "This netlist is written from the schematic; rename the name there.".to_owned(),
-            );
+            return Err(messages.text(MessageId::NetlistRenameGeneratedDeck));
         }
-        let caret = name_at_caret(model, netlist)?;
+        let caret = name_at_caret(model, netlist, messages)?;
         let replacement = caret.written.clone();
         let writable = netlist
             .open_deck
@@ -376,6 +390,7 @@ impl DeckRename {
             revision: deck_revision(model, netlist),
             writable,
             planned: None,
+            messages,
         })
     }
 
@@ -406,10 +421,11 @@ impl DeckRename {
         }
         let caret = &self.caret;
         let writable = &self.writable;
+        let messages = self.messages;
         &self
             .planned
             .get_or_insert_with(|| {
-                let plan = plan(caret, &new_name, |identity| {
+                let plan = plan(caret, &new_name, messages, |identity| {
                     writable.iter().any(|open| open == identity)
                 });
                 (new_name.clone(), plan)
@@ -432,54 +448,69 @@ fn readable_name(name: &str, node: bool) -> bool {
 fn plan(
     caret: &NameAtCaret,
     new_name: &str,
+    messages: MessageCatalog,
     writable: impl Fn(&str) -> bool,
 ) -> Result<RenamePlan, String> {
     let deck = caret.index.deck();
     let old = caret.written.as_str();
     let where_ = |file: usize, byte: usize| {
         let text = caret.texts.get(file).map_or("", String::as_str);
-        format!(
-            "{} line {}",
-            caret.index.file_name(file),
-            line_column(text, byte).0
+        messages.format(
+            MessageId::NetlistSymbolPlace,
+            &[
+                ("file", caret.index.file_name(file)),
+                ("line", &line_column(text, byte).0.to_string()),
+            ],
         )
     };
     let node = matches!(caret.name, DeckName::Node { .. });
     if node && (old == "0" || old.eq_ignore_ascii_case("gnd")) {
-        return Err("Ground keeps its name.".to_owned());
+        return Err(messages.text(MessageId::NetlistRenameGround));
     }
     if !readable_name(new_name, node) {
-        return Err(format!(
-            "A deck cannot read {new_name} as one name: a name holds no spaces or ( ) {{ }} [ ] = , ; ' \" * ${}.",
+        return Err(messages.format(
             if node {
-                ""
+                MessageId::NetlistRenameUnreadableNode
             } else {
-                ", and does not start with a digit"
-            }
+                MessageId::NetlistRenameUnreadableName
+            },
+            &[
+                ("name", new_name),
+                ("characters", "( ) { } [ ] = , ; ' \" * $"),
+            ],
         ));
     }
     let places = caret.places();
     if let Some(collision) = collision(caret, new_name, &places) {
         let (file, byte, kind) = collision;
-        return Err(format!(
-            "{new_name} is already a {kind} where {old} is read: {} defines it.",
-            where_(file, byte)
+        return Err(messages.format(
+            MessageId::NetlistRenameCollision,
+            &[
+                ("name", new_name),
+                ("kind", &messages.text(kind)),
+                ("old", old),
+                ("place", &where_(file, byte)),
+            ],
         ));
     }
     for file in places.iter().map(|place| place.file) {
         if let Some(identity) = caret.index.file_dependency(file)
             && !writable(identity)
         {
-            return Err(format!(
-                "{} is not open beside the deck, so {old} cannot be renamed in it.",
-                caret.index.file_name(file)
+            return Err(messages.format(
+                MessageId::NetlistRenameIncludeNotOpen,
+                &[("file", caret.index.file_name(file)), ("old", old)],
             ));
         }
     }
     if let Some((file, byte, inside)) = unbound_read(deck, &caret.texts, old, &places) {
-        return Err(format!(
-            "{} names {old} {inside}, which Rename cannot follow. Change it there by hand first.",
-            where_(file, byte)
+        return Err(messages.format(
+            MessageId::NetlistRenameUnbound,
+            &[
+                ("place", &where_(file, byte)),
+                ("old", old),
+                ("inside", &messages.text(inside)),
+            ],
         ));
     }
 
@@ -536,7 +567,7 @@ fn collision(
     caret: &NameAtCaret,
     new_name: &str,
     places: &[DeckPlace],
-) -> Option<(usize, usize, &'static str)> {
+) -> Option<(usize, usize, MessageId)> {
     let deck = caret.index.deck();
     match &caret.name {
         DeckName::Node { name, scope } => deck
@@ -549,7 +580,13 @@ fn collision(
                         || deck.cards().get(node.card).map(|card| card.kind)
                             == Some(DeckCardKind::Global))
             })
-            .map(|node| (node.location.file, node.location.span.start, "node")),
+            .map(|node| {
+                (
+                    node.location.file,
+                    node.location.span.start,
+                    MessageId::NetlistKindNode,
+                )
+            }),
         DeckName::Symbol(symbol) => {
             let definition = &deck.symbols()[*symbol];
             // An instance reads its master as a subcircuit, else a model.
@@ -577,7 +614,7 @@ fn collision(
                         (
                             other.location.file,
                             other.location.span.start,
-                            kind_word(other.kind),
+                            kind_words(other.kind).0,
                         )
                     })
                 })
@@ -594,7 +631,7 @@ fn unbound_read(
     texts: &[String],
     name: &str,
     places: &[DeckPlace],
-) -> Option<(usize, usize, &'static str)> {
+) -> Option<(usize, usize, MessageId)> {
     let known = |file: usize, byte: usize| {
         let covers = |location: &rspice_core::netlist::DeckLocation| {
             location.file == file && location.span.start <= byte && byte < location.span.end
@@ -620,7 +657,7 @@ fn unbound_read(
                     end = text[end..].find('\n').map_or(text.len(), |at| end + at + 1);
                 }
                 if let Some(at) = words(&text[start.start..end], name).next() {
-                    return Some((file, start.start + at, "in a .control block"));
+                    return Some((file, start.start + at, MessageId::NetlistInsideControl));
                 }
             }
             _ => {
@@ -628,8 +665,8 @@ fn unbound_read(
                     // A string is text, whatever reads it: a word in it may
                     // be the name or only look like it.
                     let (inside, bound_counts) = match token.kind {
-                        DeckTokenKind::String => ("inside a string", false),
-                        DeckTokenKind::Expression => ("inside an expression", true),
+                        DeckTokenKind::String => (MessageId::NetlistInsideString, false),
+                        DeckTokenKind::Expression => (MessageId::NetlistInsideExpression, true),
                         _ => continue,
                     };
                     let Some(written) = text.get(token.span.clone()) else {
@@ -715,7 +752,8 @@ pub(crate) fn find_references(
     netlist: &mut NetlistDocumentState,
     workbench: &mut crate::workbench::state::WorkbenchSession,
 ) -> Result<String, String> {
-    let caret = name_at_caret(model, netlist)?;
+    let messages = workbench.messages();
+    let caret = name_at_caret(model, netlist, messages)?;
     let rows = reference_rows(&caret);
     let files = rows
         .iter()
@@ -729,15 +767,20 @@ pub(crate) fn find_references(
         revision,
         rows,
     ));
-    let mut kind = caret.kind_word().to_owned();
-    if let Some(first) = kind.get_mut(..1) {
-        first.make_ascii_uppercase();
-    }
-    Ok(format!(
-        "{kind} {} is written in {count} place{} in {files} file{}.",
-        caret.written,
-        if count == 1 { "" } else { "s" },
-        if files == 1 { "" } else { "s" }
+    Ok(messages.format(
+        MessageId::NetlistReferencesFound,
+        &[
+            ("kind", &messages.text(caret.kind_words().1)),
+            ("name", &caret.written),
+            (
+                "places",
+                &messages.counted(count, MessageId::CountOnePlace, MessageId::CountPlaces),
+            ),
+            (
+                "files",
+                &messages.counted(files, MessageId::CountOneFile, MessageId::CountFiles),
+            ),
+        ],
     ))
 }
 
@@ -764,8 +807,9 @@ pub(crate) fn commit_rename(
     netlist: &mut NetlistDocumentState,
     rename: &mut DeckRename,
 ) -> Result<String, String> {
+    let messages = rename.messages;
     if !rename.is_current(model, netlist) || !still_current(model, netlist, &rename.caret) {
-        return Err("The deck changed after Rename opened. Close it and rename again.".to_owned());
+        return Err(messages.text(MessageId::SourceRenameDeckChanged));
     }
     let new_name = rename.new_name().to_owned();
     let old = rename.caret.written.clone();
@@ -775,14 +819,33 @@ pub(crate) fn commit_rename(
         model,
         netlist,
         replacements,
-        &format!("rename {old} to {new_name}"),
+        &messages.format(
+            MessageId::NetlistRenameStep,
+            &[("old", &old), ("new", &new_name)],
+        ),
     )?;
-    Ok(format!(
-        "Renamed {old} to {new_name} in {} place{} in {} file{}.",
-        plan.places,
-        if plan.places == 1 { "" } else { "s" },
-        plan.file_count(),
-        if plan.file_count() == 1 { "" } else { "s" }
+    Ok(messages.format(
+        MessageId::NetlistRenamed,
+        &[
+            ("old", &old),
+            ("new", &new_name),
+            (
+                "places",
+                &messages.counted(
+                    plan.places,
+                    MessageId::CountOnePlace,
+                    MessageId::CountPlaces,
+                ),
+            ),
+            (
+                "files",
+                &messages.counted(
+                    plan.file_count(),
+                    MessageId::CountOneFile,
+                    MessageId::CountFiles,
+                ),
+            ),
+        ],
     ))
 }
 

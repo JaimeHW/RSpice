@@ -119,8 +119,12 @@ fn renaming_a_subcircuit_lists_each_line_in_both_files_and_undoes_a_file_at_a_ti
     let mut harness = deck(&root, include);
     caret_on(&mut harness, "X1", "cell");
 
-    let mut rename = DeckRename::at_caret(&harness.model, &mut harness.state.netlist)
-        .expect("the subcircuit can be renamed");
+    let mut rename = DeckRename::at_caret(
+        &harness.model,
+        &mut harness.state.netlist,
+        harness.wb.messages(),
+    )
+    .expect("the subcircuit can be renamed");
     rename.replacement = "core".to_owned();
     let plan = rename.plan().clone().expect("nothing refuses");
     let rows = plan
@@ -174,8 +178,12 @@ fn a_rename_refuses_a_name_written_inside_a_string_and_names_its_line() {
         format!("amp_tb\n{INCLUDE_INCLUDE}.param w=2u\nR1 a 0 {{w}}\n.echo \"sweeping w\"\n.end\n");
     let mut harness = deck(&root, "* models\n");
     caret_on(&mut harness, ".param", "w=");
-    let mut rename = DeckRename::at_caret(&harness.model, &mut harness.state.netlist)
-        .expect("the parameter can be named");
+    let mut rename = DeckRename::at_caret(
+        &harness.model,
+        &mut harness.state.netlist,
+        harness.wb.messages(),
+    )
+    .expect("the parameter can be named");
     rename.replacement = "width".to_owned();
     let refusal = rename.plan().clone().expect_err("it refuses");
     assert!(
@@ -192,8 +200,12 @@ fn a_rename_to_a_name_a_reader_already_sees_is_refused() {
     );
     let mut harness = deck(&root, "* models\n");
     caret_on(&mut harness, ".param w", "w=");
-    let mut rename = DeckRename::at_caret(&harness.model, &mut harness.state.netlist)
-        .expect("the parameter can be named");
+    let mut rename = DeckRename::at_caret(
+        &harness.model,
+        &mut harness.state.netlist,
+        harness.wb.messages(),
+    )
+    .expect("the parameter can be named");
 
     rename.replacement = "l".to_owned();
     let refusal = rename.plan().clone().expect_err("l is defined");

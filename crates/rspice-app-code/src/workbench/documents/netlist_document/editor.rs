@@ -236,7 +236,7 @@ pub fn show(
     let requested_line = netlist
         .requested_line
         .take()
-        .or_else(|| show_go_to_line(ui, editor_id, &buffer));
+        .or_else(|| show_go_to_line(ui, editor_id, &buffer, workbench.messages()));
 
     let diff_document = netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff;
 
@@ -411,7 +411,7 @@ pub fn show(
         buffer.replace_range(start..end, &text);
         completion::place_caret(ui, editor_id, caret);
     }
-    show_signature_help(ui, netlist, editor_id, anchor);
+    show_signature_help(ui, netlist, editor_id, anchor, workbench.messages());
     let hover_value = hover_char_index.and_then(|index| {
         super::language::value_hover_at_in(netlist, workbench.messages(), &buffer, index)
     });
@@ -561,6 +561,7 @@ fn show_signature_help(
     netlist: &mut super::NetlistDocumentState,
     editor_id: egui::Id,
     anchor: completion::CompletionAnchor,
+    messages: crate::workbench::MessageCatalog,
 ) {
     if !netlist.signature_help.open {
         return;
@@ -593,7 +594,7 @@ fn show_signature_help(
                 ui.set_max_width(360.0);
                 ui.label(egui::RichText::new(&netlist.signature_help.title).strong());
                 ui.label(&netlist.signature_help.detail);
-                ui.weak("Signature help · Esc to close");
+                ui.weak(messages.text(crate::workbench::MessageId::NetlistSignatureHelpHint));
             });
         });
 }

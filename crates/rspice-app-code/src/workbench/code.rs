@@ -780,6 +780,7 @@ impl CodeFeature {
             cx.model,
             cx.platform,
             ctx,
+            cx.wb.messages(),
         ) {
             cx.wb.outbox.push(CodeRequest::CommitSymbolRename);
         }

@@ -176,11 +176,17 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
             );
         }
     }
-    let message = format!(
-        "Renamed {} to {}: {}.",
-        state.query,
-        state.replacement,
-        extent_words(occurrences, changed_files)
+    let messages = parts.wb.messages();
+    let message = messages.format(
+        crate::workbench::MessageId::SourceRenamed,
+        &[
+            ("old", &state.query),
+            ("new", &state.replacement),
+            (
+                "extent",
+                &extent_words(messages, occurrences, changed_files),
+            ),
+        ],
     );
     // The rename is the form's one transaction: done, the form is closed.
     parts.code.language_tools = None;
@@ -189,11 +195,28 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
 }
 
 /// "3 occurrences in 2 files", for the rename form and its receipt.
-pub fn extent_words(occurrences: usize, files: usize) -> String {
-    format!(
-        "{occurrences} occurrence{} in {files} file{}",
-        if occurrences == 1 { "" } else { "s" },
-        if files == 1 { "" } else { "s" }
+pub fn extent_words(
+    messages: crate::workbench::MessageCatalog,
+    occurrences: usize,
+    files: usize,
+) -> String {
+    use crate::workbench::MessageId;
+    messages.format(
+        MessageId::SourceExtent,
+        &[
+            (
+                "occurrences",
+                &messages.counted(
+                    occurrences,
+                    MessageId::CountOneOccurrence,
+                    MessageId::CountOccurrences,
+                ),
+            ),
+            (
+                "files",
+                &messages.counted(files, MessageId::CountOneFile, MessageId::CountFiles),
+            ),
+        ],
     )
 }
 

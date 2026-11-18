@@ -352,6 +352,7 @@ fn navigate_netlist(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) -> Resul
             cx.state.deck_rename = Some(references::DeckRename::at_caret(
                 cx.model,
                 &mut cx.state.netlist,
+                cx.wb.messages(),
             )?);
             None
         }

@@ -328,8 +328,14 @@ pub(crate) fn take_reveal_line(ui: &Ui, editor_id: Id, source: &str) -> Option<u
 /// field, its range or its refusal under it, Enter goes and Esc cancels. It
 /// was an egui window with egui's own chrome, opened at the top left over
 /// the title and menu bar, with its buttons inside the body.
-pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<usize> {
+pub(crate) fn show_go_to_line(
+    ui: &Ui,
+    editor_id: Id,
+    source: &str,
+    messages: crate::workbench::MessageCatalog,
+) -> Option<usize> {
     use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
+    use crate::workbench::MessageId;
 
     let state_id = editor_id.with("go-to-line-state");
     let mut state = ui
@@ -350,13 +356,18 @@ pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<us
         .parse::<usize>()
         .ok()
         .filter(|line| (1..=line_count).contains(line));
-    let range = format!("1 to {line_count}");
-    let refusal = format!("Enter a line from 1 to {line_count}.");
+    let lines = line_count.to_string();
+    let count = [("count", lines.as_str())];
+    let range = messages.format(MessageId::EditorGoToLineRange, &count);
+    let refusal = messages.format(MessageId::EditorGoToLineRefusal, &count);
+    let title = messages.text(MessageId::EditorGoToLineTitle);
+    let go = messages.text(MessageId::EditorGoToLineGo);
+    let field = messages.text(MessageId::EditorGoToLineField);
     let input_id = editor_id.with("go-to-line-input");
-    let choice = CommandForm::new("Go to line", "Go")
+    let choice = CommandForm::new(&title, &go)
         .primary_enabled(target.is_some())
         .show(ui.ctx(), |rows| {
-            rows.text("Line", input_id, &mut state.input, "");
+            rows.text(&field, input_id, &mut state.input, "");
             rows.field_line(
                 Some(input_id),
                 if target.is_some() {
@@ -1054,6 +1065,10 @@ mod tests {
         assert_eq!(source, "  * R1 in out 1k\n");
     }
 
+    fn english() -> crate::workbench::MessageCatalog {
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
+    }
+
     /// Go to line is the kit's command form, centred like every other
     /// dialog, and Enter goes. It was an egui window opened at the top left,
     /// over the title and menu bar.
@@ -1073,7 +1088,7 @@ mod tests {
         let mut accepted = None;
         for _ in 0..3 {
             let _ = context.run_ui(input(Vec::new()), |ui| {
-                accepted = show_go_to_line(ui, editor_id, source);
+                accepted = show_go_to_line(ui, editor_id, source, english());
             });
         }
         assert_eq!(accepted, None, "nothing is accepted before Enter");
@@ -1099,7 +1114,7 @@ mod tests {
             modifiers: Modifiers::NONE,
         };
         let _ = context.run_ui(input(vec![enter]), |ui| {
-            accepted = show_go_to_line(ui, editor_id, source);
+            accepted = show_go_to_line(ui, editor_id, source, english());
         });
         assert_eq!(accepted, Some(3));
     }

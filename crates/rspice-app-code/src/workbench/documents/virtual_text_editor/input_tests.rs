@@ -520,7 +520,14 @@ fn go_to_line_proposes_the_caret_line() {
     let mut accepted = None;
     for _ in 0..3 {
         let _ = bench.context.run_ui(input(Vec::new()), |ui| {
-            accepted = show_go_to_line(ui, id, &source);
+            accepted = show_go_to_line(
+                ui,
+                id,
+                &source,
+                crate::workbench::MessageCatalog::new(
+                    crate::workbench::UiTextLocale::EnglishUnitedStates,
+                ),
+            );
         });
     }
     let enter = egui::Event::Key {
@@ -531,7 +538,14 @@ fn go_to_line_proposes_the_caret_line() {
         modifiers: Modifiers::NONE,
     };
     let _ = bench.context.run_ui(input(vec![enter]), |ui| {
-        accepted = show_go_to_line(ui, id, &source);
+        accepted = show_go_to_line(
+            ui,
+            id,
+            &source,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        );
     });
     assert_eq!(accepted, Some(27), "Enter goes to the line it proposed");
 }

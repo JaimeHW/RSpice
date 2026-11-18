@@ -5,9 +5,9 @@
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{add_veriloga_cell, open_in_design};
 use egui::Context;
-use rspice_app_code::workbench::app::dialogs::source_language_tools::RENAME_TITLE;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_workbench::workbench::localization::MessageId;
 
 /// `resolve_veriloga_compile` was written to gate the compile command and
 /// never attached to it, so the button stayed enabled while a compile was
@@ -155,15 +155,17 @@ fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
     };
     for refused in [true, false] {
         let mut app = rename_form(if refused { "2g" } else { "gm" });
+        let title = app
+            .state
+            .workbench
+            .messages()
+            .text(MessageId::SourceRenameTitle);
         let ctx = Context::default();
         ctx.enable_accesskit();
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
         for _ in 0..2 {
             let (_, text) = dialog_frame(&ctx, &mut app, Vec::new());
-            assert!(
-                text.iter().any(|text| text == RENAME_TITLE),
-                "the form is open"
-            );
+            assert!(text.iter().any(|text| *text == title), "the form is open");
         }
         let (immediate, _) = dialog_frame(&ctx, &mut app, vec![enter.clone()]);
         assert!(
@@ -171,7 +173,7 @@ fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
             "the frame that confirmed the rename asks for the next one"
         );
         let (_, text) = dialog_frame(&ctx, &mut app, Vec::new());
-        let open = text.iter().any(|text| text == RENAME_TITLE);
+        let open = text.iter().any(|text| *text == title);
         if refused {
             assert!(open, "a refused rename leaves the form open");
             assert!(
