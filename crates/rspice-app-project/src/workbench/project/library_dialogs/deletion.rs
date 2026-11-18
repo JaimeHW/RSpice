@@ -296,13 +296,15 @@ impl ProjectFeature {
             "Owned source bundles",
             "Configuration roots",
         ];
+        let refusal = super::refused(&object);
         let mut form = CommandForm::new(&title, keep_label)
             .describe(description)
             .fit_labels(ctx, &labels)
             .primary_enabled(deletable)
-            .status(match displayed_error.as_deref() {
-                Some(error) => Err(error),
-                None => Ok(Some(UNDOABLE)),
+            .status(if displayed_error.is_some() {
+                Err(&refusal)
+            } else {
+                Ok(Some(UNDOABLE))
             });
         if placements > 0 {
             form = form
@@ -328,6 +330,9 @@ impl ProjectFeature {
             rows.value("Layout placements", &layout_count);
             rows.value("Owned source bundles", &source_count);
             rows.value("Configuration roots", &root_count);
+            if let Some(error) = displayed_error.as_deref() {
+                rows.derived(error);
+            }
             None
         });
 

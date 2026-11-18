@@ -391,15 +391,17 @@ impl ProjectFeature {
             "Source views",
             "Configuration roots",
         ];
+        let refusal = super::refused("library");
         let choice = CommandForm::new("Delete library", "Delete")
             .describe(
                 "Remove this library with every cell and view in it, the sources its views own, and close their tabs.",
             )
             .fit_labels(ctx, &labels)
             .primary_enabled(catalog_current && blocker.is_none())
-            .status(match displayed_error.as_deref() {
-                Some(error) => Err(error),
-                None => Ok(Some(super::UNDOABLE)),
+            .status(if displayed_error.is_some() {
+                Err(&refusal)
+            } else {
+                Ok(Some(super::UNDOABLE))
             })
             .show(ctx, |rows| {
                 rows.value("Library", &library);
@@ -409,6 +411,9 @@ impl ProjectFeature {
                 rows.value("Placements outside this library", &references);
                 rows.value("Source views", &impact.source_views);
                 rows.value("Configuration roots", &roots);
+                if let Some(error) = displayed_error.as_deref() {
+                    rows.derived(error);
+                }
                 None
             });
 

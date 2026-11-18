@@ -15,3 +15,9 @@ pub(super) use new_view::new_view_target;
 
 /// What a delete review says beside its buttons when Undo takes it back.
 const UNDOABLE: &str = "This can be undone with Undo.";
+
+/// What a refused delete review says beside its buttons, in words short
+/// enough for the room a phone leaves there; its body states why, whole.
+fn refused(object: &str) -> String {
+    format!("The {object} cannot be deleted.")
+}
