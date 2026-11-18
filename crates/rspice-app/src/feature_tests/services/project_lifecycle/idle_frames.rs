@@ -34,6 +34,12 @@ fn captures() -> usize {
     rspice_project::registry::PROJECT_CAPTURES.with(std::cell::Cell::get)
 }
 
+/// Comparisons of the working project made for a moved stamp.
+fn comparisons() -> usize {
+    rspice_app_services::workbench::lifecycle::project_lifecycle::DIRTY_RECOMPUTES
+        .with(std::cell::Cell::get)
+}
+
 fn stamps(app: &RSpiceApp) -> String {
     let model = &app.state.model;
     format!(
@@ -282,15 +288,20 @@ mod every_surface {
             &open(top),
         );
 
-        // The frames do ask: an edit is captured on the frame it lands on.
+        // The frames do ask: an edit is compared on the frame it lands on,
+        // once, and without a capture of the project.
         replay
             .app
             .state
             .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(40, 40));
-        let before = captures();
+        let before = (captures(), comparisons());
         replay.frame(Vec::new());
-        assert_eq!(captures() - before, 1, "an edit is captured once");
+        assert_eq!(
+            (captures() - before.0, comparisons() - before.1),
+            (0, 1),
+            "an edit is compared once, without a capture"
+        );
     }
 }

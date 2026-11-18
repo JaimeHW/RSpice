@@ -234,12 +234,7 @@ impl ProjectFile {
         simulation_results: ProjectSimulationResults,
         execution_context: ProjectExecutionContext,
     ) -> Self {
-        if let Some(plan) = &execution_context.simulation_plan.analysis_plan {
-            workspace.migrate_active_plan_data(plan.id());
-        }
-        for plan in execution_context.simulation_plan.inactive_plans() {
-            workspace.migrate_inactive_plan_data(plan.id());
-        }
+        workspace.seed_plan_data(&execution_context.simulation_plan);
         Self {
             version: ProjectVersion::current(),
             workspace,

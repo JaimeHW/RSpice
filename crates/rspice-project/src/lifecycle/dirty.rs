@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use super::{ProjectLifecycle, ProjectLifecycleError, SaveScope};
 use crate::registry::{
-    DocumentFingerprints, DocumentRegistry, ProjectDocumentId,
-    document_fingerprints_with_results_cache,
+    DocumentFingerprints, DocumentRegistry, ProjectDocumentId, ResultFingerprintCache,
+    WorkingDocuments, document_fingerprints_with_results_cache, project_content_digest,
 };
 use crate::{AcceptedProject, ProjectFile};
 use rspice_vocabulary::product::ContentDigest;
@@ -41,6 +41,9 @@ pub struct DirtyComparison {
     open: bool,
     unsaved: bool,
     documents: ComparedDocuments,
+    /// A document being edited by a gesture still in progress, read as
+    /// unsaved until the gesture ends and the edit is compared.
+    editing: Option<ProjectDocumentId>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,10 +58,13 @@ enum ComparedDocuments {
 
 impl DirtyComparison {
     pub const fn has_unsaved_changes(&self) -> bool {
-        self.unsaved
+        self.unsaved || (self.open && self.editing.is_some())
     }
 
     pub fn document_is_dirty(&self, document: &ProjectDocumentId) -> bool {
+        if self.open && self.editing.as_ref() == Some(document) {
+            return true;
+        }
         match &self.documents {
             ComparedDocuments::Unaccepted => self.open && self.unsaved,
             ComparedDocuments::Accepted(registry) => registry
@@ -71,17 +77,50 @@ impl DirtyComparison {
     /// no accepted baseline or the working content cannot be compared.
     pub fn dirty_documents(&self) -> Vec<ProjectDocumentId> {
         match &self.documents {
-            ComparedDocuments::Unaccepted if self.open && self.unsaved => {
+            ComparedDocuments::Unaccepted if self.has_unsaved_changes() => {
                 vec![ProjectDocumentId::ProjectConfiguration]
             }
             ComparedDocuments::Unaccepted => Vec::new(),
             ComparedDocuments::Accepted(None) => vec![ProjectDocumentId::ProjectConfiguration],
-            ComparedDocuments::Accepted(Some(registry)) => registry
-                .records()
-                .iter()
-                .filter(|record| record.dirty)
-                .map(|record| record.id.clone())
-                .collect(),
+            ComparedDocuments::Accepted(Some(registry)) => {
+                let mut dirty = registry
+                    .records()
+                    .iter()
+                    .filter(|record| record.dirty)
+                    .map(|record| record.id.clone())
+                    .collect::<Vec<_>>();
+                if let Some(editing) = self.editing.as_ref().filter(|_| self.open)
+                    && !dirty.contains(editing)
+                {
+                    let key = editing.stable_key();
+                    let at = dirty.partition_point(|id| id.stable_key() < key);
+                    dirty.insert(at, editing.clone());
+                }
+                dirty
+            }
+        }
+    }
+
+    /// This comparison with `document` read as unsaved while a gesture
+    /// edits it: the edit is compared once the gesture ends.
+    #[must_use]
+    pub fn with_edit_in_progress(mut self, document: ProjectDocumentId) -> Self {
+        self.editing = Some(document);
+        self
+    }
+
+    /// The document a gesture still in progress edits, as
+    /// [`Self::with_edit_in_progress`] named it.
+    pub const fn edit_in_progress(&self) -> Option<&ProjectDocumentId> {
+        self.editing.as_ref()
+    }
+
+    /// The registry, when each document was compared with an accepted
+    /// baseline.
+    fn into_registry(self) -> Option<DocumentRegistry> {
+        match self.documents {
+            ComparedDocuments::Accepted(registry) => registry,
+            ComparedDocuments::Unaccepted => None,
         }
     }
 }
@@ -89,6 +128,12 @@ impl DirtyComparison {
 impl ProjectLifecycle {
     pub fn registry(&self) -> &DocumentRegistry {
         &self.registry
+    }
+
+    /// The digest of retained results each working comparison reuses while
+    /// they stand.
+    pub const fn result_fingerprints(&self) -> &ResultFingerprintCache {
+        &self.result_fingerprints
     }
 
     pub fn working_fingerprints(
@@ -131,6 +176,7 @@ impl ProjectLifecycle {
                 open: self.project_open,
                 unsaved: self.project_open && !pristine,
                 documents: ComparedDocuments::Unaccepted,
+                editing: None,
             };
         };
         let baseline = accepted.fingerprints().ok();
@@ -150,6 +196,60 @@ impl ProjectLifecycle {
             open: self.project_open,
             unsaved,
             documents: ComparedDocuments::Accepted(registry),
+            editing: None,
+        }
+    }
+
+    /// [`Self::compare_working`] for the working documents `working` holds,
+    /// `None` when they could not be digested. `previous` is a comparison of
+    /// the same working project with this same baseline, made before the
+    /// documents named beside it moved: only those are compared again.
+    pub fn compare_working_documents(
+        &self,
+        working: Option<&WorkingDocuments>,
+        previous: Option<(DirtyComparison, &[ProjectDocumentId])>,
+    ) -> DirtyComparison {
+        let Some(accepted) = self.accepted() else {
+            let pristine = self.project_open
+                && self.pristine.is_some_and(|pristine| {
+                    working.is_some_and(|working| {
+                        project_content_digest(working.documents()) == pristine
+                    })
+                });
+            return DirtyComparison {
+                open: self.project_open,
+                unsaved: self.project_open && !pristine,
+                documents: ComparedDocuments::Unaccepted,
+                editing: None,
+            };
+        };
+        let baseline = accepted.fingerprints().ok();
+        let registry = working.zip(baseline).map(|(working, baseline)| {
+            let previous =
+                previous.and_then(|(previous, changed)| Some((previous.into_registry()?, changed)));
+            match previous {
+                Some((mut registry, changed)) => {
+                    for id in changed {
+                        registry.recompare(
+                            id,
+                            working.documents().get(id),
+                            baseline.documents().get(id),
+                        );
+                    }
+                    registry
+                }
+                None => {
+                    let mut registry = DocumentRegistry::default();
+                    registry.rebuild(working.documents(), baseline.documents());
+                    registry
+                }
+            }
+        });
+        DirtyComparison {
+            open: self.project_open,
+            unsaved: self.project_open && registry.as_ref().is_none_or(DocumentRegistry::any_dirty),
+            documents: ComparedDocuments::Accepted(registry),
+            editing: None,
         }
     }
 

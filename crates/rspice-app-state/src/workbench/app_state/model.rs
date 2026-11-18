@@ -168,6 +168,15 @@ pub struct Model {
 }
 
 impl Model {
+    /// Whether a canvas gesture is still editing the drawing in the editor:
+    /// a drag, a stretch or a placement, from its first move to its drop.
+    /// What reads the whole project for one answer — whether it holds
+    /// unsaved work, the design hierarchy — keeps its last answer until the
+    /// gesture ends, and answers once at the drop.
+    pub fn canvas_gesture_in_progress(&self) -> bool {
+        self.schematic.has_pending_operation()
+    }
+
     /// Record an event in the Console and return its log id, as
     /// [`AppState::record`](super::AppState::record) states it.
     pub fn record(

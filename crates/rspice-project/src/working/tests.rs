@@ -259,3 +259,162 @@ fn symbol_capture_keeps_buffered_designs_and_stops_at_invalid_execution_inputs()
     assert_eq!(active.document().components.len(), 2);
     assert!(active.pending_operation_id().is_some());
 }
+
+/// The digests a capture of the working project gets.
+fn captured(
+    workspace: &ProjectWorkspace,
+    active: &Schematic,
+    libraries: &ProjectLibraries,
+    context: &ProjectExecutionContext,
+) -> std::collections::HashMap<crate::registry::ProjectDocumentId, ContentDigest> {
+    let file = ProjectWorkingSet {
+        workspace,
+        active_schematic: active,
+        libraries,
+    }
+    .capture(
+        SnapshotContent::Current,
+        &mut Sessions::default(),
+        ProjectSimulationResults::default,
+        || Ok(context.clone()),
+        ResultPresentation::default,
+    )
+    .unwrap();
+    crate::registry::document_digests(&file).unwrap()
+}
+
+fn place(design: &mut Schematic, x: i32) {
+    design.add_component(
+        ComponentType::Resistor,
+        ComponentPlacement {
+            position: Point::new(x, 400),
+            rotation: Default::default(),
+            mirror_h: false,
+        },
+        None,
+    );
+}
+
+/// Each edit digests again only the documents it moved, and every digest
+/// held is the one a capture of the same working project gets.
+#[test]
+fn held_document_digests_follow_each_edit_as_a_capture_would() {
+    use crate::registry::{DOCUMENT_DIGESTS, ProjectDocumentId, WorkingDocuments, WorkingSource};
+
+    let mut workspace = ProjectWorkspace::default();
+    let active_reference = workspace.active_view.clone();
+    let other = CellViewRef::new(
+        &workspace.project.root_library,
+        "other",
+        &workspace.active_view.view,
+    );
+    workspace
+        .schematic_buffers
+        .insert(other.key(), Schematic::default());
+    let mut libraries = libraries(&workspace);
+    let mut active = Schematic::default();
+    let mut context = execution_context().unwrap();
+    let mut stamps = (1_u64, [1_u64; 4]);
+    let mut held = WorkingDocuments::default();
+    let presentation = crate::registry::digest(&ResultPresentation::default()).unwrap();
+    let mut step = |workspace: &ProjectWorkspace,
+                    active: &Schematic,
+                    libraries: &ProjectLibraries,
+                    context: &ProjectExecutionContext,
+                    stamps: (u64, [u64; 4])| {
+        DOCUMENT_DIGESTS.with(|count| count.set(0));
+        let changed = held
+            .update(
+                &WorkingSource {
+                    workspace,
+                    workspace_stamp: stamps.0,
+                    active_schematic: active,
+                    libraries,
+                    execution_stamp: stamps.1,
+                    results_stamp: (1, presentation),
+                },
+                || Ok(context.clone()),
+                || {
+                    crate::registry::result_fingerprint::digest(
+                        &ProjectSimulationResults::default(),
+                        &workspace.report_documents,
+                        &workspace.visualization_documents,
+                        &ResultPresentation::default(),
+                    )
+                },
+            )
+            .unwrap();
+        let digested = DOCUMENT_DIGESTS.with(std::cell::Cell::get);
+        assert_eq!(
+            *held.documents(),
+            captured(workspace, active, libraries, context)
+        );
+        (changed, digested)
+    };
+
+    let (changed, digested) = step(&workspace, &active, &libraries, &context, stamps);
+    assert_eq!(changed.len(), digested);
+    assert!(changed.contains(&ProjectDocumentId::CellView(other.clone())));
+
+    // The editor's drawing: its one document.
+    place(&mut active, 0);
+    assert_eq!(
+        step(&workspace, &active, &libraries, &context, stamps),
+        (
+            vec![ProjectDocumentId::CellView(active_reference.clone())],
+            1
+        )
+    );
+    // Nothing moved: nothing digested.
+    assert_eq!(
+        step(&workspace, &active, &libraries, &context, stamps),
+        (Vec::new(), 0)
+    );
+
+    // A buffered drawing: the workspace moved, and of the drawings only
+    // that one is digested again.
+    place(
+        workspace.schematic_buffers.get_mut(&other.key()).unwrap(),
+        40,
+    );
+    stamps.0 += 1;
+    let (changed, _) = step(&workspace, &active, &libraries, &context, stamps);
+    assert_eq!(changed, vec![ProjectDocumentId::CellView(other.clone())]);
+
+    // A cell added to the library: its view and the catalog.
+    let mut added = Library::new("added");
+    let mut cell = Cell::new("cell");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    added.add_cell(cell);
+    libraries.add_library(added);
+    let (changed, _) = step(&workspace, &active, &libraries, &context, stamps);
+    assert_eq!(
+        changed,
+        vec![
+            ProjectDocumentId::CellView(CellViewRef::new("added", "cell", "schematic")),
+            ProjectDocumentId::ProjectConfiguration,
+        ]
+    );
+
+    // Another plan: the plan document.
+    context
+        .simulation_plan
+        .analysis_plan
+        .replace(rspice_simulation_contract::plan_model::SimulationPlan::new());
+    stamps.1[0] += 1;
+    let (changed, _) = step(&workspace, &active, &libraries, &context, stamps);
+    assert_eq!(changed, vec![ProjectDocumentId::SimulationPlan]);
+
+    // The symbol view in front: the active drawing is its buffer again.
+    workspace.active_view.view = "symbol".to_owned();
+    workspace.open_views.push(crate::OpenCellView::new(
+        workspace.active_view.clone(),
+        ViewType::Symbol,
+    ));
+    stamps.0 += 1;
+    let (changed, _) = step(&workspace, &active, &libraries, &context, stamps);
+    assert_eq!(
+        changed,
+        vec![ProjectDocumentId::CellView(active_reference.clone())]
+    );
+}

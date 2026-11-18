@@ -37,6 +37,21 @@ impl ProjectWorkspace {
 
     /// Deterministically seed a plan payload from the legacy active specs
     /// projection. Existing plan-owned data always wins.
+    /// Seed every plan's payload the way a saved project holds it: the
+    /// active plan's from the legacy specification list, an inactive plan's
+    /// empty.
+    pub fn seed_plan_data(
+        &mut self,
+        plan: &rspice_simulation_contract::setup_state::SimulationSetup,
+    ) {
+        if let Some(active) = &plan.analysis_plan {
+            self.migrate_active_plan_data(active.id());
+        }
+        for inactive in plan.inactive_plans() {
+            self.migrate_inactive_plan_data(inactive.id());
+        }
+    }
+
     pub fn migrate_active_plan_data(&mut self, plan_id: SimulationPlanId) {
         if self.plan_data(plan_id).is_none() {
             self.simulation_plan_payloads

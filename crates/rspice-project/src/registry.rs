@@ -2,6 +2,7 @@
 
 mod canonical;
 mod fingerprints;
+mod working;
 #[cfg(any(test, feature = "document-fingerprint-observation"))]
 pub(crate) use fingerprints::observe;
 #[cfg(any(test, feature = "document-fingerprint-observation"))]
@@ -13,6 +14,7 @@ pub use fingerprints::{
 
 pub mod result_fingerprint;
 pub use result_fingerprint::ResultFingerprintCache;
+pub use working::{WorkingDocuments, WorkingSource};
 
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design_model::cell_view::CellViewRef;
@@ -121,7 +123,7 @@ impl DocumentRegistry {
     }
 
     /// Every document of `current` and `accepted`, dirty where the two differ.
-    fn rebuild(
+    pub(crate) fn rebuild(
         &mut self,
         current: &HashMap<ProjectDocumentId, ContentDigest>,
         accepted: &HashMap<ProjectDocumentId, ContentDigest>,
@@ -152,10 +154,56 @@ impl DocumentRegistry {
             .collect();
         self.dirty = self.records.iter().filter(|record| record.dirty).count();
     }
+
+    /// Compare `id` again: dirty when its working and accepted digests
+    /// differ, and gone when neither holds it.
+    pub(crate) fn recompare(
+        &mut self,
+        id: &ProjectDocumentId,
+        current: Option<&ContentDigest>,
+        accepted: Option<&ContentDigest>,
+    ) {
+        let dirty = current != accepted;
+        let present = current.is_some() || accepted.is_some();
+        match (self.index.get(id).copied(), present) {
+            (Some(at), true) => {
+                let record = &mut self.records[at];
+                if record.dirty != dirty {
+                    record.dirty = dirty;
+                    if dirty {
+                        self.dirty += 1;
+                    } else {
+                        self.dirty -= 1;
+                    }
+                }
+            }
+            (Some(at), false) => {
+                self.records.remove(at);
+                self.reindex();
+            }
+            (None, true) => {
+                let key = id.stable_key();
+                let at = self
+                    .records
+                    .partition_point(|record| record.id.stable_key() < key);
+                self.records.insert(
+                    at,
+                    DocumentRecord {
+                        id: id.clone(),
+                        dirty,
+                    },
+                );
+                self.reindex();
+            }
+            (None, false) => {}
+        }
+    }
 }
 
 /// The identity of a whole project from its documents' identities.
-fn project_content_digest(documents: &HashMap<ProjectDocumentId, ContentDigest>) -> ContentDigest {
+pub(crate) fn project_content_digest(
+    documents: &HashMap<ProjectDocumentId, ContentDigest>,
+) -> ContentDigest {
     // Each key is built once: a comparison that built its own two keys
     // cost a project of 5,000 cells about 50 ms per sort.
     let mut ordered = documents
@@ -189,6 +237,11 @@ impl DocumentFingerprints {
 
     pub fn content_digest(&self) -> ContentDigest {
         self.content
+    }
+
+    /// Every document's identity.
+    pub(crate) fn documents(&self) -> &HashMap<ProjectDocumentId, ContentDigest> {
+        &self.documents
     }
 
     /// Whether the snapshot holds the document at all.

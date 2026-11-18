@@ -12,8 +12,10 @@ use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest;
 use rspice_results::result_presentation::{SignalSet, SignalSetMember};
 
-fn captures() -> usize {
-    rspice_project::registry::PROJECT_CAPTURES.with(std::cell::Cell::get)
+/// Comparisons of the working project made for a moved stamp.
+fn comparisons() -> usize {
+    rspice_app_services::workbench::lifecycle::project_lifecycle::DIRTY_RECOMPUTES
+        .with(std::cell::Cell::get)
 }
 
 /// The project saved as it stands, with the design workspace in front.
@@ -30,7 +32,7 @@ fn saved() -> AppState {
 }
 
 /// `edit` reads unsaved and `undo` saved again, both from the answer held
-/// between frames, which captures the edit once, and from a decision's own
+/// between frames, which compares the edit once, and from a decision's own
 /// capture.
 fn edited_then_undone(
     subject: &str,
@@ -39,16 +41,16 @@ fn edited_then_undone(
 ) {
     let mut state = saved();
     edit(&mut state);
-    let before = captures();
+    let before = comparisons();
     assert!(
         has_unsaved_changes(&state),
         "{subject}: the edit reads saved"
     );
     assert!(has_unsaved_changes(&state), "{subject}");
     assert_eq!(
-        captures() - before,
+        comparisons() - before,
         1,
-        "{subject}: one capture for the edit"
+        "{subject}: one comparison for the edit"
     );
     assert!(has_unsaved_changes_fresh(&state), "{subject}");
     undo(&mut state);
@@ -169,19 +171,19 @@ fn an_edit_in_each_saved_subject_reads_unsaved_until_it_is_taken_back() {
 }
 
 #[test]
-fn a_symbol_edited_in_place_is_captured_again() {
+fn a_symbol_edited_in_place_is_compared_again() {
     let mut state = saved();
-    let before = captures();
+    let before = comparisons();
     state.model.symbol_in_place_layout = Some(InPlaceLayout {
         symbol: CellViewRef::new("bench", "amp", "symbol"),
         parent: state.model.workspace.content.active_view.clone(),
         symbol_was_open: false,
     });
     assert!(!has_unsaved_changes(&state));
-    assert_eq!(captures() - before, 1);
+    assert_eq!(comparisons() - before, 1);
     state.model.symbol_in_place_layout = None;
     assert!(!has_unsaved_changes(&state));
-    assert_eq!(captures() - before, 2);
+    assert_eq!(comparisons() - before, 2);
 }
 
 #[test]

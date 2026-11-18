@@ -1,6 +1,7 @@
 //! Recurring dirty queries scan neither the accepted content nor an
-//! unchanged working project: each is fingerprinted once, and the working
-//! project again only when something in it changed.
+//! unchanged working project: the accepted content is fingerprinted once,
+//! and the working project is compared again only when something in it
+//! changed, without a capture.
 
 use super::*;
 use crate::state::result_presentation::AnalysisPresentationKey;
@@ -41,6 +42,10 @@ fn captures() -> usize {
     rspice_project::registry::PROJECT_CAPTURES.with(std::cell::Cell::get)
 }
 
+fn recomputes() -> usize {
+    DIRTY_RECOMPUTES.with(std::cell::Cell::get)
+}
+
 /// Every recurring query, and a registry refresh, once each.
 fn query_round(state: &mut ServicesHost) -> bool {
     let unsaved = has_unsaved_changes(state);
@@ -67,6 +72,7 @@ fn the_working_project_is_fingerprinted_once_per_change_across_dirty_queries() {
             .activate(rspice_app_state::workbench::workspace::Workspace::Design);
         let baseline = snapshot(&state).unwrap();
         registry::FINGERPRINT_PASSES.with(|passes| passes.set(0));
+        DIRTY_RECOMPUTES.with(|count| count.set(0));
         state
             .platform
             .project_lifecycle
@@ -75,9 +81,9 @@ fn the_working_project_is_fingerprinted_once_per_change_across_dirty_queries() {
             assert!(!query_round(&mut state));
         }
         assert_eq!(
-            fingerprint_passes(),
-            2,
-            "{samples} samples: one pass of the accepted content and one of the working project"
+            (fingerprint_passes(), recomputes()),
+            (1, 1),
+            "{samples} samples: one pass of the accepted content and one comparison of the              working project"
         );
 
         assert!(
@@ -96,9 +102,9 @@ fn the_working_project_is_fingerprinted_once_per_change_across_dirty_queries() {
             assert!(!query_round(&mut state));
         }
         assert_eq!(
-            fingerprint_passes(),
-            4,
-            "{samples} samples: one more pass for the edit and one for its undo"
+            (fingerprint_passes(), recomputes()),
+            (1, 3),
+            "{samples} samples: one more comparison for the edit and one for its undo"
         );
     }
 }
@@ -112,14 +118,14 @@ fn a_hundred_idle_dirty_queries_capture_nothing() {
         .project_lifecycle
         .accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
-    let before = captures();
+    let before = (captures(), recomputes());
     for _ in 0..100 {
         assert!(!has_unsaved_changes(&state));
         assert!(!active_document_is_dirty(&state));
         assert_eq!(dirty_document_count(&state), 0);
         assert!(dirty_documents(&state).is_empty());
     }
-    assert_eq!(captures() - before, 0);
+    assert_eq!((captures(), recomputes()), before);
 
     state
         .model
@@ -129,9 +135,9 @@ fn a_hundred_idle_dirty_queries_capture_nothing() {
         assert!(has_unsaved_changes(&state));
     }
     assert_eq!(
-        captures() - before,
-        1,
-        "one capture for the edit, then none"
+        (captures() - before.0, recomputes() - before.1),
+        (0, 1),
+        "the edit is compared once, without a capture, then not again"
     );
 }
 
