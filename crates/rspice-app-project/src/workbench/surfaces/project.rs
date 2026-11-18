@@ -214,13 +214,15 @@ pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
                             });
                         });
                     } else {
-                        // Narrower still: the chips take as many rows as they
-                        // need, each whole, rather than running off the edge.
-                        // The revision steps in by a chip's padding, so its
-                        // words start where the words of the chips under it
-                        // do.
+                        // Narrower still: the chips take as few rows as they
+                        // fit in, each whole, rather than running off the
+                        // edge. Each is a whole touch target and they stand
+                        // side by side, their padding the space between their
+                        // words, so no row loses a chip to a gap. The
+                        // revision steps in by a chip's padding, so its words
+                        // start where the words of the chips under it do.
                         ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(CHIP_GAP, 0.0);
+                            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                             ui.add_space(CHIP_PADDING);
                             project_context_chips(ui, cx, &chips, &tokens, &mut raised);
                         });
