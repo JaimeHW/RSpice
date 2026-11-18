@@ -193,6 +193,38 @@ fn a_formal_inside_a_probe_reads_as_the_deck_s_simulator_reads_it() {
         assert_outputs(&format!("Xyce ({spice_dialect:?})"), &actual, LITERAL);
     }
 
+    // Called inside a subcircuit, the literal node is the subcircuit's own.
+    // ngspice-46: V(out) = 2*V(x1.x) = 0.5; LTspice 17.2.4: 2*V(n1) = 3.
+    let subcircuit = "* .func formal inside v() called in a subcircuit
+.func fv(x) {v(x)*2}
+v1 n1 0 1.5
+vx x 0 7
+x1 n1 out dbl
+.subckt dbl in out
+vxl x 0 0.25
+b1 out 0 v=fv(in)
+r1 out 0 1k
+.ends
+.op
+.end
+";
+    for (options, expected) in [(None, 3.0), (Some(SpiceDialect::Ngspice), 0.5)] {
+        let netlist = parse(
+            subcircuit,
+            NetlistParseOptions {
+                spice_dialect: options,
+                ..Default::default()
+            },
+        );
+        let config = SimulationConfig::default()
+            .with_spice_dialect(options.unwrap_or(SpiceDialect::BestAvailable));
+        let actual = op_voltages(&netlist, config, &["out"])[0];
+        assert!(
+            (actual - expected).abs() <= 1e-9,
+            "subcircuit, {options:?}: V(out) = {actual}, expected {expected}"
+        );
+    }
+
     // A deck drawn in LTspice reads as LTspice in any dialect.
     let netlist = parse(
         &deck_with(".options rspice_source=ltspice"),
