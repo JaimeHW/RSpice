@@ -1,8 +1,9 @@
 //! The Netlist workspace from the keyboard: every command it offers has a
 //! key or a row in a menu shown there, Show value says at the caret what a
-//! hover says under the pointer, and an include of a sectioned library binds
-//! its section from a select on its row, which Tab reaches as it reaches any
-//! control.
+//! hover says under the pointer, an include of a sectioned library binds its
+//! section from a select on its row, which Tab reaches as it reaches any
+//! control, and a menu's Paste the browser answers late or refuses still
+//! pastes or says how to.
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
@@ -11,6 +12,9 @@ use crate::workbench::app::veriloga_design_tests::{
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::netlist_document;
 use rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index;
+use rspice_app_code::workbench::documents::virtual_text_editor::{
+    BrowserPaste, deliver_browser_paste,
+};
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ALL_MENUS;
@@ -247,6 +251,36 @@ fn show_value_reads_the_name_the_caret_ends_and_says_when_there_is_none() {
     assert_eq!(
         app.state.prompt_text(),
         Some("No value or name at the caret.")
+    );
+}
+
+/// A browser that refuses a menu's Paste leaves the deck as it was, and
+/// the status line says how to paste from the keyboard, whose paste a
+/// browser always hands the page.
+#[test]
+fn a_refused_paste_says_how_to_paste_from_the_keyboard() {
+    let (ctx, mut app) = deck_on_the_netlist_workspace(VALUE_DECK);
+    caret_at(&ctx, &mut app, 2);
+    let editor = netlist_document::editor_id_in(&app.state.model, &app.state.code.netlist);
+    deliver_browser_paste(&ctx, editor, BrowserPaste::Refused);
+    frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("The browser did not let RSpice read the clipboard. Press Ctrl+V to paste.")
+    );
+
+    // An answer pastes at the caret like the keyboard's paste.
+    deliver_browser_paste(&ctx, editor, BrowserPaste::Text("X".to_owned()));
+    frame(&ctx, &mut app, DESKTOP);
+    assert!(
+        app.state
+            .model
+            .simulation
+            .source
+            .netlist_content
+            .starts_with("vaXlue hover\n"),
+        "{}",
+        app.state.model.simulation.source.netlist_content
     );
 }
 

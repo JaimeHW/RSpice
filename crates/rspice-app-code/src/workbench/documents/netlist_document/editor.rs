@@ -250,6 +250,7 @@ pub fn show(
     let anchor;
     let unanswered_history;
     let view;
+    let paste_refused;
     // The first time a document draws after a launch, its editor shows it
     // as the last launch left it.
     let front = netlist.front.clone();
@@ -360,6 +361,7 @@ pub fn show(
         hover_char_index = output.hover_char_index;
         unanswered_history = output.unanswered_history;
         view = output.view;
+        paste_refused = output.paste_refused;
         editor_response = output.response.clone();
         anchor = completion::CompletionAnchor {
             focused: output.response.has_focus(),
@@ -442,6 +444,13 @@ pub fn show(
         anchor,
         editor_response.rect,
     );
+    if paste_refused {
+        let refusal = crate::workbench::documents::virtual_text_editor::paste_refused_text(
+            ui.ctx(),
+            workbench.messages(),
+        );
+        workbench.prompt(refusal);
+    }
     // The editor's history starts again whenever the document is replaced
     // underneath it, so once it is spent the next older step is the
     // netlist's own: a replace-all or a rename.

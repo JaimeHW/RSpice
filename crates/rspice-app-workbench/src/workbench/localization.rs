@@ -873,6 +873,7 @@ define_messages! {
     // section, and its spoken name.
     NetlistLibSectionNone => "none",
     NetlistLibSectionSelect => "Section of {name}: {section}",
+    EditorPasteRefused => "The browser did not let RSpice read the clipboard. Press {key} to paste.",
 }
 
 #[derive(Debug, Clone, Copy)]

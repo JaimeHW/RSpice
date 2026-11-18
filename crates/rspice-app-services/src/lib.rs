@@ -44,6 +44,8 @@ pub mod workbench {
         pub mod accessibility;
         pub mod background_alerts;
         #[cfg(target_arch = "wasm32")]
+        pub mod clipboard;
+        #[cfg(target_arch = "wasm32")]
         pub mod download;
         #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
         pub mod file_import;

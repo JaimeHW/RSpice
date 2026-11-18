@@ -18,6 +18,8 @@ struct Shown {
     cursor_char_index: usize,
     selected: Option<(usize, usize)>,
     ime: bool,
+    /// The browser refused a menu's Paste this frame.
+    paste_refused: bool,
     /// The primary caret as painted, and the clip it was painted in.
     caret: Option<(egui::Rect, egui::Rect)>,
     output: egui::FullOutput,
@@ -94,13 +96,15 @@ impl Bench {
                         output.cursor_line,
                         output.cursor_char_index,
                         output.selected_char_range,
+                        output.paste_refused,
                     ));
                 });
                 let _ = ui.button("Right");
             });
             let _ = ui.button("Below");
         });
-        let (cursor_line, cursor_char_index, selected) = shown.expect("the editor was drawn");
+        let (cursor_line, cursor_char_index, selected, paste_refused) =
+            shown.expect("the editor was drawn");
         let caret = output
             .shapes
             .iter()
@@ -117,6 +121,7 @@ impl Bench {
             cursor_char_index,
             selected,
             ime: output.platform_output.ime.is_some(),
+            paste_refused,
             caret,
             output,
         }
@@ -269,6 +274,50 @@ fn tab_indents_at_the_caret_and_whole_lines_under_a_selection() {
         (outdented.cursor_char_index, outdented.selected),
         (13, None)
     );
+}
+
+/// A browser answers a menu's Paste a frame or more after it was asked:
+/// the text lands at the caret, and a refusal is handed to the owner to say.
+#[test]
+fn a_browsers_answer_to_paste_lands_at_the_caret_and_a_refusal_is_reported() {
+    let mut bench = Bench::new("module m;\nendmodule\n", true);
+    bench.focus();
+    bench.move_caret_to(1, 9);
+    deliver_browser_paste(
+        &bench.context,
+        bench.id,
+        BrowserPaste::Text("\r\n  x\r\n".to_owned()),
+    );
+    let pasted = bench.frame(Vec::new());
+    assert_eq!(
+        bench.source, "module m\n  x\n;\nendmodule\n",
+        "the clipboard's text in the document's line breaks, at the caret"
+    );
+    assert!(!pasted.paste_refused);
+    assert_eq!(
+        pasted.cursor_char_index, 13,
+        "the caret ends the pasted text"
+    );
+
+    deliver_browser_paste(&bench.context, bench.id, BrowserPaste::Refused);
+    let refused = bench.frame(Vec::new());
+    assert!(refused.paste_refused, "the owner is told, to say so");
+    assert_eq!(bench.source, "module m\n  x\n;\nendmodule\n");
+    assert!(
+        !bench.frame(Vec::new()).paste_refused,
+        "a refusal is said once"
+    );
+
+    // A read-only view takes no paste.
+    let mut read_only = Bench::new("module m;\n", false);
+    read_only.focus();
+    deliver_browser_paste(
+        &read_only.context,
+        read_only.id,
+        BrowserPaste::Text("x".to_owned()),
+    );
+    let _ = read_only.frame(Vec::new());
+    assert_eq!(read_only.source, "module m;\n");
 }
 
 #[test]

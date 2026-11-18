@@ -291,6 +291,9 @@ pub(crate) struct VirtualEditorOutput {
     /// no step to take. An owner with an older history of its own (a bulk
     /// replace, a rename) steps that one, so the request is never lost.
     pub unanswered_history: Option<StandardCommand>,
+    /// A menu's Paste the browser would not give the clipboard to. The
+    /// owner tells the reader the keyboard's paste, which it always gives.
+    pub paste_refused: bool,
     /// Screen position just below the primary caret, for a popover that has to
     /// point at what is being typed. `None` when the caret's line is scrolled
     /// out of the viewport or folded away — an anchor is only offered when
@@ -539,6 +542,15 @@ pub(crate) fn show_virtual_text_editor(
     if let Some(command) = take_queued_standard_command(ui.ctx(), editor_id) {
         handle_standard_command(ui, editor_id, &mut session, command, editable);
         reveal = reveal.or(Some(Reveal::Nearest));
+    }
+    let mut paste_refused = false;
+    match take_browser_paste(ui.ctx(), editor_id) {
+        Some(BrowserPaste::Text(text)) if editable => {
+            paste(&mut session, &text);
+            reveal = reveal.or(Some(Reveal::Nearest));
+        }
+        Some(BrowserPaste::Refused) => paste_refused = true,
+        Some(BrowserPaste::Text(_)) | None => {}
     }
     if let Some(command) = take_queued_structural_command(ui.ctx(), editor_id)
         && (!command.mutates_source() || editable)
@@ -1302,6 +1314,7 @@ pub(crate) fn show_virtual_text_editor(
         hover_char_index,
         selected_char_range,
         unanswered_history,
+        paste_refused,
         caret_anchor,
         view,
         response,
@@ -1744,10 +1757,7 @@ fn handle_event(
             outcome.caret_moved = true;
         }
         egui::Event::Paste(text) if editable && !text.is_empty() => {
-            let text = normalize_newlines(&text, session.model.preferred_newline());
-            grow_maximum_cells_for_insertion(session, &text);
-            session.model.insert_at_selections(&text);
-            session.preferred_column = None;
+            paste(session, &text);
             outcome.caret_moved = true;
         }
         egui::Event::Text(text)
@@ -2127,9 +2137,7 @@ fn handle_standard_command(
             copy_selection(ui, &session.model);
             session.model.insert_at_selections("");
         }
-        StandardCommand::Paste if editable => ui
-            .ctx()
-            .send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+        StandardCommand::Paste if editable => request_paste(ui.ctx(), editor_id),
         StandardCommand::Delete if editable => {
             session.model.delete_forward();
             session.preferred_column = None;
@@ -2146,6 +2154,81 @@ fn handle_standard_command(
         ui.ctx()
             .memory_mut(|memory| memory.request_focus(editor_id));
     }
+}
+
+/// Put `text` where the selections are, in the document's line breaks.
+fn paste(session: &mut VirtualEditorSession, text: &str) {
+    let text = normalize_newlines(text, session.model.preferred_newline());
+    grow_maximum_cells_for_insertion(session, &text);
+    session.model.insert_at_selections(&text);
+    session.preferred_column = None;
+}
+
+/// What a browser's clipboard answered a menu's Paste with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowserPaste {
+    Text(String),
+    /// The page may not read the clipboard: the browser refused, the reader
+    /// declined, or the browser has no way for a page to ask.
+    Refused,
+}
+
+/// Edit > Paste. The desktop hands the clipboard to the focused editor as
+/// a paste of its own; a browser gives a page the clipboard on the
+/// keyboard's paste alone, and to a menu only when the page asks, answering
+/// after this frame.
+#[cfg(not(target_arch = "wasm32"))]
+fn request_paste(ctx: &egui::Context, _editor_id: egui::Id) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn request_paste(ctx: &egui::Context, editor_id: egui::Id) {
+    let ctx = ctx.clone();
+    rspice_app_services::workbench::browser::clipboard::read_text(move |text| {
+        deliver_browser_paste(
+            &ctx,
+            editor_id,
+            text.map_or(BrowserPaste::Refused, BrowserPaste::Text),
+        );
+    });
+}
+
+/// Hand the clipboard's answer to the editor `editor_id`, which pastes the
+/// text, or says it was refused, the next time it is drawn.
+pub fn deliver_browser_paste(ctx: &egui::Context, editor_id: egui::Id, answer: BrowserPaste) {
+    ctx.data_mut(|data| data.insert_temp(browser_paste_id(editor_id), answer));
+    ctx.request_repaint();
+}
+
+fn take_browser_paste(ctx: &egui::Context, editor_id: egui::Id) -> Option<BrowserPaste> {
+    let id = browser_paste_id(editor_id);
+    ctx.data_mut(|data| {
+        let answer = data.get_temp::<BrowserPaste>(id);
+        data.remove::<BrowserPaste>(id);
+        answer
+    })
+}
+
+fn browser_paste_id(editor_id: egui::Id) -> egui::Id {
+    editor_id.with("browser-paste")
+}
+
+/// What the owner says when the browser refused a menu's Paste: the
+/// keyboard's paste, which a browser always gives a page.
+pub(crate) fn paste_refused_text(
+    ctx: &egui::Context,
+    messages: crate::workbench::MessageCatalog,
+) -> String {
+    let key = if ctx.os() == egui::os::OperatingSystem::Mac {
+        "Cmd+V"
+    } else {
+        "Ctrl+V"
+    };
+    messages.format(
+        crate::workbench::MessageId::EditorPasteRefused,
+        &[("key", key)],
+    )
 }
 
 /// Undo or redo one step of the editor's own history, or say that it had
