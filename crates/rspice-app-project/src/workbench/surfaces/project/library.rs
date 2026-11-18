@@ -1151,6 +1151,9 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
         // wider than the screen and scrolls.
         ui.set_max_width(visible_workspace_width(ui));
         ui.horizontal(|ui| {
+            // The page lays its columns flush; the band's buttons stand apart
+            // by the kit's control gap, as a dialog footer's do.
+            ui.spacing_mut().item_spacing.x = tokens::SP_3;
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if let Some((reference, view_type, _)) = &target.view
                     && Button::new(open_view_label(*view_type))
@@ -1263,11 +1266,14 @@ pub(super) fn library_actions_menu(
     });
     let attach = LibraryFileIntent::Attach;
     let blocker = library_file_blocker(cx.model, &attach);
-    if Button::new(library_file_label(&attach))
-        .enabled(blocker.is_none())
-        .show(ui)
-        .on_disabled_hover_text(blocker.unwrap_or_default())
-        .clicked()
+    let button = Button::new(library_file_label(&attach)).enabled(blocker.is_none());
+    // Where the band is too narrow for it, Attach library… stays in Library
+    // actions, which always holds it, rather than being cut at the edge.
+    if button.measured_width(ui) <= ui.available_width()
+        && button
+            .show(ui)
+            .on_disabled_hover_text(blocker.unwrap_or_default())
+            .clicked()
     {
         intent = Some(LibraryIntent::Files(attach));
     }

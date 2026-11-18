@@ -204,6 +204,9 @@ pub fn detail(
     let shown = bar_frame(ui, t.color.bg_panel).show(ui, |ui| {
         ui.set_min_height(t.metrics.ctl_h);
         ui.horizontal(|ui| {
+            // The buttons stand apart by the kit's control gap, as on the
+            // band of a library of the project's own.
+            ui.spacing_mut().item_spacing.x = tokens::SP_3;
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if browser.source.is_none()
                     && let Some(file) = browser.file.as_ref()
