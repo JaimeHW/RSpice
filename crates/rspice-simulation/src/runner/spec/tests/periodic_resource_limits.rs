@@ -217,13 +217,25 @@ pub(super) fn run_consumer_with_limit_checks(
     if matches!(spec, AnalysisSpec::Psp { .. } | AnalysisSpec::Hbsp { .. }) {
         // Native scattering/covariance fits, but publishing the sideband paths
         // and direct aliases of this two-port fixture needs 684 scalar values.
+        // A shooting carrier is linearized about every harmonic its 128
+        // samples resolve, so on it projecting the orbit's 13 periodic
+        // unknowns over 65 harmonics, real and imaginary, needs 1690 first.
+        let requested_values = if matches!(spec, AnalysisSpec::Psp { .. }) {
+            1690
+        } else {
+            684
+        };
         let mut display_limited = limits;
         display_limited.max_result_values = 600;
-        assert!(matches!(
-            run(display_limited),
-            Err(SimulationError::ResourceLimit { resource, requested: 684, limit: 600 })
-                if resource == "result_values"
-        ));
+        let limited = run(display_limited);
+        assert!(
+            matches!(
+                &limited,
+                Err(SimulationError::ResourceLimit { resource, requested, limit: 600 })
+                    if resource == "result_values" && *requested == requested_values
+            ),
+            "{spec:?}: {limited:?}"
+        );
     }
     for resource in ["netlist_bytes", "matrix_unknowns", "result_values"] {
         let mut limited = limits;
