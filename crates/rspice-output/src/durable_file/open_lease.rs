@@ -463,6 +463,9 @@ mod tests {
         let denied = UnwritableFolder::deny_new_files(&folder).unwrap();
         if denied.still_writable() {
             // An account the folder's permissions do not bind, as root.
+            eprintln!(
+                "this account writes the folder despite its permissions; skipping the refusal"
+            );
             return;
         }
         assert!(matches!(

@@ -39,6 +39,9 @@ fn a_project_in_a_folder_that_cannot_be_written_opens_read_only_and_says_why() {
     let denied = UnwritableFolder::deny_new_files(&root).expect("the folder takes no new file");
     if denied.still_writable() {
         // An account the folder's permissions do not bind, as root.
+        eprintln!(
+            "this account writes the folder despite its permissions; skipping the read-only open"
+        );
         return;
     }
     let before = std::fs::read(&path).unwrap();

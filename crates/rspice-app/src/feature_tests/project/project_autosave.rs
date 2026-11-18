@@ -61,6 +61,7 @@ fn frames_until(ctx: &egui::Context, app: &mut RSpiceApp, done: impl Fn(&RSpiceA
 #[ignore = "played in a child process by the crash tests"]
 fn crashed_session_child() {
     let Some(folder) = std::env::var_os(CRASH_FOLDER) else {
+        eprintln!("{CRASH_FOLDER} is unset; the crashed session only runs under its parent test");
         return;
     };
     let folder = PathBuf::from(folder);
