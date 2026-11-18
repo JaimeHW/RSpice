@@ -1387,6 +1387,29 @@ pub fn apply_quick_fix_for_finding(
     apply_quick_fix(model, netlist, &fix)
 }
 
+/// The file the finding `finding` offers to add to its deck, when its fix
+/// is Add file…: the fix asks the reader for a file before it edits.
+#[must_use]
+pub fn add_file_request_for_finding(
+    netlist: &NetlistDocumentState,
+    finding: uuid::Uuid,
+) -> Option<crate::state::netlist_diagnostics::DeckFileRequest> {
+    netlist
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.canonical.diagnostic_id == finding && diagnostic.is_current())
+        .and_then(|diagnostic| diagnostic.fix.as_ref()?.add_file.clone())
+}
+
+/// The file the caret's line offers to add to its deck, when the fix at
+/// the caret is Add file….
+#[must_use]
+pub fn preferred_add_file_request(
+    netlist: &NetlistDocumentState,
+) -> Option<crate::state::netlist_diagnostics::DeckFileRequest> {
+    preferred_quick_fix(netlist).and_then(|bound| bound.fix.add_file)
+}
+
 /// A fix, and the exact source it was computed against.
 ///
 /// A fix is a byte range and the text that replaces it, so it means something
@@ -1430,6 +1453,9 @@ fn apply_quick_fix(
         return Err("The text has changed since this fix was offered.".to_owned());
     }
     let fix = &bound.fix;
+    if fix.add_file.is_some() {
+        return Err(format!("{} asks for the file to add first.", fix.label));
+    }
     if fix.span.start > fix.span.end
         || fix.span.end > source.len()
         || !source.is_char_boundary(fix.span.start)

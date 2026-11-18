@@ -2,16 +2,17 @@
 //! read: SPICE files picked together or a ZIP of them, stored or deflated,
 //! come in as decks with their files kept by their paths from each deck;
 //! such a deck checks and runs reading those files and nothing on a disk,
-//! so an absolute path is the error on the line that writes it (NL-8); it
-//! goes out again as one ZIP; and on the desktop it is saved as files, and
-//! the project keeps it as the file from then on.
+//! so an absolute path is the error on the line that writes it (NL-8), and
+//! the line offers to add the file it names; it goes out again as one ZIP;
+//! and on the desktop it is saved as files, and the project keeps it as the
+//! file from then on.
 
 use std::io::Write as _;
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
 use crate::workbench::app_state::AppState;
-use rspice_app_code::workbench::documents::deck_files;
+use rspice_app_code::workbench::documents::{deck_files, netlist_document};
 use rspice_app_code::workbench::workflows::deck_import;
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -153,6 +154,161 @@ fn an_include_the_deck_does_not_keep_is_the_error_on_its_line() {
     assert_eq!(error.line, Some(2), "{error:?}");
     let refused = dispatched(&mut app.state).expect_err("nothing is read from a disk");
     assert!(refused.contains(said), "{refused}");
+}
+
+/// Two frames well after the last edit, so the deck in front is checked
+/// again as it stands.
+fn checked_again(app: &mut RSpiceApp) {
+    let ctx = themed_context();
+    for time in [100.0, 100.5] {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, DESKTOP)),
+                time: Some(time),
+                ..Default::default()
+            },
+            |ui| {
+                app.prepare_frame(ui.ctx());
+                app.render_frame_chrome(ui);
+                app.render_frame_dialogs(ui.ctx());
+            },
+        );
+    }
+}
+
+/// The finding that says `said`, once the deck in front is checked.
+fn finding_saying(
+    app: &mut RSpiceApp,
+    said: &str,
+) -> rspice_app_state::state::netlist_diagnostics::Diagnostic {
+    let ctx = themed_context();
+    frame(&ctx, app, DESKTOP);
+    frame(&ctx, app, DESKTOP);
+    app.state
+        .code
+        .netlist
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message == said)
+        .cloned()
+        .unwrap_or_else(|| panic!("no finding says {said:?}"))
+}
+
+/// An absolute include of a deck kept as text offers Add file… on its
+/// problem row and as its line's quick fix. The file picked is kept by its
+/// name beside the deck, the line names it so, and the deck checks clean
+/// and runs reading it.
+#[test]
+fn add_file_keeps_the_file_an_absolute_include_names_and_the_line_reads_it() {
+    let mut app = RSpiceApp::test_instance();
+    let deck = "* amp\nV1 a 0 1\n.include \"C:\\pdk\\models\\opamp.inc\"\nXU1 a out a 0 opamp\nR1 out 0 1k\n.op\n.end\n";
+    assert!(
+        app.state
+            .import_deck_files(vec![("amp.cir".to_owned(), deck.as_bytes().to_vec())]),
+        "{:?}",
+        app.state.prompt_text()
+    );
+    let error = finding_saying(
+        &mut app,
+        "C:/pdk/models/opamp.inc is outside this deck. Add the file to the deck to use it.",
+    );
+
+    let offered = error
+        .canonical
+        .quick_fixes
+        .first()
+        .expect("the row offers a fix");
+    assert_eq!(offered.label, "Add file…");
+    let request = netlist_document::language::add_file_request_for_finding(
+        &app.state.code.netlist,
+        error.canonical.diagnostic_id,
+    )
+    .expect("the fix asks for a file");
+    app.state.code.netlist.cursor_line = 2;
+    assert_eq!(
+        netlist_document::language::preferred_add_file_request(&app.state.code.netlist),
+        Some(request.clone()),
+        "the line's quick fix is the same offer"
+    );
+    assert_eq!(request.keep_as, "opamp.inc");
+
+    let said = app
+        .state
+        .add_deck_file_bytes(&request, "opamp.inc", OPAMP.as_bytes())
+        .expect("the file is kept");
+
+    assert_eq!(said, "Added opamp.inc to amp.cir.");
+    let stored = app.state.model.workspace.content.decks[0]
+        .stored_deck()
+        .expect("kept as text");
+    assert_eq!(stored.text.lines().nth(2), Some(".include \"opamp.inc\""));
+    let files = stored
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.text.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(files, [("opamp.inc", OPAMP)]);
+    checked_again(&mut app);
+    let errors = app
+        .state
+        .code
+        .netlist
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.severity == rspice_vocabulary::diagnostics::DiagnosticSeverity::Error
+        })
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "{errors:?}");
+    let netlist = dispatched(&mut app.state).expect("the deck runs");
+    assert!(netlist.contains("E1 out vss inp vss 2"), "{netlist}");
+}
+
+/// A relative include the deck kept as text lacks offers Add file…; the
+/// file picked is kept where the line reads it, the line is left as
+/// written, and a file of other text is not put over it.
+#[test]
+fn add_file_keeps_a_missing_include_where_its_line_reads_it() {
+    let mut app = RSpiceApp::test_instance();
+    let deck = "* amp\nV1 a 0 1\n.include \"models/opamp.inc\"\nXU1 a out a 0 opamp\nR1 out 0 1k\n.op\n.end\n";
+    assert!(
+        app.state
+            .import_deck_files(vec![("amp.cir".to_owned(), deck.as_bytes().to_vec())])
+    );
+    let error = finding_saying(
+        &mut app,
+        "models/opamp.inc is not in this deck. Add the file to the deck to use it.",
+    );
+    let request = netlist_document::language::add_file_request_for_finding(
+        &app.state.code.netlist,
+        error.canonical.diagnostic_id,
+    )
+    .expect("the fix asks for a file");
+    assert_eq!(
+        (request.keep_as.as_str(), request.rewrite_to.as_deref()),
+        ("models/opamp.inc", None)
+    );
+
+    app.state
+        .add_deck_file_bytes(&request, "opamp.inc", OPAMP.as_bytes())
+        .expect("the file is kept");
+
+    let stored = app.state.model.workspace.content.decks[0]
+        .stored_deck()
+        .expect("kept as text");
+    assert_eq!(stored.text, deck);
+    assert_eq!(stored.files[0].path, "models/opamp.inc");
+    let refused = app
+        .state
+        .add_deck_file_bytes(&request, "other.inc", b"* other\n")
+        .expect_err("a file of other text is not put over it");
+    assert!(
+        refused.contains("already keeps models/opamp.inc"),
+        "{refused}"
+    );
+    let netlist = dispatched(&mut app.state).expect("the deck runs");
+    assert!(netlist.contains("E1 out vss inp vss 2"), "{netlist}");
 }
 
 /// Files picked together come in as the decks among them, each a file no

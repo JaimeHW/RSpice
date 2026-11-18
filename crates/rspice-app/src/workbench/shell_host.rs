@@ -885,6 +885,15 @@ impl Host for RSpiceApp {
 
 impl ProblemsHost for AppState {
     fn apply_quick_fix(&mut self, finding: uuid::Uuid) -> Result<String, String> {
+        // Add file… asks for the file before anything changes.
+        if let Some(request) =
+            rspice_app_code::workbench::documents::netlist_document::language::add_file_request_for_finding(
+                &self.code.netlist,
+                finding,
+            )
+        {
+            return self.add_deck_file(request);
+        }
         rspice_app_code::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
             &mut self.model,
             &mut self.code.netlist,

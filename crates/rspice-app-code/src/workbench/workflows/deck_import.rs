@@ -74,6 +74,17 @@ pub fn import_zip(name: &str, bytes: &[u8]) -> Result<Vec<StoredDeck>, String> {
     import_files(files)
 }
 
+/// The text of `bytes`, the one file `name` picked to keep with a deck, and
+/// its encoding: a ZIP, or a file that is not text, is refused.
+pub fn picked_text(name: &str, bytes: &[u8]) -> Result<(String, TextEncoding), String> {
+    if bytes.starts_with(b"PK\x03\x04") || is_binary(bytes) {
+        return Err(format!(
+            "{name} is not a text file: pick the file the line names."
+        ));
+    }
+    TextEncoding::decode(bytes)
+}
+
 /// The deck and the files kept with it as one ZIP: the deck by its name,
 /// each file by its path from the deck, each in its own encoding.
 pub fn export_zip(deck: &StoredDeck) -> Result<Vec<u8>, String> {

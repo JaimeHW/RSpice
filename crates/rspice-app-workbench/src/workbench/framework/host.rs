@@ -380,7 +380,8 @@ pub trait Host: 'static {
 /// is handed.
 pub trait ProblemsHost {
     /// Apply the quick fix the page offers for `finding`: the sentence to
-    /// prompt, whether it applied or why it did not.
+    /// prompt, whether it applied or why it did not, or nothing when a fix
+    /// that asks for a file was not given one.
     fn apply_quick_fix(&mut self, finding: uuid::Uuid) -> Result<String, String>;
 }
 

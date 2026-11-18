@@ -403,8 +403,10 @@ pub fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
         ui.ctx().copy_text(text);
     }
     if let Some(finding) = intent.fix {
-        match state.apply_quick_fix(finding) {
-            Ok(text) | Err(text) => state.workbench_mut().prompt(text),
+        // A fix that asks for a file says nothing when the picker is closed.
+        let (Ok(text) | Err(text)) = state.apply_quick_fix(finding);
+        if !text.is_empty() {
+            state.workbench_mut().prompt(text);
         }
     }
     intent

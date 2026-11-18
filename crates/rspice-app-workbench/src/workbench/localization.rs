@@ -219,6 +219,7 @@ define_messages! {
     NetlistDeckOnTheDesktop => "{name} is a file on the desktop ({path}). Open the project on the desktop to edit or run it.",
     NetlistFileOutsideDeck => "{path} is outside this deck. Add the file to the deck to use it.",
     NetlistFileNotInDeck => "{path} is not in this deck. Add the file to the deck to use it.",
+    NetlistAddFileToDeck => "Add file…",
     NetlistDeckLocate => "Locate…",
     NetlistDeckRemoveFromProject => "Remove from project",
     NetlistDeckRemoveConfirm => "Remove {name} from the project? The file stays on disk.",

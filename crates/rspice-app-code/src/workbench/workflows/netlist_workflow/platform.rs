@@ -58,3 +58,16 @@ pub fn show_zip_save_dialog(
     }
     .save_file()
 }
+
+/// Ask for the file a line of a deck names as `requested`, offering its
+/// name; `None` when the picker was closed.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn show_add_deck_file_dialog(requested: &str) -> Option<std::path::PathBuf> {
+    let name = requested.rsplit(['/', '\\']).next().unwrap_or(requested);
+    rfd::FileDialog::new()
+        .add_filter("All Files", &["*"])
+        .set_title(format!("Add {name} to the Deck"))
+        .set_file_name(name)
+        .pick_file()
+}

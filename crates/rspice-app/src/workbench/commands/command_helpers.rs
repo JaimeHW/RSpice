@@ -365,6 +365,12 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
             let new_project = !app.state.platform.project_lifecycle.is_open();
             app.state.open_dropped_deck(&dropped, new_project);
         }
+        CodeHandOff::AddDeckFile(request) => {
+            let (Ok(said) | Err(said)) = app.state.add_deck_file(request);
+            if !said.is_empty() {
+                app.state.prompt(said);
+            }
+        }
     }
 }
 

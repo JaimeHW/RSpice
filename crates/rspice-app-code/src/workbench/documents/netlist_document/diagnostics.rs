@@ -361,6 +361,7 @@ pub(super) fn unknown_reference_diagnostics(
             label: format!("Replace with {replacement}"),
             span: reference.span.clone(),
             replacement: replacement.clone(),
+            add_file: None,
         });
 
         let mut diagnostic = Diagnostic::current(

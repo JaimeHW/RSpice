@@ -13,6 +13,7 @@
 //! and saving the project keeps it.
 
 use std::collections::HashSet;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -779,6 +780,226 @@ fn disk_join(folder: &Path, requested: &str) -> Option<PathBuf> {
         }
     }
     Some(at)
+}
+
+/// Where in `text` the zero-based `line` writes the path the engine reads as
+/// `requested`: the path alone, inside any quotes.
+#[must_use]
+pub fn named_path_span(text: &str, line: usize, requested: &str) -> Option<Range<usize>> {
+    let start = text
+        .split_inclusive('\n')
+        .take(line)
+        .map(str::len)
+        .sum::<usize>();
+    let row = text.get(start..)?.split('\n').next()?;
+    let mut index = 0;
+    while index < row.len() {
+        let rest = &row[index..];
+        let Some(first) = rest.chars().next() else {
+            break;
+        };
+        if first.is_ascii_whitespace() {
+            index += 1;
+            continue;
+        }
+        let (from, to, next) = if matches!(first, '"' | '\'') {
+            let to = rest[1..].find(first).map_or(row.len(), |at| index + 1 + at);
+            (index + 1, to, to + 1)
+        } else {
+            let to = rest
+                .find(|character: char| character.is_ascii_whitespace())
+                .map_or(row.len(), |at| index + at);
+            (index, to, to)
+        };
+        if rspice_core::netlist::normalize_source_path_literal(&row[from..to])
+            .is_ok_and(|path| path == requested)
+        {
+            return Some(start + from..start + to);
+        }
+        index = next;
+    }
+    None
+}
+
+/// The path in a deck kept as text that a file `owner`, a file of the deck
+/// by its path in it, reads as `requested`: from the folder `owner` is in,
+/// with `..` stopping at the deck's own folder as the deck reads it; or,
+/// for a path `outside` the deck, the file by its name beside `owner`.
+#[must_use]
+pub fn kept_path(owner: &str, requested: &str, outside: bool) -> String {
+    let mut parts = owner
+        .rsplit_once('/')
+        .map(|(folder, _)| folder.split('/').collect::<Vec<_>>())
+        .unwrap_or_default();
+    if outside {
+        let name = requested.rsplit(['/', '\\']).next().unwrap_or(requested);
+        parts.push(name.rsplit(':').next().unwrap_or(name));
+    } else {
+        for part in requested.split(['/', '\\']) {
+            match part {
+                "" | "." => {}
+                ".." => {
+                    parts.pop();
+                }
+                part => parts.push(part),
+            }
+        }
+    }
+    parts.join("/")
+}
+
+/// Add file…: keep `text`, the file the reader picked, in `encoding`, with
+/// the open deck the project keeps as text, under the path `request` asks
+/// for, so the line that names it reads it; a line naming an absolute path
+/// is rewritten to name the file by its name, an edit Undo takes back. The
+/// deck is checked again. What was added, or why nothing was.
+pub fn add_file_to_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    request: &crate::state::netlist_diagnostics::DeckFileRequest,
+    text: String,
+    encoding: TextEncoding,
+) -> Result<String, String> {
+    let deck = netlist
+        .open_deck
+        .as_ref()
+        .filter(|deck| deck.is_stored())
+        .ok_or_else(|| "Open the deck kept in the project to add a file to it.".to_owned())?;
+    let name = deck.root.name();
+    let keep_as = request.keep_as.as_str();
+    if keep_as.is_empty() || keep_as == name {
+        return Err(format!("{name} cannot keep a file as {keep_as}."));
+    }
+    let kept = deck
+        .stored_files
+        .iter()
+        .flatten()
+        .find(|file| file.path == keep_as);
+    if kept.is_some_and(|file| file.text != text) {
+        return Err(format!(
+            "{name} already keeps {keep_as}, with other text: nothing was added."
+        ));
+    }
+    let added = kept.is_none();
+    if let Some(to) = &request.rewrite_to {
+        rewrite_named_path(model, netlist, request, to)?;
+    }
+    let Some(deck) = netlist.open_deck.as_mut() else {
+        return Err("No deck is open.".to_owned());
+    };
+    let file = StoredDeckFile {
+        path: keep_as.to_owned(),
+        text,
+        encoding,
+    };
+    if added {
+        if let Some(files) = deck.stored_files.as_mut() {
+            files.push(file.clone());
+            files.sort_by(|left, right| left.path.cmp(&right.path));
+        }
+        let content = &mut *model.workspace.content;
+        if let Some(stored) = content
+            .decks
+            .iter_mut()
+            .find(|entry| entry.id == deck.id)
+            .and_then(crate::state::ProjectDeck::stored_deck_mut)
+        {
+            stored.files.push(file);
+            stored
+                .files
+                .sort_by(|left, right| left.path.cmp(&right.path));
+        }
+        content.decks_dirty = true;
+    }
+    // The deck reads the file it now keeps.
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
+    Ok(if added {
+        format!("Added {keep_as} to {name}.")
+    } else {
+        format!("{name} already keeps {keep_as}.")
+    })
+}
+
+/// Name the file `request` asks for as `to` on the line that names it,
+/// through the editor where the file is open, so Undo takes it back, else
+/// in the text the project keeps.
+fn rewrite_named_path(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    request: &crate::state::netlist_diagnostics::DeckFileRequest,
+    to: &str,
+) -> Result<(), String> {
+    let deck = netlist
+        .open_deck
+        .as_ref()
+        .ok_or_else(|| "No deck is open.".to_owned())?;
+    let id = deck.id;
+    let include = (request.owner != deck.root.name()).then_some(request.owner.as_str());
+    let open = deck.file(include).map(|file| file.text.clone());
+    let text = match &open {
+        Some(text) => text.clone(),
+        None => deck
+            .stored_files
+            .iter()
+            .flatten()
+            .find(|file| file.path == request.owner)
+            .map(|file| file.text.clone())
+            .ok_or_else(|| format!("{} is no longer in the deck.", request.owner))?,
+    };
+    let span = named_path_span(&text, request.line, &request.requested).ok_or_else(|| {
+        format!(
+            "Line {} of {} no longer names {}: nothing was added.",
+            request.line + 1,
+            request.owner,
+            request.requested
+        )
+    })?;
+    let mut changed = text.clone();
+    changed.replace_range(span, to);
+    if open.is_some() {
+        let edit = match include {
+            None => crate::workbench::documents::netlist_document::OwnedNetlistReplacement::root(
+                &text, changed, 1,
+            ),
+            Some(key) => {
+                crate::workbench::documents::netlist_document::OwnedNetlistReplacement::dependency(
+                    key, &text, changed, 1,
+                )
+            }
+        };
+        crate::workbench::documents::netlist_document::replace_deck_files(
+            model,
+            netlist,
+            vec![edit],
+        )?;
+        return Ok(());
+    }
+    if let Some(file) = netlist
+        .open_deck
+        .as_mut()
+        .and_then(|deck| deck.stored_files.as_mut())
+        .and_then(|files| files.iter_mut().find(|file| file.path == request.owner))
+    {
+        file.text.clone_from(&changed);
+    }
+    let content = &mut *model.workspace.content;
+    if let Some(file) = content
+        .decks
+        .iter_mut()
+        .find(|entry| entry.id == id)
+        .and_then(crate::state::ProjectDeck::stored_deck_mut)
+        .and_then(|stored| {
+            stored
+                .files
+                .iter_mut()
+                .find(|file| file.path == request.owner)
+        })
+    {
+        file.text = changed;
+    }
+    content.decks_dirty = true;
+    Ok(())
 }
 
 /// Export deck…: the name and bytes of the open deck the project keeps as

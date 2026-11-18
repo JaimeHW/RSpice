@@ -725,6 +725,7 @@ fn validated_fix_state() -> (CodeHarness, uuid::Uuid) {
         label: "Replace with 1k".to_owned(),
         span: start..start + 3,
         replacement: "1k".to_owned(),
+        add_file: None,
     });
     let mut diagnostic = diagnostic.with_line(Some(2));
     diagnostic.bind_validation(7, &crate::state::content_digest(FIX_DECK).to_string());

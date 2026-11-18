@@ -203,8 +203,8 @@ impl Request for CodeRequest {
 /// schematic, showing design's selected instance in the generated deck,
 /// opening the compiled module's symbol, creating the drafted device or the
 /// imported cells as Design documents, opening a placed instance of the
-/// cell, and opening a dropped deck. Each carries out the request of the
-/// same name.
+/// cell, opening a dropped deck, and asking for a file a deck kept as text
+/// lacks. Each carries out the request of the same name.
 #[derive(Debug)]
 pub enum CodeHandOff {
     OpenNetlist,
@@ -221,8 +221,14 @@ pub enum CodeHandOff {
     CreateVerilogADevice,
     ImportVerilogACells,
     OpenCellInstance(rspice_app_state::workbench::app_state::cell_usage::CellInstanceUse),
-    ShowNetInSchematic { schematic: CellViewRef, net: String },
+    ShowNetInSchematic {
+        schematic: CellViewRef,
+        net: String,
+    },
     OpenDroppedDeck(Vec<egui::DroppedFile>),
+    /// Add file…: ask for the file a line of the deck kept as text names,
+    /// and keep it with the deck.
+    AddDeckFile(crate::state::netlist_diagnostics::DeckFileRequest),
 }
 
 /// What the netlist page's editor typed, undid or redid in its frame, which

@@ -1425,7 +1425,72 @@ fn parse_stored(
     let parsed = rspice_core::Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
         buffer, at, bundle, options, abort,
     );
-    parse_findings(parsed, Some(at), buffer, spectre, None)
+    let missing = match &parsed {
+        Err(rspice_core::netlist::ParseWithAbortError::Parse(
+            rspice_core::netlist::ParseError::SourceNotInDeck {
+                origin: Some(origin),
+                requested,
+                outside,
+            },
+        )) => Some((origin.clone(), requested.clone(), *outside)),
+        _ => None,
+    };
+    let mut found = parse_findings(parsed, Some(at), buffer, spectre, None);
+    // The line that names a file the deck does not keep offers to add it.
+    if let Some((origin, requested, outside)) = missing
+        && let Some(fix) = add_file_fix(files, &origin, &requested, outside)
+        && let Some(diagnostic) = found.0.iter_mut().find(|diagnostic| {
+            diagnostic.fix.is_none()
+                && diagnostic.source_path == origin.path
+                && diagnostic.source_line == origin.line.checked_sub(1)
+        })
+    {
+        diagnostic.fix = Some(fix);
+        diagnostic.refresh_canonical_location();
+    }
+    found
+}
+
+/// Add file…, for the line at `origin` of a deck kept as text that names
+/// `requested`, a file the deck does not keep, `outside` it by an absolute
+/// path: the picked file is kept where the line reads it, or beside the
+/// file the line is in by its name, and the line then names it so.
+fn add_file_fix(
+    files: &[(PathBuf, String)],
+    origin: &rspice_core::netlist::NetlistSourceLocation,
+    requested: &str,
+    outside: bool,
+) -> Option<crate::state::netlist_diagnostics::DiagnosticFix> {
+    let owner = rspice_design::deck::stored_file_path(origin.path.as_deref()?);
+    let line = origin.line.checked_sub(1)?;
+    let text = files
+        .iter()
+        .find(|(identity, _)| rspice_design::deck::stored_file_path(identity) == owner)
+        .map(|(_, text)| text.as_str())?;
+    let span = crate::workbench::documents::deck_files::named_path_span(text, line, requested)?;
+    let keep_as = crate::workbench::documents::deck_files::kept_path(&owner, requested, outside);
+    let rewrite_to = outside.then(|| {
+        keep_as
+            .rsplit('/')
+            .next()
+            .unwrap_or(keep_as.as_str())
+            .to_owned()
+    });
+    Some(crate::state::netlist_diagnostics::DiagnosticFix {
+        label: crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::default())
+            .text(MessageId::NetlistAddFileToDeck),
+        replacement: rewrite_to
+            .clone()
+            .unwrap_or_else(|| text[span.clone()].to_owned()),
+        span,
+        add_file: Some(crate::state::netlist_diagnostics::DeckFileRequest {
+            owner,
+            line,
+            requested: requested.to_owned(),
+            keep_as,
+            rewrite_to,
+        }),
+    })
 }
 
 /// What one parse of `buffer`, read under the name `parse_source`, found:

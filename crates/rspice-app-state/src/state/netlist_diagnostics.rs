@@ -23,6 +23,30 @@ pub struct DiagnosticFix {
     pub label: String,
     pub span: Range<usize>,
     pub replacement: String,
+    /// A fix that keeps a file the reader picks with a deck the project
+    /// keeps as text, not an edit alone: `span` is the path the line names
+    /// and `replacement` what the line reads afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub add_file: Option<DeckFileRequest>,
+}
+
+/// The file a line of a deck the project keeps as text names and the deck
+/// does not keep, which Add file… asks the reader for.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeckFileRequest {
+    /// The file of the deck the line is in, by its path in the deck: the
+    /// deck's own name for the deck.
+    pub owner: String,
+    /// The zero-based line of `owner` that names the file.
+    pub line: usize,
+    /// The path the line names, as the engine reads it.
+    pub requested: String,
+    /// The path in the deck the picked file is kept under: where the line
+    /// reads it, or beside `owner` by its name for an absolute path.
+    pub keep_as: String,
+    /// What the line names instead, for an absolute path: the file by its
+    /// name.
+    pub rewrite_to: Option<String>,
 }
 
 /// One structured problem reported for the current editor buffer.

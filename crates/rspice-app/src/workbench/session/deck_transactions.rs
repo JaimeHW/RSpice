@@ -20,6 +20,16 @@ thread_local! {
             Result<Option<Vec<(String, Vec<u8>)>>, String>,
         )>,
     > = const { std::cell::RefCell::new(None) };
+
+    /// What the browser's picker delivered for Add file…, with the lease it
+    /// was asked under and the line's request, until a frame takes it.
+    static DECK_FILE_PICK: std::cell::RefCell<
+        Option<(
+            rspice_app_services::workbench::browser::file_import::TextImportToken,
+            rspice_app_state::state::netlist_diagnostics::DeckFileRequest,
+            Result<Option<rspice_app_services::workbench::browser::file_import::PickedTextFile>, String>,
+        )>,
+    > = const { std::cell::RefCell::new(None) };
 }
 
 /// Opening a deck file, over the whole application state.
@@ -55,9 +65,28 @@ impl AppState {
         true
     }
 
-    /// Bring in the decks the browser's picker read, once it has.
+    /// Bring in the decks the browser's picker read, or the file Add file…
+    /// asked for, once it has.
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn poll_deck_import(&mut self) {
+        if let Some((token, request, result)) = DECK_FILE_PICK.with(|slot| slot.borrow_mut().take())
+            && rspice_app_services::workbench::browser::file_import::finish_text_import(token)
+        {
+            let said = match result {
+                Ok(Some(picked)) => {
+                    let bytes = picked
+                        .original_bytes
+                        .unwrap_or_else(|| picked.contents.into_bytes());
+                    self.add_deck_file_bytes(&request, &picked.name, &bytes)
+                }
+                Ok(None) => Ok(String::new()),
+                Err(error) => Err(error),
+            };
+            let (Ok(said) | Err(said)) = said;
+            if !said.is_empty() {
+                self.prompt(said);
+            }
+        }
         let Some((token, result)) = DECK_IMPORT.with(|slot| slot.borrow_mut().take()) else {
             return;
         };
@@ -117,6 +146,69 @@ impl AppState {
             format!("Imported {}.", names.join(", ")),
         );
         true
+    }
+
+    /// Add file…: ask for the file `request` names, a file a line of the
+    /// open deck kept as text names and the deck does not keep, and keep it
+    /// with the deck where the line reads it. What was added, or why
+    /// nothing was; nothing when the picker was closed.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn add_deck_file(
+        &mut self,
+        request: rspice_app_state::state::netlist_diagnostics::DeckFileRequest,
+    ) -> Result<String, String> {
+        let Some(path) =
+            rspice_app_code::workbench::workflows::netlist_workflow::show_add_deck_file_dialog(
+                &request.requested,
+            )
+        else {
+            return Ok(String::new());
+        };
+        let bytes = std::fs::read(&path)
+            .map_err(|error| format!("{} could not be read: {error}", path.display()))?;
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        self.add_deck_file_bytes(&request, &name, &bytes)
+    }
+
+    /// Add file…, where there is no file system: ask the browser's picker
+    /// for the file `request` names; it is kept with the deck once read.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn add_deck_file(
+        &mut self,
+        request: rspice_app_state::state::netlist_diagnostics::DeckFileRequest,
+    ) -> Result<String, String> {
+        use rspice_app_services::workbench::browser::file_import;
+        let token =
+            file_import::try_begin_text_import(file_import::BrowserTextImportKind::Netlist)?;
+        let keep_as = request.keep_as.clone();
+        file_import::pick_text_file("SPICE files", DECK_FILE_EXTENSIONS, move |result| {
+            if file_import::text_import_is_current(token) {
+                DECK_FILE_PICK.with(|slot| *slot.borrow_mut() = Some((token, request, result)));
+            }
+        });
+        Ok(format!("Pick the file to keep as {keep_as}."))
+    }
+
+    /// Keep `bytes`, the file `name` picked for `request`, with the open
+    /// deck kept as text.
+    pub(crate) fn add_deck_file_bytes(
+        &mut self,
+        request: &rspice_app_state::state::netlist_diagnostics::DeckFileRequest,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<String, String> {
+        let (text, encoding) =
+            rspice_app_code::workbench::workflows::deck_import::picked_text(name, bytes)?;
+        rspice_app_code::workbench::documents::deck_files::add_file_to_deck(
+            &mut self.model,
+            &mut self.code.netlist,
+            request,
+            text,
+            encoding,
+        )
     }
 
     /// Ask for a deck file and open it. A deck that could not be opened now
@@ -596,4 +688,12 @@ impl AppState {
 #[cfg(target_arch = "wasm32")]
 const DECK_IMPORT_EXTENSIONS: &[&str] = &[
     "cir", "sp", "spi", "spice", "net", "ckt", "cki", "scs", "lib", "inc", "txt", "zip",
+];
+
+/// What Add file… offers the browser's picker: the files a deck's include
+/// and library lines read.
+#[cfg(target_arch = "wasm32")]
+const DECK_FILE_EXTENSIONS: &[&str] = &[
+    "inc", "lib", "mod", "mdl", "sub", "cir", "sp", "spi", "spice", "net", "ckt", "cki", "scs",
+    "txt",
 ];

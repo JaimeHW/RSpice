@@ -185,6 +185,12 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             return Some(CodeHandOff::ShowNetInSchematic { schematic, net });
         }
         CodeRequest::ApplyNetlistQuickFix => {
+            // Add file… asks for the file, which the shell's pickers do.
+            if let Some(request) =
+                netlist_document::language::preferred_add_file_request(&cx.state.netlist)
+            {
+                return Some(CodeHandOff::AddDeckFile(request));
+            }
             let answer = netlist_document::language::apply_preferred_quick_fix(
                 cx.model,
                 &mut cx.state.netlist,

@@ -144,6 +144,7 @@ fn netlist_finding_with_a_fix(state: &mut AppState) {
         label: "Replace with nch".to_owned(),
         span: 0..4,
         replacement: "nch".to_owned(),
+        add_file: None,
     });
     // The canonical quick fixes are derived when the location is bound, so the
     // fix is attached before the line is.
