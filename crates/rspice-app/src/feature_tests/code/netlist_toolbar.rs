@@ -50,6 +50,87 @@ fn toolbar_layout(build: fn() -> RSpiceApp, width: f32) -> CodeToolbarLayout {
     captured.expect("the toolbar paints on every pass")
 }
 
+/// Where the frame put each button it labelled, by its label.
+fn buttons(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+    output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
+        .filter_map(|(_, node)| {
+            let bounds = node.bounds()?;
+            Some((
+                node.label()?.to_owned(),
+                egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                ),
+            ))
+        })
+        .collect()
+}
+
+/// At 1024 the inspector is a drawer, so the header's count of the deck's
+/// errors is where the check's problems are read from: pressed, it lists
+/// them on the Problems page, whose rows go to their lines.
+#[test]
+fn the_error_count_lists_the_errors_on_the_problems_page() {
+    use crate::workbench::app::veriloga_design_tests::{
+        frame, frame_with, open_project_app, themed_context,
+    };
+    let mut app = open_project_app();
+    app.state
+        .seed_test_deck("amp\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.op\n.end\n");
+    app.state
+        .workbench
+        .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
+    app.state.workbench.console_visible = false;
+    let ctx = themed_context();
+    let size = vec2(1024.0, 768.0);
+    let mut output = frame(&ctx, &mut app, size);
+    for _ in 0..3 {
+        output = frame(&ctx, &mut app, size);
+    }
+    let shown = buttons(&output);
+    let (_, count) = shown
+        .iter()
+        .find(|(label, _)| label.ends_with(" error") || label.ends_with(" errors"))
+        .unwrap_or_else(|| panic!("the header counts the error: {shown:?}"));
+    let at = count.center();
+    frame_with(
+        &ctx,
+        &mut app,
+        size,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    frame_with(
+        &ctx,
+        &mut app,
+        size,
+        vec![egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+
+    assert!(app.state.workbench.console_visible);
+    assert_eq!(
+        app.state.workbench.console_page,
+        rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Problems
+    );
+}
+
 /// The action group must never reach the status chips.
 ///
 /// This replaces a set of frozen width tallies. They were hand-tuned, drifted

@@ -37,6 +37,9 @@ use crate::ui::widgets::{
 };
 /// Width that mark takes out of a status line, gap included.
 const CODE_STATUS_MARK_COLUMN: f32 = CODE_STATUS_MARK_SIDE + CODE_STATUS_MARK_GAP;
+/// Room either side of a count's mark and words, inside the fill it takes
+/// under the pointer.
+const CODE_STATUS_PRESS_PADDING: f32 = 4.0;
 
 /// Where the toolbar put its two groups.
 ///
@@ -224,8 +227,11 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             .size()
             .x
     };
-    let status_only_width = status.as_ref().map_or(0.0, |(label, _)| {
-        CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim)
+    let status_only_width = status.as_ref().map_or(0.0, |(label, problem)| {
+        status_extent(
+            label_width(label, t.color.text_dim),
+            counts_findings(*problem),
+        )
     });
     let language_width = dialect.map_or(0.0, |chip| chip.width(ui, messages));
     let warning_text = |count: usize| {
@@ -243,13 +249,13 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             left_rect.width(),
             language_width,
             status_only_width,
-            CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim),
+            status_extent(label_width(label, t.color.text_dim), true),
         )
     });
     let mut status_width = status_only_width;
     if let Some(label) = warning_label.as_deref() {
         status_width +=
-            CODE_TOOLBAR_GAP + CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim);
+            CODE_TOOLBAR_GAP + status_extent(label_width(label, t.color.text_dim), true);
     }
     status_width = status_width.min(left_rect.width());
     let status_rect = egui::Rect::from_min_max(
@@ -280,14 +286,20 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 .layout(Layout::right_to_left(Align::Center)),
         );
         status_ui.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
+        let mut open_problems = false;
         status_ui.with_layout(Layout::right_to_left(Align::Center), |bar| {
             if let Some(label) = warning_label.as_deref() {
-                code_status(bar, label, Problem::Warning);
+                open_problems |= code_status(bar, label, Problem::Warning, true);
             }
             if let Some((label, problem)) = status.as_ref() {
-                code_status(bar, label, *problem);
+                open_problems |= code_status(bar, label, *problem, counts_findings(*problem));
             }
         });
+        // A count is read in full on the Problems page, whose rows go to the
+        // line: where the inspector is a drawer, the only place it is.
+        if open_problems {
+            cx.wb.show_problem_findings();
+        }
     }
 
     match action {
@@ -547,23 +559,76 @@ pub(super) fn toolbar_warnings_fit(
     language_width + CODE_TOOLBAR_GAP + status_group_width <= left_width
 }
 
+/// Whether a status is a count of the check's findings, which the reader
+/// presses to list them: the errors are a failure, and the generation's
+/// refusal is a warning that names no finding.
+const fn counts_findings(problem: Problem) -> bool {
+    matches!(problem, Problem::Failure)
+}
+
+/// Width one status takes: its mark and its words, and the room either side
+/// of a count the reader presses.
+fn status_extent(label_width: f32, pressable: bool) -> f32 {
+    CODE_STATUS_MARK_COLUMN
+        + label_width
+        + if pressable {
+            2.0 * CODE_STATUS_PRESS_PADDING
+        } else {
+            0.0
+        }
+}
+
 /// One problem the toolbar reports: its mark, then the words in the ordinary
-/// tone.
-fn code_status(ui: &mut Ui, label: &str, problem: Problem) {
+/// tone, at the strip's control height. A count of the check's findings is
+/// pressed to list them on the Problems page; whether it was.
+fn code_status(ui: &mut Ui, label: &str, problem: Problem, pressable: bool) -> bool {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = CODE_STATUS_MARK_GAP;
-        let (mark, _) = ui.allocate_exact_size(
-            vec2(CODE_STATUS_MARK_SIDE, CODE_STATUS_MARK_SIDE),
-            egui::Sense::hover(),
-        );
-        paint_problem_mark(ui.painter(), mark, problem);
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(t.color.text_dim),
-        );
-    });
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.text_dim,
+    );
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(
+            status_extent(galley.size().x, pressable),
+            crate::ui::widgets::compact_height(&t.metrics),
+        ),
+        if pressable {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    let mut left = rect.left();
+    if pressable {
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+        });
+        if response.hovered() {
+            ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
+        }
+        left += CODE_STATUS_PRESS_PADDING;
+    }
+    let mark = egui::Rect::from_min_size(
+        egui::pos2(left, rect.center().y - CODE_STATUS_MARK_SIDE * 0.5),
+        vec2(CODE_STATUS_MARK_SIDE, CODE_STATUS_MARK_SIDE),
+    );
+    paint_problem_mark(ui.painter(), mark, problem);
+    ui.painter().galley(
+        egui::pos2(
+            mark.right() + CODE_STATUS_MARK_GAP,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        t.color.text_dim,
+    );
+    if !pressable {
+        return false;
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }
 
 pub(super) const fn toolbar_status_visible(phone: bool, problem: Problem) -> bool {
