@@ -377,6 +377,60 @@ fn view_to_use_on_a_cell_writes_a_cell_binding_and_inherited_removes_it() {
     );
 }
 
+/// A cell bound to another cell keeps that binding through view edits:
+/// inheriting the view list keeps the cell it runs, an edit to the list
+/// starts from the views it inherits, and only removing the binding drops it.
+#[test]
+fn a_cell_bound_to_another_keeps_it_through_view_edits() {
+    let mut definition = definition("schematic");
+    definition.cell_bindings.push(ConfigurationCellBinding {
+        library: "user".to_owned(),
+        cell: "filter".to_owned(),
+        executable_views: vec!["schematic".to_owned()],
+        stop_view: None,
+        target: Some(BindingTarget::new("vendor", "filter")),
+    });
+    let inherited = ["schematic".to_owned(), "spice".to_owned()];
+    let target = |definition: &ConfigurationSetDefinition| {
+        cell_binding(definition, "user", "filter")
+            .and_then(|binding| binding.target.as_ref())
+            .map(BindingTarget::display_path)
+    };
+
+    apply_cell_binding_change(
+        &mut definition,
+        "user",
+        "filter",
+        &inherited,
+        BindingChange::Inherit,
+    );
+    let binding = cell_binding(&definition, "user", "filter").expect("the binding stays");
+    assert!(binding.executable_views.is_empty());
+    assert_eq!(target(&definition).as_deref(), Some("vendor/filter"));
+
+    apply_cell_binding_change(
+        &mut definition,
+        "user",
+        "filter",
+        &inherited,
+        BindingChange::Views(crate::ui::widgets::OrderedChipsEdit::Remove(0)),
+    );
+    let binding = cell_binding(&definition, "user", "filter").unwrap();
+    assert_eq!(binding.executable_views, ["spice"]);
+    assert_eq!(target(&definition).as_deref(), Some("vendor/filter"));
+
+    set_cell_view(&mut definition, "user", "filter", None);
+    assert_eq!(target(&definition).as_deref(), Some("vendor/filter"));
+    apply_cell_binding_change(
+        &mut definition,
+        "user",
+        "filter",
+        &inherited,
+        BindingChange::Remove,
+    );
+    assert!(definition.cell_bindings.is_empty());
+}
+
 #[test]
 fn refusals_say_what_is_wrong_in_the_page_words() {
     let (mut catalog, active) = catalog_with_active();

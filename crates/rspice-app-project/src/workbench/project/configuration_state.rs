@@ -844,6 +844,14 @@ impl ConfigurationTables {
                 row.library.to_ascii_lowercase(),
                 row.cell.to_ascii_lowercase(),
             ));
+            // A cell bound to another is searched in that one, so its views
+            // are the ones to offer.
+            let bound = definition
+                .and_then(|definition| cell_binding(definition, &row.library, &row.cell))
+                .and_then(|binding| binding.target.as_ref());
+            let searched = bound.map_or((row.library.as_str(), row.cell.as_str()), |target| {
+                (target.library.as_str(), target.cell.as_str())
+            });
             cell_rows.push(CellTableRow {
                 library: row.library.clone(),
                 cell: row.cell.clone(),
@@ -855,9 +863,9 @@ impl ConfigurationTables {
                     row.views_found.join(", ")
                 },
                 to_use: cell_to_use(definition, &row.library, &row.cell),
-                target: cell_target(definition, &row.library, &row.cell),
+                target: bound.map(BindingTarget::display_path),
                 in_design: true,
-                options: options(&row.library, &row.cell),
+                options: options(searched.0, searched.1),
             });
         }
         // The cell bindings that name no cell of the expanded design: kept, as
@@ -883,7 +891,10 @@ impl ConfigurationTables {
                 to_use: cell_to_use(definition, &binding.library, &binding.cell),
                 target: binding.target.as_ref().map(BindingTarget::display_path),
                 in_design: false,
-                options: options(&binding.library, &binding.cell),
+                options: match &binding.target {
+                    Some(target) => options(&target.library, &target.cell),
+                    None => options(&binding.library, &binding.cell),
+                },
             });
         }
 
@@ -969,19 +980,6 @@ fn cell_to_use(
             || INHERITED.to_owned(),
             |binding| view_list_label(&binding.executable_views),
         )
-}
-
-/// The cell `library`/`cell`'s own binding runs in its place, if it binds
-/// another.
-fn cell_target(
-    definition: Option<&ConfigurationSetDefinition>,
-    library: &str,
-    cell: &str,
-) -> Option<String> {
-    definition
-        .and_then(|definition| cell_binding(definition, library, cell))
-        .and_then(|binding| binding.target.as_ref())
-        .map(BindingTarget::display_path)
 }
 
 /// For each tree row, the views its own instance binding names, if it names
@@ -1163,6 +1161,13 @@ pub(crate) fn apply_cell_binding_change(
         (None, _) => return,
     };
     let binding = &mut definition.cell_bindings[index];
+    // A binding to another cell that names no views searches with the ones
+    // it inherits: an edit starts from those.
+    if matches!(change, BindingChange::Views(_) | BindingChange::Stop(_))
+        && binding.executable_views.is_empty()
+    {
+        binding.executable_views = inherited.to_vec();
+    }
     match change {
         BindingChange::Views(edit) => {
             edit.apply(&mut binding.executable_views);

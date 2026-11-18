@@ -285,12 +285,18 @@ fn instance(
     property_row(ui, "Instance", path);
     let (library, cell) = match resolved {
         Some(resolved) => {
+            // A binding to another cell runs `reference` in the placed
+            // cell's place; the instance still inherits as the placed cell.
             let reference = &resolved.reference;
-            property_row(
-                ui,
-                "Cell",
-                &format!("{}/{}", reference.library, reference.cell),
-            );
+            let placed = resolved.placed.as_ref().unwrap_or(reference);
+            property_row(ui, "Cell", &format!("{}/{}", placed.library, placed.cell));
+            if resolved.placed.is_some() {
+                property_row(
+                    ui,
+                    "Cell to use",
+                    &format!("{}/{}", reference.library, reference.cell),
+                );
+            }
             property_row(
                 ui,
                 "View found",
@@ -307,7 +313,7 @@ fn instance(
             for warning in &resolved.warnings {
                 property_row_wrapped(ui, "Note", warning);
             }
-            (reference.library.as_str(), reference.cell.as_str())
+            (placed.library.as_str(), placed.cell.as_str())
         }
         None if unresolved => {
             property_row_wrapped(
@@ -357,8 +363,10 @@ fn instance(
     let platforms = exact.map_or(ConfigurationPlatform::ALL.to_vec(), |binding| {
         binding.eligible_platforms.clone()
     });
-    let addable = if resolved.is_some() {
-        cell_view_names(&model.library_manager, library, cell)
+    let addable = if let Some(resolved) = resolved {
+        // The views offered are the ones of the cell the instance searches.
+        let searched = &resolved.reference;
+        cell_view_names(&model.library_manager, &searched.library, &searched.cell)
     } else {
         resolution.map_or_else(Vec::new, |resolution| resolution.view_names.clone())
     };
@@ -426,22 +434,32 @@ fn cell_facts(
     }
     let definition = definition?;
     let binding = cell_binding(definition, library, cell);
+    // A binding to another cell searches that cell, with the views it names
+    // or, naming none, the ones it inherits.
+    let target = binding.and_then(|binding| binding.target.as_ref());
+    if let Some(target) = target {
+        property_row(ui, "Cell to use", &target.display_path());
+    }
+    let own_views = binding.filter(|binding| !binding.executable_views.is_empty());
     let inherited = definition.executable_view_policy.clone();
     section_header(
         ui,
         "Binding",
-        Some(if binding.is_some() {
+        Some(if own_views.is_some() {
             "this cell"
         } else {
             "inherited"
         }),
     );
-    let views = binding.map_or_else(
+    let views = own_views.map_or_else(
         || inherited.clone(),
         |binding| binding.executable_views.clone(),
     );
     let stop = binding.and_then(|binding| binding.stop_view.clone());
-    let addable = cell_view_names(&model.library_manager, library, cell);
+    let addable = match target {
+        Some(target) => cell_view_names(&model.library_manager, &target.library, &target.cell),
+        None => cell_view_names(&model.library_manager, library, cell),
+    };
     let mut unused = Fields {
         buffer: None,
         committed: None,
@@ -461,8 +479,8 @@ fn cell_facts(
         &mut unused,
     )
     .or_else(|| {
-        (editable && binding.is_some() && action_button(ui, "Inherit the view list", true))
-            .then_some(BindingChange::Remove)
+        (editable && own_views.is_some() && action_button(ui, "Inherit the view list", true))
+            .then_some(BindingChange::Inherit)
     });
     change.map(|change| InspectorAction::CellBinding {
         library: library.to_owned(),
