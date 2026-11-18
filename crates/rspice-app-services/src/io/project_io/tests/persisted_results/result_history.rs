@@ -814,9 +814,10 @@ fn project_load_rejects_a_descriptor_without_its_identity_or_schema() {
             .expect_err("a descriptor cannot lose a required field");
         assert!(
             error
-                .to_string()
+                .console_text()
                 .contains(&format!("missing field `{field}`")),
-            "{error}"
+            "{}",
+            error.console_text()
         );
 
         let mut null = value.clone();

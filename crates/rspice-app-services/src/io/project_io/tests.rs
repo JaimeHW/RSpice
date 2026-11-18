@@ -40,6 +40,21 @@ fn add_top_symbol_view(libraries: &mut LibraryManager) {
         .add_view(View::new("symbol", ViewType::Symbol));
 }
 
+/// A refused load as the Console records it: the sentence the author reads,
+/// then the parser's own words when the file did not read as a project.
+trait ConsoleText {
+    fn console_text(&self) -> String;
+}
+
+impl ConsoleText for ProjectIoError {
+    fn console_text(&self) -> String {
+        match self.cause() {
+            Some(cause) => format!("{self} ({cause})"),
+            None => self.to_string(),
+        }
+    }
+}
+
 fn operating_point_payload_fixture() -> AnalysisResultPayload {
     AnalysisResultPayload::OperatingPoint {
         temperature_mode: crate::state::OperatingPointTemperatureEvidence::PvtRunSet,
@@ -483,7 +498,7 @@ fn project_file_rejects_unsupported_design_management_schema() {
     let json = serde_json::to_string(&value).expect("malformed project JSON");
 
     let error = load_project_text(&json, None).expect_err("unsupported schema is rejected");
-    assert!(error.to_string().contains("schema 999 is unsupported"));
+    assert!(error.console_text().contains("schema 999 is unsupported"));
 }
 
 #[test]
@@ -635,7 +650,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
     future["execution_context"]["schema_version"] = serde_json::json!(999);
     let error = load_project_text(&future.to_string(), None)
         .expect_err("future schema must fail")
-        .to_string();
+        .console_text();
     assert!(error.contains("unsupported execution-context schema version 999"));
 
     let mut duplicate_identity = valid.clone();
@@ -647,7 +662,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
     instances[1]["id"] = first_id;
     let error = load_project_text(&duplicate_identity.to_string(), None)
         .expect_err("duplicate stable identity must fail")
-        .to_string();
+        .console_text();
     assert!(error.contains("appears more than once"), "{error}");
 
     let mut mismatched_draft = valid.clone();
@@ -655,7 +670,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
         serde_json::json!("ac");
     let error = load_project_text(&mismatched_draft.to_string(), None)
         .expect_err("declared kind and draft kind must agree")
-        .to_string();
+        .console_text();
     assert!(error.contains("declared as ac"), "{error}");
 
     let mut unsupported = valid.clone();
@@ -663,7 +678,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
         serde_json::json!("future-analysis");
     let error = load_project_text(&unsupported.to_string(), None)
         .expect_err("unsupported stable analysis kind must fail")
-        .to_string();
+        .console_text();
     assert!(
         error.contains("unknown variant `future-analysis`"),
         "{error}"
@@ -674,7 +689,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
         serde_json::json!(125.0);
     let error = load_project_text(&mismatched_pvt.to_string(), None)
         .expect_err("conflicting execution temperatures must fail")
-        .to_string();
+        .console_text();
     assert!(error.contains("disagrees with solver option temp"));
 
     let mut unknown_input = valid.clone();
@@ -682,7 +697,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
         serde_json::json!(true);
     let error = load_project_text(&unknown_input.to_string(), None)
         .expect_err("unknown execution input must not be ignored")
-        .to_string();
+        .console_text();
     assert!(error.contains("unknown field `future_mode`"));
 
     let mut invalid_model = valid;
@@ -690,7 +705,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
         serde_json::json!("missing");
     let error = load_project_text(&invalid_model.to_string(), None)
         .expect_err("invalid model binding must fail")
-        .to_string();
+        .console_text();
     assert!(error.contains("selected_corner 'missing' does not exist"));
 
     let mut invalid_digest = serde_json::from_str::<serde_json::Value>(&json).expect("valid JSON");
@@ -703,7 +718,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
     }]);
     let error = load_project_text(&invalid_digest.to_string(), None)
         .expect_err("malformed digest must fail")
-        .to_string();
+        .console_text();
     assert!(error.contains("SHA-256 digest must contain 64 hexadecimal characters"));
 
     let mut digest_without_source =
@@ -714,7 +729,7 @@ fn malformed_execution_context_is_never_silently_defaulted() {
     }]);
     let error = load_project_text(&digest_without_source.to_string(), None)
         .expect_err("digest without source path must fail")
-        .to_string();
+        .console_text();
     assert!(
         error.contains("source_authority built_in cannot own a root path or source closure"),
         "{error}"
