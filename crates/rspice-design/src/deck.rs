@@ -151,6 +151,24 @@ impl ProjectDeck {
         })
     }
 
+    /// Keep the deck's file where it is when the project moves from the
+    /// folder `from` to the folder `to`: by its path from `to` when it is
+    /// under it, else by its whole path. A relative path with no folder to
+    /// read it from stays as written.
+    pub fn rebase(&mut self, from: Option<&Path>, to: Option<&Path>) {
+        let DeckSource::File { path } = &self.source else {
+            return;
+        };
+        if path.is_relative() && from.is_none() {
+            return;
+        }
+        if let Some(file) = self.file_path(from) {
+            self.source = DeckSource::File {
+                path: stored_deck_path(&file, to),
+            };
+        }
+    }
+
     /// Whether the deck is the file at `path`, however either is spelled.
     #[must_use]
     pub fn is_file(&self, path: &Path, project_folder: Option<&Path>) -> bool {

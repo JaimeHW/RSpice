@@ -19,7 +19,9 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use crate::state::{DeckId, NetlistDocumentId, StoredDeck, StoredDeckFile, TextEncoding};
-use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
+use crate::workbench::documents::netlist_document::{
+    ActiveNetlistDocument, NetlistDocumentState, OwnedNetlistReplacement,
+};
 use crate::workbench::state::WorkspaceDocumentId;
 
 /// The line separators a file was read with, which the inspector shows.
@@ -123,6 +125,18 @@ pub struct OpenFile {
     pub disk: Option<DiskStamp>,
     /// Whether the text holds edits not yet saved.
     pub dirty: bool,
+    /// What the file on disk became while the tab held edits, until the
+    /// reader reloads it, keeps theirs or compares the two.
+    pub disk_change: Option<Box<DiskChange>>,
+}
+
+/// A file as it stands on disk after something else changed it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiskChange {
+    pub text: String,
+    pub encoding: TextEncoding,
+    pub line_ending: LineEnding,
+    pub stamp: DiskStamp,
 }
 
 impl OpenFile {
@@ -138,6 +152,7 @@ impl OpenFile {
             encoding,
             disk: None,
             dirty: false,
+            disk_change: None,
         })
     }
 
@@ -166,6 +181,7 @@ impl OpenFile {
             encoding: TextEncoding::Utf8,
             disk: None,
             dirty: false,
+            disk_change: None,
         }
     }
 
@@ -207,6 +223,7 @@ impl OpenDeck {
                 line_ending,
                 disk: None,
                 dirty: false,
+                disk_change: None,
             },
             includes: Vec::new(),
             stored_files: Some(deck.files.clone()),
@@ -298,25 +315,196 @@ fn disk_stamp(path: &Path, text: &str) -> DiskStamp {
     }
 }
 
-/// Whether the file on disk is no longer what the session last read or
-/// wrote: same length and time means unchanged, else its text decides.
+/// What a look at the disk found for one open file.
 #[cfg(not(target_arch = "wasm32"))]
-fn changed_on_disk(file: &OpenFile) -> bool {
+enum OnDisk {
+    /// What the session last read or wrote.
+    Same,
+    /// The same text, written again: the stamp to keep from now on.
+    Touched(DiskStamp),
+    /// Other text.
+    Changed(DiskChange),
+    /// No file there, or none that reads.
+    Gone,
+}
+
+/// Look at the file on disk: same length and time means unchanged, else its
+/// text decides.
+#[cfg(not(target_arch = "wasm32"))]
+fn look_at_disk(file: &OpenFile) -> OnDisk {
     let Some(stamp) = &file.disk else {
-        return false;
+        return OnDisk::Same;
     };
     let Ok(metadata) = std::fs::metadata(&file.path) else {
-        return false;
+        return OnDisk::Gone;
     };
     if metadata.len() == stamp.len && metadata.modified().ok() == stamp.modified {
-        return false;
+        return OnDisk::Same;
     }
-    std::fs::read(&file.path)
-        .ok()
-        .and_then(|bytes| TextEncoding::decode(&bytes).ok())
-        .is_none_or(|(text, _)| {
-            crate::state::content_digest(&LineEnding::read(text).0) != stamp.digest
+    let Ok(read) = read_file(&file.path) else {
+        return OnDisk::Gone;
+    };
+    let Some(now) = read.disk else {
+        return OnDisk::Gone;
+    };
+    if now.digest == stamp.digest {
+        return OnDisk::Touched(now);
+    }
+    OnDisk::Changed(DiskChange {
+        text: read.text,
+        encoding: read.encoding,
+        line_ending: read.line_ending,
+        stamp: now,
+    })
+}
+
+/// The open deck's files, the deck first, each with the include key it goes
+/// by; none for a deck the project keeps as text.
+#[cfg(not(target_arch = "wasm32"))]
+fn deck_file_keys(netlist: &NetlistDocumentState) -> Vec<Option<String>> {
+    netlist
+        .open_deck
+        .as_ref()
+        .filter(|deck| !deck.is_stored())
+        .map(|deck| {
+            std::iter::once(None)
+                .chain(deck.includes.iter().map(|file| Some(file.key())))
+                .collect()
         })
+        .unwrap_or_default()
+}
+
+/// Look at the disk for every file of the open deck. A file changed on disk
+/// whose tab holds no edits is read again, as an edit Undo takes back; one
+/// whose tab holds edits keeps them and its tab shows the change. The
+/// notices to show: one for each file read again.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn check_disk(model: &mut Model, netlist: &mut NetlistDocumentState) -> Vec<String> {
+    let mut notices = Vec::new();
+    for include in deck_file_keys(netlist) {
+        let Some(file) = netlist
+            .open_deck
+            .as_mut()
+            .and_then(|deck| deck.file_mut(include.as_deref()))
+        else {
+            continue;
+        };
+        match look_at_disk(file) {
+            OnDisk::Same | OnDisk::Gone => {}
+            OnDisk::Touched(stamp) => file.disk = Some(stamp),
+            OnDisk::Changed(change) if file.dirty => file.disk_change = Some(Box::new(change)),
+            OnDisk::Changed(change) => {
+                let name = file.name();
+                take_disk_text(model, netlist, include.as_deref(), change);
+                notices.push(format!("Reloaded {name}: changed on disk."));
+            }
+        }
+    }
+    notices
+}
+
+/// Where there is no file system, nothing on disk changes.
+#[cfg(target_arch = "wasm32")]
+pub fn check_disk(_model: &mut Model, _netlist: &mut NetlistDocumentState) -> Vec<String> {
+    Vec::new()
+}
+
+/// Put what is on disk in the tab of the file `include` names (the deck for
+/// `None`), as an edit Undo takes back; the file then holds no edits.
+fn take_disk_text(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    include: Option<&str>,
+    change: DiskChange,
+) {
+    let Some(original) = netlist
+        .open_deck
+        .as_ref()
+        .and_then(|deck| deck.file(include))
+        .map(|file| file.text.clone())
+    else {
+        return;
+    };
+    let replacement = match include {
+        None => OwnedNetlistReplacement::root(&original, change.text.clone(), 1),
+        Some(key) => OwnedNetlistReplacement::dependency(key, &original, change.text.clone(), 1),
+    };
+    let _ = crate::workbench::documents::netlist_document::replace_deck_files(
+        model,
+        netlist,
+        vec![replacement],
+    );
+    if let Some(file) = netlist
+        .open_deck
+        .as_mut()
+        .and_then(|deck| deck.file_mut(include))
+    {
+        file.encoding = change.encoding;
+        file.line_ending = change.line_ending;
+        file.disk = Some(change.stamp);
+        file.dirty = false;
+        file.disk_change = None;
+    }
+}
+
+/// Reload: drop the edits on the tab of the file `include` names (the deck
+/// for `None`) for what is on disk.
+pub fn reload_from_disk(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    include: Option<&str>,
+) -> Result<(), String> {
+    let change = netlist
+        .open_deck
+        .as_mut()
+        .and_then(|deck| deck.file_mut(include))
+        .and_then(|file| file.disk_change.take())
+        .ok_or_else(|| "Nothing on disk is newer than the tab.".to_owned())?;
+    take_disk_text(model, netlist, include, *change);
+    Ok(())
+}
+
+/// Keep mine: the tab keeps its edits, and the next Save writes them over
+/// what is on disk.
+pub fn keep_mine(netlist: &mut NetlistDocumentState, include: Option<&str>) {
+    if let Some(file) = netlist
+        .open_deck
+        .as_mut()
+        .and_then(|deck| deck.file_mut(include))
+        && let Some(change) = file.disk_change.take()
+    {
+        file.disk = Some(change.stamp);
+    }
+}
+
+/// Compare: the file on disk against the tab's text, side by side in the
+/// comparison view, the tab's edits kept.
+pub fn compare_with_disk(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    include: Option<&str>,
+) -> Result<(), String> {
+    let file = netlist
+        .open_deck
+        .as_ref()
+        .and_then(|deck| deck.file(include))
+        .ok_or_else(|| "The file is no longer open.".to_owned())?;
+    let change = file
+        .disk_change
+        .as_deref()
+        .ok_or_else(|| "Nothing on disk is newer than the tab.".to_owned())?;
+    let name = file.name();
+    let disk = format!("{name} on disk");
+    let yours = format!("{name} in RSpice");
+    let diff = similar::TextDiff::from_lines(change.text.as_str(), file.text.as_str())
+        .unified_diff()
+        .context_radius(3)
+        .header(&disk, &yours)
+        .to_string();
+    netlist.generated_diff_source = diff;
+    netlist.comparison_return_document = ActiveNetlistDocument::OwnedSource;
+    crate::workbench::documents::netlist_document::open_netlist_comparison(model, netlist);
+    Ok(())
 }
 
 /// Write `file` to its path now: its text, with the separators it was read
@@ -333,9 +521,17 @@ pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
         .encoding
         .encode(&file.line_ending.write(&file.text))
         .map_err(|error| format!("{name} was not saved: {error}"))?;
-    if changed_on_disk(file) {
+    if file.disk_change.is_none() {
+        match look_at_disk(file) {
+            OnDisk::Changed(change) => file.disk_change = Some(Box::new(change)),
+            OnDisk::Touched(stamp) => file.disk = Some(stamp),
+            OnDisk::Same | OnDisk::Gone => {}
+        }
+    }
+    if file.disk_change.is_some() {
         return Err(format!(
-            "{name} changed on disk since you opened it, so it was not saved."
+            "{name} changed on disk since you opened it, so it was not saved: reload it, \
+             keep yours or compare the two."
         ));
     }
     let temporary = file.path.with_file_name(format!(".{name}.saving"));
@@ -347,6 +543,198 @@ pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
         })?;
     file.disk = Some(disk_stamp(&file.path, &file.text));
     file.dirty = false;
+    Ok(())
+}
+
+/// Before a run of the open deck: look at the disk, then save each of its
+/// files that holds edits, so the run reads what its tabs show. The notices
+/// to show, or why the run waits.
+pub fn sync_before_run(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+) -> Result<Vec<String>, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (model, netlist);
+        Ok(Vec::new())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Some(missing) = missing_deck(model, netlist) {
+            return Err(format!(
+                "{} is not at {}.",
+                missing.name,
+                missing.path.display()
+            ));
+        }
+        let notices = check_disk(model, netlist);
+        let Some(deck) = netlist.open_deck.as_mut().filter(|deck| !deck.is_stored()) else {
+            return Ok(notices);
+        };
+        if let Some(changed) = std::iter::once(&deck.root)
+            .chain(&deck.includes)
+            .find(|file| file.disk_change.is_some())
+        {
+            return Err(format!(
+                "Run is waiting: {} changed on disk. Reload it, keep yours or compare the two.",
+                changed.name()
+            ));
+        }
+        for file in std::iter::once(&mut deck.root).chain(deck.includes.iter_mut()) {
+            if file.dirty {
+                save_file(file)?;
+            }
+        }
+        Ok(notices)
+    }
+}
+
+/// How many of the open deck's files hold edits a run saves first.
+#[must_use]
+pub fn unsaved_before_run(netlist: &NetlistDocumentState) -> usize {
+    netlist
+        .open_deck
+        .as_ref()
+        .filter(|deck| !deck.is_stored())
+        .map_or(0, |deck| {
+            std::iter::once(&deck.root)
+                .chain(&deck.includes)
+                .filter(|file| file.dirty)
+                .count()
+        })
+}
+
+/// A deck of the project whose file is not where the project says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingDeck {
+    pub id: DeckId,
+    pub name: String,
+    pub path: PathBuf,
+}
+
+/// The deck the page could not open because its file is not where the
+/// project says, when that is why no deck is open.
+#[must_use]
+pub fn missing_deck(model: &Model, netlist: &NetlistDocumentState) -> Option<MissingDeck> {
+    if netlist.open_deck.is_some() {
+        return None;
+    }
+    let id = netlist.unreadable_deck?;
+    let deck = model
+        .workspace
+        .content
+        .decks
+        .iter()
+        .find(|deck| deck.id == id)?;
+    let path = deck.file_path(model.workspace.content.project.data_root())?;
+    // In the browser a file deck is not missing: it is on the desktop.
+    if cfg!(target_arch = "wasm32") || path.exists() {
+        return None;
+    }
+    Some(MissingDeck {
+        id,
+        name: deck.name(),
+        path,
+    })
+}
+
+/// Remove from project: the project no longer lists the deck `id`, and its
+/// tabs close; its file stays where it is. A deck holding unsaved edits is
+/// not removed.
+pub fn remove_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    id: DeckId,
+) -> Result<String, String> {
+    let name = model
+        .workspace
+        .content
+        .decks
+        .iter()
+        .find(|deck| deck.id == id)
+        .map(crate::state::ProjectDeck::name)
+        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+    if let Some(open) = netlist.open_deck.as_ref().filter(|deck| deck.id == id) {
+        if let Some(unsaved) = open.unsaved() {
+            return Err(format!(
+                "Save {} before removing {name} from the project.",
+                unsaved.name()
+            ));
+        }
+        close_open_deck(model, netlist, open_documents);
+    }
+    let content = &mut *model.workspace.content;
+    content.decks.retain(|deck| deck.id != id);
+    content.decks_dirty = true;
+    if netlist.unreadable_deck == Some(id) {
+        netlist.unreadable_deck = None;
+    }
+    Ok(name)
+}
+
+/// Close the open deck and its tabs; the generated netlist comes to the
+/// front when there is one.
+fn close_open_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+) {
+    let Some(previous) = netlist.open_deck.take() else {
+        return;
+    };
+    let previous = previous.tab_id();
+    open_documents.retain(|tab| match tab {
+        WorkspaceDocumentId::NetlistOwned(id) => *id != previous,
+        WorkspaceDocumentId::NetlistDependency { root, .. } => *root != previous,
+        _ => true,
+    });
+    netlist.active_document = ActiveNetlistDocument::Generated;
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    model.simulation.source.netlist_content = model.netlist_artifacts.generated_source.clone();
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
+}
+
+/// Locate: the deck `id` is read from `path` from now on, and opens.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn locate_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    id: DeckId,
+    path: &Path,
+) -> Result<(), String> {
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let root = read_file(&path)?;
+    let folder = model
+        .workspace
+        .content
+        .project
+        .data_root()
+        .map(Path::to_path_buf);
+    let content = &mut *model.workspace.content;
+    let deck = content
+        .decks
+        .iter_mut()
+        .find(|deck| deck.id == id)
+        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+    deck.source = crate::state::ProjectDeck::for_file(&path, folder.as_deref()).source;
+    content.decks_dirty = true;
+    install_open_deck(
+        model,
+        netlist,
+        open_documents,
+        runs,
+        OpenDeck {
+            id,
+            root,
+            includes: Vec::new(),
+            stored_files: None,
+        },
+    );
     Ok(())
 }
 
@@ -550,6 +938,46 @@ fn read_project_deck(
     ))
 }
 
+/// Bring the project's deck `id` to the front, reading it when it is not
+/// the open one. The open deck's edits are never dropped for another; a
+/// deck that cannot be read leaves the page saying why.
+pub fn open_deck_by_id(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    id: DeckId,
+) -> Result<(), String> {
+    if netlist.open_deck.as_ref().is_some_and(|deck| deck.id == id) {
+        show_deck(model, netlist);
+        return Ok(());
+    }
+    if let Some(unsaved) = netlist.open_deck.as_ref().and_then(OpenDeck::unsaved) {
+        return Err(format!(
+            "Save {} before opening another deck.",
+            unsaved.name()
+        ));
+    }
+    let deck = model
+        .workspace
+        .content
+        .decks
+        .iter()
+        .find(|deck| deck.id == id)
+        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+    match read_project_deck(deck, model.workspace.content.project.data_root()) {
+        Ok(open) => {
+            install_open_deck(model, netlist, open_documents, runs, open);
+            Ok(())
+        }
+        Err(error) => {
+            close_open_deck(model, netlist, open_documents);
+            netlist.unreadable_deck = Some(id);
+            Err(error)
+        }
+    }
+}
+
 /// Open the project's first deck when the project has decks and none is
 /// open, once per project: a deck that cannot be read is reported once.
 pub fn open_project_deck(
@@ -659,6 +1087,7 @@ pub fn show_include(
                 line_ending,
                 disk: None,
                 dirty: false,
+                disk_change: None,
             });
         } else {
             #[cfg(not(target_arch = "wasm32"))]

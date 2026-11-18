@@ -18,15 +18,15 @@ use rspice_app_state::state::TextEncoding;
 use rspice_app_state::workbench::workspace::Workspace;
 
 /// A folder of one test's files, removed with it.
-struct Folder(PathBuf);
+pub(super) struct Folder(pub(super) PathBuf);
 
 impl Folder {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self(rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir("decks"))
     }
 
     /// Write `bytes` to `name` in the folder; the file's path.
-    fn write(&self, name: &str, bytes: impl AsRef<[u8]>) -> PathBuf {
+    pub(super) fn write(&self, name: &str, bytes: impl AsRef<[u8]>) -> PathBuf {
         let path = self.0.join(name);
         std::fs::create_dir_all(path.parent().expect("a folder")).expect("the folder");
         std::fs::write(&path, bytes).expect("the file is written");
@@ -41,7 +41,7 @@ impl Drop for Folder {
 }
 
 /// A session with the deck at `path` open in a project of its own.
-fn opened(path: &Path) -> AppState {
+pub(super) fn opened(path: &Path) -> AppState {
     let mut state = AppState::default();
     assert!(
         state.open_deck_at(path, true),
@@ -52,7 +52,7 @@ fn opened(path: &Path) -> AppState {
 }
 
 /// The application with the deck at `path` open in its project.
-fn app_with_deck(path: &Path) -> RSpiceApp {
+pub(super) fn app_with_deck(path: &Path) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let new_project = !app.state.platform.project_lifecycle.is_open();
     assert!(
@@ -65,7 +65,7 @@ fn app_with_deck(path: &Path) -> RSpiceApp {
 
 /// The deck in front prepared as Run deck prepares it and handed to the
 /// engine: the netlist the engine reads, or why it was refused.
-fn dispatched(state: &mut AppState) -> Result<String, String> {
+pub(super) fn dispatched(state: &mut AppState) -> Result<String, String> {
     state.model.simulation.execution.run_intent =
         rspice_app_state::state::SimulationRunIntent::ManualDeck;
     let mut controller = SimulationController::new();
@@ -144,7 +144,10 @@ fn a_deck_changed_on_disk_is_never_overwritten() {
     );
     assert_eq!(
         app.state.prompt_text(),
-        Some("amp.cir changed on disk since you opened it, so it was not saved.")
+        Some(
+            "amp.cir changed on disk since you opened it, so it was not saved: reload it, \
+             keep yours or compare the two."
+        )
     );
     assert!(
         app.state

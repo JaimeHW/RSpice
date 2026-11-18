@@ -9,6 +9,7 @@ use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::rend
 use rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_source_bundle;
 
 mod deck_dialects;
+mod deck_disk;
 mod generated_netlist_jumps;
 mod netlist_cross_probe;
 #[cfg(not(target_arch = "wasm32"))]

@@ -11,6 +11,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
+mod deck_bands;
 mod dialect_chip;
 pub mod generation;
 mod revision;
@@ -298,6 +299,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
         }
         None => {}
     }
+    deck_bands::show(ui, cx);
     dialect_chip::deck_hint_band(ui, cx.model, &cx.state.netlist, cx.wb.messages());
     control_disposition_band(ui, &cx.state.netlist, cx.wb.messages());
     if crate::workbench::documents::text_editor_commands::take_format_document_request(

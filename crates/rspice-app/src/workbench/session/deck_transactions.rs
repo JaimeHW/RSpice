@@ -60,17 +60,24 @@ impl AppState {
             else {
                 return false;
             };
-            let deck = rspice_app_state::state::StoredDeck::new(
-                &path
-                    .file_name()
-                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
-            );
-            if let Err(error) = std::fs::write(&path, deck.text) {
-                self.prompt(format!("{} could not be written: {error}", path.display()));
-                return false;
-            }
-            self.open_deck_at(&path, new_project)
+            self.new_deck_at(&path, new_project)
         }
+    }
+
+    /// Write a new deck, a title line and `.end`, to `path` and open it, in a
+    /// new project around it when `new_project` says so.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn new_deck_at(&mut self, path: &std::path::Path, new_project: bool) -> bool {
+        let deck = rspice_app_state::state::StoredDeck::new(
+            &path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+        );
+        if let Err(error) = std::fs::write(path, deck.text) {
+            self.prompt(format!("{} could not be written: {error}", path.display()));
+            return false;
+        }
+        self.open_deck_at(path, new_project)
     }
 
     /// Add a new deck the project keeps as text and bring it to the front,

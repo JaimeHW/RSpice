@@ -102,16 +102,18 @@ fn netlist_navigator_projects_exact_live_counts_and_include_lines() {
 fn an_include_row_names_the_fate_of_its_own_dependency() {
     let states = [
         IncludeRowFacts {
+            line: None,
             locator: "models/base.lib".to_owned(),
-            state: MessageId::NetlistNavigatorDependencyMissing,
+            state: Some(MessageId::NetlistNavigatorDependencyMissing),
             via: None,
             chain: None,
             shadowed_by: None,
             sections: Vec::new(),
         },
         IncludeRowFacts {
+            line: None,
             locator: "corners/process.lib".to_owned(),
-            state: MessageId::NetlistNavigatorAuthorityVendor,
+            state: Some(MessageId::NetlistNavigatorAuthorityVendor),
             via: None,
             chain: None,
             shadowed_by: None,
@@ -683,8 +685,9 @@ fn an_include_row_states_the_chain_stage_it_resolved_through() {
         ),
     ] {
         let facts = IncludeRowFacts {
+            line: None,
             locator: "models.lib".to_owned(),
-            state: MessageId::NetlistNavigatorAuthorityExternal,
+            state: Some(MessageId::NetlistNavigatorAuthorityExternal),
             via: Some(include_stage_text(messages, stage)),
             chain: Some("chain".to_owned()),
             shadowed_by: None,
@@ -752,8 +755,9 @@ fn a_shadowed_include_row_carries_a_warning_marker_and_names_the_other_file() {
     let source = "shadow deck\n.include models.lib\n.end\n";
     let messages = english();
     let facts = IncludeRowFacts {
+        line: None,
         locator: "models.lib".to_owned(),
-        state: MessageId::NetlistNavigatorAuthorityExternal,
+        state: Some(MessageId::NetlistNavigatorAuthorityExternal),
         via: Some(include_stage_text(
             messages,
             rspice_core::netlist::IncludeSearchStage::LibraryPath(0),
@@ -839,8 +843,9 @@ fn corner_sections() -> Vec<rspice_core::library::LibSectionSummary> {
 
 fn library_facts(locator: &str) -> IncludeRowFacts {
     IncludeRowFacts {
+        line: None,
         locator: locator.to_owned(),
-        state: MessageId::NetlistNavigatorAuthorityVendor,
+        state: Some(MessageId::NetlistNavigatorAuthorityVendor),
         via: Some(include_stage_text(
             english(),
             rspice_core::netlist::IncludeSearchStage::IncludingFile,
@@ -938,6 +943,7 @@ fn a_library_included_without_a_section_says_so_and_counts_the_alternatives() {
 #[test]
 fn an_include_of_a_file_without_sections_gains_nothing() {
     let facts = IncludeRowFacts {
+        line: None,
         sections: Vec::new(),
         ..library_facts("models.lib")
     };

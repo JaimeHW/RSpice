@@ -190,7 +190,30 @@ impl AppState {
     }
 
     /// Request a Netlist workspace run, queuing one re-run if the engine is busy.
+    /// The deck's files are looked at on disk and saved first, so the run
+    /// reads what their tabs show; a file changed on disk under edits holds
+    /// the run until the reader answers for it.
     pub(crate) fn request_netlist_manual_deck_run(&mut self) {
+        match rspice_app_code::workbench::documents::deck_files::sync_before_run(
+            &mut self.model,
+            &mut self.code.netlist,
+        ) {
+            Ok(notices) => {
+                let reloaded = !notices.is_empty();
+                for notice in notices {
+                    self.workbench.prompt(notice);
+                }
+                // A deck read again from disk is not the deck that was checked.
+                if reloaded && let Some(reason) = self.manual_deck_run_block_reason() {
+                    self.workbench.prompt(reason);
+                    return;
+                }
+            }
+            Err(why) => {
+                self.workbench.prompt(why);
+                return;
+            }
+        }
         rspice_app_code::workbench::documents::netlist_document::request_netlist_manual_deck_run_in(
             &mut self.model,
             &mut self.runs,

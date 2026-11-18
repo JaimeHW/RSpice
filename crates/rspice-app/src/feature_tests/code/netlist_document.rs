@@ -118,7 +118,7 @@ fn a_sweep_points_executed_deck_stays_on_screen_on_the_next_frames() {
 }
 
 /// Every string `output` painted, one per line.
-fn painted_text(output: &egui::FullOutput) -> String {
+pub(super) fn painted_text(output: &egui::FullOutput) -> String {
     fn collect(shape: &egui::epaint::Shape, text: &mut String) {
         match shape {
             egui::epaint::Shape::Text(shape) => {

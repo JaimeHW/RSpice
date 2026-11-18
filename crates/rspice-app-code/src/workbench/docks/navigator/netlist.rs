@@ -29,6 +29,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
+mod decks;
 mod lib_sections;
 
 /// Width reserved for a disclosure caret. Root and include rows leave it
@@ -192,6 +193,7 @@ pub(in crate::workbench) fn netlist(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
+            decks::list(ui, parts, height, &mut asked);
 
             if projection.root_row.is_some() || !projection.groups.is_empty() {
                 // No line count: the editor's own gutter numbers every line
@@ -650,14 +652,16 @@ fn outline_group_row(
     response.clicked()
 }
 
-/// Open the file an include line of the open deck names, as the run read it
-/// when the deck was last checked, else where it is found now.
+/// Open the file an include line of the open deck names, as the check read
+/// it, else where it is found now.
 fn open_deck_include(parts: &mut NetlistNavigator<'_>, requested: &str) -> Result<(), String> {
     let traced = parts
-        .code_workspace
-        .include_resolutions
-        .get(requested)
-        .map(|resolution| resolution.resolved().to_path_buf());
+        .netlist
+        .diagnostics
+        .includes()
+        .iter()
+        .find(|include| include.requested == requested)
+        .map(|include| include.path.clone());
     #[cfg(not(target_arch = "wasm32"))]
     let traced = traced.or_else(|| {
         parts.netlist.open_deck.as_ref().and_then(|deck| {
@@ -721,8 +725,11 @@ pub(super) fn active_canonical_netlist_document<'a>(
 pub(super) struct IncludeRowFacts {
     /// The locator the include card wrote.
     pub(super) locator: String,
-    /// The closure's verdict for this dependency.
-    pub(super) state: MessageId,
+    /// The line of the deck that writes it, when the facts are for one line.
+    pub(super) line: Option<usize>,
+    /// The closure's verdict for this dependency; none for a deck's include,
+    /// which is a file the deck reads where the engine found it.
+    pub(super) state: Option<MessageId>,
     /// The chain stage that resolved it, already localized.
     pub(super) via: Option<String>,
     /// Every candidate the resolver tried, with the winner marked.
@@ -929,30 +936,34 @@ pub(super) fn retained_include_facts(
 ) -> Vec<IncludeRowFacts> {
     let project_paths = model.workspace.content.project.include_search_paths().len();
     if netlist.active_document == ActiveNetlistDocument::OwnedSource {
-        // A deck is a file: what is known about its includes is what the
-        // last check traced, each one a file the deck reads where it is.
-        return code_workspace
-            .include_resolutions
+        // A deck is a file: its includes are the files the check read for
+        // its lines, one row a line, so a library two lines name for two
+        // sections is two rows and one tab.
+        return netlist
+            .diagnostics
+            .includes()
             .iter()
-            .map(|(locator, resolution)| IncludeRowFacts {
-                state: MessageId::NetlistNavigatorAuthorityExternal,
-                via: Some(chain_stage_text(
-                    messages,
-                    resolution.stage(),
-                    project_paths,
-                )),
+            .map(|include| IncludeRowFacts {
+                line: Some(include.line),
+                state: None,
+                // A file beside the file that names it is the ordinary case;
+                // the row names where else one was found.
+                via: (include.resolution.stage()
+                    != rspice_core::netlist::IncludeSearchStage::IncludingFile)
+                    .then(|| chain_stage_text(messages, include.resolution.stage(), project_paths)),
                 chain: Some(include_chain_text(
                     messages,
-                    locator,
-                    resolution,
+                    &include.requested,
+                    &include.resolution,
                     project_paths,
                 )),
-                shadowed_by: resolution
+                shadowed_by: include
+                    .resolution
                     .shadowed()
                     .next()
                     .map(|candidate| candidate.path().display().to_string()),
-                sections: lib_sections::declared(code_workspace, locator),
-                locator: locator.clone(),
+                sections: include.sections.to_vec(),
+                locator: include.requested.clone(),
             })
             .collect();
     }
@@ -964,7 +975,8 @@ pub(super) fn retained_include_facts(
                 let locator = dependency.requested_locator().to_owned();
                 let resolution = code_workspace.include_resolutions.get(&locator);
                 IncludeRowFacts {
-                    state: match dependency.resolution() {
+                    line: None,
+                    state: Some(match dependency.resolution() {
                         crate::state::DependencyResolution::Missing { .. } => {
                             MessageId::NetlistNavigatorDependencyMissing
                         }
@@ -974,7 +986,7 @@ pub(super) fn retained_include_facts(
                         crate::state::DependencyResolution::Resolved { .. } => {
                             dependency_authority_message(dependency.authority())
                         }
-                    },
+                    }),
                     via: resolution.map(|resolution| {
                         chain_stage_text(messages, resolution.stage(), project_paths)
                     }),
@@ -1528,7 +1540,9 @@ impl NetlistNavigatorProjection {
             .filter(|entry| query.matches_entry(entry))
             .map(|entry| {
                 let label = include_entry_label(entry.label());
-                let facts = include_states.iter().find(|facts| facts.locator == label);
+                let facts = include_states.iter().find(|facts| {
+                    facts.locator == label && facts.line.is_none_or(|line| line == entry.line())
+                });
                 // A locator the closure never retained is not "resolved" and
                 // not "missing" either; the row says where it is written and
                 // claims nothing about its fate.
@@ -1562,8 +1576,10 @@ impl NetlistNavigatorProjection {
                 // else the closure's verdict. Everything else is the tooltip.
                 let unresolved = matches!(
                     facts.state,
-                    MessageId::NetlistNavigatorDependencyMissing
-                        | MessageId::NetlistNavigatorDependencyUnresolved
+                    Some(
+                        MessageId::NetlistNavigatorDependencyMissing
+                            | MessageId::NetlistNavigatorDependencyUnresolved
+                    )
                 );
                 let section_meta = sections.as_ref().map(|choice| match &choice.selected {
                     Some(name) => {
@@ -1578,10 +1594,20 @@ impl NetlistNavigatorProjection {
                     (Some(_), _, _) => messages.text(MessageId::NetlistIncludeShadowMarker),
                     (None, Some(section), _) if !unresolved => section.clone(),
                     (None, None, Some(via)) if !unresolved => via.clone(),
-                    _ => messages.text(facts.state),
+                    _ => facts.state.map_or_else(
+                        || {
+                            messages.format(
+                                MessageId::NetlistNavigatorLine,
+                                &[("line", &entry.line().to_string())],
+                            )
+                        },
+                        |state| messages.text(state),
+                    ),
                 };
-                let mut tooltip = messages.text(facts.state);
-                tooltip.push('\n');
+                let mut tooltip = facts
+                    .state
+                    .map(|state| format!("{}\n", messages.text(state)))
+                    .unwrap_or_default();
                 tooltip.push_str(
                     &facts
                         .chain

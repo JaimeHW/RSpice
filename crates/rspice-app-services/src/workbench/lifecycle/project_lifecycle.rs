@@ -1018,12 +1018,20 @@ pub fn save_native(
         // never names a revision its folder does not hold; a file that cannot be written
         // leaves the project file as it was.
         write_library_files(state, &mut file, path)?;
+        // A deck kept by its path from the project's folder is kept by its
+        // path from the folder the project is saved to.
+        let folders = deck_folders(state.lifecycle_parts().model, path);
+        rebase_decks(&mut file.workspace.decks, &folders);
         // The segments the file names are in its folder before the file is written, so a
         // project on disk never names results it cannot read.
         keep_result_segments(&file, path)?;
         let published = destination.publish(&persistence::NativeStorage, file, |candidate| {
             prepare_post_save_registry(state, candidate, scope, SnapshotContent::Current)
         })?;
+        rebase_decks(
+            &mut state.lifecycle_parts().model.workspace.content.decks,
+            &folders,
+        );
         let read = file_segments(&published.candidate);
         let candidate = ProjectSnapshot {
             file: published.candidate,
@@ -1078,6 +1086,36 @@ fn write_library_files(
     model
         .write_library_files(file)
         .map_err(ProjectLifecycleError::LibraryFiles)
+}
+
+/// The folder the project is kept in now, and the folder of `path`, the
+/// file it is saved to.
+#[cfg(not(target_arch = "wasm32"))]
+fn deck_folders(model: &Model, path: &Path) -> (Option<PathBuf>, Option<PathBuf>) {
+    (
+        model
+            .workspace
+            .content
+            .project
+            .data_root()
+            .map(Path::to_path_buf),
+        path.parent().map(Path::to_path_buf),
+    )
+}
+
+/// Each deck's file, kept from the second of `folders` as it was kept from
+/// the first.
+#[cfg(not(target_arch = "wasm32"))]
+fn rebase_decks(
+    decks: &mut [rspice_app_state::state::ProjectDeck],
+    (from, to): &(Option<PathBuf>, Option<PathBuf>),
+) {
+    if from == to {
+        return;
+    }
+    for deck in decks {
+        deck.rebase(from.as_deref(), to.as_deref());
+    }
 }
 
 /// Rewrite, in a copy of the project saved at `path`, each relative library path so it still
@@ -1315,6 +1353,10 @@ pub fn save_project_copy_native(
     let result = (|| {
         let mut copy = snapshot(state)?;
         rebase_copied_library_references(state.model, &mut copy.file, path)?;
+        rebase_decks(
+            &mut copy.file.workspace.decks,
+            &deck_folders(state.model, path),
+        );
         keep_result_segments(&copy.file, path)?;
         destination.publish(&persistence::NativeStorage, copy.file)
     })();
