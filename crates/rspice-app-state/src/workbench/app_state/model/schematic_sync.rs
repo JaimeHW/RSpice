@@ -1,8 +1,8 @@
 //! The sync of the open schematic into the project: the drawing the editor
 //! holds is written back to its cell view's buffer, its sheet catalog and its
-//! generated symbol view. Every frame runs it, and so does every operation
-//! that must read the project as the open schematic edits it, whichever
-//! feature asks.
+//! generated symbol view. A frame runs it when anything it writes has moved,
+//! and every operation that must read the project as the open schematic
+//! edits it runs it, whichever feature asks.
 
 use super::Model;
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -41,12 +41,77 @@ impl SyncFailures {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// How many frames this thread has run the drawing sync on, rather than
+    /// passed it by because nothing it writes had moved.
+    pub static FRAME_SYNCS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// What the frame's drawing sync last left: the stamps of the editor's
+/// drawing, the workspace, the library catalog and the libraries it
+/// references, and the editor's unsaved, read-only and file marks, which a
+/// projection reads from the buffer. While all stand, the buffer already
+/// holds the drawing, and its sheets, bindings and generated symbol already
+/// follow it. Runtime only.
+#[derive(Debug, Clone, Default)]
+pub struct FrameSync(Option<FrameSyncKey>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FrameSyncKey {
+    stamps: [u64; 4],
+    dirty: bool,
+    read_only: bool,
+    current_file: Option<std::path::PathBuf>,
+}
+
 /// Whether a view of this type is edited as a schematic drawing.
 fn is_schematic_like(view_type: ViewType) -> bool {
     matches!(view_type, ViewType::Schematic | ViewType::Testbench)
 }
 
 impl Model {
+    /// [`Self::sync_active_schematic_to_workspace`] for a frame: nothing is
+    /// written, and the drawing is not copied, while the drawing, the
+    /// workspace and the libraries stand as the last frame's sync left them
+    /// and no annotation recovery waits.
+    #[must_use]
+    pub fn sync_active_schematic_for_frame(&mut self) -> Option<String> {
+        if self.frame_sync_stands() && self.workspace.annotation_restoration_error().is_none() {
+            return None;
+        }
+        #[cfg(any(test, feature = "test-support"))]
+        FRAME_SYNCS.with(|count| count.set(count.get() + 1));
+        let prompt = self.sync_active_schematic_to_workspace();
+        let session = &self.schematic.session;
+        self.frame_sync.0 = Some(FrameSyncKey {
+            stamps: self.frame_sync_stamps(),
+            dirty: session.is_dirty,
+            read_only: session.read_only,
+            current_file: session.current_file.clone(),
+        });
+        prompt
+    }
+
+    fn frame_sync_stands(&self) -> bool {
+        let session = &self.schematic.session;
+        self.frame_sync.0.as_ref().is_some_and(|key| {
+            key.stamps == self.frame_sync_stamps()
+                && key.dirty == session.is_dirty
+                && key.read_only == session.read_only
+                && key.current_file == session.current_file
+        })
+    }
+
+    fn frame_sync_stamps(&self) -> [u64; 4] {
+        [
+            self.schematic.content_stamp(),
+            self.workspace.content.stamp(),
+            self.library_manager.content_stamp(),
+            self.library_manager.references_stamp(),
+        ]
+    }
+
     /// Write the open schematic back to the project.
     ///
     /// Answers the prompt the sync has for the reader, if it has one: a

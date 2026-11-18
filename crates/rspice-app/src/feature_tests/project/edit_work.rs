@@ -1,0 +1,177 @@
+//! What an edit costs the frames after it, counted where the work is done:
+//! whether the project holds unsaved work is compared once per edit, over
+//! the documents the edit moved; a frame that only paints compares nothing
+//! and writes nothing back from the editor; and a canvas gesture holds the
+//! answer, and the Design navigator its hierarchy, until the drop. None of
+//! this shows in what a frame paints, which is why it is counted.
+
+#![cfg(not(target_arch = "wasm32"))]
+
+use std::time::Duration;
+
+use crate::feature_tests::replay::Replay;
+use crate::workbench::RSpiceApp;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::DIRTY_RECOMPUTES;
+use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
+use rspice_app_state::state::{Cell, ComponentType, Library, Point, View, ViewType};
+use rspice_app_state::workbench::app_state::model::FRAME_SYNCS;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_project::registry::{DOCUMENT_DIGESTS, PROJECT_CAPTURES};
+
+/// Frames a surface is given to lay itself out before counting starts.
+const WARM_UP_FRAMES: usize = 3;
+/// Frames counted after an edit, and while nothing happens.
+const FRAMES: usize = 6;
+/// Longer than a drawing waits to stand still before its live check runs,
+/// so the check's own work falls inside what an edit is counted for.
+const LIVE_CHECK_SETTLED: Duration = Duration::from_millis(400);
+
+/// The work the frames did since the last [`take`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct EditWork {
+    /// Comparisons of the working project with the saved one.
+    comparisons: usize,
+    /// Project documents digested from their content.
+    documents_digested: usize,
+    /// Whole working-project captures.
+    captures: usize,
+    /// Frames that wrote the editor's drawing back to the project.
+    drawing_syncs: usize,
+}
+
+fn take() -> EditWork {
+    EditWork {
+        comparisons: DIRTY_RECOMPUTES.with(|count| count.replace(0)),
+        documents_digested: DOCUMENT_DIGESTS.with(|count| count.replace(0)),
+        captures: PROJECT_CAPTURES.with(|count| count.replace(0)),
+        drawing_syncs: FRAME_SYNCS.with(|count| count.replace(0)),
+    }
+}
+
+/// A saved, clean project in a folder of its own: three resistors on the
+/// root schematic, and a library of three cells beside it.
+fn saved_project(label: &str) -> (Replay, std::path::PathBuf) {
+    let folder = unique_temp_dir(label);
+    let mut app = RSpiceApp::test_instance();
+    app.symbol_library = rspice_app_design::schematic::symbols::SymbolLibrary::load_embedded().ok();
+    app.state.model.schematic.with_undo("Fill", |schematic| {
+        for index in 0..3 {
+            schematic.add_component(ComponentType::Resistor, Point::new(200 * index, 0));
+        }
+    });
+    let mut cells = Library::new("cells");
+    for index in 0..3 {
+        let mut cell = Cell::new(format!("cell{index}"));
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        cells.add_cell(cell);
+    }
+    app.state.model.library_manager.add_library(cells);
+    assert!(
+        app.state
+            .save_project_to_path(&folder.join("edits.rspiceproj")),
+        "the project saves"
+    );
+    (Replay::of(app), folder)
+}
+
+fn idle(replay: &mut Replay, frames: usize) {
+    for _ in 0..frames {
+        replay.frame(Vec::new());
+    }
+}
+
+/// The frames after `edit`, its live check among them, and what they did.
+fn work_of(replay: &mut Replay, edit: impl FnOnce(&mut RSpiceApp)) -> EditWork {
+    let _ = take();
+    edit(&mut replay.app);
+    idle(replay, FRAMES);
+    std::thread::sleep(LIVE_CHECK_SETTLED);
+    idle(replay, FRAMES);
+    take()
+}
+
+fn place(app: &mut RSpiceApp) {
+    app.state.model.schematic.with_undo("Place", |schematic| {
+        schematic.add_component(ComponentType::Capacitor, Point::new(0, 400));
+    });
+}
+
+/// Idle frames compare nothing and write nothing back, on the canvas and on
+/// the Project pages; a part placed on the drawing is compared once, from
+/// that one drawing's digest, and written back once.
+#[test]
+fn an_edit_is_compared_once_from_its_own_document_and_idle_frames_do_nothing() {
+    let (mut replay, folder) = saved_project("edit-work-idle");
+    for (surface, bring_up) in [
+        ("the canvas", None),
+        ("the Overview", Some(ProjectPage::Overview)),
+        ("the Library page", Some(ProjectPage::Library)),
+    ] {
+        match bring_up {
+            None => replay.app.state.workbench.activate(Workspace::Design),
+            Some(page) => {
+                replay.app.state.workbench.activate(Workspace::Project);
+                replay.app.state.project.project_page = page;
+            }
+        }
+        idle(&mut replay, WARM_UP_FRAMES);
+        let _ = take();
+        idle(&mut replay, FRAMES);
+        assert_eq!(
+            take(),
+            EditWork::default(),
+            "{surface}: idle frames compare, digest, capture and write back nothing"
+        );
+
+        assert_eq!(
+            work_of(&mut replay, place),
+            EditWork {
+                comparisons: 1,
+                documents_digested: 1,
+                captures: 0,
+                drawing_syncs: 1,
+            },
+            "{surface}: a placed part is compared once, from its drawing alone, and written \
+             back once"
+        );
+        assert!(
+            replay.app.last_window_title.contains('*'),
+            "{surface}: the title marks the edit: {}",
+            replay.app.last_window_title
+        );
+    }
+    drop(replay);
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// A library change from the Library page is compared once: the frames
+/// after it do not compare it again.
+#[test]
+fn a_library_change_is_compared_once() {
+    type Change = fn(&mut RSpiceApp) -> Result<usize, String>;
+    let changes: [(&str, Change); 3] = [
+        ("rename a cell", |app| {
+            app.state.rename_cell("cells", "cell1", "renamed")
+        }),
+        ("rename a library", |app| {
+            app.state.rename_library("cells", "parts")
+        }),
+        ("delete a library", |app| app.state.delete_library("cells")),
+    ];
+    for (name, change) in changes {
+        let (mut replay, folder) = saved_project("edit-work-library");
+        replay.app.state.workbench.activate(Workspace::Project);
+        replay.app.state.project.project_page = ProjectPage::Library;
+        idle(&mut replay, WARM_UP_FRAMES);
+        let work = work_of(&mut replay, |app| {
+            change(app).unwrap_or_else(|error| panic!("{name}: {error}"));
+        });
+        assert_eq!(
+            work.comparisons, 1,
+            "{name}: the change is compared once: {work:?}"
+        );
+        drop(replay);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+}

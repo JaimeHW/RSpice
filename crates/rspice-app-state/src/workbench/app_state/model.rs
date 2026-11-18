@@ -50,6 +50,8 @@ pub use library_files::{
 pub use plan_outcome::AnalysisLifecycleOutcome;
 pub use project_technology::ProjectTechnologyVerdict;
 #[cfg(any(test, feature = "test-support"))]
+pub use schematic_sync::FRAME_SYNCS;
+#[cfg(any(test, feature = "test-support"))]
 pub use source_drift::SOURCE_DRIFT_HASHES;
 pub use source_drift::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};
 pub use veriloga_compile::{
@@ -134,6 +136,8 @@ pub struct Model {
     /// The sheet-membership and generated-symbol failures the drawing sync
     /// last recorded. Runtime only.
     pub recorded_sync_failures: schematic_sync::SyncFailures,
+    /// What the frame's drawing sync last left. Runtime only.
+    pub frame_sync: schematic_sync::FrameSync,
     /// The pin renames each symbol's placed instances have taken since the
     /// symbol was last saved, which Revert to saved on the symbol takes back.
     /// Runtime only: a save of the symbol, or another project replacing this

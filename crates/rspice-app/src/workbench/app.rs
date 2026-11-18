@@ -786,7 +786,9 @@ impl RSpiceApp {
         self.capture_application_window_projection(primary);
         let secondary = self.state.workbench.window_session.secondary_window_ids();
         if secondary.is_empty() {
-            self.state.sync_active_schematic_to_workspace();
+            if let Some(prompt) = self.state.model.sync_active_schematic_for_frame() {
+                self.state.workbench.prompt(prompt);
+            }
             return;
         }
         let primary_state = self
