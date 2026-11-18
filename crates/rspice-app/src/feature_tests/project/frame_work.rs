@@ -20,7 +20,9 @@ use rspice_app_project::workbench::surfaces::project::overview::OverviewSnapshot
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, create,
 };
-use rspice_app_services::workbench::lifecycle::project_lifecycle::dirty_document_count;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    dirty_document_count, without_audit,
+};
 use rspice_app_services::workbench::lifecycle::recovery::{take_disk_reads, unique_temp_dir};
 use rspice_app_state::product::ContentDigest;
 use rspice_app_state::state::{
@@ -68,76 +70,6 @@ struct FrameWork {
     /// Drawings walked for a cell's placements, and a configuration's
     /// bindings, instance paths or views walked.
     design_scans: usize,
-}
-
-impl FrameWork {
-    const fn counts(self) -> [usize; 10] {
-        [
-            self.fingerprint_passes,
-            self.project_captures,
-            self.model_library_hashes,
-            self.project_file_reads,
-            self.checkpoint_reads,
-            self.checkpoint_writes,
-            self.catalog_sorts,
-            self.net_extractions,
-            self.library_rows,
-            self.design_scans,
-        ]
-    }
-
-    const fn from_counts(counts: [usize; 10]) -> Self {
-        let [
-            fingerprint_passes,
-            project_captures,
-            model_library_hashes,
-            project_file_reads,
-            checkpoint_reads,
-            checkpoint_writes,
-            catalog_sorts,
-            net_extractions,
-            library_rows,
-            design_scans,
-        ] = counts;
-        Self {
-            fingerprint_passes,
-            project_captures,
-            model_library_hashes,
-            project_file_reads,
-            checkpoint_reads,
-            checkpoint_writes,
-            catalog_sorts,
-            net_extractions,
-            library_rows,
-            design_scans,
-        }
-    }
-
-    /// What the page itself did, leaving out the checks of the held
-    /// unsaved-document answer.
-    ///
-    /// The toolbar, the window title and the Overview ask on every frame
-    /// whether the project holds unsaved work, and read the answer held for
-    /// the working state. A debug build checks every read: it captures the
-    /// project again, outside the capture and fingerprint counts, and that
-    /// capture proves the model libraries. A release build does not.
-    /// `per_read` is what one checked read costs on this project; the frames'
-    /// work must be a whole number of reads, and what is left is the page's.
-    fn page_work(self, per_read: Self) -> Self {
-        let (frames, each) = (self.counts(), per_read.counts());
-        let reads = frames
-            .iter()
-            .zip(each)
-            .find(|(_, each)| *each > 0)
-            .map_or(0, |(total, each)| total / each);
-        Self::from_counts(std::array::from_fn(|kind| {
-            frames[kind]
-                .checked_sub(reads * each[kind])
-                .unwrap_or_else(|| {
-                    panic!("{reads} checked reads of {per_read:?} cost more than the frames did: {self:?}")
-                })
-        }))
-    }
 }
 
 /// The work counted on this thread since the last call, and start again.
@@ -253,27 +185,30 @@ fn large_project(label: &str, components: usize) -> (RSpiceApp, PathBuf) {
     (app, folder)
 }
 
-/// The page's share of the work thirty idle frames do. On no page does an
-/// idle frame capture or fingerprint the project: the unsaved-document
-/// answer is held for the working state until it changes.
+/// The work thirty idle frames of the page do. On no page does an idle
+/// frame capture or fingerprint the project: the unsaved-document answer is
+/// held for the working state until it changes. The debug build audits that
+/// held answer now and then, capturing the project again and proving its
+/// model libraries; that is the build checking itself, not the page's work,
+/// so it is set aside here.
 fn idle_frames(ctx: &Context, app: &mut RSpiceApp) -> FrameWork {
     take_work();
-    for _ in 0..IDLE_FRAMES {
-        app_frame(ctx, app, Vec::new());
-    }
+    without_audit(|| {
+        for _ in 0..IDLE_FRAMES {
+            app_frame(ctx, app, Vec::new());
+        }
+    });
     let frames = take_work();
     assert_eq!(
         (frames.fingerprint_passes, frames.project_captures),
         (0, 0),
         "an idle frame neither captures nor fingerprints the project: {frames:?}"
     );
-    let _ = dirty_document_count(&app.state);
-    let per_read = take_work();
-    frames.page_work(per_read)
+    frames
 }
 
-/// The page's share of the work thirty idle frames of `page` do, counted
-/// from the first frame after the page has shown what it shows.
+/// The work thirty idle frames of `page` do, counted from the first frame
+/// after the page has shown what it shows.
 fn idle_work(page: ProjectPage) -> FrameWork {
     let (mut app, folder) = large_project("frame-work", COMPONENTS);
     app.state.workbench.activate(Workspace::Project);
