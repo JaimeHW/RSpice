@@ -598,6 +598,78 @@ endmodule
     let _ = std::fs::remove_file(model);
 }
 
+/// An ideal edge at 1 us drives a resistor into a capacitor and a diode with
+/// a series resistance, and a timer lands the next point 1e-19 s after the
+/// edge. Over that step the diode's internal node moves by about 4e-18 V,
+/// far below VJ*EPSILON: a junction charge formed as `1 - (1 - vd/vj)^(1-m)`
+/// rounds to zero there, so the internal node's residual stayed at the whole
+/// series current and the run was refused as a convergence failure. The
+/// junction charge must carry that current.
+#[test]
+fn a_junction_charge_carries_its_current_over_a_tiny_step_after_an_ideal_edge() {
+    let model = write_model(
+        "tiny_step_after_ideal_edge",
+        r#"
+`include "disciplines.vams"
+module va_ideal_edge(out);
+    output out;
+    electrical out;
+    real level;
+    analog begin
+        @(initial_step) level = 0.0;
+        @(timer(1.0e-6)) level = 1.8;
+        @(timer(1.0e-6 + 1.0e-19)) level = level;
+        V(out) <+ level;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* tiny step after an ideal edge into R-diode-C\n\
+         X1 drive va_ideal_edge\n\
+         R9 drive m 1k\n\
+         D1 m 0 dmod\n\
+         C1 m 0 10p\n\
+         R1 m 0 50\n\
+         .model dmod D(IS=1e-15 N=1 RS=0.1 CJO=5p TT=2n)\n\
+         .va \"{}\" va_ideal_edge\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse tiny-step deck");
+    let result = Engine::default()
+        .run_tran(&netlist, 1.5e-6, 1.0e-9)
+        .expect("a tiny step after an ideal edge converges");
+    let edge = result
+        .time
+        .iter()
+        .rposition(|&time| time <= 1.0e-6)
+        .expect("a point at the edge");
+    let landing = edge + 1;
+    let dt = result.time[landing] - result.time[edge];
+    assert!(
+        dt > 0.0 && dt <= 1.0e-18,
+        "the timer lands just after the edge: {:?}",
+        &result.time[edge..=landing]
+    );
+    // Nearly all of the 1.8 mA charges C1 (1e-8 ohm at this step against
+    // the diode's 0.1 ohm series resistance), and the series current charges
+    // the junction capacitance.
+    let vm = node_series(&result.node_names, &result.voltages, "m")[landing];
+    let expected_vm = 1.8e-3 * dt / 10e-12;
+    assert!(
+        (vm - expected_vm).abs() <= 1e-3 * expected_vm,
+        "V(m) = {vm:e}, expected {expected_vm:e}"
+    );
+    let internal = node_series(&result.node_names, &result.voltages, "d1.__aint")[landing];
+    let expected_internal = vm / 0.1 * dt / 5e-12;
+    assert!(
+        (internal - expected_internal).abs() <= 1e-3 * expected_internal,
+        "V(D1 internal) = {internal:e}, expected {expected_internal:e}"
+    );
+    let _ = std::fs::remove_file(model);
+}
+
 #[test]
 fn veriloga_zi_commits_t0_and_lands_on_sample_lattice() {
     let model = write_model(

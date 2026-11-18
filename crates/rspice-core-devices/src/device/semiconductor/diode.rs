@@ -2959,13 +2959,26 @@ impl Diode {
         let fc = fc.clamp(0.0, 0.95);
         let dep_cap_knee = fc * vj;
         if vd < dep_cap_knee {
-            let arg = 1.0 - vd / vj;
-            let sarg_arg = (-grading * arg.ln()).min(MAX_EXP_ARG);
+            // The charge vj*cj0*(1 - (1 - vd/vj)^(1-m))/(1-m), formed as an
+            // expm1 of ln1p(-vd/vj). Near zero bias 1 - vd/vj rounds to one,
+            // so the `1 - arg*sarg` form quantized the charge at about
+            // vj*cj0*EPSILON whatever the bias; a companion divides that
+            // quantum by dt, and a sub-femtosecond step after an ideal edge
+            // could not move the charge at all.
+            let log_arg = (-vd / vj).ln_1p();
+            let sarg_arg = (-grading * log_arg).min(MAX_EXP_ARG);
             let sarg = sarg_arg.exp();
             let charge = if (grading - 1.0).abs() < 1.0e-12 {
-                -vj * cj0 * arg.ln()
+                -vj * cj0 * log_arg
             } else {
-                vj * cj0 * (1.0 - arg * sarg) / (1.0 - grading)
+                // arg*sarg = exp(log_arg + sarg_arg), also when sarg's clamp
+                // binds.
+                let exponent = if sarg_arg < MAX_EXP_ARG {
+                    (1.0 - grading) * log_arg
+                } else {
+                    log_arg + sarg_arg
+                };
+                -vj * cj0 * exponent.exp_m1() / (1.0 - grading)
             };
             let capacitance = cj0 * sarg;
             return (charge, capacitance);
@@ -4093,6 +4106,26 @@ mod tests {
         let tolerance = bare_near * 1e-12;
         assert!((d.junction_capacitance(-1.0) - bare_near - expected).abs() <= tolerance);
         assert!((d.junction_capacitance(-3.0) - bare_far - expected).abs() <= tolerance);
+    }
+
+    /// Near zero bias the depletion charge is `cj0*vd*(1 + m*vd/(2*vj))` to
+    /// second order, and it keeps that relative precision however small the
+    /// bias: a companion divides the charge's absolute error by dt, so a
+    /// charge rounded to a quantum of `vj*cj0*EPSILON` left a 1e-19 s step
+    /// unable to move it at all.
+    #[test]
+    fn depletion_charge_keeps_its_relative_precision_near_zero_bias() {
+        let (cj0, fc) = (5e-12, 0.5);
+        for (vj, grading) in [(1.0, 0.5), (0.3, 0.33), (0.8, 1.0), (9.99, 1.2861)] {
+            for vd in [3.4e-18, -3.4e-18, 1e-12, -1e-9] {
+                let (charge, _) = Diode::depletion_charge_and_capacitance(vd, cj0, vj, grading, fc);
+                let expected = cj0 * vd * (1.0 + 0.5 * grading * vd / vj);
+                assert!(
+                    (charge - expected).abs() <= expected.abs() * 1e-12,
+                    "Q({vd:e}) = {charge:e}, expected {expected:e} (VJ={vj}, M={grading})"
+                );
+            }
+        }
     }
 
     /// SPICE diode cards are not restricted to the textbook `M < 1` range.
