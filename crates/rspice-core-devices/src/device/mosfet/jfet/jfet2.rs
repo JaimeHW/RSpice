@@ -938,7 +938,10 @@ impl Jfet {
         let dep_cap = fc * pb;
         if voltage < dep_cap {
             let sqrt_arg = (1.0 - voltage / pb).max(1.0e-30).sqrt();
-            let q = 2.0 * pb * zero_bias_cap * (1.0 - sqrt_arg);
+            // 2*PB*C0*(1 - root) as 2*C0*V/(1 + root): near zero bias root
+            // rounds to one, and 1 - root would quantize the charge at about
+            // PB*C0*EPSILON whatever the bias.
+            let q = 2.0 * zero_bias_cap * voltage / (1.0 + sqrt_arg);
             let cap = zero_bias_cap / sqrt_arg;
             return (finite_or_zero(q), finite_or_zero(cap));
         }
@@ -1625,6 +1628,25 @@ mod tests {
         assert!((charge.cgs - 1.767_766_952_966_368_8e-6).abs() < 1.0e-18);
         assert!((charge.qgd - -4.721_359_549_995_796e-7).abs() < 1.0e-18);
         assert!((charge.cgd - 1.788_854_381_999_831_5e-6).abs() < 1.0e-18);
+    }
+
+    /// Near zero bias the Xyce JFET2 gate-junction charge is
+    /// `c0*v*(1 + v/(4*PB))` to second order, and it keeps that relative
+    /// precision however small the bias: a companion divides the charge's
+    /// absolute error by dt, so a charge rounded to a quantum of
+    /// `PB*c0*EPSILON` left a 1e-19 s step unable to move it at all.
+    #[test]
+    fn xyce_jfet2_junction_charge_keeps_its_relative_precision_near_zero_bias() {
+        for (c0, pb) in [(1e-12, 1.0), (2e-12, 0.6)] {
+            for v in [1e-18, -1e-18, 3.4e-18, -3.4e-18, 1e-12, -1e-9] {
+                let (q, _) = Jfet::xyce_jfet2_junction_charge(v, c0, pb, 0.5);
+                let expected = c0 * v * (1.0 + 0.25 * v / pb);
+                assert!(
+                    (q - expected).abs() <= expected.abs() * 1e-12,
+                    "Q({v:e}) = {q:e}, expected {expected:e} (PB={pb})"
+                );
+            }
+        }
     }
 
     #[test]
