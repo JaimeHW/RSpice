@@ -670,6 +670,85 @@ fn netlist_navigator_geometry_matches_mockup_and_touch_contract() {
     );
 }
 
+/// The texts one outline row painted at `width`, each with its right edge
+/// and the right edge of what is visible of it.
+fn painted_row(width: f32, label: &str, meta: &str) -> Vec<(String, f32, f32)> {
+    let context = egui::Context::default();
+    crate::ui::Theme::default().apply(&context);
+    let mut painted = Vec::new();
+    for _ in 0..2 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(width, 200.0),
+            )),
+            ..Default::default()
+        };
+        let mut row_right = 0.0;
+        let output = context.run_ui(input, |ui| {
+            ui.set_width(width);
+            let response = netlist_outline_row(
+                ui,
+                OutlineRowVisual {
+                    label,
+                    meta: Some(meta),
+                    meta_tone: None,
+                    icon: None,
+                    shape: NetlistOutlineRowShape::Child,
+                    selected: false,
+                    enabled: true,
+                    height: 24.0,
+                    hover: None,
+                },
+            );
+            row_right = response.rect.right();
+        });
+        painted = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.visual_bounding_rect().right(),
+                    clipped.clip_rect.right().min(row_right),
+                )),
+                _ => None,
+            })
+            .collect();
+    }
+    painted
+}
+
+/// A declaration row whose value is longer than the row keeps its name whole:
+/// the value gives way, ending in an ellipsis, and nothing runs past the row.
+#[test]
+fn a_long_value_gives_way_to_the_name_it_belongs_to() {
+    let painted = painted_row(180.0, ".options", "rspice_dialect=ngspice abstol=1e-12");
+    let texts = painted
+        .iter()
+        .map(|(text, ..)| text.as_str())
+        .collect::<Vec<_>>();
+    assert!(texts.contains(&".options"), "{texts:?}");
+    let value = texts
+        .iter()
+        .find(|text| text.starts_with("rspice"))
+        .unwrap_or_else(|| panic!("the value is shown: {texts:?}"));
+    assert!(value.ends_with('\u{2026}'), "{value}");
+    // Nothing is cut by the row's edge: what does not fit was elided.
+    for (text, right, visible_right) in &painted {
+        assert!(right <= visible_right, "{text} is cut at the row's edge");
+    }
+
+    // A row with room for both shows both whole.
+    let painted = painted_row(480.0, ".options", "rspice_dialect=ngspice");
+    let texts = painted
+        .iter()
+        .map(|(text, ..)| text.as_str())
+        .collect::<Vec<_>>();
+    assert!(texts.contains(&".options"), "{texts:?}");
+    assert!(texts.contains(&"rspice_dialect=ngspice"), "{texts:?}");
+}
+
 /// An include row states where the file came from, and the stage it names is
 /// the resolver's own, not a word this surface invented.
 #[test]

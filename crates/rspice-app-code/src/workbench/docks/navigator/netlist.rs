@@ -216,6 +216,7 @@ pub(in crate::workbench) fn netlist(
                         selected: root.contains_line(active_line),
                         enabled: root.target_line.is_some(),
                         height,
+                        hover: None,
                     },
                 )
                 .clicked()
@@ -251,6 +252,7 @@ pub(in crate::workbench) fn netlist(
                             selected: child.contains_line(active_line),
                             enabled: true,
                             height,
+                            hover: None,
                         },
                     )
                     .clicked()
@@ -286,6 +288,8 @@ pub(in crate::workbench) fn netlist(
                             reference.cell,
                             crate::state::ViewType::VerilogA.caption_for(&reference.view)
                         );
+                        let hover =
+                            format!("{action}: {}\n{}", reference.display_path(), row.label);
                         let response = netlist_outline_row(
                             ui,
                             OutlineRowVisual {
@@ -297,19 +301,15 @@ pub(in crate::workbench) fn netlist(
                                 selected: row.contains_line(active_line),
                                 enabled: true,
                                 height,
+                                hover: Some(&hover),
                             },
-                        )
-                        .on_hover_text(format!(
-                            "{action}: {}\n{}",
-                            reference.display_path(),
-                            row.label
-                        ));
+                        );
                         if response.clicked() {
                             open_in_design = Some(reference);
                         }
                         continue;
                     }
-                    let mut response = netlist_outline_row(
+                    let response = netlist_outline_row(
                         ui,
                         OutlineRowVisual {
                             label: &row.label,
@@ -320,11 +320,9 @@ pub(in crate::workbench) fn netlist(
                             selected: row.contains_line(active_line),
                             enabled: row.target_line.is_some(),
                             height,
+                            hover: row.tooltip.as_deref(),
                         },
                     );
-                    if let Some(tooltip) = row.tooltip.as_deref() {
-                        response = response.on_hover_text(tooltip);
-                    }
                     if let Some(choice) = row.sections.as_ref() {
                         section_choice_menu(
                             &response,
@@ -395,6 +393,7 @@ pub(in crate::workbench) fn netlist(
                                 selected: false,
                                 enabled: true,
                                 height,
+                                hover: None,
                             },
                         )
                         .clicked()
@@ -460,6 +459,7 @@ pub(in crate::workbench) fn netlist(
                                 selected: false,
                                 enabled: true,
                                 height,
+                                hover: None,
                             },
                         )
                         .clicked()
@@ -507,6 +507,7 @@ pub(in crate::workbench) fn netlist(
                                 selected: false,
                                 enabled: true,
                                 height,
+                                hover: None,
                             },
                         )
                         .clicked()
@@ -643,6 +644,7 @@ fn outline_group_row(
             selected: !group.expanded && group.contains_line(index, active_line),
             enabled: true,
             height,
+            hover: None,
         },
     );
     let expanded = group.expanded;
@@ -1141,6 +1143,7 @@ pub(super) fn netlist_diff(ui: &mut Ui, parts: &mut NetlistNavigator<'_>) {
                         selected: hunk.contains_line(active_line),
                         enabled: true,
                         height,
+                        hover: None,
                     },
                 )
                 .clicked()
@@ -1966,6 +1969,9 @@ pub(super) struct OutlineRowVisual<'a> {
     pub(super) selected: bool,
     pub(super) enabled: bool,
     pub(super) height: f32,
+    /// What the row says on hover. `None` says the row's whole text when the
+    /// row had to cut it, and nothing when it did not.
+    pub(super) hover: Option<&'a str>,
 }
 
 impl NetlistOutlineRowShape {
@@ -2093,38 +2099,41 @@ pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Res
     }
 
     let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let meta_width = row.meta.map_or(0.0, |meta| {
-        ui.painter()
-            .layout_no_wrap(meta.to_owned(), meta_font.clone(), t.color.text_faint)
-            .size()
-            .x
-    });
-    let label_left = rect.left() + row.shape.label_left();
-    let label_right = if row.meta.is_some() {
-        rect.right() - NETLIST_OUTLINE_PADDING_X - meta_width - NETLIST_OUTLINE_ICON_GAP
+    let label_font = if matches!(
+        row.shape,
+        NetlistOutlineRowShape::Child | NetlistOutlineRowShape::NestedChild
+    ) {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
     } else {
-        rect.right() - NETLIST_OUTLINE_PADDING_X
+        theme::sans(tokens::FS_0, FontWeight::Regular)
     };
-    ui.painter()
-        .with_clip_rect(egui::Rect::from_x_y_ranges(
-            label_left..=label_right.max(label_left),
-            rect.y_range(),
-        ))
-        .text(
-            egui::pos2(label_left, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            row.label,
-            if matches!(
-                row.shape,
-                NetlistOutlineRowShape::Child | NetlistOutlineRowShape::NestedChild
-            ) {
-                theme::mono(tokens::FS_0, FontWeight::Regular)
-            } else {
-                theme::sans(tokens::FS_0, FontWeight::Regular)
-            },
-            foreground,
-        );
-    if let Some(meta) = row.meta {
+    let label_left = rect.left() + row.shape.label_left();
+    let room = (rect.right() - NETLIST_OUTLINE_PADDING_X - label_left).max(0.0);
+    // The name is what the row is: it keeps its whole width, and the value
+    // beside it is what gives way, ending in an ellipsis.
+    let label = crate::ui::panels::elide_text(ui, row.label, &label_font, room);
+    let label_width = ui
+        .painter()
+        .layout_no_wrap(label.clone(), label_font.clone(), foreground)
+        .size()
+        .x;
+    let meta = row.meta.map(|meta| {
+        crate::ui::panels::elide_text(
+            ui,
+            meta,
+            &meta_font,
+            room - label_width - NETLIST_OUTLINE_ICON_GAP,
+        )
+    });
+    let cut = label != row.label || meta.as_deref() != row.meta;
+    ui.painter().with_clip_rect(rect).text(
+        egui::pos2(label_left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        &label,
+        label_font,
+        foreground,
+    );
+    if let Some(meta) = meta.filter(|meta| !meta.is_empty()) {
         ui.painter().text(
             egui::pos2(rect.right() - NETLIST_OUTLINE_PADDING_X, rect.center().y),
             egui::Align2::RIGHT_CENTER,
@@ -2134,7 +2143,12 @@ pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Res
         );
     }
     theme::paint_focus_ring(ui, &response, rect);
-    response
+    match (row.hover, row.meta) {
+        (Some(hover), _) => response.on_hover_text(hover),
+        (None, Some(meta)) if cut => response.on_hover_text(format!("{} {meta}", row.label)),
+        (None, None) if cut => response.on_hover_text(row.label),
+        (None, _) => response,
+    }
 }
 
 pub(super) fn netlist_outline_icon(kind: NetlistNavigatorRowKind) -> WorkbenchIcon {

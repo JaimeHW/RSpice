@@ -61,6 +61,7 @@ pub(super) fn list(
                 selected: open == Some(*id),
                 enabled: true,
                 height,
+                hover: None,
             },
         )
         .on_hover_text(tooltip);
