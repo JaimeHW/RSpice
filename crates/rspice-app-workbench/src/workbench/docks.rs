@@ -347,6 +347,25 @@ pub fn show_console(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: L
     if !layout.show_console_strip {
         return;
     }
+    // A phone opens on its page with the dock as its strip, whatever a wider
+    // window or the session it came from left open; the sheet rises when the
+    // reader asks for it here.
+    let phone_key = Id::new(CONSOLE_PANEL_ID).with("phone");
+    let was_phone = ctx.data_mut(|data| data.get_temp::<bool>(phone_key));
+    ctx.data_mut(|data| data.insert_temp(phone_key, layout.compact_shell));
+    let layout = if layout.compact_shell && layout.show_console_body && was_phone != Some(true) {
+        app.workbench_mut().console_visible = false;
+        app.workbench_mut().console_maximized = false;
+        LayoutSpec {
+            show_console_body: false,
+            ..layout
+        }
+    } else {
+        layout
+    };
+    // On a phone the open dock is a sheet over the page, not a split of it:
+    // the page keeps everything above the strip.
+    let sheet = layout.compact_shell && layout.show_console_body;
     let t = Tokens::get(ctx);
     let panel = Panel::bottom(CONSOLE_PANEL_ID)
         .default_size(layout.console_height)
@@ -356,17 +375,30 @@ pub fn show_console(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: L
         panel
             .size_range(layout.console_min_height..=layout.console_max_height)
             .resizable(true)
+    } else if sheet {
+        panel
+            .exact_size(console::strip_height(ctx))
+            .resizable(false)
     } else {
         // Collapsed, touch, and maximized compositions are exact mockup rows;
         // no previously dragged desktop height may leak into them.
         panel.exact_size(layout.console_height).resizable(false)
     };
     let shown = panel.show(root, |ui| {
-        fill_dock(ui, |ui| console::show(ui, app, layout))
+        fill_dock(ui, |ui| {
+            if !sheet {
+                console::show(ui, app, layout);
+            }
+        })
     });
+    let dock = if sheet {
+        show_console_sheet(ctx, app, layout, shown.response.rect)
+    } else {
+        shown.response.clone()
+    };
     app.workbench_mut()
         .pane_focus
-        .record(ctx, Pane::BottomDock, &shown.response);
+        .record(ctx, Pane::BottomDock, &dock);
     if layout.console_resizable && splitter_is_dragged(ctx, CONSOLE_PANEL_ID) {
         app.workbench_mut().console_height = shown
             .response
@@ -396,10 +428,77 @@ pub fn show_console(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: L
             ctx.request_repaint();
         }
     }
-    ctx.accesskit_node_builder(shown.response.id, |node| {
+    ctx.accesskit_node_builder(dock.id, |node| {
         node.set_role(egui::accesskit::Role::Region);
         node.set_label("Console and diagnostics");
     });
+}
+
+/// The grab band at the top of a phone's console sheet.
+const SHEET_HANDLE_BAND: f32 = 20.0;
+/// How far the grab band is pulled down before the sheet closes.
+const SHEET_CLOSE_PULL: f32 = 48.0;
+
+/// The open dock on a phone: a sheet rising over the page from the foot of
+/// `strip`, the row the collapsed dock takes, to the touch composition's
+/// height. A grab band tops it: pulled down, or pressed, it closes the sheet,
+/// as the strip's chevron does.
+fn show_console_sheet(
+    ctx: &Context,
+    app: &mut impl WorkbenchHost,
+    layout: LayoutSpec,
+    strip: egui::Rect,
+) -> Response {
+    let t = Tokens::get(ctx);
+    let rect = egui::Rect::from_min_max(
+        egui::pos2(strip.left(), strip.bottom() - layout.console_height),
+        strip.max,
+    );
+    egui::Area::new(Id::new(CONSOLE_PANEL_ID).with("sheet"))
+        .order(egui::Order::Middle)
+        .fixed_pos(rect.min)
+        .constrain(false)
+        .show(ctx, |ui| {
+            ui.set_min_size(rect.size());
+            ui.set_max_size(rect.size());
+            ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+            ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+            ui.painter().hline(
+                rect.x_range(),
+                rect.top() + 0.5,
+                egui::Stroke::new(1.0, t.color.border),
+            );
+            let (band, grab) = ui.allocate_exact_size(
+                egui::vec2(rect.width(), SHEET_HANDLE_BAND),
+                egui::Sense::click_and_drag(),
+            );
+            grab.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close console")
+            });
+            let handle = egui::Rect::from_center_size(band.center(), egui::vec2(36.0, 4.0));
+            let handle_color = if grab.hovered() || grab.dragged() {
+                t.color.text_dim
+            } else {
+                t.color.border_strong
+            };
+            ui.painter().rect_filled(handle, 2.0, handle_color);
+            crate::ui::theme::paint_focus_ring(ui, &grab, band);
+            let pulled = grab.drag_stopped()
+                && ctx.input(|input| {
+                    input
+                        .pointer
+                        .press_origin()
+                        .zip(input.pointer.interact_pos())
+                        .is_some_and(|(from, to)| to.y - from.y >= SHEET_CLOSE_PULL)
+                });
+            if grab.clicked() || pulled {
+                app.workbench_mut().console_visible = false;
+                ctx.request_repaint();
+            }
+            console::show(ui, app, layout);
+            ui.expand_to_include_rect(rect);
+        })
+        .response
 }
 
 pub fn show_drawers(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {

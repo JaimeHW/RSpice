@@ -123,15 +123,20 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     });
 }
 
+/// The tab strip's height: a touch target under a finger.
+pub fn strip_height(ctx: &egui::Context) -> f32 {
+    if Tokens::get(ctx).metrics.ctl_h >= 44.0 {
+        CONSOLE_TOUCH_HEADER_HEIGHT
+    } else {
+        CONSOLE_HEADER_HEIGHT
+    }
+}
+
 fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let t = Tokens::get(ui.ctx());
     let problems = active_problem_count(app.session(), ui.ctx().cumulative_pass_nr());
     let touch_targets = Tokens::get(ui.ctx()).metrics.ctl_h >= 44.0;
-    let header_height = if touch_targets {
-        CONSOLE_TOUCH_HEADER_HEIGHT
-    } else {
-        CONSOLE_HEADER_HEIGHT
-    };
+    let header_height = strip_height(ui.ctx());
     let open = layout.show_console_body;
     // The strip's last row of pixels, inside the strip: centred on its
     // bottom edge, half the line fell on the body, whose fill then painted
