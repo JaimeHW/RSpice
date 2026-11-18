@@ -234,6 +234,8 @@ pub enum DeckNameAt {
 pub struct DeckIndex {
     /// Per file, where the comment on each physical line starts.
     comments: Vec<Vec<Option<usize>>>,
+    /// Per file, whether each physical line is read as Spectre.
+    spectre_lines: Vec<Vec<bool>>,
     files: Vec<String>,
     cards: Vec<DeckCard>,
     scopes: Vec<DeckScope>,
@@ -418,11 +420,16 @@ impl DeckIndex {
             .get(card.location.file)
             .map_or(&[][..], Vec::as_slice);
         let first_line = card.lines.start() - 1;
+        let spectre = self
+            .spectre_lines
+            .get(card.location.file)
+            .map_or(&[][..], Vec::as_slice);
         let mut tokens = Vec::new();
         for_each_logical_line(
             &text[start..end],
             0,
             |line, raw| Some(code_before_comment(comments, first_line + line, raw)),
+            |line| spectre.get(first_line + line).copied().unwrap_or(false),
             |line| {
                 if tokens.is_empty() {
                     tokens = lex_card(&line)
@@ -498,6 +505,34 @@ fn comment_starts(text: &str, line_starts: &[usize], kind: SourceKind) -> Vec<Op
         *start = Some(start.map_or(at, |earlier| earlier.min(at)));
     }
     starts
+}
+
+/// Whether each physical line of `text` is read as Spectre: every line of a
+/// Spectre source, and the lines after a `simulator lang=spectre` statement
+/// up to a `simulator lang=spice` one.
+fn spectre_lines(text: &str, comments: &[Option<usize>], kind: SourceKind) -> Vec<bool> {
+    let mut spectre = kind == SourceKind::Spectre;
+    text.split('\n')
+        .enumerate()
+        .map(|(line, raw)| {
+            let read_as_spectre = spectre;
+            let code = code_before_comment(comments, line, raw);
+            let mut words = code.split_whitespace();
+            if words
+                .next()
+                .is_some_and(|head| head.eq_ignore_ascii_case("simulator"))
+            {
+                for word in words {
+                    match word.to_ascii_lowercase().as_str() {
+                        "lang=spectre" => spectre = true,
+                        "lang=spice" => spectre = false,
+                        _ => {}
+                    }
+                }
+            }
+            read_as_spectre
+        })
+        .collect()
 }
 
 /// The part of physical line `line` before its comment.
@@ -679,6 +714,7 @@ impl Builder {
             braces: 0,
         };
         let comments = comment_starts(text, &state.line_starts, source.kind);
+        let spectre = spectre_lines(text, &comments, source.kind);
         let title_lines = usize::from(source.kind == SourceKind::DeckRoot && !text.is_empty());
         if title_lines == 1 {
             let first = text.split('\n').next().unwrap_or_default();
@@ -696,9 +732,11 @@ impl Builder {
             text,
             title_lines,
             |line, raw| Some(code_before_comment(&comments, line, raw)),
+            |line| spectre.get(line).copied().unwrap_or(false),
             |line| self.read_card(&mut state, &line),
         );
         self.index.comments.push(comments);
+        self.index.spectre_lines.push(spectre);
     }
 
     fn read_card(&mut self, state: &mut FileState<'_>, line: &MappedLine) {

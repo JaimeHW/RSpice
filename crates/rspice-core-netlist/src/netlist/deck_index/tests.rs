@@ -438,3 +438,45 @@ fn a_simulator_switch_hands_the_lines_after_it_to_spectre_and_back() {
         "3k"
     );
 }
+
+#[test]
+fn a_spectre_line_ending_in_a_backslash_is_continued_by_the_next() {
+    let source = "simulator lang=spectre\nparameters vdd=1.8 \\\n    gain=2\nX1 (in \\\n  out) amp\nsubckt amp (a b)\nends amp\n";
+    let index = DeckIndex::build(&[DeckIndexSource {
+        identity: "amp.scs",
+        text: source,
+        kind: SourceKind::Spectre,
+    }]);
+    let parameters = index
+        .cards()
+        .iter()
+        .find(|card| card.head == "parameters")
+        .expect("the parameters statement is a card");
+    assert_eq!(parameters.lines, 2..=3, "one card over both lines");
+    let gain = &symbol(&index, DeckSymbolKind::Parameter, "gain")[0];
+    assert_eq!((gain.location.line, gain.detail.as_str()), (3, "2"));
+    assert!(
+        index.cards().iter().all(|card| card.head != "gain=2"),
+        "the continued line is no card of its own"
+    );
+    let x1 = index.card_on_line(0, 5).expect("X1 spans line 5");
+    assert_eq!(index.cards()[x1].head, "X1");
+    assert_eq!(
+        symbol(&index, DeckSymbolKind::Instance, "X1")[0].detail,
+        "amp"
+    );
+    let tokens = index.card_tokens(x1, source);
+    assert!(
+        tokens
+            .iter()
+            .all(|token| &source[token.span.clone()] != "\\"),
+        "the backslash is no token"
+    );
+}
+
+#[test]
+fn a_spice_line_ending_in_a_backslash_is_not_continued() {
+    let deck = "title\nR1 a b 1k \\\nR2 b 0 2k\n.end\n";
+    let index = index(deck);
+    assert_eq!(instance_names(&index), ["R1", "R2"]);
+}

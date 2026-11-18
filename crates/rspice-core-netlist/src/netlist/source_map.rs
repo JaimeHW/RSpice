@@ -2,6 +2,7 @@
 
 use super::expr::ParameterResolver;
 use super::optional_names_eq;
+use super::{SourceKind, comment_start};
 use crate::abort_signal::NoAbort;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -328,7 +329,8 @@ pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
     for_each_logical_line(
         buffer,
         1,
-        |_, raw| Some(&raw[..find_inline_comment(raw).unwrap_or(raw.len())]),
+        |_, raw| Some(&raw[..comment_start(raw, SourceKind::DeckRoot).unwrap_or(raw.len())]),
+        |_| false,
         |line| process_logical_line(&line, &mut scopes, &mut map),
     );
     map
@@ -340,15 +342,19 @@ pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
 /// `code_of` gives the part of a physical line, numbered from zero, before its
 /// comment, a prefix of it, or `None` for a line that is a comment as a whole; a line whose code is
 /// blank or starts with `*` is a comment too. A line whose code starts with `+`
-/// continues the card before it, joined by one space.
+/// continues the card before it, joined by one space. A line `backslash_joins`
+/// says is Spectre and whose code ends with `\` is continued by the line
+/// after it, the `\` dropped, as Spectre reads it.
 pub(super) fn for_each_logical_line<'a>(
     buffer: &'a str,
     skipped_lines: usize,
     code_of: impl Fn(usize, &'a str) -> Option<&'a str>,
+    backslash_joins: impl Fn(usize) -> bool,
     mut each: impl FnMut(MappedLine),
 ) {
     let mut logical: Option<MappedLine> = None;
     let mut offset = 0usize;
+    let mut continued_by_backslash = false;
 
     for (line_index, physical) in buffer.split_inclusive('\n').enumerate() {
         if line_index < skipped_lines {
@@ -361,6 +367,7 @@ pub(super) fn for_each_logical_line<'a>(
         let code = code_of(line_index, raw).unwrap_or_default();
         let trimmed = code.trim_start();
         let lead = code.len() - trimmed.len();
+        let continues_card = std::mem::take(&mut continued_by_backslash);
 
         if trimmed.is_empty() || trimmed.starts_with('*') {
             if let Some(line) = logical.take() {
@@ -370,7 +377,17 @@ pub(super) fn for_each_logical_line<'a>(
             continue;
         }
 
-        if let Some(rest) = trimmed.strip_prefix('+') {
+        let trimmed = match trimmed.trim_end().strip_suffix('\\') {
+            Some(body) if backslash_joins(line_index) => {
+                continued_by_backslash = true;
+                body.trim_end()
+            }
+            _ => trimmed,
+        };
+        if continues_card && let Some(line) = logical.as_mut() {
+            line.push_join_space();
+            line.push_segment(trimmed, offset + lead, line_index + 1);
+        } else if let Some(rest) = trimmed.strip_prefix('+') {
             if let Some(line) = logical.as_mut() {
                 let continued = rest.trim_start();
                 let continued_lead = rest.len() - continued.len();
@@ -1102,29 +1119,31 @@ fn looks_numeric(token: &str) -> bool {
         .is_some_and(|ch| ch.is_ascii_digit() || ch == '+' || ch == '-' || ch == '.')
 }
 
-fn find_inline_comment(line: &str) -> Option<usize> {
-    let semicolon = line.find(';');
-    let dollar = line
-        .char_indices()
-        .find(|(idx, ch)| {
-            *ch == '$'
-                && *idx > 0
-                && line[..*idx]
-                    .chars()
-                    .next_back()
-                    .is_some_and(char::is_whitespace)
-        })
-        .map(|(idx, _)| idx);
-    match (semicolon, dollar) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    }
-}
-
 #[cfg(test)]
 mod editor_tests {
     use super::*;
     use crate::netlist::Netlist;
+
+    /// The editor's map cuts comments where the engine does: a PSpice
+    /// `$N_0001` node opens no comment, and a `;` inside quotes is text.
+    #[test]
+    fn the_editor_map_cuts_comments_by_the_engines_rule() {
+        let src = "deck\n.param rval=1k\nR1 $N_0001 0 {rval}\n.param label=\"a;b\" gain={rval*2}\nR2 a 0 1k $ load\n.end\n";
+
+        let map = source_map_for_editor(src);
+
+        let reads = map
+            .value_spans
+            .iter()
+            .filter(|span| span.kind == NetlistValueKind::ParamReference && span.name == "rval")
+            .map(|span| span.line)
+            .collect::<Vec<_>>();
+        assert_eq!(reads, [3, 4]);
+        assert!(
+            map.value_spans.iter().all(|span| span.line != 5),
+            "a $ comment after a field is cut"
+        );
+    }
 
     #[test]
     fn source_map_records_mos_model_reference_span() {
