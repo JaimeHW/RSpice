@@ -218,13 +218,12 @@ fn table(ui: &mut Ui, variables: &[Variable], draft: &mut Draft) -> Option<Edit>
     let height = t.metrics.ctl_h;
     let gap = tokens::SP_3;
     let full = ui.available_width();
-    let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = vec2(gap, gap);
         text_field(
             ui,
             egui::TextEdit::singleline(&mut draft.name)
-                .font(mono.clone())
+                .font(theme::field_mono())
                 .hint_text("NAME"),
             full,
         );
@@ -239,7 +238,7 @@ fn table(ui: &mut Ui, variables: &[Variable], draft: &mut Draft) -> Option<Edit>
                 let value = text_field(
                     ui,
                     egui::TextEdit::singleline(&mut draft.value)
-                        .font(mono.clone())
+                        .font(theme::field_mono())
                         .hint_text("Folder"),
                     (full - browse_width).max(0.0),
                 );
