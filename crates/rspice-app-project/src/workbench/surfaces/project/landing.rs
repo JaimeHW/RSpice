@@ -381,6 +381,8 @@ fn recent_toolbar(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, shown: usize) {
         .fill(t.color.bg_panel_2)
         .inner_margin(Margin::symmetric(9, 4))
         .show(ui, |ui| {
+            // The band spans the panel, however little its controls take.
+            ui.set_min_width(ui.available_width());
             ui.set_min_height(t.metrics.ctl_h);
             if ui.available_width() < PHONE_RECENTS_BREAKPOINT {
                 ui.horizontal(|ui| {
