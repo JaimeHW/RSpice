@@ -467,7 +467,7 @@ pub struct ExportRequests {
 
 pub fn export_menu(ui: &mut Ui) -> ExportRequests {
     let mut requests = ExportRequests::default();
-    ui.menu_button("Export…", |ui| {
+    rspice_ui_kit::widgets::menu_button(ui, "Export…", |ui| {
         // Not "waveform data": the export routes on the active sheet and then
         // on the retained payload, so it writes a spectrum here and SOA rules,
         // SOA observations, optimizer candidates or an event history there —

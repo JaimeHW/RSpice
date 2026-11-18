@@ -827,7 +827,7 @@ fn expression_conversions(
         }
         return;
     }
-    ui.menu_button("Digital", |ui| {
+    rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
         // The threshold starts at the middle of what the expression draws.
         let values = host
             .resolve_expressions(model, t)

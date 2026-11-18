@@ -16,7 +16,6 @@ use crate::workbench::documents::result_document::signal_sets::{
     MAX_SIGNAL_SET_MEMBERS, MAX_SIGNAL_SETS, signal_set_index, signal_set_name,
 };
 
-use super::super::super::design_system::WorkbenchIcon;
 use super::results_actions::set_result_quantity_ticked;
 use super::results_rows::retained_result_artifacts;
 
@@ -344,7 +343,7 @@ fn signal_sets_menu_body(
         .map(|set| (set.name.clone(), set.members.len()))
         .collect::<Vec<_>>();
     for (index, (name, members)) in sets.into_iter().enumerate() {
-        submenu(ui, format!("{name} · {members}"), |ui| {
+        rspice_ui_kit::widgets::menu_button(ui, format!("{name} · {members}"), |ui| {
             signal_set_submenu(ui, state, ticked, index, &name);
         });
     }
@@ -406,26 +405,6 @@ fn signal_set_submenu(
     }
 }
 
-/// A submenu row with the workbench's own chevron: the bundled faces have no
-/// glyph for egui's arrow, which would draw as a missing-glyph box.
-fn submenu(ui: &mut Ui, label: String, content: impl FnOnce(&mut Ui)) {
-    const CHEVRON_SIDE: f32 = 12.0;
-    let button = egui::Button::new(label).right_text("   ");
-    let (response, _) = egui::containers::menu::SubMenuButton::from_button(button).ui(ui, content);
-    let rect = response.rect;
-    WorkbenchIcon::ChevronRight.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(
-            egui::pos2(
-                rect.right() - ui.spacing().button_padding.x - CHEVRON_SIDE / 2.0,
-                rect.center().y,
-            ),
-            egui::Vec2::splat(CHEVRON_SIDE),
-        ),
-        Tokens::get(ui.ctx()).color.text_dim,
-    );
-}
-
 /// "Add to set" on a row's menu: every saved set, and a new one named after
 /// the row.
 pub(super) fn add_to_set_menu(
@@ -433,7 +412,7 @@ pub(super) fn add_to_set_menu(
     state: &mut ResultsParts<'_>,
     key: &ResultBrowserSelectionKey,
 ) {
-    submenu(ui, "Add to set".to_owned(), |ui| {
+    rspice_ui_kit::widgets::menu_button(ui, "Add to set", |ui| {
         let sets = state
             .results
             .signal_sets

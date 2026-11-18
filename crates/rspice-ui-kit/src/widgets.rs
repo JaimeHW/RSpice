@@ -31,6 +31,7 @@ mod docbar;
 mod filter_clear;
 mod form;
 mod measurement_table;
+mod menu_button;
 pub mod notice;
 mod ordered_chips;
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
@@ -66,6 +67,7 @@ pub use form::{
     text_field, value_row,
 };
 pub use measurement_table::measurement_table;
+pub use menu_button::menu_button;
 pub use ordered_chips::{OrderedChipsEdit, ordered_chips, required_ordered_chips};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_INSET, PANE_RAIL_W, PaneSide, pane_footer,

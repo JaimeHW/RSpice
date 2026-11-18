@@ -838,7 +838,7 @@ fn lane_menu(
             }
         }
         ui.separator();
-        ui.menu_button("Value names", |ui| {
+        rspice_ui_kit::widgets::menu_button(ui, "Value names", |ui| {
             value_names_menu(ui, lane, *radix, names, input.cursor, index, output);
         });
         if lane.origin() == BusOrigin::User {

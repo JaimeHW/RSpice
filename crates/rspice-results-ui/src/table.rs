@@ -966,7 +966,7 @@ pub fn inline_actions(
         && let Some(active) = model
     {
         let label = active.table_label();
-        ui.menu_button(elide_label(&label), |ui| {
+        rspice_ui_kit::widgets::menu_button(ui, elide_label(&label), |ui| {
             for candidate in models.iter() {
                 let selected = candidate.analysis_key() == active.analysis_key();
                 if ui
@@ -1021,7 +1021,7 @@ pub fn inline_actions(
         // The menu offers the same headings the table paints, so a bus bit is
         // picked by the notation its bus was drawn in rather than by the deck
         // spelling it is toggled under.
-        ui.menu_button(format!("Columns ({})", effective.len()), |ui| {
+        rspice_ui_kit::widgets::menu_button(ui, format!("Columns ({})", effective.len()), |ui| {
             for index in active.visible_signal_indices() {
                 let Some((name, _)) = active.trace_heading(index) else {
                     continue;

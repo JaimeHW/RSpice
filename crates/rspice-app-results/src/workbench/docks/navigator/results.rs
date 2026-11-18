@@ -688,7 +688,7 @@ pub(in crate::workbench) fn results(
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(6.0);
-                    ui.menu_button("Actions...", |ui| {
+                    rspice_ui_kit::widgets::menu_button(ui, "Actions...", |ui| {
                         if ui
                             .add_enabled(
                                 !visible_result_keys.is_empty(),

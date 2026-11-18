@@ -264,7 +264,7 @@ fn show(ctx: &egui::Context, menu_id: egui::Id, menu: &RowMenu, opened: bool) ->
             pick = Some(Pick::Open);
         }
         ui.add_enabled_ui(edits, |ui| {
-            ui.menu_button("Set view to", |ui| {
+            rspice_ui_kit::widgets::menu_button(ui, "Set view to", |ui| {
                 if item(ui, INHERITED, true) {
                     pick = Some(Pick::SetView(None));
                 }

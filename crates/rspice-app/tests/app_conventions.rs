@@ -2039,6 +2039,66 @@ fn source_files_have_no_byte_order_mark() {
     );
 }
 
+/// Every submenu row draws the workbench's chevron.
+///
+/// egui's own submenu button marks its row with U+23F5, which no bundled face
+/// has, so it draws a missing-glyph box on every platform. Every crate's
+/// interface letters in the bundled faces, so every crate opens its menus
+/// through `rspice_ui_kit::widgets::menu_button`, the one place egui's
+/// submenu row is replaced.
+#[test]
+fn every_submenu_row_draws_the_workbench_chevron() {
+    const EGUI_SUBMENU_ROWS: [&str; 5] = [
+        ".menu_button(",
+        ".menu_image_button(",
+        ".menu_image_text_button(",
+        "SubMenuButton::new(",
+        "SubMenuButton::RIGHT_ARROW",
+    ];
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the crates directory");
+    let helper = crates.join("rspice-ui-kit/src/widgets/menu_button.rs");
+    let mut roots: Vec<PathBuf> = fs::read_dir(crates)
+        .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
+        .map(|entry| entry.expect("directory entry").path().join("src"))
+        .filter(|src| src.is_dir())
+        .collect();
+    roots.sort();
+    assert!(
+        roots
+            .iter()
+            .any(|root| root.ends_with("rspice-results-ui/src")),
+        "the scan must read the crates outside the application that draw menus too"
+    );
+    let mut offenders = Vec::new();
+    for file in roots.iter().flat_map(|root| rust_sources(root)) {
+        if file == helper {
+            continue;
+        }
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+        let code = strip_line_comments(&source);
+        for (index, line) in code.lines().enumerate() {
+            if EGUI_SUBMENU_ROWS.iter().any(|row| line.contains(row)) {
+                let shown = file
+                    .strip_prefix(crates)
+                    .unwrap_or(&file)
+                    .display()
+                    .to_string()
+                    .replace('\\', "/");
+                offenders.push(format!("{shown}:{}: {}", index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these open a menu through egui's own button, whose submenu arrow no bundled face \
+         has:\n  {}\nCall rspice_ui_kit::widgets::menu_button(ui, label, contents) instead.",
+        offenders.join("\n  ")
+    );
+}
+
 /// Every module says what it is.
 ///
 /// A module with no `//!` header fails the build.

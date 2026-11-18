@@ -628,7 +628,7 @@ fn expression_chip(
         host.activate_pane();
     }
     label.context_menu(|ui| {
-        ui.menu_button("Digital", |ui| {
+        rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
             if let Some(text) = super::logic::convert::digital_form_of(
                 ui,
                 &expression.text,
@@ -802,7 +802,7 @@ fn legend_chip(
         host.select_trace(trace);
     }
     label.context_menu(|ui| {
-        ui.menu_button("Digital", |ui| {
+        rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
             if let Some(text) = super::logic::convert::digital_form(
                 ui,
                 &trace.source_waveform_name,

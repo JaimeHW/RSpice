@@ -530,7 +530,7 @@ fn banner_row(ui: &mut Ui, reason: &str, candidates: &[(DatasetId, String)]) -> 
                     }
                 }
                 _ => {
-                    ui.menu_button("Read another run instead", |ui| {
+                    rspice_ui_kit::widgets::menu_button(ui, "Read another run instead", |ui| {
                         for (dataset_id, label) in candidates {
                             if ui.button(label).clicked() {
                                 chosen = Some(*dataset_id);

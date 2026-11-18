@@ -1164,7 +1164,7 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                     intent = Some(LibraryIntent::OpenView(reference.clone(), *view_type));
                 }
                 if target.cell.is_some() {
-                    ui.menu_button("Cell actions", |ui| {
+                    rspice_ui_kit::widgets::menu_button(ui, "Cell actions", |ui| {
                         let cell = cell_items(ui, &target);
                         if target.view.is_some() {
                             ui.separator();
@@ -1261,7 +1261,7 @@ pub(super) fn library_actions_menu(
     selected_library: Option<(String, bool)>,
 ) -> Option<LibraryIntent> {
     let mut intent = None;
-    ui.menu_button("Library actions", |ui| {
+    rspice_ui_kit::widgets::menu_button(ui, "Library actions", |ui| {
         intent = library_items(ui, cx, selected_library);
     });
     let attach = LibraryFileIntent::Attach;
