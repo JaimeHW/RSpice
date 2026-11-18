@@ -42,7 +42,7 @@ pub fn navigate_source_bundle(
     command: CodeCommand,
 ) -> Result<(), String> {
     let messages = parts.wb.messages();
-    let no_bundle = || messages.format(MessageId::SourceNoBundle, &[("language", "Verilog-A")]);
+    let no_bundle = || messages.text(MessageId::SourceNoBundle);
     let bundle_id = parts
         .model
         .workspace

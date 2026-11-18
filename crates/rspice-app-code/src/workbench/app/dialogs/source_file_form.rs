@@ -199,10 +199,7 @@ fn titles(draft: &CodeSourceFileDialogState, messages: MessageCatalog) -> (Strin
     let (title, primary) = match draft.action {
         CodeSourceFileAction::New => {
             return (
-                messages.format(
-                    MessageId::CodeSourceFileNewTitle,
-                    &[("language", "Verilog-A")],
-                ),
+                messages.text(MessageId::CodeSourceFileNewTitle),
                 messages.text(MessageId::CodeSourceCreatePrimary),
             );
         }
