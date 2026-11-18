@@ -627,10 +627,21 @@ fn plot_from_source(cx: &mut Cx<'_, CodeFeature>, quantity: cross_probe::PlotQua
     cx.execute(ids::RESULT_WAVEFORMS);
 }
 
-/// Open the export dialog where the deck draws it; anywhere else the deck is
+/// Export what the Netlist workspace has in front: a deck, or one of its
+/// includes, exports the deck as it is in the editor; otherwise the export
+/// dialog opens over the page, and anywhere else the design's netlist is
 /// exported straight away.
 fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>) {
-    if cx.wb.workspace == Workspace::Netlist {
+    if cx.wb.workspace == Workspace::Netlist
+        && cx.state.netlist.front.shows_deck()
+        && let Some(deck) = cx.state.netlist.open_deck.as_ref()
+    {
+        crate::workbench::menu_bar::netlist_actions::action_export_deck_with_io(
+            cx.model,
+            deck,
+            cx.handles.export_io,
+        );
+    } else if cx.wb.workspace == Workspace::Netlist {
         let dialog = &mut cx.state.netlist.export_dialog;
         dialog.open = true;
         dialog.error = None;

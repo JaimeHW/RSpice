@@ -375,3 +375,76 @@ fn the_inspector_says_whose_added_lines_are_in_front() {
         );
     }
 }
+
+/// A save dialog that answers with `self.0`, and writes that reach the disk.
+struct SavesTo(std::path::PathBuf);
+
+impl rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo for SavesTo {
+    fn show_save_dialog(
+        &self,
+        _config: rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        Ok(Some(self.0.clone()))
+    }
+
+    fn write_text_file(&self, path: &std::path::Path, contents: &str) -> Result<(), String> {
+        std::fs::write(path, contents).map_err(|error| error.to_string())
+    }
+
+    fn write_bytes_file_observed(
+        &self,
+        destination: &rspice_app_services::workbench::workflows::export_workflow::ObservedExportDestination,
+        contents: &[u8],
+        _mime_type: &str,
+    ) -> Result<(), String> {
+        std::fs::write(destination.path(), contents).map_err(|error| error.to_string())
+    }
+
+    fn write_waveform_csv(
+        &self,
+        _dataset: &rspice_app_services::io::WaveformDataset,
+        _path: &std::path::Path,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Export with the deck in front writes the deck as it is in the editor, not
+/// the generated netlist, and opens no dialog; with the generated netlist in
+/// front it opens the generated netlist's export dialog.
+#[test]
+fn export_writes_the_deck_in_front_and_the_generated_netlist_behind_its_dialog() {
+    use rspice_app_code::workbench::code::commands::CodeCommand;
+
+    let mut app = plan_and_deck_session();
+    let edited = DECK.replace("1k", "4k7");
+    assert!(netlist_document::edit_deck_file(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        edited.clone(),
+    ));
+    let folder = std::env::temp_dir().join(format!("rspice-deck-export-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&folder).expect("fixture folder");
+    let copy = folder.join("copy.cir");
+    app.export_workflow_io = Box::new(SavesTo(copy.clone()));
+
+    app.execute_command_key(CodeCommand::ExportNetlist.key());
+
+    assert_eq!(
+        std::fs::read_to_string(&copy).expect("the export wrote the deck"),
+        edited
+    );
+    assert!(
+        !app.state.code.netlist.export_dialog.open,
+        "no dialog for a deck"
+    );
+
+    let generated = tab_labelled(&app, "Generated netlist").id;
+    assert!(activate_document(&mut app.state, &generated));
+    app.execute_command_key(CodeCommand::ExportNetlist.key());
+    assert!(
+        app.state.code.netlist.export_dialog.open,
+        "the generated netlist exports through its dialog"
+    );
+    std::fs::remove_dir_all(folder).expect("fixture removed");
+}

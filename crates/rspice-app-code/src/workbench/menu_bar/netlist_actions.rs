@@ -1,13 +1,69 @@
 //! File ▸ Export ▸ Netlist. The export writes the deck the run executes, with
 //! every enabled analysis's card and its Verilog-A beside it, so the file runs
-//! in the CLI as the design runs here. It records in the model's Console, and
-//! a refusal is prompted on the session's status bar.
+//! in the CLI as the design runs here. With a deck in front of the Netlist
+//! workspace it writes a copy of that deck instead. It records in the
+//! model's Console, and a refusal is prompted on the session's status bar.
 
 use super::netlist_export::record_netlist_warnings_in;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::WorkbenchSession;
 use crate::workbench::app_state::Model;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+
+/// Export a copy of `deck` as it is in the editor, edits not yet saved
+/// included, to the file the reader picks: in the deck's own encoding and
+/// line separators, its include lines as written. The deck itself stays
+/// where it is and keeps its file.
+pub fn action_export_deck_with_io(
+    model: &mut Model,
+    deck: &crate::workbench::documents::deck_files::OpenDeck,
+    io: &(impl ExportWorkflowIo + ?Sized),
+) {
+    let file = &deck.root;
+    let name = file.name();
+    let extension = std::path::Path::new(&name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("cir")
+        .to_owned();
+    let bytes = match file.encoding.encode(&file.line_ending.write(&file.text)) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            model.report_failure("Deck export failed", error);
+            return;
+        }
+    };
+    let picked = io.show_save_dialog(SaveDialogConfig {
+        title: "Export Deck",
+        default_name: &name,
+        filter_name: "SPICE Deck",
+        filter_extensions: &[extension.as_str()],
+    });
+    let mut path = match picked {
+        Ok(Some(path)) => path,
+        Ok(None) => return,
+        Err(error) => {
+            model.report_failure("Deck export failed", error);
+            return;
+        }
+    };
+    crate::io::file_exchange::ensure_file_extension(&mut path, &extension);
+    let written = io
+        .observe_destination(&path)
+        .and_then(|destination| io.write_bytes_file_observed(&destination, &bytes, "text/plain"));
+    match written {
+        Ok(()) => {
+            model.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                crate::workbench::workflows::export_workflow::export_completion_message(
+                    "deck", &path, None, io,
+                ),
+            );
+        }
+        Err(error) => model.report_failure("Deck export failed", error),
+    }
+}
 
 pub fn action_export_netlist_with_io(
     model: &mut Model,
