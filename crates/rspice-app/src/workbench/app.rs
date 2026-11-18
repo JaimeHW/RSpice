@@ -540,6 +540,12 @@ impl RSpiceApp {
         if let Some(event) = self.state.poll_browser_project_save() {
             self.handle_save_continuation_event(event);
         }
+        // The open project's tab lock follows whatever this frame opened,
+        // saved or closed.
+        #[cfg(target_arch = "wasm32")]
+        rspice_app_services::workbench::lifecycle::project_lifecycle::follow_browser_open_lock(
+            &mut self.state,
+        );
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(event) = self.state.poll_results_save(ctx) {
             self.handle_save_continuation_event(event);

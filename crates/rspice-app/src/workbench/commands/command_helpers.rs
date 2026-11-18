@@ -485,7 +485,6 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
         }
         ProjectRequest::CommitCheckAndSave => app.commit_check_and_save(),
         ProjectRequest::OpenAnyway => {
-            #[cfg(not(target_arch = "wasm32"))]
             crate::workbench::app_state::services_access::open_anyway(&mut app.state);
         }
         ProjectRequest::GoOnLeaving { action, recent } => {

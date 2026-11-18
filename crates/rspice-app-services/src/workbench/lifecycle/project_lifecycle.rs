@@ -6,6 +6,8 @@
 //! one tab from accidentally committing unrelated drafts.
 
 mod accepted_project;
+#[cfg(target_arch = "wasm32")]
+mod browser_open_lock;
 mod dirty_answer;
 #[cfg(not(target_arch = "wasm32"))]
 mod open_access;
@@ -14,6 +16,8 @@ mod result_cache;
 #[cfg(not(target_arch = "wasm32"))]
 mod save_conflict;
 
+#[cfg(target_arch = "wasm32")]
+pub use browser_open_lock::{follow as follow_browser_open_lock, open_anyway};
 #[cfg(not(target_arch = "wasm32"))]
 pub use open_access::open_anyway;
 #[cfg(target_arch = "wasm32")]
@@ -1293,7 +1297,13 @@ pub fn prepare_browser_save(
     let project_copy = kind == BrowserSaveKind::Copy;
     let state = &mut state.lifecycle_parts();
     require_open_project(state.platform)?;
-    require_project_writable(state.model)?;
+    // A project another tab holds is kept by saving it to a file of its own,
+    // as a desktop window keeps one it cannot write; safe mode writes nothing.
+    let opened_elsewhere = state.model.safe_mode.opened_read_only.is_some()
+        && !state.model.safe_mode.safe_mode_read_only();
+    if kind == BrowserSaveKind::Save || !opened_elsewhere {
+        require_project_writable(state.model)?;
+    }
     state
         .platform
         .project_lifecycle

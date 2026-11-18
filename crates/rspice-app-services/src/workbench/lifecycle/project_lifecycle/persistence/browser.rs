@@ -1230,13 +1230,73 @@ pub(super) async fn acquire_browser_web_lock(
     binding_id: uuid::Uuid,
     required: bool,
 ) -> Result<Option<BrowserWebLock>, String> {
-    use wasm_bindgen::JsCast as _;
-
     let locks = match browser_lock_manager() {
         Ok(locks) => locks,
         Err(_error) if !required => return Ok(None),
         Err(error) => return Err(error),
     };
+    match try_browser_web_lock(&locks, &format!("rspice-binding-{binding_id}")).await? {
+        Some(lock) => Ok(Some(lock)),
+        None => Err("the project is being saved in another RSpice tab".to_owned()),
+    }
+}
+
+/// This tab's hold on the open project's lock, let go when it is dropped:
+/// the project closed, or another took its place. The browser lets go of it
+/// too when the tab closes or reloads.
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct BrowserOpenLock(BrowserWebLock);
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for BrowserOpenLock {
+    fn drop(&mut self) {
+        let _ = self.0.release.call0(&wasm_bindgen::JsValue::UNDEFINED);
+    }
+}
+
+/// What asking for a project's open lock found.
+#[cfg(target_arch = "wasm32")]
+pub(crate) enum BrowserOpenLockAttempt {
+    Held(BrowserOpenLock),
+    /// Another tab of this browser holds it.
+    HeldElsewhere,
+    /// This browser has no locks to tell tabs apart with.
+    Unavailable,
+}
+
+/// Ask, without waiting, for the lock a tab holds while it has the project
+/// kept under `binding_id` open.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_open_lock(
+    binding_id: uuid::Uuid,
+    complete: impl FnOnce(BrowserOpenLockAttempt) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let attempt = match browser_lock_manager() {
+            Ok(locks) => {
+                match try_browser_web_lock(&locks, &format!("rspice-open-{binding_id}")).await {
+                    Ok(Some(lock)) => BrowserOpenLockAttempt::Held(BrowserOpenLock(lock)),
+                    Ok(None) => BrowserOpenLockAttempt::HeldElsewhere,
+                    Err(error) => {
+                        log::warn!("the open project's tab lock could not be asked for: {error}");
+                        BrowserOpenLockAttempt::Unavailable
+                    }
+                }
+            }
+            Err(_) => BrowserOpenLockAttempt::Unavailable,
+        };
+        complete(attempt);
+    });
+}
+
+/// Take the exclusive lock `name` if no tab holds it; `None` when one does.
+#[cfg(target_arch = "wasm32")]
+async fn try_browser_web_lock(
+    locks: &wasm_bindgen::JsValue,
+    name: &str,
+) -> Result<Option<BrowserWebLock>, String> {
+    use wasm_bindgen::JsCast as _;
+
     let mut release_resolver = None;
     let release_promise = js_sys::Promise::new(&mut |resolve, _reject| {
         release_resolver = Some(resolve.clone());
@@ -1278,10 +1338,10 @@ pub(super) async fn acquire_browser_web_lock(
         &wasm_bindgen::JsValue::from_bool(true),
     )?;
     let request = call_value_method(
-        &locks,
+        locks,
         "request",
         &[
-            wasm_bindgen::JsValue::from_str(&format!("rspice-binding-{binding_id}")),
+            wasm_bindgen::JsValue::from_str(name),
             options.into(),
             callback.as_ref().clone(),
         ],
@@ -1300,7 +1360,7 @@ pub(super) async fn acquire_browser_web_lock(
     };
     if !acquired {
         let _ = await_browser_promise(request, "unavailable Web Lock cleanup").await;
-        return Err("the project is being saved in another RSpice tab".to_owned());
+        return Ok(None);
     }
     Ok(Some(BrowserWebLock {
         release,

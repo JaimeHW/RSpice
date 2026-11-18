@@ -37,8 +37,9 @@ pub enum OpenedReadOnly {
     FolderNotWritable { folder: std::path::PathBuf },
     /// The project file is marked read-only.
     FileReadOnly,
-    /// Another RSpice window has the project open: who and since when, when
-    /// that window's record could be read.
+    /// Another RSpice window, or another tab of this browser, has the
+    /// project open: who and since when, when that window's record could be
+    /// read. A browser tab is never named.
     OpenElsewhere { holder: Option<ProjectHolder> },
 }
 
@@ -80,6 +81,9 @@ impl OpenedReadOnly {
                 holder.display_name(),
                 crate::time_compat::utc_stamp(holder.since_unix_ms)
             ),
+            Self::OpenElsewhere { holder: None } if cfg!(target_arch = "wasm32") => {
+                "Opened read-only: another tab of this browser has this project open.".to_owned()
+            }
             Self::OpenElsewhere { holder: None } => {
                 "Opened read-only: another RSpice window has this project open.".to_owned()
             }

@@ -140,8 +140,8 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
     project_lifecycle::reset_for_new_project(state);
 }
 
-/// Take the project another window holds for writing all the same.
-#[cfg(not(target_arch = "wasm32"))]
+/// Take the project another window, or another tab of this browser, holds
+/// for writing all the same.
 pub(crate) fn open_anyway(state: &mut AppState) -> bool {
     project_lifecycle::open_anyway(state)
 }
