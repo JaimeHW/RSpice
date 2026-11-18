@@ -347,3 +347,45 @@ fn a_measurement_reads_as_its_plan_spells_it() {
     assert_eq!(notations.display_measurement("TPD"), "TPD");
     assert_eq!(notations.display("OKT"), "OKT");
 }
+
+/// Asked on every paint by several surfaces, the notations are read from the
+/// drawings once and held while no drawing and no plan changes; an edit to
+/// any drawing is read at the next ask.
+#[test]
+fn the_notations_are_read_again_only_after_a_drawing_changes() {
+    let reads = || NOTATION_READS.with(std::cell::Cell::get);
+    let mut workspace = crate::state::ProjectWorkspace::default();
+    workspace.insert_schematic_editor("lib/top/schematic".to_owned(), bus_sheet("data[7:0]"));
+    let mut active = bus_sheet("ctl<1:0>");
+    let start = reads();
+
+    let first = bus_notations(&workspace, &active);
+    for _ in 0..3 {
+        assert_eq!(
+            bus_notations(&workspace, &active).display("DATA#3"),
+            "data[3]"
+        );
+    }
+    assert_eq!(
+        reads() - start,
+        1,
+        "four asks over standing drawings read them once"
+    );
+    assert_eq!(first.display("CTL#1"), "ctl<1>");
+    assert_eq!(first.display("ADDR#1"), "ADDR#1");
+
+    active
+        .document_mut_for_test()
+        .buses
+        .push(drawn_bus(2, "addr[3:0]"));
+    let edited = bus_notations(&workspace, &active);
+    assert_eq!(reads() - start, 2, "the edited drawing is read again");
+    assert_eq!(edited.display("ADDR#1"), "addr[1]");
+    workspace.insert_schematic_editor("lib/other/schematic".to_owned(), bus_sheet("bus<3:0>"));
+    assert_eq!(
+        bus_notations(&workspace, &active).display("BUS#2"),
+        "bus<2>",
+        "a drawing the workspace takes in is read"
+    );
+    assert_eq!(reads() - start, 3);
+}

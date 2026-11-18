@@ -32,8 +32,10 @@
 //! time a surface paints one.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::sync::Arc;
 
 use crate::state::{BusNotation, PortSpec, ProjectWorkspace, SchematicState};
 use rspice_design::connectivity::display_bit_name;
@@ -47,8 +49,13 @@ use rspice_design::connectivity::display_bit_name;
 /// the bit keeps its deck name rather than picking a side. A name two drawings
 /// spell in two different cases keeps the engine's spelling for the same
 /// reason.
+///
+/// Shared: a clone is the same answer, and costs a count.
+#[derive(Debug, Default, Clone)]
+pub struct BusNotations(Arc<Notations>);
+
 #[derive(Debug, Default)]
-pub struct BusNotations {
+struct Notations {
     by_bus: HashMap<String, Option<BusNotation>>,
     /// Keyed by the engine's spelling: the name folded to upper case.
     drawn: HashMap<String, Option<String>>,
@@ -69,34 +76,101 @@ pub struct BusNotations {
 /// a drawing, so nothing about the answer is weaker for the design's own cells;
 /// a bus declared only inside a master the project does not own keeps its deck
 /// spelling, which is what an unclaimed bit does anyway.
+///
+/// The answer is held while it stands: while every drawing it read carries
+/// the stamp it had and the plans author the same measurements, a call reads
+/// no drawing. A stamp names one content wherever it is carried, so the one
+/// answer held serves any workspace that asks.
 pub fn bus_notations(workspace: &ProjectWorkspace, active: &SchematicState) -> BusNotations {
-    let mut notations = BusNotations::of_sheets(
-        workspace
-            .content
-            .schematic_buffers
-            .values()
-            .map(|schematic| schematic.document())
-            .chain(std::iter::once(active.document())),
-    );
-    for record in &workspace.content.simulation_plan_payloads {
-        let payload = &record.payload;
-        let defined = payload
-            .specification_definitions
-            .iter()
-            .map(|definition| definition.measurement.as_str());
-        let listed = payload.specs.iter().map(|spec| spec.measurement.as_str());
-        for name in defined.chain(listed) {
-            spell(&mut notations.measurements, name.trim());
+    let mut drawings = workspace
+        .content
+        .schematic_buffers
+        .values()
+        .map(rspice_design::schematic::owned::Schematic::content_stamp)
+        .collect::<Vec<_>>();
+    drawings.sort_unstable();
+    let measurements = workspace
+        .content
+        .simulation_plan_payloads
+        .iter()
+        .flat_map(|record| {
+            let payload = &record.payload;
+            let defined = payload
+                .specification_definitions
+                .iter()
+                .map(|definition| definition.measurement.as_str());
+            let listed = payload.specs.iter().map(|spec| spec.measurement.as_str());
+            defined.chain(listed)
+        })
+        .map(|name| name.trim().to_owned())
+        .collect::<Vec<_>>();
+    let read = NotationsRead {
+        drawings,
+        active: active.content_stamp(),
+        measurements,
+    };
+    HELD.with(|held| {
+        let mut held = held.borrow_mut();
+        if let Some((standing, notations)) = held.as_ref()
+            && *standing == read
+        {
+            return notations.clone();
         }
-    }
-    notations
+        let mut notations = Notations::of_sheets(
+            workspace
+                .content
+                .schematic_buffers
+                .values()
+                .map(|schematic| schematic.document())
+                .chain(std::iter::once(active.document())),
+        );
+        for name in &read.measurements {
+            spell(&mut notations.measurements, name);
+        }
+        let notations = BusNotations(Arc::new(notations));
+        *held = Some((read, notations.clone()));
+        notations
+    })
+}
+
+/// What one answer of [`bus_notations`] was read from: the stamp of every
+/// retained drawing, in order, the live drawing's, and the measurement names
+/// the plans author.
+#[derive(PartialEq, Eq)]
+struct NotationsRead {
+    drawings: Vec<u64>,
+    active: u64,
+    measurements: Vec<String>,
+}
+
+thread_local! {
+    /// The last answer, and what it was read from.
+    static HELD: RefCell<Option<(NotationsRead, BusNotations)>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Times this thread read the drawings for their notations.
+    pub static NOTATION_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl BusNotations {
     /// The notations `sheets` declare between them.
+    #[cfg(test)]
     fn of_sheets<'a>(
         sheets: impl IntoIterator<Item = &'a rspice_design::schematic::document::SchematicDocument>,
     ) -> Self {
+        Self(Arc::new(Notations::of_sheets(sheets)))
+    }
+}
+
+impl Notations {
+    /// The notations `sheets` declare between them.
+    fn of_sheets<'a>(
+        sheets: impl IntoIterator<Item = &'a rspice_design::schematic::document::SchematicDocument>,
+    ) -> Self {
+        #[cfg(test)]
+        NOTATION_READS.with(|reads| reads.set(reads.get() + 1));
         let mut by_bus = HashMap::new();
         let mut drawn = HashMap::new();
         let mut elements = HashMap::new();
@@ -139,12 +213,14 @@ impl BusNotations {
             measurements: HashMap::new(),
         }
     }
+}
 
+impl BusNotations {
     /// A measurement's name, spelled as the plan that authors it writes it.
     /// One no plan authors, or two plans spell two ways, is left as the
     /// engine named it.
     pub fn display_measurement<'a>(&self, name: &'a str) -> Cow<'a, str> {
-        match lookup(&self.measurements, name).flatten() {
+        match lookup(&self.0.measurements, name).flatten() {
             Some(authored) if authored != name => Cow::Owned(authored.to_owned()),
             _ => Cow::Borrowed(name),
         }
@@ -220,7 +296,7 @@ impl BusNotations {
     /// An instance scope (`XLDO.XAMP.`, its trailing dot included) with each
     /// segment a drawing places spelled as drawn.
     fn scope<'a>(&self, scope: &'a str) -> Cow<'a, str> {
-        if self.elements.is_empty()
+        if self.0.elements.is_empty()
             || !scope
                 .split('.')
                 .any(|segment| self.element(segment).is_some())
@@ -237,14 +313,14 @@ impl BusNotations {
     /// How the drawings write the element the engine names `name`, when that
     /// differs from the engine's spelling.
     fn element(&self, name: &str) -> Option<&str> {
-        lookup(&self.elements, name)?.filter(|drawn| *drawn != name)
+        lookup(&self.0.elements, name)?.filter(|drawn| *drawn != name)
     }
 
     /// `name` with the net its last segments name spelled as drawn, its
     /// instance scope kept; `None` when no drawing names it, or it already
     /// reads as drawn.
     fn drawn_net(&self, name: &str) -> Option<String> {
-        if self.drawn.is_empty() {
+        if self.0.drawn.is_empty() {
             return None;
         }
         let mut candidate = name;
@@ -261,7 +337,7 @@ impl BusNotations {
 
     /// How the drawings spell `name`: `Some(None)` when two of them disagree.
     fn spelling(&self, name: &str) -> Option<Option<&str>> {
-        lookup(&self.drawn, name)
+        lookup(&self.0.drawn, name)
     }
 
     /// `name` rendered as the bit it is, or `None` when no bus declares it.
@@ -299,7 +375,7 @@ impl BusNotations {
     fn declared(&self, base: &str) -> Option<(usize, BusNotation)> {
         let mut candidate = base;
         loop {
-            if let Some(declared) = self.by_bus.get(&candidate.to_ascii_lowercase()) {
+            if let Some(declared) = self.0.by_bus.get(&candidate.to_ascii_lowercase()) {
                 return declared.map(|notation| (base.len() - candidate.len(), notation));
             }
             candidate = candidate.split_once('.')?.1;
