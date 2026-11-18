@@ -837,7 +837,7 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("explicit validation authorizes the exact manual deck");
 
     controller.start_simulation(&mut state);
@@ -878,7 +878,7 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("explicit validation authorizes the exact manual deck");
 
     controller.start_simulation(&mut state);
@@ -962,7 +962,7 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("explicit validation authorizes the exact manual deck");
 
     controller.start_simulation(&mut state);

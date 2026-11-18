@@ -59,9 +59,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             crate::workbench::surfaces::netlist::generation::refresh_generated_artifact(cx);
             return Some(CodeHandOff::ShowInNetlist);
         }
-        CodeRequest::ValidateCodeDocument => {
-            crate::workbench::code::netlist_validation::request_validation(cx, false);
-        }
         CodeRequest::ManageSourceDocument => {
             if let Err(error) = source_document::open_source_document_dialog_in(
                 cx.wb.workspace,
@@ -197,7 +194,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         CodeRequest::FormatNetlistDocument => {
-            crate::workbench::code::netlist_validation::format_owned_netlist(cx);
+            crate::workbench::code::netlist_format::format_owned_netlist(cx);
         }
         CodeRequest::SaveDeckFile => {
             #[cfg(not(target_arch = "wasm32"))]

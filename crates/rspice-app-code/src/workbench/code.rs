@@ -5,9 +5,10 @@
 //! What it has not registered yet, the shell's legacy tables still serve.
 
 pub mod commands;
+pub mod deck_run;
 mod docks;
 pub mod netlist_first;
-pub mod netlist_validation;
+mod netlist_format;
 pub mod requests;
 mod source_menus;
 pub mod toolbar;
@@ -36,7 +37,7 @@ use crate::workbench::documents::code_workspace::{
     CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
     design_hosts_veriloga, poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
 };
-use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, cross_probe};
+use crate::workbench::documents::netlist_document::cross_probe;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -60,10 +61,6 @@ impl Feature for CodeFeature {
     type State = CodeState;
     type Session = WorkbenchSession;
     type Handles = crate::workbench::documents::code_workspace::CodeHandles;
-    /// The deck page's toolbar offers Run or Stop while the dispatcher would
-    /// run or stop, stating Stop's refusal in its words.
-    const FOREIGN_AVAILABILITY: &'static [CommandKey] =
-        &[ids::RUN_SIMULATION, ids::STOP_SIMULATION];
     /// The source editor's right-click menu offers these, each greyed while
     /// the dispatcher would not run it.
     const MENU_AVAILABILITY: &'static [CommandKey] = &[
@@ -108,7 +105,9 @@ impl Feature for CodeFeature {
 /// Netlist workspace opens the deck's own find bar, and View > Zoom over a
 /// source editor sizes the editors' text, as the editor's own Ctrl+= and
 /// Ctrl+- do. The shell asks it before the design feature, which would take
-/// both there too.
+/// both there too. Run on the Netlist workspace, while a deck is what Run
+/// runs, checks that deck and runs it as written; with the plan as the
+/// target, Simulate's Run runs it.
 const ROUTED: &[RoutedCommand<CodeFeature>] = &[
     RoutedCommand {
         key: ids::FIND_IN_DESIGN,
@@ -134,11 +133,28 @@ const ROUTED: &[RoutedCommand<CodeFeature>] = &[
         enabled: |reads| !reads.model.preferences.editor_font_size_is_actual(),
         execute: |cx| cx.model.preferences.reset_editor_font_size(),
     },
+    RoutedCommand {
+        key: ids::RUN_SIMULATION,
+        takes: |reads| reads.wb.workspace == Workspace::Netlist && runs_a_deck(reads),
+        enabled: |reads| {
+            let execution = &reads.model.simulation.execution;
+            !execution.has_active_execution() && !execution.trigger_simulation
+        },
+        execute: deck_run::request_deck_run,
+    },
 ];
 
 /// Whether a source editor is in front, so a view command is its text's.
 fn source_editor_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.wb.active_source_editor.is_some()
+}
+
+/// Whether Run on the Netlist workspace runs a deck rather than the plan.
+fn runs_a_deck(reads: &Reads<'_, CodeFeature>) -> bool {
+    matches!(
+        reads.state.netlist.run_target(),
+        crate::workbench::documents::netlist_tabs::RunTarget::Deck(_)
+    )
 }
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
@@ -318,11 +334,9 @@ impl CommandSet for CodeCommand {
                     Err(reason) => (false, reason),
                 }
             }
-            Self::ValidateCodeDocument => (
-                netlist_page_on_screen(reads)
-                    && reads.state.netlist.active_document != ActiveNetlistDocument::GeneratedDiff
-                    && !model.simulation.source.netlist_content.trim().is_empty(),
-                UNAVAILABLE,
+            Self::ShowRunDeck => (
+                reads.wb.workspace == Workspace::Netlist && runs_a_deck(reads),
+                "Run runs the plan, not a deck",
             ),
             // Unlike its neighbours this one belongs to the source documents,
             // a Verilog-A cell view, not the deck: it manages a project source
@@ -491,7 +505,9 @@ impl CommandSet for CodeCommand {
                     plot_from_source(cx, quantity);
                 }
             }
-            Self::ValidateCodeDocument => cx.wb.outbox.push(CodeRequest::ValidateCodeDocument),
+            Self::ShowRunDeck => {
+                crate::workbench::documents::deck_files::show_deck(cx.model, &mut cx.state.netlist);
+            }
             Self::ManageSourceDocument => cx.wb.outbox.push(CodeRequest::ManageSourceDocument),
             Self::GoToDefinition => cx.wb.outbox.push(CodeRequest::GoToDefinition),
             Self::FindReferences => cx.wb.outbox.push(CodeRequest::FindReferences),

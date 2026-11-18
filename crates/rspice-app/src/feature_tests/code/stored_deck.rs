@@ -18,7 +18,7 @@ fn dispatched(state: &mut AppState) -> Result<String, String> {
         rspice_app_state::state::SimulationRunIntent::ManualDeck;
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(state)
+        .prepare_deck_run(state)
         .map_err(|error| error.to_string())?;
     let dispatch = controller
         .consume_snapshot_for_dispatch(state)

@@ -149,7 +149,6 @@ fn seed_stale_design_execution_context(state: &mut AppState) {
     state.runs.manual_run.last_run_buffer = Some("last manual run\n.end\n".to_owned());
     state.runs.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
     state.runs.manual_run.pending_manual_run_id = Some(1);
-    state.runs.manual_run.rerun_queued = true;
     state.runs.manual_run.edited_lines.insert(3);
     state.results.analysis.histogram_state.selected = Some("old measurement".to_owned());
 }
@@ -161,7 +160,6 @@ fn assert_design_execution_context_cleared(state: &AppState) {
     assert!(state.runs.manual_run.last_run_buffer.is_none());
     assert!(state.runs.manual_run.pending_run_buffer.is_none());
     assert!(state.runs.manual_run.pending_manual_run_id.is_none());
-    assert!(!state.runs.manual_run.rerun_queued);
     assert!(state.runs.manual_run.edited_lines.is_empty());
     assert_eq!(state.results.analysis.histogram_state.selected, None);
 }

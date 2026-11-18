@@ -2,7 +2,7 @@
 //! opening, importing, exporting and generating a netlist, importing an
 //! LTspice or QSPICE schematic, exporting the bill of materials, a new
 //! Verilog-A device, where an instance sits in the generated deck, the Code
-//! workspace's find, validate and document tools, the source editor's
+//! workspace's find, its run deck and document tools, the source editor's
 //! line, navigation, finding and folding commands, the generated deck's
 //! revision comparison, the Verilog-A compiler, its build settings and the
 //! symbol of the module it compiles.
@@ -66,7 +66,8 @@ pub enum CodeCommand {
     FindCodeDocument,
     /// Open the find bar with its replace row, where the text may change.
     ReplaceInCodeDocument,
-    ValidateCodeDocument,
+    /// The deck Run runs on the Netlist workspace, brought to the front.
+    ShowRunDeck,
     ManageSourceDocument,
     /// The source editor's line, navigation and folding commands. Each acts
     /// on the source editor the page on screen shows as its document, and
@@ -111,7 +112,7 @@ pub enum CodeCommand {
 /// importing an LTspice or QSPICE schematic, exporting the deck from outside
 /// the netlist page, exporting the bill of materials, the generated deck, the
 /// selected instance's line in it, the Code workspace's
-/// find, validation and document tools, language navigation from
+/// find and document tools, language navigation from
 /// the caret, the Verilog-A compile, its build settings and the symbol of
 /// the module it compiles; and, from the feature's dialogs, creating the
 /// device New Verilog-A device drafted, importing the cells Import
@@ -124,7 +125,7 @@ pub enum CodeCommand {
 /// a source rail's file action and opening a placed instance of the
 /// Verilog-A cell; and, from the netlist page's dialogs, the revision
 /// comparison and a find window press; and, from the netlist page itself,
-/// validating the deck, saving the file in front, the quick fix,
+/// saving the file in front, the quick fix,
 /// formatting and a dropped file.
 /// Each command, dialog step, navigator, page dialog or page that raises one
 /// raises one. Taken straight after the call that raised it.
@@ -143,7 +144,6 @@ pub enum CodeRequest {
     ExportDeckFiles,
     GenerateNetlist,
     ShowInNetlist,
-    ValidateCodeDocument,
     ManageSourceDocument,
     GoToDefinition,
     FindReferences,
@@ -467,7 +467,7 @@ impl CodeCommand {
         Self::PlotDeviceCurrent,
         Self::FindCodeDocument,
         Self::ReplaceInCodeDocument,
-        Self::ValidateCodeDocument,
+        Self::ShowRunDeck,
         Self::ManageSourceDocument,
         Self::ToggleLineComment,
         Self::IndentLines,
@@ -519,7 +519,7 @@ impl CodeCommand {
             Self::PlotDeviceCurrent => CommandKey::new("plot-device-current"),
             Self::FindCodeDocument => CommandKey::new("find-code"),
             Self::ReplaceInCodeDocument => CommandKey::new("replace-code"),
-            Self::ValidateCodeDocument => CommandKey::new("validate-code"),
+            Self::ShowRunDeck => ids::SHOW_RUN_DECK,
             Self::ManageSourceDocument => CommandKey::new("manage-source-document"),
             Self::ToggleLineComment => CommandKey::new("toggle-line-comment"),
             Self::IndentLines => CommandKey::new("indent-lines"),
@@ -712,7 +712,7 @@ impl CodeCommand {
             Self::PlotDeviceCurrent => ("Plot device current", "Code", open),
             Self::FindCodeDocument => ("Find in source\u{2026}", "Code", palette),
             Self::ReplaceInCodeDocument => ("Replace in source\u{2026}", "Code", palette),
-            Self::ValidateCodeDocument => ("Validate netlist", "Code", palette),
+            Self::ShowRunDeck => ("Show deck", "Simulate", navigates),
             Self::ManageSourceDocument => ("Manage source document\u{2026}", "Code", palette),
             Self::ToggleLineComment => ("Toggle line comment", "Edit", palette),
             Self::IndentLines => ("Indent lines", "Edit", palette),

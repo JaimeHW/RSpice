@@ -13,7 +13,7 @@
 use egui::Key;
 use egui::accesskit::Role;
 
-use crate::feature_tests::replay::{PRIMARY, Replay, only};
+use crate::feature_tests::replay::{Control, PRIMARY, Replay, only};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 
@@ -52,6 +52,23 @@ pub(super) fn author_deck(replay: &mut Replay) {
     );
 }
 
+/// The run control while a deck is what Run runs: one button, named for
+/// the deck it runs ("Run deck deck1.cir"), as the script finds it.
+pub(super) fn run_deck(controls: &[Control]) -> &Control {
+    let mut offered = controls
+        .iter()
+        .filter(|control| control.role == Role::Button && control.label.starts_with("Run deck "));
+    let run = offered.next().expect("Run names the deck it runs");
+    assert!(offered.next().is_none(), "one Run runs the deck");
+    run
+}
+
+/// Press the run control while a deck is what Run runs.
+fn press_run_deck(replay: &mut Replay) {
+    let label = run_deck(&replay.frames(Vec::new())).label.clone();
+    replay.click(&label, Role::Button);
+}
+
 /// The browser's New deck is the command the script presses: there it asks
 /// nothing, so its name has no ellipsis.
 #[test]
@@ -68,17 +85,15 @@ fn the_browser_names_new_deck_as_the_script_presses_it() {
 }
 
 /// `author_deck` and the native half of `run`: the editor takes the typed
-/// deck, Validate
-/// source and Run deck run it, the finished run opens in Results, a press of
-/// the Task log tab shows its DONE row there, and the palette opens the
-/// Recovery page on its Create checkpoint.
+/// deck, one press of Run checks and runs it, the finished run opens in
+/// Results, a press of the Task log tab shows its DONE row there, and the
+/// palette opens the Recovery page on its Create checkpoint.
 #[test]
-fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
+fn the_engine_recovery_script_authors_and_runs_its_deck() {
     let mut replay = Replay::new();
     author_deck(&mut replay);
-    replay.click("Validate source", Role::Button);
 
-    replay.click("Run deck", Role::Button);
+    press_run_deck(&mut replay);
     // The run opens in Results the frame after it completes, so the DONE row
     // on the editor's page can last a single frame, which a browser polling
     // the tree misses. The script reads it on Results, whose own dock layout
@@ -119,7 +134,6 @@ fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
 fn a_run_failure_notice_leaves_run_deck_pressable() {
     let mut replay = Replay::new();
     author_deck(&mut replay);
-    replay.click("Validate source", Role::Button);
     let ctx = replay.ctx().clone();
     replay.app.state.workbench.toasts.notify_with_action(
         &ctx,
@@ -135,7 +149,7 @@ fn a_run_failure_notice_leaves_run_deck_pressable() {
         Role::Button,
     );
 
-    replay.click("Run deck", Role::Button);
+    press_run_deck(&mut replay);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while replay.app.state.model.simulation.retained.runs.is_empty() {
         assert!(

@@ -37,9 +37,7 @@ impl RunsState {
     }
 }
 
-/// Request a run of the Simulate workspace's run set, which replaces a
-/// netlist rerun the runs had queued.
-pub fn request_run_set(model: &mut Model, runs: &mut RunsState) {
-    runs.manual_run.rerun_queued = false;
+/// Request a run of the Simulate workspace's run set.
+pub fn request_run_set(model: &mut Model) {
     model.simulation.execution.request_simulate_run_set();
 }

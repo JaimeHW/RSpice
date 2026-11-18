@@ -46,7 +46,7 @@ pub fn start_manual_deck(source: &str) -> SimulationRunner {
 fn start_manual_deck_of(state: &impl RunHost) -> SimulationRunner {
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(state)
+        .prepare_deck_run(state)
         .expect("fixture source passes complete preparation");
     let dispatch = controller
         .consume_snapshot_for_dispatch(state)
@@ -108,7 +108,7 @@ pub fn run_manual_batch_with_lifecycle(
     state.model.simulation.source.netlist_content = source.to_owned();
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("fixture source passes complete preparation");
     run_batch(state, controller, expected_lifecycle)
 }
@@ -139,7 +139,7 @@ pub fn run_manual_batch_at_within(
     ));
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("fixture source passes complete preparation");
     run_batch_session(&mut state, controller, expected_lifecycle, limit)
 }
@@ -207,7 +207,7 @@ pub fn run_manual_batch_session<H: RunHost + Default>(source: &str) -> H {
     model.simulation.source.netlist_content = source.to_owned();
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("fixture source passes complete preparation");
     run_batch_session(
         &mut state,

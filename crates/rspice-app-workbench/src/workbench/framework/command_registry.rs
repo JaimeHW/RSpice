@@ -696,6 +696,7 @@ pub mod ids {
         SELECT_ALL = "select-all";
         SHEET_PROPERTIES = "page-setup";
         SHOW_IN_NETLIST = "show-in-netlist";
+        SHOW_RUN_DECK = "show-run-deck";
         SIMULATION_ANALYSES = "simulation-analyses";
         SIMULATION_EXCITATIONS = "simulation-excitations";
         SIMULATE_WORKSPACE = "simulate";

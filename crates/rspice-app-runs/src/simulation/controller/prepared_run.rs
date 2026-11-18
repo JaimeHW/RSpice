@@ -809,17 +809,16 @@ impl SimulationController {
         )
     }
 
-    /// Validate the exact visible manual-deck document through the same
-    /// dependency expansion, source checks, task construction, model binding,
-    /// and execution-target contract used immediately before dispatch.
+    /// Check the deck Run runs through the same dependency expansion, source
+    /// checks, task construction, model binding, and execution-target
+    /// contract used immediately before dispatch: Run on a deck's first step.
     ///
-    /// The validated snapshot is retained behind a one-shot execution permit,
-    /// with the identity of everything it was prepared from. Run dispatches
-    /// this very snapshot once none of it has moved, the deck's text, its
-    /// file, its includes and its model files among it, so a dependency
-    /// changed after validation cannot execute under a stale receipt; nothing
-    /// is prepared again in the frame that starts it.
-    pub fn validate_manual_deck_document(
+    /// The checked snapshot is retained behind a one-shot execution permit,
+    /// with the identity of everything it was prepared from. The run then
+    /// dispatches this very snapshot once none of it has moved, the deck's
+    /// text, its file, its includes and its model files among it; nothing is
+    /// prepared again in the frame that starts it.
+    pub fn prepare_deck_run(
         &mut self,
         state: &impl RunHost,
     ) -> Result<PreparedRunMetadata, PreparationError> {

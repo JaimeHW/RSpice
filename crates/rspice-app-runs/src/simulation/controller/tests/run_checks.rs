@@ -20,7 +20,7 @@ fn a_runs_assertion_report_is_retained_saved_and_restored() {
     state.model.simulation.source.netlist_content = RC.to_owned();
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the fixture deck prepares");
     state.model.simulation.execution.trigger_simulation = true;
     controller.update(&mut state, &export_io);
@@ -146,7 +146,7 @@ fn corpus_c12_fail_files_one_row_per_testbench_error_as_the_cli_prints_them() {
     state.manual_deck = Some(crate::simulation::ManualDeckCopy::new(path, deck));
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the corpus deck prepares");
     state.model.simulation.execution.trigger_simulation = true;
     controller.update(&mut state, &export_io);
@@ -235,7 +235,7 @@ fn samples_after_the_stop_time_are_one_warning_row_and_warn_the_run() {
     ));
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the deck prepares");
     state.model.simulation.execution.trigger_simulation = true;
     controller.update(&mut state, &export_io);

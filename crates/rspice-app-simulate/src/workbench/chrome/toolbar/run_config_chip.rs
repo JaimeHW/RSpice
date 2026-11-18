@@ -159,6 +159,91 @@ pub(in crate::workbench) fn run_config_selector(
     pressed
 }
 
+/// Draw the chip that stands in for the plan chip where Run runs a deck:
+/// the deck's file name over "Deck", enabled as `show`, the dispatcher's
+/// answer for Show deck, says. Returns whether the reader pressed it.
+pub(in crate::workbench) fn deck_chip(
+    ui: &mut egui::Ui,
+    deck: &str,
+    show: CommandAvailability,
+    height: f32,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let enabled = show == CommandAvailability::Available && ui.is_enabled();
+    let accessibility = format!("Deck {deck}; show the deck Run runs");
+    let summary = "Deck";
+    let measure = |text: &str, font: egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font, t.color.text)
+            .size()
+            .x
+    };
+    let width = run_config_chip_width(
+        measure(deck, theme::sans(tokens::FS_0, FontWeight::Medium)),
+        measure(summary, theme::mono(tokens::FS_0, FontWeight::Regular)),
+    );
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(width, height),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &accessibility)
+    });
+    let hovered = enabled && response.hovered();
+    ui.painter().rect(
+        rect,
+        t.radius,
+        if hovered {
+            t.color.bg_hover
+        } else {
+            t.color.bg_inset
+        },
+        egui::Stroke::new(
+            1.0,
+            if hovered {
+                t.color.border_strong
+            } else {
+                t.color.border
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    WorkbenchIcon::Netlist.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::Pos2::new(rect.left() + 16.0, rect.center().y),
+            Vec2::splat(16.0),
+        ),
+        t.color.text_dim,
+    );
+    let copy_painter = ui.painter().with_clip_rect(egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 31.0, rect.top()),
+        egui::pos2(rect.right() - 8.0, rect.bottom()),
+    ));
+    copy_painter.text(
+        egui::Pos2::new(rect.left() + 31.0, rect.center().y - 6.5),
+        egui::Align2::LEFT_CENTER,
+        deck,
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        t.color.text,
+    );
+    copy_painter.text(
+        egui::Pos2::new(rect.left() + 31.0, rect.center().y + 7.0),
+        egui::Align2::LEFT_CENTER,
+        summary,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    theme::paint_focus_ring_outset(ui, &response, rect);
+    let pressed = response.clicked() && enabled;
+    response.on_hover_text(&accessibility);
+    pressed
+}
+
 fn configured_pvt_count(model: &Model) -> usize {
     // The plan-wide Run Set expands every enabled analysis. Legacy Corner and
     // Temperature analysis drafts no longer own the workspace's PVT count and

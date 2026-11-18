@@ -35,7 +35,7 @@ pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
     let show_simulation_context = app.platform().project_lifecycle.is_open()
         && matches!(
             app.workbench().workspace,
-            Workspace::Design | Workspace::Simulate
+            Workspace::Design | Workspace::Simulate | Workspace::Netlist
         );
     Panel::top("workbench.context_toolbar")
         .exact_size(layout.toolbar_height)

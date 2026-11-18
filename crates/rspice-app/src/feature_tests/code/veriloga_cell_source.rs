@@ -283,7 +283,7 @@ fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration
     app.state.seed_test_deck(deck);
     let mut controller = rspice_app_runs::simulation::controller::SimulationController::new();
     controller
-        .validate_manual_deck_document(&app.state)
+        .prepare_deck_run(&app.state)
         .expect("the deck prepares against the migrated cell view's bundle");
 }
 

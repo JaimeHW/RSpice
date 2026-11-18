@@ -80,7 +80,7 @@ fn manual(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     state.model.simulation.execution.run_intent = super::SimulationRunIntent::ManualDeck;
     state.model.simulation.source.netlist_content = source;
     let mut controller = super::SimulationController::new();
-    controller.validate_manual_deck_document(&state).unwrap();
+    controller.prepare_deck_run(&state).unwrap();
     let run = super::run_batch(
         state,
         controller,

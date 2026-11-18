@@ -93,12 +93,12 @@ impl CodeState {
     }
 }
 
-/// The deck in front of the netlist editor's session, which a manual run
-/// reads: the open deck while it, or an include open beside it, is shown.
+/// The deck Run runs on the Netlist workspace, which a manual run reads:
+/// the deck last brought to the front, while it is open and the plan has
+/// not been brought to the front since.
 pub fn manual_deck_in(netlist: &NetlistDocumentState) -> Option<ManualDeck<'_>> {
     let deck = netlist.open_deck.as_ref()?;
-    (crate::workbench::documents::netlist_document::effective_active_document_in(netlist)
-        == ActiveNetlistDocument::OwnedSource)
+    (netlist.run_target() == crate::workbench::documents::netlist_tabs::RunTarget::Deck(deck.id))
         .then(|| ManualDeck {
             name: deck
                 .root
@@ -148,18 +148,6 @@ impl CodePort for CodeState {
             &self.code_workspace.veriloga,
             sources,
             libraries,
-        )
-    }
-
-    fn manual_deck_run_block_reason(
-        &self,
-        model: &crate::workbench::app_state::Model,
-        messages: crate::workbench::MessageCatalog,
-    ) -> Option<String> {
-        crate::workbench::documents::netlist_document::manual_deck_run_block_reason_in(
-            model,
-            &self.netlist,
-            messages,
         )
     }
 

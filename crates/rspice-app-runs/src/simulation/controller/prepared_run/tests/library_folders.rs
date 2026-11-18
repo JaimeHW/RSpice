@@ -57,12 +57,12 @@ fn a_run_resolves_an_include_only_a_library_folder_holds() {
     let mut state = deck_in(&directory);
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect_err("nothing the deck is searched from holds device.inc");
 
     set_library_folders(&mut state, vec![folder.clone()]);
     let metadata = controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the library folder holds device.inc");
     let [dependency] = metadata.sealed_source_dependencies.as_slice() else {
         panic!("one include: {:?}", metadata.sealed_source_dependencies);
@@ -96,7 +96,7 @@ fn the_projects_own_search_path_wins_over_a_library_folder() {
     set_library_folders(&mut state, vec![shared.clone()]);
 
     let metadata = SimulationController::new()
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("both hold device.inc");
     let [dependency] = metadata.sealed_source_dependencies.as_slice() else {
         panic!("one include: {:?}", metadata.sealed_source_dependencies);
@@ -125,11 +125,11 @@ fn a_receipt_names_the_library_folder_its_include_was_read_from() {
 
     set_library_folders(&mut state, vec![first.clone(), second.clone()]);
     let from_first = SimulationController::new()
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the first folder holds device.inc");
     set_library_folders(&mut state, vec![second.clone(), first.clone()]);
     let from_second = SimulationController::new()
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the second folder holds device.inc");
 
     assert_eq!(from_first.source_digest, from_second.source_digest);
@@ -154,7 +154,7 @@ fn changing_the_library_folders_after_validation_refuses_the_dispatch() {
     set_library_folders(&mut state, vec![folder]);
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the library folder holds device.inc");
 
     set_library_folders(&mut state, Vec::new());

@@ -41,14 +41,13 @@ use rspice_app_workbench::workbench::routing::surface_catalog::{SurfaceArchetype
 
 pub(in crate::workbench) mod dialog_order;
 
-/// Carry out a manual deck's validation or a campaign's start that waits for
-/// a Verilog-A compile, once it has ended. Nothing is lent while nothing
-/// waits.
+/// Carry out a deck's run or a campaign's start that waits for a Verilog-A
+/// compile, once it has ended. Nothing is lent while nothing waits.
 fn poll_waiting_preparations(app: &mut RSpiceApp) {
-    if app.state.runs.waiting.validation.is_some() {
-        rspice_app_code::workbench::code::netlist_validation::poll_waiting_validation(
-            &mut features::cx::<rspice_app_code::workbench::code::CodeFeature>(app),
-        );
+    if app.state.runs.waiting.deck_run {
+        rspice_app_code::workbench::code::deck_run::poll_waiting_deck_run(&mut features::cx::<
+            rspice_app_code::workbench::code::CodeFeature,
+        >(app));
     }
     if app.state.runs.waiting.campaign.is_some() {
         rspice_app_simulate::workbench::surfaces::simulate::plan_manager::poll_waiting_campaign(
@@ -2550,14 +2549,12 @@ mod tests {
     }
 
     /// The run history's primary runs what Run would if raised now. On the
-    /// Netlist workspace that is the deck the page shows, not the active
-    /// plan: a deck that cannot run yet leaves the primary disabled, and once
-    /// it is validated the primary is enabled and a click runs that deck.
+    /// Netlist workspace with a deck in front that is the deck, not the active
+    /// plan: the primary is enabled before any check, and a click checks the
+    /// deck and runs it.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {
-        use crate::workbench::features::cx;
-        use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
         use rspice_app_state::state::SimulationRunIntent;
 
         let ctx = Context::default();
@@ -2571,20 +2568,13 @@ mod tests {
             .components
             .clear();
 
-        let (enabled, _) = run_history_over_the_netlist(&ctx, &mut app);
-        assert!(
-            !enabled,
-            "a deck that cannot run yet leaves the primary disabled"
-        );
-
         assert!(app.state.open_test_deck(
             "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
             None,
             "standalone.cir"
         ));
-        assert!(validate_visible_netlist_source(&mut cx(&mut app)));
         let (enabled, primary) = run_history_over_the_netlist(&ctx, &mut app);
-        assert!(enabled, "a validated deck enables the primary");
+        assert!(enabled, "the deck in front enables the primary");
 
         let at = primary.center();
         run_history_pass(

@@ -1,14 +1,9 @@
 //! Netlist workspace workflows.
 //!
-//! The parts of validating the visible deck, and composing the source a run
-//! executes. Validation is pinned to an exact content digest and project
-//! revision, so an edit after validation invalidates it rather than being
-//! carried along. The code feature's `netlist_validation` runs the
-//! validation and the format over these parts.
-
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app_state::Model;
-use crate::workbench::documents::netlist_document::NetlistDocumentState;
+//! The parts Run and Format share on the Netlist workspace: where a run's
+//! check found the deck's includes, and the deck text Format writes. The
+//! code feature's deck run and format answer their commands over these
+//! parts.
 
 mod platform;
 #[cfg(test)]
@@ -167,14 +162,6 @@ pub fn formatted_deck_text(source: &str, spectre: bool) -> String {
     formatted
 }
 
-pub fn record_validation_failure(model: &mut Model, error: &str) {
-    model.record(
-        LogSeverity::Error,
-        LogSource::Netlist,
-        format!("Netlist validation failed: {error}"),
-    );
-}
-
 /// Retain where each dependency resolved so the navigator and the Problems
 /// pipeline can state it. The engine walked the chain; nothing here re-walks
 /// it, so the two can never disagree.
@@ -191,67 +178,5 @@ pub fn record_include_resolutions(
             dependency.requested_path().to_owned(),
             dependency.resolution().clone(),
         );
-    }
-}
-
-/// Bind the editor's settled findings to the generated document they were
-/// checked against. A deck is a file, not a document: its check is the
-/// validation receipt the run reads.
-pub fn acknowledge_canonical_validation(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-) -> Result<(), String> {
-    if netlist.active_document
-        != crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-    {
-        return Ok(());
-    }
-    let diagnostics = netlist
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.is_current())
-        .map(|diagnostic| {
-            let severity = match diagnostic.severity {
-                crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint
-                | crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
-                    crate::state::DiagnosticSeverity::Info
-                }
-                crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
-                    crate::state::DiagnosticSeverity::Warning
-                }
-                crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
-                    crate::state::DiagnosticSeverity::Error
-                }
-            };
-            crate::state::ValidationDiagnostic::try_new(
-                severity,
-                diagnostic.message.clone(),
-                diagnostic.line.unwrap_or(0) + 1,
-                diagnostic.column.unwrap_or(0) + 1,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    let document = model
-        .netlist_artifacts
-        .generated_document
-        .as_mut()
-        .ok_or_else(|| "The active source has no netlist document.".to_owned())?;
-    document
-        .acknowledge_validation(document.content_digest(), diagnostics)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
-/// Withdraw the generated document's validation when it is the document
-/// shown.
-pub fn invalidate_canonical_validation(model: &mut Model, netlist: &mut NetlistDocumentState) {
-    if netlist.active_document
-        != crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-    {
-        return;
-    }
-    if let Some(document) = model.netlist_artifacts.generated_document.as_mut() {
-        let _ = document.invalidate_validation(document.content_digest());
     }
 }

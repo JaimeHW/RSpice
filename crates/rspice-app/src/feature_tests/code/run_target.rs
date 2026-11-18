@@ -1,0 +1,399 @@
+//! Run on the Netlist workspace, in whole applications: what Run runs as
+//! tabs come to the front, the check that is Run's first step, where that
+//! check found the deck's includes, and how the toolbar names what runs.
+
+use crate::workbench::RSpiceApp;
+use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::SimulationRunIntent;
+use rspice_app_state::workbench::preferences::FolderListPreference;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::{CommandAvailability, ids};
+
+const DECK: &str = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+
+/// A session on the Netlist workspace with the deck `source` open from a
+/// file called `name`, and the schematic's components gone.
+fn netlist_session_with_deck(source: &str, name: &str) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    assert!(app.state.open_test_deck(source.to_owned(), None, name));
+    app.state.workbench.workspace = Workspace::Netlist;
+    app
+}
+
+/// Press F5: run Run as the key does.
+fn press_run(app: &mut RSpiceApp) {
+    app.execute_command_key(ids::RUN_SIMULATION);
+}
+
+/// Whether the press started a run of the deck as written.
+fn deck_run_started(app: &RSpiceApp) -> bool {
+    let execution = &app.state.model.simulation.execution;
+    execution.trigger_simulation && execution.run_intent == SimulationRunIntent::ManualDeck
+}
+
+/// With a deck's tab in front, F5 checks the deck and starts a run of it as
+/// written, in one press, and nothing of the plan's.
+#[test]
+fn a_deck_in_front_runs_as_written_in_one_press() {
+    let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
+
+    assert_eq!(
+        app.command_availability(ids::RUN_SIMULATION),
+        CommandAvailability::Available
+    );
+    press_run(&mut app);
+
+    assert!(deck_run_started(&app), "F5 runs the deck");
+    assert!(
+        !app.state.runs.preflight.take_run_and_queue_request(),
+        "the plan's run is not asked for"
+    );
+}
+
+/// An include, a run's input and a comparison in front leave the deck as
+/// what Run runs.
+#[test]
+fn an_include_in_front_leaves_the_deck_as_what_runs() {
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-run-target-include-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&folder).expect("fixture folder");
+    std::fs::write(folder.join("load.inc"), "R2 out 0 2k\n").expect("include written");
+    let source = "standalone\n.include \"load.inc\"\nV1 out 0 1\n.op\n.end\n";
+    let root = folder.join("amp_tb.cir");
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    assert!(
+        app.state
+            .open_test_deck(source.to_owned(), Some(root), "amp_tb.cir")
+    );
+    app.state.workbench.workspace = Workspace::Netlist;
+
+    rspice_app_code::workbench::documents::deck_files::show_include(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.code.netlist_open_documents,
+        &mut app.state.runs,
+        &folder.join("load.inc"),
+    )
+    .expect("the include opens");
+    press_run(&mut app);
+
+    assert!(deck_run_started(&app), "the deck runs, not its include");
+    std::fs::remove_dir_all(folder).expect("fixture removed");
+}
+
+/// The generated netlist in front makes the plan what Run runs: F5 asks for
+/// Simulate's own run, and the deck does not run.
+#[test]
+fn the_generated_netlist_in_front_runs_the_plan() {
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state
+            .open_test_deck(DECK.to_owned(), None, "amp_tb.cir")
+    );
+    app.state.workbench.workspace = Workspace::Netlist;
+    rspice_app_code::workbench::documents::netlist_document::show_generated_deck(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.workbench,
+    );
+
+    press_run(&mut app);
+
+    assert!(
+        app.state.runs.preflight.take_run_and_queue_request(),
+        "F5 is Simulate's Run of the plan"
+    );
+    assert!(!deck_run_started(&app), "the deck does not run");
+}
+
+/// A deck the check stops starts nothing, comes to the front, and the notice
+/// names the deck and the line.
+#[test]
+fn a_deck_with_an_error_does_not_run_and_the_notice_names_the_line() {
+    let source = "standalone\nV1 out 0 1\nQ1 out out 0 qn2\n.op\n.end\n";
+    let mut app = netlist_session_with_deck(source, "amp_tb.cir");
+
+    press_run(&mut app);
+
+    assert!(!deck_run_started(&app), "nothing starts");
+    let notice = app.state.prompt_text().unwrap_or_default().to_owned();
+    assert!(
+        notice.starts_with("amp_tb.cir did not run: "),
+        "the notice names the deck: {notice}"
+    );
+    assert!(
+        notice.contains("line 3"),
+        "the notice names the line: {notice}"
+    );
+}
+
+/// Nothing anywhere asks for a separate validation before Run: no command is
+/// called Validate.
+#[test]
+fn no_command_asks_for_a_validation_before_run() {
+    for command in CodeCommand::ALL {
+        let label = command.declared_spec().label;
+        assert!(!label.contains("Validat"), "{label}");
+    }
+}
+
+/// While a run is going, Run on the Netlist workspace is refused in Simulate's
+/// words, through the part the code feature takes in Run.
+#[test]
+fn run_is_refused_while_a_run_is_going_on_the_netlist_workspace() {
+    let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
+    app.state.model.simulation.execution.trigger_simulation = true;
+
+    assert_eq!(
+        app.routed_command_key_enabled(ids::RUN_SIMULATION),
+        Some(false)
+    );
+    assert_eq!(
+        app.command_availability(ids::RUN_SIMULATION),
+        CommandAvailability::Disabled("a run is already in progress")
+    );
+}
+
+/// Show deck brings the deck Run runs to the front from one of its includes.
+#[test]
+fn show_deck_brings_the_deck_that_runs_to_the_front() {
+    let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
+    assert_eq!(
+        app.command_availability(CodeCommand::ShowRunDeck.key()),
+        CommandAvailability::Available
+    );
+    rspice_app_code::workbench::documents::netlist_document::show_generated_deck(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.workbench,
+    );
+    assert!(
+        !app.command_availability(CodeCommand::ShowRunDeck.key())
+            .is_available(),
+        "with the plan as what runs, there is no deck to show"
+    );
+}
+
+#[test]
+fn run_finds_direct_and_transitive_includes_where_they_are() {
+    let dir = std::env::temp_dir().join(format!(
+        "rspice-netlist-dependency-closure-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let models = dir.join("models");
+    std::fs::create_dir_all(&models).expect("create dependency fixture");
+    let root = dir.join("root.cir");
+    std::fs::write(
+        models.join("first.inc"),
+        ".include \"nested.inc\"\nRmodel out 0 2k\n",
+    )
+    .expect("write direct include");
+    std::fs::write(models.join("nested.inc"), "Cmodel out 0 1p\n")
+        .expect("write transitive include");
+    let source = "standalone\n.include \"models/first.inc\"\nV1 out 0 1\n.op\n.end\n";
+    std::fs::write(&root, source).expect("write root deck");
+
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state
+            .open_test_deck(source.to_owned(), Some(root.clone()), "root.cir")
+    );
+    app.state.workbench.workspace = Workspace::Netlist;
+    press_run(&mut app);
+    assert!(deck_run_started(&app));
+
+    let resolutions = &app.state.code.code_workspace.include_resolutions;
+    let canonical = |path: &std::path::Path| std::fs::canonicalize(path).expect("fixture path");
+    assert_eq!(
+        resolutions.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["models/first.inc", "nested.inc"],
+        "the direct include and the include of an include, as their lines name them"
+    );
+    assert_eq!(
+        canonical(resolutions["models/first.inc"].resolved()),
+        canonical(&models.join("first.inc"))
+    );
+    assert_eq!(
+        canonical(resolutions["nested.inc"].resolved()),
+        canonical(&models.join("nested.inc")),
+        "an include's own include is found beside it"
+    );
+
+    std::fs::remove_dir_all(dir).expect("remove dependency fixture");
+}
+
+#[test]
+fn run_distinguishes_inline_lib_sections_from_external_lib_paths() {
+    let dir = std::env::temp_dir().join(format!(
+        "rspice-netlist-library-closure-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&dir).expect("create library fixture");
+    let root = dir.join("root.cir");
+    let library_source =
+        ".lib TT\n.model DMOD D IS=1e-14\n.endl TT\n.lib SS\n.model DMOD D IS=2e-14\n.endl SS\n";
+    std::fs::write(dir.join("corners.lib"), library_source).expect("write library");
+    let source = "standalone\n.lib LOCAL\n.model LOCALMOD D IS=3e-14\n.endl LOCAL\n.lib \"corners.lib\" TT\nD1 out 0 DMOD\n.op\n.end\n";
+    std::fs::write(&root, source).expect("write root deck");
+
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state
+            .open_test_deck(source.to_owned(), Some(root), "root.cir")
+    );
+    app.state.workbench.workspace = Workspace::Netlist;
+    press_run(&mut app);
+    assert!(deck_run_started(&app));
+
+    assert_eq!(
+        app.state
+            .code
+            .code_workspace
+            .include_resolutions
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["corners.lib"],
+        "an inline section is part of the deck; only the library file is read"
+    );
+
+    std::fs::remove_dir_all(dir).expect("remove library fixture");
+}
+
+#[test]
+fn run_resolves_an_include_only_a_library_folder_holds() {
+    let directory = std::env::temp_dir().join(format!(
+        "rspice-netlist-library-folder-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let deck = directory.join("deck");
+    let shared = directory.join("shared");
+    std::fs::create_dir_all(&deck).expect("create deck folder");
+    std::fs::create_dir_all(&shared).expect("create library folder");
+    std::fs::write(shared.join("device.inc"), "Rmodel out 0 2k\n").expect("write library include");
+    let root = deck.join("root.cir");
+    let source = "standalone\n.include \"device.inc\"\nV1 out 0 1\n.op\n.end\n";
+    std::fs::write(&root, source).expect("write root deck");
+
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state
+            .open_test_deck(source.to_owned(), Some(root), "root.cir")
+    );
+    app.state.workbench.workspace = Workspace::Netlist;
+    press_run(&mut app);
+    assert!(
+        !deck_run_started(&app),
+        "nothing the deck is searched from holds device.inc"
+    );
+    let notice = app.state.prompt_text().unwrap_or_default().to_owned();
+    assert!(
+        notice.contains("device.inc"),
+        "the notice says which include is missing: {notice}"
+    );
+
+    app.state
+        .model
+        .preferences
+        .set_folders(FolderListPreference::LibraryFolders, vec![shared.clone()])
+        .expect("a full path");
+    press_run(&mut app);
+    assert!(deck_run_started(&app));
+    let resolution = app
+        .state
+        .code
+        .code_workspace
+        .include_resolutions
+        .get("device.inc")
+        .expect("the run retains where the include resolved");
+    assert_eq!(
+        resolution.stage(),
+        rspice_core::netlist::IncludeSearchStage::LibraryPath(0)
+    );
+    let canonical = |path: &std::path::Path| std::fs::canonicalize(path).expect("fixture path");
+    assert_eq!(
+        resolution.resolved().parent().map(canonical),
+        Some(canonical(&shared))
+    );
+
+    std::fs::remove_dir_all(directory).expect("remove library fixture");
+}
+
+/// A Run pressed while a Verilog-A source the deck's check reads is
+/// compiling on another thread holds no frame: it waits, the status bar says
+/// so, and frames keep coming while the compile runs. The first frame after
+/// the compile ends runs the deck. Stop drops a run that waits.
+#[test]
+fn a_run_pressed_mid_compile_waits_while_frames_keep_coming() {
+    use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
+    use rspice_app_runs::workbench::waiting::hold_compiling;
+
+    const WAITING: &str = "Running the deck \u{b7} waiting for the Verilog-A compile";
+    fn says(output: &egui::FullOutput, text: &str) -> bool {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .is_some_and(|update| {
+                update
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some(text) || node.value() == Some(text))
+            })
+    }
+    fn deck_runs(app: &RSpiceApp) -> usize {
+        app.state
+            .model
+            .simulation
+            .retained
+            .executed_decks
+            .iter()
+            .count()
+    }
+
+    let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
+    let ctx = themed_context();
+
+    let compile = hold_compiling();
+    press_run(&mut app);
+    assert!(app.state.runs.waiting.deck_run);
+    for _ in 0..3 {
+        let output = frame(&ctx, &mut app, DESKTOP);
+        assert!(says(&output, WAITING), "the status bar says what waits");
+        assert!(!deck_run_started(&app));
+    }
+    drop(compile);
+    let output = frame(&ctx, &mut app, DESKTOP);
+    assert!(app.state.runs.waiting.is_empty());
+    assert!(!says(&output, WAITING));
+    assert!(
+        deck_run_started(&app) || deck_runs(&app) == 1,
+        "the deck's run starts once the compile ends"
+    );
+
+    let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
+    let compile = hold_compiling();
+    press_run(&mut app);
+    assert!(app.state.runs.waiting.deck_run);
+    assert!(app.command_key_enabled(ids::STOP_SIMULATION));
+    app.execute_command_key(ids::STOP_SIMULATION);
+    assert!(app.state.runs.waiting.is_empty());
+    drop(compile);
+    frame(&ctx, &mut app, DESKTOP);
+    assert!(!deck_run_started(&app), "a stopped run never starts");
+    assert_eq!(deck_runs(&app), 0, "a stopped run never starts");
+}

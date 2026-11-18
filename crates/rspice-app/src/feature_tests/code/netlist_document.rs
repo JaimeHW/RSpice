@@ -42,7 +42,19 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
             .map(|deck| deck.root.text.as_str()),
         Some(EDITED)
     );
-    assert!(state.manual_deck_run_block_reason().is_some());
+    assert_eq!(
+        state.code.netlist.run_target(),
+        rspice_app_code::workbench::documents::netlist_tabs::RunTarget::Deck(
+            state
+                .code
+                .netlist
+                .open_deck
+                .as_ref()
+                .expect("the deck stays open")
+                .id
+        ),
+        "with the run's input in front, Run still runs the deck"
+    );
 
     assert!(close_run_deck_snapshot(
         &mut state.model,

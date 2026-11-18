@@ -585,7 +585,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CodeCommand::PlotDeviceCurrent.key(),
     CodeCommand::FindCodeDocument.key(),
     CodeCommand::ReplaceInCodeDocument.key(),
-    CodeCommand::ValidateCodeDocument.key(),
+    CodeCommand::ShowRunDeck.key(),
     CodeCommand::ManageSourceDocument.key(),
     CodeCommand::ToggleLineComment.key(),
     CodeCommand::IndentLines.key(),

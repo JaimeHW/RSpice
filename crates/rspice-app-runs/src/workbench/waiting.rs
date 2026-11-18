@@ -1,4 +1,4 @@
-//! A manual deck's validation, or a campaign's start, that waits for a
+//! A deck's run, or a campaign's start, that waits for a
 //! Verilog-A compile instead of holding the frame.
 //!
 //! Both are prepared in the frame that takes the press. A PDK's or a model
@@ -15,18 +15,10 @@ use crate::product::SimulationPlanId;
 /// What waits for a Verilog-A compile to end.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WaitingPreparations {
-    /// The manual deck's validation.
-    pub validation: Option<WaitingValidation>,
+    /// Run, pressed for the deck the Netlist workspace runs.
+    pub deck_run: bool,
     /// A campaign's start.
     pub campaign: Option<WaitingCampaign>,
-}
-
-/// A manual deck's validation that waits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WaitingValidation {
-    /// The format gesture asked for it: the deck is formatted once it
-    /// validates.
-    pub then_format: bool,
 }
 
 /// A campaign's start that waits: what the campaign dialog committed.
@@ -39,31 +31,28 @@ pub struct WaitingCampaign {
 impl WaitingPreparations {
     /// Whether nothing waits.
     pub fn is_empty(&self) -> bool {
-        self.validation.is_none() && self.campaign.is_none()
+        !self.deck_run && self.campaign.is_none()
     }
 
     /// Drop everything that waits. Returns what was dropped, each as the
     /// reader would name it, for the log line that says so.
     pub fn cancel(&mut self) -> Vec<String> {
-        let validation = self
-            .validation
-            .take()
-            .map(|_| "the netlist's validation".to_owned());
+        let deck_run = std::mem::take(&mut self.deck_run).then(|| "the deck's run".to_owned());
         let campaign = self
             .campaign
             .take()
             .map(|campaign| format!("campaign '{}'", campaign.name));
-        validation.into_iter().chain(campaign).collect()
+        deck_run.into_iter().chain(campaign).collect()
     }
 
     /// What the status bar says while something waits.
     pub fn status(&self) -> Option<String> {
-        let what = match (&self.validation, &self.campaign) {
-            (None, None) => return None,
-            (Some(_), None) => "Validating the netlist".to_owned(),
-            (None, Some(campaign)) => format!("Campaign {}", campaign.name),
-            (Some(_), Some(campaign)) => {
-                format!("Validating the netlist and campaign {}", campaign.name)
+        let what = match (self.deck_run, &self.campaign) {
+            (false, None) => return None,
+            (true, None) => "Running the deck".to_owned(),
+            (false, Some(campaign)) => format!("Campaign {}", campaign.name),
+            (true, Some(campaign)) => {
+                format!("Running the deck and campaign {}", campaign.name)
             }
         };
         Some(format!("{what} \u{b7} waiting for the Verilog-A compile"))

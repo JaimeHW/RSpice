@@ -141,6 +141,7 @@ pub mod workbench {
         pub mod deck_files;
         pub mod editor_font;
         pub mod netlist_document;
+        pub mod netlist_tabs;
         pub mod text_document_model;
         pub mod text_editor_commands;
         pub mod virtual_text_editor;

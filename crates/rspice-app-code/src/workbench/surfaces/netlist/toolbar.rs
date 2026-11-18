@@ -83,7 +83,6 @@ fn action_extent(widths: &[f32]) -> f32 {
 /// may the status chips have?".
 fn full_action_extent(
     ui: &Ui,
-    execution_active: bool,
     messages: crate::workbench::MessageCatalog,
     context: ActionSetContext,
 ) -> f32 {
@@ -104,7 +103,6 @@ fn full_action_extent(
             ActiveNetlistDocument::Generated => {}
             ActiveNetlistDocument::OwnedSource => {
                 widths.push(button(&messages.text(MessageId::NetlistSaveSourceDeck)));
-                widths.push(button(&messages.text(MessageId::NetlistValidateSource)));
                 widths.push(button(&messages.text(if context.generated_ready {
                     MessageId::NetlistReturnPrimary
                 } else {
@@ -116,7 +114,6 @@ fn full_action_extent(
             }
         }
     }
-    widths.push(run_control_width(ui, execution_active, messages));
     action_extent(&widths)
 }
 
@@ -170,7 +167,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         );
     let full_action_width = full_action_extent(
         ui,
-        cx.model.simulation.execution.has_active_execution(),
         messages,
         ActionSetContext {
             active,
@@ -353,9 +349,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                     }
                 }
             }
-            if let Some(run) = run_control(ui, cx, messages) {
-                action = Some(run);
-            }
         });
     } else {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -424,12 +417,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                         {
                             action = Some(NetlistToolbarAction::Save);
                         }
-                        if ui
-                            .button(messages.text(MessageId::NetlistValidateSource))
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::Validate);
-                        }
                         if generated_ready {
                             if ui
                                 .button(messages.text(MessageId::NetlistReturnPrimary))
@@ -461,9 +448,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                         }
                     }
                 }
-            }
-            if let Some(run) = run_control(ui, cx, messages) {
-                action = Some(run);
             }
         });
     }
@@ -576,12 +560,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 &mut cx.state.netlist,
             );
         }
-        Some(NetlistToolbarAction::RunDeck) => {
-            cx.execute(crate::workbench::framework::command_registry::ids::RUN_SIMULATION);
-        }
-        Some(NetlistToolbarAction::StopRun) => {
-            cx.execute(crate::workbench::framework::command_registry::ids::STOP_SIMULATION);
-        }
         Some(NetlistToolbarAction::CloseDependency) => {
             crate::workbench::documents::netlist_document::close_active_dependency_in(
                 cx.model,
@@ -658,9 +636,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 ),
             );
         }
-        Some(NetlistToolbarAction::Validate) => {
-            cx.wb.outbox.push(CodeRequest::ValidateCodeDocument);
-        }
         Some(NetlistToolbarAction::ApplyQuickFix) => {
             cx.wb.outbox.push(CodeRequest::ApplyNetlistQuickFix);
         }
@@ -674,70 +649,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         #[cfg(any(test, feature = "test-support"))]
         actions: regions.1,
     }
-}
-
-/// The deck's Run/Stop control.
-///
-/// Both states dispatch the shared command vocabulary rather than the manual
-/// deck gate directly, so the palette, the Simulate menu and this button can
-/// never disagree about what Run does or why it is unavailable.
-fn run_control_label(execution_active: bool, messages: crate::workbench::MessageCatalog) -> String {
-    messages.text(if execution_active {
-        MessageId::NetlistStopRun
-    } else {
-        MessageId::NetlistRunDeck
-    })
-}
-
-/// The run control is sized to its own label like every other full-set button,
-/// so "Run deck" can never come out as "Run de…".
-fn run_control_width(
-    ui: &Ui,
-    execution_active: bool,
-    messages: crate::workbench::MessageCatalog,
-) -> f32 {
-    action_button_width(ui, &run_control_label(execution_active, messages))
-}
-
-fn run_control(
-    ui: &mut Ui,
-    cx: &Cx<'_, CodeFeature>,
-    messages: crate::workbench::MessageCatalog,
-) -> Option<NetlistToolbarAction> {
-    use crate::workbench::framework::command_registry::{CommandAvailability, ids};
-
-    let execution_active = cx.model.simulation.execution.has_active_execution();
-    let label = run_control_label(execution_active, messages);
-    let (command, action) = if execution_active {
-        (ids::STOP_SIMULATION, NetlistToolbarAction::StopRun)
-    } else {
-        (ids::RUN_SIMULATION, NetlistToolbarAction::RunDeck)
-    };
-    let availability = cx.foreign_availability(command);
-    let enabled = availability == CommandAvailability::Available;
-    // The registry's generic reason names the run set's plan, which this page
-    // does not have. The deck gate is the authority here, exactly as the
-    // chrome run control resolves it for this workspace.
-    let blocked = if execution_active {
-        match availability {
-            CommandAvailability::Disabled(reason) => reason.to_owned(),
-            CommandAvailability::Available | CommandAvailability::Hidden => {
-                messages.text(MessageId::NetlistGenerateBeforeAction)
-            }
-        }
-    } else {
-        crate::workbench::documents::netlist_document::manual_deck_run_block_reason_for_run(
-            cx.model,
-            &cx.state.netlist,
-            messages,
-            cx.handles.run_controller,
-        )
-        .unwrap_or_else(|| messages.text(MessageId::NetlistGenerateBeforeAction))
-    };
-    let response = ui
-        .add_enabled(enabled, egui::Button::new(&label))
-        .on_disabled_hover_text(blocked);
-    response.clicked().then_some(action)
 }
 
 fn language_tools_menu(
@@ -931,8 +842,6 @@ enum NetlistToolbarAction {
     OpenGenerated,
     CloseComparison,
     CloseRunSnapshot,
-    RunDeck,
-    StopRun,
     CloseDependency,
     Save,
     SignatureHelp,
@@ -941,6 +850,5 @@ enum NetlistToolbarAction {
     WorkspaceSymbols,
     Find,
     FormatDocument,
-    Validate,
     ApplyQuickFix,
 }

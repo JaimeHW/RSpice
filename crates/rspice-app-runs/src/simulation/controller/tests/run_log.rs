@@ -20,7 +20,7 @@ fn start_manual_batch(source: &str) -> (RunTestHost, SimulationController) {
     state.model.simulation.source.netlist_content = source.to_owned();
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the fixture deck prepares");
     state.model.simulation.execution.trigger_simulation = true;
     controller.update(&mut state, &MockExportWorkflowIo::default());

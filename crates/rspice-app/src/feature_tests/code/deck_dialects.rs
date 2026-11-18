@@ -4,12 +4,13 @@
 //! review first.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::features::cx;
-use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
+use rspice_app_state::state::SimulationRunIntent;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 /// Open `source` as the deck file `name` in an application with no
-/// schematic, check it as Run does, and give back what the check said: the
-/// engine's refusal, or nothing.
+/// schematic, press Run, and give back what the check that is Run's first
+/// step said: the engine's refusal, or nothing when the deck runs.
 fn checked(source: &str, name: &str) -> Option<String> {
     let mut app = RSpiceApp::test_instance();
     app.state
@@ -19,18 +20,13 @@ fn checked(source: &str, name: &str) -> Option<String> {
         .components
         .clear();
     assert!(app.state.open_test_deck(source.to_owned(), None, name));
-    if validate_visible_netlist_source(&mut cx(&mut app)) {
-        assert_eq!(app.manual_deck_run_block_reason(), None, "{name} runs");
+    app.state.workbench.workspace = Workspace::Netlist;
+    app.execute_command_key(ids::RUN_SIMULATION);
+    let execution = &app.state.model.simulation.execution;
+    if execution.trigger_simulation && execution.run_intent == SimulationRunIntent::ManualDeck {
         return None;
     }
-    Some(
-        app.state
-            .model
-            .netlist_artifacts
-            .validation_error
-            .clone()
-            .unwrap_or_default(),
-    )
+    Some(app.state.prompt_text().unwrap_or_default().to_owned())
 }
 
 #[test]

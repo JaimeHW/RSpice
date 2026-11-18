@@ -208,11 +208,6 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
                 WorkbenchIcon::Export,
                 "Export generated deck",
             ),
-            labelled(
-                CodeCommand::ValidateCodeDocument.key(),
-                WorkbenchIcon::Check,
-                "Validate generated netlist",
-            ),
             ToolbarEntry::Separator,
             labelled(
                 CodeCommand::CompareGeneratedRevisions.key(),
@@ -225,11 +220,6 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
         owned_deck_shown,
         &[
             labelled(ids::SAVE, WorkbenchIcon::Save, "Save deck"),
-            labelled(
-                CodeCommand::ValidateCodeDocument.key(),
-                WorkbenchIcon::Check,
-                "Validate source",
-            ),
             ToolbarEntry::Separator,
             labelled(
                 CodeCommand::ExportNetlist.key(),
@@ -238,7 +228,6 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
             ),
         ],
     ),
-    icon(ids::RUN_SIMULATION, WorkbenchIcon::Run),
 ];
 
 fn generated_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {

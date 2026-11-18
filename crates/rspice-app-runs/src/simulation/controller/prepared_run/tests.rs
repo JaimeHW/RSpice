@@ -1302,7 +1302,7 @@ fn direct_manual_run_cannot_bypass_internal_prepare_and_permit_consumption() {
     assert!(controller.cached_netlist.is_none());
 
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("explicit validation authorizes the exact manual deck");
     controller.start_simulation(&mut state);
 
@@ -1334,7 +1334,7 @@ fn included_source_mutation_after_prepare_is_rejected() {
     ));
     let mut controller = SimulationController::new();
     let metadata = controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("validate and retain first include closure");
 
     fs::write(&include, "R1 out 0 2k\n").expect("mutate include");
@@ -1368,7 +1368,7 @@ fn dispatched_include_closure_never_reopens_mutated_source_files() {
     ));
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("validate the exact include closure");
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -1400,7 +1400,7 @@ fn a_validated_manual_deck_dispatches_without_being_prepared_again() {
     let state = manual_deck_state(MANUAL_DECK);
     let mut controller = SimulationController::new();
     let validated = controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the deck validates");
     assert_eq!(
         thread_preparations::take(),
@@ -1426,7 +1426,7 @@ fn an_edit_to_a_validated_manual_deck_refuses_its_run() {
     let mut state = manual_deck_state(MANUAL_DECK);
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the deck validates");
     thread_preparations::take();
     state.model.simulation.source.netlist_content = MANUAL_DECK.replace("1k", "2k");
@@ -1455,7 +1455,7 @@ fn a_schematic_edit_a_manual_deck_does_not_read_leaves_it_to_run() {
     load_example("Voltage Divider", &mut state.model.schematic);
     let mut controller = SimulationController::new();
     let validated = controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("the deck validates");
     let topology = state.model.schematic.topology_version();
     state
@@ -1713,7 +1713,7 @@ fn an_unresolved_device_model_is_named_at_prepare_rather_than_at_dispatch() {
     );
     let mut controller = SimulationController::new();
     let error = controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect_err("a device naming an undefined model cannot be prepared");
     assert_eq!(error.stage(), PreparationStage::ModelBindings);
     let named = error.message().to_ascii_lowercase();
@@ -1740,7 +1740,7 @@ fn builder_resolvable_model_names_prepare_without_any_card() {
     ] {
         let state = manual_deck_state(deck);
         let mut controller = SimulationController::new();
-        if let Err(error) = controller.validate_manual_deck_document(&state) {
+        if let Err(error) = controller.prepare_deck_run(&state) {
             panic!("a deck the builder resolves was rejected: {deck}: {error}");
         }
     }

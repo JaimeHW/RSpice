@@ -37,7 +37,8 @@ impl Feature for SimulateFeature {
     /// split stage will not open, in the dispatcher's own words. The
     /// toolbar's run controls and plan chip offer Run or Stop, Preflight,
     /// Options and Manage plans as the dispatcher answers them, its guards
-    /// included.
+    /// included, and the deck chip that stands in for the plan chip where
+    /// Run runs a deck offers Show deck.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
         SimulateCommand::Run.key(),
         SimulateCommand::Stop.key(),
@@ -45,6 +46,7 @@ impl Feature for SimulateFeature {
         SimulateCommand::Preflight.key(),
         SimulateCommand::Options.key(),
         SimulateCommand::ManagePlans.key(),
+        ids::SHOW_RUN_DECK,
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {

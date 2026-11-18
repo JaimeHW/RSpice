@@ -1394,7 +1394,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         DesignCommand::RenameSelection.key(),
         DesignCommand::CheckCellview.key(),
         DesignCommand::CheckDesign.key(),
-        CodeCommand::ValidateCodeDocument.key(),
         SimulateCommand::Preflight.key(),
         ModelsCommand::ModelValidate.key(),
     ] {

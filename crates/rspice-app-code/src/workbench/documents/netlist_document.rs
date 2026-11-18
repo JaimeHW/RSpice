@@ -408,75 +408,6 @@ pub(crate) fn working_deck_source_in<'a>(
     }
 }
 
-/// Why Run on the Netlist workspace will not run the deck: what
-/// [`manual_deck_run_block_reason_in`] finds, then a validation whose
-/// authorization the run controller no longer holds, which is the run
-/// tier's half of the answer.
-pub fn manual_deck_run_block_reason_for_run(
-    model: &Model,
-    netlist: &NetlistDocumentState,
-    messages: crate::workbench::MessageCatalog,
-    controller: &rspice_app_runs::simulation::SimulationController,
-) -> Option<String> {
-    manual_deck_run_block_reason_in(model, netlist, messages).or_else(|| {
-        rspice_app_runs::workbench::app_state::run_preflight::manual_deck_authorization_block_reason(
-            model, controller,
-        )
-    })
-}
-
-/// User-facing reason the Netlist workspace cannot run the current deck. It
-/// reads the model, the netlist editor's state and the message catalogue.
-pub fn manual_deck_run_block_reason_in(
-    model: &Model,
-    netlist: &NetlistDocumentState,
-    messages: crate::workbench::MessageCatalog,
-) -> Option<String> {
-    if model.simulation.execution.has_active_execution() {
-        return Some(messages.text(crate::workbench::MessageId::NetlistRunAlreadyActive));
-    }
-    let active_document = effective_active_document_in(netlist);
-    if netlist.active_dependency_identity.is_some() {
-        return Some(messages.text(crate::workbench::MessageId::NetlistDependencyCannotRun));
-    }
-    let source = working_deck_source_in(model, netlist);
-    if source.trim().is_empty() {
-        return Some(messages.text(crate::workbench::MessageId::NetlistRunNeedsText));
-    }
-    if active_document == ActiveNetlistDocument::GeneratedDiff {
-        return Some(messages.text(crate::workbench::MessageId::NetlistRunComparison));
-    }
-    if active_document == ActiveNetlistDocument::RunSnapshot {
-        return Some(messages.text(crate::workbench::MessageId::NetlistRunUsedDeck));
-    }
-    let current_digest = crate::state::content_digest(source);
-    if active_document == ActiveNetlistDocument::Generated
-        && (model.netlist_artifacts.generation_error.is_some()
-            || model.netlist_artifacts.generated_input_digest
-                != model.netlist_artifacts.current_generation_input_digest)
-    {
-        return Some(
-            model
-                .netlist_artifacts
-                .generation_error
-                .clone()
-                .unwrap_or_else(|| messages.text(crate::workbench::MessageId::NetlistRunStale)),
-        );
-    }
-    let validated = model
-        .netlist_artifacts
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == current_digest
-                && receipt.project_revision == model.workspace.content.project.revision().get()
-        });
-    if !validated {
-        return Some(messages.text(crate::workbench::MessageId::NetlistRunUnvalidated));
-    }
-    None
-}
-
 /// Open a resolved direct or transitive dependency without changing its root
 /// document selection or ownership. Unresolved and stale identities fail
 /// closed and leave the current buffer unchanged. It works over the model, the
@@ -633,6 +564,7 @@ pub fn show_generated_deck(
         netlist.active_dependency_root = None;
         netlist.active_document = ActiveNetlistDocument::Generated;
         netlist.active_document_initialized = true;
+        netlist.run_the_plan();
     }
     if workbench.workspace != crate::workbench::state::Workspace::Netlist {
         workbench.activate(crate::workbench::state::Workspace::Netlist);
@@ -649,6 +581,8 @@ pub fn open_generated_primary_in(model: &mut Model, netlist: &mut NetlistDocumen
     {
         return false;
     }
+    // With the generated netlist in front, Run runs the plan.
+    netlist.run_the_plan();
     // A session that never chose a document is not showing the generated one
     // yet, whatever the default says: the page would put a retained deck in
     // front on its first frame.
@@ -726,6 +660,10 @@ pub struct NetlistDocumentState {
     /// The project deck whose file could not be read, so it is not tried
     /// again on every frame.
     pub unreadable_deck: Option<crate::state::DeckId>,
+    /// What Run runs on this workspace: read through
+    /// [`NetlistDocumentState::run_target`], which answers the plan for a
+    /// deck that is no longer open.
+    pub(crate) run_target: super::netlist_tabs::RunTarget,
     /// Prior immutable artifacts retained for deterministic revision compare.
     pub generated_history: Vec<crate::state::GeneratedArtifact>,
     /// Read-only unified comparison document (`generated.diff`).
@@ -839,6 +777,25 @@ pub struct NetlistDocumentState {
 }
 
 impl NetlistDocumentState {
+    /// What Run runs: the deck it was last pointed at while that deck is the
+    /// open one, else the plan.
+    #[must_use]
+    pub fn run_target(&self) -> super::netlist_tabs::RunTarget {
+        use super::netlist_tabs::RunTarget;
+        match self.run_target {
+            RunTarget::Deck(id) if self.open_deck.as_ref().is_some_and(|deck| deck.id == id) => {
+                RunTarget::Deck(id)
+            }
+            RunTarget::Deck(_) | RunTarget::Plan => RunTarget::Plan,
+        }
+    }
+
+    /// Run runs the plan from now on: the deck it ran has gone from the
+    /// front for good, as its tab closed.
+    pub fn run_the_plan(&mut self) {
+        self.run_target = super::netlist_tabs::RunTarget::Plan;
+    }
+
     /// Whether the buffer stands where an edit typed in the editor left it,
     /// so its indexes may trail it by a build while the writer types.
     fn is_being_typed(&self) -> bool {
@@ -896,31 +853,9 @@ impl NetlistDocumentState {
     }
 }
 
-/// Reconcile queued execution and diff state before rendering the document,
-/// over the model, the netlist editor's state, the runs and the session.
-pub fn prepare(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-    runs: &mut RunsState,
-    workbench: &mut crate::workbench::state::WorkbenchSession,
-) {
-    if runs.manual_run.rerun_queued && !model.simulation.execution.has_active_execution() {
-        runs.manual_run.rerun_queued = false;
-        if let Some(reason) = manual_deck_run_block_reason_in(model, netlist, workbench.messages())
-        {
-            model.record(
-                crate::diagnostics::LogSeverity::Warning,
-                crate::diagnostics::LogSource::Run,
-                workbench.messages().format(
-                    crate::workbench::MessageId::NetlistRerunCancelled,
-                    &[("reason", &reason)],
-                ),
-            );
-        } else {
-            request_netlist_manual_deck_run_in(model, runs, workbench);
-        }
-    }
-
+/// Mark the lines changed since the last run before rendering the document,
+/// over the model, the netlist editor's state and the runs.
+pub fn prepare(model: &mut Model, netlist: &mut NetlistDocumentState, runs: &mut RunsState) {
     let data_version = model.simulation.view.data_version;
     if netlist.seen_data_version == data_version {
         return;
@@ -931,23 +866,6 @@ pub fn prepare(
             &model.simulation.source.netlist_content,
             baseline,
         );
-    }
-}
-
-/// Run the Netlist workspace's deck: remember the page Run was pressed on,
-/// and start the run, or queue it behind the one going. It writes the model,
-/// the runs and the session.
-pub fn request_netlist_manual_deck_run_in(
-    model: &mut Model,
-    runs: &mut RunsState,
-    workbench: &mut crate::workbench::state::WorkbenchSession,
-) {
-    workbench.run_press_route = Some(workbench.current_route());
-    model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
-    if model.simulation.execution.has_active_execution() {
-        runs.manual_run.rerun_queued = true;
-    } else {
-        model.simulation.execution.request_manual_deck_run();
     }
 }
 

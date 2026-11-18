@@ -146,15 +146,6 @@ pub trait CodePort {
         sources: &ProjectSourceRegistry,
         libraries: &LibraryManager,
     ) -> Option<(CellViewRef, String)>;
-    /// Why the Netlist workspace cannot run the deck it shows, as `model`
-    /// stands, in the words `messages` gives; `None` when nothing in the
-    /// deck or the editor stops it. Whether the run's authorization is still
-    /// current is the run tier's half of the answer.
-    fn manual_deck_run_block_reason(
-        &self,
-        model: &Model,
-        messages: crate::workbench::localization::MessageCatalog,
-    ) -> Option<String>;
     /// Whether New Verilog-A device can make anything at all as `model`
     /// stands: it needs a library it can write. A port with no device form
     /// offers nothing.

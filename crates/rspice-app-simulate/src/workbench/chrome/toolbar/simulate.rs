@@ -62,6 +62,9 @@ pub(in crate::workbench) struct RunControls<'a> {
     pub(in crate::workbench) options: RunEntry,
     /// Why the primary is unavailable, read only while it is.
     pub(in crate::workbench) unavailable_reason: Option<String>,
+    /// The deck Run runs on the Netlist workspace, by its file's name, when
+    /// Run runs a deck there rather than the plan.
+    pub(in crate::workbench) deck: Option<String>,
 }
 
 /// One run command as the control or its menu offers it: what it is called,
@@ -96,7 +99,10 @@ pub(in crate::workbench) fn run_controls(
     };
     let t = Tokens::get(ui.ctx());
     let radius = t.radius.round().clamp(0.0, u8::MAX as f32) as u8;
-    let label = run_control_label_for(model, checking, layout);
+    let label = match &controls.deck {
+        Some(_) if !execution_active => "Run deck".to_owned(),
+        _ => run_control_label_for(model, checking, layout),
+    };
     let label_width = ui
         .painter()
         .layout_no_wrap(
@@ -124,6 +130,8 @@ pub(in crate::workbench) fn run_controls(
                 "Simulation cancellation in progress".to_owned()
             } else if execution_active {
                 "Stop active simulation".to_owned()
+            } else if let Some(deck) = &controls.deck {
+                format!("Run deck {deck}")
             } else {
                 let reference = model.sim_setup.reference_pvt;
                 let quantity_policy = model.preferences.quantity_presentation_policy();

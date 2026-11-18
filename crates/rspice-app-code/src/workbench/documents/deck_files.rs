@@ -1332,6 +1332,8 @@ pub fn show_deck(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool 
     let Some(deck) = netlist.open_deck.as_ref() else {
         return false;
     };
+    // The deck in front is the deck Run runs.
+    netlist.run_target = super::netlist_tabs::RunTarget::Deck(deck.id);
     // Asking again for the deck already in front changes nothing: a fresh
     // revision would throw away the deck's settled check.
     if netlist.active_document == ActiveNetlistDocument::OwnedSource

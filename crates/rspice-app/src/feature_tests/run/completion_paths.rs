@@ -12,7 +12,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .prepare_deck_run(&state)
         .expect("explicit validation authorizes the exact manual deck");
     controller.start_simulation(&mut state);
     let task_provenance = controller

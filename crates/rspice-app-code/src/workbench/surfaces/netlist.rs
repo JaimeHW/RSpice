@@ -215,7 +215,6 @@ pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
         cx.model,
         &mut cx.state.netlist,
         cx.runs,
-        cx.wb,
     );
     if !generated_primary_unavailable(cx.model, &cx.state.netlist) {
         let editor = crate::workbench::documents::text_editor_commands::ActiveSourceEditor {

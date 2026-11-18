@@ -8,11 +8,11 @@
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::run_preflight;
-use crate::workbench::chrome::toolbar::run_config_chip::run_config_selector;
+use crate::workbench::chrome::toolbar::run_config_chip::{deck_chip, run_config_selector};
 use crate::workbench::chrome::toolbar::simulate::{
     RunControls, RunEntry, pvt_selector, run_controls,
 };
-use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
@@ -21,11 +21,28 @@ use super::commands::SimulateCommand;
 use super::{SimulateFeature, invalidate_preflight};
 
 /// Draw the trailing group: the run controls, then the plan chip and the PVT
-/// chip where `layout` has room for them.
+/// chip where `layout` has room for them. Where Run runs a deck, on the
+/// Netlist workspace, the deck's chip stands in the plan chip's place, and
+/// pressing it brings the deck's tab to the front.
 pub fn show_trailing(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
-    let controls = run_control_parts(cx, ui);
-    if let Some(key) = run_controls(ui, &controls, layout) {
+    let mut controls = run_control_parts(cx, ui);
+    let pressed = run_controls(ui, &controls, layout);
+    let deck = controls.deck.take();
+    if let Some(key) = pressed {
         cx.execute(key);
+    }
+    if let Some(deck) = deck {
+        if layout.show_run_config_selector
+            && deck_chip(
+                ui,
+                &deck,
+                cx.foreign_availability(ids::SHOW_RUN_DECK),
+                layout.run_control_height,
+            )
+        {
+            cx.execute(ids::SHOW_RUN_DECK);
+        }
+        return;
     }
     let manage = SimulateCommand::ManagePlans.key();
     if layout.show_run_config_selector
@@ -81,6 +98,16 @@ fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunC
     let primary = entry(primary);
     let unavailable_reason =
         (!primary.enabled).then(|| unavailable_reason(cx, primary.key, execution_active));
+    // Run on the Netlist workspace runs the deck the code feature names, when
+    // it names one; the plan otherwise.
+    let deck = (cx.wb.workspace == Workspace::Netlist)
+        .then(|| {
+            cx.peers
+                .code()
+                .manual_deck()
+                .map(|deck| deck.name.to_owned())
+        })
+        .flatten();
     RunControls {
         model: cx.model,
         checking,
@@ -88,12 +115,12 @@ fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunC
         preflight: entry(SimulateCommand::Preflight.key()),
         options: entry(SimulateCommand::Options.key()),
         unavailable_reason,
+        deck,
     }
 }
 
 /// Why Run or Stop, `command`, is unavailable: while a run is active, the
-/// dispatcher's reason; on the Netlist workspace, why its deck cannot run;
-/// elsewhere, why the active plan cannot.
+/// dispatcher's reason; otherwise why the active plan cannot run.
 fn unavailable_reason(
     cx: &Cx<'_, SimulateFeature>,
     command: CommandKey,
@@ -104,16 +131,6 @@ fn unavailable_reason(
             CommandAvailability::Disabled(reason) => Some(reason.to_owned()),
             CommandAvailability::Available | CommandAvailability::Hidden => None,
         }
-    } else if cx.wb.workspace == Workspace::Netlist {
-        cx.peers
-            .code()
-            .manual_deck_run_block_reason(cx.model, cx.wb.messages())
-            .or_else(|| {
-                run_preflight::manual_deck_authorization_block_reason(
-                    cx.model,
-                    cx.handles.run_controller,
-                )
-            })
     } else {
         run_preflight::simulation_run_block_reason(
             cx.model,

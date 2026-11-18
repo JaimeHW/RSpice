@@ -48,24 +48,24 @@ fn frozen_from(app: &mut RSpiceApp) -> FrozenRun {
 fn a_campaigns_frozen_host_leaves_the_live_results_and_runs_untouched() {
     let mut app = RSpiceApp::test_instance();
     let live_source = app.state.results.analysis.fft_state.selected_source.clone();
-    let live_rerun = app.state.runs.manual_run.rerun_queued;
+    let live_marks = app.state.runs.manual_run.edited_lines.clone();
     let mut frozen = frozen_from(&mut app);
 
     frozen.apply_run_event(RunEvent::FftSourceChosen {
         source: "V(out)".to_owned(),
     });
-    frozen.runs_mut().manual_run.rerun_queued = !live_rerun;
+    frozen.runs_mut().manual_run.edited_lines.insert(usize::MAX);
 
     assert_eq!(
         frozen.viewer_reading().fft_source.as_deref(),
         Some("V(out)")
     );
-    assert_eq!(frozen.runs().manual_run.rerun_queued, !live_rerun);
+    assert!(frozen.runs().manual_run.edited_lines.contains(&usize::MAX));
     assert_eq!(
         app.state.results.analysis.fft_state.selected_source,
         live_source
     );
-    assert_eq!(app.state.runs.manual_run.rerun_queued, live_rerun);
+    assert_eq!(app.state.runs.manual_run.edited_lines, live_marks);
 }
 
 /// What code shows reaches the run tier's host when the host is built, and

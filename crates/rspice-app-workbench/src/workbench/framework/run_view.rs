@@ -153,7 +153,7 @@ impl RunHost for RunView<'_, '_> {
     }
 
     fn queue_run_set(&mut self) {
-        request_run_set(self.model, self.runs);
+        request_run_set(self.model);
     }
 
     fn sync_active_schematic_to_workspace(&mut self) {
@@ -275,7 +275,7 @@ impl RunHost for FrozenRun {
     /// The run set is queued on the copy's model; the reader's workspace
     /// stays where it is.
     fn queue_run_set(&mut self) {
-        request_run_set(&mut self.model, &mut self.runs);
+        request_run_set(&mut self.model);
     }
 
     fn sync_active_schematic_to_workspace(&mut self) {

@@ -18,6 +18,7 @@ use rspice_app_code::workbench::documents::netlist_document::{
 };
 use rspice_app_state::state::ProjectDeck;
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 const DECK: &str = "* amp\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";
 const EDITED: &str = "* amp\nV1 in 0 1\nR1 in 0 2k\n.op\n.end\n";
@@ -123,23 +124,25 @@ fn a_tab_holding_edits_keeps_them_and_shows_the_change_on_disk() {
 fn run_waits_while_a_file_changed_on_disk_holds_edits() {
     let folder = Folder::new();
     let path = folder.write("amp.cir", DECK);
-    let mut state = opened(&path);
+    let mut app = app_with_deck(&path);
+    app.state.workbench.activate(Workspace::Netlist);
     assert!(edit_deck_file(
-        &mut state.model,
-        &mut state.code.netlist,
+        &mut app.state.model,
+        &mut app.state.code.netlist,
         EDITED.to_owned()
     ));
     std::fs::write(&path, ON_DISK).expect("another writer");
 
-    state.request_netlist_manual_deck_run();
+    app.execute_command_key(ids::RUN_SIMULATION);
 
+    let state = &app.state;
     assert!(!state.model.simulation.execution.trigger_simulation);
     assert_eq!(
         state.prompt_text(),
         Some("Run is waiting: amp.cir changed on disk. Reload it, keep yours or compare the two.")
     );
     assert_eq!(std::fs::read_to_string(&path).expect("the deck"), ON_DISK);
-    assert_eq!(root(&state).text, EDITED);
+    assert_eq!(root(state).text, EDITED);
 }
 
 /// Reload drops the tab's edits for the file on disk.
@@ -210,7 +213,9 @@ fn run_saves_an_edited_include_and_the_run_reads_it() {
         "inc.cir",
         "* include\n.include models.inc\nV1 in 0 1\nR1 in a 1k\nD1 a 0 dmod\n.op\n.end\n",
     );
-    let mut state = opened(&deck);
+    let mut app = app_with_deck(&deck);
+    app.state.workbench.activate(Workspace::Netlist);
+    let state = &mut app.state;
     deck_files::show_include(
         &mut state.model,
         &mut state.code.netlist,
@@ -229,13 +234,13 @@ fn run_saves_an_edited_include_and_the_run_reads_it() {
         &mut state.code.netlist
     ));
 
-    state.request_netlist_manual_deck_run();
+    app.execute_command_key(ids::RUN_SIMULATION);
 
     assert_eq!(
         std::fs::read_to_string(&include).expect("the include"),
         ".model dmod d is=3e-14\n"
     );
-    let netlist = dispatched(&mut state).expect("the deck runs");
+    let netlist = dispatched(&mut app.state).expect("the deck runs");
     assert!(netlist.contains("3e-14"), "{netlist}");
 }
 

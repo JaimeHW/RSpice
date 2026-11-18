@@ -180,47 +180,6 @@ impl AppState {
         run_preflight::simulation_run_preflight_block_reason(&self.model, self.slot_facts())
     }
 
-    /// User-facing reason the Netlist workspace cannot run the current deck.
-    pub fn manual_deck_run_block_reason(&self) -> Option<String> {
-        rspice_app_code::workbench::documents::netlist_document::manual_deck_run_block_reason_in(
-            &self.model,
-            &self.code.netlist,
-            self.workbench.messages(),
-        )
-    }
-
-    /// Request a Netlist workspace run, queuing one re-run if the engine is busy.
-    /// The deck's files are looked at on disk and saved first, so the run
-    /// reads what their tabs show; a file changed on disk under edits holds
-    /// the run until the reader answers for it.
-    pub(crate) fn request_netlist_manual_deck_run(&mut self) {
-        match rspice_app_code::workbench::documents::deck_files::sync_before_run(
-            &mut self.model,
-            &mut self.code.netlist,
-        ) {
-            Ok(notices) => {
-                let reloaded = !notices.is_empty();
-                for notice in notices {
-                    self.workbench.prompt(notice);
-                }
-                // A deck read again from disk is not the deck that was checked.
-                if reloaded && let Some(reason) = self.manual_deck_run_block_reason() {
-                    self.workbench.prompt(reason);
-                    return;
-                }
-            }
-            Err(why) => {
-                self.workbench.prompt(why);
-                return;
-            }
-        }
-        rspice_app_code::workbench::documents::netlist_document::request_netlist_manual_deck_run_in(
-            &mut self.model,
-            &mut self.runs,
-            &mut self.workbench,
-        );
-    }
-
     /// [`run_preflight::current_blocking_drc_result`] for the session's model.
     pub fn current_blocking_drc_result(&self) -> Option<&rspice_design::drc::DrcResult> {
         run_preflight::current_blocking_drc_result(&self.model, self.slot_facts())
@@ -237,9 +196,9 @@ impl AppState {
     }
 
     /// [`request_run_set`](rspice_app_runs::workbench::slots::runs::request_run_set)
-    /// for the session's model and runs.
+    /// for the session's model.
     pub fn request_run_set_simulation(&mut self) {
-        rspice_app_runs::workbench::slots::runs::request_run_set(&mut self.model, &mut self.runs);
+        rspice_app_runs::workbench::slots::runs::request_run_set(&mut self.model);
     }
 
     /// Answer the gesture just made, on the status bar.

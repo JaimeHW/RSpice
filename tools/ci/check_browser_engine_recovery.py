@@ -63,6 +63,20 @@ def has_control(browser, label):
     return any(control["label"] == label for control in controls(browser.snapshot()))
 
 
+def run_deck_label(browser):
+    """The run control while a deck is what Run runs, named for that deck."""
+    labels = [control["label"] for control in controls(browser.snapshot())
+              if control["role"] == "button" and control["label"].startswith("Run deck ")]
+    if len(labels) != 1:
+        raise AssertionError(f"Expected one Run naming the deck; got {labels}")
+    return labels[0]
+
+
+def has_run_deck(browser):
+    return any(control["label"].startswith("Run deck ")
+               for control in controls(browser.snapshot()))
+
+
 def author_deck(browser):
     browser.click("Netlist", "button")
     # The browser has no file system: New deck makes a deck the project keeps
@@ -73,8 +87,7 @@ def author_deck(browser):
     browser.keys("a", ("\ue009",))
     browser.snapshot()
     browser.keys(DECK)
-    browser.click("Validate source", "button")
-    browser.capture("validated-deck")
+    browser.capture("authored-deck")
 
 
 def check_console(browser, fault):
@@ -101,7 +114,7 @@ def run(browser, fault, cancel_startup=False):
         raise AssertionError("An uninitialized worker was not reported as Engine starting")
     browser.capture("starting")
     author_deck(browser)
-    browser.click("Run deck", "button")
+    browser.click(run_deck_label(browser), "button")
     wait_for(lambda: has_control(browser, "Stop"), "the queued manual deck")
     if not has_control(browser, "Engine starting"):
         raise AssertionError("A queued request advertised progress before worker initialization")
@@ -112,7 +125,7 @@ def run(browser, fault, cancel_startup=False):
     # A failed engine announces its severity before its state; a stopped one has none.
     retry_label = "Engine stopped" if cancel_startup else "Error: Engine unavailable"
     wait_for(lambda: has_control(browser, retry_label), "retirement of the initial worker")
-    wait_for(lambda: has_control(browser, "Run deck"), "termination of the queued run")
+    wait_for(lambda: has_run_deck(browser), "termination of the queued run")
     browser.capture("retired")
     browser.click(retry_label, "button")
     # A ready engine has no status cell: the retry and starting cells leave, and
@@ -130,9 +143,8 @@ def run(browser, fault, cancel_startup=False):
     if browser.script("return document.documentElement.getAttribute('data-rspice-wasm-jit-status')") != "qualified":
         raise AssertionError("The replacement worker did not publish its JIT qualification")
     browser.capture("recovered")
-    # Prepared execution authorization is consumed by the first launch.
-    browser.click("Validate source", "button")
-    browser.click("Run deck", "button")
+    # One press checks the deck and runs it again.
+    browser.click(run_deck_label(browser), "button")
 
     # A finished run is a DONE row in the Task log. The run opens in Results
     # the frame after it completes, and Results keeps its own dock layout,

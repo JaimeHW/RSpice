@@ -239,15 +239,6 @@ impl RSpiceApp {
         self.reset_code_after_project_change();
     }
 
-    pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
-        rspice_app_code::workbench::documents::netlist_document::manual_deck_run_block_reason_for_run(
-            &self.state.model,
-            &self.state.code.netlist,
-            self.state.workbench.messages(),
-            &self.simulation_controller,
-        )
-    }
-
     #[cfg(test)]
     pub(crate) fn test_instance() -> Self {
         let state = AppState::default();
@@ -1826,57 +1817,6 @@ mod tests {
             .simulation_run_preflight_block_reason()
             .expect("an attached contract that no longer resolves must block");
         assert!(reason.contains("was removed"), "{reason}");
-    }
-
-    #[test]
-    fn generated_and_manual_runs_have_separate_drc_readiness() {
-        let mut state = runnable_state();
-        state.seed_test_deck("V1 in 0 1\nR1 in 0 1k\n.end\n");
-        publish_drc_result(
-            &mut state,
-            drc_result(DrcViolationType::MissingGround, None),
-        );
-
-        assert!(
-            state.simulation_run_block_reason().is_some(),
-            "schematic Simulate must still be blocked by current schematic DRC"
-        );
-        let manual_reason = state
-            .manual_deck_run_block_reason()
-            .expect("an unvalidated manual deck must remain blocked");
-        assert!(manual_reason.contains("Validate"));
-        assert!(
-            !manual_reason.contains("DRC"),
-            "manual deck readiness must remain independent of schematic DRC"
-        );
-    }
-
-    #[test]
-    fn netlist_manual_run_request_queues_when_engine_is_busy() {
-        let mut state = AppState::default();
-        let identity = state
-            .model
-            .simulation
-            .start_run()
-            .execution_identity()
-            .expect("current run has execution identity");
-        state.model.simulation.execution.active_execution = Some(identity);
-        state.model.simulation.execution.is_running = false;
-        state.request_netlist_manual_deck_run();
-
-        assert_eq!(
-            state.model.simulation.execution.run_intent,
-            rspice_app_state::state::SimulationRunIntent::ManualDeck
-        );
-        assert!(!state.model.simulation.execution.trigger_simulation);
-        assert!(state.runs.manual_run.rerun_queued);
-
-        state.model.simulation.execution.active_execution = None;
-        state.runs.manual_run.rerun_queued = false;
-        state.request_netlist_manual_deck_run();
-
-        assert!(state.model.simulation.execution.trigger_simulation);
-        assert!(!state.runs.manual_run.rerun_queued);
     }
 
     #[test]
