@@ -187,7 +187,11 @@ fn dialect_hint_band(
                 ("line", line.as_str()),
             ],
         );
+        // The buttons stand apart from each other, and further from the
+        // sentence they answer.
+        ui.spacing_mut().item_spacing.x = HINT_BUTTON_GAP;
         ui.label(with_card(ui, &sentence, hint.marker));
+        ui.add_space(HINT_BUTTON_GAP);
         read = ui
             .button(messages.format(MessageId::NetlistDialectHintRead, &[("program", &program)]))
             .clicked();
@@ -201,6 +205,9 @@ fn dialect_hint_band(
     }
     read.then_some(hint.dialect)
 }
+
+/// The air between the hint band's buttons, and again before the first.
+const HINT_BUTTON_GAP: f32 = 8.0;
 
 /// Stands in for a card's name while the sentence around it is formatted.
 const CARD_SLOT: &str = "\u{e000}";
