@@ -178,9 +178,13 @@ impl CodePort for CodeState {
         messages: crate::workbench::MessageCatalog,
     ) {
         use crate::workbench::documents::code_workspace::{
-            CodeEditorLanguage, EditorFindings, show_veriloga_document_versioned,
+            CodeEditorLanguage, EditorFindings, release_closed_code_editors,
+            show_veriloga_document_versioned,
         };
 
+        // One source is read here at a time: the editor of the one read
+        // before is let go.
+        release_closed_code_editors(ui.ctx(), "read-only-veriloga-well", &[egui::Id::new(id)]);
         show_veriloga_document_versioned(
             ui,
             id,

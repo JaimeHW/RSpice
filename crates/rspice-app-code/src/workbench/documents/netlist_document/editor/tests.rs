@@ -1553,3 +1553,101 @@ fn a_finding_about_unnamed_text_names_no_file() {
         );
     }
 }
+
+/// Closing an include tab lets go of its editor, with its text and undo
+/// history, and of what the page read of it; the deck's own editor, still
+/// listed, keeps its own.
+#[test]
+fn closing_an_include_tab_lets_go_of_its_editor() {
+    use crate::workbench::documents::virtual_text_editor::session_count;
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    let mut harness = harness();
+    let deck = crate::state::NetlistDocument::from_authored_source(
+        crate::state::NetlistDocumentId::new(),
+        b"deck\n.include \"a.inc\"\n.end\n".to_vec(),
+    )
+    .unwrap();
+    let root = deck.id();
+    harness.model.workspace.content.netlist_document = Some(deck);
+    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    harness.model.simulation.source.netlist_content = "deck\n.include \"a.inc\"\n.end\n".into();
+    let deck_editor = editor_id_in(&harness.model, &harness.state.netlist);
+
+    let context = egui::Context::default();
+    crate::ui::Theme::default().apply(&context);
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let frame = |harness: &mut CodeHarness| {
+        let _ = context.clone().run_ui(input.clone(), |ui| {
+            release_closed_editors(
+                ui.ctx(),
+                &open_editor_ids_in(
+                    &harness.model,
+                    &harness.state.netlist,
+                    &harness.state.netlist_open_documents,
+                ),
+            );
+            show_state(ui, harness);
+        });
+    };
+    frame(&mut harness);
+    let with_the_deck = session_count(&context);
+
+    // The include opens in a tab of its own, beside the deck.
+    let include_tab = WorkspaceDocumentId::NetlistDependency {
+        root,
+        logical_identity: "a.inc".to_owned(),
+    };
+    harness
+        .state
+        .netlist_open_documents
+        .insert(include_tab.clone());
+    harness.state.netlist.active_dependency_root =
+        Some(super::super::ActiveNetlistDocument::OwnedSource);
+    harness.state.netlist.active_dependency_identity = Some("a.inc".to_owned());
+    harness.model.simulation.source.netlist_content = "* a.inc\nR9 x 0 1k\n".into();
+    let include_editor = editor_id_in(&harness.model, &harness.state.netlist);
+    assert_ne!(include_editor, deck_editor);
+    frame(&mut harness);
+    assert_eq!(session_count(&context), with_the_deck + 1);
+    assert!(
+        context.data_mut(|data| data
+            .get_temp::<super::highlight::SourceComments>(include_editor.with("source-comments"))
+            .is_some()),
+        "the page reads the include's comments"
+    );
+
+    // Closing the tab returns to the deck and lets the include's editor go.
+    crate::workbench::chrome::document_bar::code::close_netlist_dependency(
+        &mut harness.state.netlist_open_documents,
+        &include_tab,
+    );
+    assert!(super::super::close_active_dependency_in(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.runs,
+    ));
+    frame(&mut harness);
+    assert_eq!(session_count(&context), with_the_deck);
+    assert!(
+        crate::workbench::documents::virtual_text_editor::shown_source(&context, include_editor)
+            .is_none()
+    );
+    assert!(
+        context.data_mut(|data| data
+            .get_temp::<super::highlight::SourceComments>(include_editor.with("source-comments"))
+            .is_none()),
+        "what the page read of the include goes with it"
+    );
+    assert!(
+        crate::workbench::documents::virtual_text_editor::shown_source(&context, deck_editor)
+            .is_some(),
+        "the deck keeps its editor"
+    );
+}

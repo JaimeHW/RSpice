@@ -1027,6 +1027,45 @@ fn random_edits_on_a_large_buffer_keep_text_caret_and_undo_as_a_string_does() {
     }
 }
 
+/// An owner keeps the sessions of the documents it has open and no others:
+/// closing one drops its text, history and caret, and the count of sessions
+/// goes back to what it was before the document opened.
+#[test]
+fn a_closed_document_releases_its_editor_session() {
+    let mut first = ScriptedEditor::new("R1 a b 1k\n");
+    let owner = egui::Id::new("scripted-owner");
+    let open = [first.id];
+    assert!(retain_sessions(&first.context, owner, &open).is_empty());
+    let before = session_count(&first.context);
+
+    // A second document opens beside the first and takes an edit.
+    let second = egui::Id::new("scripted-second");
+    let kept = (first.id, first.source.clone());
+    first.id = second;
+    first.source = TextSnapshot::new("C1 p q 1p\n");
+    first
+        .context
+        .memory_mut(|memory| memory.request_focus(second));
+    let _ = first.frame(Vec::new());
+    let _ = first.frame(Vec::new());
+    assert!(first.frame(vec![egui::Event::Text("x".to_owned())]).changed);
+    assert!(
+        retain_sessions(&first.context, owner, &[kept.0, second]).is_empty(),
+        "both documents are open"
+    );
+    assert_eq!(session_count(&first.context), before + 1);
+
+    // Closing it releases its session and nothing else.
+    assert_eq!(retain_sessions(&first.context, owner, &open), vec![second]);
+    assert_eq!(session_count(&first.context), before);
+    assert!(shown_source(&first.context, second).is_none());
+    assert_eq!(
+        shown_source(&first.context, kept.0).as_deref(),
+        Some("R1 a b 1k\n"),
+        "the document still open keeps its session"
+    );
+}
+
 /// A structural command read over the whole text: the reference the editor's
 /// reading of only the lines a command touches must match.
 fn structural_over_whole_text(

@@ -61,7 +61,9 @@ pub use comparison::{
 pub use comparison::{compare_generated_revision, compare_owned_revision};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub use editor::show as show_editor;
-pub use editor::{commit_edit as commit_editor_edit, editor_id_in};
+pub use editor::{
+    commit_edit as commit_editor_edit, editor_id_in, open_editor_ids_in, release_closed_editors,
+};
 pub(crate) use executed_deck::run_snapshot_source_in;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
 pub use source_index::{

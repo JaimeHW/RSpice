@@ -396,6 +396,16 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             );
             step_netlist_problem(ui.ctx(), cx.model, &cx.state.netlist, cx.wb, editor_id);
             reveal_in_netlist(ui, cx.model, &mut cx.state.netlist, editor_id);
+            // A tab closed, or a project closed, lets go of its editor and
+            // its undo history; every listed tab keeps its own.
+            crate::workbench::documents::netlist_document::release_closed_editors(
+                ui.ctx(),
+                &crate::workbench::documents::netlist_document::open_editor_ids_in(
+                    cx.model,
+                    &cx.state.netlist,
+                    &cx.state.netlist_open_documents,
+                ),
+            );
             let response = crate::workbench::documents::netlist_document::show_editor(
                 ui,
                 cx.model,

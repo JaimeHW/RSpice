@@ -285,6 +285,42 @@ pub fn shown_source(ctx: &egui::Context, editor_id: egui::Id) -> Option<String> 
     })
 }
 
+/// Drop what the editor `editor_id` keeps between frames: its text, its
+/// history, its caret and its view. The next time it is drawn it starts
+/// again from the text its owner hands it.
+pub(crate) fn release(ctx: &egui::Context, editor_id: egui::Id) {
+    ctx.data_mut(|data| {
+        data.remove::<VirtualEditorSession>(editor_id.with("virtual-session"));
+        data.remove::<(u64, TextSnapshot)>(editor_id.with("owner-text"));
+        data.remove::<f64>(editor_id.with("tab-mode-announced-at"));
+    });
+}
+
+/// Keep, of the editors an owner draws, only those of the documents it
+/// still has open: `open` names their editors. The sessions of the others
+/// are released, and their ids returned so the owner can drop what it keeps
+/// for each beside the session. Called once a frame by the owner, it costs
+/// in proportion to the documents open, never to their text.
+pub(crate) fn retain_sessions(
+    ctx: &egui::Context,
+    owner: egui::Id,
+    open: &[egui::Id],
+) -> Vec<egui::Id> {
+    let known_id = owner.with("editor-sessions");
+    let known = ctx
+        .data_mut(|data| data.remove_temp::<Vec<egui::Id>>(known_id))
+        .unwrap_or_default();
+    let closed = known
+        .into_iter()
+        .filter(|id| !open.contains(id))
+        .collect::<Vec<_>>();
+    for id in &closed {
+        release(ctx, *id);
+    }
+    ctx.data_mut(|data| data.insert_temp(known_id, open.to_vec()));
+    closed
+}
+
 /// The text of an owner that keeps it as a string, at the owner's
 /// `revision`, as the editor `editor_id` takes it. The snapshot is kept
 /// between frames: it is built again only when the owner's text is not the
@@ -313,6 +349,12 @@ pub(crate) fn keep_string_owner_text(
     text: TextSnapshot,
 ) {
     ctx.data_mut(|data| data.insert_temp(editor_id.with("owner-text"), (revision, text)));
+}
+
+/// How many editor sessions the context keeps.
+#[cfg(any(test, feature = "test-support"))]
+pub fn session_count(ctx: &egui::Context) -> usize {
+    ctx.data(|data| data.count::<VirtualEditorSession>())
 }
 
 /// Show a virtualized source document.

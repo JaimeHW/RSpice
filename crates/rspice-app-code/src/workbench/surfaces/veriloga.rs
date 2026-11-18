@@ -444,6 +444,37 @@ fn source_editor(
         })
         .map(str::to_owned)
         .collect::<Vec<_>>();
+    // A file the project no longer holds, or every file of a project
+    // closed, lets go of its editor and undo history; each file the project
+    // holds keeps its own.
+    let open = cx
+        .model
+        .workspace
+        .content
+        .project_sources
+        .iter_bundles()
+        .flat_map(|bundle| {
+            std::iter::once(bundle.root().logical_path())
+                .chain(
+                    bundle
+                        .files()
+                        .iter()
+                        .map(crate::state::ProjectSourceFile::logical_path),
+                )
+                .map(move |path| {
+                    crate::workbench::documents::code_workspace::source_editor_id(
+                        crate::state::ProjectSourceLanguage::VerilogA,
+                        bundle.id(),
+                        path,
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    crate::workbench::documents::code_workspace::release_closed_code_editors(
+        ui.ctx(),
+        "workbench.veriloga.source",
+        &open,
+    );
     let interaction = egui::Frame::new()
         .fill(t.color.bg_inset)
         .show(ui, |ui| {

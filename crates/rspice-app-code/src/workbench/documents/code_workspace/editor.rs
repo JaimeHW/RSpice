@@ -119,6 +119,22 @@ pub fn show_veriloga_document_versioned(
     )
 }
 
+/// Let go of the editor of every source not in `open`, with the findings
+/// and the reading of its lines it kept: a file removed, or every file of
+/// a project closed. `owner` names the page the editors are on; each
+/// source in `open` keeps its caret and undo history.
+pub fn release_closed_code_editors(ctx: &egui::Context, owner: &str, open: &[egui::Id]) {
+    let owner = egui::Id::new(owner);
+    for closed in
+        crate::workbench::documents::virtual_text_editor::retain_sessions(ctx, owner, open)
+    {
+        ctx.data_mut(|data| {
+            data.remove::<HeldFindings>(closed.with("held-findings"));
+            data.remove::<VerilogAHighlighter>(closed.with("veriloga-syntax"));
+        });
+    }
+}
+
 /// Put the caret of the source editor `editor_id` on a one-based line and
 /// column the next time it is drawn, scroll it into view and give it the
 /// keyboard, so F8 steps on from there. Every way to a place in a source

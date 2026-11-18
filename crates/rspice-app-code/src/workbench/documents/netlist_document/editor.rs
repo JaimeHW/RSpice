@@ -98,6 +98,58 @@ pub fn editor_id_in(model: &super::Model, netlist: &super::NetlistDocumentState)
     }
 }
 
+/// The editors of every document the page lists as a tab, over the model,
+/// the netlist editor's state and the include tabs the reader has open: each
+/// root, each open include, the comparison, the run's deck and the editor
+/// on screen. These are the editors whose text, caret and undo history are
+/// kept while the reader moves between tabs.
+pub fn open_editor_ids_in(
+    model: &super::Model,
+    netlist: &super::NetlistDocumentState,
+    open_documents: &HashSet<WorkspaceDocumentId>,
+) -> Vec<egui::Id> {
+    let base = egui::Id::new("rspice.netlist.editor.text");
+    let roots = [
+        model
+            .netlist_artifacts
+            .generated_document
+            .as_ref()
+            .map(|document| document.id()),
+        netlist
+            .owned_document
+            .as_ref()
+            .or(model.workspace.content.netlist_document.as_ref())
+            .map(|document| document.id()),
+    ];
+    let mut open = ["comparison", "generated", "owned", "run-snapshot"]
+        .map(|name| base.with(name))
+        .to_vec();
+    open.extend(roots.into_iter().flatten().map(|id| base.with(id)));
+    open.extend(open_documents.iter().filter_map(|document| match document {
+        WorkspaceDocumentId::NetlistDependency {
+            root,
+            logical_identity,
+        } => Some(base.with((*root, logical_identity.as_str()))),
+        _ => None,
+    }));
+    open.push(editor_id_in(model, netlist));
+    open
+}
+
+/// Let go of the editor, and what the page read of its text, of every
+/// document no longer in `open`: a closed include tab, or every document of
+/// a project closed.
+pub fn release_closed_editors(ctx: &egui::Context, open: &[egui::Id]) {
+    let owner = egui::Id::new("rspice.netlist.editor.text");
+    for closed in
+        crate::workbench::documents::virtual_text_editor::retain_sessions(ctx, owner, open)
+    {
+        ctx.data_mut(|data| {
+            data.remove::<highlight::SourceComments>(closed.with("source-comments"));
+        });
+    }
+}
+
 /// Render the editor and diagnostics strip over the model, the netlist
 /// editor's state, where the page's includes resolved, the runs (for the
 /// lines a run edited) and the workbench session. Returns the source well,
