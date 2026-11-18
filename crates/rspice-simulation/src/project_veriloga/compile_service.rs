@@ -218,13 +218,12 @@ pub fn start_compile(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use rspice_design::project_sources::{ProjectSourceLanguage, ProjectSourceOwner};
+    use rspice_design::project_sources::ProjectSourceOwner;
     use rspice_design_model::cell_view::CellViewRef;
 
     fn bundle(source: &str) -> ProjectSourceBundle {
         ProjectSourceBundle::try_new(
             ProjectSourceOwner::cell_view(CellViewRef::new("lib", "cell", "veriloga")),
-            ProjectSourceLanguage::VerilogA,
             "m.va",
             source,
             [],

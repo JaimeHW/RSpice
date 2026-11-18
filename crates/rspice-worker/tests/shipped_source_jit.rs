@@ -19,8 +19,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rspice_design::project_sources::{
-    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
-    ProjectSourceOwner,
+    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::{console_log, wasm_bindgen_test};
@@ -519,8 +518,7 @@ fn import_bundle(root: &str) -> ProjectSourceBundle {
         .filter(|(_, imported)| imported != file)
         .map(|(importer, imported)| ProjectSourceDependency::try_new(importer, imported).unwrap());
     ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         file,
         root_text,
         files

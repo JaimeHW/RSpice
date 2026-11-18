@@ -416,14 +416,13 @@ pub(super) use browser::{finish, start};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_design::project_sources::{ProjectSourceLanguage, ProjectSourceOwner};
+    use rspice_design::project_sources::ProjectSourceOwner;
 
     const TYP: DigitalDelaySelect = DigitalDelaySelect::Typ;
 
     fn selected_source() -> ProjectSourceBundle {
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+            ProjectSourceOwner::CodeWorkspace,
             "worker.va",
             "module worker(p, n); inout p, n; electrical p, n; endmodule\n",
             [],
@@ -433,15 +432,12 @@ mod tests {
     }
 
     fn selected_source_with_profile() -> ProjectSourceBundle {
-        use rspice_design::project_sources::{
-            ProjectSourceDependency, ProjectSourceFile, ProjectSourceRole, ProjectSourceRoleBinding,
-        };
+        use rspice_design::project_sources::{ProjectSourceDependency, ProjectSourceFile};
         let mut profile =
             crate::project_veriloga::build_profile::VerilogABuildProfile::starter("worker");
         profile.entry_modules.clear();
-        ProjectSourceBundle::try_new_with_roles(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+        ProjectSourceBundle::try_new_with_build_profile(
+            ProjectSourceOwner::CodeWorkspace,
             "worker.va",
             "module worker(p, n); inout p, n; electrical p, n; endmodule\n",
             [
@@ -455,11 +451,7 @@ mod tests {
                 ProjectSourceDependency::try_new("worker.va", ".rspice/veriloga-build.toml")
                     .unwrap(),
             ],
-            [ProjectSourceRoleBinding::try_new(
-                ".rspice/veriloga-build.toml",
-                ProjectSourceRole::VerilogABuildProfile,
-            )
-            .unwrap()],
+            Some(".rspice/veriloga-build.toml".to_owned()),
         )
         .unwrap()
     }
@@ -548,8 +540,7 @@ mod tests {
     /// `missing`, which nothing defines.
     fn design_over(cell: &str) -> ProjectSourceBundle {
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+            ProjectSourceOwner::CodeWorkspace,
             "top.va",
             format!("module top(p, n); inout p, n; electrical p, n; {cell} xu(p, n); endmodule\n"),
             [],
@@ -656,8 +647,7 @@ mod tests {
     #[test]
     fn the_worker_compiles_under_the_transferred_min_typ_max_selection() {
         let held = ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+            ProjectSourceOwner::CodeWorkspace,
             "held.va",
             "module held(p, n); inout p, n; electrical p, n;\n\
              parameter real g = 1.0e-3:2.0e-3:3.0e-3;\n\

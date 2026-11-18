@@ -2,7 +2,6 @@
 
 use rspice_design::project_sources::{
     MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, ProjectSourceBundle, ProjectSourceError,
-    ProjectSourceLanguage,
 };
 use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_veriloga::{ExternalCell, RuntimeCompileReport};
@@ -108,7 +107,6 @@ impl WasmJitWorkerArtifact {
 /// Source admission failures, distinct from diagnosed compiler failures.
 #[derive(Debug)]
 pub enum WorkerCompileRequestError {
-    Language,
     SourceBundle(ProjectSourceError),
     BuildProfile(String),
     ModuleSelection,
@@ -117,9 +115,6 @@ pub enum WorkerCompileRequestError {
 impl std::fmt::Display for WorkerCompileRequestError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Language => {
-                formatter.write_str("Verilog-A worker received a non-Verilog-A source bundle.")
-            }
             Self::SourceBundle(error) => {
                 write!(
                     formatter,
@@ -178,9 +173,6 @@ impl<'a> WorkerCompileRequest<'a> {
         bundle: &'a ProjectSourceBundle,
         selected_module: Option<&'a str>,
     ) -> Result<Self, WorkerCompileRequestError> {
-        if bundle.language() != ProjectSourceLanguage::VerilogA {
-            return Err(WorkerCompileRequestError::Language);
-        }
         bundle
             .validate()
             .map_err(WorkerCompileRequestError::SourceBundle)?;
@@ -257,11 +249,10 @@ mod tests {
     const SOURCE: &str =
         "module worker(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n";
 
-    fn bundle(language: ProjectSourceLanguage, source: &str) -> ProjectSourceBundle {
+    fn bundle(source: &str) -> ProjectSourceBundle {
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(language),
-            language,
-            format!("worker{}", language.required_extension()),
+            ProjectSourceOwner::CodeWorkspace,
+            "worker.va",
             source,
             [],
             [],
@@ -271,7 +262,7 @@ mod tests {
 
     #[test]
     fn source_admission_precedes_compilation_and_bytecode_needs_no_jit() {
-        let source = bundle(ProjectSourceLanguage::VerilogA, SOURCE);
+        let source = bundle(SOURCE);
         for module in [
             "",
             "worker\n",
@@ -295,7 +286,7 @@ mod tests {
     #[cfg(feature = "wasm-jit")]
     #[test]
     fn jit_compilation_retains_the_report_and_source_failures_stay_diagnosed() {
-        let source = bundle(ProjectSourceLanguage::VerilogA, SOURCE);
+        let source = bundle(SOURCE);
         let compiled = WorkerCompileRequest::try_new(&source, Some("worker"))
             .unwrap()
             .compile(WorkerCompileTarget::WasmJit)
@@ -305,7 +296,6 @@ mod tests {
         assert!(!artifact.module().bytes().is_empty());
 
         let invalid = bundle(
-            ProjectSourceLanguage::VerilogA,
             "module worker(p, n); inout p, n; electrical p, n; analog I(p,n) <+ @; endmodule\n",
         );
         let failure = WorkerCompileRequest::try_new(&invalid, Some("worker"))

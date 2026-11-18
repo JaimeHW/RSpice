@@ -1,6 +1,6 @@
 //! Project source compilation with typed failures for host diagnostic adapters.
 
-use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceRole};
+use rspice_design::project_sources::ProjectSourceBundle;
 use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_veriloga::{
     ExternalCell, NoPipelineControl, PipelineControl, RuntimeCompileReport, VerilogACompiler,
@@ -71,9 +71,10 @@ pub fn compile_project_bundle_source_with_control(
         [module] => Some(module.as_str()),
         _ => None,
     });
-    let has_source_dependencies = bundle.files().iter().any(|file| {
-        bundle.role_for_path(file.logical_path()) != Some(ProjectSourceRole::VerilogABuildProfile)
-    });
+    let has_source_dependencies = bundle
+        .files()
+        .iter()
+        .any(|file| !bundle.is_build_profile(file.logical_path()));
     if let Some(module_name) = selected_module {
         resolved
             .profile
@@ -200,13 +201,6 @@ pub fn compile_project_source_bundle_runtime(
     cells: Option<&[ExternalCell]>,
     delay_select: DigitalDelaySelect,
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
-    if bundle.language() != rspice_design::project_sources::ProjectSourceLanguage::VerilogA {
-        return Err(PreparedRuntimeError::SourceIdentity(format!(
-            "Project source bundle {} is {}, not Verilog-A",
-            bundle.id(),
-            bundle.language()
-        )));
-    }
     let source_key = rspice_design::project_sources::project_veriloga_bundle_source_key(
         project_id,
         bundle,

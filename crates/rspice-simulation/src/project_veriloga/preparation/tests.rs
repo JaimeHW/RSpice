@@ -50,8 +50,7 @@ fn project_of(source: &str) -> (ProjectId, ProjectSourceRegistry) {
     sources
         .insert_bundle(
             ProjectSourceBundle::try_new(
-                ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-                ProjectSourceLanguage::VerilogA,
+                ProjectSourceOwner::CodeWorkspace,
                 "top.va",
                 source,
                 [],
@@ -61,7 +60,7 @@ fn project_of(source: &str) -> (ProjectId, ProjectSourceRegistry) {
         )
         .expect("install the design");
     sources
-        .mark_validated(ProjectSourceLanguage::VerilogA)
+        .mark_validated()
         .expect("the editor validated the design");
     (ProjectId::new(), sources)
 }
@@ -263,8 +262,7 @@ fn a_design_without_leaves_keeps_its_identity_under_any_table() {
     sources
         .insert_bundle(
             ProjectSourceBundle::try_new(
-                ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-                ProjectSourceLanguage::VerilogA,
+                ProjectSourceOwner::CodeWorkspace,
                 "load.va",
                 "`include \"disciplines.vams\"\n\
                  module load(p, n); inout p, n; electrical p, n;\n\

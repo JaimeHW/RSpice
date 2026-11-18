@@ -125,10 +125,9 @@ mod tests {
     const PROBE: &str = "`include \"disciplines.vams\"\n\nmodule probe(p, n);\n  inout p, n;\n  electrical p, n;\n  real g;\n  analog begin\n    g = 2;\n    I(p, n) <+ g * V(p, n);\n  end\nendmodule\n";
 
     fn bundle(source: &str) -> ProjectSourceBundle {
-        use rspice_design::project_sources::{ProjectSourceLanguage, ProjectSourceOwner};
+        use rspice_design::project_sources::ProjectSourceOwner;
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+            ProjectSourceOwner::CodeWorkspace,
             "probe.va",
             source,
             [],

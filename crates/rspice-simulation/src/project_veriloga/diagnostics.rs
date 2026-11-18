@@ -410,16 +410,9 @@ mod tests {
     const PROBE: &str = "`include \"disciplines.vams\"\n\nmodule probe(p, n, c);\n  inout p, n, c;\n  electrical p, n, c;\n  analog I(p, n) <+ V(p, n) / V(c);\nendmodule\n";
 
     fn bundle(path: &str, source: &str) -> ProjectSourceBundle {
-        use rspice_design::project_sources::{ProjectSourceLanguage, ProjectSourceOwner};
-        ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
-            path,
-            source,
-            [],
-            [],
-        )
-        .expect("a valid bundle")
+        use rspice_design::project_sources::ProjectSourceOwner;
+        ProjectSourceBundle::try_new(ProjectSourceOwner::CodeWorkspace, path, source, [], [])
+            .expect("a valid bundle")
     }
 
     fn compiled(

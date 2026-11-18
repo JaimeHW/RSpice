@@ -944,10 +944,7 @@ fn reference_only_run_set_preserves_an_analysis_owned_temperature_declaration() 
 fn project_runtime() -> crate::veriloga::PreparedVerilogARuntime {
     let project_id = rspice_vocabulary::product::ProjectId::new();
     let bundle = rspice_design::project_sources::ProjectSourceBundle::try_new(
-            rspice_design::project_sources::ProjectSourceOwner::code_workspace(
-                rspice_design::project_sources::ProjectSourceLanguage::VerilogA,
-            ),
-            rspice_design::project_sources::ProjectSourceLanguage::VerilogA,
+            rspice_design::project_sources::ProjectSourceOwner::CodeWorkspace,
             "file_name_differs.va",
             "module snapshot_owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
             [],

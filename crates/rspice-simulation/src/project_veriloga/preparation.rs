@@ -3,9 +3,7 @@
 use crate::netlist_preparation::executable_logical_lines;
 use crate::preparation::{PreparationError, PreparationStage};
 use crate::project_veriloga::receipt::ProjectCompileReceipt;
-use rspice_design::project_sources::{
-    ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceRegistry,
-};
+use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceRegistry};
 use rspice_design::projection::ConfigurationExecutionProjection;
 use rspice_veriloga::ExternalCell;
 use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
@@ -365,10 +363,7 @@ pub fn project_veriloga_runtimes_referenced_by(
     let mut runtimes = Vec::new();
     // The deck's cells and selection, read once a bundle it names needs them.
     let mut deck = None;
-    for bundle in sources
-        .iter_bundles()
-        .filter(|bundle| bundle.language() == ProjectSourceLanguage::VerilogA)
-    {
+    for bundle in sources.iter_bundles() {
         let key_prefix = format!(
             "__rspice_project__/{}/{}/{}/",
             project_id,

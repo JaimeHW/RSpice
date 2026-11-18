@@ -10,10 +10,7 @@ use rspice_veriloga::{CompilerOptions, InterpreterFallbackPolicy, RuntimeQualifi
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use rspice_design::project_sources::{
-    MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, ProjectSourceBundle, ProjectSourceLanguage,
-    ProjectSourceRole,
-};
+use rspice_design::project_sources::{MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, ProjectSourceBundle};
 use rspice_vocabulary::product::ContentDigest;
 
 const VERILOGA_BUILD_PROFILE_SCHEMA: &str = "rspice.veriloga-build/v1";
@@ -263,10 +260,7 @@ pub(super) fn project_bundle_as_virtual_with_profile(
         bundle
             .files()
             .iter()
-            .filter(|file| {
-                bundle.role_for_path(file.logical_path())
-                    != Some(ProjectSourceRole::VerilogABuildProfile)
-            })
+            .filter(|file| !bundle.is_build_profile(file.logical_path()))
             .map(|file| {
                 rspice_veriloga::VirtualSourceFile::new(file.logical_path(), file.content())
             }),
@@ -309,14 +303,8 @@ pub(super) fn validate_profile_cell_bindings(
 pub fn resolve_veriloga_build_profile(
     bundle: &ProjectSourceBundle,
 ) -> Result<ResolvedVerilogABuildProfile, String> {
-    if bundle.language() != ProjectSourceLanguage::VerilogA {
-        return Err("Cannot resolve a Verilog-A build profile for another source language.".into());
-    }
-    let paths = bundle
-        .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
-        .collect::<Vec<_>>();
-    match paths.as_slice() {
-        [] => {
+    match bundle.build_profile_path() {
+        None => {
             let module = module_name_from_path(bundle.root().logical_path());
             let mut profile = VerilogABuildProfile::starter(&module);
             // A legacy bundle has no authored module-selection contract. Its
@@ -334,19 +322,18 @@ pub fn resolve_veriloga_build_profile(
                 legacy_builtin: true,
             })
         }
-        [path] => {
+        Some(path) => {
             let source = bundle.file_content(path).ok_or_else(|| {
                 format!("Verilog-A build-profile role references missing document '{path}'.")
             })?;
             let profile = VerilogABuildProfile::parse(source)?;
             Ok(ResolvedVerilogABuildProfile {
                 profile,
-                logical_path: Some((*path).to_owned()),
+                logical_path: Some(path.to_owned()),
                 digest: digest(source.as_bytes()),
                 legacy_builtin: false,
             })
         }
-        _ => Err("A Verilog-A bundle may own only one build profile.".to_owned()),
     }
 }
 
@@ -478,16 +465,15 @@ fn validate_binding_path(value: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use rspice_design::project_sources::{
-        ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner, ProjectSourceRoleBinding,
+        ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner,
     };
     use rspice_veriloga::{RuntimeCompileReport, VerilogACompiler};
 
     #[test]
     fn persisted_profile_is_selected_by_role_not_filename() {
         let profile = VerilogABuildProfile::starter("device").to_toml().unwrap();
-        let bundle = ProjectSourceBundle::try_new_with_roles(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+        let bundle = ProjectSourceBundle::try_new_with_build_profile(
+            ProjectSourceOwner::CodeWorkspace,
             "models/device.va",
             "module device; endmodule\n",
             [ProjectSourceFile::try_new("config/release.data", profile).unwrap()],
@@ -495,11 +481,7 @@ mod tests {
                 ProjectSourceDependency::try_new("models/device.va", "config/release.data")
                     .unwrap(),
             ],
-            [ProjectSourceRoleBinding::try_new(
-                "config/release.data",
-                ProjectSourceRole::VerilogABuildProfile,
-            )
-            .unwrap()],
+            Some("config/release.data".to_owned()),
         )
         .unwrap();
 
@@ -515,8 +497,7 @@ mod tests {
     #[test]
     fn legacy_profile_never_invents_an_entry_module_from_the_file_name() {
         let bundle = ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+            ProjectSourceOwner::CodeWorkspace,
             "presentation_name.va",
             "module actual_model; endmodule\n",
             [],
