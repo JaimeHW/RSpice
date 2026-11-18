@@ -118,6 +118,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
                     .len(),
                 expected_components
             );
+            drop(state);
             let mut reopened = AppState::default();
             assert!(reopened.load_project_from_path(&path));
             assert!(!has_unsaved_changes(&reopened));
@@ -281,6 +282,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
             DestinationAuthority::Canonical,
         )
         .unwrap();
+        drop(state);
         let mut reopened = AppState::default();
         assert!(reopened.load_project_from_path(&path));
         assert!(!has_unsaved_changes(&reopened));
@@ -319,6 +321,7 @@ fn legacy_marker_history_is_adopted_without_dirtying_an_unchanged_project() {
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
     let written = rspice_app_services::io::load_project_file(&path).unwrap();
     assert_eq!(written.file.result_presentation.marker_id_high_water, None);
+    drop(state);
     let mut reopened = AppState::default();
     assert!(reopened.load_project_from_path(&path));
     assert!(!has_unsaved_changes(&reopened));
@@ -350,6 +353,7 @@ fn removing_the_last_possible_marker_does_not_reset_exhaustion_after_reopen() {
         DestinationAuthority::Canonical,
     )
     .unwrap();
+    drop(state);
     let mut reopened = AppState::default();
     assert!(reopened.load_project_from_path(&path));
     assert!(!has_unsaved_changes(&reopened));

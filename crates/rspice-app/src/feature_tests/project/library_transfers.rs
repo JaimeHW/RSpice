@@ -115,18 +115,29 @@ fn pair(library: &str, cell: &str) -> Vec<(String, String)> {
 /// `app`'s project saved to a file of its own and opened again in a new
 /// session.
 fn saved_and_reopened(app: &mut RSpiceApp, label: &str) -> RSpiceApp {
-    let folder = unique_temp_dir(label);
-    let path = folder.join("transfers.rspiceproj");
+    reopened(&saved(app, label))
+}
+
+/// `app`'s project saved into a folder of its own: the project file.
+fn saved(app: &mut RSpiceApp, label: &str) -> std::path::PathBuf {
+    let path = unique_temp_dir(label).join("transfers.rspiceproj");
     assert!(
         app.state.save_project_to_path(&path),
         "the project is saved"
     );
+    path
+}
+
+/// The project at `path` opened by a new application; its folder is removed.
+fn reopened(path: &std::path::Path) -> RSpiceApp {
     let mut reopened = RSpiceApp::test_instance();
     assert!(
-        reopened.state.load_project_from_path(&path),
+        reopened.state.load_project_from_path(path),
         "the saved project opens"
     );
-    std::fs::remove_dir_all(folder).ok();
+    if let Some(folder) = path.parent() {
+        std::fs::remove_dir_all(folder).ok();
+    }
     reopened
 }
 
@@ -323,7 +334,9 @@ fn a_moved_cell_takes_its_placements_its_tab_and_the_top_with_it() {
 
 /// Library properties and Cell properties apply through their form: a
 /// description for each and the library made read-only, after which the
-/// cell takes no edit. The reopened project reads all three.
+/// cell takes no edit. Undo takes all three back; the project saved before
+/// it, closed and opened again, reads all three, and may make the library
+/// writable again.
 #[test]
 fn library_and_cell_properties_survive_save_and_reopen() {
     let mut app = hierarchy();
@@ -353,8 +366,7 @@ fn library_and_cell_properties_survive_save_and_reopen() {
     .expect_err("a read-only library's cell takes no edit");
     assert!(refusal.contains("read-only"), "{refusal}");
 
-    let reopened = saved_and_reopened(&mut app, "library-properties");
-    for app in [&app, &reopened] {
+    let described = |app: &RSpiceApp| {
         let parts = app
             .state
             .model
@@ -367,22 +379,9 @@ fn library_and_cell_properties_survive_save_and_reopen() {
             parts.get_cell("amp").map(|cell| cell.description.as_str()),
             Some("Two-stage amplifier")
         );
-    }
-    let mut reopened = reopened;
-    reopened
-        .state
-        .model
-        .edit_library_properties("parts", "Analog parts", false)
-        .expect("a read-only library the project keeps is made writable again");
-    assert!(
-        !reopened
-            .state
-            .model
-            .library_manager
-            .get_library("parts")
-            .unwrap()
-            .read_only
-    );
+    };
+    let path = saved(&mut app, "library-properties");
+    described(&app);
     for _ in 0..3 {
         app.execute_command_key(ids::UNDO);
     }
@@ -396,6 +395,27 @@ fn library_and_cell_properties_survive_save_and_reopen() {
     assert_eq!(
         parts.get_cell("amp").map(|cell| cell.description.as_str()),
         Some("")
+    );
+
+    // Closing the window lets go of the project, so the next one to open
+    // it may write it.
+    drop(app);
+    let mut reopened = reopened(&path);
+    assert_eq!(reopened.state.model.safe_mode.opened_read_only, None);
+    described(&reopened);
+    reopened
+        .state
+        .model
+        .edit_library_properties("parts", "Analog parts", false)
+        .expect("a read-only library the project keeps is made writable again");
+    assert!(
+        !reopened
+            .state
+            .model
+            .library_manager
+            .get_library("parts")
+            .unwrap()
+            .read_only
     );
 }
 
