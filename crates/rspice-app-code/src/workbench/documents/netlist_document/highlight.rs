@@ -205,42 +205,6 @@ pub fn layout_job(text: &str, comments: &[Range<usize>], font: FontId, c: &Palet
     job
 }
 
-/// Unified-diff highlighting for immutable generated-revision comparisons.
-/// The complete input is appended byte-for-byte so TextEdit selection and
-/// copy semantics remain exact.
-pub fn diff_layout_job(text: &str, font: FontId, c: &Palette) -> LayoutJob {
-    let mut job = LayoutJob {
-        break_on_newline: true,
-        ..Default::default()
-    };
-    job.wrap.max_width = f32::INFINITY;
-    for line in text.split_inclusive('\n') {
-        let content = line.strip_suffix('\n').unwrap_or(line);
-        let color = if content.starts_with("@@") {
-            c.traces[1]
-        } else if content.starts_with("+++") || content.starts_with("---") {
-            c.text_dim
-        } else if content.starts_with('+') {
-            c.ok
-        } else if content.starts_with('-') {
-            c.err
-        } else {
-            c.text_faint
-        };
-        job.append(
-            line,
-            0.0,
-            TextFormat {
-                font_id: font.clone(),
-                color,
-                line_height: Some(EDITOR_LINE_HEIGHT),
-                ..Default::default()
-            },
-        );
-    }
-    job
-}
-
 /// Append one line's tokens to the job, its `comments` (byte ranges of the
 /// line, in order) faint.
 fn highlight_line(

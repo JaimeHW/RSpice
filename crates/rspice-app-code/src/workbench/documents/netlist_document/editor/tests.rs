@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::workbench::code::tests::{CodeHarness, harness};
+use rspice_core::abort_signal::NoAbort;
 
 /// The editor drawn over the parts of `state` it reads.
 fn show_state(ui: &mut Ui, harness: &mut CodeHarness) -> egui::Response {

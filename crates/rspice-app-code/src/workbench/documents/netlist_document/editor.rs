@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use egui::Ui;
 use rspice_app_runs::workbench::slots::runs::RunsState;
-use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::IncludeResolution;
 
 use crate::ui::theme::{self, FontWeight};
@@ -62,13 +62,10 @@ const fn platform_include_access() -> IncludeAccess {
 }
 
 /// Stable per-document id so cursor, selection, undo, and scroll state do not
-/// leak between an owned root, generated root, include, or comparison tab,
-/// over the model and the netlist editor's state.
+/// leak between the generated netlist, the Added lines, a deck, an include or
+/// a run's input, over the model and the netlist editor's state.
 pub fn editor_id_in(model: &super::Model, netlist: &super::NetlistDocumentState) -> egui::Id {
     let base = egui::Id::new("rspice.netlist.editor.text");
-    if netlist.front.is_comparison() {
-        return base.with("comparison");
-    }
     let root = netlist.front.root_kind();
     let document_id = match root {
         super::NetlistRoot::Generated => model
@@ -97,8 +94,8 @@ pub fn editor_id_in(model: &super::Model, netlist: &super::NetlistDocumentState)
 
 /// The editors of every document the page lists as a tab, over the model,
 /// the netlist editor's state and the include tabs the reader has open: each
-/// root, each open include, the comparison, the run's deck and the editor
-/// on screen. These are the editors whose text, caret and undo history are
+/// root, each open include, the run's deck and the editor on screen. A
+/// comparison is a list of lines, not an editor. These are the editors whose text, caret and undo history are
 /// kept while the reader moves between tabs.
 pub fn open_editor_ids_in(
     model: &super::Model,
@@ -115,7 +112,7 @@ pub fn open_editor_ids_in(
             .map(|document| document.id()),
         netlist.open_deck.as_ref().map(|deck| deck.tab_id()),
     ];
-    let mut open = ["comparison", "generated", "owned", "run-snapshot"]
+    let mut open = ["generated", "owned", "run-snapshot"]
         .map(|name| base.with(name))
         .to_vec();
     open.extend(roots.into_iter().flatten().map(|id| base.with(id)));
@@ -241,8 +238,6 @@ pub fn show(
         .take()
         .or_else(|| show_go_to_line(ui, editor_id, &buffer, workbench.messages()));
 
-    let diff_document = netlist.front.is_comparison();
-
     let mut completion_changed = false;
     let changed;
     let cursor_line;
@@ -311,13 +306,8 @@ pub fn show(
             &style,
             |ui, row, font| {
                 // Coloured from the line's start, then cut to the part shown.
-                if diff_document {
-                    let line = row.line();
-                    row.shown_part(&line, highlight::diff_layout_job(&line, font, &c))
-                } else {
-                    let (line, comments) = source_comments.on_line(ui.ctx(), row, &shown_source);
-                    row.shown_part(&line, highlight::layout_job(&line, &comments, font, &c))
-                }
+                let (line, comments) = source_comments.on_line(ui.ctx(), row, &shown_source);
+                row.shown_part(&line, highlight::layout_job(&line, &comments, font, &c))
             },
             |logical_line| {
                 diagnostics
@@ -668,10 +658,6 @@ fn refresh_diagnostics(
     if netlist.diag_revision == Some(revision) && netlist.diag_library_folders == folders {
         return;
     }
-    if netlist.front.is_comparison() {
-        validate_visible_source_in(model, netlist, include_resolutions, revision, messages);
-        return;
-    }
     netlist.live_check.stop_unless(revision, folders);
     if netlist.diag_revision.is_some() && !netlist.diagnostics.is_empty() {
         // Retain the prior records for Problems/history, but never decorate
@@ -721,6 +707,7 @@ fn receive_check(
 /// `revision`, over the model, the netlist editor's state and where the
 /// page's includes resolved, its findings worded in `messages`. It runs
 /// here, on the caller's thread.
+#[cfg(test)]
 fn validate_visible_source_in(
     model: &super::Model,
     netlist: &mut super::NetlistDocumentState,
@@ -728,14 +715,8 @@ fn validate_visible_source_in(
     revision: u64,
     messages: crate::workbench::MessageCatalog,
 ) {
-    if netlist.front.is_comparison() {
-        netlist.diag_library_folders = model.library_folders().to_vec();
-        Arc::make_mut(&mut netlist.diagnostics).clear();
-        netlist.diag_revision = Some(revision);
-        return;
-    }
-    let checked =
-        SourceCheck::of(model, netlist, include_resolutions, revision, messages).run(&NoAbort);
+    let checked = SourceCheck::of(model, netlist, include_resolutions, revision, messages)
+        .run(&rspice_core::abort_signal::NoAbort);
     publish_check(netlist, checked);
 }
 
@@ -866,7 +847,7 @@ impl LiveCheck {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = wake;
-            self.finished = Some(check.run(&NoAbort));
+            self.finished = Some(check.run(&rspice_core::abort_signal::NoAbort));
         }
     }
 
@@ -1241,7 +1222,7 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
         &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
         platform_include_access(),
         None,
-        &NoAbort,
+        &rspice_core::abort_signal::NoAbort,
     );
     (diagnostics, symbols)
 }
