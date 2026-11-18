@@ -39,6 +39,9 @@ pub enum FileProblem {
     Unreadable(String),
 }
 
+/// What reading one file gave: its revision and stamp, or why not.
+pub type FileOutcome = Result<(FileRevision, Option<FileStamp>), FileProblem>;
+
 /// Why a folder could not be taken as a library at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderProblem {
@@ -77,12 +80,7 @@ impl FolderRead {
     }
 
     /// Every file found, each with what reading it gave.
-    pub fn files(
-        &self,
-    ) -> Vec<(
-        LibraryFile,
-        Result<(FileRevision, Option<FileStamp>), FileProblem>,
-    )> {
+    pub fn files(&self) -> Vec<(LibraryFile, FileOutcome)> {
         let mut files = vec![(
             LibraryFile::Manifest,
             Ok((self.manifest.revision, self.manifest.stamp)),

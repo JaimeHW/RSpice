@@ -433,10 +433,9 @@ fn a_publication_freezes_each_file_once_and_restores_the_library_as_published() 
         .unwrap();
     assert!(published.libraries.get_library(LIBRARY).is_some());
     assert!(
-        published.libraries.get_library(LIBRARY).unwrap().cells["amp"].views["schematic"]
+        !published.libraries.get_library(LIBRARY).unwrap().cells["amp"].views["schematic"]
             .metadata
-            .get("note")
-            .is_none(),
+            .contains_key("note"),
         "the library is restored as it was published"
     );
     let mut restored = project(&scratch.0.join("first").join("design.rspiceproj"));
