@@ -7,8 +7,8 @@
 //! page, so a project that never opens it carries none of it.
 
 use rspice_app_state::veriloga_library::{
-    BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel,
-    builtin_veriloga_model, read_builtin_veriloga_model,
+    BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel, builtin_veriloga_model,
+    read_builtin_veriloga_model,
 };
 
 use super::*;
@@ -42,17 +42,6 @@ pub(super) fn shown_models(filter: &str) -> Vec<&'static BuiltinVerilogAModel> {
 
 pub fn selected_model(browser: &BuiltinModelsBrowser) -> Option<&'static BuiltinVerilogAModel> {
     builtin_veriloga_model(browser.model.as_deref()?)
-}
-
-/// `library/cell/file`, the path the page's context strip reads.
-pub(super) fn selection_path(browser: &BuiltinModelsBrowser) -> String {
-    match (selected_model(browser), browser.file.as_deref()) {
-        (Some(model), Some(file)) => {
-            format!("{BUILTIN_VERILOGA_LIBRARY}/{}/{file}", model.name)
-        }
-        (Some(model), None) => format!("{BUILTIN_VERILOGA_LIBRARY}/{}", model.name),
-        (None, _) => BUILTIN_VERILOGA_LIBRARY.to_owned(),
-    }
 }
 
 /// Make `registry_name` the model the page shows, its root file selected.
@@ -269,36 +258,40 @@ pub(super) fn source_pane(
         vec2(ui.available_width(), height),
         Layout::top_down(Align::Min),
         |ui| {
-            let (bar, bar_response) =
-                ui.allocate_exact_size(vec2(ui.available_width(), bar_height(ui)), Sense::hover());
-            ui.painter().rect_filled(bar, 0.0, t.color.bg_panel);
+            // The file's bar: its name, cut to the room Close leaves it, and
+            // Close, the kit's button, at the bar's right edge.
+            let bar = bar_frame(ui, t.color.bg_panel).show(ui, |ui| {
+                ui.set_min_height(t.metrics.ctl_h);
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = tokens::SP_3;
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if Button::new("Close").show(ui).clicked() {
+                            intent = Some(LibraryIntent::BuiltinModels(
+                                BuiltinModelsIntent::CloseSource,
+                            ));
+                        }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            let title = format!("{file}  \u{00b7}  read-only");
+                            let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                            let shown = elide_text(ui, &title, &font, ui.available_width());
+                            let label = ui.label(
+                                egui::RichText::new(&shown)
+                                    .font(font)
+                                    .color(t.color.text_dim),
+                            );
+                            if shown != title {
+                                label.on_hover_text(title);
+                            }
+                        });
+                    });
+                });
+            });
             ui.painter().hline(
-                bar.x_range(),
-                bar.top(),
+                bar.response.rect.x_range(),
+                bar.response.rect.top(),
                 Stroke::new(1.0, t.color.border_strong),
             );
-            let title = format!("{file}  \u{00b7}  read-only");
-            ui.painter().text(
-                pos2(bar.left() + 10.0, bar.center().y),
-                Align2::LEFT_CENTER,
-                &title,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                t.color.text_dim,
-            );
-            bar_response
-                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &title));
-            let close = egui::Rect::from_center_size(
-                pos2(bar.right() - 10.0 - 31.0, bar.center().y),
-                vec2(62.0, t.metrics.ctl_h),
-            );
-            if ui
-                .put(close, egui::Button::new("Close").frame(false))
-                .clicked()
-            {
-                intent = Some(LibraryIntent::BuiltinModels(
-                    BuiltinModelsIntent::CloseSource,
-                ));
-            }
             code.read_only_veriloga_well(
                 ui,
                 ("workbench.project.library.builtin-source", revision),

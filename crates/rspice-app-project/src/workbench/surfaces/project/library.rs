@@ -587,17 +587,11 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
     }
 }
 
+/// The strip over the columns: the find and the view-type filter. What is
+/// selected is the inspector's to state, with its description and file; the
+/// columns mark it, and a read-only library says so on its row.
 pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let t = Tokens::get(ui.ctx());
-    let builtin = &cx.state.builtin_models;
-    // Writable is the ordinary library and says nothing; read-only is the
-    // exception the strip states.
-    let read_only = builtin.open
-        || cx
-            .model
-            .library_manager
-            .current_library()
-            .is_some_and(|library| library.read_only);
     // No rule under this strip: the column header below opens with one of its
     // own, and two hairlines a pixel apart read as one thick, uneven line.
     bar_frame(ui, t.color.bg_inset).show(ui, |ui| {
@@ -608,16 +602,6 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         // band's inner width: subtracting the margins again leaves the fill
         // 20 px short of the edge.
         ui.set_width(visible_workspace_width(ui));
-        ui.spacing_mut().item_spacing.y = t.metrics.bar_pad;
-        // The selection beside the find while the strip has room for some of
-        // it; on a strip too narrow for any, on a row of its own under the
-        // find, so a phone still names what is selected.
-        let selection = if cx.state.builtin_models.open {
-            builtin_models::selection_path(&cx.state.builtin_models)
-        } else {
-            shown_selection_path(cx.model, cx.state)
-        };
-        let mut beside = true;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             let search_width = (ui.available_width() * 0.32).clamp(150.0, 380.0);
@@ -654,43 +638,9 @@ pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             if asked {
                 select_found(ui.ctx(), cx);
             }
-            // The separator before the selection is counted in.
-            let separator = ui.spacing().item_spacing.x * 2.0;
-            beside = ui.available_width() - CONTEXT_FIXED_WIDTH - separator >= MIN_SELECTION_ROOM;
-            if beside {
-                ui.separator();
-                selection_context(ui, &selection, read_only);
-            }
         });
-        if !beside {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                selection_context(ui, &selection, read_only);
-            });
-        }
     });
 }
-
-/// The selection, cut to the room the strip leaves it, and whether the
-/// library is read-only.
-fn selection_context(ui: &mut Ui, selection: &str, read_only: bool) {
-    let t = Tokens::get(ui.ctx());
-    let room = (ui.available_width() - CONTEXT_FIXED_WIDTH).max(MIN_SELECTION_ROOM);
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let shown = elide_text(ui, selection, &font, room);
-    context_value(ui, "Selection", &shown, t.color.text);
-    if read_only {
-        ui.separator();
-        context_value(ui, "Access", "read-only", t.color.text_dim);
-    }
-}
-
-/// What the context strip spends beside the selection's own text: its label,
-/// the separator and the access pair.
-const CONTEXT_FIXED_WIDTH: f32 = 190.0;
-
-/// The least of a path worth showing: a library's name and an ellipsis.
-const MIN_SELECTION_ROOM: f32 = 48.0;
 
 /// The view-type select's choice that asks for no type.
 const ANY_VIEW_TYPE: &str = "Any type";
@@ -777,20 +727,6 @@ fn first_found(manager: &LibraryManager, find: &columns::Find) -> Option<(String
             .find(|cell| find.cell(cell))?;
         Some((library.name.clone(), cell.name.clone()))
     })
-}
-
-fn context_value(ui: &mut Ui, label: &str, value: &str, color: Color32) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
-    );
-    ui.label(
-        egui::RichText::new(value)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(color),
-    );
 }
 
 /// A column: its head with the title and the row count, then whatever
@@ -1139,8 +1075,9 @@ fn deletion_intent(library: &str, cell: Option<&str>, chosen: &[String]) -> Opti
     }
 }
 
-/// The band under the columns: what the selection is, its path cut to the
-/// width the controls leave, then Library actions, Cell actions and Open.
+/// The band under the columns: Attach library…, Library actions, Cell actions
+/// and Open, and what to do while no view is selected. The selection itself
+/// is the inspector's to state.
 fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
     let target = Target::of(cx.model, cx.state);
@@ -1178,9 +1115,11 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
                 if let Some(asked) = library_actions_menu(ui, cx, target.library.clone()) {
                     intent = Some(asked);
                 }
-                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    selection_summary(ui, &target);
-                });
+                if target.view.is_none() {
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        select_prompt(ui);
+                    });
+                }
             });
         });
     });
@@ -1192,50 +1131,14 @@ fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryInt
     intent
 }
 
-/// The selected view's path, cut to the width its type and mark leave, its
-/// type and, only when it has them, its unsaved changes; or what to do when
-/// nothing is selected.
-fn selection_summary(ui: &mut Ui, target: &Target) {
+/// What to do while no view is selected, cut to the room the band's buttons
+/// leave.
+fn select_prompt(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let body = egui::TextStyle::Body.resolve(ui.style());
-    let width = |ui: &Ui, text: &str, font: &egui::FontId| {
-        ui.painter()
-            .layout_no_wrap(text.to_owned(), font.clone(), t.color.text)
-            .size()
-            .x
-    };
-    let Some((reference, view_type, modified)) = &target.view else {
-        let prompt = "Select a view to inspect or open";
-        let shown = elide_text(ui, prompt, &body, ui.available_width());
-        ui.label(egui::RichText::new(shown).color(t.color.text_dim));
-        return;
-    };
-    let gap = ui.spacing().item_spacing.x * 2.0 + 1.0;
-    let mut tail = gap + width(ui, view_type.caption(), &body);
-    if *modified {
-        tail += gap + width(ui, "modified", &body);
-    }
-    // A band too narrow for any of the path keeps its buttons whole and
-    // leaves the selection to the inspector.
-    let room = ui.available_width() - tail;
-    if room < MIN_SELECTION_ROOM {
-        return;
-    }
-    let path = reference.display_path();
-    let font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let shown = elide_text(ui, &path, &font, room);
-    let label = ui.label(egui::RichText::new(&shown).font(font).color(t.color.text));
-    if shown != path {
-        label.on_hover_text(path);
-    }
-    ui.separator();
-    ui.label(view_type.caption());
-    // Only the exception is stated: the row and the strip already say a
-    // library is read-only, and an unsaved edit is a marker, not an alarm.
-    if *modified {
-        ui.separator();
-        ui.label(egui::RichText::new("modified").color(t.color.text_dim));
-    }
+    let prompt = "Select a view to inspect or open";
+    let shown = elide_text(ui, prompt, &body, ui.available_width());
+    ui.label(egui::RichText::new(shown).color(t.color.text_dim));
 }
 
 /// A command over library folders, or the clause its refusal is stated in.
@@ -1410,25 +1313,6 @@ pub(in crate::workbench) fn shown_selection(model: &Model, state: &ProjectState)
             .current_view()
             .is_some_and(|view| find.view(view.view_type));
     LibraryShown { cell, view }
-}
-
-/// The selection the strip states, as far as the find lists it: a cell or
-/// view the find hides is not named, as the band and the inspector do not
-/// name it.
-fn shown_selection_path(model: &Model, state: &ProjectState) -> String {
-    let manager = &model.library_manager;
-    let Some(library) = manager.current_library() else {
-        return "No library selection".to_owned();
-    };
-    let shown = shown_selection(model, state);
-    let mut path = library.name.clone();
-    if let Some(cell) = manager.current_cell().filter(|_| shown.cell) {
-        path = format!("{path}/{}", cell.name);
-        if let Some(view) = manager.current_view().filter(|_| shown.view) {
-            path = format!("{path}/{}", view.name);
-        }
-    }
-    path
 }
 
 /// Whether the selected cell is one the Cell column lists.
