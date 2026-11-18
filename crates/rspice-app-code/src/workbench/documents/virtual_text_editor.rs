@@ -26,7 +26,7 @@ use egui::{Color32, FontId, Key, Modifiers, Response, Sense, Stroke, Ui, Vec2};
 use crate::state::TextSnapshot;
 use crate::ui::widgets::{Problem, paint_problem_mark};
 
-use super::text_document_model::{TextDocumentModel, TextSelection};
+use super::text_document_model::{Keystroke, TextDocumentModel, TextSelection};
 use super::text_editor_commands::{
     ByteSelection, EditorSyntax, apply_structural_command, publish_caret_line,
     take_queued_caret_char_index, take_queued_caret_position, take_queued_standard_command,
@@ -119,6 +119,9 @@ struct KeyContext {
     syntax: EditorSyntax,
     page_rows: usize,
     tab_moves_focus: bool,
+    /// When the keys arrived, in seconds: keystrokes without a pause between
+    /// them are one undo step.
+    now: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -497,6 +500,7 @@ pub(crate) fn show_virtual_text_editor(
             syntax,
             page_rows: page_rows(&session, ui, style),
             tab_moves_focus,
+            now: ui.input(|input| input.time),
         };
         let events = ui.input(|input| input.events.clone());
         // egui moves focus on arrows and Tab before any widget runs, unless
@@ -1438,7 +1442,7 @@ fn handle_event(
             if editable && !text.is_empty() && !text.chars().any(char::is_control) =>
         {
             grow_maximum_columns_for_insertion(session, &text);
-            session.model.insert_at_selections(&text);
+            session.model.keystroke(Keystroke::Typing, &text, keys.now);
             if keys.syntax == EditorSyntax::VerilogA {
                 dedent_after_typing(&mut session.model, &text);
             }
@@ -1545,10 +1549,14 @@ fn apply_key_action(
         KeyAction::Delete { forward, reach } if editable => {
             match (reach, forward) {
                 (Reach::Character, false) => {
-                    session.model.delete_backward();
+                    session
+                        .model
+                        .keystroke(Keystroke::DeletingBackward, "", keys.now);
                 }
                 (Reach::Character, true) => {
-                    session.model.delete_forward();
+                    session
+                        .model
+                        .keystroke(Keystroke::DeletingForward, "", keys.now);
                 }
                 (Reach::Word | Reach::LineEdge, _) => {
                     delete_to(&mut session.model, forward, reach);

@@ -12,7 +12,15 @@ use ropey::Rope;
 
 use crate::state::TextSnapshot;
 
-const DEFAULT_HISTORY_LIMIT: usize = 512;
+/// The text an editor's undo history may keep alive. The oldest steps go
+/// once the history holds more, never the newest; typing is grouped, so a
+/// day's editing of a deck stays well inside it.
+const HISTORY_BYTE_BUDGET: usize = 64 << 20;
+/// What a step keeps besides the text it changed: the stretch of the rope
+/// the edit copied rather than shared.
+const STEP_OVERHEAD_BYTES: usize = 2 << 10;
+/// A pause in typing this long starts a new undo step.
+const TYPING_PAUSE_SECONDS: f64 = 1.0;
 /// Texts the owner's edits can leave behind and still come back to.
 const PARKED_HISTORY_LIMIT: usize = 64;
 
@@ -77,6 +85,32 @@ struct HistoryEntry {
     before_selections: Vec<TextSelection>,
     after: Rope,
     after_selections: Vec<TextSelection>,
+    /// The text the step keeps alive that no other step shares: what it
+    /// removed and inserted, and the rope it copied to do so.
+    bytes: usize,
+}
+
+/// A keystroke's edit: typing, or deleting a character either way.
+/// Keystrokes of one kind, each where the last one left the carets and
+/// without a pause between them, are one undo step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Keystroke {
+    Typing,
+    DeletingBackward,
+    DeletingForward,
+}
+
+/// The undo step keystrokes are still being added to.
+#[derive(Debug, Clone)]
+struct OpenStep {
+    keystroke: Keystroke,
+    /// When the last keystroke of the step was made, in seconds.
+    at: f64,
+    /// The last character typed, which decides whether a space starts a
+    /// new step.
+    last_typed: Option<char>,
+    /// The carets the step left, which the next keystroke must start from.
+    carets: Vec<TextSelection>,
 }
 
 /// The history of a text the document's owner replaced, kept for the moment
@@ -120,7 +154,8 @@ pub(crate) struct TextDocumentModel {
     redo: Vec<HistoryEntry>,
     parked: Vec<ParkedHistory>,
     published: Option<PublishedText>,
-    history_limit: usize,
+    history_byte_budget: usize,
+    open_step: Option<OpenStep>,
     revision: u64,
 }
 
@@ -150,7 +185,8 @@ impl TextDocumentModel {
             redo: Vec::new(),
             parked: Vec::new(),
             published: None,
-            history_limit: DEFAULT_HISTORY_LIMIT,
+            history_byte_budget: HISTORY_BYTE_BUDGET,
+            open_step: None,
             revision: if source.is_empty() {
                 TextSnapshot::default().revision()
             } else {
@@ -291,6 +327,7 @@ impl TextDocumentModel {
                 self.redo = returned.redo;
             }
         }
+        self.open_step = None;
         self.preferred_newline = detect_preferred_newline(source);
         self.selections =
             normalize_selections(std::mem::take(&mut self.selections), self.text.len_chars());
@@ -432,13 +469,16 @@ impl TextDocumentModel {
 
         let before = self.text.clone();
         let before_selections = self.selections.clone();
+        let mut bytes = STEP_OVERHEAD_BYTES;
         for (index, range) in edits.iter().enumerate().rev() {
             let replacement = if replacements.len() == 1 {
                 &replacements[0]
             } else {
                 &replacements[index]
             };
+            bytes += replacement.len();
             if !range.is_empty() {
+                bytes += self.text.slice(range.clone()).len_bytes();
                 self.text.remove(range.clone());
             }
             if !replacement.is_empty() {
@@ -461,7 +501,7 @@ impl TextDocumentModel {
             cumulative_delta += inserted_chars as isize - range.len() as isize;
         }
         self.selections = after_selections;
-        self.commit_history(before, before_selections);
+        self.commit_history(before, before_selections, bytes);
         true
     }
 
@@ -481,10 +521,12 @@ impl TextDocumentModel {
         }
         let before = self.text.clone();
         let before_selections = self.selections.clone();
+        let bytes =
+            STEP_OVERHEAD_BYTES + self.text.slice(range.clone()).len_bytes() + replacement.len();
         self.text.remove(range.clone());
         self.text.insert(range.start, replacement);
         self.selections = normalize_selections(selections, self.text.len_chars());
-        self.commit_history(before, before_selections);
+        self.commit_history(before, before_selections, bytes);
         true
     }
 
@@ -538,6 +580,65 @@ impl TextDocumentModel {
         self.insert_at_selections("")
     }
 
+    /// One keystroke's edit at `at` seconds: `text` typed at every caret,
+    /// or a character deleted either way. It joins the undo step the last
+    /// keystroke made when it is of the same kind, starts where that one
+    /// left the carets and follows it without a pause. A space typed after
+    /// a word starts a step, so Undo takes typing back a word at a time.
+    pub fn keystroke(&mut self, keystroke: Keystroke, text: &str, at: f64) -> bool {
+        let carets = self.selections.clone();
+        let open = self.open_step.take();
+        let changed = match keystroke {
+            Keystroke::Typing => self.insert_at_selections(text),
+            Keystroke::DeletingBackward => self.delete_backward(),
+            Keystroke::DeletingForward => self.delete_forward(),
+        };
+        if !changed {
+            self.selections = carets;
+            self.open_step = open;
+            return false;
+        }
+        let typed = (keystroke == Keystroke::Typing)
+            .then(|| text.chars().last())
+            .flatten();
+        let joins = open.as_ref().is_some_and(|open| {
+            let space_after_word = text.starts_with(char::is_whitespace)
+                && open.last_typed.is_some_and(|last| !last.is_whitespace());
+            open.keystroke == keystroke
+                && open.carets == carets
+                && at - open.at < TYPING_PAUSE_SECONDS
+                && !space_after_word
+        });
+        if joins
+            && self.undo.len() >= 2
+            && let Some(step) = self.undo.pop()
+            && let Some(previous) = self.undo.last_mut()
+        {
+            // Undoing a run of deletions selects all it deleted, as undoing
+            // one deletion selects the character it took.
+            if let ([first], [next]) = (
+                previous.before_selections.as_mut_slice(),
+                step.before_selections.as_slice(),
+            ) {
+                match keystroke {
+                    Keystroke::Typing => {}
+                    Keystroke::DeletingBackward => first.anchor = next.range().start,
+                    Keystroke::DeletingForward => first.cursor += next.range().len(),
+                }
+            }
+            previous.after = step.after;
+            previous.after_selections = step.after_selections;
+            previous.bytes += step.bytes.saturating_sub(STEP_OVERHEAD_BYTES);
+        }
+        self.open_step = Some(OpenStep {
+            keystroke,
+            at,
+            last_typed: typed,
+            carets: self.selections.clone(),
+        });
+        true
+    }
+
     /// Whether the history has a step to undo.
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
@@ -552,6 +653,7 @@ impl TextDocumentModel {
         let Some(entry) = self.undo.pop() else {
             return false;
         };
+        self.open_step = None;
         Self::keep_selections_before_change(&mut self.published, self.revision, &self.selections);
         self.text = entry.before.clone();
         self.selections = entry.before_selections.clone();
@@ -565,6 +667,7 @@ impl TextDocumentModel {
         let Some(entry) = self.redo.pop() else {
             return false;
         };
+        self.open_step = None;
         Self::keep_selections_before_change(&mut self.published, self.revision, &self.selections);
         self.text = entry.after.clone();
         self.selections = entry.after_selections.clone();
@@ -763,17 +866,36 @@ impl TextDocumentModel {
         &self.text
     }
 
-    fn commit_history(&mut self, before: Rope, before_selections: Vec<TextSelection>) {
+    fn commit_history(
+        &mut self,
+        before: Rope,
+        before_selections: Vec<TextSelection>,
+        bytes: usize,
+    ) {
         Self::keep_selections_before_change(&mut self.published, self.revision, &before_selections);
+        self.open_step = None;
         self.undo.push(HistoryEntry {
             before,
             before_selections,
             after: self.text.clone(),
             after_selections: self.selections.clone(),
+            bytes,
         });
-        if self.undo.len() > self.history_limit {
-            self.undo.remove(0);
-        }
+        // The oldest steps give way to the newest; the newest is always kept.
+        let mut kept = self.undo.iter().map(|entry| entry.bytes).sum::<usize>();
+        let dropped = self
+            .undo
+            .iter()
+            .take(self.undo.len() - 1)
+            .take_while(|entry| {
+                let over = kept > self.history_byte_budget;
+                if over {
+                    kept -= entry.bytes;
+                }
+                over
+            })
+            .count();
+        self.undo.drain(..dropped);
         self.redo.clear();
         self.revision = TextSnapshot::next_revision();
         self.prune_invalid_folds();
@@ -926,6 +1048,115 @@ fn trailing_line_break_chars(slice: ropey::RopeSlice<'_>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Type `text` a character a keystroke, `gap` seconds apart from `at`.
+    fn type_out(model: &mut TextDocumentModel, text: &str, at: f64, gap: f64) -> f64 {
+        let mut now = at;
+        for character in text.chars() {
+            assert!(model.keystroke(Keystroke::Typing, &character.to_string(), now));
+            now += gap;
+        }
+        now
+    }
+
+    /// Undo once at a time, keeping the text each step leaves.
+    fn undo_all(model: &mut TextDocumentModel) -> Vec<String> {
+        let mut texts = Vec::new();
+        while model.undo() {
+            texts.push(model.to_source());
+        }
+        texts
+    }
+
+    #[test]
+    fn typing_is_undone_a_word_at_a_time() {
+        let mut model = TextDocumentModel::from_source("");
+        type_out(&mut model, "R1 in out 1k", 0.0, 0.1);
+        assert_eq!(
+            undo_all(&mut model),
+            ["R1 in out", "R1 in", "R1", ""],
+            "each word goes with the space before it"
+        );
+        while model.redo() {}
+        assert_eq!(model.to_source(), "R1 in out 1k");
+    }
+
+    #[test]
+    fn a_pause_or_a_caret_move_starts_a_new_step() {
+        let mut model = TextDocumentModel::from_source("");
+        let now = type_out(&mut model, "vdd", 0.0, 0.1);
+        type_out(&mut model, "1", now + TYPING_PAUSE_SECONDS, 0.1);
+        model.set_selections(vec![TextSelection::caret(0)]);
+        type_out(&mut model, "V", now + TYPING_PAUSE_SECONDS + 0.2, 0.1);
+        assert_eq!(undo_all(&mut model), ["vdd1", "vdd", ""]);
+    }
+
+    #[test]
+    fn deleting_a_word_a_key_at_a_time_is_one_step_and_typing_after_it_another() {
+        let mut model = TextDocumentModel::from_source("C1 a b 10p");
+        model.set_selections(vec![TextSelection::caret(10)]);
+        for step in 0..3 {
+            assert!(model.keystroke(Keystroke::DeletingBackward, "", f64::from(step) * 0.1));
+        }
+        type_out(&mut model, "1n", 0.4, 0.1);
+        assert_eq!(model.to_source(), "C1 a b 1n");
+        assert_eq!(undo_all(&mut model), ["C1 a b ", "C1 a b 10p"]);
+        assert_eq!(
+            model.selections(),
+            [TextSelection {
+                anchor: 7,
+                cursor: 10
+            }],
+            "undoing the deletions selects what they took"
+        );
+    }
+
+    #[test]
+    fn nothing_typed_at_normal_sizes_is_dropped_from_the_history() {
+        let mut model = TextDocumentModel::from_source("");
+        let mut now = 0.0;
+        for word in 0..5_000 {
+            now = type_out(&mut model, &format!("w{word} "), now, 0.05);
+            // Each line a step of its own, as a caret move makes it.
+            model.set_selections(model.selections().to_vec());
+            now += TYPING_PAUSE_SECONDS;
+        }
+        let mut steps = 0;
+        while model.undo() {
+            steps += 1;
+        }
+        assert_eq!(model.to_source(), "", "every word typed can be undone");
+        assert!(steps >= 5_000, "{steps} steps");
+    }
+
+    #[test]
+    fn the_history_is_bounded_by_the_text_it_keeps_and_keeps_the_newest_step() {
+        let mut model = TextDocumentModel::from_source("");
+        model.history_byte_budget = 64 << 10;
+        let block = "x".repeat(16 << 10);
+        for _ in 0..8 {
+            model.set_selections(vec![TextSelection::caret(model.len_chars())]);
+            assert!(model.insert_at_selections(&block));
+        }
+        let kept = model.undo.iter().map(|entry| entry.bytes).sum::<usize>();
+        assert!(kept <= 64 << 10, "{kept} bytes kept");
+        assert_eq!(model.undo.len(), 3, "the oldest steps went first");
+        assert!(model.undo());
+        assert_eq!(
+            model.len_chars(),
+            7 * (16 << 10),
+            "the newest step is undone"
+        );
+
+        model.history_byte_budget = 1;
+        model.set_selections(vec![TextSelection::caret(0)]);
+        assert!(model.insert_at_selections(&block));
+        assert_eq!(
+            model.undo.len(),
+            1,
+            "a step larger than the budget is still kept"
+        );
+    }
 
     #[test]
     fn bom_and_mixed_line_endings_round_trip_exactly() {

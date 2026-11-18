@@ -133,6 +133,7 @@ fn release_text_fidelity_matrix_preserves_large_unicode_ime_clipboard_and_paste_
         syntax: EditorSyntax::Toml,
         page_rows: 20,
         tab_moves_focus: false,
+        now: 0.0,
     };
     let _ = context.run_ui(Default::default(), |ui| {
         handle_event(
@@ -754,6 +755,8 @@ struct ScriptedEditor {
     id: egui::Id,
     source: TextSnapshot,
     time: f64,
+    /// Seconds from one frame to the next.
+    frame_gap: f64,
 }
 
 /// What a frame left: whether the text changed and where the caret is.
@@ -772,6 +775,7 @@ impl ScriptedEditor {
             id: egui::Id::new("scripted-editor"),
             source: TextSnapshot::new(source),
             time: 0.0,
+            frame_gap: 1.0 / 60.0,
         };
         editor
             .context
@@ -782,7 +786,7 @@ impl ScriptedEditor {
     }
 
     fn frame(&mut self, events: Vec<egui::Event>) -> ScriptedFrame {
-        self.time += 1.0 / 60.0;
+        self.time += self.frame_gap;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -865,6 +869,31 @@ struct ScriptState {
     left_from: (usize, Option<usize>),
 }
 
+/// Keys typed one after another are undone together, up to the space
+/// before the word.
+#[test]
+fn typing_without_a_pause_is_undone_a_word_at_a_time() {
+    let mut editor = ScriptedEditor::new("");
+    for typed in ["R", "1", " ", "a", "b"] {
+        assert!(
+            editor
+                .frame(vec![egui::Event::Text(typed.to_owned())])
+                .changed
+        );
+    }
+    assert!(editor.key(Key::Backspace, Modifiers::NONE).changed);
+    assert!(editor.source == "R1 a", "{}", String::from(&editor.source));
+    assert!(editor.key(Key::Z, Modifiers::COMMAND).changed);
+    assert!(
+        editor.source == "R1 ab",
+        "the deletion is a step of its own"
+    );
+    assert!(editor.key(Key::Z, Modifiers::COMMAND).changed);
+    assert!(editor.source == "R1", "the word goes with its space");
+    assert!(editor.key(Key::Z, Modifiers::COMMAND).changed);
+    assert!(editor.source == "", "{}", String::from(&editor.source));
+}
+
 /// Random edit scripts on a large text leave the editor's text, its caret
 /// and its undo history exactly where the same edits leave a plain string:
 /// typing, pasting lines, deleting either way, replacing a selection, undo
@@ -877,6 +906,9 @@ fn random_edits_on_a_large_buffer_keep_text_caret_and_undo_as_a_string_does() {
     for seed in [0x9E37_79B9_7F4A_7C15_u64, 0xD1B5_4A32_D192_ED03] {
         let mut choices = Choices(seed);
         let mut editor = ScriptedEditor::new(&base);
+        // Each keystroke a pause after the last, so each is a step of its
+        // own, as the string model below counts them.
+        editor.frame_gap = 2.0;
         let mut text = base.clone();
         let mut cursor = 0_usize;
         let mut anchor = None::<usize>;
