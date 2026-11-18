@@ -1,10 +1,10 @@
 //! The netlist document toolbar.
 //!
-//! One 33-point row: the dialect chip and the check's status on the left,
-//! Find, Manage source and the language tools on the right, the same on
-//! every tab; what a tab can do with its text is on the workbench toolbar.
-//! The warning count yields its space before the dialect chip or a blocking
-//! status can clip.
+//! One row, a compact control high with the bar's padding above and below
+//! it: the dialect chip and the check's status on the left, Find, Manage
+//! source and the language tools on the right, the same on every tab; what
+//! a tab can do with its text is on the workbench toolbar. The warning count
+//! yields its space before the dialect chip or a blocking status can clip.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
@@ -19,17 +19,20 @@ use crate::workbench::code::commands::CodeRequest;
 use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint_problem_mark};
 use crate::workbench::documents::netlist_document::NetlistRoot;
 use crate::workbench::framework::feature::Cx;
+use crate::workbench::state::workbench_session::WidthClass;
 
 use super::{active_document_available, document_error_status};
 
-pub const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 pub(super) const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
 pub(super) const CODE_TOOLBAR_GAP: f32 = 5.0;
 pub(super) const CODE_TOOLBAR_ACTION_GUTTER: f32 = 12.0;
-pub(super) const CODE_TOOLBAR_COMPACT_BREAKPOINT: f32 = 720.0;
-pub(super) const CODE_TOOLBAR_TABLET_VIEWPORT_BREAKPOINT: f32 = 1024.0;
-pub(super) const CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH: f32 = 320.0;
-pub(super) const PHONE_BREAKPOINT: f32 = 560.0;
+
+/// The strip's height under `metrics`: a compact control, which a finger's
+/// target raises, with the bar's padding above and below it.
+#[must_use]
+pub fn code_toolbar_height(metrics: &tokens::Metrics) -> f32 {
+    crate::ui::widgets::compact_height(metrics) + 2.0 * metrics.bar_pad
+}
 /// Side of a status line's problem mark and the air after it: the kit's own,
 /// so a marked status matches every other marked line in the product.
 use crate::ui::widgets::{
@@ -55,24 +58,6 @@ pub struct CodeToolbarLayout {
     /// Exact rect the action group actually occupied, not the reservation.
     #[cfg(any(test, feature = "test-support"))]
     pub actions: egui::Rect,
-}
-
-/// Total width of a group laid out with one gap between each control.
-fn action_extent(widths: &[f32]) -> f32 {
-    if widths.is_empty() {
-        return 0.0;
-    }
-    widths.iter().sum::<f32>() + CODE_TOOLBAR_GAP * (widths.len() - 1) as f32
-}
-
-/// Width the action group needs: Find, Manage source and the language tools,
-/// each a square at the strip's control height. A tab's own verbs are on the
-/// workbench toolbar above, so the group is the same on every tab.
-///
-/// This decides whether the status chips may show in full. Where the group
-/// actually lands is read back after it is painted.
-fn full_action_extent(control_h: f32) -> f32 {
-    action_extent(&[control_h; 3])
 }
 
 /// What the language tools menu offers for the text in front.
@@ -101,8 +86,12 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     // clipped to the visible center document. Base both allocation and
     // responsive projection on the width a user can actually see.
     let width = code_toolbar_visible_width(ui.available_width(), ui.clip_rect().width());
-    let phone = width <= PHONE_BREAKPOINT;
-    let (rect, _) = ui.allocate_exact_size(vec2(width, CODE_TOOLBAR_HEIGHT), egui::Sense::hover());
+    // The shell's layout class, the one every workspace lays out by.
+    let phone = WidthClass::for_width(ui.ctx().content_rect().width()) == WidthClass::Phone;
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(width, code_toolbar_height(&t.metrics)),
+        egui::Sense::hover(),
+    );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     ui.painter().hline(
         rect.x_range(),
@@ -132,41 +121,30 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     // and the icons are square at it, so they sit level with the dialect
     // chip, an equal gap above and below them in the row.
     let control_h = crate::ui::widgets::compact_height(&t.metrics);
-    // Dock collapse can make the document wider at a smaller outer viewport.
-    // Decide from both the canonical breakpoint and the space left after the
-    // action group, so that discontinuity cannot re-enable a crowded toolbar
-    // on tablet landscape.
-    let compact = code_toolbar_prefers_compact(
-        crate::ui::viewport::root_viewport_width(ui.ctx()),
-        width,
-        full_action_extent(control_h),
-    );
     let dialect = super::dialect_chip::DeckChip::shown(cx.model, &cx.state.netlist);
     let status = document_error_status(cx.model, &cx.state.netlist, messages)
         .filter(|(_, problem)| toolbar_status_visible(phone, *problem));
     // Nothing is said when there are no warnings, and "0 warnings" is not
-    // news: the count appears only once there is something in it.
-    let warning_candidate = (!compact)
-        .then(|| {
-            cx.state
-                .netlist
-                .diagnostics
-                .iter()
-                .filter(|diagnostic| {
-                    diagnostic.is_current()
-                        && diagnostic.severity
-                            != crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
-                })
-                .count()
-                + cx
-                    .model
-                    .netlist_artifacts
-                    .validation
-                    .as_ref()
-                    .map_or(0, |receipt| receipt.advisory_count)
-                + usize::from(cx.model.netlist_artifacts.validation_error.is_some())
+    // news: the count appears only once there is something in it, and where
+    // it fits beside the chip and the status.
+    let warnings = cx
+        .state
+        .netlist
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.is_current()
+                && diagnostic.severity
+                    != crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
         })
-        .filter(|count| *count > 0);
+        .count()
+        + cx.model
+            .netlist_artifacts
+            .validation
+            .as_ref()
+            .map_or(0, |receipt| receipt.advisory_count)
+        + usize::from(cx.model.netlist_artifacts.validation_error.is_some());
+    let warning_candidate = (warnings > 0).then_some(warnings);
     let mut action = None;
     // The actions go down first, over the whole content rect. What the status
     // may occupy is then whatever they left, so the two groups cannot overlap
@@ -501,27 +479,8 @@ fn language_tools_menu(
     action
 }
 
-pub(super) const fn code_toolbar_compact(width: f32) -> bool {
-    width <= CODE_TOOLBAR_COMPACT_BREAKPOINT
-}
-
 pub(super) fn code_toolbar_visible_width(available_width: f32, clip_width: f32) -> f32 {
     available_width.min(clip_width).max(0.0)
-}
-
-pub(super) fn code_toolbar_prefers_compact(
-    viewport_width: f32,
-    local_width: f32,
-    full_action_width: f32,
-) -> bool {
-    if viewport_width <= CODE_TOOLBAR_TABLET_VIEWPORT_BREAKPOINT
-        || code_toolbar_compact(local_width)
-    {
-        return true;
-    }
-    let content_width = (local_width - CODE_TOOLBAR_PADDING_X * 2.0).max(0.0);
-    let left_width = (content_width - full_action_width - CODE_TOOLBAR_ACTION_GUTTER).max(0.0);
-    left_width < CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH
 }
 
 pub(super) fn code_toolbar_regions(

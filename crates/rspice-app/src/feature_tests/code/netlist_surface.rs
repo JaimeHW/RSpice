@@ -5,8 +5,8 @@ use crate::workbench::{RSpiceApp, features};
 use egui::vec2;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use rspice_app_code::workbench::surfaces::netlist::{
-    RUN_STRIP_HEIGHT, RunStripPhase, reveal_in_netlist, run_strip_projection, show_prepared,
-    step_netlist_problem, toolbar,
+    RunStripPhase, reveal_in_netlist, run_strip_projection, show_prepared, step_netlist_problem,
+    toolbar,
 };
 
 /// F8 in the netlist editor goes to the deck's next finding, on its
@@ -153,9 +153,14 @@ fn run_strip_band(
                 show_prepared(ui, &mut features::cx_with_menu_answers(&mut app, |_| false));
             });
     });
+    // The run's band is at least an advisory row high: these are the first
+    // points under the toolbar.
+    const BAND_PROBE: f32 = 24.0;
+    let toolbar_height =
+        toolbar::code_toolbar_height(&rspice_app_workbench::ui::tokens::Tokens::default().metrics);
     let band = egui::Rect::from_min_max(
-        egui::pos2(0.0, toolbar::CODE_TOOLBAR_HEIGHT + 1.0),
-        egui::pos2(width, toolbar::CODE_TOOLBAR_HEIGHT + RUN_STRIP_HEIGHT - 1.0),
+        egui::pos2(0.0, toolbar_height + 1.0),
+        egui::pos2(width, toolbar_height + BAND_PROBE - 1.0),
     );
     let pixels = canvas
         .pixels_in(band)

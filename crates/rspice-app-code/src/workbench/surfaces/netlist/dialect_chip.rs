@@ -537,7 +537,10 @@ mod tests {
             painted
                 .iter()
                 .filter(|(_, rect)| {
-                    rect.bottom() <= super::super::super::toolbar::CODE_TOOLBAR_HEIGHT
+                    rect.bottom()
+                        <= super::super::super::toolbar::code_toolbar_height(
+                            &crate::ui::tokens::Tokens::default().metrics,
+                        )
                 })
                 .map(|(text, _)| text.clone())
                 .collect()

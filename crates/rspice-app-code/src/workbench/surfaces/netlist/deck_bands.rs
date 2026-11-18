@@ -9,6 +9,7 @@
 
 use egui::Ui;
 
+use crate::ui::widgets::Button;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::documents::deck_files;
 use crate::workbench::framework::feature::Cx;
@@ -223,14 +224,24 @@ enum MissingAnswer {
 
 /// One band's row after its mark: the words on the left, cut short with the
 /// whole on hover when the row is too narrow for them, and the buttons kept
-/// whole on the right. The button pressed, if one was.
+/// whole on the right, each as wide as the widest of them. The button
+/// pressed, if one was.
 fn band_row<T: Copy>(ui: &mut Ui, words: &str, buttons: &[(T, String)]) -> Option<T> {
     let mut pressed = None;
     ui.add_space(MARK_GAP);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = BUTTON_GAP;
+        let column = buttons
+            .iter()
+            .map(|(_, label)| Button::new(label).compact().measured_width(ui))
+            .fold(0.0, f32::max);
         for (answer, label) in buttons.iter().rev() {
-            if ui.button(label).clicked() {
+            if Button::new(label)
+                .compact()
+                .min_width(column)
+                .show(ui)
+                .clicked()
+            {
                 pressed = Some(*answer);
             }
         }
@@ -275,7 +286,42 @@ fn disk_moment(ui: &Ui) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::disk_moment;
+    use super::{band_row, disk_moment};
+
+    /// A band's buttons stand in equal columns, however long their labels.
+    #[test]
+    fn a_bands_buttons_are_as_wide_as_each_other() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.horizontal(|ui| {
+                band_row(
+                    ui,
+                    "amp_tb.cir changed on disk.",
+                    &[
+                        (0, "Reload".to_owned()),
+                        (1, "Keep mine".to_owned()),
+                        (2, "Compare".to_owned()),
+                    ],
+                );
+            });
+        });
+        let widths = output
+            .platform_output
+            .accesskit_update
+            .iter()
+            .flat_map(|update| update.nodes.iter())
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
+            .filter_map(|(_, node)| node.bounds())
+            .map(|bounds| bounds.x1 - bounds.x0)
+            .collect::<Vec<_>>();
+        assert_eq!(widths.len(), 3, "{widths:?}");
+        assert!(
+            widths.iter().all(|width| (width - widths[0]).abs() < 0.5),
+            "{widths:?}"
+        );
+    }
 
     /// For each pass that draws the page, whether it looked at the disk;
     /// each pass is `(the window has the focus, the page is drawn)`.

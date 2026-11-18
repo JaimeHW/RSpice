@@ -497,8 +497,6 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     transfer::export_generated_dialog_window(ui.ctx(), cx);
 }
 
-/// Height of the run's band at the least: an advisory band's row.
-pub const RUN_STRIP_HEIGHT: f32 = 24.0;
 const RUN_STRIP_GAP: f32 = 8.0;
 const RUN_STRIP_DOT_DIAMETER: f32 = 5.0;
 const RUN_STRIP_DOT_GAP: f32 = 6.0;

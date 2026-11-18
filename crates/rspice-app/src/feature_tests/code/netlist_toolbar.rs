@@ -71,27 +71,34 @@ fn buttons(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
         .collect()
 }
 
-/// At 1024 the inspector is a drawer, so the header's count of the deck's
-/// errors is where the check's problems are read from: pressed, it lists
-/// them on the Problems page, whose rows go to their lines.
-#[test]
-fn the_error_count_lists_the_errors_on_the_problems_page() {
-    use crate::workbench::app::veriloga_design_tests::{
-        frame, frame_with, open_project_app, themed_context,
-    };
+/// The application with `deck` open on the Netlist workspace at 1024 by
+/// 768, the console closed, drawn until its check has run.
+fn deck_at_1024(deck: &str) -> (egui::Context, RSpiceApp, egui::FullOutput) {
+    use crate::workbench::app::veriloga_design_tests::{frame, open_project_app, themed_context};
     let mut app = open_project_app();
-    app.state
-        .seed_test_deck("amp\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.op\n.end\n");
+    app.state.seed_test_deck(deck);
     app.state
         .workbench
         .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
     app.state.workbench.console_visible = false;
     let ctx = themed_context();
-    let size = vec2(1024.0, 768.0);
-    let mut output = frame(&ctx, &mut app, size);
+    let mut output = frame(&ctx, &mut app, AT_1024);
     for _ in 0..3 {
-        output = frame(&ctx, &mut app, size);
+        output = frame(&ctx, &mut app, AT_1024);
     }
+    (ctx, app, output)
+}
+
+const AT_1024: egui::Vec2 = egui::vec2(1024.0, 768.0);
+
+/// At 1024 the inspector is a drawer, so the header's count of the deck's
+/// errors is where the check's problems are read from: pressed, it lists
+/// them on the Problems page, whose rows go to their lines.
+#[test]
+fn the_error_count_lists_the_errors_on_the_problems_page() {
+    use crate::workbench::app::veriloga_design_tests::frame_with;
+    let (ctx, mut app, output) =
+        deck_at_1024("amp\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.op\n.end\n");
     let shown = buttons(&output);
     let (_, count) = shown
         .iter()
@@ -101,7 +108,7 @@ fn the_error_count_lists_the_errors_on_the_problems_page() {
     frame_with(
         &ctx,
         &mut app,
-        size,
+        AT_1024,
         vec![
             egui::Event::PointerMoved(at),
             egui::Event::PointerButton {
@@ -115,7 +122,7 @@ fn the_error_count_lists_the_errors_on_the_problems_page() {
     frame_with(
         &ctx,
         &mut app,
-        size,
+        AT_1024,
         vec![egui::Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -128,6 +135,21 @@ fn the_error_count_lists_the_errors_on_the_problems_page() {
     assert_eq!(
         app.state.workbench.console_page,
         rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Problems
+    );
+}
+
+/// The header lays out by the shell's layout class, as every workspace
+/// does: at 1024 the window is a desktop one, and a deck's warnings are
+/// counted beside its chip where they fit.
+#[test]
+fn at_1024_the_header_counts_the_warnings() {
+    let (_, _, output) = deck_at_1024("broken\nR1 out 0\n.op\n.end\n");
+    let shown = buttons(&output);
+    assert!(
+        shown
+            .iter()
+            .any(|(label, _)| label.ends_with(" warning") || label.ends_with(" warnings")),
+        "the header counts the warning: {shown:?}"
     );
 }
 

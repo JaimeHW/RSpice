@@ -98,7 +98,9 @@ mod tests {
                 .filter_map(|clipped| match &clipped.shape {
                     egui::Shape::Text(text)
                         if text.visual_bounding_rect().bottom()
-                            <= super::super::toolbar::CODE_TOOLBAR_HEIGHT =>
+                            <= super::super::toolbar::code_toolbar_height(
+                                &crate::ui::tokens::Tokens::default().metrics,
+                            ) =>
                     {
                         Some(text.galley.text().to_owned())
                     }
