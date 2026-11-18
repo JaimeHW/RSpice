@@ -1146,6 +1146,50 @@ impl<'u> FormRows<'u> {
         })
     }
 
+    /// [`Self::value_action`] for a value that is a sentence, such as a count
+    /// of findings or what is wrong with an instance: it wraps in the room the
+    /// action leaves, never cut, and the row grows to hold it, its first line
+    /// level with the label.
+    pub fn sentence_action(&mut self, label: &str, sentence: &str, action: &str) -> bool {
+        let line_h = Tokens::get(self.ui.ctx()).metrics.ctl_h;
+        self.block(label, line_h, |ui, width| {
+            ui.allocate_ui_with_layout(
+                vec2(width, line_h),
+                Layout::right_to_left(Align::Min),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = LABEL_GAP;
+                    let clicked = super::Button::new(action).show(ui).clicked();
+                    let t = Tokens::get(ui.ctx());
+                    let font = theme::field_sans();
+                    let room = ui.available_width().max(1.0);
+                    let galley = ui.painter().layout(
+                        sentence.to_owned(),
+                        font.clone(),
+                        t.color.text,
+                        (room - VALUE_INSET).max(1.0),
+                    );
+                    let first_line = ui.fonts_mut(|fonts| fonts.row_height(&font));
+                    let air = (line_h - first_line).max(0.0);
+                    let (rect, response) = ui.allocate_exact_size(
+                        vec2(room, (galley.size().y + air).max(line_h)),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().galley(
+                        pos2(rect.left() + VALUE_INSET, rect.top() + air * 0.5),
+                        galley,
+                        t.color.text,
+                    );
+                    let spoken = format!("{label}: {sentence}");
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &spoken)
+                    });
+                    clicked
+                },
+            )
+            .inner
+        })
+    }
+
     /// A read-only table across the whole form, its first column on the
     /// labels' edge: what a command will make or keep, one line per item, read
     /// before the primary is pressed. Columns are as wide as their widest
@@ -1764,6 +1808,25 @@ impl<'a> CommandForm<'a> {
     pub fn label_column(mut self, width: f32) -> Self {
         self.label_col = width.max(form::LABEL_COL);
         self
+    }
+
+    /// Widen the label column to the widest of `labels`, as the rows paint
+    /// them, for a form of facts whose names run longer than the shared
+    /// column.
+    pub fn fit_labels(self, ctx: &Context, labels: &[&str]) -> Self {
+        let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+        let widest = ctx.fonts_mut(|fonts| {
+            labels
+                .iter()
+                .map(|label| {
+                    fonts
+                        .layout_no_wrap((*label).to_owned(), font.clone(), Color32::PLACEHOLDER)
+                        .size()
+                        .x
+                })
+                .fold(0.0, f32::max)
+        });
+        self.label_column(widest.ceil())
     }
 
     /// The sentence assistive technology reads for the whole surface.
