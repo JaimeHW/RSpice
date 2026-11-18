@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::state::{
         CellViewRef, ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile,
-        ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
+        ProjectSourceOwner, ProjectSourceRegistry,
     };
 
     const ROOT: &str = "`include \"defs.vams\"\nmodule m; endmodule\n";
@@ -142,7 +142,6 @@ mod tests {
     fn two_files() -> (ProjectWorkspace, ProjectSourceId) {
         let bundle = ProjectSourceBundle::try_new(
             ProjectSourceOwner::cell_view(CellViewRef::new("lib", "m", "veriloga")),
-            ProjectSourceLanguage::VerilogA,
             "m.va",
             ROOT,
             [ProjectSourceFile::try_new("defs.vams", DEFS).unwrap()],

@@ -74,12 +74,10 @@ fn answer_rail(cx: &mut Cx<'_, CodeFeature>, asked: Option<RailAction>) {
         None => {}
         Some(RailAction::Prompt(text)) => cx.wb.prompt(text),
         Some(RailAction::FileAction {
-            language,
             bundle_id,
             action,
             path,
         }) => cx.wb.outbox.push(CodeRequest::SourceFileAction {
-            language,
             bundle_id,
             action,
             path,

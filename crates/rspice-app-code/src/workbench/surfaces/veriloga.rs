@@ -88,10 +88,7 @@ fn editor_language(
     active_path: &str,
     header_shown: bool,
 ) -> CodeEditorLanguage {
-    if !header_shown
-        && selected.bundle().role_for_path(active_path)
-            == Some(crate::state::ProjectSourceRole::VerilogABuildProfile)
-    {
+    if !header_shown && selected.bundle().is_build_profile(active_path) {
         CodeEditorLanguage::Toml
     } else {
         CodeEditorLanguage::VerilogA
@@ -109,16 +106,13 @@ fn page_editor(
     editor_language: CodeEditorLanguage,
     editable: bool,
 ) -> ActiveSourceEditor {
-    let language = crate::state::ProjectSourceLanguage::VerilogA;
     let bundle_id = selected.bundle().id();
     ActiveSourceEditor {
-        id: crate::workbench::documents::code_workspace::source_editor_id(
-            language, bundle_id, shown_path,
-        ),
+        id: crate::workbench::documents::code_workspace::source_editor_id(bundle_id, shown_path),
         // A built-in header is read here whatever the bundle allows.
         editable: editable
             && crate::workbench::documents::code_workspace::source_bundle_document_is_editable_in(
-                model, code, platform, language, bundle_id, shown_path,
+                model, code, platform, bundle_id, shown_path,
             ),
         // The build profile beside the module is TOML, which the language
         // service does not index, and a built-in header is not part of the
@@ -447,7 +441,7 @@ fn source_editor(
         .chain([selected.bundle().root().logical_path()])
         .filter(|path| {
             !crate::state::project_source_paths_equal(path, active_path)
-                && selected.bundle().role_for_path(path).is_none()
+                && !selected.bundle().is_build_profile(path)
         })
         .map(str::to_owned)
         .collect::<Vec<_>>();
@@ -469,11 +463,7 @@ fn source_editor(
                         .map(crate::state::ProjectSourceFile::logical_path),
                 )
                 .map(move |path| {
-                    crate::workbench::documents::code_workspace::source_editor_id(
-                        crate::state::ProjectSourceLanguage::VerilogA,
-                        bundle.id(),
-                        path,
-                    )
+                    crate::workbench::documents::code_workspace::source_editor_id(bundle.id(), path)
                 })
         })
         .collect::<Vec<_>>();
@@ -517,7 +507,6 @@ fn source_editor(
                         crate::workbench::documents::virtual_text_editor::resynchronize(
                             ui.ctx(),
                             crate::workbench::documents::code_workspace::source_editor_id(
-                                crate::state::ProjectSourceLanguage::VerilogA,
                                 selected.bundle().id(),
                                 active_path,
                             ),
@@ -607,7 +596,6 @@ fn source_editor(
         ui, editor_id,
     ) && let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
         &mut CodeFeature::workspace_parts(cx),
-        crate::state::ProjectSourceLanguage::VerilogA,
         bundle_id,
         active_path,
     ) {

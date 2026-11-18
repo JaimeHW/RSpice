@@ -29,7 +29,6 @@ use rspice_simulation::project_veriloga::build_profile::{
     is_preprocessor_symbol, resolve_veriloga_build_profile,
 };
 
-use crate::state::ProjectSourceLanguage;
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, ListWords};
 use crate::workbench::app_state::{
@@ -255,10 +254,7 @@ fn symbol_refusal(name: &str, messages: &MessageCatalog) -> Option<String> {
 pub fn veriloga_build_settings_available(model: &Model, platform: &PlatformState) -> bool {
     platform.project_lifecycle.is_open()
         && model.workspace.content.active_view_is_hdl_source()
-        && model
-            .workspace
-            .active_source_bundle(ProjectSourceLanguage::VerilogA)
-            .is_some()
+        && model.workspace.active_source_bundle().is_some()
 }
 
 /// Open Build settings on the profile of the Verilog-A view in front.

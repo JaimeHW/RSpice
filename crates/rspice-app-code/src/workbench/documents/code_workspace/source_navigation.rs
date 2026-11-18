@@ -22,9 +22,7 @@ use rspice_veriloga::{
 };
 
 use crate::product::{ContentDigest, ProjectId};
-use crate::state::{
-    ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole,
-};
+use crate::state::{ProjectSourceBundle, ProjectSourceId};
 
 use super::language_services::{LanguageServiceIndex, SourceSymbolKind};
 
@@ -138,22 +136,18 @@ fn derive_navigation(
     index: Option<&LanguageServiceIndex>,
     logical_path: &str,
 ) -> SourceNavigation {
-    match bundle.language() {
-        ProjectSourceLanguage::VerilogA => {
-            // The build profile is policy, not Verilog-A: it has no outline
-            // and includes nothing.
-            if bundle.role_for_path(logical_path) == Some(ProjectSourceRole::VerilogABuildProfile) {
-                return SourceNavigation::default();
-            }
-            let Some(source) = bundle.file_content(logical_path) else {
-                return SourceNavigation::default();
-            };
-            SourceNavigation {
-                outline: veriloga_outline(source)
-                    .unwrap_or_else(|| indexed_veriloga_outline(index, logical_path)),
-                includes: veriloga_includes(bundle, logical_path),
-            }
-        }
+    // The build profile is policy, not Verilog-A: it has no outline
+    // and includes nothing.
+    if bundle.is_build_profile(logical_path) {
+        return SourceNavigation::default();
+    }
+    let Some(source) = bundle.file_content(logical_path) else {
+        return SourceNavigation::default();
+    };
+    SourceNavigation {
+        outline: veriloga_outline(source)
+            .unwrap_or_else(|| indexed_veriloga_outline(index, logical_path)),
+        includes: veriloga_includes(bundle, logical_path),
     }
 }
 
@@ -714,10 +708,7 @@ impl<'a> BundleIncludeProvider<'a> {
                     .files()
                     .iter()
                     // The compile leaves the build profile out of the closure.
-                    .filter(|file| {
-                        bundle.role_for_path(file.logical_path())
-                            != Some(ProjectSourceRole::VerilogABuildProfile)
-                    })
+                    .filter(|file| !bundle.is_build_profile(file.logical_path()))
                     .map(|file| (file.logical_path(), file.content())),
             )
             .map(|(path, source)| (fold(path), (path, source)))

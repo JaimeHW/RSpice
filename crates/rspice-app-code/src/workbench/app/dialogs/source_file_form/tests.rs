@@ -31,7 +31,6 @@ pub(crate) fn two_files() -> CodeHarness {
     harness.model.library_manager.add_library(library);
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(reference.clone()),
-        ProjectSourceLanguage::VerilogA,
         "gain.va",
         "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
         [],
@@ -77,7 +76,6 @@ fn open(harness: &mut CodeHarness, action: CodeSourceFileAction, path: &str) {
     let id = bundle(harness).id();
     code_workspace::open_source_file_dialog_in_bundle(
         &mut CodeFeature::workspace_parts(&mut harness.cx()),
-        ProjectSourceLanguage::VerilogA,
         id,
         action,
         path,
@@ -160,7 +158,7 @@ fn a_malformed_path_is_refused_in_the_readers_words() {
 
 #[test]
 fn the_bundles_other_refusals_are_worded_and_the_rest_fall_back_to_its_own() {
-    let main = ProjectSourceDocument::try_new("gain.txt", ProjectSourceLanguage::VerilogA, "")
+    let main = ProjectSourceDocument::try_new("gain.txt", "")
         .expect_err("the main file needs a Verilog-A extension");
     assert_eq!(
         name_error(&main, "gain.txt", english()),
@@ -238,11 +236,10 @@ fn the_main_file_a_role_bound_file_and_an_includer_refuse_deletion() {
         .model
         .workspace
         .content
-        .add_project_source_bundle_file_with_role(
+        .add_project_source_bundle_build_profile_file(
             id,
             "gain.va",
             ProjectSourceFile::try_new("build.toml", "").expect("a valid file"),
-            crate::state::ProjectSourceRole::VerilogABuildProfile,
         )
         .expect("the bundle takes a build profile");
     let bundle = bundle(&harness);

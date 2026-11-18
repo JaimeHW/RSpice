@@ -158,7 +158,6 @@ fn generated_netlist_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layou
 fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     use crate::workbench::documents::code_workspace;
 
-    let language = crate::state::ProjectSourceLanguage::VerilogA;
     let code = &cx.state.code_workspace;
     let editor = code_workspace::selected_veriloga_editor_snapshot_in(cx.model, code)
         .ok()
@@ -167,13 +166,12 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
                 cx.model,
                 code,
                 cx.platform,
-                language,
                 snapshot.bundle_id(),
                 snapshot.active_path(),
             )
         })
         .map(|snapshot| {
-            code_workspace::source_editor_id(language, snapshot.bundle_id(), snapshot.active_path())
+            code_workspace::source_editor_id(snapshot.bundle_id(), snapshot.active_path())
         });
     let response = ui
         .add_enabled_ui(editor.is_some(), |ui| {

@@ -20,8 +20,8 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
-    CellViewRef, Library, LibraryManager, ProjectSourceLanguage, ProjectSourceOwner,
-    ProjectSourceRegistry, ProjectWorkspace, ViewType,
+    CellViewRef, Library, LibraryManager, ProjectSourceOwner, ProjectSourceRegistry,
+    ProjectWorkspace, ViewType,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::state::{LibraryManager, ProjectWorkspace};
@@ -341,13 +341,6 @@ fn validate_global_library_contract(
 
     let mut found = BTreeSet::new();
     for bundle in sources.iter_bundles() {
-        if bundle.language() != ProjectSourceLanguage::VerilogA {
-            return Err(format!(
-                "global Verilog-A source bundle '{}' has language {}",
-                bundle.id(),
-                bundle.language()
-            ));
-        }
         if !matches!(bundle.owner(), ProjectSourceOwner::CellView { .. }) {
             return Err(format!(
                 "global Verilog-A source bundle '{}' is not owned by a cell view",
@@ -475,7 +468,6 @@ mod tests {
                 .unwrap();
         let mut bundle = ProjectSourceBundle::try_new(
             ProjectSourceOwner::cell_view(reference.clone()),
-            ProjectSourceLanguage::VerilogA,
             "precision_amp.va",
             "`include \"constants.vams\"\n`include \"disciplines.vams\"\n`include \"models/gain.va\"\nmodule rspice_precision_amp_va(p, n); inout p, n; electrical p, n; analog I(p,n) <+ 2.0 * V(p,n); endmodule\n",
             [helper],
@@ -620,7 +612,6 @@ mod tests {
                 "other_cell",
                 "veriloga",
             )),
-            ProjectSourceLanguage::VerilogA,
             bundle.root().logical_path(),
             bundle.root().content(),
             bundle.files().iter().cloned(),

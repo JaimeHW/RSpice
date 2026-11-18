@@ -20,7 +20,6 @@ fn bundle(root_path: &str, root: &str, files: &[(&str, &str)]) -> ProjectSourceB
         .collect::<Vec<_>>();
     ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(CellViewRef::new("behavioral", "gain", "veriloga")),
-        ProjectSourceLanguage::VerilogA,
         root_path,
         root,
         files,

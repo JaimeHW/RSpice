@@ -10,9 +10,7 @@
 
 use crate::{
     product::{ContentDigest, ProjectId},
-    state::{
-        ProjectSourceId, ProjectSourceLanguage, VerilogACompileReceipt, VerilogAPlacementHandoff,
-    },
+    state::{ProjectSourceId, VerilogACompileReceipt, VerilogAPlacementHandoff},
 };
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 #[cfg(test)]
@@ -29,7 +27,6 @@ pub struct CodeSourceFileDialogState {
     pub bundle_id: ProjectSourceId,
     pub bundle_revision: u64,
     pub closure_digest: ContentDigest,
-    pub language: ProjectSourceLanguage,
     pub source_path: String,
     pub importer_path: String,
     pub proposed_path: String,
@@ -45,7 +42,6 @@ pub struct CodeSourceHistoryState {
     pub bundle_id: ProjectSourceId,
     pub bundle_revision: u64,
     pub closure_digest: ContentDigest,
-    pub language: ProjectSourceLanguage,
     pub source_path: String,
     pub selected_revision: Option<u64>,
     pub error: Option<String>,
@@ -358,7 +354,6 @@ mod tests {
                 module_name,
                 "veriloga",
             )),
-            crate::state::ProjectSourceLanguage::VerilogA,
             file_name,
             format!(
                 "module {module_name}(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n"
@@ -386,7 +381,6 @@ mod tests {
         let mut registry = crate::state::ProjectSourceRegistry::try_from_bundles([
             crate::state::ProjectSourceBundle::try_new(
                 owner.clone(),
-                crate::state::ProjectSourceLanguage::VerilogA,
                 "stable.va",
                 "module stable(p, n); inout p, n; electrical p, n; endmodule\n",
                 [],

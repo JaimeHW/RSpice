@@ -15,7 +15,7 @@ use egui::Key;
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
-use crate::state::{CellViewRef, LibraryCellInstance, ProjectSourceLanguage};
+use crate::state::{CellViewRef, LibraryCellInstance};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{
     Drain, EditorViewCommand, Request, SourceEditorRequest, StandardCommand, StructuralCommand,
@@ -171,7 +171,6 @@ pub enum CodeRequest {
     /// Open `action`'s form for `path`: the file it renames or deletes, or
     /// the file a new one is included from.
     SourceFileAction {
-        language: ProjectSourceLanguage,
         bundle_id: crate::state::ProjectSourceId,
         action: CodeSourceFileAction,
         path: String,
@@ -282,7 +281,6 @@ pub enum SourceDocumentRequest {
     /// the dialog's close when the same frame closed it.
     Document {
         action: LifecycleAction,
-        language: ProjectSourceLanguage,
         logical_path: String,
         close: bool,
     },

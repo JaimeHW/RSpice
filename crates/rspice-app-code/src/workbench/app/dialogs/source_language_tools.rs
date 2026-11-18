@@ -34,26 +34,23 @@ use crate::workbench::{MessageCatalog, MessageId};
 const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
 
 /// Go to definition, Find references and Rename symbol from the caret of the
-/// source editor on screen, in the `language` bundle it shows, through the
+/// source editor on screen, in the Verilog-A bundle it shows, through the
 /// project source index. A netlist answers through its own language service
 /// instead, which the shell asks.
 pub fn navigate_source_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
-    language: crate::state::ProjectSourceLanguage,
     command: CodeCommand,
 ) -> Result<(), String> {
     let messages = parts.wb.messages();
-    let no_bundle =
-        || messages.format(MessageId::SourceNoBundle, &[("language", language.label())]);
+    let no_bundle = || messages.format(MessageId::SourceNoBundle, &[("language", "Verilog-A")]);
     let bundle_id = parts
         .model
         .workspace
-        .active_source_bundle(language)
+        .active_source_bundle()
         .map(crate::state::ProjectSourceBundle::id)
         .ok_or_else(no_bundle)?;
-    let logical_path =
-        code_workspace::active_bundle_path(&parts.model.workspace, parts.code, language)
-            .ok_or_else(no_bundle)?;
+    let logical_path = code_workspace::active_bundle_path(&parts.model.workspace, parts.code)
+        .ok_or_else(no_bundle)?;
     // The caret the editor last reported for this document.
     let caret = parts
         .code
@@ -64,13 +61,9 @@ pub fn navigate_source_bundle(
     // Built from the exact closure on screen. Rename keeps it as the form's
     // state; the other two borrow it and leave an open form as they found it.
     let previous = parts.code.language_tools.take();
-    if let Err(error) = code_workspace::open_language_tools_in_bundle(
-        parts,
-        language,
-        bundle_id,
-        &logical_path,
-        caret,
-    ) {
+    if let Err(error) =
+        code_workspace::open_language_tools_in_bundle(parts, bundle_id, &logical_path, caret)
+    {
         parts.code.language_tools = previous;
         return Err(error);
     }
@@ -107,14 +100,10 @@ pub fn navigate_source_bundle(
         .definition_at(&logical_path, caret, &caret_name)
         .ok_or_else(|| messages.format(MessageId::SourceNoDefinition, &[("name", &caret_name)]))?;
     if !crate::state::project_source_paths_equal(&definition.logical_path, &logical_path) {
-        match language {
-            crate::state::ProjectSourceLanguage::VerilogA => {
-                parts.code.veriloga.selected_file = Some(code_workspace::VerilogAFileSelection {
-                    bundle_id,
-                    logical_path: definition.logical_path.clone(),
-                });
-            }
-        }
+        parts.code.veriloga.selected_file = Some(code_workspace::VerilogAFileSelection {
+            bundle_id,
+            logical_path: definition.logical_path.clone(),
+        });
     }
     // The page hands this to the editor it draws next, which is the
     // definition's file.
@@ -214,29 +203,23 @@ pub(in crate::workbench) fn render_rename_symbol_form(
                 .index
                 .is_current(model.workspace.content.project.id(), bundle)
         });
-    let blocked = code_workspace::source_file_mutation_block_reason_in(
-        model,
-        code,
-        platform,
-        tools.index.language,
-    )
-    .map(str::to_owned)
-    .or_else(|| {
-        (!code_workspace::source_bundle_document_is_editable_in(
-            model,
-            code,
-            platform,
-            tools.index.language,
-            tools.index.bundle_id,
-            &tools.active_path,
-        ))
-        .then(|| {
-            messages.format(
-                MessageId::SourceRenameReadOnly,
-                &[("file", &tools.active_path)],
-            )
-        })
-    });
+    let blocked = code_workspace::source_file_mutation_block_reason_in(model, code, platform)
+        .map(str::to_owned)
+        .or_else(|| {
+            (!code_workspace::source_bundle_document_is_editable_in(
+                model,
+                code,
+                platform,
+                tools.index.bundle_id,
+                &tools.active_path,
+            ))
+            .then(|| {
+                messages.format(
+                    MessageId::SourceRenameReadOnly,
+                    &[("file", &tools.active_path)],
+                )
+            })
+        });
     let new_name = tools.replacement.trim();
     let refusal = if let Some(error) = tools.error.clone() {
         Some(error)

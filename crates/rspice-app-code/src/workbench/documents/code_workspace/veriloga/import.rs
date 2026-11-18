@@ -12,7 +12,7 @@ use crate::state::workspace::{
 };
 use crate::state::{
     LibraryManager, MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle, ProjectSourceFile,
-    ProjectSourceId, ProjectSourceLanguage,
+    ProjectSourceId,
 };
 use crate::workbench::documents::code_workspace::CodeWorkspaceParts;
 use rspice_app_state::workbench::app_state::model::Model;
@@ -527,9 +527,7 @@ pub fn request_veriloga_source_replacement(
     parts: &mut CodeWorkspaceParts<'_>,
     logical_path: &str,
 ) -> Result<(), String> {
-    if let Some(reason) =
-        super::super::source_file_mutation_block_reason(parts, ProjectSourceLanguage::VerilogA)
-    {
+    if let Some(reason) = super::super::source_file_mutation_block_reason(parts) {
         return Err(reason.to_owned());
     }
     if parts.code.veriloga.import_requested {
@@ -540,7 +538,6 @@ pub fn request_veriloga_source_replacement(
         parts.model,
         parts.code,
         parts.platform,
-        ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),
         logical_path,
     ) {

@@ -21,7 +21,7 @@ use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
+use crate::state::ProjectSourceId;
 use crate::workbench::app::dialogs::source_document::leaf_name;
 use crate::workbench::app::dialogs::source_file_form::delete_refusal;
 use crate::workbench::app_state::PlatformState;
@@ -50,7 +50,6 @@ pub(crate) enum RailAction {
     Prompt(String),
     /// Open `action`'s form for `path`.
     FileAction {
-        language: ProjectSourceLanguage,
         bundle_id: ProjectSourceId,
         action: CodeSourceFileAction,
         path: String,
@@ -61,10 +60,9 @@ pub(crate) enum RailAction {
 
 /// The rail of a Verilog-A cell view's bundle, with its file operations.
 pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAction> {
-    let language = ProjectSourceLanguage::VerilogA;
     let reference = parts.model.workspace.content.active_view.clone();
     let messages = parts.messages;
-    let actions = active_bundle(parts.model, language).map(|bundle| FileActions {
+    let actions = active_bundle(parts.model).map(|bundle| FileActions {
         bundle_id: bundle.id(),
         delete_refusals: std::iter::once(bundle.root().logical_path())
             .chain(bundle.files().iter().map(|file| file.logical_path()))
@@ -77,7 +75,6 @@ pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAc
                 parts.model,
                 parts.code_workspace,
                 parts.platform,
-                language,
             )
             .is_none(),
     });
@@ -86,9 +83,8 @@ pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAc
         // One list: the build profile is a file of the bundle like any
         // other, and its row says what it is.
         files_title: MessageId::CodeNavigatorFiles,
-        files: bundle_rows(parts.model, language),
-        active: active_path(parts.model, parts.code_workspace, language),
-        language,
+        files: bundle_rows(parts.model),
+        active: active_path(parts.model, parts.code_workspace),
         actions,
         used_in: Some(
             parts
@@ -105,7 +101,6 @@ struct Rail {
     files_title: MessageId,
     files: Vec<BundleRow>,
     active: Option<String>,
-    language: ProjectSourceLanguage,
     actions: Option<FileActions>,
     /// The cell's placed instances, for a rail whose bundle is a cell view's.
     used_in: Option<Vec<CellInstanceUse>>,
@@ -264,72 +259,47 @@ fn row_file_actions(
 struct BundleRow {
     logical_path: String,
     label: String,
-    role: Option<ProjectSourceRole>,
+    build_profile: bool,
 }
 
-fn bundle_rows(model: &Model, language: ProjectSourceLanguage) -> Vec<BundleRow> {
-    let Some(bundle) = active_bundle(model, language) else {
+fn bundle_rows(model: &Model) -> Vec<BundleRow> {
+    let Some(bundle) = active_bundle(model) else {
         return Vec::new();
     };
     let root = bundle.root();
-    std::iter::once((
-        root.logical_path(),
-        bundle.role_for_path(root.logical_path()),
-    ))
-    .chain(bundle.files().iter().map(|file| {
-        (
-            file.logical_path(),
-            bundle.role_for_path(file.logical_path()),
-        )
-    }))
-    .map(|(logical_path, role)| BundleRow {
-        label: leaf_name(logical_path),
-        logical_path: logical_path.to_owned(),
-        role,
-    })
-    .collect()
+    std::iter::once(root.logical_path())
+        .chain(bundle.files().iter().map(|file| file.logical_path()))
+        .map(|logical_path| BundleRow {
+            label: leaf_name(logical_path),
+            logical_path: logical_path.to_owned(),
+            build_profile: bundle.is_build_profile(logical_path),
+        })
+        .collect()
 }
 
 /// What the bundle records this file as, when that is something other than
-/// ordinary source.
-///
-/// `ProjectSourceRole::label` prefixes the language, which is noise in a rail
-/// already scoped to it, so the rail states the short form. The match is
-/// exhaustive on purpose: a new role has to be given a name here rather than
-/// silently reading as ordinary source.
-const fn role_message(role: Option<ProjectSourceRole>) -> Option<MessageId> {
-    match role {
-        Some(ProjectSourceRole::VerilogABuildProfile) => {
-            Some(MessageId::CodeNavigatorRoleBuildProfile)
-        }
-        None => None,
+/// ordinary source: the build profile, in the short form a rail already
+/// scoped to Verilog-A states.
+const fn role_message(build_profile: bool) -> Option<MessageId> {
+    if build_profile {
+        Some(MessageId::CodeNavigatorRoleBuildProfile)
+    } else {
+        None
     }
 }
 
 /// The bundle this rail lists: the one every editor host and command resolves,
 /// so the rail can never offer the files of a bundle the editor is not showing.
-fn active_bundle(
-    model: &Model,
-    language: ProjectSourceLanguage,
-) -> Option<&crate::state::ProjectSourceBundle> {
-    model.workspace.active_source_bundle(language)
+fn active_bundle(model: &Model) -> Option<&crate::state::ProjectSourceBundle> {
+    model.workspace.active_source_bundle()
 }
 
-fn active_path(
-    model: &Model,
-    code: &CodeWorkspaceRuntimeState,
-    language: ProjectSourceLanguage,
-) -> Option<String> {
-    code_workspace::active_bundle_path(&model.workspace, code, language)
+fn active_path(model: &Model, code: &CodeWorkspaceRuntimeState) -> Option<String> {
+    code_workspace::active_bundle_path(&model.workspace, code)
 }
 
-fn select(
-    model: &Model,
-    code: &mut CodeWorkspaceRuntimeState,
-    language: ProjectSourceLanguage,
-    logical_path: &str,
-) {
-    code_workspace::select_source_document(&model.workspace, code, language, logical_path);
+fn select(model: &Model, code: &mut CodeWorkspaceRuntimeState, logical_path: &str) {
+    code_workspace::select_source_document(&model.workspace, code, logical_path);
 }
 
 /// What a click in the rail asked for, applied once the rows are painted.
@@ -352,8 +322,7 @@ enum RailRequest {
 
 fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<RailAction> {
     let messages = parts.messages;
-    let language = rail.language;
-    let bundle = parts.model.workspace.active_source_bundle(language);
+    let bundle = parts.model.workspace.active_source_bundle();
     let bundle_id = bundle.map(crate::state::ProjectSourceBundle::id);
     let navigation = match (rail.active.as_deref(), bundle) {
         (Some(path), Some(bundle)) => document_navigation(
@@ -387,9 +356,7 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
                 let Some(active) = rail.active.as_deref() else {
                     break 'rows;
                 };
-                if language == ProjectSourceLanguage::VerilogA {
-                    includes_section(ui, &navigation, header, messages, &mut request);
-                }
+                includes_section(ui, &navigation, header, messages, &mut request);
                 outline_section(ui, &navigation, active, messages, &mut request);
                 if let Some(used_in) = &rail.used_in {
                     used_in_section(ui, used_in, messages, &mut request);
@@ -403,13 +370,12 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
     match request {
         None => {}
         Some(RailRequest::Select(path)) => {
-            select(parts.model, parts.code_workspace, language, &path);
+            select(parts.model, parts.code_workspace, &path);
         }
         Some(RailRequest::Refused(reason)) => return Some(RailAction::Prompt(reason)),
         Some(RailRequest::FileAction(action, path)) => {
             if let Some(file_actions) = rail.actions.as_ref() {
                 return Some(RailAction::FileAction {
-                    language,
                     bundle_id: file_actions.bundle_id,
                     action,
                     path,
@@ -422,7 +388,6 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
                     parts.model,
                     parts.code_workspace,
                     parts.platform,
-                    language,
                 ) {
                     Some(reason) => Err(reason.to_owned()),
                     None => code_workspace::request_veriloga_add_files(
@@ -438,13 +403,13 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
             }
         }
         Some(RailRequest::Reveal { path, line }) => {
-            select(parts.model, parts.code_workspace, language, &path);
+            select(parts.model, parts.code_workspace, &path);
             if let Some(bundle_id) = bundle_id {
                 // The shared code editor consumes this on its next frame,
                 // which is the frame it shows `path` in.
                 crate::workbench::documents::text_editor_commands::queue_reveal_line(
                     ui.ctx(),
-                    code_workspace::source_editor_id(language, bundle_id, &path),
+                    code_workspace::source_editor_id(bundle_id, &path),
                     line,
                 );
             }
@@ -502,10 +467,10 @@ fn files_section(
         // file row claims the editor then.
         let is_active =
             header.is_none() && rail.active.as_deref() == Some(row.logical_path.as_str());
-        let role = role_message(row.role).map(|role| messages.text(role));
+        let role = role_message(row.build_profile).map(|role| messages.text(role));
         let response = nav_row_response(
             ui,
-            source_row_icon(row.role),
+            source_row_icon(row.build_profile),
             &row.label,
             is_active,
             role.as_deref(),
@@ -571,7 +536,7 @@ fn includes_section(
         match &include.target {
             SourceIncludeTarget::Project(path) => {
                 let response =
-                    nav_row_response(ui, source_row_icon(None), &leaf_name(path), false, None)
+                    nav_row_response(ui, source_row_icon(false), &leaf_name(path), false, None)
                         .on_hover_text(path);
                 if response.clicked() {
                     *request = Some(RailRequest::Select(path.clone()));
@@ -580,7 +545,7 @@ fn includes_section(
             SourceIncludeTarget::BuiltIn(identity) => {
                 let response = nav_row_response(
                     ui,
-                    source_row_icon(None),
+                    source_row_icon(false),
                     &leaf_name(identity),
                     header == Some(*identity),
                     Some(&messages.text(MessageId::CodeNavigatorIncludeBuiltIn)),
@@ -592,7 +557,7 @@ fn includes_section(
             }
             SourceIncludeTarget::Missing { including, line } => {
                 let response =
-                    nav_row_response(ui, source_row_icon(None), &include.requested, false, None);
+                    nav_row_response(ui, source_row_icon(false), &include.requested, false, None);
                 // The mark carries the severity at the row's trailing edge,
                 // where the other rows state where their include resolved;
                 // the name beside it stays neutral.
@@ -767,11 +732,12 @@ fn used_in_section(
     }
 }
 
-fn source_row_icon(role: Option<ProjectSourceRole>) -> WorkbenchIcon {
-    match role {
+fn source_row_icon(build_profile: bool) -> WorkbenchIcon {
+    if build_profile {
         // Build settings rather than authored logic.
-        Some(ProjectSourceRole::VerilogABuildProfile) => WorkbenchIcon::Sliders,
-        None => WorkbenchIcon::Code,
+        WorkbenchIcon::Sliders
+    } else {
+        WorkbenchIcon::Code
     }
 }
 

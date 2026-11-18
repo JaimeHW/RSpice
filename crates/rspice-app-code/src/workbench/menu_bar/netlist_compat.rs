@@ -143,7 +143,7 @@ fn source_folder(
 ) -> String {
     let owner = match bundle.owner() {
         crate::state::ProjectSourceOwner::CellView { reference } => reference.cell.clone(),
-        crate::state::ProjectSourceOwner::CodeWorkspace { .. } => bundle
+        crate::state::ProjectSourceOwner::CodeWorkspace => bundle
             .root()
             .logical_path()
             .rsplit('/')

@@ -15,7 +15,7 @@
 use egui::{Context, Grid, RichText, Ui};
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{ProjectSourceBundle, ProjectSourceLanguage};
+use crate::state::ProjectSourceBundle;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -53,7 +53,7 @@ pub fn open_source_document_dialog_in(
     netlist: &NetlistDocumentState,
     platform: &PlatformState,
 ) -> Result<(), String> {
-    let Some(language) = visible_language_in(workspace, model) else {
+    if !veriloga_is_visible_in(workspace, model) {
         if !platform.project_lifecycle.is_open() {
             return Err("Open a project before managing its decks.".to_owned());
         }
@@ -62,12 +62,9 @@ pub fn open_source_document_dialog_in(
         }
         code.source_document_dialog = true;
         return Ok(());
-    };
-    if model.workspace.active_source_bundle(language).is_none() {
-        return Err(format!(
-            "This project owns no {} source workspace yet.",
-            language.label()
-        ));
+    }
+    if model.workspace.active_source_bundle().is_none() {
+        return Err("This project owns no Verilog-A source workspace yet.".to_owned());
     }
     code.source_document_dialog = true;
     Ok(())
@@ -80,11 +77,10 @@ pub fn source_document_dialog_is_available(
     netlist: &NetlistDocumentState,
     platform: &PlatformState,
 ) -> bool {
-    match visible_language_in(workspace, model) {
-        None => {
-            platform.project_lifecycle.is_open() && generated_deck_refusal(model, netlist).is_none()
-        }
-        Some(language) => model.workspace.active_source_bundle(language).is_some(),
+    if veriloga_is_visible_in(workspace, model) {
+        model.workspace.active_source_bundle().is_some()
+    } else {
+        platform.project_lifecycle.is_open() && generated_deck_refusal(model, netlist).is_none()
     }
 }
 
@@ -100,10 +96,10 @@ pub(crate) fn generated_deck_refusal(
         .then_some("The generated netlist is read-only. Open a deck to manage one.")
 }
 
-/// The source language of the document the dialog manages: a Verilog-A cell
-/// view open in Design; `None` is the Netlist workspace's deck.
-fn visible_language_in(workspace: Workspace, model: &Model) -> Option<ProjectSourceLanguage> {
-    code_workspace::active_source_language(workspace, &model.workspace)
+/// Whether the document the dialog manages is a Verilog-A cell view open in
+/// Design; otherwise it is the Netlist workspace's deck.
+fn veriloga_is_visible_in(workspace: Workspace, model: &Model) -> bool {
+    code_workspace::design_hosts_veriloga(workspace, &model.workspace)
 }
 
 /// What the dialog states about the visible document.
@@ -112,7 +108,6 @@ fn visible_language_in(workspace: Workspace, model: &Model) -> Option<ProjectSou
 /// invalidate a borrow the body is still rendering from, and so every row is
 /// measured from the same closure.
 pub struct DocumentFacts {
-    pub language: ProjectSourceLanguage,
     pub logical_path: String,
     leaf: String,
     role: String,
@@ -194,9 +189,11 @@ fn document_facts(
     platform: &PlatformState,
     messages: MessageCatalog,
 ) -> Option<DocumentFacts> {
-    let language = visible_language_in(workspace, model)?;
-    let logical_path = code_workspace::active_bundle_path(&model.workspace, code, language)?;
-    let bundle = model.workspace.active_source_bundle(language)?;
+    if !veriloga_is_visible_in(workspace, model) {
+        return None;
+    }
+    let logical_path = code_workspace::active_bundle_path(&model.workspace, code)?;
+    let bundle = model.workspace.active_source_bundle()?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
     let history = bundle
         .revision_history()
@@ -211,14 +208,12 @@ fn document_facts(
         })
         .collect();
     Some(DocumentFacts {
-        language,
         leaf: leaf_name(&logical_path),
-        role: role_label(messages, bundle.role_for_path(&logical_path)),
+        role: role_label(messages, bundle.is_build_profile(&logical_path)),
         editable: code_workspace::source_bundle_document_is_editable_in(
             model,
             code,
             platform,
-            language,
             bundle.id(),
             &logical_path,
         ),
@@ -232,9 +227,7 @@ fn document_facts(
         imported_by: dependency_paths(bundle, &logical_path, false),
         delete_refusal: super::source_file_form::delete_refusal(bundle, &logical_path, messages),
         history,
-        block_reason: code_workspace::source_file_mutation_block_reason_in(
-            model, code, platform, language,
-        ),
+        block_reason: code_workspace::source_file_mutation_block_reason_in(model, code, platform),
         logical_path,
     })
 }
@@ -275,17 +268,12 @@ enum Report {
 ///
 /// The picker resolves a selection by matching the label it drew, so the label
 /// has to come from the same locale the row was painted in.
-pub(super) fn role_label(
-    messages: MessageCatalog,
-    role: Option<crate::state::ProjectSourceRole>,
-) -> String {
-    messages.text(
-        role.map_or(MessageId::CodeSourceRoleOrdinary, |role| match role {
-            crate::state::ProjectSourceRole::VerilogABuildProfile => {
-                MessageId::CodeSourceRoleBuildProfile
-            }
-        }),
-    )
+pub(super) fn role_label(messages: MessageCatalog, build_profile: bool) -> String {
+    messages.text(if build_profile {
+        MessageId::CodeSourceRoleBuildProfile
+    } else {
+        MessageId::CodeSourceRoleOrdinary
+    })
 }
 
 /// Close the document lifecycle dialog and the drafts it opened.
@@ -318,7 +306,7 @@ pub(in crate::workbench) fn render_source_document_dialog(
     if !code.source_document_dialog {
         return None;
     }
-    if visible_language_in(wb.workspace, model).is_none() {
+    if !veriloga_is_visible_in(wb.workspace, model) {
         render_netlist_source_document_dialog(code, netlist, model, wb, ctx);
         return None;
     }
@@ -379,7 +367,6 @@ pub(in crate::workbench) fn render_source_document_dialog(
         action => {
             return Some(SourceDocumentRequest::Document {
                 action,
-                language: facts.language,
                 logical_path: facts.logical_path,
                 close,
             });
@@ -396,7 +383,6 @@ pub(in crate::workbench) fn render_source_document_dialog(
 pub fn apply_lifecycle_action(
     parts: &mut CodeWorkspaceParts<'_>,
     action: LifecycleAction,
-    language: ProjectSourceLanguage,
     logical_path: &str,
 ) {
     // Where a failure is stated is part of the action, not a guess made
@@ -413,7 +399,6 @@ pub fn apply_lifecycle_action(
         LifecycleAction::Begin(file_action) => {
             let outcome = code_workspace::open_source_file_dialog(
                 parts,
-                language,
                 file_action,
                 logical_path,
                 logical_path,
@@ -430,7 +415,7 @@ pub fn apply_lifecycle_action(
             Report::FileTransaction,
         ),
         LifecycleAction::OpenHistory => (
-            code_workspace::open_source_history(parts, language, logical_path),
+            code_workspace::open_source_history(parts, logical_path),
             Report::Console,
         ),
         LifecycleAction::Restore => (
@@ -920,17 +905,14 @@ fn operations(
                 {
                     *action = LifecycleAction::OpenHistory;
                 }
-                if facts.language == ProjectSourceLanguage::VerilogA {
-                    let response =
-                        Button::new(&messages.text(MessageId::CodeSourceReplaceFromFile))
-                            .enabled(facts.editable)
-                            .show(ui);
-                    if response.clicked() {
-                        *action = LifecycleAction::ReplaceFromFile;
-                    }
-                    if let Some(reason) = facts.block_reason {
-                        response.on_disabled_hover_text(reason);
-                    }
+                let response = Button::new(&messages.text(MessageId::CodeSourceReplaceFromFile))
+                    .enabled(facts.editable)
+                    .show(ui);
+                if response.clicked() {
+                    *action = LifecycleAction::ReplaceFromFile;
+                }
+                if let Some(reason) = facts.block_reason {
+                    response.on_disabled_hover_text(reason);
                 }
             });
         },

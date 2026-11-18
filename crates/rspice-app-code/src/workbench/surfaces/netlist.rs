@@ -1100,7 +1100,6 @@ mod tests {
 
         let bundle = crate::state::ProjectSourceBundle::try_new(
             crate::state::ProjectSourceOwner::cell_view(reference),
-            crate::state::ProjectSourceLanguage::VerilogA,
             "behavioral/gain.va",
             "`ifdef NEVER\n`include \"behavioral/inactive.va\"\n`endif\n`include \"behavioral/gain_constants.va\"\nmodule sealed_gain(p, n); inout p, n; electrical p, n; analog I(p,n) <+ `RSPICE_GAIN * V(p,n); endmodule\n",
             [

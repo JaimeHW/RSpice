@@ -10,10 +10,7 @@ use rspice_veriloga::{RuntimeCompileReport, RuntimeTargetMaturity, RuntimeTarget
 use sha2::Digest as _;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{
-    ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceRole,
-};
+use crate::state::{ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceOwner};
 use crate::workbench::MessageId;
 use rspice_app_workbench::workbench::state::WorkbenchSession;
 
@@ -99,10 +96,7 @@ impl SelectedVerilogASource {
 /// selects, read from the model.
 pub fn selected_veriloga_source_in(model: &Model) -> Result<SelectedVerilogASource, String> {
     let no_view = || "Open a Verilog-A cell view to work on its source.".to_owned();
-    let owner = model
-        .workspace
-        .active_source_owner(ProjectSourceLanguage::VerilogA)
-        .ok_or_else(no_view)?;
+    let owner = model.workspace.active_source_owner().ok_or_else(no_view)?;
     let ProjectSourceOwner::CellView { reference } = &owner else {
         return Err(no_view());
     };
@@ -394,11 +388,10 @@ fn add_build_profile_document(
     model
         .workspace
         .content
-        .add_project_source_bundle_file_with_role(
+        .add_project_source_bundle_build_profile_file(
             selected.bundle().id(),
             selected.bundle().root().logical_path(),
             file,
-            ProjectSourceRole::VerilogABuildProfile,
         )
         .map_err(|error| error.to_string())?;
     invalidate_veriloga_evidence_in(model, code, selected.bundle().id());
@@ -1080,7 +1073,6 @@ mod tests {
         library.add_cell(cell);
         let bundle = ProjectSourceBundle::try_new(
             ProjectSourceOwner::cell_view(reference.clone()),
-            ProjectSourceLanguage::VerilogA,
             root,
             source,
             [],
@@ -1135,13 +1127,7 @@ mod tests {
             .clone()
             .expect("the click took the closure");
         assert_eq!(request.bundle().revision(), before);
-        assert!(
-            request
-                .bundle()
-                .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
-                .next()
-                .is_none()
-        );
+        assert!(request.bundle().build_profile_path().is_none());
     }
 
     /// A build profile written over the one a bundle holds is an ordinary
@@ -1172,12 +1158,8 @@ mod tests {
 
         let after = selected_veriloga_source_in(&harness.model).unwrap();
         assert!(after.bundle().revision() > revision);
-        assert_eq!(
-            after
-                .bundle()
-                .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
-                .count(),
-            1,
+        assert!(
+            after.bundle().build_profile_path().is_some(),
             "written over, not beside"
         );
         let resolved =
@@ -1264,12 +1246,7 @@ mod tests {
             .content
             .project_sources
             .insert(
-                ProjectSourceDocument::try_new(
-                    "legacy.va",
-                    ProjectSourceLanguage::VerilogA,
-                    "module legacy; endmodule\n",
-                )
-                .unwrap(),
+                ProjectSourceDocument::try_new("legacy.va", "module legacy; endmodule\n").unwrap(),
             )
             .unwrap();
 

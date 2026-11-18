@@ -18,8 +18,7 @@ use egui::{Context, Id};
 
 use crate::state::project_sources::ProjectSourceError;
 use crate::state::{
-    ProjectSourceBundle, ProjectSourceDocument, ProjectSourceFile, ProjectSourceLanguage,
-    project_source_paths_equal,
+    ProjectSourceBundle, ProjectSourceDocument, ProjectSourceFile, project_source_paths_equal,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app_state::{Model, PlatformState};
@@ -51,25 +50,17 @@ pub(in crate::workbench) fn render(
         .content
         .project_sources
         .get_bundle(draft.bundle_id);
-    let blocked =
-        code_workspace::source_file_mutation_block_reason_in(model, code, platform, draft.language);
+    let blocked = code_workspace::source_file_mutation_block_reason_in(model, code, platform);
     let stale = bundle.is_none_or(|bundle| {
         draft.project_id != model.workspace.content.project.id()
             || bundle.revision().get() != draft.bundle_revision
             || bundle.closure_digest() != draft.closure_digest
     });
     let stale_text = messages.text(MessageId::CodeSourceFileStale);
-    let veriloga = draft.language == ProjectSourceLanguage::VerilogA;
-    let includers = match bundle {
-        Some(bundle) if veriloga => {
-            code_workspace::veriloga_includers_of(bundle, &draft.source_path)
-        }
-        _ => Vec::new(),
-    };
-    let hosts = match bundle {
-        Some(bundle) if veriloga => code_workspace::veriloga_include_hosts(bundle),
-        _ => Vec::new(),
-    };
+    let includers = bundle.map_or_else(Vec::new, |bundle| {
+        code_workspace::veriloga_includers_of(bundle, &draft.source_path)
+    });
+    let hosts = bundle.map_or_else(Vec::new, code_workspace::veriloga_include_hosts);
 
     let deleting = draft.action == CodeSourceFileAction::Delete;
     let refusal = bundle
@@ -166,7 +157,7 @@ pub(in crate::workbench) fn render(
                 draft.action,
                 CodeSourceFileAction::New | CodeSourceFileAction::Duplicate
             );
-            if veriloga && adds_file {
+            if adds_file {
                 let label = messages.text(MessageId::CodeSourceFileIncludedFrom);
                 if hosts.len() >= 2 {
                     if let Some(index) = rows.select(&label, INCLUDED_FROM, &importer, &hosts)
@@ -192,7 +183,6 @@ pub(in crate::workbench) fn render(
     match choice {
         DialogChoice::Primary if ready => Some(SourceDocumentRequest::Document {
             action: LifecycleAction::Commit,
-            language: draft.language,
             logical_path: draft.source_path,
             close: false,
         }),
@@ -211,7 +201,7 @@ fn titles(draft: &CodeSourceFileDialogState, messages: MessageCatalog) -> (Strin
             return (
                 messages.format(
                     MessageId::CodeSourceFileNewTitle,
-                    &[("language", draft.language.label())],
+                    &[("language", "Verilog-A")],
                 ),
                 messages.text(MessageId::CodeSourceCreatePrimary),
             );
@@ -250,12 +240,12 @@ pub(in crate::workbench) fn delete_refusal(
     if project_source_paths_equal(logical_path, bundle.root().logical_path()) {
         return Some(messages.text(MessageId::CodeSourceRootDeleteBlocked));
     }
-    if let Some(role) = bundle.role_for_path(logical_path) {
+    if bundle.is_build_profile(logical_path) {
         return Some(messages.format(
             MessageId::CodeSourceFileRoleBound,
             &[
                 ("file", logical_path),
-                ("role", &role_label(messages, Some(role))),
+                ("role", &role_label(messages, true)),
             ],
         ));
     }
@@ -340,7 +330,7 @@ fn check_name(
     });
     if moves
         && is_root
-        && let Err(error) = ProjectSourceDocument::try_new(name, draft.language, "")
+        && let Err(error) = ProjectSourceDocument::try_new(name, "")
     {
         return refused(error);
     }
@@ -366,11 +356,10 @@ fn check_name(
 fn name_error(error: &ProjectSourceError, name: &str, messages: MessageCatalog) -> String {
     match error {
         ProjectSourceError::InvalidLogicalPathCharacter { .. }
-        | ProjectSourceError::InvalidFileNameCharacters { .. } => {
+        | ProjectSourceError::InvalidFileNameCharacters => {
             messages.text(MessageId::CodeSourceFileNameCharacters)
         }
-        ProjectSourceError::ReservedLogicalPath { .. }
-        | ProjectSourceError::ReservedFileName { .. } => {
+        ProjectSourceError::ReservedLogicalPath { .. } | ProjectSourceError::ReservedFileName => {
             messages.text(MessageId::CodeSourceFileNameReserved)
         }
         ProjectSourceError::LogicalPathTooLong { limit, .. } => messages.format(
@@ -385,8 +374,8 @@ fn name_error(error: &ProjectSourceError, name: &str, messages: MessageCatalog) 
             messages.format(MessageId::CodeSourceFileExists, &[("name", logical_path)])
         }
         ProjectSourceError::InvalidLogicalPath { .. }
-        | ProjectSourceError::InvalidFileNamePath { .. }
-        | ProjectSourceError::InvalidFileNameWhitespace { .. } => {
+        | ProjectSourceError::InvalidFileNamePath
+        | ProjectSourceError::InvalidFileNameWhitespace => {
             path_shape(name).map_or_else(|| error.to_string(), |shape| messages.text(shape))
         }
         other => other.to_string(),

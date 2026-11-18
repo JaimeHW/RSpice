@@ -13,14 +13,13 @@ use crate::workbench::app::dialogs::source_file_form::tests::two_files;
 #[test]
 fn every_file_in_the_bundle_is_offered_and_selectable() {
     let mut harness = two_files();
-    let language = ProjectSourceLanguage::VerilogA;
-    let rows = bundle_rows(&harness.model, language);
+    let rows = bundle_rows(&harness.model);
     assert!(
         rows.len() > 1,
         "the view's bundle carries its main file and the stage it includes"
     );
 
-    let root = active_path(&harness.model, &harness.state.code_workspace, language)
+    let root = active_path(&harness.model, &harness.state.code_workspace)
         .expect("bundle root is the default document");
     let other = rows
         .iter()
@@ -28,15 +27,10 @@ fn every_file_in_the_bundle_is_offered_and_selectable() {
         .expect("a non-root file to select");
     let target = other.logical_path.clone();
 
-    select(
-        &harness.model,
-        &mut harness.state.code_workspace,
-        language,
-        &target,
-    );
+    select(&harness.model, &mut harness.state.code_workspace, &target);
 
     assert_eq!(
-        active_path(&harness.model, &harness.state.code_workspace, language).as_deref(),
+        active_path(&harness.model, &harness.state.code_workspace).as_deref(),
         Some(target.as_str())
     );
 }
@@ -49,28 +43,27 @@ fn rows_state_the_recorded_role_rather_than_guessing_from_the_name() {
     let id = harness
         .model
         .workspace
-        .active_source_bundle(ProjectSourceLanguage::VerilogA)
+        .active_source_bundle()
         .expect("the open view's bundle")
         .id();
     harness
         .model
         .workspace
         .content
-        .add_project_source_bundle_file_with_role(
+        .add_project_source_bundle_build_profile_file(
             id,
             "gain.va",
             crate::state::ProjectSourceFile::try_new("settings.toml", "").expect("a valid file"),
-            ProjectSourceRole::VerilogABuildProfile,
         )
         .expect("the bundle takes a build profile");
     let messages = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
-    let rows = bundle_rows(&harness.model, ProjectSourceLanguage::VerilogA);
+    let rows = bundle_rows(&harness.model);
     let stated = rows
         .iter()
         .map(|row| {
             (
                 row.label.clone(),
-                role_message(row.role).map(|role| messages.text(role)),
+                role_message(row.build_profile).map(|role| messages.text(role)),
             )
         })
         .collect::<Vec<_>>();
@@ -91,9 +84,9 @@ fn rows_state_the_recorded_role_rather_than_guessing_from_the_name() {
 fn only_a_role_other_than_ordinary_source_is_stated() {
     let messages = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
 
-    assert_eq!(role_message(None), None);
+    assert_eq!(role_message(false), None);
     assert_eq!(
-        role_message(Some(ProjectSourceRole::VerilogABuildProfile)).map(|role| messages.text(role)),
+        role_message(true).map(|role| messages.text(role)),
         Some("build profile".to_owned())
     );
 }

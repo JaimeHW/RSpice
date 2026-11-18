@@ -5,9 +5,7 @@
 
 use super::CodeWorkspaceParts;
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{
-    ProjectSourceBundle, ProjectSourceFile, ProjectSourceLanguage, ProjectSourceOwner,
-};
+use crate::state::{ProjectSourceBundle, ProjectSourceFile};
 use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
@@ -16,11 +14,8 @@ use super::{
     CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
 };
 
-pub fn source_file_mutation_block_reason(
-    parts: &CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
-) -> Option<&'static str> {
-    source_file_mutation_block_reason_in(parts.model, parts.code, parts.platform, language)
+pub fn source_file_mutation_block_reason(parts: &CodeWorkspaceParts<'_>) -> Option<&'static str> {
+    source_file_mutation_block_reason_in(parts.model, parts.code, parts.platform)
 }
 
 /// [`source_file_mutation_block_reason`], over the model, the Code
@@ -29,7 +24,6 @@ pub fn source_file_mutation_block_reason_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     platform: &PlatformState,
-    language: ProjectSourceLanguage,
 ) -> Option<&'static str> {
     if !platform.project_lifecycle.is_open() {
         return Some("Open a project before changing project source files.");
@@ -37,12 +31,10 @@ pub fn source_file_mutation_block_reason_in(
     if model.safe_mode.project_read_only() {
         return Some("The project is open read-only.");
     }
-    match language {
-        ProjectSourceLanguage::VerilogA if code.veriloga.pending.is_some() => {
-            Some("Wait for the Verilog-A compile to finish or cancel it first.")
-        }
-        _ => None,
-    }
+    code.veriloga
+        .pending
+        .is_some()
+        .then_some("Wait for the Verilog-A compile to finish or cancel it first.")
 }
 
 /// Resolve edit authority from persisted document ownership and semantic
@@ -51,17 +43,16 @@ pub fn source_document_is_editable(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     platform: &PlatformState,
-    language: ProjectSourceLanguage,
     logical_path: &str,
 ) -> bool {
     let Some(bundle_id) = model
         .workspace
-        .active_source_bundle(language)
+        .active_source_bundle()
         .map(ProjectSourceBundle::id)
     else {
         return false;
     };
-    source_bundle_document_is_editable_in(model, code, platform, language, bundle_id, logical_path)
+    source_bundle_document_is_editable_in(model, code, platform, bundle_id, logical_path)
 }
 
 /// Resolve edit authority for an exact source bundle, over the model, the
@@ -71,14 +62,13 @@ pub fn source_bundle_document_is_editable_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     platform: &PlatformState,
-    language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
-    if source_file_mutation_block_reason_in(model, code, platform, language).is_some() {
+    if source_file_mutation_block_reason_in(model, code, platform).is_some() {
         return false;
     }
-    source_bundle_contains_document_in(model, platform, language, bundle_id, logical_path)
+    source_bundle_contains_document_in(model, platform, bundle_id, logical_path)
 }
 
 /// Whether an exact retained document belongs to an authenticated source
@@ -87,17 +77,10 @@ pub fn source_bundle_document_is_editable_in(
 /// available in safe mode.
 pub fn source_bundle_contains_document(
     parts: &CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
-    source_bundle_contains_document_in(
-        parts.model,
-        parts.platform,
-        language,
-        bundle_id,
-        logical_path,
-    )
+    source_bundle_contains_document_in(parts.model, parts.platform, bundle_id, logical_path)
 }
 
 /// [`source_bundle_contains_document`], over the model and the platform's
@@ -105,7 +88,6 @@ pub fn source_bundle_contains_document(
 pub(crate) fn source_bundle_contains_document_in(
     model: &Model,
     platform: &PlatformState,
-    language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
@@ -117,20 +99,11 @@ pub(crate) fn source_bundle_contains_document_in(
         .content
         .project_sources
         .get_bundle(bundle_id)
-        .is_some_and(|bundle| {
-            let owner_matches = match bundle.owner() {
-                ProjectSourceOwner::CodeWorkspace {
-                    language: owner_language,
-                } => *owner_language == language,
-                ProjectSourceOwner::CellView { .. } => language == ProjectSourceLanguage::VerilogA,
-            };
-            bundle.language() == language && owner_matches && bundle.contains_file(logical_path)
-        })
+        .is_some_and(|bundle| bundle.contains_file(logical_path))
 }
 
 pub fn open_source_file_dialog(
     parts: &mut CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
     action: CodeSourceFileAction,
     source_path: &str,
     importer_path: &str,
@@ -138,28 +111,20 @@ pub fn open_source_file_dialog(
     let bundle_id = parts
         .model
         .workspace
-        .active_source_bundle(language)
+        .active_source_bundle()
         .map(ProjectSourceBundle::id)
-        .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    open_source_file_dialog_in_bundle(
-        parts,
-        language,
-        bundle_id,
-        action,
-        source_path,
-        importer_path,
-    )
+        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
+    open_source_file_dialog_in_bundle(parts, bundle_id, action, source_path, importer_path)
 }
 
 pub fn open_source_file_dialog_in_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     action: CodeSourceFileAction,
     source_path: &str,
     importer_path: &str,
 ) -> Result<(), String> {
-    if let Some(reason) = source_file_mutation_block_reason(parts, language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts) {
         return Err(reason.to_owned());
     }
     let authority_path = if action == CodeSourceFileAction::New {
@@ -167,7 +132,7 @@ pub fn open_source_file_dialog_in_bundle(
     } else {
         source_path
     };
-    if !source_bundle_contains_document(parts, language, bundle_id, authority_path) {
+    if !source_bundle_contains_document(parts, bundle_id, authority_path) {
         return Err(format!(
             "The selected source file '{authority_path}' no longer belongs to this project source bundle."
         ));
@@ -178,7 +143,7 @@ pub fn open_source_file_dialog_in_bundle(
         .content
         .project_sources
         .get_bundle(bundle_id)
-        .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
+        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
     if action != CodeSourceFileAction::New && !bundle.contains_file(source_path) {
         return Err(format!(
             "The selected source file '{source_path}' no longer exists."
@@ -197,25 +162,19 @@ pub fn open_source_file_dialog_in_bundle(
     // new file asked for from there is included from the main file instead.
     // A copy stands beside its original: it is included from the file that
     // includes the original, rather than from the original itself.
-    let veriloga = language == ProjectSourceLanguage::VerilogA;
-    let importer_path = if veriloga && action == CodeSourceFileAction::Duplicate {
+    let importer_path = if action == CodeSourceFileAction::Duplicate {
         veriloga_includers_of(bundle, source_path)
             .into_iter()
-            .find(|includer| bundle.role_for_path(includer).is_none())
+            .find(|includer| !bundle.is_build_profile(includer))
             .unwrap_or_else(|| bundle.root().logical_path().to_owned())
-    } else if veriloga
-        && action == CodeSourceFileAction::New
-        && bundle.role_for_path(importer_path).is_some()
-    {
+    } else if action == CodeSourceFileAction::New && bundle.is_build_profile(importer_path) {
         bundle.root().logical_path().to_owned()
     } else {
         importer_path.to_owned()
     };
     let importer_path = importer_path.as_str();
     let proposed_path = match action {
-        CodeSourceFileAction::New => {
-            unique_suggestion(bundle, importer_path, default_file_name(language))
-        }
+        CodeSourceFileAction::New => unique_suggestion(bundle, importer_path, default_file_name()),
         CodeSourceFileAction::Duplicate => {
             unique_suggestion(bundle, source_path, duplicate_file_name(source_path))
         }
@@ -229,7 +188,6 @@ pub fn open_source_file_dialog_in_bundle(
         bundle_id,
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
-        language,
         source_path: source_path.to_owned(),
         importer_path: importer_path.to_owned(),
         proposed_path,
@@ -244,7 +202,7 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
         .source_file_dialog
         .clone()
         .ok_or_else(|| "No source-file transaction is open.".to_owned())?;
-    if let Some(reason) = source_file_mutation_block_reason(parts, draft.language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts) {
         return Err(reason.to_owned());
     }
     if draft.project_id != parts.model.workspace.content.project.id() {
@@ -266,13 +224,12 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
     } else {
         draft.source_path.as_str()
     };
-    if !source_bundle_contains_document(parts, draft.language, draft.bundle_id, authority_path) {
+    if !source_bundle_contains_document(parts, draft.bundle_id, authority_path) {
         return Err(
             "The file change no longer applies to a source bundle in the project.".to_owned(),
         );
     }
-    if bundle.language() != draft.language
-        || bundle.revision().get() != draft.bundle_revision
+    if bundle.revision().get() != draft.bundle_revision
         || bundle.closure_digest() != draft.closure_digest
     {
         return Err(
@@ -288,7 +245,7 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
         .unwrap_or_else(|| bundle.root().logical_path().to_owned());
     let changed = match draft.action {
         CodeSourceFileAction::New => {
-            let file = ProjectSourceFile::try_new(proposed, new_file_template(draft.language))
+            let file = ProjectSourceFile::try_new(proposed, new_file_template())
                 .map_err(|error| error.to_string())?;
             parts
                 .model
@@ -337,19 +294,11 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
         CodeSourceFileAction::Delete => after_delete,
         _ => proposed.to_owned(),
     };
-    match draft.language {
-        ProjectSourceLanguage::VerilogA => {
-            parts.code.veriloga.selected_file = Some(VerilogAFileSelection {
-                bundle_id: draft.bundle_id,
-                logical_path: selected_path,
-            });
-            super::veriloga::invalidate_veriloga_evidence_in(
-                parts.model,
-                parts.code,
-                draft.bundle_id,
-            );
-        }
-    }
+    parts.code.veriloga.selected_file = Some(VerilogAFileSelection {
+        bundle_id: draft.bundle_id,
+        logical_path: selected_path,
+    });
+    super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, draft.bundle_id);
     parts.code.source_file_dialog = None;
     let message = match draft.action {
         CodeSourceFileAction::New => format!("Created {proposed}."),
@@ -372,25 +321,23 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
 
 pub fn open_source_history(
     parts: &mut CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
     source_path: &str,
 ) -> Result<(), String> {
     let bundle_id = parts
         .model
         .workspace
-        .active_source_bundle(language)
+        .active_source_bundle()
         .map(ProjectSourceBundle::id)
-        .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    open_source_history_in_bundle(parts, language, bundle_id, source_path)
+        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
+    open_source_history_in_bundle(parts, bundle_id, source_path)
 }
 
 pub(crate) fn open_source_history_in_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     source_path: &str,
 ) -> Result<(), String> {
-    if !source_bundle_contains_document(parts, language, bundle_id, source_path) {
+    if !source_bundle_contains_document(parts, bundle_id, source_path) {
         return Err(format!(
             "The selected source file '{source_path}' no longer belongs to this project source bundle."
         ));
@@ -401,7 +348,7 @@ pub(crate) fn open_source_history_in_bundle(
         .content
         .project_sources
         .get_bundle(bundle_id)
-        .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
+        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
     if !bundle.contains_file(source_path) {
         return Err(format!(
             "The selected source file '{source_path}' no longer exists."
@@ -412,7 +359,6 @@ pub(crate) fn open_source_history_in_bundle(
         bundle_id,
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
-        language,
         source_path: source_path.to_owned(),
         selected_revision: bundle
             .revision_history()
@@ -432,7 +378,7 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
     if parts.model.workspace.content.project.id() != draft.project_id {
         return Err("The active project changed while source history was open.".to_owned());
     }
-    if let Some(reason) = source_file_mutation_block_reason(parts, draft.language) {
+    if let Some(reason) = source_file_mutation_block_reason(parts) {
         return Err(reason.to_owned());
     }
     let retained_revision = draft
@@ -445,8 +391,7 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
         .project_sources
         .get_bundle(draft.bundle_id)
         .ok_or_else(|| "The source bundle no longer exists.".to_owned())?;
-    if !source_bundle_contains_document(parts, draft.language, draft.bundle_id, &draft.source_path)
-    {
+    if !source_bundle_contains_document(parts, draft.bundle_id, &draft.source_path) {
         return Err(
             "Source history no longer applies to a source bundle in the project.".to_owned(),
         );
@@ -489,23 +434,14 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
     } else {
         restored_bundle.root().logical_path().to_owned()
     };
-    match draft.language {
-        ProjectSourceLanguage::VerilogA => {
-            parts.code.veriloga.selected_file = Some(VerilogAFileSelection {
-                bundle_id: draft.bundle_id,
-                logical_path: selected_path,
-            });
-            super::veriloga::invalidate_veriloga_evidence_in(
-                parts.model,
-                parts.code,
-                draft.bundle_id,
-            );
-        }
-    }
+    parts.code.veriloga.selected_file = Some(VerilogAFileSelection {
+        bundle_id: draft.bundle_id,
+        logical_path: selected_path,
+    });
+    super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, draft.bundle_id);
     parts.code.source_history = None;
     let message = format!(
-        "Restored {} source bundle revision {} as a new revision.",
-        draft.language.label(),
+        "Restored Verilog-A source bundle revision {} as a new revision.",
         retained_revision.get()
     );
     parts
@@ -514,10 +450,8 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
     Ok(message)
 }
 
-fn default_file_name(language: ProjectSourceLanguage) -> &'static str {
-    match language {
-        ProjectSourceLanguage::VerilogA => "untitled.va",
-    }
+fn default_file_name() -> &'static str {
+    "untitled.va"
 }
 
 fn duplicate_file_name(path: &str) -> String {
@@ -585,7 +519,7 @@ pub fn veriloga_include_hosts(bundle: &ProjectSourceBundle) -> Vec<String> {
                 .files()
                 .iter()
                 .map(ProjectSourceFile::logical_path)
-                .filter(|path| bundle.role_for_path(path).is_none()),
+                .filter(|path| !bundle.is_build_profile(path)),
         )
         .map(str::to_owned)
         .collect()
@@ -606,17 +540,14 @@ pub fn veriloga_includers_of(bundle: &ProjectSourceBundle, logical_path: &str) -
 /// everything in the file that includes it, so it brings the standard
 /// headers it needs with it and compiles on its own terms; the reader's
 /// caret goes under them.
-fn new_file_template(language: ProjectSourceLanguage) -> String {
-    match language {
-        ProjectSourceLanguage::VerilogA => {
-            "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n".to_owned()
-        }
-    }
+fn new_file_template() -> String {
+    "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n".to_owned()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::ProjectSourceOwner;
     use crate::workbench::code::{
         CodeFeature,
         tests::{CodeHarness, harness},
@@ -656,7 +587,6 @@ mod tests {
             .insert_bundle(
                 ProjectSourceBundle::try_new(
                     ProjectSourceOwner::cell_view(reference.clone()),
-                    ProjectSourceLanguage::VerilogA,
                     "gain.va",
                     "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
                     [],
@@ -697,7 +627,6 @@ mod tests {
                 "gain",
                 "veriloga",
             )),
-            ProjectSourceLanguage::VerilogA,
             "cell/gain.va",
             "module gain; endmodule\n",
             [],
@@ -716,7 +645,6 @@ mod tests {
 
         open_source_file_dialog_in_bundle(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             bundle_id,
             CodeSourceFileAction::Duplicate,
             "cell/gain.va",
@@ -752,7 +680,6 @@ mod tests {
         );
         open_source_history_in_bundle(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             bundle_id,
             "cell/gain.va",
         )
@@ -787,7 +714,6 @@ mod tests {
                 &harness.model,
                 &harness.state.code_workspace,
                 &harness.platform,
-                ProjectSourceLanguage::VerilogA,
                 path,
             )
         };
@@ -818,7 +744,6 @@ mod tests {
 
         open_source_file_dialog(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::New,
             &root,
             &root,
@@ -837,7 +762,6 @@ mod tests {
 
         open_source_file_dialog(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Rename,
             "models/helper.va",
             &root,
@@ -856,7 +780,6 @@ mod tests {
 
         open_source_file_dialog(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Move,
             "models/renamed.va",
             &root,
@@ -875,7 +798,6 @@ mod tests {
 
         open_source_file_dialog(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Duplicate,
             "library/renamed.va",
             &root,
@@ -894,7 +816,6 @@ mod tests {
 
         open_source_file_dialog(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Delete,
             &duplicate,
             &root,
@@ -915,7 +836,6 @@ mod tests {
         let create = |harness: &mut CodeHarness, path: &str| {
             open_source_file_dialog(
                 &mut CodeFeature::workspace_parts(&mut harness.cx()),
-                ProjectSourceLanguage::VerilogA,
                 CodeSourceFileAction::New,
                 &root,
                 &root,
@@ -956,7 +876,6 @@ mod tests {
         let before = verilog_a_bundle(&harness).closure_digest();
         open_source_file_dialog(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::New,
             &root,
             &root,
@@ -999,12 +918,7 @@ mod tests {
             .unwrap();
         let edited_revision = verilog_a_bundle(&harness).revision();
 
-        open_source_history(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
-            &root,
-        )
-        .unwrap();
+        open_source_history(&mut CodeFeature::workspace_parts(&mut harness.cx()), &root).unwrap();
         commit_source_history_restore(&mut CodeFeature::workspace_parts(&mut harness.cx()))
             .unwrap();
 
@@ -1030,12 +944,7 @@ mod tests {
                 "module first; endmodule\n".to_owned(),
             )
             .unwrap();
-        open_source_history(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
-            &root,
-        )
-        .unwrap();
+        open_source_history(&mut CodeFeature::workspace_parts(&mut harness.cx()), &root).unwrap();
         harness
             .model
             .workspace
@@ -1064,7 +973,6 @@ mod tests {
         let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
         let error = open_source_file_dialog(
             &mut CodeFeature::workspace_parts(&mut harness.cx()),
-            ProjectSourceLanguage::VerilogA,
             CodeSourceFileAction::Delete,
             &root,
             &root,

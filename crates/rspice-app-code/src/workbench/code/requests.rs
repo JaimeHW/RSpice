@@ -160,7 +160,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             }
         }
         CodeRequest::SourceFileAction {
-            language,
             bundle_id,
             action,
             path,
@@ -169,7 +168,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             // not behind it.
             let opened = code_workspace::open_source_file_dialog_in_bundle(
                 &mut CodeFeature::workspace_parts(cx),
-                language,
                 bundle_id,
                 action,
                 &path,
@@ -259,14 +257,12 @@ fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentR
     match request {
         SourceDocumentRequest::Document {
             action,
-            language,
             logical_path,
             close,
         } => {
             source_document::apply_lifecycle_action(
                 &mut CodeFeature::workspace_parts(cx),
                 action,
-                language,
                 &logical_path,
             );
             if close {
@@ -281,16 +277,13 @@ fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentR
 /// answers through the project source index, over the code workspace's
 /// parts; a netlist answers through its own language service.
 fn navigate_active_source(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) {
-    let language = code_workspace::active_source_language(cx.wb.workspace, &cx.model.workspace);
-    let result = match language {
-        Some(language) => {
-            crate::workbench::app::dialogs::source_language_tools::navigate_source_bundle(
-                &mut CodeFeature::workspace_parts(cx),
-                language,
-                command,
-            )
-        }
-        None => navigate_netlist(cx, command),
+    let result = if code_workspace::design_hosts_veriloga(cx.wb.workspace, &cx.model.workspace) {
+        crate::workbench::app::dialogs::source_language_tools::navigate_source_bundle(
+            &mut CodeFeature::workspace_parts(cx),
+            command,
+        )
+    } else {
+        navigate_netlist(cx, command)
     };
     if let Err(error) = result {
         cx.wb.prompt(error);

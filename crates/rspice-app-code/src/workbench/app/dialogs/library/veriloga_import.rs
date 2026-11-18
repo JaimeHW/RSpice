@@ -20,7 +20,7 @@ use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::state::workspace::{DeclaredModule, declared_cell_interface, hdl_cell_for_module};
 use crate::state::{
     CellViewRef, ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile,
-    ProjectSourceLanguage, ProjectSourceOwner,
+    ProjectSourceOwner,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
 use crate::workbench::app_state::Model;
@@ -416,7 +416,6 @@ pub fn publish_veriloga_import(
     // them is the source all of them compile.
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(first.clone()),
-        ProjectSourceLanguage::VerilogA,
         form.file_name.as_str(),
         root.as_str(),
         imported_files(&form)?,

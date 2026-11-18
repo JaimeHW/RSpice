@@ -125,7 +125,7 @@ pub(crate) fn veriloga_dependency_view(
         .owner()
     {
         crate::state::ProjectSourceOwner::CellView { reference } => Some(reference.clone()),
-        crate::state::ProjectSourceOwner::CodeWorkspace { .. } => None,
+        crate::state::ProjectSourceOwner::CodeWorkspace => None,
     }
 }
 
@@ -139,16 +139,6 @@ pub(crate) fn design_hosts_veriloga(
         && workspace.content.active_view_is_hdl_source()
 }
 
-/// The source language of the code document commands, dialogs, and labels act
-/// on: a Verilog-A cell view the Design workspace is showing, or `None` for
-/// the Netlist workspace's deck, which is not a project source bundle at all.
-pub fn active_source_language(
-    shown: crate::workbench::state::Workspace,
-    workspace: &crate::state::ProjectWorkspace,
-) -> Option<crate::state::ProjectSourceLanguage> {
-    design_hosts_veriloga(shown, workspace).then_some(crate::state::ProjectSourceLanguage::VerilogA)
-}
-
 /// The bundle file a language page is showing.
 ///
 /// Selection is optional state: a page that has never had a file chosen shows
@@ -160,22 +150,18 @@ pub fn active_source_language(
 pub(crate) fn active_bundle_path(
     workspace: &crate::state::ProjectWorkspace,
     code: &CodeWorkspaceRuntimeState,
-    language: crate::state::ProjectSourceLanguage,
 ) -> Option<String> {
-    let bundle = workspace.active_source_bundle(language);
-    let explicit = match language {
-        crate::state::ProjectSourceLanguage::VerilogA => code
-            .veriloga
-            .selected_file
-            .as_ref()
-            .filter(|selection| {
-                bundle.is_some_and(|bundle| {
-                    selection.bundle_id == bundle.id()
-                        && bundle.contains_file(&selection.logical_path)
-                })
+    let bundle = workspace.active_source_bundle();
+    let explicit = code
+        .veriloga
+        .selected_file
+        .as_ref()
+        .filter(|selection| {
+            bundle.is_some_and(|bundle| {
+                selection.bundle_id == bundle.id() && bundle.contains_file(&selection.logical_path)
             })
-            .map(|selection| selection.logical_path.clone()),
-    };
+        })
+        .map(|selection| selection.logical_path.clone());
     explicit.or_else(|| bundle.map(|bundle| bundle.root().logical_path().to_owned()))
 }
 
@@ -185,16 +171,8 @@ pub(crate) fn active_bundle_path(
 /// Verilog-A well mixes in, or a reveal request lands on an editor that is not
 /// on screen and the caller silently does nothing. One owner, so a navigator
 /// row and a search result cannot disagree about where they are pointing.
-pub fn source_editor_id(
-    language: crate::state::ProjectSourceLanguage,
-    bundle_id: crate::state::ProjectSourceId,
-    logical_path: &str,
-) -> egui::Id {
-    match language {
-        crate::state::ProjectSourceLanguage::VerilogA => {
-            egui::Id::new(("workbench.veriloga.source", bundle_id, logical_path))
-        }
-    }
+pub fn source_editor_id(bundle_id: crate::state::ProjectSourceId, logical_path: &str) -> egui::Id {
+    egui::Id::new(("workbench.veriloga.source", bundle_id, logical_path))
 }
 
 /// Choose `logical_path` of the bundle in front of the reader, and report the
@@ -206,23 +184,16 @@ pub fn source_editor_id(
 pub fn select_source_document(
     workspace: &crate::state::ProjectWorkspace,
     code: &mut CodeWorkspaceRuntimeState,
-    language: crate::state::ProjectSourceLanguage,
     logical_path: &str,
 ) -> Option<crate::state::ProjectSourceId> {
-    use crate::state::ProjectSourceLanguage;
-
     let bundle_id = workspace
-        .active_source_bundle(language)
+        .active_source_bundle()
         .map(crate::state::ProjectSourceBundle::id)?;
-    match language {
-        ProjectSourceLanguage::VerilogA => {
-            code.veriloga.viewed_header = None;
-            code.veriloga.selected_file = Some(page::VerilogAFileSelection {
-                bundle_id,
-                logical_path: logical_path.to_owned(),
-            });
-        }
-    }
+    code.veriloga.viewed_header = None;
+    code.veriloga.selected_file = Some(page::VerilogAFileSelection {
+        bundle_id,
+        logical_path: logical_path.to_owned(),
+    });
     Some(bundle_id)
 }
 
@@ -287,7 +258,6 @@ mod tests {
             .insert_bundle(
                 crate::state::ProjectSourceBundle::try_new(
                     crate::state::ProjectSourceOwner::cell_view(reference.clone()),
-                    crate::state::ProjectSourceLanguage::VerilogA,
                     "models/gain_cell.va",
                     "module gain_cell(p, n); inout p, n; electrical p, n; endmodule\n",
                     [],
@@ -306,14 +276,13 @@ mod tests {
     #[test]
     fn the_veriloga_source_in_front_is_the_active_cell_views_or_none() {
         let mut workspace = crate::state::ProjectWorkspace::default();
-        let language = crate::state::ProjectSourceLanguage::VerilogA;
-        assert_eq!(workspace.active_source_owner(language), None);
-        assert!(workspace.active_source_bundle(language).is_none());
+        assert_eq!(workspace.active_source_owner(), None);
+        assert!(workspace.active_source_bundle().is_none());
 
         let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
         workspace.open_view(reference.clone(), crate::state::ViewType::VerilogA);
         assert_eq!(
-            workspace.active_source_owner(language),
+            workspace.active_source_owner(),
             Some(crate::state::ProjectSourceOwner::cell_view(reference))
         );
     }

@@ -11,7 +11,7 @@ use std::ops::Range;
 
 use super::CodeWorkspaceParts;
 use crate::product::{ContentDigest, ProjectId};
-use crate::state::{ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage};
+use crate::state::{ProjectSourceBundle, ProjectSourceId};
 
 use super::veriloga_catalog::VerilogACatalog;
 use super::veriloga_symbols::{VerilogASymbolKind, VerilogASymbols};
@@ -69,7 +69,6 @@ pub struct LanguageServiceIndex {
     pub bundle_id: ProjectSourceId,
     pub bundle_revision: u64,
     pub closure_digest: ContentDigest,
-    pub language: ProjectSourceLanguage,
     symbols: Vec<SourceSymbol>,
     tokens: Vec<IndexedToken>,
     sources: BTreeMap<String, String>,
@@ -93,12 +92,11 @@ pub struct CodeLanguageToolsState {
 
 pub fn open_language_tools_in_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
     bundle_id: crate::state::ProjectSourceId,
     active_path: &str,
     caret_char_index: usize,
 ) -> Result<(), String> {
-    if !super::source_bundle_contains_document(parts, language, bundle_id, active_path) {
+    if !super::source_bundle_contains_document(parts, bundle_id, active_path) {
         return Err(format!(
             "The active source file '{active_path}' no longer belongs to this project source bundle."
         ));
@@ -109,7 +107,7 @@ pub fn open_language_tools_in_bundle(
         .content
         .project_sources
         .get_bundle(bundle_id)
-        .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
+        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
     let active_path = bundle
         .retained_logical_path(active_path)
         .ok_or_else(|| {
@@ -147,7 +145,6 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
             parts.model,
             parts.code,
             parts.platform,
-            state.index.language,
             state.index.bundle_id,
             logical_path,
         )
@@ -167,15 +164,11 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
             replacements,
         )?
     };
-    match state.index.language {
-        ProjectSourceLanguage::VerilogA => {
-            super::veriloga::invalidate_veriloga_evidence_in(
-                parts.model,
-                parts.code,
-                state.index.bundle_id,
-            );
-        }
-    }
+    super::veriloga::invalidate_veriloga_evidence_in(
+        parts.model,
+        parts.code,
+        state.index.bundle_id,
+    );
     let messages = parts.wb.messages();
     let message = messages.format(
         crate::workbench::MessageId::SourceRenamed,
@@ -228,14 +221,13 @@ fn current_language_transaction(
         .language_tools
         .clone()
         .ok_or_else(|| "No source-language transaction is open.".to_owned())?;
-    if let Some(reason) = super::source_file_mutation_block_reason(parts, state.index.language) {
+    if let Some(reason) = super::source_file_mutation_block_reason(parts) {
         return Err(reason.to_owned());
     }
     if !super::source_files::source_bundle_document_is_editable_in(
         parts.model,
         parts.code,
         parts.platform,
-        state.index.language,
         state.index.bundle_id,
         &state.active_path,
     ) {
@@ -272,18 +264,16 @@ fn current_language_transaction(
 /// it does not parse, says why instead of changing anything.
 pub fn format_language_document(
     parts: &mut CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
     bundle_id: ProjectSourceId,
     logical_path: &str,
 ) -> Result<String, String> {
-    if let Some(reason) = super::source_file_mutation_block_reason(parts, language) {
+    if let Some(reason) = super::source_file_mutation_block_reason(parts) {
         return Err(reason.to_owned());
     }
     if !super::source_files::source_bundle_document_is_editable_in(
         parts.model,
         parts.code,
         parts.platform,
-        language,
         bundle_id,
         logical_path,
     ) {
@@ -303,11 +293,11 @@ pub fn format_language_document(
                 .map(|(_, source)| source.to_owned())
         })
         .ok_or_else(|| format!("{logical_path} is no longer part of this project."))?;
-    let formatted = formatted_source(language, logical_path, &source)?;
+    let formatted = formatted_source(logical_path, &source)?;
     let message = if formatted == source {
         format!("{logical_path} is already formatted.")
     } else {
-        write_language_document(parts, language, bundle_id, logical_path, formatted)?;
+        write_language_document(parts, bundle_id, logical_path, formatted)?;
         format!("Formatted {logical_path}.")
     };
     parts.wb.prompt(message.clone());
@@ -317,14 +307,7 @@ pub fn format_language_document(
 /// The formatter's whole-document edit, or why the source is refused:
 /// trailing blanks removed outside string literals, one final line break,
 /// and the Verilog-A laid out by its block structure.
-fn formatted_source(
-    language: ProjectSourceLanguage,
-    logical_path: &str,
-    source: &str,
-) -> Result<String, String> {
-    if language != ProjectSourceLanguage::VerilogA {
-        return Err("Only a Verilog-A source can be formatted.".to_owned());
-    }
+fn formatted_source(logical_path: &str, source: &str) -> Result<String, String> {
     validate_source_for_formatting(logical_path, source)?;
     let protected = protected_string_lines(source);
     let normalized = normalize_source_whitespace(source, &protected).0;
@@ -333,12 +316,11 @@ fn formatted_source(
 
 #[cfg(test)]
 pub(super) fn formatted_verilog_a(logical_path: &str, source: &str) -> Result<String, String> {
-    formatted_source(ProjectSourceLanguage::VerilogA, logical_path, source)
+    formatted_source(logical_path, source)
 }
 
 fn write_language_document(
     parts: &mut CodeWorkspaceParts<'_>,
-    language: ProjectSourceLanguage,
     bundle_id: ProjectSourceId,
     logical_path: &str,
     replacement: String,
@@ -348,11 +330,7 @@ fn write_language_document(
         bundle_id,
         vec![(logical_path.to_owned(), replacement)],
     )?;
-    match language {
-        ProjectSourceLanguage::VerilogA => {
-            super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, bundle_id);
-        }
-    }
+    super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, bundle_id);
     Ok(())
 }
 
@@ -415,7 +393,6 @@ impl LanguageServiceIndex {
             bundle_id: bundle.id(),
             bundle_revision: bundle.revision().get(),
             closure_digest: bundle.closure_digest(),
-            language: bundle.language(),
             symbols,
             tokens,
             sources,
@@ -428,7 +405,6 @@ impl LanguageServiceIndex {
             && self.bundle_id == bundle.id()
             && self.bundle_revision == bundle.revision().get()
             && self.closure_digest == bundle.closure_digest()
-            && self.language == bundle.language()
     }
 
     pub(crate) fn document_symbols(&self, logical_path: &str) -> Vec<&SourceSymbol> {
@@ -496,7 +472,7 @@ impl LanguageServiceIndex {
         name: &str,
         replacement: &str,
     ) -> Result<Vec<(String, String)>, String> {
-        if !valid_identifier(replacement) || language_keyword(self.language, replacement) {
+        if !valid_identifier(replacement) || language_keyword(replacement) {
             return Err(format!(
                 "'{replacement}' is not a valid non-keyword identifier."
             ));
@@ -643,9 +619,6 @@ impl LanguageServiceIndex {
         name: &str,
         replacement: &str,
     ) -> Result<Vec<(String, String)>, String> {
-        if self.language != ProjectSourceLanguage::VerilogA {
-            return self.rename_preview(name, replacement);
-        }
         if !valid_identifier(replacement) {
             return Err(format!("'{replacement}' is not a valid name."));
         }
@@ -1224,24 +1197,22 @@ fn valid_identifier(value: &str) -> bool {
         && characters.all(|character| character == '_' || character.is_alphanumeric())
 }
 
-fn language_keyword(language: ProjectSourceLanguage, value: &str) -> bool {
-    match language {
-        ProjectSourceLanguage::VerilogA => matches!(
-            value,
-            "module"
-                | "endmodule"
-                | "analog"
-                | "parameter"
-                | "real"
-                | "integer"
-                | "input"
-                | "output"
-                | "inout"
-                | "electrical"
-                | "begin"
-                | "end"
-        ),
-    }
+fn language_keyword(value: &str) -> bool {
+    matches!(
+        value,
+        "module"
+            | "endmodule"
+            | "analog"
+            | "parameter"
+            | "real"
+            | "integer"
+            | "input"
+            | "output"
+            | "inout"
+            | "electrical"
+            | "begin"
+            | "end"
+    )
 }
 
 fn char_to_byte(source: &str, char_index: usize) -> usize {
@@ -1267,19 +1238,13 @@ mod tests {
     use super::*;
     use crate::state::{ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner};
 
-    fn bundle(
-        language: ProjectSourceLanguage,
-        root_path: &str,
-        root: &str,
-        files: Vec<ProjectSourceFile>,
-    ) -> ProjectSourceBundle {
+    fn bundle(root_path: &str, root: &str, files: Vec<ProjectSourceFile>) -> ProjectSourceBundle {
         let dependencies = files
             .iter()
             .map(|file| ProjectSourceDependency::try_new(root_path, file.logical_path()).unwrap())
             .collect::<Vec<_>>();
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(language),
-            language,
+            ProjectSourceOwner::CodeWorkspace,
             root_path,
             root,
             files,
@@ -1291,7 +1256,6 @@ mod tests {
     #[test]
     fn verilog_index_navigates_and_renames_without_touching_comments_or_strings() {
         let bundle = bundle(
-            ProjectSourceLanguage::VerilogA,
             "models/resistor.va",
             "module resistor(p, n);\nparameter real resistance = 1k;\nanalog V(p,n) <+ resistance;\n// resistance stays\nendmodule\n",
             vec![
@@ -1335,7 +1299,6 @@ mod tests {
     #[test]
     fn renaming_a_verilog_a_name_leaves_number_literals_alone() {
         let bundle = bundle(
-            ProjectSourceLanguage::VerilogA,
             "models/leaky_cap.va",
             "`timescale 1ns/1ps\nmodule leaky_cap(a, b);\ninout a, b;\nelectrical a, b;\nparameter real p = 10p;\nparameter real e = 2.5e-3;\nanalog I(a, b) <+ p * ddt(V(a, b)) + e * 1e-3 * V(a, b);\nendmodule\n",
             vec![],
@@ -1361,7 +1324,6 @@ mod tests {
     #[test]
     fn names_after_a_based_verilog_a_number_are_indexed() {
         let bundle = bundle(
-            ProjectSourceLanguage::VerilogA,
             "models/masked_gain.va",
             "module masked_gain(out);\noutput out;\nelectrical out;\nparameter integer mask = 4'b1010;\nparameter real gain = 2.0;\nanalog V(out) <+ gain * mask;\nendmodule\n",
             vec![],
@@ -1379,7 +1341,6 @@ mod tests {
     #[test]
     fn a_verilog_a_stretch_the_lexer_refuses_hides_no_names_around_it() {
         let bundle = bundle(
-            ProjectSourceLanguage::VerilogA,
             "models/half_typed.va",
             "module half_typed(a);\ninout a;\nelectrical a;\nparameter real before = 1.0;\nreal broken = 3e+;\nparameter real after = 2.0;\nanalog V(a) <+ before + after * \"unterminated",
             vec![],
@@ -1397,7 +1358,6 @@ mod tests {
     #[test]
     fn verilog_a_names_after_a_continued_string_keep_their_lines() {
         let bundle = bundle(
-            ProjectSourceLanguage::VerilogA,
             "models/continued.va",
             "module continued(a);\ninout a;\nelectrical a;\n`define WARN $strobe(\"first \\\nsecond\")\nparameter real gain = 1.0;\nanalog V(a) <+ gain;\nendmodule\n",
             vec![],
@@ -1411,12 +1371,7 @@ mod tests {
     const TWO_SCOPES: &str = "`include \"disciplines.vams\"\nmodule one(a, b);\n  inout a, b;\n  electrical a, b;\n  analog V(a, b) <+ 0;\nendmodule\nmodule two(b, c);\n  inout b, c;\n  electrical b, c;\n  real x;\n  analog begin\n    x = V(b, c);\n    I(b, c) <+ x;\n  end\nendmodule\n";
 
     fn two_scopes() -> LanguageServiceIndex {
-        let bundle = bundle(
-            ProjectSourceLanguage::VerilogA,
-            "two.va",
-            TWO_SCOPES,
-            Vec::new(),
-        );
+        let bundle = bundle("two.va", TWO_SCOPES, Vec::new());
         LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap()
     }
 
@@ -1484,7 +1439,7 @@ mod tests {
     #[test]
     fn a_verilog_a_rename_that_would_change_the_meaning_is_refused() {
         let source = "module m(p);\n  inout p;\n  electrical p;\n  real a, b;\n  analog function real f;\n    input c;\n    real d;\n    f = a + c + b;\n  endfunction\n  analog begin : body\n    integer k;\n    k = 1;\n    V(p) <+ a * k;\n  end\nendmodule\n";
-        let bundle = bundle(ProjectSourceLanguage::VerilogA, "m.va", source, Vec::new());
+        let bundle = bundle("m.va", source, Vec::new());
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         let rename = |written: &str, name: &str, replacement: &str| {
             index.rename_preview_at("m.va", char_of(source, written), name, replacement)
@@ -1516,7 +1471,7 @@ mod tests {
     #[test]
     fn a_verilog_a_rename_in_a_module_that_does_not_read_says_which_line() {
         let source = "module m(p);\n  inout p;\n  electrical p;\n  parameter real g = ;\n  analog V(p) <+ g;\nendmodule\n";
-        let bundle = bundle(ProjectSourceLanguage::VerilogA, "m.va", source, Vec::new());
+        let bundle = bundle("m.va", source, Vec::new());
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         let refusal = index
             .rename_preview_at("m.va", char_of(source, "g = ;"), "g", "gain")
@@ -1531,7 +1486,7 @@ mod tests {
     #[test]
     fn a_port_or_parameter_connected_by_name_is_not_renamed_behind_it() {
         let source = "module inner(p);\n  inout p;\n  electrical p;\n  parameter real g = 1;\n  analog V(p) <+ g;\nendmodule\nmodule outer(q);\n  inout q;\n  electrical q;\n  inner #(.g(2)) u1 (.p(q));\nendmodule\n";
-        let bundle = bundle(ProjectSourceLanguage::VerilogA, "m.va", source, Vec::new());
+        let bundle = bundle("m.va", source, Vec::new());
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         let refusal = index
             .rename_preview_at("m.va", char_of(source, "g = 1"), "g", "gain")
@@ -1568,12 +1523,7 @@ mod tests {
     #[test]
     fn language_index_uses_unicode_project_path_identity() {
         let source = "module mesurer;\nendmodule\n";
-        let bundle = bundle(
-            ProjectSourceLanguage::VerilogA,
-            "Flux/été.va",
-            source,
-            Vec::new(),
-        );
+        let bundle = bundle("Flux/été.va", source, Vec::new());
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         let alias = "FLUX/ÉTÉ.VA";
 
