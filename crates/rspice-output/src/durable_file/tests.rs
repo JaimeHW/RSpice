@@ -1444,7 +1444,6 @@ fn assert_only_target(root: &Path, target: &Path) {
             .to_os_string()
     }
 
-    let destination = resolved_destination(target);
     let mut actual = std::fs::read_dir(root)
         .expect("read fixture")
         .map(|entry| entry.expect("entry").file_name())
@@ -1452,7 +1451,7 @@ fn assert_only_target(root: &Path, target: &Path) {
     let mut expected = vec![entry_name(target)];
     #[cfg(windows)]
     expected.extend(
-        recovery_slot_paths(&destination)
+        recovery_slot_paths(&resolved_destination(target))
             .iter()
             .filter(|path| path.exists())
             .map(|path| entry_name(path)),
