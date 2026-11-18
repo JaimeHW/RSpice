@@ -72,15 +72,6 @@ impl<'a> ScheduleOwner<'a> {
         }
     }
 
-    /// A generated built-in device's timer.
-    #[cfg(feature = "veriloga-builtins-base")]
-    fn generated(name: &'a str) -> Self {
-        Self {
-            kind: "generated Verilog-A device",
-            name,
-        }
-    }
-
     /// The subject of a diagnostic about this owner's schedule.
     pub(crate) fn subject(self) -> String {
         let Self { kind, name } = self;
@@ -4932,13 +4923,12 @@ impl CircuitData {
     /// Verilog-A evaluation. The transient engine must reject the current
     /// endpoint before any device or integration history is committed.
     pub(crate) fn veriloga_event_refinement_time(&self) -> Result<Option<Value>, String> {
-        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        #[cfg(not(feature = "veriloga"))]
         return Ok(None);
 
-        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        #[cfg(feature = "veriloga")]
         {
             let mut earliest: Option<Value> = None;
-            #[cfg(feature = "veriloga")]
             for device in self.veriloga_devices.iter() {
                 let instance = &device.name;
                 let Some(target) =
@@ -4952,13 +4942,6 @@ impl CircuitData {
                 else {
                     continue;
                 };
-                earliest = Some(earliest.map_or(target, |current| current.min(target)));
-            }
-            #[cfg(feature = "veriloga-builtins-base")]
-            if let Some(target) = self
-                .generated_veriloga_devices
-                .transient_event_refinement_time()
-            {
                 earliest = Some(earliest.map_or(target, |current| current.min(target)));
             }
             Ok(earliest)
@@ -5002,10 +4985,9 @@ impl CircuitData {
     }
 
     /// Earliest exact absolute event requested by accepted Verilog-A state.
-    /// Runtime timer, sampled-filter, and slew corners participate alongside
-    /// generated-model timers so locked grids and checkpoint resume preserve
-    /// the authoritative target rather than reconstructing it from a relative
-    /// step bound.
+    /// Runtime timer, sampled-filter, and slew corners participate so locked
+    /// grids and checkpoint resume preserve the authoritative target rather
+    /// than reconstructing it from a relative step bound.
     pub(crate) fn veriloga_transient_event_time(
         &self,
         accepted_time: Value,
@@ -5016,9 +4998,9 @@ impl CircuitData {
             ));
         }
 
-        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        #[cfg(feature = "veriloga")]
         let mut earliest: Option<Value> = None;
-        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        #[cfg(not(feature = "veriloga"))]
         let earliest: Option<Value> = None;
         #[cfg(feature = "veriloga")]
         for device in self.veriloga_analog_devices() {
@@ -5032,19 +5014,6 @@ impl CircuitData {
             if !target.is_finite() || target <= accepted_time {
                 return Err(format!(
                     "Verilog-A device '{instance}' event {target} is not strictly after accepted time {accepted_time}"
-                ));
-            }
-            earliest = Some(earliest.map_or(target, |current| current.min(target)));
-        }
-
-        #[cfg(feature = "veriloga-builtins-base")]
-        if let Some(target) = self
-            .generated_veriloga_devices
-            .transient_timer_event_time()?
-        {
-            if !target.is_finite() || target <= accepted_time {
-                return Err(format!(
-                    "generated Verilog-A timer event {target} is not strictly after accepted time {accepted_time}"
                 ));
             }
             earliest = Some(earliest.map_or(target, |current| current.min(target)));
@@ -5136,18 +5105,6 @@ impl CircuitData {
                 .ok()
                 .flatten()
                 .map(|activation| (activation.owner, activation.seconds())),
-            accepted_time,
-        );
-        // A generated built-in device's timer is an absolute event target the
-        // same fold lands — `veriloga_transient_event_time` folds it beside
-        // the JIT devices' — so a run it pins is this bound's business too,
-        // and the generated instance carries the deck name to say whose.
-        #[cfg(feature = "veriloga-builtins-base")]
-        fold_scheduled_activation(
-            &mut owner,
-            self.generated_veriloga_devices
-                .scheduled_timer_activation()
-                .map(|(instance, target)| (Some(ScheduleOwner::generated(instance)), target)),
             accepted_time,
         );
         // The single-host fallback, for the wakeups the shared wheel holds

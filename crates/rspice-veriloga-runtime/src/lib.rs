@@ -78,10 +78,9 @@ pub use limexp::*;
 
 pub use event_control::{
     CrossingAccepted, CrossingDecision, CrossingRule, GeneratedCheckpointLaneDescriptor,
-    GeneratedCheckpointLaneType, GeneratedCrossEvaluation, GeneratedCrossState,
-    GeneratedEventControlError, decide_crossing, evaluate_generated_above,
-    evaluate_generated_cross, evaluate_generated_last_crossing, evaluate_generated_timer,
-    generated_crossing_time_between, validate_generated_cross_state,
+    GeneratedCheckpointLaneType, GeneratedCrossState, GeneratedEventControlError, decide_crossing,
+    evaluate_generated_last_crossing, evaluate_generated_timer, generated_crossing_time_between,
+    validate_generated_cross_state,
 };
 
 pub type Value = f64;
@@ -3371,121 +3370,6 @@ mod fixed_lane_tests {
                 .expect_err("non-finite crossing state must fail")
                 .contains("malformed")
         );
-    }
-
-    #[test]
-    fn generated_cross_is_pure_against_accepted_state_and_refines_the_root() {
-        let initial = evaluate_generated_cross(
-            GeneratedCrossState::INITIAL,
-            -1.0,
-            0.0,
-            1.0,
-            0.0,
-            0.0,
-            1.0,
-            true,
-        )
-        .expect("initialize crossing state");
-        assert!(!initial.fired);
-        let accepted = initial.candidate;
-
-        let crossing = evaluate_generated_cross(accepted, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, true)
-            .expect("evaluate crossing");
-        assert!(crossing.fired);
-        assert_eq!(crossing.candidate.value, 1.0);
-        assert_eq!(crossing.candidate.time, 1.0);
-        assert_eq!(crossing.candidate.side, 1);
-        assert_eq!(crossing.candidate.last_crossing_time, 0.5);
-        // Half the default window past the root estimate
-        // (`decide_crossing`).
-        assert_eq!(crossing.refinement_time, Some(0.5 + 16.0 * f64::EPSILON));
-
-        let repeated = evaluate_generated_cross(accepted, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, true)
-            .expect("repeat the same Newton candidate");
-        assert_eq!(repeated, crossing);
-        assert_eq!(accepted, initial.candidate, "candidate evaluation is pure");
-
-        let rolled_back = evaluate_generated_cross(accepted, -0.5, 0.75, 1.0, 0.0, 0.0, 1.0, true)
-            .expect("evaluate from the unmodified accepted endpoint");
-        assert!(!rolled_back.fired);
-        assert_eq!(rolled_back.candidate.side, -1);
-    }
-
-    #[test]
-    fn generated_event_operands_are_exact_and_invalid_directions_are_inactive() {
-        let initialized = evaluate_generated_cross(
-            GeneratedCrossState::INITIAL,
-            -1.0,
-            0.0,
-            2.0,
-            0.0,
-            0.0,
-            1.0,
-            true,
-        )
-        .expect("integer direction outside the event domain remains legal");
-        let inactive =
-            evaluate_generated_cross(initialized.candidate, 1.0, 1.0, 2.0, 0.0, 0.0, 1.0, true)
-                .expect("out-of-domain integer direction is inactive");
-        assert!(!inactive.fired);
-
-        assert_eq!(
-            evaluate_generated_cross(initialized.candidate, 1.0, 1.0, 0.5, 0.0, 0.0, 1.0, true,),
-            Err(GeneratedEventControlError::NonIntegerDirection)
-        );
-        assert_eq!(
-            evaluate_generated_above(initialized.candidate, 1.0, 1.0, 0.0, 0.0, 0.5, false,),
-            Err(GeneratedEventControlError::NonIntegerEnable)
-        );
-
-        // A non-finite operand is a different fact from a finite non-integer
-        // one: `0.5` is the module's source and no other point will fix it,
-        // NaN is the iterate the solver offered. The consumer rejects the
-        // point for one and refuses the run for the other, so the producer
-        // must not collapse them — the interpreter and the native route have
-        // always split them.
-        assert_eq!(
-            evaluate_generated_cross(
-                initialized.candidate,
-                1.0,
-                1.0,
-                Value::NAN,
-                0.0,
-                0.0,
-                1.0,
-                true,
-            ),
-            Err(GeneratedEventControlError::NonFiniteOperand)
-        );
-        assert_eq!(
-            evaluate_generated_above(
-                initialized.candidate,
-                1.0,
-                1.0,
-                0.0,
-                0.0,
-                Value::INFINITY,
-                false,
-            ),
-            Err(GeneratedEventControlError::NonFiniteOperand)
-        );
-    }
-
-    #[test]
-    fn generated_above_fires_at_a_positive_static_initial_point() {
-        let above =
-            evaluate_generated_above(GeneratedCrossState::INITIAL, 0.25, 0.0, 0.0, 0.0, 1.0, true)
-                .expect("static above evaluation");
-        assert!(above.fired);
-        assert_eq!(above.candidate.side, 1);
-        assert_eq!(above.candidate.last_event_time, 0.0);
-        assert_eq!(above.candidate.last_crossing_time, 0.0);
-        assert_eq!(above.refinement_time, None);
-
-        let disabled =
-            evaluate_generated_above(GeneratedCrossState::INITIAL, 0.25, 0.0, 0.0, 0.0, 0.0, true)
-                .expect("disabled static above evaluation");
-        assert!(!disabled.fired);
     }
 
     #[test]

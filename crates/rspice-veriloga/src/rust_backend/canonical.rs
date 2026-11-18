@@ -1008,11 +1008,8 @@ struct ModelPlan {
     idt_slots: HashMap<ExprId, usize>,
     /// Circular integrators own typed history, including their exact origins.
     idtmod_slots: HashMap<ExprId, usize>,
-    /// One accepted/candidate detector slot shared by `cross` and `above`.
+    /// One accepted/candidate detector slot per `last_crossing`.
     cross_slots: HashMap<ExprId, usize>,
-    /// Dense source-order timer ids (timers share one per-instance next-event
-    /// bound, but ids preserve diagnostics and emitted-code stability).
-    timer_slots: HashMap<ExprId, usize>,
     /// One anchor slot per `$limit`, holding what it returned on the previous
     /// Newton iteration. `Limit` and its `LimitPrevious` readers carry the same
     /// operator id, so they resolve to the same slot by construction.
@@ -1102,7 +1099,6 @@ impl ModelPlan {
         let mut idtmod_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut limit_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut cross_slots: HashMap<ExprId, usize> = HashMap::new();
-        let mut timer_slots: HashMap<ExprId, usize> = HashMap::new();
         for value in &cfg.function.values {
             match &value.kind {
                 CfgValueKind::Ddt { operator, .. } => {
@@ -1117,15 +1113,9 @@ impl ModelPlan {
                     let next = idtmod_slots.len();
                     idtmod_slots.entry(*operator).or_insert(next);
                 }
-                CfgValueKind::Cross { operator, .. }
-                | CfgValueKind::Above { operator, .. }
-                | CfgValueKind::LastCrossing { operator, .. } => {
+                CfgValueKind::LastCrossing { operator, .. } => {
                     let next = cross_slots.len();
                     cross_slots.entry(*operator).or_insert(next);
-                }
-                CfgValueKind::Timer { operator, .. } => {
-                    let next = timer_slots.len();
-                    timer_slots.entry(*operator).or_insert(next);
                 }
                 // `LimitPrevious` is included so a `$limit` whose body reads the
                 // previous iterate before the `Limit` value is built still finds
@@ -1848,7 +1838,6 @@ impl ModelPlan {
             idt_slots,
             idtmod_slots,
             cross_slots,
-            timer_slots,
             limit_slots,
             one_step_dae_split_safe,
             harmonic_balance_refusal,
@@ -2016,13 +2005,6 @@ impl ModelPlan {
         for variable in &artifact.hir.switch_branch_variables {
             shape.u64(u64::from(variable.index()));
             shape.field(b"accepted:f64:zero-or-one");
-        }
-
-        let has_timer_bound = !self.timer_slots.is_empty();
-        shape.section("timer_bound", usize::from(has_timer_bound));
-        if has_timer_bound {
-            shape.record("timer_bound");
-            shape.field(b"accepted:f64:positive-or-infinity");
         }
 
         if !self.initialization_inputs.is_empty() {
@@ -2663,7 +2645,6 @@ impl ModelPlan {
             idt_slots: self.idt_slots.clone(),
             idtmod_slots: self.idtmod_slots.clone(),
             cross_slots: self.cross_slots.clone(),
-            timer_slots: self.timer_slots.clone(),
             limit_slots: self.limit_slots.clone(),
             ..bindings()
         }
@@ -2748,9 +2729,6 @@ impl ModelPlan {
             runtime_support.push("evaluate_generated_last_crossing".to_string());
         }
         runtime_support.extend([
-            "evaluate_generated_above".to_string(),
-            "evaluate_generated_cross".to_string(),
-            "evaluate_generated_timer".to_string(),
             "rspice_eval_ddt".to_string(),
             "rspice_eval_idt".to_string(),
             "rspice_limexp".to_string(),
@@ -3995,15 +3973,6 @@ impl ModelPlan {
             );
         }
         emit_disabled_limit_bindings(&wants, "        ", out);
-        if wants.cross {
-            out.push_str("        macro_rules! rspice_cross { ($slot:expr, $value:expr, $direction:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{ let _ = ($slot, $value, $direction, $time_tol, $expr_tol, $enable); 0.0 }}; }\n");
-        }
-        if wants.above {
-            out.push_str("        macro_rules! rspice_above { ($slot:expr, $value:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{ let _ = ($slot, $value, $time_tol, $expr_tol, $enable); 0.0 }}; }\n");
-        }
-        if wants.timer {
-            out.push_str("        macro_rules! rspice_timer { ($slot:expr, $start:expr, $period:expr, $time_tol:expr, $enable:expr) => {{ let _ = ($slot, $start, $period, $time_tol, $enable); 0.0 }}; }\n");
-        }
     }
 
     /// Where equation `index`'s reactive values start in the cache.
@@ -4764,58 +4733,6 @@ impl ModelPlan {
                  {pad}}};"
             );
         }
-        if wants.cross {
-            for value in &function.values {
-                if let CfgValueKind::Cross { operator, .. } = &value.kind {
-                    self.cross_slots.get(operator).copied().ok_or_else(|| {
-                        unsupported(
-                            artifact,
-                            format!("a cross event at {operator} with no generated detector slot"),
-                        )
-                    })?;
-                }
-            }
-            out.push_str(&format!(
-                "{pad}macro_rules! rspice_cross {{ ($slot:expr, $value:expr, $direction:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{{{\n\
-                 {pad}    let slot = $slot;\n\
-                 {pad}    match evaluate_generated_cross(self.cross_event_accepted[slot], $value, self.time, $direction, $time_tol, $expr_tol, $enable, ctx.analysis_tran()) {{\n\
-                 {pad}        Ok(evaluation) if ctx.dynamic_operators_enabled() => {{\n\
-                 {pad}            self.cross_event_candidate[slot] = evaluation.candidate;\n\
-                 {pad}            if let Some(target) = evaluation.refinement_time {{ self.event_refinement_time = self.event_refinement_time.min(target); }}\n\
-                 {pad}            evaluation.fired as u8 as f64\n\
-                 {pad}        }}\n\
-                 {pad}        Ok(_) => 0.0,\n\
-                 {pad}        Err(source) => {{ ctx.report_event_control_error(\"cross\", slot, source); 0.0 }}\n\
-                 {pad}    }}\n\
-                 {pad}}}}}; }}"
-            ));
-        }
-        if wants.above {
-            for value in &function.values {
-                if let CfgValueKind::Above { operator, .. } = &value.kind {
-                    self.cross_slots.get(operator).copied().ok_or_else(|| {
-                        unsupported(
-                            artifact,
-                            format!("an above event at {operator} with no generated detector slot"),
-                        )
-                    })?;
-                }
-            }
-            out.push_str(&format!(
-                "{pad}macro_rules! rspice_above {{ ($slot:expr, $value:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{{{\n\
-                 {pad}    let slot = $slot;\n\
-                 {pad}    match evaluate_generated_above(self.cross_event_accepted[slot], $value, self.time, $time_tol, $expr_tol, $enable, ctx.analysis_static()) {{\n\
-                 {pad}        Ok(evaluation) if ctx.dynamic_operators_enabled() => {{\n\
-                 {pad}            self.cross_event_candidate[slot] = evaluation.candidate;\n\
-                 {pad}            if let Some(target) = evaluation.refinement_time {{ self.event_refinement_time = self.event_refinement_time.min(target); }}\n\
-                 {pad}            evaluation.fired as u8 as f64\n\
-                 {pad}        }}\n\
-                 {pad}        Ok(_) => 0.0,\n\
-                 {pad}        Err(source) => {{ ctx.report_event_control_error(\"above\", slot, source); 0.0 }}\n\
-                 {pad}    }}\n\
-                 {pad}}}}}; }}"
-            ));
-        }
         if wants.last_crossing {
             for value in &function.values {
                 if let CfgValueKind::LastCrossing { operator, .. } = &value.kind {
@@ -4839,18 +4756,6 @@ impl ModelPlan {
                  {pad}        }}\n\
                  {pad}        Err(source) => {{ ctx.report_event_control_error(\"last_crossing\", slot, source); -1.0 }}\n\
                  {pad}    }}\n\
-                 {pad}}}}}; }}"
-            ));
-        }
-        if wants.timer {
-            out.push_str(&format!(
-                "{pad}macro_rules! rspice_timer {{ ($slot:expr, $start:expr, $period:expr, $time_tol:expr, $enable:expr) => {{{{\n\
-                 {pad}    let _ = $slot;\n\
-                 {pad}    let (fired, next_event) = evaluate_generated_timer($start, $period, $time_tol, $enable, self.time, self.timestep);\n\
-                 {pad}    if ctx.dynamic_operators_enabled() {{\n\
-                 {pad}        if let Some(target) = next_event {{ self.timer_event_bound_candidate = self.timer_event_bound_candidate.min(target); }}\n\
-                 {pad}        fired as u8 as f64\n\
-                 {pad}    }} else {{ 0.0 }}\n\
                  {pad}}}}}; }}"
             ));
         }
@@ -5540,8 +5445,7 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
 
     fn push_event_control_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
         let cross_count = self.cross_slots.len();
-        let has_timer = !self.timer_slots.is_empty();
-        if cross_count > 0 || has_timer {
+        if cross_count > 0 {
             let offset = Self::event_checkpoint_index(extensions.persistent_event_lane_count);
             let prefix = format!(
                 "        let mut generated_event_lanes = &state.event_variables[{offset}..];\n"
@@ -5551,28 +5455,24 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
         }
 
         if cross_count > 0 {
-            extensions.reset_analysis_state.push_str("        self.cross_event_accepted.fill(GeneratedCrossState::INITIAL);\n        self.cross_event_candidate.fill(GeneratedCrossState::INITIAL);\n        self.event_refinement_time = f64::INFINITY;\n");
+            extensions.reset_analysis_state.push_str("        self.cross_event_accepted.fill(GeneratedCrossState::INITIAL);\n        self.cross_event_candidate.fill(GeneratedCrossState::INITIAL);\n");
             extensions.uses_cross_event_state = true;
             let _ = write!(
                 extensions.instance_fields,
                 "    pub(crate) cross_event_accepted: Box<[GeneratedCrossState; {cross_count}]>,\n\
-                     pub(crate) cross_event_candidate: Box<[GeneratedCrossState; {cross_count}]>,\n\
-                     pub(crate) event_refinement_time: f64,\n"
+                     pub(crate) cross_event_candidate: Box<[GeneratedCrossState; {cross_count}]>,\n"
             );
             extensions.clone_fields.push_str(
                 "            cross_event_accepted: self.cross_event_accepted.clone(),\n\
-                             cross_event_candidate: self.cross_event_candidate.clone(),\n\
-                             event_refinement_time: self.event_refinement_time,\n",
+                             cross_event_candidate: self.cross_event_candidate.clone(),\n",
             );
             let _ = write!(
                 extensions.new_initializers,
                 "            cross_event_accepted: Box::new([GeneratedCrossState::INITIAL; {cross_count}]),\n\
-                             cross_event_candidate: Box::new([GeneratedCrossState::INITIAL; {cross_count}]),\n\
-                             event_refinement_time: f64::INFINITY,\n"
+                             cross_event_candidate: Box::new([GeneratedCrossState::INITIAL; {cross_count}]),\n"
             );
             extensions.begin_event_state_evaluation.push_str(
-                "        self.cross_event_candidate.copy_from_slice(&*self.cross_event_accepted);\n\
-                         self.event_refinement_time = f64::INFINITY;\n",
+                "        self.cross_event_candidate.copy_from_slice(&*self.cross_event_accepted);\n",
             );
             extensions.validate_advance_state.push_str(
                 "        for (index, (accepted, candidate)) in self.cross_event_accepted.iter().copied().zip(self.cross_event_candidate.iter().copied()).enumerate() {\n\
@@ -5581,23 +5481,18 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
                              if candidate != accepted && candidate.initialized && candidate.time != self.time {\n\
                                  return Err(format!(\"generated event detector candidate {index} time {} does not equal evaluation time {}\", candidate.time, self.time));\n\
                              }\n\
-                         }\n\
-                         if self.event_refinement_time != f64::INFINITY && (!self.event_refinement_time.is_finite() || self.event_refinement_time < 0.0 || self.event_refinement_time >= self.time) {\n\
-                             return Err(format!(\"generated event refinement {} is not interior to candidate time {}\", self.event_refinement_time, self.time));\n\
                          }\n",
             );
             extensions.apply_advance_state.push_str(
-                "        self.cross_event_accepted.copy_from_slice(&*self.cross_event_candidate);\n\
-                         self.event_refinement_time = f64::INFINITY;\n",
+                "        self.cross_event_accepted.copy_from_slice(&*self.cross_event_candidate);\n",
             );
-            let cross_rollback_values = cross_count.saturating_mul(12).saturating_add(1);
+            let cross_rollback_values = cross_count.saturating_mul(12);
             extensions.rollback_value_count = extensions
                 .rollback_value_count
                 .saturating_add(cross_rollback_values);
             extensions.rollback_capture_values.push_str(
                 "        for state in self.cross_event_accepted.iter().copied() { state.append_checkpoint_lanes(&mut values); }\n\
-                         for state in self.cross_event_candidate.iter().copied() { state.append_checkpoint_lanes(&mut values); }\n\
-                         values.push(self.event_refinement_time);\n",
+                         for state in self.cross_event_candidate.iter().copied() { state.append_checkpoint_lanes(&mut values); }\n",
             );
             let _ = write!(
                 extensions.rollback_restore_fields,
@@ -5610,10 +5505,7 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
                              let (lanes, remaining) = rollback_values.split_at(GeneratedCrossState::CHECKPOINT_LANES);\n\
                              *state = GeneratedCrossState::from_checkpoint_lanes(lanes).expect(\"captured generated crossing rollback candidate\");\n\
                              rollback_values = remaining;\n\
-                         }}\n\
-                         let (refinement, remaining) = rollback_values.split_first().expect(\"generated crossing rollback refinement\");\n\
-                         self.event_refinement_time = *refinement;\n\
-                         rollback_values = remaining;\n"
+                         }}\n"
             );
 
             let persistent_cross_lanes = cross_count
@@ -5630,7 +5522,8 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
                              let (lanes, remaining) = generated_event_lanes.split_at(GeneratedCrossState::CHECKPOINT_LANES);\n\
                              GeneratedCrossState::from_checkpoint_lanes(lanes).map_err(|error| format!(\"generated crossing checkpoint slot {{index}}: {{error}}\"))?;\n\
                              generated_event_lanes = remaining;\n\
-                         }}\n"
+                         }}\n\
+                         debug_assert!(generated_event_lanes.is_empty());\n"
             );
             let _ = write!(
                 extensions.checkpoint_event_restore,
@@ -5640,101 +5533,7 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
                              generated_event_lanes = remaining;\n\
                          }}\n\
                          self.cross_event_candidate.copy_from_slice(&*self.cross_event_accepted);\n\
-                         self.event_refinement_time = f64::INFINITY;\n"
-            );
-        }
-
-        if has_timer {
-            extensions.reset_analysis_state.push_str("        self.timer_event_bound_accepted = f64::INFINITY;\n        self.timer_event_bound_candidate = f64::INFINITY;\n");
-            extensions.instance_fields.push_str(
-                "    pub(crate) timer_event_bound_accepted: f64,\n\
-                     pub(crate) timer_event_bound_candidate: f64,\n",
-            );
-            extensions.clone_fields.push_str(
-                "            timer_event_bound_accepted: self.timer_event_bound_accepted,\n\
-                             timer_event_bound_candidate: self.timer_event_bound_candidate,\n",
-            );
-            extensions.new_initializers.push_str(
-                "            timer_event_bound_accepted: f64::INFINITY,\n\
-                             timer_event_bound_candidate: f64::INFINITY,\n",
-            );
-            extensions
-                .begin_event_state_evaluation
-                .push_str("        self.timer_event_bound_candidate = f64::INFINITY;\n");
-            extensions.validate_advance_state.push_str(
-                "        if self.timer_event_bound_accepted != f64::INFINITY && (!self.timer_event_bound_accepted.is_finite() || self.timer_event_bound_accepted <= 0.0) {\n\
-                             return Err(format!(\"generated accepted timer event bound is invalid: {}\", self.timer_event_bound_accepted));\n\
-                         }\n\
-                         if self.timer_event_bound_candidate != f64::INFINITY && (!self.timer_event_bound_candidate.is_finite() || self.timer_event_bound_candidate <= self.time) {\n\
-                             return Err(format!(\"generated candidate timer event bound {} is not strictly after time {}\", self.timer_event_bound_candidate, self.time));\n\
-                         }\n",
-            );
-            extensions.apply_advance_state.push_str(
-                "        self.timer_event_bound_accepted = self.timer_event_bound_candidate;\n",
-            );
-            extensions.rollback_value_count = extensions.rollback_value_count.saturating_add(2);
-            extensions.rollback_capture_values.push_str(
-                "        values.push(self.timer_event_bound_accepted);\n\
-                                   values.push(self.timer_event_bound_candidate);\n",
-            );
-            extensions.rollback_restore_fields.push_str(
-                "        let (accepted_timer_bound, remaining) = rollback_values.split_first().expect(\"generated accepted timer rollback bound\");\n\
-                         self.timer_event_bound_accepted = *accepted_timer_bound;\n\
-                         rollback_values = remaining;\n\
-                         let (candidate_timer_bound, remaining) = rollback_values.split_first().expect(\"generated candidate timer rollback bound\");\n\
-                         self.timer_event_bound_candidate = *candidate_timer_bound;\n\
-                         rollback_values = remaining;\n",
-            );
-            extensions.persistent_event_lane_count =
-                extensions.persistent_event_lane_count.saturating_add(1);
-            extensions
-                .checkpoint_event_capture
-                .push_str("        event_variables.push(self.timer_event_bound_accepted);\n");
-            extensions.checkpoint_event_validate.push_str(
-                "        let timer_bound = *generated_event_lanes.first().expect(\"generated timer checkpoint lane\");\n\
-                         if timer_bound != f64::INFINITY && (!timer_bound.is_finite() || timer_bound <= 0.0) { return Err(format!(\"generated timer checkpoint bound is invalid: {timer_bound}\")); }\n\
-                         generated_event_lanes = &generated_event_lanes[1..];\n\
-                         debug_assert!(generated_event_lanes.is_empty());\n",
-            );
-            extensions.checkpoint_event_restore.push_str(
-                "        self.timer_event_bound_accepted = *generated_event_lanes.first().expect(\"generated timer checkpoint lane\");\n\
-                         self.timer_event_bound_candidate = self.timer_event_bound_accepted;\n\
-                         generated_event_lanes = &generated_event_lanes[1..];\n\
-                         debug_assert!(generated_event_lanes.is_empty());\n",
-            );
-        } else if cross_count > 0 {
-            extensions
-                .checkpoint_event_validate
-                .push_str("        debug_assert!(generated_event_lanes.is_empty());\n");
-            extensions
-                .checkpoint_event_restore
-                .push_str("        debug_assert!(generated_event_lanes.is_empty());\n");
-        }
-
-        if cross_count > 0 {
-            extensions.impl_methods.push_str(
-                "    #[inline]\n\
-                     pub fn transient_event_refinement_time(&self) -> Option<f64> {\n\
-                         (self.event_refinement_time.is_finite() && self.event_refinement_time >= 0.0 && self.event_refinement_time < self.time).then_some(self.event_refinement_time)\n\
-                     }\n",
-            );
-        } else {
-            extensions.impl_methods.push_str(
-                "    #[inline]\n\
-                     pub fn transient_event_refinement_time(&self) -> Option<f64> { None }\n",
-            );
-        }
-        if has_timer {
-            extensions.impl_methods.push_str(
-                "    #[inline]\n\
-                     pub fn transient_timer_event_time(&self) -> Option<f64> {\n\
-                         (self.timer_event_bound_accepted != f64::INFINITY).then_some(self.timer_event_bound_accepted)\n\
-                     }\n",
-            );
-        } else {
-            extensions.impl_methods.push_str(
-                "    #[inline]\n\
-                     pub fn transient_timer_event_time(&self) -> Option<f64> { None }\n",
+                         debug_assert!(generated_event_lanes.is_empty());\n"
             );
         }
     }
@@ -6124,10 +5923,7 @@ struct Wants {
     idtmod_derivative: bool,
     idtmod_initial: bool,
     idtmod_branch_derivative: bool,
-    cross: bool,
-    above: bool,
     last_crossing: bool,
-    timer: bool,
     limit: bool,
     limit_previous: bool,
     staged: bool,
@@ -6164,10 +5960,7 @@ impl Wants {
             CfgValueKind::IdtMod { .. } => self.idtmod = true,
             CfgValueKind::IdtModInitial { .. } => self.idtmod_initial = true,
             CfgValueKind::IdtModBranchDerivative { .. } => self.idtmod_branch_derivative = true,
-            CfgValueKind::Cross { .. } => self.cross = true,
-            CfgValueKind::Above { .. } => self.above = true,
             CfgValueKind::LastCrossing { .. } => self.last_crossing = true,
-            CfgValueKind::Timer { .. } => self.timer = true,
             CfgValueKind::Limit { .. } => self.limit = true,
             CfgValueKind::LimitPrevious { .. } => self.limit_previous = true,
             CfgValueKind::Staged { .. } => self.staged = true,
@@ -6404,10 +6197,7 @@ fn bindings() -> EmitBindings {
         analysis: "ctx.analysis".into(),
         simparam_required: "ctx.simparam_required".into(),
         simparam_present: "ctx.has_simparam".into(),
-        cross: "rspice_cross!".into(),
-        above: "rspice_above!".into(),
         last_crossing: "rspice_last_crossing!".into(),
-        timer: "rspice_timer!".into(),
         ..EmitBindings::default()
     }
 }

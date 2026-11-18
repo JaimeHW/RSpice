@@ -1834,7 +1834,7 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 11;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const IDTMOD_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([65, 170, 25, 19, 28, 213, 3, 181, 30, 68, 11, 220, 245, 244, 105, 226, 167, 82, 206, 242, 233, 163, 170, 59, 117, 112, 0, 226, 59, 12, 57, 163]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([26, 176, 253, 191, 224, 126, 124, 34, 152, 226, 116, 245, 2, 72, 197, 169, 17, 169, 113, 168, 104, 133, 112, 176, 60, 169, 8, 91, 219, 159, 98, 213]);
 	pub const EVENT_STATE_COUNT: usize = 16;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const HB_ADMISSIBLE: bool = true;
@@ -2443,10 +2443,6 @@ impl Instance {
 	pub fn transient_step_bound(&self) -> Result<Option<f64>, String> { Ok(None) }
 	#[inline]
 	pub fn discontinuity_rising(&self) -> bool { self.event_state_candidate[9] != self.event_state_accepted[9] || self.event_state_candidate[10] != self.event_state_accepted[10] || self.event_state_candidate[11] != self.event_state_accepted[11] || self.event_state_candidate[12] != self.event_state_accepted[12] || self.event_state_candidate[13] != self.event_state_accepted[13] || self.event_state_candidate[14] != self.event_state_accepted[14] || self.event_state_candidate[15] != self.event_state_accepted[15] }
-	#[inline]
-pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
-	#[inline]
-pub fn transient_timer_event_time(&self) -> Option<f64> { None }
 	/// Restore a trajectory under resolved context without executing initializers.
 	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState, ctx: &GeneratedEvalContext<'_>) -> Result<(), String> {
 		if ctx.evaluation_failed() { return Err("analysis continuation context has a pending evaluation error".into()); }

@@ -542,67 +542,6 @@ impl BuiltinVerilogADevices {
         Ok(tightest)
     }
 
-    /// Earliest interior `cross`/`above` root produced by the latest complete
-    /// generated-model evaluation.
-    #[inline]
-    #[doc(hidden)]
-    pub fn transient_event_refinement_time(&self) -> Option<Value> {
-        self.devices
-            .get()
-            .iter()
-            .filter_map(|device| device.kind.transient_event_refinement_time())
-            .reduce(Value::min)
-    }
-
-    /// Earliest absolute timer event produced by the latest accepted
-    /// generated-model evaluation.
-    ///
-    /// The target stays absolute here because generated instance time is
-    /// evaluation context, not persistent checkpoint state. A resumed
-    /// transient must therefore compare this value with the checkpoint's
-    /// accepted time rather than reconstructing it from a relative bound.
-    #[doc(hidden)]
-    pub fn transient_timer_event_time(&self) -> Result<Option<Value>, String> {
-        let mut earliest: Option<Value> = None;
-        for device in self.devices.get() {
-            let Some(target) = device.kind.transient_timer_event_time() else {
-                continue;
-            };
-            if !target.is_finite() || target <= 0.0 {
-                return Err(format!(
-                    "generated Verilog-A instance '{}' ({}) requested invalid absolute timer event {target}",
-                    device.instance_name, device.model_name
-                ));
-            }
-            earliest = Some(earliest.map_or(target, |current| current.min(target)));
-        }
-        Ok(earliest)
-    }
-
-    /// [`Self::transient_timer_event_time`], with the instance that owns it.
-    ///
-    /// The diagnostic's form of the same walk: an invalid target is skipped
-    /// rather than reported, because the fold above runs with `?` on every
-    /// accepted point and has already refused one by the time anything asks
-    /// this. What it adds is the name — a refusal that says a schedule is
-    /// holding the stepper has to say whose.
-    #[doc(hidden)]
-    pub fn scheduled_timer_activation(&self) -> Option<(&str, Value)> {
-        let mut owner: Option<(&str, Value)> = None;
-        for device in self.devices.get() {
-            let Some(target) = device.kind.transient_timer_event_time() else {
-                continue;
-            };
-            if !target.is_finite() {
-                continue;
-            }
-            if owner.is_none_or(|(_, earliest)| target < earliest) {
-                owner = Some((device.instance_name.as_str(), target));
-            }
-        }
-        owner
-    }
-
     #[inline]
     #[doc(hidden)]
     pub fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {

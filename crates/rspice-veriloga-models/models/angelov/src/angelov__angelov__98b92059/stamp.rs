@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 46] = [1, 2, 10, 3, 11, 12, 14, 15, 13, 16, 17, 18, 19, 4, 21, 5, 6, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 36, 37, 38, 39, 41, 43, 45, 58, 59, 61, 62, 63, 65, 66, 67, 69, 70];

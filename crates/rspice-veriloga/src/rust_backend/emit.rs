@@ -123,13 +123,9 @@ pub struct EmitBindings {
     pub idtmod_derivative: String,
     pub idtmod_initial: String,
     pub idtmod_branch_derivative: String,
-    /// Stateful generated event-control evaluators.
-    pub cross: String,
+    /// The stateful `last_crossing` evaluator and its detector slots.
     pub cross_slots: HashMap<crate::canonical_ir::ExprId, usize>,
-    pub above: String,
     pub last_crossing: String,
-    pub timer: String,
-    pub timer_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     /// Called as `analysis("dc")`.
     pub analysis: String,
     /// Required query; called as `simparam_required("gmin")`.
@@ -195,12 +191,8 @@ impl Default for EmitBindings {
             idtmod_derivative: "idtmod_derivative".into(),
             idtmod_initial: "idtmod_initial".into(),
             idtmod_branch_derivative: "idtmod_branch_derivative".into(),
-            cross: "cross".into(),
             cross_slots: HashMap::new(),
-            above: "above".into(),
             last_crossing: "last_crossing".into(),
-            timer: "timer".into(),
-            timer_slots: HashMap::new(),
             analysis: "analysis".into(),
             simparam_required: "simparam_required".into(),
             simparam_present: "has_simparam".into(),
@@ -2398,65 +2390,27 @@ impl<'a> Emitter<'a> {
                     )
                 }
             }
-            CfgValueKind::Cross {
-                operator,
-                input,
-                direction,
-                time_tol,
-                expr_tol,
-                enable,
-            } => format!(
-                "{}({}, {}, {}, {}, {}, {})",
-                bindings.cross,
-                bindings
-                    .cross_slots
-                    .get(operator)
-                    .copied()
-                    .unwrap_or_else(|| usize::from(*operator)),
-                self.numeric_operand(*input),
-                self.numeric_operand(*direction),
-                self.numeric_operand(*time_tol),
-                self.numeric_operand(*expr_tol),
-                self.numeric_operand(*enable),
-            ),
-            CfgValueKind::Above {
-                operator,
-                input,
-                time_tol,
-                expr_tol,
-                enable,
-            } => format!(
-                "{}({}, {}, {}, {}, {})",
-                bindings.above,
-                bindings
-                    .cross_slots
-                    .get(operator)
-                    .copied()
-                    .unwrap_or_else(|| usize::from(*operator)),
-                self.numeric_operand(*input),
-                self.numeric_operand(*time_tol),
-                self.numeric_operand(*expr_tol),
-                self.numeric_operand(*enable),
-            ),
-            CfgValueKind::Timer {
-                operator,
-                start,
-                period,
-                time_tol,
-                enable,
-            } => format!(
-                "{}({}, {}, {}, {}, {})",
-                bindings.timer,
-                bindings
-                    .timer_slots
-                    .get(operator)
-                    .copied()
-                    .unwrap_or_else(|| usize::from(*operator)),
-                self.numeric_operand(*start),
-                self.numeric_operand(*period),
-                self.numeric_operand(*time_tol),
-                self.numeric_operand(*enable),
-            ),
+            // An analog event takes effect at its instant, which this backend
+            // cannot defer to; `ModelPlan::build` refuses a module carrying one
+            // before it reaches here.
+            CfgValueKind::Cross { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "cross",
+                });
+            }
+            CfgValueKind::Above { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "above",
+                });
+            }
+            CfgValueKind::Timer { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "timer",
+                });
+            }
             CfgValueKind::Limit {
                 operator,
                 proposed,

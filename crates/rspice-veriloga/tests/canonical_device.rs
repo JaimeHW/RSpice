@@ -3025,8 +3025,6 @@ fn generated_dependent_parameter_defaults_use_bounded_ordered_helpers() {
     let body = r#"
 let instance = device::state::Instance::new(&[0, 1]);
 assert_eq!(instance.params.values[17], 18.0, "dependent defaults must finalize in source order across helper boundaries");
-assert_eq!(instance.transient_event_refinement_time(), None);
-assert_eq!(instance.transient_timer_event_time(), None);
 "#;
     run_generated_main("bounded dependent defaults", &state, &stamp, &noise, body)
         .unwrap_or_else(|report| panic!("generated bounded dependent defaults failed:\n{report}"));
@@ -5970,7 +5968,6 @@ fn stamp(instance: &mut device::state::Instance, voltage: f64) -> f64 {{
     instance.begin_stateful_evaluation();
     instance.stamp(&ctx, &mut runtime::GeneratedStamper {{ sink: Some(&mut sink) }});
     assert!(!ctx.evaluation_failed());
-    assert_eq!(instance.transient_event_refinement_time(), None);
     sink[0]
 }}
 let mut instance = device::state::Instance::new(&[0,1]);

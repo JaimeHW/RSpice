@@ -2692,18 +2692,6 @@ mod tests {
             "{registry}"
         );
         assert!(
-            registry.contains("pub fn transient_event_refinement_time(&self)")
-                && registry
-                    .contains("Self::Device0(device) => device.transient_event_refinement_time()"),
-            "{registry}"
-        );
-        assert!(
-            registry.contains("pub fn transient_timer_event_time(&self)")
-                && registry
-                    .contains("Self::Device1(device) => device.transient_timer_event_time()"),
-            "{registry}"
-        );
-        assert!(
             registry.contains("pub fn terminal_descriptors(model_name: &str")
                 && registry
                     .contains("descriptor(model_name).map(|descriptor| descriptor.terminals)"),
@@ -3113,42 +3101,6 @@ fn write_registry(
             )?;
         }
         out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
-    }
-    out.push_str("    }\n\n");
-    out.push_str("    pub fn transient_event_refinement_time(&self) -> Option<crate::Value> {\n");
-    if devices.is_empty() {
-        out.push_str("        let _ = self;\n");
-        out.push_str(
-            "        unreachable!(\"empty generated Verilog-A registry has no event state\")\n",
-        );
-    } else {
-        out.push_str("        match self {\n");
-        for (index, feature) in feature_names.iter().enumerate() {
-            writeln!(
-                out,
-                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.transient_event_refinement_time(),"
-            )?;
-        }
-        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
-        out.push_str("        }\n");
-    }
-    out.push_str("    }\n\n");
-    out.push_str("    pub fn transient_timer_event_time(&self) -> Option<crate::Value> {\n");
-    if devices.is_empty() {
-        out.push_str("        let _ = self;\n");
-        out.push_str(
-            "        unreachable!(\"empty generated Verilog-A registry has no timer state\")\n",
-        );
-    } else {
-        out.push_str("        match self {\n");
-        for (index, feature) in feature_names.iter().enumerate() {
-            writeln!(
-                out,
-                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.transient_timer_event_time(),"
-            )?;
-        }
-        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
-        out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
     out.push_str(

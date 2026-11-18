@@ -1856,7 +1856,7 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 12;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const IDTMOD_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([122, 115, 133, 174, 227, 196, 138, 72, 140, 159, 60, 116, 73, 221, 163, 166, 57, 232, 76, 155, 104, 250, 58, 117, 83, 218, 66, 103, 79, 103, 188, 161]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([139, 128, 126, 165, 229, 221, 26, 227, 68, 224, 249, 249, 118, 144, 89, 208, 98, 176, 79, 160, 125, 131, 37, 141, 161, 193, 249, 228, 201, 38, 146, 127]);
 	pub const EVENT_STATE_COUNT: usize = 16;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const HB_ADMISSIBLE: bool = true;
@@ -2465,10 +2465,6 @@ impl Instance {
 	pub fn transient_step_bound(&self) -> Result<Option<f64>, String> { Ok(None) }
 	#[inline]
 	pub fn discontinuity_rising(&self) -> bool { self.event_state_candidate[9] != self.event_state_accepted[9] || self.event_state_candidate[10] != self.event_state_accepted[10] || self.event_state_candidate[11] != self.event_state_accepted[11] || self.event_state_candidate[12] != self.event_state_accepted[12] || self.event_state_candidate[13] != self.event_state_accepted[13] || self.event_state_candidate[14] != self.event_state_accepted[14] || self.event_state_candidate[15] != self.event_state_accepted[15] }
-	#[inline]
-pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
-	#[inline]
-pub fn transient_timer_event_time(&self) -> Option<f64> { None }
 	/// Restore a trajectory under resolved context without executing initializers.
 	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState, ctx: &GeneratedEvalContext<'_>) -> Result<(), String> {
 		if ctx.evaluation_failed() { return Err("analysis continuation context has a pending evaluation error".into()); }
