@@ -21,7 +21,7 @@ pub use open_view::OpenCellView;
 
 mod workspace;
 pub use workspace::{
-    HardcopySourceSetPersistenceError, MAX_PROJECT_HARDCOPY_SOURCE_SETS,
+    HardcopySourceSetPersistenceError, LibraryImage, MAX_PROJECT_HARDCOPY_SOURCE_SETS,
     MAX_PROJECT_VISUALIZATION_DOCUMENTS, PreparedAnnotation, PreparedPhysicalLayoutCatalog,
     PreparedReferences, ProjectConfigurationMutationError, ProjectHierarchy,
     ProjectReferenceTransaction, ProjectWorkspace, ReferenceChanges, SimulationConfigurationError,
@@ -34,6 +34,7 @@ pub use file::{
     decode_project_text, serialize_project_file,
 };
 
+pub mod library_folder;
 pub mod lifecycle;
 pub mod persistence;
 

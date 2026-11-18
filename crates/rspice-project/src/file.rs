@@ -495,11 +495,20 @@ impl ProjectFile {
             }
             for (instance_id, instance) in document.instances() {
                 let master_key = instance.master.key();
-                let master = view_index.get_exact(&master_key).ok_or_else(|| {
-                    ProjectIoError::InvalidData(format!(
+                // A placement of a master in a library read from a folder of
+                // its own stays drawn and unresolved while that folder or
+                // file is not there, as a schematic's does: the project
+                // opens, and nothing is extracted through it. A master the
+                // project itself should hold still fails closed.
+                let referenced = self.libraries.is_referenced(&instance.master.library);
+                let Some(master) = view_index.get_exact(&master_key) else {
+                    if referenced {
+                        continue;
+                    }
+                    return Err(ProjectIoError::InvalidData(format!(
                         "workspace.physical_layout_documents[{key}].instances[{instance_id}] references missing exact master {master_key}"
-                    ))
-                })?;
+                    )));
+                };
                 if master.reference != instance.master || master.view_type != ViewType::Layout {
                     return Err(ProjectIoError::InvalidData(format!(
                         "workspace.physical_layout_documents[{key}].instances[{instance_id}] master {master_key} is not that exact Layout view"
@@ -510,6 +519,9 @@ impl ProjectFile {
                     .physical_layout_document(&instance.master)
                     .is_none()
                 {
+                    if referenced {
+                        continue;
+                    }
                     return Err(ProjectIoError::InvalidData(format!(
                         "workspace.physical_layout_documents[{key}].instances[{instance_id}] master {master_key} has no authoritative physical-layout document"
                     )));
@@ -1111,23 +1123,34 @@ impl ProjectFile {
             "workspace.project.top_cell",
             &self.workspace.project.top_cell,
         )?;
-        let root_library = self
+        // A top cell in a library read from a folder of its own stands while
+        // that folder is not there to read, as every reference into it does.
+        let root_is_referenced = self
+            .libraries
+            .is_referenced(&self.workspace.project.root_library);
+        match self
             .libraries
             .get_library(&self.workspace.project.root_library)
-            .ok_or_else(|| {
-                ProjectIoError::InvalidData(format!(
+        {
+            None if root_is_referenced => {}
+            None => {
+                return Err(ProjectIoError::InvalidData(format!(
                     "workspace.project.root_library '{}' was not found",
                     self.workspace.project.root_library
-                ))
-            })?;
-        if root_library
-            .get_cell(&self.workspace.project.top_cell)
-            .is_none()
-        {
-            return Err(ProjectIoError::InvalidData(format!(
-                "workspace.project.top_cell '{}' was not found in root library '{}'",
-                self.workspace.project.top_cell, self.workspace.project.root_library
-            )));
+                )));
+            }
+            Some(root_library)
+                if root_library
+                    .get_cell(&self.workspace.project.top_cell)
+                    .is_none()
+                    && !root_is_referenced =>
+            {
+                return Err(ProjectIoError::InvalidData(format!(
+                    "workspace.project.top_cell '{}' was not found in root library '{}'",
+                    self.workspace.project.top_cell, self.workspace.project.root_library
+                )));
+            }
+            Some(_) => {}
         }
 
         for (index, configuration) in self
@@ -1141,6 +1164,10 @@ impl ProjectFile {
                 &format!("workspace.configuration_sets.configurations[{index}].root"),
                 configuration.root(),
             )?;
+            let Some(view_type) = view_type else {
+                validate_configured_scopes(index, configuration)?;
+                continue;
+            };
             if !matches!(view_type, ViewType::Schematic | ViewType::Testbench) {
                 return Err(ProjectIoError::InvalidData(format!(
                     "workspace.configuration_sets.configurations[{index}].root references {} view '{}'; a simulation root must be a schematic or testbench",
@@ -1165,7 +1192,7 @@ impl ProjectFile {
                 self.workspace.active_key()
             )));
         }
-        if project_view_requires_schematic_buffer(active_view_type) {
+        if active_view_type.is_some_and(project_view_requires_schematic_buffer) {
             required_schematic_buffers.insert(self.workspace.active_key());
         }
         let mut open_view_keys = HashSet::new();
@@ -1180,6 +1207,9 @@ impl ProjectFile {
                 &format!("workspace.open_views[{index}]"),
                 &open_view.reference,
             )?;
+            let Some(library_view_type) = library_view_type else {
+                continue;
+            };
             if library_view_type != open_view.view_type {
                 return Err(ProjectIoError::InvalidData(format!(
                     "workspace.open_views[{index}] references '{}', but persisted view type '{}' does not match library view type '{}'",
@@ -1254,11 +1284,16 @@ impl ProjectFile {
         Ok(())
     }
 
+    /// The view type `reference` names, after checking that it names a view
+    /// the project holds. A cellview of a library read from a folder of its
+    /// own may be absent, while that folder or file is not there to read or
+    /// when the project is written without it: such a reference is kept as
+    /// it stands, with no type to check against.
     fn validate_library_reference(
         &self,
         context: &str,
         reference: &CellViewRef,
-    ) -> Result<ViewType, ProjectIoError> {
+    ) -> Result<Option<ViewType>, ProjectIoError> {
         for (field, value) in [
             ("library", reference.library.as_str()),
             ("cell", reference.cell.as_str()),
@@ -1267,6 +1302,16 @@ impl ProjectFile {
             validate_lcv_name(&format!("{context}.{field}"), value)?;
         }
         let key = reference.key();
+        if self.libraries.is_referenced(&reference.library)
+            && self
+                .libraries
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view(&reference.view))
+                .is_none()
+        {
+            return Ok(None);
+        }
         let library = self
             .libraries
             .get_library(&reference.library)
@@ -1288,7 +1333,7 @@ impl ProjectFile {
                 reference.view, reference.cell
             ))
         })?;
-        Ok(view.view_type)
+        Ok(Some(view.view_type))
     }
 }
 
@@ -1504,7 +1549,54 @@ impl From<std::io::Error> for ProjectIoError {
 /// large retained result histories.
 pub const MAX_PROJECT_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
+impl ProjectFile {
+    /// The project as its file holds it: a library read from a folder of its
+    /// own keeps only its reference there, and its cells, drawings, layouts
+    /// and sources are its folder's.
+    pub fn without_referenced_libraries(&self) -> Self {
+        let mut file = self.clone();
+        let names = file
+            .libraries
+            .references()
+            .map(|reference| reference.name.clone())
+            .collect::<Vec<_>>();
+        for name in &names {
+            file.workspace.remove_library_parts(&file.libraries, name);
+        }
+        file.libraries = file.libraries.without_referenced_content();
+        file
+    }
+
+    /// Rewrite each library path relative to the project for a project file
+    /// that moves from the folder `from` to the folder `to`, so every path
+    /// still names the folder it named.
+    pub fn rebase_library_references(&mut self, from: &Path, to: &Path) -> Result<(), String> {
+        let host = rspice_design::library::folder::HostPlatform::current();
+        let names = self
+            .libraries
+            .references()
+            .map(|reference| reference.name.clone())
+            .collect::<Vec<_>>();
+        for name in names {
+            let Some(reference) = self.libraries.reference_mut(&name) else {
+                continue;
+            };
+            reference.path = reference.path.rebased(from, to, host).map_err(|error| {
+                format!("The path of library '{name}' cannot follow the project: {error}")
+            })?;
+        }
+        Ok(())
+    }
+}
+
 pub fn serialize_project_file(project: &ProjectFile) -> Result<String, ProjectIoError> {
+    let without_references;
+    let project = if project.libraries.references().next().is_some() {
+        without_references = project.without_referenced_libraries();
+        &without_references
+    } else {
+        project
+    };
     project.validate()?;
     project
         .simulation_results

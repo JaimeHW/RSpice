@@ -139,6 +139,26 @@ impl ProjectLibraries {
         self.references.stamp()
     }
 
+    /// This record as the project file holds it: each library read from a
+    /// folder of its own keeps only its reference, and the catalog keeps its
+    /// revision.
+    pub fn without_referenced_content(&self) -> Self {
+        let libraries = self
+            .catalog
+            .libraries()
+            .iter()
+            .filter(|(_, library)| !self.is_referenced(&library.name))
+            .map(|(key, library)| (key.clone(), library.clone()))
+            .collect();
+        Self {
+            catalog: LibraryCatalog::from_persisted(libraries, self.catalog.revision()).into(),
+            references: self.references.clone(),
+            selected_library: self.selected_library.clone(),
+            selected_cell: self.selected_cell.clone(),
+            selected_view: self.selected_view.clone(),
+        }
+    }
+
     /// The libraries the project file holds whole, sorted by name.
     pub fn embedded_libraries(&self) -> Vec<&Library> {
         self.catalog
