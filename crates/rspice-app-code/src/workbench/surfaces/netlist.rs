@@ -222,6 +222,7 @@ pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
         &mut cx.state.netlist,
         &mut cx.state.netlist_open_documents,
         cx.runs,
+        cx.wb.messages(),
     );
     crate::workbench::documents::netlist_document::prepare(
         cx.model,

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::{CompareSide, NetlistDocumentState, NetlistRoot, NetlistTab};
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{DeckId, NetlistDocumentId};
+use crate::workbench::MessageCatalog;
 use crate::workbench::documents::netlist_tabs::RunTarget;
 use crate::workbench::documents::virtual_text_editor::EditorView;
 use crate::workbench::state::WorkspaceDocumentId;
@@ -165,6 +166,7 @@ pub fn reopen(
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
+    messages: MessageCatalog,
 ) {
     let Some(session) = netlist.pending_session.take() else {
         return;
@@ -198,6 +200,7 @@ pub fn reopen(
                     open_documents,
                     runs,
                     Path::new(path),
+                    messages,
                 ) {
                     refusals.push(refusal);
                 }
@@ -212,6 +215,7 @@ pub fn reopen(
             runs,
             NetlistRoot::Generated,
             path,
+            messages,
         ) {
             refusals.push(refusal);
         }
@@ -226,12 +230,12 @@ pub fn reopen(
         None => {}
     }
     if let Some((left, right)) = session.comparison
-        && let Err(refusal) = super::compare(model, netlist, runs, left, right)
+        && let Err(refusal) = super::compare(model, netlist, runs, left, right, messages)
     {
         refusals.push(refusal);
     }
     if let Some(front) = &session.front {
-        bring_to_front(model, netlist, open_documents, runs, front);
+        bring_to_front(model, netlist, open_documents, runs, front, messages);
     }
     // The deck is the open one, or the one whose file is missing, which
     // stands on its tab as it would and which Run names.
@@ -261,6 +265,7 @@ fn bring_to_front(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     tab: &NetlistTab,
+    messages: MessageCatalog,
 ) {
     match tab {
         NetlistTab::Generated => {
@@ -284,6 +289,7 @@ fn bring_to_front(
                 open_documents,
                 runs,
                 Path::new(path),
+                messages,
             );
         }
         NetlistTab::Include { deck: None, path } => {
@@ -294,6 +300,7 @@ fn bring_to_front(
                 runs,
                 NetlistRoot::Generated,
                 path,
+                messages,
             );
         }
         NetlistTab::RunInput { run, point } => match point {
@@ -369,6 +376,7 @@ mod tests {
             &mut harness.state.netlist,
             &mut harness.state.netlist_open_documents,
             &mut harness.runs,
+            MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
         );
 
         assert_eq!(

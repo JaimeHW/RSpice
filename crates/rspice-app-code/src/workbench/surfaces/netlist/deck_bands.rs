@@ -190,6 +190,7 @@ fn answer_missing(
     missing: &deck_files::MissingDeck,
     answer: MissingAnswer,
 ) {
+    let messages = cx.wb.messages();
     let confirm_id = remove_confirm_id(missing);
     let locate = answer == MissingAnswer::Locate;
     let remove = answer == MissingAnswer::Remove;

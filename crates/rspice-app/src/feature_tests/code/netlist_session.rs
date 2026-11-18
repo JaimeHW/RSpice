@@ -72,6 +72,7 @@ fn working_app(deck: &Path, include: &Path) -> RSpiceApp {
         &mut state.code.netlist_open_documents,
         &mut state.runs,
         include,
+        state.workbench.messages(),
     )
     .expect("the include opens");
     assert!(
