@@ -136,3 +136,59 @@ fn storage_reports_the_owned_lease_and_recovers_after_release() {
         assert_eq!(std::fs::read(target).unwrap(), successor);
     });
 }
+
+/// A resolved project path is kept in its plain spelling when that reaches
+/// the same file, and keeps the verbatim prefix when it is the only
+/// spelling that does.
+#[cfg(windows)]
+#[test]
+fn a_resolved_path_is_kept_plain_only_where_plain_reaches_it() {
+    let plain = |text: &str| plain_spelling(PathBuf::from(text));
+    for (verbatim, spelled) in [
+        (
+            r"\\?\C:\Users\example\amp.rspiceproj",
+            r"C:\Users\example\amp.rspiceproj",
+        ),
+        (
+            r"\\?\UNC\server\share\amp.rspiceproj",
+            r"\\server\share\amp.rspiceproj",
+        ),
+        (
+            r"C:\already\plain.rspiceproj",
+            r"C:\already\plain.rspiceproj",
+        ),
+    ] {
+        assert_eq!(plain(verbatim), PathBuf::from(spelled), "{verbatim}");
+    }
+    let long = format!(r"\\?\C:\{}amp.rspiceproj", r"deep\".repeat(70));
+    for kept in [
+        r"\\?\C:\projects\con\amp.rspiceproj",
+        r"\\?\C:\projects\COM1.txt\amp.rspiceproj",
+        r"\\?\C:\projects\trailing.\amp.rspiceproj",
+        r"\\?\C:\projects\trailing \amp.rspiceproj",
+        r"\\?\C:\projects\..\amp.rspiceproj",
+        r"\\?\Volume{00000000-0000-0000-0000-000000000000}\amp.rspiceproj",
+        r"\\?\UNC\server\nul\amp.rspiceproj",
+        long.as_str(),
+    ] {
+        assert_eq!(plain(kept), PathBuf::from(kept), "{kept}");
+    }
+}
+
+/// A project resolved from the temporary folder is named without the
+/// verbatim prefix, and the name reaches the same file.
+#[test]
+fn a_project_path_is_resolved_to_its_plain_spelling() {
+    let root = std::env::temp_dir().join(format!("rspice-plain-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let unwritten = normalize_native_path(&root.join("amp.rspiceproj")).unwrap();
+    std::fs::write(root.join("amp.rspiceproj"), b"{}").unwrap();
+    let written = normalize_native_path(&root.join("amp.rspiceproj")).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+    assert_eq!(unwritten, written);
+    assert!(
+        !written.to_string_lossy().starts_with(r"\\?\"),
+        "{written:?}"
+    );
+    assert!(written.is_absolute());
+}

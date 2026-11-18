@@ -136,9 +136,15 @@ pub fn restore_native_binding(
     Ok((ProjectSnapshot::from_decoded(project), binding))
 }
 
+/// The project file at `path` as the filesystem names it, links and short
+/// names resolved; a file not written yet is named in its resolved folder.
+/// The name is the one every binding, recent entry and field keeps, so it is
+/// spelled plainly whenever the plain spelling reaches the same file.
 pub fn normalize_native_path(path: &Path) -> Result<PathBuf, PersistenceError> {
     if path.exists() {
-        return std::fs::canonicalize(path).map_err(PersistenceError::Io);
+        return std::fs::canonicalize(path)
+            .map(plain_spelling)
+            .map_err(PersistenceError::Io);
     }
     let parent = path
         .parent()
@@ -148,7 +154,73 @@ pub fn normalize_native_path(path: &Path) -> Result<PathBuf, PersistenceError> {
     let name = path.file_name().ok_or_else(|| {
         PersistenceError::Platform(format!("'{}' has no project filename", path.display()))
     })?;
-    Ok(parent.join(name))
+    Ok(plain_spelling(parent.join(name)))
+}
+
+/// `path` without the verbatim `\\?\` (or `\\?\UNC\`) prefix Windows puts on
+/// a resolved path, when the plain spelling reaches the same file: a drive
+/// or share path whose every name Windows takes without the prefix, within
+/// the classic path length. Any other path keeps the prefix, the only
+/// spelling that reaches it.
+#[cfg(windows)]
+fn plain_spelling(path: PathBuf) -> PathBuf {
+    use std::path::{Component, Prefix};
+
+    let Some(text) = path.to_str() else {
+        return path;
+    };
+    let mut components = path.components();
+    let plain = match components.next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::VerbatimDisk(_) => text.strip_prefix(r"\\?\").map(str::to_owned),
+            Prefix::VerbatimUNC(server, share)
+                if [server, share]
+                    .into_iter()
+                    .all(|name| name.to_str().is_some_and(plain_name)) =>
+            {
+                text.strip_prefix(r"\\?\UNC\")
+                    .map(|share| format!(r"\\{share}"))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    let names_plain = components.all(|component| match component {
+        Component::RootDir => true,
+        Component::Normal(name) => name.to_str().is_some_and(plain_name),
+        _ => false,
+    });
+    match plain {
+        Some(plain) if names_plain && plain.encode_utf16().count() < 260 => PathBuf::from(plain),
+        _ => path,
+    }
+}
+
+/// Whether Windows reads `name` as written without the verbatim prefix: no
+/// control character or `<>:"/\|?*`, no trailing dot or space (stripped
+/// there), and no device name such as `CON` or `com1.txt`.
+#[cfg(windows)]
+fn plain_name(name: &str) -> bool {
+    const DEVICES: [&str; 24] = [
+        "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM1", "COM2", "COM3", "COM4", "COM5",
+        "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
+        "LPT8", "LPT9",
+    ];
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    !name.is_empty()
+        && name.encode_utf16().count() <= 255
+        && !name
+            .chars()
+            .any(|c| u32::from(c) < 32 || r#"<>:"/\|?*"#.contains(c))
+        && !name.ends_with(['.', ' '])
+        && !DEVICES
+            .iter()
+            .any(|device| stem.eq_ignore_ascii_case(device))
+}
+
+#[cfg(not(windows))]
+fn plain_spelling(path: PathBuf) -> PathBuf {
+    path
 }
 
 #[cfg(windows)]

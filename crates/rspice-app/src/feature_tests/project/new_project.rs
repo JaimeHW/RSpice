@@ -134,6 +134,43 @@ mod written_at_creation {
         assert_eq!(project.top_cell, "core");
     }
 
+    /// A created project is listed in Recent projects, and its folder's
+    /// parent offered as the next New project's location, by the plain
+    /// spelling of the path the filesystem resolves: never with Windows'
+    /// `\\?\` verbatim prefix, and reaching the same file.
+    #[test]
+    fn a_created_project_is_remembered_and_offered_by_its_plain_path() {
+        let location = unique_temp_dir("new-project-plain");
+        let mut app = naming("Amp", &location);
+        create(&mut app);
+        let file = location.join("Amp").join("Amp.rspiceproj");
+        let same = |shown: &std::path::Path, real: &std::path::Path| {
+            std::fs::canonicalize(shown).ok() == std::fs::canonicalize(real).ok()
+        };
+        let verbatim = |shown: &std::path::Path| shown.to_string_lossy().starts_with(r"\\?\");
+
+        let bound = canonical_native_path(&app.state.platform).expect("the window is bound");
+        let recent = app
+            .state
+            .platform
+            .recent_files
+            .first()
+            .map(|recent| recent.path.clone())
+            .expect("the project is listed");
+        for shown in [&bound, &recent] {
+            assert!(!verbatim(shown) && same(shown, &file), "{shown:?}");
+        }
+
+        open_new_project_dialog(&mut app.state);
+        let offered = std::path::PathBuf::from(&app.state.project.new_project.location);
+        assert!(
+            !verbatim(&offered) && same(&offered, &location),
+            "{offered:?}"
+        );
+        drop(app);
+        let _ = std::fs::remove_dir_all(location);
+    }
+
     /// A folder that already holds files is not written into: Create is
     /// refused with the reason the Location field gives, the open project
     /// stays, and nothing is written.
