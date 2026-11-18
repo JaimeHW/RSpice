@@ -8,11 +8,10 @@
 
 use egui::Context;
 
+use super::UNDOABLE;
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::state::{ProjectSourceId, ProjectSourceOwner};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
@@ -288,66 +287,48 @@ impl ProjectFeature {
         } else {
             "Delete"
         };
-        let mut dialog = Dialog::new(title, keep_label)
-            .description(description)
-            .size(DialogSize::Transaction)
-            .ghost("Cancel")
-            .destructive()
-            .primary_enabled(deletable);
+        let labels = [
+            "Target",
+            "Views removed",
+            "Open views",
+            "Placements in this project",
+            "Layout placements",
+            "Owned source bundles",
+            "Configuration roots",
+        ];
+        let mut form = CommandForm::new(&title, keep_label)
+            .describe(description)
+            .fit_labels(ctx, &labels)
+            .primary_enabled(deletable)
+            .status(match displayed_error.as_deref() {
+                Some(error) => Err(error),
+                None => Ok(Some(UNDOABLE)),
+            });
         if placements > 0 {
-            dialog = dialog
+            form = form
                 .secondary("Delete and remove placements")
                 .secondary_enabled(deletable);
         }
-        let choice = dialog.show(ctx, |ui| {
-            kv_row(ui, "Target", &target_path);
-            kv_row(ui, "Object", target.kind_label());
+        let choice = form.show(ctx, |rows| {
+            rows.value("Target", &target_path);
             if matches!(target, LibraryDeletionTarget::Cell { .. }) {
-                kv_row(ui, "Views removed", &view_count);
+                rows.value("Views removed", &view_count);
             }
-            kv_row(ui, "Open views", &open_count);
-            kv_row(ui, "Placements in this project", &reference_count);
-            kv_row(ui, "Layout placements", &layout_count);
-            kv_row(ui, "Owned source bundles", &source_count);
-            kv_row(ui, "Configuration roots", &root_count);
-
-            let t = Tokens::get(ui.ctx());
+            rows.value("Open views", &open_count);
+            rows.value("Placements in this project", &reference_count);
             if let Some(question) = &placement_question {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(question)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.text),
-                );
-                ui.add_space(4.0);
-                for line in [
+                rows.derived(question);
+                rows.derived(
                     "Keep placements: they stay on their sheets, still naming this master, and read as unresolved until you rebind or remove them.",
+                );
+                rows.derived(
                     "Remove placements: they come off every sheet with the deletion. Their wires stay where they are.",
-                ] {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                }
-            }
-
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(
-                    "This can be undone with Undo.",
-                )
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-            );
-            if let Some(error) = &displayed_error {
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(error)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.err),
                 );
             }
+            rows.value("Layout placements", &layout_count);
+            rows.value("Owned source bundles", &source_count);
+            rows.value("Configuration roots", &root_count);
+            None
         });
 
         let resolution = match choice {

@@ -12,7 +12,7 @@ use egui::Context;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogSize, input_row, kv_row};
+use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogSize, input_row};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::{LibraryRemoval, WorkspacePruned};
@@ -382,33 +382,34 @@ impl ProjectFeature {
         let references = impact.instance_references.to_string();
         let roots = impact.configuration_roots.to_string();
 
-        let choice = Dialog::new("Delete library", "Delete")
-            .description(
+        let labels = [
+            "Library",
+            "Cells removed",
+            "Views removed",
+            "Open views",
+            "Placements outside this library",
+            "Source views",
+            "Configuration roots",
+        ];
+        let choice = CommandForm::new("Delete library", "Delete")
+            .describe(
                 "Remove this library with every cell and view in it, the sources its views own, and close their tabs.",
             )
-            .size(DialogSize::Transaction)
-            .ghost("Cancel")
-            .destructive()
+            .fit_labels(ctx, &labels)
             .primary_enabled(catalog_current && blocker.is_none())
-            .show(ctx, |ui| {
-                kv_row(ui, "Library", &library);
-                kv_row(ui, "Cells removed", &cells);
-                kv_row(ui, "Views removed", &views);
-                kv_row(ui, "Open views", &open_views);
-                kv_row(ui, "Placements outside this library", &references);
-                kv_row(ui, "Source views", &impact.source_views);
-                kv_row(ui, "Configuration roots", &roots);
-
-                ui.add_space(8.0);
-                let t = Tokens::get(ui.ctx());
-                ui.label(
-                    egui::RichText::new("This can be undone with Undo.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-                if let Some(error) = displayed_error {
-                    error_label(ui, &error);
-                }
+            .status(match displayed_error.as_deref() {
+                Some(error) => Err(error),
+                None => Ok(Some(super::UNDOABLE)),
+            })
+            .show(ctx, |rows| {
+                rows.value("Library", &library);
+                rows.value("Cells removed", &cells);
+                rows.value("Views removed", &views);
+                rows.value("Open views", &open_views);
+                rows.value("Placements outside this library", &references);
+                rows.value("Source views", &impact.source_views);
+                rows.value("Configuration roots", &roots);
+                None
             });
 
         let mut should_close = false;

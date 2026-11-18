@@ -12,3 +12,6 @@ pub mod rename_view;
 pub mod transfer;
 
 pub(super) use new_view::new_view_target;
+
+/// What a delete review says beside its buttons when Undo takes it back.
+const UNDOABLE: &str = "This can be undone with Undo.";
