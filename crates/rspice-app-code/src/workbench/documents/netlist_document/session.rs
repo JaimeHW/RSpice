@@ -169,6 +169,16 @@ pub fn reopen(
     let Some(session) = netlist.pending_session.take() else {
         return;
     };
+    // A deck the reader opened since the launch, before the page was shown,
+    // is the reader's choice: it stays in front, and the last launch's tabs
+    // give way to it.
+    if netlist
+        .open_deck
+        .as_ref()
+        .is_some_and(|open| Some(open.id) != session.deck)
+    {
+        return;
+    }
     let mut refusals = Vec::new();
     if let Some(deck) = session.deck {
         let opened = crate::workbench::documents::deck_files::open_deck_by_id(
@@ -322,5 +332,44 @@ pub(super) fn keep_view(netlist: &mut NetlistDocumentState, tab: &NetlistTab, vi
     {
         Some((_, kept)) => *kept = view,
         None => netlist.editor_views.push((tab.clone(), view)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workbench::code::tests::harness;
+    use crate::workbench::documents::deck_files::OpenDeck;
+
+    /// A deck opened after the launch and before the Netlist page was shown
+    /// stays open in front: the session the launch restored gives way.
+    #[test]
+    fn a_deck_opened_since_the_launch_outranks_the_restored_one() {
+        let mut harness = harness();
+        let opened = OpenDeck::in_memory("C:/p/new.cir", "new\n.end\n");
+        let opened_id = opened.id;
+        harness.state.netlist.open_deck = Some(opened);
+        restore(
+            &mut harness.state.netlist,
+            NetlistSession {
+                deck: Some(DeckId::new()),
+                front: Some(NetlistTab::AddedLines),
+                ..NetlistSession::default()
+            },
+        );
+
+        reopen(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            &mut harness.state.netlist_open_documents,
+            &mut harness.runs,
+        );
+
+        assert_eq!(
+            harness.state.netlist.open_deck.as_ref().map(|deck| deck.id),
+            Some(opened_id)
+        );
+        assert_ne!(harness.state.netlist.front, NetlistTab::AddedLines);
+        assert!(harness.state.netlist.pending_session.is_none());
     }
 }

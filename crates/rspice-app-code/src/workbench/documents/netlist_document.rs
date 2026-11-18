@@ -30,10 +30,11 @@ pub mod language;
 mod navigation;
 mod param_scan;
 pub(crate) mod references;
-pub mod session;
+pub(crate) mod session;
 mod source_index;
 pub use navigation::{open_diagnostic_location, open_source_location};
 pub use references::open_deck_place;
+pub use session::NetlistSession;
 
 pub use super::netlist_tabs::{CompareSide, NetlistRoot, NetlistTab};
 pub use added_lines::{added_lines_design, added_lines_text, edit_added_lines, show_added_lines};

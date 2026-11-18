@@ -21,7 +21,7 @@ use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
 use crate::workbench::app_state::AppState;
-use rspice_app_code::workbench::documents::netlist_document::session::NetlistSession;
+use rspice_app_code::workbench::documents::netlist_document::NetlistSession;
 use rspice_app_code::workbench::slots::code::CodeState;
 use rspice_app_design::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};

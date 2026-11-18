@@ -5,8 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use rspice_app_code::workbench::documents::netlist_document::NetlistTab;
-use rspice_app_code::workbench::documents::netlist_document::session::NetlistSession;
+use rspice_app_code::workbench::documents::netlist_document::{NetlistSession, NetlistTab};
 use rspice_app_state::workbench::preferences::TogglePreference;
 use rspice_app_state::workbench::workspace::Workspace;
 
