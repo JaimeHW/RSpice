@@ -122,9 +122,6 @@ impl Model {
             }
         }
         self.record_saved_library_revisions(file);
-        // Edits held for a library that could not be read stay in the
-        // project file until a reading takes them.
-        file.unsaved_library_files = self.library_files.pending().to_vec();
         if failures.is_empty() {
             Ok(())
         } else {

@@ -497,15 +497,16 @@ fn an_edit_held_for_a_library_that_cannot_be_read_is_kept_until_it_can_be() {
     assert_eq!(session.pending().len(), 1, "kept aside, not dropped");
 
     owner.library_files = session;
-    let mut saved = working_file(&owner);
-    owner.write_library_files(&mut saved).unwrap();
-    assert_eq!(saved.unsaved_library_files.len(), 1, "a save carries it");
     let mut again = working_file(&owner);
     owner.hold_unsaved_library_files(&mut again);
-    assert_eq!(again.unsaved_library_files.len(), 1, "so does a checkpoint");
+    assert_eq!(
+        again.unsaved_library_files.len(),
+        1,
+        "a checkpoint carries it"
+    );
 
     std::fs::rename(&away, &folder).unwrap();
-    let (file, session) = restore(&owner, &saved);
+    let (file, session) = restore(&owner, &again);
     assert!(session.pending().is_empty(), "the reading takes it");
     let state = &session.library(LIBRARY).unwrap().files[&schematic_file()];
     assert!(state.edited, "marked edited");

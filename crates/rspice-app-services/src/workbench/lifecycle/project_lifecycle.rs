@@ -266,6 +266,9 @@ pub fn capture_snapshot(
     if let Some(layout) = &state.model.symbol_in_place_layout {
         layout.apply(&mut file.workspace);
     }
+    // Unsaved edits held for a library that could not be read go wherever
+    // the project does, until a reading takes them.
+    file.unsaved_library_files = state.model.library_files.pending().to_vec();
     Ok(ProjectSnapshot {
         file,
         workspace_session: sessions.workspace,
