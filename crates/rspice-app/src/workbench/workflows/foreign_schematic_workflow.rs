@@ -1029,6 +1029,7 @@ fn commit_plan_document(
         reference_pvt,
         run_set,
         model_bindings,
+        design_configuration: Default::default(),
         save_policy:
             rspice_app_state::workbench::app_state::sim_setup::SimulationSavePolicy::default(),
         options,

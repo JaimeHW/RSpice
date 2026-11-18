@@ -1,6 +1,7 @@
 //! Atomic operations on the persisted active and inactive plan catalog.
 
 use super::SimulationSetupDocument;
+use crate::design_configuration::DesignConfiguration;
 use crate::options::SimulationOptions;
 use crate::plan_catalog::{
     SimulationPlanCatalogError, SimulationPlanCloneOptions, SimulationPlanCloneOutcome,
@@ -49,6 +50,7 @@ impl SimulationSetupDocument {
                 reference_pvt: self.reference_pvt,
                 run_set: self.run_set.clone(),
                 model_bindings: self.model_bindings.clone(),
+                design_configuration: self.design_configuration,
                 save_policy: self.save_policy,
                 options: self.options.clone(),
             });
@@ -89,6 +91,7 @@ impl SimulationSetupDocument {
         candidate.reference_pvt = ReferencePvtPoint::default();
         candidate.run_set = RunSetState::reference_only();
         candidate.model_bindings.clear();
+        candidate.design_configuration = DesignConfiguration::UsedForRuns;
         candidate.save_policy = crate::output_policy::SimulationSavePolicy::default();
         candidate.options = SimulationOptions::default();
         candidate.options.temp = candidate.reference_pvt.temperature_celsius;
@@ -212,6 +215,7 @@ impl SimulationSetupDocument {
         candidate.reference_pvt = document.reference_pvt;
         candidate.run_set = document.run_set;
         candidate.model_bindings = document.model_bindings;
+        candidate.design_configuration = document.design_configuration;
         candidate.save_policy = document.save_policy;
         candidate.options = document.options;
         candidate.validate_plan_catalog()?;
@@ -308,6 +312,9 @@ impl SimulationSetupDocument {
         candidate.reference_pvt = cloned_reference_pvt;
         candidate.run_set = cloned_run_set;
         candidate.model_bindings = cloned_model_bindings;
+        // The design under test is what a clone is a variant of, whatever
+        // else it leaves behind, so it always names the same configuration.
+        candidate.design_configuration = self.design_configuration;
         candidate.save_policy = cloned_save_policy;
         candidate.options = cloned_options;
         candidate.validate_plan_catalog()?;
@@ -365,6 +372,7 @@ impl SimulationSetupDocument {
         candidate.reference_pvt = target.reference_pvt;
         candidate.run_set = target.run_set;
         candidate.model_bindings = target.model_bindings;
+        candidate.design_configuration = target.design_configuration;
         candidate.save_policy = target.save_policy;
         candidate.options = target.options;
         candidate.validate_plan_catalog()?;
@@ -490,6 +498,7 @@ fn take_active_plan_for_storage(
         reference_pvt: setup.reference_pvt,
         run_set: setup.run_set.clone(),
         model_bindings: setup.model_bindings.clone(),
+        design_configuration: setup.design_configuration,
         save_policy: setup.save_policy,
         options: setup.options.clone(),
     };

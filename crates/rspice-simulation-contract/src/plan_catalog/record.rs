@@ -6,6 +6,7 @@ use rspice_model_library::SimulationPlanModelBinding;
 use rspice_vocabulary::product::{ObjectRevision, SimulationPlanId};
 use serde::{Deserialize, Serialize};
 
+use crate::design_configuration::DesignConfiguration;
 use crate::options::SimulationOptions;
 use crate::output_policy::SimulationSavePolicy;
 use crate::plan_model::SimulationPlan;
@@ -30,6 +31,9 @@ pub struct StoredSimulationPlan {
     /// inactive plan.
     #[serde(default)]
     model_bindings: Vec<SimulationPlanModelBinding>,
+    /// The hierarchy configuration this plan's design elaborates under.
+    #[serde(default, skip_serializing_if = "DesignConfiguration::follows_runs")]
+    design_configuration: DesignConfiguration,
     #[serde(default)]
     save_policy: SimulationSavePolicy,
     /// Recoverable retirement state. Archived plans retain their complete
@@ -60,6 +64,7 @@ impl StoredSimulationPlan {
             reference_pvt: document.reference_pvt,
             run_set: document.run_set,
             model_bindings: document.model_bindings,
+            design_configuration: document.design_configuration,
             save_policy: document.save_policy,
             archived: false,
             options: document.options,
@@ -77,6 +82,7 @@ impl StoredSimulationPlan {
             reference_pvt: self.reference_pvt,
             run_set: self.run_set.clone(),
             model_bindings: self.model_bindings.clone(),
+            design_configuration: self.design_configuration,
             save_policy: self.save_policy,
             options: self.options.clone(),
         }
@@ -93,6 +99,7 @@ impl StoredSimulationPlan {
             reference_pvt: self.reference_pvt,
             run_set: self.run_set,
             model_bindings: self.model_bindings,
+            design_configuration: self.design_configuration,
             save_policy: self.save_policy,
             options: self.options,
         }
@@ -159,6 +166,12 @@ impl StoredSimulationPlan {
         &self.model_bindings
     }
 
+    /// The hierarchy configuration this plan's design elaborates under.
+    #[must_use]
+    pub const fn design_configuration(&self) -> DesignConfiguration {
+        self.design_configuration
+    }
+
     #[must_use]
     pub const fn save_policy(&self) -> SimulationSavePolicy {
         self.save_policy
@@ -183,6 +196,11 @@ pub struct SimulationPlanImportDocument {
     pub reference_pvt: ReferencePoint,
     pub run_set: RunSetState,
     pub model_bindings: Vec<SimulationPlanModelBinding>,
+    /// The hierarchy configuration the plan's design elaborates under. A
+    /// configuration identity is the project's own, so a plan carried to
+    /// another project names one that is not there until the reader chooses.
+    #[serde(default, skip_serializing_if = "DesignConfiguration::follows_runs")]
+    pub design_configuration: DesignConfiguration,
     #[serde(default)]
     pub save_policy: SimulationSavePolicy,
     pub options: SimulationOptions,

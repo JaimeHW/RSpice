@@ -16,6 +16,7 @@ pub mod corner_draft;
 #[cfg(any(test, feature = "derivation-test-observation"))]
 pub mod cost_probe;
 pub mod dependency_contract;
+pub mod design_configuration;
 pub mod design_variable;
 pub mod design_variable_quantity;
 pub mod drafts;

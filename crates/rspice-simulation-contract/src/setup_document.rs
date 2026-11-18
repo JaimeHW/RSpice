@@ -1,10 +1,11 @@
 //! Stable persisted simulation setup document.
 //!
-//! Only these nine plan fields are written to a project, and only they are read
+//! Only these ten plan fields are written to a project, and only they are read
 //! back.
 
 mod catalog;
 
+use crate::design_configuration::DesignConfiguration;
 use crate::output_policy::SimulationSavePolicy;
 use crate::plan_catalog::StoredSimulationPlan;
 use crate::plan_model::SimulationPlan;
@@ -28,6 +29,9 @@ pub struct SimulationSetupDocument {
     /// every library currently loaded in the project manager.
     #[serde(default)]
     pub model_bindings: Vec<rspice_model_library::SimulationPlanModelBinding>,
+    /// The hierarchy configuration this plan's design elaborates under.
+    #[serde(default, skip_serializing_if = "DesignConfiguration::follows_runs")]
+    pub design_configuration: DesignConfiguration,
     /// Result storage, live delivery, and per-plan history policy.
     #[serde(default)]
     pub save_policy: SimulationSavePolicy,

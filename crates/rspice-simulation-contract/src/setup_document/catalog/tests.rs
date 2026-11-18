@@ -232,3 +232,50 @@ fn create_rename_archive_restore_and_activate_preserve_identity() {
         Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(id)) if id == original_id
     ));
 }
+
+/// Each plan keeps the configuration its design runs under: switching plans
+/// swaps it with the rest of the plan, a clone keeps it, a fresh plan follows
+/// the mark for runs, and an export carries it.
+#[test]
+fn a_plans_configuration_travels_with_the_plan() {
+    use crate::design_configuration::DesignConfiguration;
+    use rspice_design_model::primitives::ConfigurationSetId;
+
+    let extracted = ConfigurationSetId::new();
+    let mut setup = new_setup();
+    let schematic_plan = setup.analysis_plan.as_ref().unwrap().id();
+    let extracted_plan = setup.create_plan("Extracted").expect("fresh plan commits");
+    assert_eq!(setup.design_configuration, DesignConfiguration::UsedForRuns);
+    setup.design_configuration = DesignConfiguration::Named(extracted);
+
+    setup
+        .activate_plan(schematic_plan)
+        .expect("the first plan activates");
+    assert_eq!(setup.design_configuration, DesignConfiguration::UsedForRuns);
+    assert_eq!(
+        setup.inactive_plans()[0].design_configuration(),
+        DesignConfiguration::Named(extracted)
+    );
+    assert_eq!(
+        setup
+            .export_plan(extracted_plan)
+            .expect("the stored plan exports")
+            .design_configuration,
+        DesignConfiguration::Named(extracted)
+    );
+
+    setup
+        .activate_plan(extracted_plan)
+        .expect("the second plan activates");
+    assert_eq!(
+        setup.design_configuration,
+        DesignConfiguration::Named(extracted)
+    );
+    setup
+        .clone_active_plan("Extracted copy", SimulationPlanCloneOptions::default())
+        .expect("the clone commits");
+    assert_eq!(
+        setup.design_configuration,
+        DesignConfiguration::Named(extracted)
+    );
+}
