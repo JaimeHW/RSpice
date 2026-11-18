@@ -19,8 +19,9 @@ use crate::netlist_preparation::dependencies::{
     expand_generated_dependencies_with_sealed_sources, expand_manual_dependencies,
 };
 use crate::netlist_preparation::{
-    deferred_external_source_reason, executable_logical_lines, measurements,
-    reject_deferred_external_sources_with_project_runtimes, validated_executable_hierarchy,
+    contains_external_include_directive, deferred_external_source_reason, executable_logical_lines,
+    measurements, reject_deferred_external_sources_with_project_runtimes,
+    validated_executable_hierarchy,
 };
 use crate::output_contract::selection::{effective_plan_capture, projection_occurrence_nets};
 use crate::preparation::{QueuedAnalysis, validate_prepared_periodic_sources};
@@ -747,6 +748,14 @@ fn expand_manual_deck<R, A>(
         );
     }
     let origin = manual.origin;
+    // An include resolves against the deck's folder; with no file there is
+    // no folder, and the process's working directory is never read instead.
+    if origin.is_none() && contains_external_include_directive(&composed) {
+        return Err(PreparationError::new(
+            PreparationStage::SourceChecks,
+            "The deck has no file, so its .include and .lib lines have no folder to be read from.",
+        ));
+    }
     let sealed_hdl = if seal_hdl {
         crate::netlist_preparation::seal_deck_hdl_sources(
             &composed,

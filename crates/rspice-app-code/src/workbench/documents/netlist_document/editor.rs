@@ -1195,7 +1195,7 @@ fn parse_buffer_with_context(
         (None, Some(line)) => {
             return (
                 vec![Diagnostic::error(
-                    "Relative .include/.inc/.lib sources require an imported deck origin before they can be resolved and sealed.",
+                    "The deck has no file, so its .include and .lib lines have no folder to be read from.",
                 )
                 .with_line(Some(line))],
                 None,

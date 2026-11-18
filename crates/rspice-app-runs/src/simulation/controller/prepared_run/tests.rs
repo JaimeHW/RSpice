@@ -769,7 +769,7 @@ fn an_equal_setup_rebuilt_before_dispatch_does_not_refuse_it() {
 }
 
 #[test]
-fn manual_include_without_origin_fails_closed() {
+fn manual_include_without_a_deck_file_fails_closed() {
     let mut state = RunTestHost::default();
     state.model.simulation.source.netlist_content =
         "deck\n.include models.lib\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
@@ -777,7 +777,11 @@ fn manual_include_without_origin_fails_closed() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect_err("unbound include must fail");
     assert_eq!(error.stage(), PreparationStage::SourceChecks);
-    assert!(error.message().contains("origin"));
+    assert!(
+        error.message().contains("has no file"),
+        "{}",
+        error.message()
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
