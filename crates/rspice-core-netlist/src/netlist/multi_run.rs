@@ -286,7 +286,7 @@ fn expand_variant(
                 for column in &table.params {
                     if !seen_columns.insert(column.to_ascii_uppercase()) {
                         return Err(MultiRunError::new(format!(
-                            ".data column `{column}` is specified more than once across the active tables"
+                            ".data column '{column}' is specified more than once across the active tables"
                         )));
                     }
                 }
@@ -943,7 +943,7 @@ fn extract_data_tables(
                         poll_abort(abort, param_index)?;
                         if !data_table_parameter_name_is_valid(param) {
                             return Err(MultiRunError::new(format!(
-                                ".data {} line {} parameter column `{param}` is not a valid parameter name",
+                                ".data {} line {} parameter column '{param}' is not a valid parameter name",
                                 table.name, line_number
                             )));
                         }
@@ -966,7 +966,7 @@ fn extract_data_tables(
                         }
                         Err(_) => {
                             return Err(MultiRunError::new(format!(
-                                ".data {} line {} contains non-numeric token `{raw}`",
+                                ".data {} line {} contains non-numeric token '{raw}'",
                                 table.name, line_number
                             )));
                         }
@@ -992,7 +992,7 @@ fn extract_data_tables(
             for param in &params {
                 if !data_table_parameter_name_is_valid(param) {
                     return Err(MultiRunError::new(format!(
-                        ".data {name} line {line_number} parameter column `{param}` is not a valid parameter name"
+                        ".data {name} line {line_number} parameter column '{param}' is not a valid parameter name"
                     )));
                 }
             }
@@ -1046,7 +1046,7 @@ fn find_data_references(
             Some(table_index) => table_index,
             None => {
                 return Err(MultiRunError::new(format!(
-                    "analysis line {} references unknown .data table `{name}`",
+                    "analysis line {} references unknown .data table '{name}'",
                     line_index + 1
                 )));
             }
@@ -1056,7 +1056,7 @@ fn find_data_references(
             && previous_kind != kind
         {
             return Err(MultiRunError::new(format!(
-                "table-driven analyses of kinds `{previous_kind}` and `{kind}` cannot be combined into one textual multi-run expansion"
+                "table-driven analyses of kinds '{previous_kind}' and '{kind}' cannot be combined into one textual multi-run expansion"
             )));
         }
         analysis_kind = Some(kind);
@@ -1523,7 +1523,7 @@ mod tests {
             (
                 "non_numeric",
                 "t\n.data tbl vdd\n1.0\nbad\n.enddata\n.dc data=tbl\n.end\n",
-                "non-numeric token `bad`",
+                "non-numeric token 'bad'",
             ),
             (
                 "unclosed",
@@ -1538,12 +1538,12 @@ mod tests {
             (
                 "missing_continuation_header",
                 "t\n.data tbl\n1.0\n.enddata\n.dc data=tbl\n.end\n",
-                "parameter column `1.0` is not a valid parameter name",
+                "parameter column '1.0' is not a valid parameter name",
             ),
             (
                 "mixed_continuation_header",
                 "t\n.data tbl\n+ vdd 1\n+ 1 2\n.enddata\n.dc data=tbl\n.end\n",
-                "parameter column `1` is not a valid parameter name",
+                "parameter column '1' is not a valid parameter name",
             ),
             (
                 "empty",
@@ -1553,7 +1553,7 @@ mod tests {
             (
                 "unknown_reference",
                 "t\nV1 a 0 1\n.dc data=missing\n.end\n",
-                "unknown .data table `missing`",
+                "unknown .data table 'missing'",
             ),
         ];
 
