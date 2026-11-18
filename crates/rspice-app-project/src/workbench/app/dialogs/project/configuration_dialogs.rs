@@ -788,10 +788,11 @@ fn delete_dialog(
         count(configuration.overrides().len(), "instance"),
         count(configuration.cell_bindings().len(), "cell"),
     );
+    // Undo brings it back, so the primary keeps the accent: red is for a
+    // delete nothing takes back.
     let mut dialog = Dialog::new(&title, "Delete")
         .description("Delete a configuration from the project.")
         .size(DialogSize::Confirmation)
-        .destructive()
         .ghost("Cancel")
         .primary_enabled(write_allowed && !in_use);
     let problem = refusal.or_else(|| in_use.then(|| delete_refusal(&name)));
