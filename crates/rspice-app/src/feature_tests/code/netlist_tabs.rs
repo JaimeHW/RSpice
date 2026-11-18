@@ -104,6 +104,119 @@ fn press_run(app: &mut RSpiceApp) -> &'static str {
     }
 }
 
+/// The toolbar verbs `drawn` painted, of every verb a Netlist tab has had,
+/// a verb with a shortcut painted with it in brackets.
+fn toolbar_verbs(drawn: &str) -> Vec<&'static str> {
+    [
+        "Save",
+        "Save deck",
+        "Save include",
+        "Export deck",
+        "Export deck copy",
+        "Export netlist",
+        "Export generated deck",
+        "Compare",
+        "Compare with earlier build",
+        "Compare generated revisions",
+    ]
+    .into_iter()
+    .filter(|verb| {
+        drawn.lines().any(|line| {
+            line.strip_prefix(*verb)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(" ("))
+        })
+    })
+    .collect()
+}
+
+/// Each tab's toolbar holds only the verbs that tab has: the deck is saved,
+/// exported and compared, with one Save; the generated netlist is exported
+/// and compared with an earlier build; the Added lines, saved with the
+/// project, add none.
+#[test]
+fn the_toolbar_offers_each_tab_only_its_own_verbs() {
+    let mut app = plan_and_deck_session();
+    assert_eq!(
+        toolbar_verbs(&drawn_frame_at(&mut app, 1.0)),
+        ["Save deck", "Export deck", "Compare"],
+        "the deck"
+    );
+
+    let generated = tab_labelled(&app, "Generated netlist").id;
+    assert!(activate_document(&mut app.state, &generated));
+    assert_eq!(
+        toolbar_verbs(&drawn_frame_at(&mut app, 2.0)),
+        ["Export netlist", "Compare with earlier build"],
+        "the generated netlist"
+    );
+
+    assert!(activate_document(
+        &mut app.state,
+        &WorkspaceDocumentId::NetlistAddedLines
+    ));
+    assert_eq!(
+        toolbar_verbs(&drawn_frame_at(&mut app, 3.0)),
+        [] as [&str; 0],
+        "the Added lines"
+    );
+}
+
+/// The deck's Compare menu compares it with its file on disk, the last
+/// run's input or the generated netlist; with no run yet, the run's row is
+/// there and cannot be taken. Comparing with the file opens the view of
+/// the edit on a tab naming both.
+#[test]
+fn the_decks_compare_menu_opens_the_comparison_chosen() {
+    use crate::feature_tests::replay::Replay;
+    use egui::accesskit::Role;
+
+    let folder =
+        std::env::temp_dir().join(format!("rspice-deck-compare-menu-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&folder).expect("fixture folder");
+    let mut replay = Replay::new();
+    assert!(replay.app.state.open_test_deck(
+        DECK.to_owned(),
+        Some(folder.join("amp_tb.cir")),
+        "amp_tb.cir"
+    ));
+    replay.app.state.workbench.workspace = Workspace::Netlist;
+    assert!(netlist_document::edit_deck_file(
+        &mut replay.app.state.model,
+        &mut replay.app.state.code.netlist,
+        DECK.replace("1k", "2k"),
+    ));
+
+    let menu = replay.click("Compare", Role::Button);
+    let rows = menu
+        .iter()
+        .filter(|control| control.role == Role::Button)
+        .map(|control| control.label.as_str())
+        .collect::<Vec<_>>();
+    for offered in [
+        "With its file on disk",
+        "With the last run's input",
+        "With the generated netlist",
+    ] {
+        assert!(rows.contains(&offered), "{offered}: {rows:?}");
+    }
+
+    replay.click("With its file on disk", Role::Button);
+    let view = tab_labelled(&replay.app, "amp_tb.cir on disk vs amp_tb.cir");
+    assert!(view.active, "{view:?}");
+    assert!(
+        replay
+            .app
+            .state
+            .model
+            .simulation
+            .source
+            .netlist_content
+            .contains("\n-R1 out 0 1k\n+R1 out 0 2k\n"),
+        "the view shows the edit"
+    );
+    std::fs::remove_dir_all(folder).expect("fixture removed");
+}
+
 /// The generated netlist and the Added lines come first and stay: neither
 /// closes. The deck beside them does.
 #[test]

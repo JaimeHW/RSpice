@@ -10,6 +10,7 @@ use crate::workbench::chrome::toolbar::{explicit_label_width, toolbar_icon_butto
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
+use crate::workbench::documents::netlist_document::NetlistTab;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{
     Cx, Reads, ToolbarAction, ToolbarControl, ToolbarEntry, ToolbarIcon, ToolbarId, ToolbarTool,
@@ -192,50 +193,166 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
     }
 }
 
-/// The Netlist workspace's toolbar follows the document it is showing: a
-/// generated primary is exported and compared, an owned deck is saved and
-/// run.
+/// The Netlist workspace's toolbar follows the tab in front, with only the
+/// verbs that tab has: the generated netlist is exported and compared with
+/// an earlier build; a deck is saved, exported and compared; an include of
+/// a deck is saved. The Added lines are saved with the project, by the Save
+/// at the toolbar's head, and a run's input and a comparison are only read.
 ///
-/// Find is deliberately absent: the editor's own toolbar sits directly under
+/// Find is deliberately absent: the page's own toolbar sits directly under
 /// this one and owns it.
 const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
     ToolbarEntry::Only(
-        generated_deck_shown,
+        generated_netlist_in_front,
         &[
             labelled(
                 CodeCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
-                "Export generated deck",
+                "Export netlist",
             ),
-            ToolbarEntry::Separator,
             labelled(
                 CodeCommand::CompareGeneratedRevisions.key(),
                 WorkbenchIcon::Compare,
-                "Compare generated revisions",
+                "Compare with earlier build",
             ),
         ],
     ),
     ToolbarEntry::Only(
-        owned_deck_shown,
+        deck_in_front,
         &[
             labelled(ids::SAVE, WorkbenchIcon::Save, "Save deck"),
-            ToolbarEntry::Separator,
             labelled(
                 CodeCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
-                "Export deck copy",
+                "Export deck",
             ),
+            ToolbarEntry::Control(ToolbarControl {
+                show: compare_deck_menu,
+                overflow: None,
+            }),
         ],
+    ),
+    ToolbarEntry::Only(
+        include_of_deck_in_front,
+        &[labelled(ids::SAVE, WorkbenchIcon::Save, "Save include")],
     ),
 ];
 
-fn generated_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
+fn generated_netlist_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.state.netlist.front.shows_generated()
 }
 
-fn owned_deck_shown(reads: &Reads<'_, CodeFeature>) -> bool {
-    reads.state.netlist.front.shows_deck()
+fn deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+    matches!(reads.state.netlist.front, NetlistTab::Deck(_))
 }
+
+fn include_of_deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+    matches!(
+        reads.state.netlist.front,
+        NetlistTab::Include { deck: Some(_), .. }
+    )
+}
+
+/// Compare the deck in front: a menu of the texts it can be compared with,
+/// its file on disk, the last run's input and the generated netlist, each
+/// disabled with the reason when there is nothing to compare it with. The
+/// comparison opens on a tab of its own.
+fn compare_deck_menu(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
+    use crate::workbench::MessageId;
+    use crate::workbench::documents::netlist_document::{self, CompareSide};
+
+    let Some(deck) = cx.state.netlist.open_deck.as_ref() else {
+        return;
+    };
+    let id = deck.id;
+    let messages = cx.wb.messages();
+    // A deck the project keeps as text has no file; nor has any deck in
+    // the browser, which keeps them all.
+    let on_disk = !deck.is_stored() && cfg!(not(target_arch = "wasm32"));
+    let last_run = netlist_document::run_deck_snapshot_run_id_in(cx.runs);
+    let generated = cx.model.netlist_artifacts.generated_document.is_some();
+    let label = messages.text(MessageId::NetlistCompareMenu);
+    let response = if layout.toolbar_labels {
+        // The label, then a chevron saying the button opens a menu.
+        let response = labeled_icon_button_sized(
+            ui,
+            WorkbenchIcon::Compare,
+            &label,
+            false,
+            explicit_label_width(ui, &label, false) + COMPARE_CHEVRON_WIDTH,
+            layout.toolbar_control_height,
+        );
+        let t = crate::ui::tokens::Tokens::get(ui.ctx());
+        WorkbenchIcon::ChevronDown.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(
+                    response.rect.right() - COMPARE_CHEVRON_WIDTH / 2.0 - 4.0,
+                    response.rect.center().y,
+                ),
+                egui::Vec2::splat(12.0),
+            ),
+            t.color.text_dim,
+        );
+        response
+    } else {
+        icon_button(
+            ui,
+            WorkbenchIcon::Compare,
+            &label,
+            false,
+            toolbar_icon_button_size(layout),
+        )
+    };
+    let mut chosen = None;
+    egui::Popup::menu(&response).show(|ui| {
+        let mut row = |ui: &mut egui::Ui, text: String, why: MessageId, sides| {
+            if ui
+                .add_enabled(Option::is_some(&sides), egui::Button::new(text))
+                .on_disabled_hover_text(messages.text(why))
+                .clicked()
+            {
+                chosen = sides;
+                ui.close();
+            }
+        };
+        row(
+            ui,
+            messages.text(MessageId::NetlistCompareWithDisk),
+            MessageId::NetlistCompareKeptInProject,
+            on_disk.then_some((CompareSide::DiskFile(id), CompareSide::Deck(id))),
+        );
+        row(
+            ui,
+            last_run.map_or_else(
+                || messages.text(MessageId::NetlistCompareWithLastRun),
+                |run| {
+                    messages.format(
+                        MessageId::NetlistCompareWithRun,
+                        &[("run", &run.to_string())],
+                    )
+                },
+            ),
+            MessageId::NetlistCompareNoRun,
+            last_run.map(|run| (CompareSide::RunInput(run), CompareSide::Deck(id))),
+        );
+        row(
+            ui,
+            messages.text(MessageId::NetlistCompareWithGenerated),
+            MessageId::NetlistCompareNoGenerated,
+            generated.then_some((CompareSide::Deck(id), CompareSide::Generated)),
+        );
+    });
+    if let Some((left, right)) = chosen
+        && let Err(error) =
+            netlist_document::compare(cx.model, &mut cx.state.netlist, cx.runs, left, right)
+    {
+        cx.wb.prompt(error);
+    }
+}
+
+/// Room a menu's chevron takes after the Compare button's label.
+const COMPARE_CHEVRON_WIDTH: f32 = 14.0;
 
 #[cfg(test)]
 mod tests {

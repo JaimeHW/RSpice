@@ -6,9 +6,7 @@ use rspice_app_code::workbench::documents::netlist_document::NetlistTab;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::retain_generated;
 use rspice_app_code::workbench::surfaces::netlist::toolbar::{CodeToolbarLayout, code_toolbar};
 
-/// A netlist-first project: an owned deck and no generated primary. This is
-/// the shape whose action set is widest, because the third full-set button
-/// is "Manage source document" rather than "Return to primary".
+/// A netlist-first project: a deck and no generated netlist.
 fn netlist_first_app() -> RSpiceApp {
     const DECK: &str = "toolbar fixture\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let mut app = RSpiceApp::test_instance();

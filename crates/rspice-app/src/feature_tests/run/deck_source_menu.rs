@@ -595,19 +595,46 @@ fn the_decks_menu_and_keys_offer_find_references_and_rename() {
     );
 }
 
-/// The page's language-tools menu lists Go to definition, and neither Find
-/// references nor Rename symbol.
+/// The page's language-tools menu lists Find references and Rename symbol
+/// beside Go to definition, as the deck's own menu does: with the caret on
+/// the call, Find references lists the places the subcircuit is written,
+/// and Rename symbol opens the rename on its name.
 #[test]
-fn the_language_tools_menu_offers_neither_find_references_nor_rename() {
+fn the_language_tools_menu_finds_references_and_renames() {
     let mut replay = deck_page();
+    click_the_call(&mut replay);
     let rows = labels(
         &replay.click("SPICE language tools", Role::Button),
         Role::Button,
     );
-    assert!(rows.iter().any(|row| row == "Go to definition"), "{rows:?}");
-    for absent in [FIND_REFERENCES, RENAME_SYMBOL] {
-        assert!(!rows.iter().any(|row| row == absent), "{absent}: {rows:?}");
+    for offered in ["Go to definition", FIND_REFERENCES, RENAME_SYMBOL] {
+        assert!(rows.iter().any(|row| row == offered), "{offered}: {rows:?}");
     }
+
+    replay.click(FIND_REFERENCES, Role::Button);
+    let listed = replay
+        .app
+        .state
+        .workbench
+        .source_references
+        .as_ref()
+        .map(|list| list.rows.iter().map(|row| row.line).collect::<Vec<_>>());
+    assert_eq!(
+        listed,
+        Some(vec![2, 5]),
+        "the definition and the call; the status line says {:?}",
+        replay.app.state.prompt_text()
+    );
+
+    click_the_call(&mut replay);
+    replay.click("SPICE language tools", Role::Button);
+    let shown = replay.click(RENAME_SYMBOL, Role::Button);
+    assert!(
+        shown
+            .iter()
+            .any(|control| control.label == "New name" && control.value == NAME),
+        "Rename symbol opens the rename of {NAME}"
+    );
 }
 
 /// The palette finds Go to definition, Find references and Rename symbol on

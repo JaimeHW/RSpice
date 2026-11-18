@@ -1,14 +1,14 @@
 //! The netlist document toolbar.
 //!
 //! One 33-point row: the dialect chip and the check's status on the left,
-//! document actions on the right. Which actions appear is decided by the
-//! document in front, and the advisory chip yields its space before the
-//! dialect chip or a blocking status can clip.
+//! Find, Manage source and the language tools on the right, the same on
+//! every tab; what a tab can do with its text is on the workbench toolbar.
+//! The warning count yields its space before the dialect chip or a blocking
+//! status can clip.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-use egui::containers::menu::MenuButton;
 use egui::{Align, Layout, Ui, vec2};
 
 use crate::ui::theme::{self, FontWeight};
@@ -20,7 +20,7 @@ use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint
 use crate::workbench::documents::netlist_document::NetlistRoot;
 use crate::workbench::framework::feature::Cx;
 
-use super::{active_document_available, document_syntax_status, generated_primary_ready_in};
+use super::{active_document_available, document_syntax_status};
 
 pub const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 pub(super) const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
@@ -30,8 +30,6 @@ pub(super) const CODE_TOOLBAR_COMPACT_BREAKPOINT: f32 = 720.0;
 pub(super) const CODE_TOOLBAR_TABLET_VIEWPORT_BREAKPOINT: f32 = 1024.0;
 pub(super) const CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH: f32 = 320.0;
 pub(super) const PHONE_BREAKPOINT: f32 = 560.0;
-pub(super) const PHONE_PRIMARY_WIDTH: f32 = 154.0;
-pub(super) const CODE_TOOLBAR_ICON_WIDTH: f32 = 28.0;
 /// Side of a status line's problem mark and the air after it: the kit's own,
 /// so a marked status matches every other marked line in the product.
 use crate::ui::widgets::{
@@ -56,17 +54,6 @@ pub struct CodeToolbarLayout {
     pub actions: egui::Rect,
 }
 
-/// Width of one auto-sized toolbar button, measured the way egui will size it.
-fn action_button_width(ui: &Ui, label: &str) -> f32 {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let text = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), font, ui.visuals().text_color())
-        .size()
-        .x;
-    text + 2.0 * ui.spacing().button_padding.x
-}
-
 /// Total width of a group laid out with one gap between each control.
 fn action_extent(widths: &[f32]) -> f32 {
     if widths.is_empty() {
@@ -75,64 +62,37 @@ fn action_extent(widths: &[f32]) -> f32 {
     widths.iter().sum::<f32>() + CODE_TOOLBAR_GAP * (widths.len() - 1) as f32
 }
 
-/// Width the full action set needs, measured from the labels it will lay out.
+/// Width the action group needs: Find, Manage source and the language tools,
+/// each a square at the strip's control height. A tab's own verbs are on the
+/// workbench toolbar above, so the group is the same on every tab.
 ///
-/// This decides whether the full set is affordable at all. Where the group
-/// actually lands is read back after it is painted — a predicted width is a
-/// good enough answer for "does this fit?" and was never a safe one for "what
-/// may the status chips have?".
-fn full_action_extent(
-    ui: &Ui,
-    messages: crate::workbench::MessageCatalog,
-    context: ActionSetContext,
-) -> f32 {
-    let button = |label: &str| action_button_width(ui, label);
-    // Find, source lifecycle and language tools as icon buttons.
-    let mut widths = vec![
-        CODE_TOOLBAR_ICON_WIDTH,
-        CODE_TOOLBAR_ICON_WIDTH,
-        CODE_TOOLBAR_ICON_WIDTH,
-    ];
-    if context.dependency_visible {
-        widths.push(button(&messages.text(MessageId::NetlistReturnRoot)));
-        if context.active == NetlistRoot::Deck {
-            widths.push(button(&messages.text(MessageId::NetlistSaveSourceDeck)));
-        }
-    } else {
-        match context.active {
-            NetlistRoot::Generated | NetlistRoot::AddedLines => {}
-            NetlistRoot::Deck => {
-                widths.push(button(&messages.text(MessageId::NetlistSaveSourceDeck)));
-                widths.push(button(&messages.text(if context.generated_ready {
-                    MessageId::NetlistReturnPrimary
-                } else {
-                    MessageId::CodeSourceLifecycleTitle
-                })));
-            }
-            NetlistRoot::Comparison | NetlistRoot::RunInput => {
-                widths.push(button(&messages.text(MessageId::NetlistReturnPrimary)));
-            }
-        }
-    }
-    action_extent(&widths)
+/// This decides whether the status chips may show in full. Where the group
+/// actually lands is read back after it is painted.
+fn full_action_extent(control_h: f32) -> f32 {
+    action_extent(&[control_h; 3])
 }
 
-/// What decides which actions the toolbar paints.
+/// What the language tools menu offers for the text in front.
 #[derive(Clone, Copy)]
-struct ActionSetContext {
-    active: NetlistRoot,
-    dependency_visible: bool,
-    generated_ready: bool,
+struct LanguageTools {
+    /// The text in front has a language service at all: a comparison has
+    /// none.
+    enabled: bool,
+    /// The text in front may be rewritten: the quick fix and Format.
+    editable: bool,
+    quick_fix_available: bool,
+    /// The editor in front answers where a name is defined and written.
+    navigable: bool,
+    /// ...and may rename it.
+    renamable: bool,
 }
 
-/// Draw the toolbar in the code feature's context, lent with the dispatcher's
-/// answers for Run and Stop, and do what was pressed: in place for what the
-/// context holds, and raised for what the application carries out once the
-/// page has drawn: Run and Stop, saving the file in front, validating the
-/// deck and the quick fix. It returns where it drew.
+/// Draw the toolbar in the code feature's context and do what was pressed:
+/// in place for what the context holds, and raised for what the application
+/// carries out once the page has drawn: Find references, Rename symbol and
+/// the quick fix. It returns where it drew.
 pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLayout {
     let messages = cx.wb.messages();
-    let save_source_label = messages.text(MessageId::NetlistSaveSourceDeck);
     let t = Tokens::get(ui.ctx());
     // A child UI can retain the pre-dock available width while its painter is
     // clipped to the visible center document. Base both allocation and
@@ -149,46 +109,41 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
 
     let content = rect.shrink2(vec2(CODE_TOOLBAR_PADDING_X, 0.0));
     let active = cx.state.netlist.front.root_kind();
-    let dependency_visible = cx.state.netlist.front.include().is_some();
-    // The deck or an include beside it: a file, which Save writes.
-    let deck_file_dirty =
-        crate::workbench::documents::netlist_document::active_deck_file_in(&cx.state.netlist)
-            .map(|file| file.dirty);
-    let generated_ready = generated_primary_ready_in(cx.model);
     let active_available = active_document_available(cx.model, &cx.state.netlist, cx.runs);
-    let active_editable =
-        crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
-            cx.model,
-            &cx.state.netlist,
-        );
-    let quick_fix_available =
-        crate::workbench::documents::netlist_document::language::preferred_quick_fix_available(
-            &cx.state.netlist,
-        );
-    let full_action_width = full_action_extent(
-        ui,
-        messages,
-        ActionSetContext {
-            active,
-            dependency_visible,
-            generated_ready,
-        },
-    );
+    let editor = cx.wb.active_source_editor;
+    let tools = LanguageTools {
+        enabled: active_available && active != NetlistRoot::Comparison,
+        editable:
+            crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
+                cx.model,
+                &cx.state.netlist,
+            ),
+        quick_fix_available:
+            crate::workbench::documents::netlist_document::language::preferred_quick_fix_available(
+                &cx.state.netlist,
+            ),
+        navigable: editor.is_some_and(|editor| editor.navigable),
+        renamable: editor.is_some_and(|editor| editor.navigable && editor.editable),
+    };
+    // Every control in the strip stands at the kit's compact control height
+    // and the icons are square at it, so they sit level with the dialect
+    // chip, an equal gap above and below them in the row.
+    let control_h = crate::ui::widgets::compact_height(&t.metrics);
     // Dock collapse can make the document wider at a smaller outer viewport.
     // Decide from both the canonical breakpoint and the space left after the
-    // exact full action set, so that discontinuity cannot re-enable a crowded
-    // toolbar on tablet landscape.
+    // action group, so that discontinuity cannot re-enable a crowded toolbar
+    // on tablet landscape.
     let compact = code_toolbar_prefers_compact(
         crate::ui::viewport::root_viewport_width(ui.ctx()),
         width,
-        full_action_width,
+        full_action_extent(control_h),
     );
     let dialect = super::dialect_chip::DeckChip::shown(cx.model, &cx.state.netlist);
     let status = document_syntax_status(cx.model, &cx.state.netlist, messages)
         .filter(|(_, problem)| toolbar_status_visible(phone, *problem));
-    // Nothing is advised when the count is zero, and "0 advisories" is not
-    // news: the label appears only once there is something in it.
-    let advisory_candidate = (!compact)
+    // Nothing is said when there are no warnings, and "0 warnings" is not
+    // news: the count appears only once there is something in it.
+    let warning_candidate = (!compact)
         .then(|| {
             cx.state
                 .netlist
@@ -219,237 +174,35 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             .layout(Layout::right_to_left(Align::Center)),
     );
     actions.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
-    // Every labelled button in the strip stands at the kit's compact control
-    // height, so the run and save buttons sit level, an equal gap above and
-    // below them in the row. A button is as tall as its label and padding
-    // when that is more than the interact height, so the padding is what
-    // brings it down to the height. egui rounds a button's padding to whole
-    // points, so it is floored here: half a point rounded up made the button
-    // a point taller than the row allows.
-    let control_h = crate::ui::widgets::compact_height(&t.metrics);
-    let label_h = actions.text_style_height(&egui::TextStyle::Button);
-    actions.spacing_mut().interact_size.y = control_h;
-    actions.spacing_mut().button_padding.y = ((control_h - label_h) / 2.0).floor().max(0.0);
-    if compact {
-        actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let mut find_clicked = false;
-            ui.add_enabled_ui(active_available, |ui| {
-                find_clicked = icon_button(
-                    ui,
-                    WorkbenchIcon::Search,
-                    &messages.text(MessageId::NetlistFindActiveDocument),
-                    false,
-                    vec2(28.0, 28.0),
-                )
-                .clicked();
-            })
-            .response
-            .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
-            if find_clicked {
-                action = Some(NetlistToolbarAction::Find);
-            }
-            let manage_source = icon_button(
+    let side = vec2(control_h, control_h);
+    let find = actions
+        .add_enabled(active_available, |ui: &mut Ui| {
+            icon_button(
                 ui,
-                WorkbenchIcon::Folder,
-                &messages.text(MessageId::CodeSourceLifecycleTitle),
+                WorkbenchIcon::Search,
+                &messages.text(MessageId::NetlistFindActiveDocument),
                 false,
-                vec2(28.0, 28.0),
-            );
-            if manage_source.clicked() {
-                action = Some(NetlistToolbarAction::ManageTopDecks);
-            }
-            if let Some(language_action) = language_tools_menu(
-                ui,
-                messages,
-                active_available && active != NetlistRoot::Comparison,
-                active_editable,
-                quick_fix_available,
-            ) {
-                action = Some(language_action);
-            }
-            if dependency_visible {
-                if let Some(dirty) = deck_file_dirty {
-                    // An include of the deck: a file of its own, saved like
-                    // the deck, with the way back as an icon.
-                    if ui
-                        .add_enabled_ui(dirty, |ui| {
-                            ui.add_sized(
-                                [PHONE_PRIMARY_WIDTH, control_h],
-                                egui::Button::new(save_source_label.as_str()).truncate(),
-                            )
-                        })
-                        .inner
-                        .on_disabled_hover_text(messages.text(MessageId::NetlistNothingToSave))
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::Save);
-                    }
-                    if icon_button(
-                        ui,
-                        WorkbenchIcon::ArrowLeft,
-                        &messages.text(MessageId::NetlistReturnRoot),
-                        false,
-                        vec2(28.0, 28.0),
-                    )
-                    .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::CloseDependency);
-                    }
-                } else if ui
-                    .add_sized(
-                        [PHONE_PRIMARY_WIDTH, control_h],
-                        egui::Button::new(messages.text(MessageId::NetlistReturnRoot)).truncate(),
-                    )
-                    .clicked()
-                {
-                    action = Some(NetlistToolbarAction::CloseDependency);
-                }
-            } else {
-                match active {
-                    NetlistRoot::Generated | NetlistRoot::AddedLines => {}
-                    NetlistRoot::Deck => {
-                        let save = ui
-                            .add_enabled_ui(deck_file_dirty.unwrap_or(false), |ui| {
-                                ui.add_sized(
-                                    [PHONE_PRIMARY_WIDTH, control_h],
-                                    egui::Button::new(save_source_label.as_str()).truncate(),
-                                )
-                            })
-                            .inner
-                            .on_disabled_hover_text(messages.text(MessageId::NetlistNothingToSave));
-                        if save.clicked() {
-                            action = Some(NetlistToolbarAction::Save);
-                        }
-                    }
-                    NetlistRoot::Comparison => {
-                        if ui
-                            .add_sized(
-                                [PHONE_PRIMARY_WIDTH, control_h],
-                                egui::Button::new(
-                                    messages.text(MessageId::NetlistReturnGeneratedPrimary),
-                                )
-                                .truncate(),
-                            )
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::CloseComparison);
-                        }
-                    }
-                    NetlistRoot::RunInput => {
-                        if ui
-                            .add_sized(
-                                [PHONE_PRIMARY_WIDTH, control_h],
-                                egui::Button::new(messages.text(MessageId::NetlistReturnPrimary))
-                                    .truncate(),
-                            )
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::CloseRunSnapshot);
-                        }
-                    }
-                }
-            }
-        });
-    } else {
-        actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let mut find_clicked = false;
-            ui.add_enabled_ui(active_available, |ui| {
-                find_clicked = icon_button(
-                    ui,
-                    WorkbenchIcon::Search,
-                    &messages.text(MessageId::NetlistFindActiveDocument),
-                    false,
-                    vec2(control_h, control_h),
-                )
-                .clicked();
-            })
-            .response
-            .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
-            if find_clicked {
-                action = Some(NetlistToolbarAction::Find);
-            }
-            let manage_source = icon_button(
-                ui,
-                WorkbenchIcon::Folder,
-                &messages.text(MessageId::CodeSourceLifecycleTitle),
-                false,
-                vec2(control_h, control_h),
-            );
-            if manage_source.clicked() {
-                action = Some(NetlistToolbarAction::ManageTopDecks);
-            }
-            if let Some(language_action) = language_tools_menu(
-                ui,
-                messages,
-                active_available && active != NetlistRoot::Comparison,
-                active_editable,
-                quick_fix_available,
-            ) {
-                action = Some(language_action);
-            }
-
-            if dependency_visible {
-                if ui
-                    .button(messages.text(MessageId::NetlistReturnRoot))
-                    .clicked()
-                {
-                    action = Some(NetlistToolbarAction::CloseDependency);
-                }
-                if let Some(dirty) = deck_file_dirty
-                    && ui
-                        .add_enabled(dirty, egui::Button::new(save_source_label.as_str()))
-                        .on_disabled_hover_text(messages.text(MessageId::NetlistNothingToSave))
-                        .clicked()
-                {
-                    action = Some(NetlistToolbarAction::Save);
-                }
-            } else {
-                match active {
-                    NetlistRoot::Generated | NetlistRoot::AddedLines => {}
-                    NetlistRoot::Deck => {
-                        if ui
-                            .add_enabled(
-                                deck_file_dirty.unwrap_or(false),
-                                egui::Button::new(save_source_label.as_str()),
-                            )
-                            .on_disabled_hover_text(messages.text(MessageId::NetlistNothingToSave))
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::Save);
-                        }
-                        if generated_ready {
-                            if ui
-                                .button(messages.text(MessageId::NetlistReturnPrimary))
-                                .clicked()
-                            {
-                                action = Some(NetlistToolbarAction::OpenGenerated);
-                            }
-                        } else if ui
-                            .button(messages.text(MessageId::CodeSourceLifecycleTitle))
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::ManageTopDecks);
-                        }
-                    }
-                    NetlistRoot::Comparison => {
-                        if ui
-                            .button(messages.text(MessageId::NetlistReturnPrimary))
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::CloseComparison);
-                        }
-                    }
-                    NetlistRoot::RunInput => {
-                        if ui
-                            .button(messages.text(MessageId::NetlistReturnPrimary))
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::CloseRunSnapshot);
-                        }
-                    }
-                }
-            }
-        });
+                side,
+            )
+        })
+        .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
+    if find.clicked() {
+        action = Some(NetlistToolbarAction::Find);
+    }
+    let manage_source = actions.add(|ui: &mut Ui| {
+        icon_button(
+            ui,
+            WorkbenchIcon::Folder,
+            &messages.text(MessageId::CodeSourceLifecycleTitle),
+            false,
+            side,
+        )
+    });
+    if manage_source.clicked() {
+        action = Some(NetlistToolbarAction::ManageTopDecks);
+    }
+    if let Some(language_action) = language_tools_menu(&mut actions, messages, side, tools) {
+        action = Some(language_action);
     }
     // What the group actually occupied, not what it was predicted to need. The
     // action half is only ever read back by this file's layout test, so it stays
@@ -475,19 +228,26 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim)
     });
     let language_width = dialect.map_or(0.0, |chip| chip.width(ui, messages));
-    let advisory_count = advisory_candidate.filter(|count| {
-        let label = format!("{count} advisor{}", if *count == 1 { "y" } else { "ies" });
-        toolbar_advisory_fits(
+    let warning_text = |count: usize| {
+        messages.format(
+            if count == 1 {
+                MessageId::NetlistWarningSingular
+            } else {
+                MessageId::NetlistWarnings
+            },
+            &[("count", &count.to_string())],
+        )
+    };
+    let warning_label = warning_candidate.map(warning_text).filter(|label| {
+        toolbar_warnings_fit(
             left_rect.width(),
             language_width,
             status_only_width,
-            CODE_STATUS_MARK_COLUMN + label_width(&label, t.color.text_dim),
+            CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim),
         )
     });
-    let advisory_label = advisory_count
-        .map(|count| format!("{count} advisor{}", if count == 1 { "y" } else { "ies" }));
     let mut status_width = status_only_width;
-    if let Some(label) = advisory_label.as_deref() {
+    if let Some(label) = warning_label.as_deref() {
         status_width +=
             CODE_TOOLBAR_GAP + CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim);
     }
@@ -521,7 +281,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         );
         status_ui.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
         status_ui.with_layout(Layout::right_to_left(Align::Center), |bar| {
-            if let Some(label) = advisory_label.as_deref() {
+            if let Some(label) = warning_label.as_deref() {
                 code_status(bar, label, Problem::Warning);
             }
             if let Some((label, problem)) = status.as_ref() {
@@ -541,34 +301,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             ) {
                 cx.wb.prompt(error);
             }
-        }
-        Some(NetlistToolbarAction::OpenGenerated) => {
-            let _ = crate::workbench::documents::netlist_document::open_generated_primary_in(
-                cx.model,
-                &mut cx.state.netlist,
-            );
-        }
-        Some(NetlistToolbarAction::CloseComparison) => {
-            crate::workbench::documents::netlist_document::close_revision_comparison(
-                cx.model,
-                &mut cx.state.netlist,
-            );
-        }
-        Some(NetlistToolbarAction::CloseRunSnapshot) => {
-            crate::workbench::documents::netlist_document::close_run_deck_snapshot(
-                cx.model,
-                &mut cx.state.netlist,
-            );
-        }
-        Some(NetlistToolbarAction::CloseDependency) => {
-            crate::workbench::documents::netlist_document::close_active_dependency_in(
-                cx.model,
-                &mut cx.state.netlist,
-                cx.runs,
-            );
-        }
-        Some(NetlistToolbarAction::Save) => {
-            cx.wb.outbox.push(CodeRequest::SaveDeckFile);
         }
         Some(NetlistToolbarAction::GoToDefinition) => {
             let answer =
@@ -591,6 +323,12 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                     cx.wb,
                 );
             cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
+        }
+        Some(NetlistToolbarAction::FindReferences) => {
+            cx.execute(crate::workbench::code::commands::CodeCommand::FindReferences.key());
+        }
+        Some(NetlistToolbarAction::RenameSymbol) => {
+            cx.execute(crate::workbench::code::commands::CodeCommand::RenameSymbol.key());
         }
         Some(NetlistToolbarAction::SignatureHelp) => {
             match crate::workbench::documents::netlist_document::language::show_signature_help_at_cursor(
@@ -651,107 +389,103 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     }
 }
 
+/// The language tools: an icon drawn as Find and Manage source are, which
+/// opens the menu of what the language service answers at the caret.
 fn language_tools_menu(
     ui: &mut Ui,
     messages: crate::workbench::MessageCatalog,
-    enabled: bool,
-    editable: bool,
-    quick_fix_available: bool,
+    side: egui::Vec2,
+    tools: LanguageTools,
 ) -> Option<NetlistToolbarAction> {
     let mut action = None;
-    let (response, _) = ui
-        .add_enabled_ui(enabled, |ui| {
-            // Square, at the strip's control height like the icons beside it.
-            let side = ui.spacing().interact_size.y;
-            ui.spacing_mut().button_padding = vec2(0.0, 0.0);
-            MenuButton::from_button(
-                egui::Button::new(egui::WidgetText::default())
-                    .frame(false)
-                    .min_size(vec2(side, side)),
-            )
-            .ui(ui, |ui| {
-                ui.set_min_width(180.0);
-                if ui
-                    .button(messages.text(MessageId::NetlistSignatureHelp))
-                    .clicked()
-                {
-                    action = Some(NetlistToolbarAction::SignatureHelp);
-                    ui.close();
-                }
-                if ui
-                    .button(messages.text(MessageId::NetlistGoToDeclaration))
-                    .clicked()
-                {
-                    action = Some(NetlistToolbarAction::GoToDeclaration);
-                    ui.close();
-                }
-                if ui
-                    .button(messages.text(MessageId::NetlistGoToDefinition))
-                    .clicked()
-                {
-                    action = Some(NetlistToolbarAction::GoToDefinition);
-                    ui.close();
-                }
-                if ui
-                    .button(messages.text(MessageId::NetlistWorkspaceSymbols))
-                    .clicked()
-                {
-                    action = Some(NetlistToolbarAction::WorkspaceSymbols);
-                    ui.close();
-                }
-                ui.separator();
-                rspice_ui_kit::widgets::menu_button(
-                    ui,
-                    messages.text(MessageId::NetlistCodeActions),
-                    |ui| {
-                        if ui
-                            .add_enabled(
-                                editable && quick_fix_available,
-                                egui::Button::new(messages.text(MessageId::NetlistApplyQuickFix)),
-                            )
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::ApplyQuickFix);
-                            ui.close();
-                        }
-                        if ui
-                            .add_enabled(
-                                editable,
-                                egui::Button::new(messages.text(MessageId::NetlistFormatDocument)),
-                            )
-                            .clicked()
-                        {
-                            action = Some(NetlistToolbarAction::FormatDocument);
-                            ui.close();
-                        }
-                    },
-                );
-            })
-        })
-        .inner;
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            messages.text(MessageId::NetlistLanguageTools),
+    let response = ui.add_enabled(tools.enabled, |ui: &mut Ui| {
+        icon_button(
+            ui,
+            WorkbenchIcon::Target,
+            &messages.text(MessageId::NetlistLanguageTools),
+            false,
+            side,
         )
     });
-    ui.painter().rect_filled(
-        response.rect,
-        2.0,
-        if response.hovered() {
-            Tokens::get(ui.ctx()).color.bg_hover
-        } else {
-            egui::Color32::TRANSPARENT
-        },
-    );
-    WorkbenchIcon::Target.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(response.rect.center(), vec2(16.0, 16.0)),
-        Tokens::get(ui.ctx()).color.text_dim,
-    );
-    theme::paint_focus_ring(ui, &response, response.rect);
-    response.on_hover_text(messages.text(MessageId::NetlistLanguageTools));
+    // A row the text in front cannot have says why when it is read-only.
+    let read_only = (!tools.editable).then_some(MessageId::CodeSourceReadOnlyDocument);
+    egui::Popup::menu(&response).show(|ui| {
+        ui.set_min_width(180.0);
+        let mut row =
+            |ui: &mut Ui, enabled: bool, label: MessageId, chosen, why: Option<MessageId>| {
+                let mut response = ui.add_enabled(enabled, egui::Button::new(messages.text(label)));
+                if let Some(why) = why {
+                    response = response.on_disabled_hover_text(messages.text(why));
+                }
+                if response.clicked() {
+                    action = Some(chosen);
+                    ui.close();
+                }
+            };
+        row(
+            ui,
+            true,
+            MessageId::NetlistSignatureHelp,
+            NetlistToolbarAction::SignatureHelp,
+            None,
+        );
+        row(
+            ui,
+            true,
+            MessageId::NetlistGoToDeclaration,
+            NetlistToolbarAction::GoToDeclaration,
+            None,
+        );
+        row(
+            ui,
+            true,
+            MessageId::NetlistGoToDefinition,
+            NetlistToolbarAction::GoToDefinition,
+            None,
+        );
+        row(
+            ui,
+            tools.navigable,
+            MessageId::NetlistFindReferences,
+            NetlistToolbarAction::FindReferences,
+            None,
+        );
+        row(
+            ui,
+            true,
+            MessageId::NetlistWorkspaceSymbols,
+            NetlistToolbarAction::WorkspaceSymbols,
+            None,
+        );
+        ui.separator();
+        row(
+            ui,
+            tools.renamable,
+            MessageId::NetlistRenameSymbol,
+            NetlistToolbarAction::RenameSymbol,
+            read_only,
+        );
+        rspice_ui_kit::widgets::menu_button(
+            ui,
+            messages.text(MessageId::NetlistCodeActions),
+            |ui| {
+                row(
+                    ui,
+                    tools.editable && tools.quick_fix_available,
+                    MessageId::NetlistApplyQuickFix,
+                    NetlistToolbarAction::ApplyQuickFix,
+                    read_only,
+                );
+                row(
+                    ui,
+                    tools.editable,
+                    MessageId::NetlistFormatDocument,
+                    NetlistToolbarAction::FormatDocument,
+                    read_only,
+                );
+            },
+        );
+    });
     action
 }
 
@@ -797,11 +531,11 @@ pub(super) fn code_toolbar_regions(
     (left, right)
 }
 
-pub(super) fn toolbar_advisory_fits(
+pub(super) fn toolbar_warnings_fit(
     left_width: f32,
     language_width: f32,
     status_width: f32,
-    advisory_width: f32,
+    warnings_width: f32,
 ) -> bool {
     let status_group_width = status_width
         + if status_width > 0.0 {
@@ -809,7 +543,7 @@ pub(super) fn toolbar_advisory_fits(
         } else {
             0.0
         }
-        + advisory_width;
+        + warnings_width;
     language_width + CODE_TOOLBAR_GAP + status_group_width <= left_width
 }
 
@@ -839,14 +573,11 @@ pub(super) const fn toolbar_status_visible(phone: bool, problem: Problem) -> boo
 #[derive(Debug, Clone, Copy)]
 enum NetlistToolbarAction {
     ManageTopDecks,
-    OpenGenerated,
-    CloseComparison,
-    CloseRunSnapshot,
-    CloseDependency,
-    Save,
     SignatureHelp,
     GoToDeclaration,
     GoToDefinition,
+    FindReferences,
+    RenameSymbol,
     WorkspaceSymbols,
     Find,
     FormatDocument,

@@ -735,7 +735,9 @@ impl CodeCommand {
             Self::GoToDefinition => ("Go to definition", "Code", palette),
             Self::FindReferences => ("Find references", "Code", palette),
             Self::RenameSymbol => ("Rename symbol\u{2026}", "Code", palette),
-            Self::CompareGeneratedRevisions => ("Compare generated revisions", "Code", palette),
+            Self::CompareGeneratedRevisions => {
+                ("Compare with earlier build\u{2026}", "Code", palette)
+            }
             Self::CompileVerilogA => ("Compile Verilog-A/AMS", "Design", open),
             Self::CancelVerilogACompile => ("Cancel Verilog-A/AMS compile", "Design", open),
             Self::VerilogABuildSettings => ("Build settings\u{2026}", "Design", open),
