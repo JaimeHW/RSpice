@@ -1165,7 +1165,7 @@ mod workbench_session_tests {
                 SurfaceRoute::surface(SurfaceId::LibraryCellviewManager),
                 RouteTransitionSource::User,
             )
-            .expect("Library Cellview Manager has a registered executor");
+            .expect("the Library Manager has a registered executor");
 
         assert_eq!(state.workbench.workspace, Workspace::Models);
         assert_eq!(

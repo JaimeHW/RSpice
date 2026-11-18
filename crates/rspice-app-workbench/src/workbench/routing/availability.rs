@@ -255,7 +255,7 @@ mod tests {
             }
         ));
         require_available(SurfaceRoute::surface(SurfaceId::LibraryCellviewManager))
-            .expect("Library Cellview Manager route executor is registered");
+            .expect("the Library Manager's route executor is registered");
     }
 
     #[test]
