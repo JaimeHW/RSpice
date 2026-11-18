@@ -310,15 +310,18 @@ fn a_budget_refusal_names_the_budget_it_exceeded() {
     );
 }
 
-/// What a task stores is a model until the store writes it: a run set whose
-/// modelled storage passes its budget is forecast so, never refused.
+/// What a task stores is a model until the store writes it, and the store
+/// holds the run to its plan's storage budget as it writes: a run set states
+/// its modelled storage as a forecast and is neither refused nor warned for it,
+/// however large the model.
 #[test]
-fn a_modelled_storage_over_the_budget_is_a_forecast_not_a_refusal() {
+fn a_modelled_storage_is_a_forecast_never_a_limit() {
     let mut state = RunSetState::default();
+    let bytes_per_point = 1024 * 1024 * 1024 * 1024;
     let transaction = dispatch(
         &mut state,
         RunSetAction::SetBudgets(RunSetBudgets {
-            maximum_storage_bytes: 1024,
+            bytes_per_point,
             ..RunSetBudgets::default()
         }),
         1,
@@ -330,21 +333,17 @@ fn a_modelled_storage_over_the_budget_is_a_forecast_not_a_refusal() {
         validation
             .errors
             .iter()
-            .all(|error| !error.id.starts_with("RUNSET-STORAGE")),
-        "{:?}",
-        validation.errors
+            .map(|error| error.id)
+            .chain(validation.warnings.iter().map(|warning| warning.id))
+            .all(|id| !id.contains("STORAGE")),
+        "{:?} {:?}",
+        validation.errors,
+        validation.warnings
     );
-    let forecast = validation
-        .warnings
-        .iter()
-        .find(|warning| warning.id == "RUNSET-STORAGE-FORECAST")
-        .expect("the forecast says the model passes the budget");
-    assert!(
-        forecast
-            .message
-            .contains("more than the declared 1.00 KiB storage budget"),
-        "{}",
-        forecast.message
+    assert_eq!(
+        validation.forecast.storage_bytes,
+        validation.forecast.task_count as u64 * bytes_per_point,
+        "the forecast states the modelled storage"
     );
 }
 

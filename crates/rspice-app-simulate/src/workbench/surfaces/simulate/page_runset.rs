@@ -27,8 +27,8 @@ use rspice_simulation_contract::run_set::{
 };
 
 use super::page_kit::{
-    CARD_PAD_X, Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head,
-    note_line, pressable_note_line, rule_row,
+    CARD_PAD_X, Tone, card, card_body, card_head_row, card_note, card_row, field_pair, field_row,
+    ledger_head, note_line, pressable_note_line, rule_row,
 };
 
 pub mod toolbar;
@@ -1174,54 +1174,50 @@ fn budgets(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, frame: &RunSetFrame) {
                     .clone()
                     .unwrap_or_else(|| drafts_from(&current));
                 let released = std::cell::Cell::new(false);
-                field_pair(
+                // The one limit, then the two per-task models the forecast
+                // multiplies out. What a run may store is the plan's storage
+                // budget on the Save page, which the store holds it to as it
+                // writes; this page only forecasts it.
+                field_row(
                     ui,
-                    ("Maximum tasks", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(ui, "Maximum tasks", &mut drafts.maximum_tasks, width)
+                    [
+                        ("Maximum tasks", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get()
+                                    | mono_input(
+                                        ui,
+                                        "Maximum tasks",
+                                        &mut drafts.maximum_tasks,
+                                        width,
+                                    )
                                     .lost_focus(),
-                        );
-                    }),
-                    Some(("Maximum storage", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(
-                                    ui,
-                                    "Maximum storage",
-                                    &mut drafts.maximum_storage,
-                                    width,
-                                )
-                                .lost_focus(),
-                        );
-                    })),
-                );
-                field_pair(
-                    ui,
-                    ("Cost / task · ms", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(
-                                    ui,
-                                    "Cost \u{b7} ms per task",
-                                    &mut drafts.cost_per_point_ms,
-                                    width,
-                                )
-                                .lost_focus(),
-                        );
-                    }),
-                    Some(("Storage / task", &mut |ui: &mut Ui, width: f32| {
-                        released.set(
-                            released.get()
-                                | mono_input(
-                                    ui,
-                                    "Storage per task",
-                                    &mut drafts.bytes_per_point,
-                                    width,
-                                )
-                                .lost_focus(),
-                        );
-                    })),
+                            );
+                        }),
+                        ("Cost / task · ms", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get()
+                                    | mono_input(
+                                        ui,
+                                        "Cost \u{b7} ms per task",
+                                        &mut drafts.cost_per_point_ms,
+                                        width,
+                                    )
+                                    .lost_focus(),
+                            );
+                        }),
+                        ("Storage / task", &mut |ui: &mut Ui, width: f32| {
+                            released.set(
+                                released.get()
+                                    | mono_input(
+                                        ui,
+                                        "Storage per task",
+                                        &mut drafts.bytes_per_point,
+                                        width,
+                                    )
+                                    .lost_focus(),
+                            );
+                        }),
+                    ],
                 );
                 cx.state.run_set_budget_drafts = Some(drafts.clone());
                 if released.get() {
@@ -1248,7 +1244,6 @@ fn budgets(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, frame: &RunSetFrame) {
 fn drafts_from(budgets: &RunSetBudgets) -> RunSetBudgetDrafts {
     RunSetBudgetDrafts {
         maximum_tasks: budgets.maximum_tasks.to_string(),
-        maximum_storage: run_set::format_bytes(budgets.maximum_storage_bytes),
         cost_per_point_ms: budgets.cost_per_point_ms.to_string(),
         bytes_per_point: run_set::format_bytes(budgets.bytes_per_point),
     }
@@ -1262,7 +1257,6 @@ fn budgets_from(drafts: &RunSetBudgetDrafts) -> Result<RunSetBudgets, String> {
             .replace([',', '_'], "")
             .parse()
             .map_err(|_| format!("'{}' is not a task count", drafts.maximum_tasks))?,
-        maximum_storage_bytes: run_set::parse_bytes(&drafts.maximum_storage)?,
         cost_per_point_ms: drafts
             .cost_per_point_ms
             .trim()

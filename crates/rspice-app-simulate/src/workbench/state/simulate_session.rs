@@ -16,7 +16,6 @@ use super::*;
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunSetBudgetDrafts {
     pub maximum_tasks: String,
-    pub maximum_storage: String,
     pub cost_per_point_ms: String,
     pub bytes_per_point: String,
 }

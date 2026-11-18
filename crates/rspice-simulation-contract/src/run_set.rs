@@ -657,8 +657,6 @@ pub fn value_id(dimension_id: &str, index: usize) -> String {
 pub struct RunSetBudgets {
     /// Maximum tasks the composed space may expand to.
     pub maximum_tasks: usize,
-    /// Maximum bytes the run may store.
-    pub maximum_storage_bytes: u64,
     /// Modelled solve cost of one task, in milliseconds.
     pub cost_per_point_ms: u64,
     /// Modelled stored bytes of one task.
@@ -669,7 +667,6 @@ impl Default for RunSetBudgets {
     fn default() -> Self {
         Self {
             maximum_tasks: 1_000_000,
-            maximum_storage_bytes: 10 * 1024 * 1024 * 1024,
             cost_per_point_ms: 250,
             bytes_per_point: 4 * 1024 * 1024,
         }

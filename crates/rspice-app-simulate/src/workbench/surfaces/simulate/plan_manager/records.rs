@@ -436,10 +436,10 @@ fn specification_bound(entry: &SpecEntry) -> String {
     }
 }
 
-/// The run space a plan declares: one entry per axis, then the two limits the
+/// The run space a plan declares: one entry per axis, then the task limit the
 /// run set refuses past.
 ///
-/// The limits belong to this roster and not beside it because they are declared
+/// The limit belongs to this roster and not beside it because it is declared
 /// policy in the same domain — a plan that caps its run at a thousand tasks
 /// declares something a plan capping at a million does not. The two modelled
 /// rates in the same budget are deliberately not entries: they are inputs to the
@@ -474,10 +474,6 @@ fn run_set_roster(run_set: &RunSetState) -> Vec<PlanEntry> {
     roster.push(PlanEntry {
         name: "maximum tasks".to_owned(),
         detail: run_set.budgets.maximum_tasks.to_string(),
-    });
-    roster.push(PlanEntry {
-        name: "maximum storage".to_owned(),
-        detail: format_bytes(run_set.budgets.maximum_storage_bytes),
     });
     roster
 }

@@ -684,7 +684,7 @@ pub(super) type Field<'a> = (&'a str, FieldControl<'a>);
 /// these pages hold two equal fields per row, and the narrow column clipped
 /// option text.
 pub(super) fn field_pair(ui: &mut Ui, left: Field<'_>, right: Option<Field<'_>>) {
-    let gap = 11.0;
+    let gap = FIELD_GAP;
     let available = ui.available_width();
     let column = if right.is_some() {
         ((available - gap) * 0.5).max(1.0)
@@ -699,6 +699,23 @@ pub(super) fn field_pair(ui: &mut Ui, left: Field<'_>, right: Option<Field<'_>>)
         }
     });
 }
+
+/// Labeled fields side by side in one row of equal columns, as
+/// [`field_pair`] lays out two.
+pub(super) fn field_row<const N: usize>(ui: &mut Ui, fields: [Field<'_>; N]) {
+    let gap = FIELD_GAP;
+    let gaps = gap * N.saturating_sub(1) as f32;
+    let column = ((ui.available_width() - gaps) / N.max(1) as f32).max(1.0);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for (label, control) in fields {
+            field(ui, column, label, control);
+        }
+    });
+}
+
+/// The gap between the columns of a field row.
+const FIELD_GAP: f32 = 11.0;
 
 fn field(ui: &mut Ui, width: f32, label: &str, control: FieldControl<'_>) {
     let t = Tokens::get(ui.ctx());
