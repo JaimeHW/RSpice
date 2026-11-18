@@ -24,7 +24,7 @@ const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
 mod baseline;
 mod comparison;
 mod completion;
-pub(crate) mod cross_probe;
+pub mod cross_probe;
 mod deck_transaction;
 pub(crate) mod diagnostics;
 pub(crate) mod dialect;
@@ -2341,6 +2341,9 @@ pub struct NetlistDocumentState {
     /// The name under the caret, as the frame last read it. Read through
     /// [`cross_probe::caret_name`].
     caret_name: cross_probe::CaretNameCache,
+    /// Where the generated netlist writes the net last shown from the
+    /// schematic. Drawn through [`cross_probe::net_marks`].
+    net_marks: cross_probe::NetMarks,
 }
 
 impl NetlistDocumentState {

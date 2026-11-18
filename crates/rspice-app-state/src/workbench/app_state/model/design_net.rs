@@ -1,6 +1,7 @@
-//! The nets of the open cell view as the design resolves them, and showing
-//! one of them on the drawing.
+//! The nets of the open cell view as the design resolves them: the one the
+//! selection names, and showing one of them on the drawing.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
@@ -77,4 +78,140 @@ impl Model {
         editor.center_request = position;
         true
     }
+
+    /// The one net the selection on the drawing names: a net the navigator
+    /// or the inspector selected whole, a port, or wires, junctions and net
+    /// labels that all lie on one net. `None` for an instance, for nothing
+    /// and for a selection spanning two nets.
+    #[must_use]
+    pub fn selected_design_net(&self) -> Option<String> {
+        let editor = &self.schematic.session.editor;
+        if editor.net_highlight.selected_net_name.is_some()
+            && let Some(name) = self.selected_whole_net(&self.active_design_nets())
+        {
+            return Some(name);
+        }
+        if let Some(component_id) = editor.selection.single_component() {
+            return self
+                .schematic
+                .document()
+                .components
+                .iter()
+                .find(|component| component.id == component_id)?
+                .port_spec()
+                .map(|port| port.name);
+        }
+        if !conductor_selection(&editor.selection) {
+            return None;
+        }
+        self.selected_conductor_net(&self.active_design_nets())
+    }
+
+    /// The net a navigator or inspector row selected, while the selection
+    /// and the light are still exactly what it set: its wires, or the
+    /// instances on it when it has none, and nothing else.
+    #[must_use]
+    pub fn selected_whole_net(&self, nets: &[DesignNet]) -> Option<String> {
+        let editor = &self.schematic.session.editor;
+        let name = editor.net_highlight.selected_net_name.as_deref()?;
+        let net = nets
+            .iter()
+            .find(|net| net.name.eq_ignore_ascii_case(name))?;
+        if editor.net_highlight.highlighted_wires != net.wire_ids.iter().copied().collect() {
+            return None;
+        }
+        let selection = &editor.selection;
+        let no_other_classes = selection.wire_segments.is_empty()
+            && selection.wire_vertices.is_empty()
+            && selection.junctions.is_empty()
+            && selection.buses.is_empty()
+            && selection.bus_taps.is_empty()
+            && selection.net_labels.is_empty()
+            && selection.design_notes.is_empty()
+            && selection.documentation_shapes.is_empty()
+            && selection.probes.is_empty();
+        let exact_wires = selection.wires == net.wire_ids.iter().copied().collect();
+        let exact_components = if net.wire_ids.is_empty() {
+            selection.components
+                == net
+                    .terminals
+                    .iter()
+                    .map(|terminal| terminal.component_id)
+                    .collect()
+        } else {
+            selection.components.is_empty()
+        };
+        (no_other_classes && exact_wires && exact_components).then(|| net.name.clone())
+    }
+
+    /// The one net the selected wires, junctions and net labels lie on.
+    fn selected_conductor_net(&self, nets: &[DesignNet]) -> Option<String> {
+        let selection = &self.schematic.session.editor.selection;
+        let document = self.schematic.document();
+        let mut resolved: Option<String> = None;
+        let mut accept = |candidate: &str| -> bool {
+            match resolved.as_deref() {
+                Some(existing) => existing.eq_ignore_ascii_case(candidate),
+                None => {
+                    resolved = Some(candidate.to_owned());
+                    true
+                }
+            }
+        };
+        for label in &document.net_labels {
+            if selection.net_labels.contains(&label.id) && !accept(&label.name) {
+                return None;
+            }
+        }
+        let mut wire_ids = selection.wires.iter().copied().collect::<HashSet<_>>();
+        wire_ids.extend(
+            selection
+                .wire_segments
+                .iter()
+                .map(|segment| segment.wire_id),
+        );
+        wire_ids.extend(selection.wire_vertices.iter().map(|vertex| vertex.wire_id));
+        for wire_id in wire_ids {
+            let Some(net) = nets.iter().find(|net| net.wire_ids.contains(&wire_id)) else {
+                continue;
+            };
+            if !accept(&net.name) {
+                return None;
+            }
+        }
+        for junction in &selection.junctions {
+            let mut names = document
+                .wires
+                .iter()
+                .filter(|wire| wire.contains_point(junction.pos))
+                .filter_map(|wire| {
+                    nets.iter()
+                        .find(|net| net.wire_ids.contains(&wire.id))
+                        .map(|net| net.name.as_str())
+                });
+            if let Some(name) = names.next()
+                && (!accept(name) || names.any(|candidate| !accept(candidate)))
+            {
+                return None;
+            }
+        }
+        resolved
+    }
+}
+
+/// Whether the selection is conductors alone: wires, their segments and
+/// vertices, junctions and net labels, with no instance or other object.
+fn conductor_selection(selection: &crate::state::Selection) -> bool {
+    let has_conductor = !selection.wires.is_empty()
+        || !selection.wire_segments.is_empty()
+        || !selection.wire_vertices.is_empty()
+        || !selection.junctions.is_empty()
+        || !selection.net_labels.is_empty();
+    has_conductor
+        && selection.components.is_empty()
+        && selection.buses.is_empty()
+        && selection.bus_taps.is_empty()
+        && selection.design_notes.is_empty()
+        && selection.documentation_shapes.is_empty()
+        && selection.probes.is_empty()
 }

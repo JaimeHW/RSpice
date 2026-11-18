@@ -155,6 +155,7 @@ pub fn show(
     let font = theme::mono(text_size, FontWeight::Regular);
     let diagnostics = Arc::clone(&netlist.diagnostics);
     let edited_lines = runs.manual_run.edited_lines.clone();
+    let net_marks = super::cross_probe::net_marks(model, netlist).to_vec();
     let cross_probe_line = (netlist.active_document == super::ActiveNetlistDocument::Generated)
         .then_some(netlist.cross_probe_line)
         .flatten()
@@ -234,6 +235,7 @@ pub fn show(
             // The deck's findings are underlined in its own layout.
             marks: &[],
             marks_outdated: false,
+            occurrences: &net_marks,
         };
         let revision = netlist.revision;
         let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(

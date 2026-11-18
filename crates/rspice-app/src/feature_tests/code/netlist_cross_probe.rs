@@ -1,6 +1,7 @@
-//! Going from a line of the generated netlist to what the schematic drew it
-//! from, through whole application frames: Show in schematic on the editor's
-//! line, from its key, its menu row, or a double-click on an instance's name.
+//! Going between a line of the generated netlist and what the schematic drew
+//! it from, through whole application frames: Show in schematic on the
+//! editor's line, from its key, its menu row, or a double-click on an
+//! instance's name; and Show in netlist on a net the schematic selects.
 
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, PointerButton, Pos2};
@@ -328,4 +329,166 @@ fn double_clicking_an_instance_name_shows_it_on_the_schematic() {
     assert_eq!(state.workbench.workspace, Workspace::Design);
     assert_eq!(state.model.workspace.content.active_view, top);
     assert_eq!(selected_component(&replay), Some(XB));
+}
+
+/// What the editor tells a screen reader of a line that writes the net
+/// shown from the schematic, beside the box it draws round each place.
+const NET_MARKED: &str = "Connects the net shown from the schematic.";
+
+/// Two resistors on the design's schematic whose facing pins one wire
+/// joins, named `mid` by a label on it, on the Design page; the wire's and
+/// the label's ids.
+fn joined_resistors() -> (Replay, u64, u64) {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    let schematic = &mut app.state.model.schematic;
+    let first = schematic.add_component(ComponentType::Resistor, Point::new(0, 0));
+    let second = schematic.add_component(ComponentType::Resistor, Point::new(400, 0));
+    let pin = |app: &RSpiceApp, id: u64, index: usize| {
+        let component = app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .expect("placed")
+            .clone();
+        app.state
+            .model
+            .schematic_symbol_context()
+            .named_terminal_points(&component)[index]
+            .1
+    };
+    let from = pin(&app, first, 1);
+    let to = pin(&app, second, 0);
+    let wire = app
+        .state
+        .model
+        .schematic
+        .add_wire(vec![from, Point::new(to.x, from.y), to])
+        .expect("the wire is drawn");
+    let label = app
+        .state
+        .model
+        .schematic
+        .add_net_label(from, "mid".to_owned());
+    app.state.sync_active_schematic_to_workspace();
+    (Replay::of(app), wire, label)
+}
+
+/// The one-based lines of the shown netlist whose card writes `net`.
+fn lines_writing(replay: &Replay, net: &str) -> Vec<usize> {
+    replay
+        .app
+        .state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .split('\n')
+        .enumerate()
+        .filter(|(_, text)| {
+            !text.trim_start().starts_with('*')
+                && text
+                    .split_whitespace()
+                    .any(|token| token.eq_ignore_ascii_case(net))
+        })
+        .map(|(index, _)| index + 1)
+        .collect()
+}
+
+/// Whether the editor, with its caret on the one-based `line`, says the
+/// line writes the net shown.
+fn marked(replay: &mut Replay, line: usize) -> bool {
+    caret_at(replay, line, 0);
+    replay
+        .frames(Vec::new())
+        .into_iter()
+        .find(|control| control.role == Role::MultilineTextInput)
+        .expect("the editor is published")
+        .description
+        .contains(NET_MARKED)
+}
+
+/// Show in netlist on a selected wire lands on the first card that
+/// connects its net and marks every card that writes it, and no other.
+#[test]
+fn a_selected_wire_shows_the_first_card_of_its_net_and_marks_the_rest() {
+    let (mut replay, wire, _) = joined_resistors();
+    replay
+        .app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(wire);
+    assert_eq!(
+        replay
+            .app
+            .command_availability(CodeCommand::ShowInNetlist.key()),
+        CommandAvailability::Available
+    );
+
+    replay
+        .app
+        .execute_command_key(CodeCommand::ShowInNetlist.key());
+    replay.frames(Vec::new());
+
+    let state = &replay.app.state;
+    assert_eq!(state.workbench.workspace, Workspace::Netlist);
+    let writing = lines_writing(&replay, "mid");
+    assert_eq!(writing.len(), 2, "both resistors' cards write the net");
+    assert_eq!(replay.app.state.code.netlist.cursor_line + 1, writing[0]);
+    assert_eq!(
+        replay.app.state.prompt_text(),
+        Some(
+            format!(
+                "Located net mid at generated line {}; every line that connects it is marked.",
+                writing[0]
+            )
+            .as_str()
+        )
+    );
+    assert!(
+        marked(&mut replay, writing[0]),
+        "the card landed on is marked"
+    );
+    assert!(marked(&mut replay, writing[1]), "the other card is marked");
+    let unmarked = (1..writing[1])
+        .find(|line| !writing.contains(line))
+        .expect("a line that does not write the net");
+    assert!(
+        !marked(&mut replay, unmarked),
+        "line {unmarked} is not marked"
+    );
+}
+
+/// A selected net label names its net for Show in netlist as its wire
+/// does.
+#[test]
+fn a_selected_net_label_shows_its_net_in_the_netlist() {
+    let (mut replay, _, label) = joined_resistors();
+    replay
+        .app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_net_label(label);
+
+    replay
+        .app
+        .execute_command_key(CodeCommand::ShowInNetlist.key());
+    replay.frames(Vec::new());
+
+    assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
+    let writing = lines_writing(&replay, "mid");
+    assert_eq!(replay.app.state.code.netlist.cursor_line + 1, writing[0]);
+    assert!(marked(&mut replay, writing[1]));
 }

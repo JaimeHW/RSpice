@@ -111,7 +111,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
 
     assert_eq!(
         state.model.selected_instance_generated_line().err(),
-        Some("select one instance")
+        Some("select one instance or one net")
     );
 
     state
@@ -156,7 +156,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
         .select_component(load_id);
     assert_eq!(
         state.model.selected_instance_generated_line().err(),
-        Some("select one instance")
+        Some("select one instance or one net")
     );
 
     state

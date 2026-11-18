@@ -438,6 +438,7 @@ fn show_code_document_impl(
         cross_probe_line: None,
         marks: held.marks(),
         marks_outdated: held.is_outdated(),
+        occurrences: &[],
     };
     // The reading of each line is kept between frames, so a frame reads
     // only the lines it shows.

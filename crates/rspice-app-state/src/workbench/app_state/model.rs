@@ -37,7 +37,7 @@ mod veriloga_interface;
 mod veriloga_parameters;
 
 pub use definition_index::DefinitionRow;
-pub use generated_instance::GeneratedInstanceLocation;
+pub use generated_instance::{GeneratedInstanceLocation, GeneratedNetLocation};
 pub use in_place_layout::InPlaceLayout;
 pub use library_catalog::{
     HierarchyCopy, LibraryRemoval, PreparedLibraryOperation, WorkspacePruned,

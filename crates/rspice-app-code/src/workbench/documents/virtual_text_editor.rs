@@ -171,6 +171,9 @@ pub(crate) struct VirtualEditorStyle<'a> {
     /// The findings were made before the latest edits: their marks are
     /// drawn dimmed.
     pub marks_outdated: bool,
+    /// Each place the name the reader went to is written, by line, boxed
+    /// behind its text.
+    pub occurrences: &'a [SourceSpan],
 }
 
 /// The stretch of one line a finding covers.
@@ -182,6 +185,15 @@ pub(crate) struct SourceMark {
     /// end of a line, is marked one character wide.
     pub columns: std::ops::Range<usize>,
     pub severity: rspice_vocabulary::diagnostics::DiagnosticSeverity,
+}
+
+/// A stretch of one line: a place a name is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceSpan {
+    /// Zero-based logical line.
+    pub line: usize,
+    /// Character columns on the line.
+    pub columns: std::ops::Range<usize>,
 }
 
 /// How much of its ink an outdated finding's mark keeps.
@@ -707,6 +719,14 @@ pub(crate) fn show_virtual_text_editor(
                     code_origin_x,
                     char_width,
                     style.selection_background,
+                );
+                paint_occurrences(
+                    &code_painter,
+                    style,
+                    line.logical_line,
+                    row_rect,
+                    code_origin_x,
+                    char_width,
                 );
                 let galley = layout_line(
                     ui,
@@ -2286,6 +2306,40 @@ fn paint_selections(
         );
     }
 }
+
+/// Box each place on `line` the name the reader went to is written.
+fn paint_occurrences(
+    painter: &egui::Painter,
+    style: &VirtualEditorStyle<'_>,
+    line: usize,
+    row_rect: egui::Rect,
+    code_origin_x: f32,
+    char_width: f32,
+) {
+    let first = style.occurrences.partition_point(|span| span.line < line);
+    for span in style.occurrences[first..]
+        .iter()
+        .take_while(|span| span.line == line)
+    {
+        let x0 = code_origin_x + span.columns.start as f32 * char_width;
+        let x1 = code_origin_x + span.columns.end as f32 * char_width;
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(x0, row_rect.top() + 1.0),
+            egui::pos2(x1.max(x0 + char_width), row_rect.bottom() - 1.0),
+        );
+        painter.rect_filled(rect, 2.0, style.accent.gamma_multiply(OCCURRENCE_FILL));
+        painter.rect_stroke(
+            rect,
+            2.0,
+            Stroke::new(1.0, style.accent.gamma_multiply(OCCURRENCE_EDGE)),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+/// How much of the accent an occurrence's box fill and edge keep.
+const OCCURRENCE_FILL: f32 = 0.16;
+const OCCURRENCE_EDGE: f32 = 0.55;
 
 fn paint_carets_and_ime(
     ui: &Ui,

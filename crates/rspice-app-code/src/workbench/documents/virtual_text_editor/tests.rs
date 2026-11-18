@@ -31,6 +31,7 @@ pub(super) fn test_style<'a>(
         cross_probe_line: None,
         marks: &[],
         marks_outdated: false,
+        occurrences: &[],
     }
 }
 

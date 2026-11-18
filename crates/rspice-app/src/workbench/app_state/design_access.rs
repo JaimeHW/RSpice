@@ -83,7 +83,8 @@ impl AppState {
 
     /// Open the generated deck at the selected instance's card, the way
     /// [`NavigationParts::open_selected_instance_master`] opens its
-    /// schematic master.
+    /// schematic master; or, with a net selected, at the first card that
+    /// connects it, with every place the deck writes it marked.
     ///
     /// The Netlist workspace, the generated primary document and the caret
     /// move as one transaction, and the status bar states where the instance
@@ -91,16 +92,14 @@ impl AppState {
     /// schematic selection is deliberately left alone: the netlist
     /// navigator's reveal reads it to bring the round trip back.
     pub(crate) fn show_selected_instance_in_netlist(&mut self) {
+        if let Some(net) = self.model.selected_design_net() {
+            self.show_net_in_netlist(&net);
+            return;
+        }
         let location = match self.model.selected_instance_generated_line() {
             Ok(location) => location,
             Err(reason) => {
-                let detail = self
-                    .model
-                    .netlist_artifacts
-                    .generation_error
-                    .as_deref()
-                    .map(|error| format!(" {error}"))
-                    .unwrap_or_default();
+                let detail = self.generation_failure_detail();
                 self.prompt(format!(
                     "Cannot show the instance in the netlist: {reason}.{detail}"
                 ));
@@ -111,6 +110,9 @@ impl AppState {
             &mut self.model,
             &mut self.code.netlist,
             &mut self.workbench,
+        );
+        rspice_app_code::workbench::documents::netlist_document::cross_probe::clear_net_marks(
+            &mut self.code.netlist,
         );
         self.code.netlist.cursor_line = location.line.saturating_sub(1);
         self.code.netlist.requested_line = Some(location.line);
@@ -126,6 +128,57 @@ impl AppState {
             ],
         );
         self.prompt(announced);
+    }
+
+    /// Open the generated deck at the first card of the open cell view that
+    /// connects `net`, and mark every place its cards write it.
+    fn show_net_in_netlist(&mut self, net: &str) {
+        use rspice_app_code::workbench::documents::netlist_document;
+        use rspice_app_workbench::workbench::localization::MessageId;
+
+        let location = match self.model.net_generated_lines(net) {
+            Ok(location) => location,
+            Err(reason) => {
+                let detail = self.generation_failure_detail();
+                self.prompt(format!(
+                    "Cannot show net {net} in the netlist: {reason}.{detail}"
+                ));
+                return;
+            }
+        };
+        netlist_document::show_generated_deck(
+            &mut self.model,
+            &mut self.code.netlist,
+            &mut self.workbench,
+        );
+        let first = location.lines[0];
+        self.code.netlist.cursor_line = first.saturating_sub(1);
+        self.code.netlist.requested_line = Some(first);
+        netlist_document::cross_probe::mark_net_in_generated_netlist(
+            &self.model,
+            &mut self.code.netlist,
+            net,
+            &location.lines,
+        );
+        let announced = self.workbench.messages().format(
+            if location.stale {
+                MessageId::NetlistShowNetStale
+            } else {
+                MessageId::NetlistShowNetLocated
+            },
+            &[("net", net), ("line", &first.to_string())],
+        );
+        self.prompt(announced);
+    }
+
+    /// What the last generation said when it failed, to follow a refusal.
+    fn generation_failure_detail(&self) -> String {
+        self.model
+            .netlist_artifacts
+            .generation_error
+            .as_deref()
+            .map(|error| format!(" {error}"))
+            .unwrap_or_default()
     }
 
     /// [`commit_inline_component_edit`] for the session.

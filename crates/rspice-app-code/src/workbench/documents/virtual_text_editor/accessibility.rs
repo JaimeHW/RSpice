@@ -314,6 +314,11 @@ pub(super) fn update_accesskit_text_state(
             .edited_lines
             .contains(&window.line)
             .then_some(crate::workbench::MessageId::EditorAccessibleModifiedLine),
+        style
+            .occurrences
+            .iter()
+            .any(|span| span.line == window.line)
+            .then_some(crate::workbench::MessageId::EditorAccessibleNetMarked),
     ]
     .into_iter()
     .flatten()

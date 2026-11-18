@@ -720,7 +720,7 @@ mod tests {
 
         assert_eq!(
             app.command_availability(CodeCommand::ShowInNetlist.key()),
-            CommandAvailability::Disabled("select one instance")
+            CommandAvailability::Disabled("select one instance or one net")
         );
 
         app.state

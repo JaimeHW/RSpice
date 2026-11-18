@@ -9,6 +9,7 @@ use rspice_core::netlist::{DeckIndex, DeckLocation, DeckSymbolKind};
 use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
 use crate::state::{CellViewRef, NetlistDocument, NetlistSourceIndex};
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
+use crate::workbench::documents::virtual_text_editor::SourceSpan;
 
 /// What the name under the caret is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,11 +217,7 @@ pub(crate) fn schematic_target(
     netlist: &NetlistDocumentState,
     name: Option<&CaretName>,
 ) -> Result<SchematicTarget, &'static str> {
-    let entry = model
-        .netlist_artifacts
-        .generated_document
-        .as_ref()
-        .and_then(NetlistDocument::generated_artifact)
+    let entry = generated_artifact(model)
         .and_then(|artifact| artifact.source_map_entry(netlist.cursor_line + 1))
         .ok_or(NO_SCHEMATIC_SOURCE)?;
     let schematic = CellViewRef::from_key(entry.view_identity()).ok_or(NO_SCHEMATIC_SOURCE)?;
@@ -241,6 +238,80 @@ pub(crate) fn schematic_target(
         instance: entry.instance_identity().unwrap_or_default().to_owned(),
         component_id,
     }))
+}
+
+/// Where the generated netlist writes the net last shown from the
+/// schematic, kept with the generated text it was read from.
+#[derive(Debug, Clone, Default)]
+pub struct NetMarks {
+    generated: Option<crate::product::ContentDigest>,
+    spans: Vec<SourceSpan>,
+}
+
+/// Mark each place the generated netlist writes `net` on its one-based
+/// `lines`, the lines of the net's own cell, so the editor shows every use
+/// around the one the caret lands on.
+pub fn mark_net_in_generated_netlist(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    net: &str,
+    lines: &[usize],
+) {
+    let Some(artifact) = generated_artifact(model) else {
+        netlist.net_marks = NetMarks::default();
+        return;
+    };
+    let index = NetlistSourceIndex::parse(artifact.source());
+    let mut spans = index
+        .deck()
+        .nodes()
+        .iter()
+        .filter(|node| {
+            node.location.file == 0
+                && lines.contains(&node.location.line)
+                && node.name.eq_ignore_ascii_case(net)
+        })
+        .map(|node| {
+            let start = node.location.column - 1;
+            SourceSpan {
+                line: node.location.line - 1,
+                columns: start..start + node.name.chars().count(),
+            }
+        })
+        .collect::<Vec<_>>();
+    spans.sort_by_key(|span| (span.line, span.columns.start));
+    netlist.net_marks = NetMarks {
+        generated: Some(artifact.content_digest()),
+        spans,
+    };
+}
+
+/// Forget the marks of the net last shown.
+pub fn clear_net_marks(netlist: &mut NetlistDocumentState) {
+    netlist.net_marks = NetMarks::default();
+}
+
+/// The marks to draw: while the generated netlist they were read from is
+/// the text in front, and none otherwise.
+pub(super) fn net_marks<'a>(model: &Model, netlist: &'a NetlistDocumentState) -> &'a [SourceSpan] {
+    let current = generated_artifact(model).map(|artifact| artifact.content_digest());
+    if generated_netlist_in_front(netlist)
+        && current.is_some()
+        && netlist.net_marks.generated == current
+    {
+        &netlist.net_marks.spans
+    } else {
+        &[]
+    }
+}
+
+/// The generated netlist the project keeps.
+fn generated_artifact(model: &Model) -> Option<&crate::state::GeneratedArtifact> {
+    model
+        .netlist_artifacts
+        .generated_document
+        .as_ref()
+        .and_then(NetlistDocument::generated_artifact)
 }
 
 #[cfg(test)]

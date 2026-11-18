@@ -6,14 +6,11 @@
 //! changing project data, adding probes, or navigating away from the user's
 //! current workspace.
 
-use std::collections::HashSet;
-
 use crate::product::ContentDigest;
 use crate::state::{GeneratedArtifact, GeneratedSourceMapEntry};
 use crate::workbench::TogglePreference;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::NetlistDocumentKey;
-use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 use rspice_results_ui::selection::SelectedResultTrace;
 
 /// Stable logical subject selected in the active schematic document.
@@ -182,185 +179,26 @@ fn release_synchronized_projection(
 }
 
 fn selected_target(model: &Model) -> Option<SchematicCrossProbeTarget> {
-    let selection = &model.schematic.session.editor.selection;
-    if model
+    if let Some(name) = model.selected_design_net() {
+        return Some(SchematicCrossProbeTarget::Net { name });
+    }
+    let component_id = model
         .schematic
         .session
         .editor
-        .net_highlight
-        .selected_net_name
-        .is_some()
-    {
-        let nets = active_design_nets(model);
-        if let Some(name) = semantic_selected_net_name(model, &nets) {
-            return Some(SchematicCrossProbeTarget::Net { name });
-        }
-    }
-    if let Some(component_id) = selection.single_component() {
-        let component = model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == component_id)?;
-        if let Some(port) = component.port_spec() {
-            return Some(SchematicCrossProbeTarget::Net { name: port.name });
-        }
-        return Some(SchematicCrossProbeTarget::Component {
-            component_id,
-            written_element: component.written_element_name(),
-            engine_element: component.engine_element_name(),
-        });
-    }
-
-    if !conductor_selection(selection) {
-        return None;
-    }
-    let nets = active_design_nets(model);
-    selected_net_name(model, &nets).map(|name| SchematicCrossProbeTarget::Net { name })
-}
-
-fn semantic_selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
-    let name = model
+        .selection
+        .single_component()?;
+    let component = model
         .schematic
-        .session
-        .editor
-        .net_highlight
-        .selected_net_name
-        .as_deref()?;
-    let net = nets
+        .document()
+        .components
         .iter()
-        .find(|net| net.name.eq_ignore_ascii_case(name))?;
-    if model
-        .schematic
-        .session
-        .editor
-        .net_highlight
-        .highlighted_wires
-        != net.wire_ids.iter().copied().collect()
-    {
-        return None;
-    }
-    let selection = &model.schematic.session.editor.selection;
-    let no_other_classes = selection.wire_segments.is_empty()
-        && selection.wire_vertices.is_empty()
-        && selection.junctions.is_empty()
-        && selection.buses.is_empty()
-        && selection.bus_taps.is_empty()
-        && selection.net_labels.is_empty()
-        && selection.design_notes.is_empty()
-        && selection.documentation_shapes.is_empty()
-        && selection.probes.is_empty();
-    let exact_wires = selection.wires == net.wire_ids.iter().copied().collect();
-    let exact_components = if net.wire_ids.is_empty() {
-        selection.components
-            == net
-                .terminals
-                .iter()
-                .map(|terminal| terminal.component_id)
-                .collect()
-    } else {
-        selection.components.is_empty()
-    };
-    (no_other_classes && exact_wires && exact_components).then(|| net.name.clone())
-}
-
-fn conductor_selection(selection: &crate::state::Selection) -> bool {
-    let has_conductor = !selection.wires.is_empty()
-        || !selection.wire_segments.is_empty()
-        || !selection.wire_vertices.is_empty()
-        || !selection.junctions.is_empty()
-        || !selection.net_labels.is_empty();
-    has_conductor
-        && selection.components.is_empty()
-        && selection.buses.is_empty()
-        && selection.bus_taps.is_empty()
-        && selection.design_notes.is_empty()
-        && selection.documentation_shapes.is_empty()
-        && selection.probes.is_empty()
-}
-
-/// Nets of the open view as the configured design resolves it.
-///
-/// The synchronizer projects a selection into the generated source map, so it
-/// has to agree with what generation emitted. An unresolved configuration
-/// therefore synchronizes nothing rather than matching against editor-buffer
-/// names the generator would never produce.
-fn active_design_nets(model: &Model) -> std::sync::Arc<Vec<DesignNet>> {
-    match model.workspace.design_projection(
-        &model.library_manager,
-        &model.workspace.content.active_view,
-        &model.schematic,
-    ) {
-        Ok(projection) => projection_nets(
-            model.library_manager.catalog(),
-            &projection,
-            &model.workspace.content.active_view.key(),
-        ),
-        Err(error) => {
-            log::warn!("Schematic cross-probe has no design projection: {error}");
-            std::sync::Arc::new(Vec::new())
-        }
-    }
-}
-
-fn selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
-    let selection = &model.schematic.session.editor.selection;
-    if !conductor_selection(selection) {
-        return None;
-    }
-
-    let mut resolved: Option<String> = None;
-    let mut accept = |candidate: &str| -> bool {
-        match resolved.as_deref() {
-            Some(existing) => existing.eq_ignore_ascii_case(candidate),
-            None => {
-                resolved = Some(candidate.to_owned());
-                true
-            }
-        }
-    };
-    for label in &model.schematic.document().net_labels {
-        if selection.net_labels.contains(&label.id) && !accept(&label.name) {
-            return None;
-        }
-    }
-
-    let mut wire_ids = selection.wires.iter().copied().collect::<HashSet<_>>();
-    wire_ids.extend(
-        selection
-            .wire_segments
-            .iter()
-            .map(|segment| segment.wire_id),
-    );
-    wire_ids.extend(selection.wire_vertices.iter().map(|vertex| vertex.wire_id));
-    for wire_id in wire_ids {
-        let Some(net) = nets.iter().find(|net| net.wire_ids.contains(&wire_id)) else {
-            continue;
-        };
-        if !accept(&net.name) {
-            return None;
-        }
-    }
-    for junction in &selection.junctions {
-        let mut names = model
-            .schematic
-            .document()
-            .wires
-            .iter()
-            .filter(|wire| wire.contains_point(junction.pos))
-            .filter_map(|wire| {
-                nets.iter()
-                    .find(|net| net.wire_ids.contains(&wire.id))
-                    .map(|net| net.name.as_str())
-            });
-        if let Some(name) = names.next()
-            && (!accept(name) || names.any(|candidate| !accept(candidate)))
-        {
-            return None;
-        }
-    }
-    resolved
+        .find(|component| component.id == component_id)?;
+    Some(SchematicCrossProbeTarget::Component {
+        component_id,
+        written_element: component.written_element_name(),
+        engine_element: component.engine_element_name(),
+    })
 }
 
 fn compatible_result_trace(
@@ -516,8 +354,8 @@ mod tests {
             .session
             .editor
             .net_highlight
-            .highlight_named_wires("PORT_OUT", HashSet::new());
-        let nets = vec![DesignNet {
+            .highlight_named_wires("PORT_OUT", std::collections::HashSet::new());
+        let nets = vec![rspice_design::connectivity::summary::DesignNet {
             name: "PORT_OUT".to_owned(),
             authored_name: true,
             class: rspice_design::connectivity::summary::NetClass::Signal,
@@ -532,11 +370,11 @@ mod tests {
         }];
 
         assert_eq!(
-            semantic_selected_net_name(&state.model, &nets).as_deref(),
+            state.model.selected_whole_net(&nets).as_deref(),
             Some("PORT_OUT")
         );
         state.model.schematic.session.editor.net_highlight.clear();
-        assert!(semantic_selected_net_name(&state.model, &nets).is_none());
+        assert!(state.model.selected_whole_net(&nets).is_none());
     }
 
     #[test]
