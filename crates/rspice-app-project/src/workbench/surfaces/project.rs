@@ -177,6 +177,11 @@ pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
         health_chips(ui.ctx(), cx)
     };
     let context_width = project_context_desired_width(ui, cx, &chips);
+    let context_least = if chips.is_empty() {
+        0.0
+    } else {
+        project_context_least_width(ui)
+    };
     let shown = egui::Frame::new()
         .fill(tokens.color.bg_panel)
         .inner_margin(Margin {
@@ -186,8 +191,14 @@ pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
             bottom: 0,
         })
         .show(ui, |ui| {
+            // The revision and the chips stand beside the tabs whenever the
+            // tabs and the chips' subjects fit there, their states eliding
+            // when the whole does not: where the band stands follows the
+            // page's width, not how long one project's states run, so a
+            // page's first row starts at one height from one project to the
+            // next.
             let inline =
-                ui.available_width() >= project_tabs_desired_width(ui) + context_width + 10.0;
+                ui.available_width() >= project_tabs_desired_width(ui) + context_least + 10.0;
             if inline {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
@@ -207,7 +218,9 @@ pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
                         project_tabs(ui, cx);
                     });
                 if !chips.is_empty() {
-                    if context_width <= ui.available_width() {
+                    // Their own row under the tabs, by the same rule: one
+                    // row wherever the subjects fit in it.
+                    if context_least <= ui.available_width() {
                         ui.horizontal(|ui| {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 project_context_cluster(ui, cx, &chips, context_width, &mut raised);
@@ -224,7 +237,14 @@ pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                             ui.add_space(CHIP_PADDING);
-                            project_context_chips(ui, cx, &chips, &tokens, &mut raised);
+                            project_context_chips(
+                                ui,
+                                cx,
+                                &chips,
+                                &tokens,
+                                &mut raised,
+                                f32::INFINITY,
+                            );
                         });
                     }
                 }
@@ -254,23 +274,54 @@ fn project_context_cluster(
     }
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().min(desired).max(1.0);
+    // The room the chips' words share once the revision, the gaps and each
+    // chip's padding and mark are set.
+    let words = chips
+        .iter()
+        .map(|chip| health_text_width(ui, &chip.label))
+        .collect::<Vec<_>>();
+    let set = health_text_width(ui, &revision_label(cx))
+        + chips
+            .iter()
+            .map(|chip| CHIP_GAP + chip_frame_width(chip))
+            .sum::<f32>();
+    let cap = equal_share_cap(&words, (width - set).max(0.0));
     ui.allocate_ui_with_layout(
         vec2(width, project_tab_height(&tokens)),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = CHIP_GAP;
-            project_context_chips(ui, cx, chips, &tokens, raised);
+            project_context_chips(ui, cx, chips, &tokens, raised, cap);
         },
     );
 }
 
-/// The revision and the chips, in the layout the caller opened.
+/// The widest any of `words` may run for all of them to share `room`: the
+/// shorter stand whole, and the longer elide to an equal share of what the
+/// shorter leave. Infinite when every one fits.
+fn equal_share_cap(words: &[f32], room: f32) -> f32 {
+    let mut sorted = words.to_vec();
+    sorted.sort_by(f32::total_cmp);
+    let mut left = room;
+    for (index, word) in sorted.iter().enumerate() {
+        let share = left / (sorted.len() - index) as f32;
+        if *word > share {
+            return share;
+        }
+        left -= word;
+    }
+    f32::INFINITY
+}
+
+/// The revision and the chips, in the layout the caller opened, no chip's
+/// words wider than `cap`.
 fn project_context_chips(
     ui: &mut Ui,
     cx: &mut Cx<'_, ProjectFeature>,
     chips: &[HealthChip],
     tokens: &Tokens,
     raised: &mut Option<ChromeRaise>,
+    cap: f32,
 ) {
     project_revision_label(ui, cx, tokens);
     for chip in chips {
@@ -281,6 +332,7 @@ fn project_context_chips(
             &chip.description,
             chip.problem,
             chip.enabled,
+            cap,
         );
         if response.clicked() {
             chip_clicked(cx, chip.kind, raised);
@@ -293,6 +345,31 @@ const CHIP_GAP: f32 = 8.0;
 /// A chip's padding either side of its words.
 const CHIP_PADDING: f32 = 7.0;
 
+/// The face the band's words are set in: the interface's, as the tabs
+/// beside them are. A revision, a count or a run is a word here, not code.
+fn health_font() -> egui::FontId {
+    theme::sans(tokens::FS_0, FontWeight::Regular)
+}
+
+/// How wide `text` runs in the band's face.
+fn health_text_width(ui: &Ui, text: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), health_font(), egui::Color32::PLACEHOLDER)
+        .size()
+        .x
+}
+
+/// What a chip takes beside its words: its padding, and its mark when it
+/// has one.
+fn chip_frame_width(chip: &HealthChip) -> f32 {
+    2.0 * CHIP_PADDING
+        + if chip.problem.is_some() {
+            CHIP_MARK_ADVANCE
+        } else {
+            0.0
+        }
+}
+
 /// What the band to the right of the tabs needs: the revision and every
 /// chip at its own width.
 fn project_context_desired_width(
@@ -303,27 +380,34 @@ fn project_context_desired_width(
     if chips.is_empty() {
         return 0.0;
     }
-    let tokens = Tokens::get(ui.ctx());
-    let font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let measure = |text: &str| {
-        ui.painter()
-            .layout_no_wrap(text.to_owned(), font.clone(), tokens.color.text_dim)
-            .size()
-            .x
-    };
     let chips_width = chips
         .iter()
-        .map(|chip| {
-            measure(&chip.label)
-                + 2.0 * CHIP_PADDING
-                + if chip.problem.is_some() {
-                    CHIP_MARK_ADVANCE
-                } else {
-                    0.0
-                }
-        })
+        .map(|chip| health_text_width(ui, &chip.label) + chip_frame_width(chip))
         .sum::<f32>();
-    measure(&revision_label(cx)) + chips_width + CHIP_GAP * chips.len() as f32
+    health_text_width(ui, &revision_label(cx)) + chips_width + CHIP_GAP * chips.len() as f32
+}
+
+/// The least the band to the right of the tabs takes, whatever the project:
+/// a four-digit revision whole, and each chip's subject marked, its state
+/// elided. It reads no project, so whether the band fits beside the tabs
+/// turns on the page's width alone.
+fn project_context_least_width(ui: &Ui) -> f32 {
+    let subjects = [
+        DesignSubject::SchematicChecks.chip_label(),
+        DesignSubject::SourceDeck.chip_label(),
+    ]
+    .map(|subject| health_text_width(ui, &format!("{subject}\u{2026}")))
+    .into_iter()
+    .fold(0.0, f32::max);
+    let chips_width = [
+        subjects,
+        health_text_width(ui, "Configuration\u{2026}"),
+        health_text_width(ui, "Run 9999\u{2026}"),
+    ]
+    .map(|words| words + 2.0 * CHIP_PADDING + CHIP_MARK_ADVANCE + CHIP_GAP)
+    .iter()
+    .sum::<f32>();
+    health_text_width(ui, "Revision 9999") + chips_width
 }
 
 fn project_tabs_desired_width(ui: &Ui) -> f32 {
@@ -472,7 +556,7 @@ fn revision_label(cx: &Cx<'_, ProjectFeature>) -> String {
 fn project_revision_label(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>, tokens: &Tokens) {
     ui.label(
         egui::RichText::new(revision_label(cx))
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .font(health_font())
             .color(tokens.color.text_faint),
     );
 }
@@ -613,22 +697,22 @@ fn project_status_chip(
     accessible_label: &str,
     problem: Option<Problem>,
     enabled: bool,
+    cap: f32,
 ) -> Response {
     let tokens = Tokens::get(ui.ctx());
-    let font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let text_width = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), font.clone(), tokens.color.text_dim)
-        .size()
-        .x;
+    let font = health_font();
+    let text_width = health_text_width(ui, label);
     let mark_advance = if problem.is_some() {
         CHIP_MARK_ADVANCE
     } else {
         0.0
     };
-    // A chip wider than its whole row ends in an ellipsis rather than
-    // running past the edge; its announcement keeps every word.
-    let room = (ui.max_rect().width() - mark_advance - 2.0 * CHIP_PADDING).max(1.0);
+    // A chip wider than its whole row, or than its share of the band, ends
+    // in an ellipsis rather than running past the edge; its announcement
+    // and its hint keep every word.
+    let room = (ui.max_rect().width() - mark_advance - 2.0 * CHIP_PADDING)
+        .min(cap)
+        .max(1.0);
     let (label, text_width) = if text_width > room {
         (elide_text(ui, label, &font, room), room)
     } else {
