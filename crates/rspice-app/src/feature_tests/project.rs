@@ -6,6 +6,7 @@ mod check_and_save;
 mod check_and_save_validation;
 mod checkpoint_restore;
 mod checkpoint_store;
+mod configuration_binding;
 mod configuration_dialogs;
 mod configuration_editing;
 mod configuration_inspector;
