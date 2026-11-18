@@ -297,7 +297,7 @@ fn project_state(project: &RecentProject) -> Option<(&'static str, Option<Proble
 pub(crate) enum RecentPick {
     /// Open this project.
     Open(RecentFile),
-    /// A row's pin, Locateâ€¦ or Remove.
+    /// A row's pin, Locate… or Remove.
     Row(RecentRowAction),
 }
 
