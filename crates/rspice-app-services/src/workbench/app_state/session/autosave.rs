@@ -127,9 +127,9 @@ fn spawn_into<T: Send + 'static>(
 /// open or a start found.
 #[derive(Debug, Clone, Default)]
 pub struct ProjectAutosave {
-    /// When the timer was armed (the first frame with unsaved work) or the
-    /// last autosave was started.
-    armed: Option<std::time::Instant>,
+    /// When the next autosave is due: an interval after the first frame
+    /// with unsaved work, or after the last autosave started.
+    due: Option<std::time::Instant>,
     /// The autosave being written on a background thread.
     writing: Option<Slot<Result<ProjectCheckpointSummary, String>>>,
     /// The autosaves this process wrote. Never offered back to it as
@@ -166,11 +166,10 @@ pub struct UnopenedProject {
 }
 
 impl ProjectAutosave {
-    /// Arm the timer as if it had been armed at `at`, for a test that cannot
-    /// wait an interval.
+    /// Make the autosave due now, for a test that cannot wait an interval.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn arm_at(&mut self, at: std::time::Instant) {
-        self.armed = Some(at);
+    pub fn arm_due(&mut self) {
+        self.due = Some(std::time::Instant::now());
     }
 
     /// Whether an autosave is being written or recovered work looked for.
@@ -218,27 +217,30 @@ pub fn project_autosave_tick(state: &mut dyn LifecycleSourceMut, ctx: &Context) 
     let unsaved = autosaved_work(parts);
     let autosave = &mut parts.platform.project_autosave;
     if minutes == 0 || !unsaved {
-        autosave.armed = None;
+        autosave.due = None;
         return written;
     }
     let now = std::time::Instant::now();
     let interval = std::time::Duration::from_secs(u64::from(minutes) * 60);
-    let Some(armed) = autosave.armed else {
-        autosave.armed = Some(now);
+    let Some(due) = autosave.due else {
+        autosave.due = Some(now + interval);
         ctx.request_repaint_after(interval);
         return written;
     };
-    let elapsed = now.saturating_duration_since(armed);
-    if elapsed < interval {
+    // A shorter interval chosen in Preferences since the timer was armed
+    // counts from now.
+    let due = due.min(now + interval);
+    autosave.due = Some(due);
+    if now < due {
         // An idle window paints no frames: one is kept queued so the autosave
         // is written on time without an interaction.
-        ctx.request_repaint_after(interval - elapsed);
+        ctx.request_repaint_after(due - now);
         return written;
     }
     if autosave.writing.is_some() {
         return written;
     }
-    autosave.armed = Some(now);
+    autosave.due = Some(now + interval);
     match project_checkpoint::capture(parts, ProjectCheckpointReason::Autosave) {
         Ok(capture) => {
             parts.platform.project_autosave.writing = Some(spawn_into(Some(ctx), move || {

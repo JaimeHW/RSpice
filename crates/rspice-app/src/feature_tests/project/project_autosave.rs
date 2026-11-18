@@ -68,10 +68,7 @@ fn crashed_session_child() {
     assert!(app.state.save_project_to_path(&folder.join(PROJECT)));
     edit(&mut app, 7);
     assert!(has_unsaved_changes_fresh(&app.state));
-    app.state
-        .platform
-        .project_autosave
-        .arm_at(Instant::now() - Duration::from_secs(3600));
+    app.state.platform.project_autosave.arm_due();
     let ctx = offscreen();
     frames_until(&ctx, &mut app, |app| {
         !app.state.platform.project_autosave.written().is_empty()
@@ -295,10 +292,7 @@ fn an_exit_that_asked_about_unsaved_work_leaves_no_autosave() {
     let mut app = RSpiceApp::test_instance();
     assert!(app.state.save_project_to_path(&file));
     edit(&mut app, 4);
-    app.state
-        .platform
-        .project_autosave
-        .arm_at(Instant::now() - Duration::from_secs(3600));
+    app.state.platform.project_autosave.arm_due();
     let ctx = offscreen();
     frames_until(&ctx, &mut app, |app| {
         !app.state.platform.project_autosave.written().is_empty()
@@ -324,10 +318,7 @@ fn the_autosave_this_session_wrote_goes_when_its_work_is_saved_or_given_up() {
     let autosave_now = |app: &mut RSpiceApp| {
         edit(app, 3);
         assert!(has_unsaved_changes_fresh(&app.state));
-        app.state
-            .platform
-            .project_autosave
-            .arm_at(Instant::now() - Duration::from_secs(3600));
+        app.state.platform.project_autosave.arm_due();
     };
     let autosaves = |app: &RSpiceApp| {
         list(&app.state.model)

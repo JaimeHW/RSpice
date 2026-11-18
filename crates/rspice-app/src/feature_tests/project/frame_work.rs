@@ -353,10 +353,7 @@ fn the_autosave_is_written_off_the_frame() {
     for _ in 0..WARM_UP_FRAMES {
         app_frame(&ctx, &mut app, Vec::new());
     }
-    app.state
-        .platform
-        .project_autosave
-        .arm_at(std::time::Instant::now() - std::time::Duration::from_secs(3600));
+    app.state.platform.project_autosave.arm_due();
     take_work();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     while app.state.platform.project_autosave.written().is_empty() {
