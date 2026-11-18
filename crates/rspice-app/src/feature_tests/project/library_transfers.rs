@@ -560,3 +560,49 @@ fn a_copy_saved_in_another_folder_finds_a_library_kept_in_its_own_folder() {
     );
     std::fs::remove_dir_all(root).ok();
 }
+
+/// A copy saved through a path that names its folder another way than the
+/// project will keep it, as a link or a `..` does, still names the folder
+/// its library is kept in, so the copy opens with the library read.
+#[test]
+fn a_copy_saved_through_another_spelling_of_a_folder_finds_its_library() {
+    let mut app = hierarchy();
+    let root = unique_temp_dir("library-folder-spelling");
+    let design = root.join("design");
+    let project = design.join("transfers.rspiceproj");
+    let elsewhere = root.join("elsewhere");
+    for folder in [&design, &elsewhere.join("x")] {
+        std::fs::create_dir_all(folder).expect("a folder for the project");
+    }
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project is saved"
+    );
+    app.state
+        .model
+        .move_library_to_folder("work", &design.join("work"))
+        .expect("work moves to a folder of its own beside the project");
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project is saved"
+    );
+
+    let roundabout = elsewhere.join("x").join("..").join("copy.rspiceproj");
+    assert!(
+        app.state.save_project_copy_to_path(&roundabout),
+        "the copy is saved"
+    );
+    let mut reopened = RSpiceApp::test_instance();
+    assert!(
+        reopened
+            .state
+            .load_project_from_path(&elsewhere.join("copy.rspiceproj")),
+        "the copy opens"
+    );
+    let status = reopened.state.model.reference_status("work");
+    assert!(
+        matches!(status, Some(ReferenceStatus::Found { .. })),
+        "the copy reads the library from its folder: {status:?}"
+    );
+    std::fs::remove_dir_all(root).ok();
+}

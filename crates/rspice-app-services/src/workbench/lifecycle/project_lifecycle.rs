@@ -1078,9 +1078,9 @@ fn write_library_files(
         .as_deref()
         .and_then(Path::parent)
         .map(Path::to_path_buf);
-    if let (Some(from), Some(to)) = (from, path.parent()) {
+    if let (Some(from), Some(to)) = (from, saved_folder(path)) {
         model
-            .rebase_library_references(file, &from, to)
+            .rebase_library_references(file, &from, &to)
             .map_err(ProjectLifecycleError::LibraryFiles)?;
     }
     model
@@ -1099,8 +1099,22 @@ fn deck_folders(model: &Model, path: &Path) -> (Option<PathBuf>, Option<PathBuf>
             .project
             .data_root()
             .map(Path::to_path_buf),
-        path.parent().map(Path::to_path_buf),
+        saved_folder(path),
     )
+}
+
+/// The folder a project saved at `path` is kept in, spelled as the project
+/// will keep it: links resolved, as the folder it is kept in now already
+/// is. Paths kept relative to a folder are rewritten between these two
+/// spellings, and a folder reached through a link (macOS's temporary
+/// folder is one) named two ways is not one folder to a path. The folder
+/// of `path` as given only when it cannot be resolved.
+#[cfg(not(target_arch = "wasm32"))]
+fn saved_folder(path: &Path) -> Option<PathBuf> {
+    persistence::normalize_native_path(path)
+        .ok()
+        .and_then(|resolved| resolved.parent().map(Path::to_path_buf))
+        .or_else(|| path.parent().map(Path::to_path_buf))
 }
 
 /// Each deck's file, kept from the second of `folders` as it was kept from
@@ -1134,9 +1148,9 @@ fn rebase_copied_library_references(
         .path
         .as_deref()
         .and_then(Path::parent);
-    match (from, path.parent()) {
+    match (from, saved_folder(path)) {
         (Some(from), Some(to)) if from != to => file
-            .rebase_library_references(from, to)
+            .rebase_library_references(from, &to)
             .map_err(ProjectLifecycleError::LibraryFiles),
         _ => Ok(()),
     }

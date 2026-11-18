@@ -562,3 +562,39 @@ fn a_project_saved_elsewhere_keeps_its_deck_where_it_is() {
     assert!(!stored(&elsewhere).contains(r#""path":"decks/amp.cir""#));
     assert!(reads(&app));
 }
+
+/// A project saved through a path that names its folder another way than
+/// the project keeps it, as a link or a `..` does, still keeps its deck by
+/// its path from that folder: the two spellings are one folder.
+#[test]
+fn a_project_saved_through_another_spelling_of_a_folder_keeps_its_deck_by_its_path() {
+    let folder = Folder::new();
+    let deck = folder.write("one/decks/amp.cir", DECK);
+    let first = folder.0.join("one").join("amp.rspiceproj");
+    let mut app = RSpiceApp::test_instance();
+    assert!(app.state.save_project_to_path(&first), "the project saves");
+    assert!(app.state.open_deck_at(&deck, false));
+    assert!(app.state.save_project_to_path(&first), "the project saves");
+    std::fs::create_dir_all(folder.0.join("one").join("x")).expect("the folder");
+
+    let roundabout = folder
+        .0
+        .join("one")
+        .join("x")
+        .join("..")
+        .join("..")
+        .join("amp.rspiceproj");
+    assert!(
+        app.state.save_project_to_path(&roundabout),
+        "the project saves"
+    );
+
+    let stored: String = std::fs::read_to_string(folder.0.join("amp.rspiceproj"))
+        .expect("the project file")
+        .split_whitespace()
+        .collect();
+    assert!(
+        stored.contains(r#"{"kind":"file","path":"one/decks/amp.cir"}"#),
+        "{stored}"
+    );
+}
