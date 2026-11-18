@@ -41,6 +41,7 @@ fn show_deck_include(harness: &mut CodeHarness) {
         &mut harness.state.netlist_open_documents,
         &mut harness.runs,
         DECK_INCLUDE,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     )
     .unwrap();
 }
@@ -213,6 +214,7 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
         &mut harness.state.netlist_open_documents,
         &mut harness.runs,
         DECK_INCLUDE,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     )
     .unwrap_err();
     assert!(error.contains("Close an include tab"));
@@ -246,7 +248,15 @@ fn workspace_replacement_commits_deck_and_include_together() {
     let (edited_root, edits) = deck_and_include_edits();
 
     assert_eq!(
-        replace_deck_files(&mut harness.model, &mut harness.state.netlist, edits).unwrap(),
+        replace_deck_files(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            edits,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates
+            )
+        )
+        .unwrap(),
         2
     );
     assert_eq!(
@@ -264,13 +274,25 @@ fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
     let mut harness = deck_state();
     show_deck_include(&mut harness);
     let (edited_root, edits) = deck_and_include_edits();
-    replace_deck_files(&mut harness.model, &mut harness.state.netlist, edits).unwrap();
+    replace_deck_files(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        edits,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
+    .unwrap();
     assert!(can_undo_netlist_edit(&harness.state.netlist));
 
     assert!(
-        undo_netlist_edit(&mut harness.model, &mut harness.state.netlist)
-            .unwrap()
-            .is_some()
+        undo_netlist_edit(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates
+            )
+        )
+        .unwrap()
+        .is_some()
     );
     assert_eq!(
         deck_texts(&harness),
@@ -279,9 +301,15 @@ fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
     assert!(can_redo_netlist_edit(&harness.state.netlist));
 
     assert!(
-        redo_netlist_edit(&mut harness.model, &mut harness.state.netlist)
-            .unwrap()
-            .is_some()
+        redo_netlist_edit(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates
+            )
+        )
+        .unwrap()
+        .is_some()
     );
     assert_eq!(
         deck_texts(&harness),
@@ -300,8 +328,13 @@ fn workspace_replacement_rejects_stale_include_without_partial_root_edit() {
         ".param rmodel=3.3k\n".to_owned()
     ));
 
-    let error = replace_deck_files(&mut harness.model, &mut harness.state.netlist, stale_edits)
-        .unwrap_err();
+    let error = replace_deck_files(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        stale_edits,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
+    .unwrap_err();
 
     assert!(error.contains("nothing was changed"), "{error}");
     assert_eq!(
@@ -333,6 +366,7 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
         &mut harness.model,
         &mut harness.state.netlist,
         &harness.runs,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     )
     .unwrap();
 
@@ -440,7 +474,10 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
         compare_run_deck_snapshot_in(
             &mut harness.model,
             &mut harness.state.netlist,
-            &harness.runs
+            &harness.runs,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates
+            )
         )
         .is_err(),
         "there is no working copy of a deck nobody typed"

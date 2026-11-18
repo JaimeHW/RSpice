@@ -465,7 +465,7 @@ fn a_selected_wire_shows_the_first_card_of_its_net_and_marks_the_rest() {
         replay.app.state.prompt_text(),
         Some(
             format!(
-                "Located net mid at generated line {}; every line that connects it is marked.",
+                "Net mid is on line {} of the generated netlist; every line that connects it is marked.",
                 writing[0]
             )
             .as_str()

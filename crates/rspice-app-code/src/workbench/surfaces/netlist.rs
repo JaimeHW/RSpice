@@ -301,6 +301,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                     cx.model,
                     &mut cx.state.netlist,
                     cx.runs,
+                    cx.wb.messages(),
                 )
             {
                 cx.wb.prompt(error);
@@ -541,7 +542,6 @@ pub enum RunStripPhase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunStripProjection {
     pub run_id: u64,
-    pub deck_digest: String,
     pub revision: u64,
     pub phase: RunStripPhase,
     /// Which point of the run the document is showing, when it is showing an
@@ -644,12 +644,6 @@ pub fn run_strip_projection(
     });
     Some(RunStripProjection {
         run_id,
-        deck_digest: receipt
-            .source_content_digest()
-            .to_string()
-            .chars()
-            .take(12)
-            .collect(),
         revision: receipt.project_revision().get(),
         phase,
         point,
@@ -832,7 +826,7 @@ fn run_strip_statement(
         ),
         None => messages.format(
             MessageId::NetlistRunStripIdentity,
-            &[("digest", &projection.deck_digest), ("revision", &revision)],
+            &[("revision", &revision)],
         ),
     };
     (
@@ -1291,7 +1285,7 @@ mod tests {
         let mut harness = harness();
         harness.state.netlist.front = NetlistTab::Generated;
         harness.model.netlist_artifacts.generation_error =
-            Some("Add a circuit before generating the primary netlist.".to_owned());
+            Some("Add a circuit to the schematic to generate its netlist.".to_owned());
 
         assert!(generated_primary_unavailable(
             &harness.model,
@@ -1304,7 +1298,7 @@ mod tests {
                 &harness.state.netlist,
                 harness.wb.messages()
             ),
-            Some(("generation blocked".to_owned(), Problem::Warning))
+            Some(("could not generate".to_owned(), Problem::Warning))
         );
     }
 
@@ -1330,7 +1324,10 @@ mod tests {
                 &harness.state.netlist,
                 harness.wb.messages()
             ),
-            Some(("stale · generation blocked".to_owned(), Problem::Warning))
+            Some((
+                "older than the schematic · could not generate".to_owned(),
+                Problem::Warning
+            ))
         );
     }
 
@@ -1363,7 +1360,7 @@ mod tests {
                 &harness.state.netlist,
                 harness.wb.messages()
             ),
-            Some(("generation blocked".to_owned(), Problem::Warning))
+            Some(("could not generate".to_owned(), Problem::Warning))
         );
     }
 
@@ -1420,14 +1417,6 @@ mod tests {
         assert_eq!(projection.phase, RunStripPhase::Current);
         assert_eq!(projection.run_id, 7);
         assert_eq!(projection.revision, 4);
-        assert_eq!(
-            projection.deck_digest,
-            crate::product::ContentDigest::from_bytes([0xAB; 32])
-                .to_string()
-                .chars()
-                .take(12)
-                .collect::<String>()
-        );
     }
 
     #[test]

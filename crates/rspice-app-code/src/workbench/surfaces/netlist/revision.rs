@@ -22,15 +22,9 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, Code
     dialog.selected_history_index = dialog.selected_history_index.min(history_len - 1);
     let revision_label = |artifact: &crate::state::GeneratedArtifact| {
         let revision = artifact.provenance().input().revision().get().to_string();
-        let digest = artifact
-            .content_digest()
-            .to_string()
-            .chars()
-            .take(12)
-            .collect::<String>();
         messages.format(
             MessageId::NetlistGeneratedRevisionChoice,
-            &[("revision", &revision), ("digest", &digest)],
+            &[("revision", &revision)],
         )
     };
     let selected_label =
@@ -71,6 +65,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, Code
                 &mut cx.state.netlist,
                 cx.runs,
                 dialog.selected_history_index,
+                cx.wb.messages(),
             ) {
                 Ok(()) => dialog.open = false,
                 Err(error) => cx.wb.prompt(error),

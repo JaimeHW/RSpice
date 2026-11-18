@@ -152,9 +152,15 @@ fn renaming_a_subcircuit_lists_each_line_in_both_files_and_undoes_a_file_at_a_ti
 
     // One Undo takes back one file; the next, the other.
     let undo = |harness: &mut CodeHarness| {
-        super::super::undo_netlist_edit(&mut harness.model, &mut harness.state.netlist)
-            .expect("the step is taken back")
-            .expect("there is a step")
+        super::super::undo_netlist_edit(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        )
+        .expect("the step is taken back")
+        .expect("there is a step")
     };
     assert_eq!(undo(&mut harness), "rename cell to core");
     assert_eq!(

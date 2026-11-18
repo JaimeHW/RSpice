@@ -287,7 +287,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 cx.model,
                 &mut cx.state.code_workspace,
                 &cx.state.netlist,
-                cx.platform,
+                cx.platform, cx.wb.messages(),
             ) {
                 cx.wb.prompt(error);
             }

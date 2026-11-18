@@ -65,7 +65,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
                 cx.model,
                 &mut cx.state.code_workspace,
                 &cx.state.netlist,
-                cx.platform,
+                cx.platform, cx.wb.messages(),
             ) {
                 cx.wb.prompt(error);
             }
@@ -154,7 +154,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
                 }
                 None => OwnedNetlistReplacement::root(&original, replacement, 1),
             };
-            match replace_deck_files(cx.model, &mut cx.state.netlist, vec![edit]) {
+            match replace_deck_files(cx.model, &mut cx.state.netlist, vec![edit], cx.wb.messages()) {
                 Ok(_) => cx.wb.prompt(selected),
                 Err(error) => cx.wb.prompt(error),
             }
@@ -193,7 +193,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             }
             let answer = netlist_document::language::apply_preferred_quick_fix(
                 cx.model,
-                &mut cx.state.netlist,
+                &mut cx.state.netlist, cx.wb.messages(),
             );
             cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
@@ -207,6 +207,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
                 cx.model,
                 &mut cx.state.netlist,
                 finding,
+                cx.wb.messages(),
             );
             cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
@@ -257,9 +258,9 @@ pub fn answer_netlist_editor(cx: &mut Cx<'_, CodeFeature>, request: NetlistEdito
 /// Redo's. `Ok(None)` when that history holds no step that way.
 pub fn step_history(cx: &mut Cx<'_, CodeFeature>, undo: bool) -> Result<Option<String>, String> {
     if undo {
-        netlist_document::undo_netlist_edit(cx.model, &mut cx.state.netlist)
+        netlist_document::undo_netlist_edit(cx.model, &mut cx.state.netlist, cx.wb.messages())
     } else {
-        netlist_document::redo_netlist_edit(cx.model, &mut cx.state.netlist)
+        netlist_document::redo_netlist_edit(cx.model, &mut cx.state.netlist, cx.wb.messages())
     }
 }
 

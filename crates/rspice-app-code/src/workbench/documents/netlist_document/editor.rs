@@ -27,10 +27,10 @@ use rspice_core::netlist::IncludeResolution;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
-use crate::workbench::MessageId;
 use crate::workbench::code::commands::NetlistEditorRequest;
 use crate::workbench::documents::text_editor_commands::show_go_to_line;
 use crate::workbench::state::WorkbenchSession;
+use crate::workbench::{MessageCatalog, MessageId};
 
 use super::{
     DiagnosticSeverity, completion,
@@ -1061,6 +1061,7 @@ impl SourceCheck {
                     &buffer,
                     revision,
                     &validation_id,
+                    messages,
                 ),
                 symbols: None,
                 unread: None,
@@ -1082,7 +1083,9 @@ impl SourceCheck {
             (None, None) => Ok(buffer.as_str()),
         };
         let in_buffer = |diagnostics: Vec<Diagnostic>| match composed.as_deref() {
-            Some(composed) => super::diagnostics::in_authored_text(diagnostics, composed, &buffer),
+            Some(composed) => {
+                super::diagnostics::in_authored_text(diagnostics, composed, &buffer, messages)
+            }
             None => diagnostics,
         };
         let bound = |mut diagnostics: Vec<Diagnostic>| {
@@ -1090,7 +1093,7 @@ impl SourceCheck {
             for diagnostic in &mut diagnostics {
                 diagnostic.bind_validation(revision, &validation_id);
             }
-            bounded_netlist_diagnostics(diagnostics, &buffer, revision, &validation_id)
+            bounded_netlist_diagnostics(diagnostics, &buffer, revision, &validation_id, messages)
         };
         let sealed_sources = match sealed_sources.transpose() {
             Ok(sources) => sources,
@@ -1100,8 +1103,9 @@ impl SourceCheck {
                     .ok()
                     .and_then(|source| first_external_dependency_line(source));
                 let diagnostics = in_buffer(vec![
-                    Diagnostic::error(format!(
-                        "The imported browser source bundle is invalid: {error}"
+                    Diagnostic::error(messages.format(
+                        MessageId::NetlistImportedIncludesUnreadable,
+                        &[("error", &error)],
                     ))
                     .with_line(line),
                 ]);
@@ -1147,6 +1151,7 @@ impl SourceCheck {
                             platform_include_access(),
                             sealed_sources.as_ref(),
                             stop,
+                            messages,
                         ),
                     };
                     (
@@ -1171,11 +1176,13 @@ impl SourceCheck {
         diagnostics.extend(shadowed_include_diagnostics(
             walked.as_ref().unwrap_or(&include_resolutions),
             &buffer,
+            messages,
         ));
         super::diagnostics::as_the_reader_sees_them(
             &mut diagnostics,
             &buffer,
             shown_path.as_deref(),
+            messages,
         );
         CheckedSource {
             revision,
@@ -1194,13 +1201,14 @@ fn bounded_netlist_diagnostics(
     buffer: &str,
     revision: u64,
     validation_id: &str,
+    messages: MessageCatalog,
 ) -> NetlistDiagnosticCollection {
     NetlistDiagnosticCollection::try_new(diagnostics, buffer).unwrap_or_else(|error| {
         let mut diagnostic = Diagnostic::current(
             "rspice.diagnostics",
             "DIAGNOSTIC-CAPACITY",
             DiagnosticSeverity::Error,
-            "Netlist diagnostic collection exceeded the supported maximum",
+            messages.text(MessageId::NetlistTooManyFindings),
         );
         diagnostic.details = error;
         diagnostic.bind_validation(revision, validation_id);
@@ -1223,6 +1231,7 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
         platform_include_access(),
         None,
         &rspice_core::abort_signal::NoAbort,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
     (diagnostics, symbols)
 }
@@ -1283,9 +1292,13 @@ fn parse_buffer_with_context(
     include_access: IncludeAccess,
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
     abort: &dyn AbortSignal,
+    messages: MessageCatalog,
 ) -> BufferParse {
     let external_line = first_external_dependency_line(buffer);
-    let file = match source_path.map(editor_parse_source).transpose() {
+    let file = match source_path
+        .map(|path| editor_parse_source(path, messages))
+        .transpose()
+    {
         Ok(file) => file,
         Err(error) => return (vec![Diagnostic::error(error)], None, None, None, None),
     };
@@ -1302,10 +1315,10 @@ fn parse_buffer_with_context(
     let (parse_source, parsed) = match (file, external_line) {
         (None, Some(line)) => {
             return (
-                vec![Diagnostic::error(
-                    "The deck has no file, so its .include and .lib lines have no folder to be read from.",
-                )
-                .with_line(Some(line))],
+                vec![
+                    Diagnostic::error(messages.text(MessageId::NetlistDeckHasNoFolder))
+                        .with_line(Some(line)),
+                ],
                 None,
                 None,
                 None,
@@ -1340,7 +1353,7 @@ fn parse_buffer_with_context(
                 Ok(bundle) => bundle,
                 Err(error) => {
                     return (
-                        parse_error_diagnostics_at(error, None),
+                        parse_error_diagnostics_at(error, None, messages),
                         None,
                         None,
                         None,
@@ -1357,10 +1370,10 @@ fn parse_buffer_with_context(
         (Some(file), Some(_)) => {
             let Some(sealed_sources) = sealed_sources else {
                 return (
-                    vec![Diagnostic::error(
-                        "In the browser, external .include/.inc/.lib sources must come from an imported source bundle.",
-                    )
-                    .with_line(external_line)],
+                    vec![
+                        Diagnostic::error(messages.text(MessageId::NetlistBrowserIncludesImported))
+                            .with_line(external_line),
+                    ],
                     None,
                     None,
                     None,
@@ -1392,6 +1405,7 @@ fn parse_buffer_with_context(
         buffer,
         spectre,
         source_path,
+        messages,
     )
 }
 
@@ -1403,7 +1417,7 @@ fn parse_stored(
     at: &Path,
     files: &[(PathBuf, String)],
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
-    messages: crate::workbench::MessageCatalog,
+    messages: MessageCatalog,
     abort: &dyn AbortSignal,
 ) -> BufferParse {
     let spectre = rspice_core::netlist::is_spectre_source(at, buffer);
@@ -1433,7 +1447,7 @@ fn parse_stored(
         )) => Some((origin.clone(), requested.clone(), *outside)),
         _ => None,
     };
-    let mut found = parse_findings(parsed, Some(at), buffer, spectre, None);
+    let mut found = parse_findings(parsed, Some(at), buffer, spectre, None, messages);
     // The line that names a file the deck does not keep says so in the
     // reader's words, and offers to add it.
     if let Some((origin, requested, outside)) = missing
@@ -1505,25 +1519,26 @@ fn parse_findings(
     buffer: &str,
     spectre: bool,
     source_path: Option<&Path>,
+    messages: MessageCatalog,
 ) -> BufferParse {
     match parsed {
         Ok(netlist) => {
             let unread = netlist.unread_root_source().cloned().collect::<Vec<_>>();
-            let mut diagnostics = parser_diagnostics(&netlist, parse_source);
+            let mut diagnostics = parser_diagnostics(&netlist, parse_source, messages);
             if let Err(error) = rspice_core::netlist::validate_output_requests(&netlist) {
-                diagnostics.extend(parse_error_diagnostics_at(error, parse_source));
+                diagnostics.extend(parse_error_diagnostics_at(error, parse_source, messages));
             }
-            diagnostics.extend(unknown_reference_diagnostics(buffer, &unread));
+            diagnostics.extend(unknown_reference_diagnostics(buffer, &unread, messages));
             (
                 diagnostics,
-                Some(harvest_symbols(&netlist)),
+                Some(harvest_symbols(&netlist, messages)),
                 Some(unread),
                 Some(DeckReading::of(&netlist.options, spectre)),
                 Some(checked_includes(&netlist)),
             )
         }
         Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => (
-            parse_error_diagnostics_at(error, parse_source),
+            parse_error_diagnostics_at(error, parse_source, messages),
             None,
             None,
             None,
@@ -1535,7 +1550,7 @@ fn parse_findings(
                     "rspice.netlist.parser",
                     "SPICE-VALIDATION-CANCELLED",
                     DiagnosticSeverity::Info,
-                    "Live netlist diagnostics were cancelled before completion.",
+                    messages.text(MessageId::NetlistCheckStopped),
                 )
                 .with_source_path(source_path.map(Path::to_path_buf)),
             ],
@@ -1559,18 +1574,22 @@ fn spectre_root(name: Option<&Path>) -> PathBuf {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn editor_parse_source(path: &Path) -> Result<PathBuf, String> {
+fn editor_parse_source(path: &Path, messages: MessageCatalog) -> Result<PathBuf, String> {
     if path.is_absolute() {
         return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     }
-    let current = std::env::current_dir()
-        .map_err(|error| format!("Could not resolve the netlist source origin: {error}"))?;
+    let current = std::env::current_dir().map_err(|error| {
+        messages.format(
+            MessageId::NetlistDeckFolderUnknown,
+            &[("error", &error.to_string())],
+        )
+    })?;
     let absolute = current.join(path);
     Ok(absolute.canonicalize().unwrap_or(absolute))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn editor_parse_source(path: &Path) -> Result<PathBuf, String> {
+fn editor_parse_source(path: &Path, _messages: MessageCatalog) -> Result<PathBuf, String> {
     Ok(path.to_path_buf())
 }
 
@@ -1583,6 +1602,7 @@ fn editor_parse_source(path: &Path) -> Result<PathBuf, String> {
 fn shadowed_include_diagnostics(
     include_resolutions: &BTreeMap<String, IncludeResolution>,
     buffer: &str,
+    messages: MessageCatalog,
 ) -> Vec<Diagnostic> {
     if include_resolutions.is_empty() {
         return Vec::new();
@@ -1602,10 +1622,13 @@ fn shadowed_include_diagnostics(
                     "rspice.netlist.include",
                     "SPICE-INCLUDE-SHADOWED",
                     DiagnosticSeverity::Warning,
-                    format!(
-                        "'{requested}' resolved to {} and shadows {}",
-                        resolution.resolved().display(),
-                        shadowed.path().display()
+                    messages.format(
+                        MessageId::NetlistIncludeShadows,
+                        &[
+                            ("name", &requested),
+                            ("found", &resolution.resolved().display().to_string()),
+                            ("hidden", &shadowed.path().display().to_string()),
+                        ],
                     ),
                 )
                 .with_line(Some(line)),
@@ -1629,15 +1652,24 @@ fn first_external_dependency_line(buffer: &str) -> Option<usize> {
 /// retained inside that card's message.
 #[cfg(test)]
 fn parse_error_diagnostics(error: rspice_core::netlist::ParseError) -> Vec<Diagnostic> {
-    parse_error_diagnostics_at(error, None)
+    parse_error_diagnostics_at(
+        error,
+        None,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
 }
 
 fn parse_error_diagnostics_at(
     error: rspice_core::netlist::ParseError,
     editor_source_path: Option<&Path>,
+    messages: MessageCatalog,
 ) -> Vec<Diagnostic> {
     let rspice_core::netlist::ParseError::OutputSymbolValidation(validation) = error else {
-        return vec![parse_error_diagnostic_at(error, editor_source_path)];
+        return vec![parse_error_diagnostic_at(
+            error,
+            editor_source_path,
+            messages,
+        )];
     };
 
     let mut groups = Vec::<(
@@ -1646,9 +1678,13 @@ fn parse_error_diagnostics_at(
         Vec<String>,
     )>::new();
     for unresolved in validation.unresolved {
-        let entry = format!(
-            "{} `{}` via {}",
-            unresolved.kind, unresolved.symbol, unresolved.operator
+        let entry = messages.format(
+            MessageId::NetlistUndefinedOutput,
+            &[
+                ("kind", &unresolved.kind.to_string()),
+                ("symbol", &unresolved.symbol.to_string()),
+                ("operator", &unresolved.operator.to_string()),
+            ],
         );
         match groups.last_mut() {
             Some((directive, origin, entries))
@@ -1663,9 +1699,13 @@ fn parse_error_diagnostics_at(
     groups
         .into_iter()
         .map(|(directive, origin, entries)| {
-            Diagnostic::error(format!(
-                "Undefined output symbols in {directive} ({origin}): {}",
-                entries.join(", ")
+            Diagnostic::error(messages.format(
+                MessageId::NetlistUndefinedOutputs,
+                &[
+                    ("directive", &directive.to_string()),
+                    ("place", &origin.to_string()),
+                    ("names", &entries.join(", ")),
+                ],
             ))
             .with_source_location(&origin, editor_source_path)
         })
@@ -1674,12 +1714,17 @@ fn parse_error_diagnostics_at(
 
 #[cfg(test)]
 fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic {
-    parse_error_diagnostic_at(error, None)
+    parse_error_diagnostic_at(
+        error,
+        None,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
 }
 
 fn parse_error_diagnostic_at(
     error: rspice_core::netlist::ParseError,
     editor_source_path: Option<&Path>,
+    messages: MessageCatalog,
 ) -> Diagnostic {
     use rspice_core::netlist::ParseError;
 
@@ -1707,68 +1752,115 @@ fn parse_error_diagnostic_at(
             });
             Diagnostic::error(message).with_source_location(&origin, editor_source_path)
         }
-        ParseError::MissingSubcircuitEnds(error) => {
-            Diagnostic::error(error.to_string())
-                .with_source_location(&error.opened_at, editor_source_path)
+        ParseError::MissingSubcircuitEnds(error) => Diagnostic::error(error.to_string())
+            .with_source_location(&error.opened_at, editor_source_path),
+        ParseError::DuplicateSubcircuitPortBinding(error) => {
+            let detail = messages.format(
+                MessageId::NetlistDuplicatePortDetail,
+                &[
+                    ("subcircuit", &error.subcircuit_name.to_string()),
+                    (
+                        "subcircuit_read",
+                        &error.canonical_subcircuit_name.to_string(),
+                    ),
+                    ("instance", &error.qualified_instance_name.to_string()),
+                    ("formal", &error.formal_port.to_string()),
+                    ("first", &error.first_position.to_string()),
+                    ("second", &error.conflicting_position.to_string()),
+                    ("first_node", &error.first_actual_node.to_string()),
+                    ("second_node", &error.conflicting_actual_node.to_string()),
+                ],
+            );
+            Diagnostic::error(format!("{error}\n{detail}"))
         }
-        ParseError::DuplicateSubcircuitPortBinding(error) => Diagnostic::error(format!(
-            "{}\nSubcircuit: {} (read as {}) · instance: {} · formal {} · positions {} and {} · effective nodes {} and {}",
-            error,
-            error.subcircuit_name,
-            error.canonical_subcircuit_name,
-            error.qualified_instance_name,
-            error.formal_port,
-            error.first_position,
-            error.conflicting_position,
-            error.first_actual_node,
-            error.conflicting_actual_node,
-        )),
-        ParseError::GlobalSubcircuitPortBinding(error) => Diagnostic::error(format!(
-            "{}\nSubcircuit: {} (read as {}) · instance: {} · formal {} · position {} · effective node {}",
-            error,
-            error.subcircuit_name,
-            error.canonical_subcircuit_name,
-            error.qualified_instance_name,
-            error.formal_port,
-            error.position,
-            error.actual_node,
-        )),
-        ParseError::UndefinedSubcircuit(error) => Diagnostic::error(format!(
-            "{}\nSubcircuit: {} (read as {}) · instance: {} (read as {})",
-            error,
-            error.subcircuit_name,
-            error.canonical_subcircuit_name,
-            error.qualified_instance_name,
-            error.canonical_instance_name,
-        )),
-        ParseError::MissingDeviceModel(error) => Diagnostic::error(format!(
-            "{}\nDevice: {} (read as {}) · type: {}",
-            error, error.device_name, error.canonical_device_name, error.device_type,
-        )),
-        ParseError::UndefinedMutualInductorReference(error) => Diagnostic::error(format!(
-            "{}\nCoupling: {} (read as {}) · missing inductor: {} (read as {}) · scope: {} · reference position {}",
-            error,
-            error.qualified_coupling_name,
-            error.canonical_coupling_name,
-            error.qualified_inductor_name,
-            error.canonical_inductor_name,
-            error.scope_name.as_deref().unwrap_or("top level"),
-            error.reference_position,
-        ))
-        .with_source_location(&error.origin, editor_source_path),
+        ParseError::GlobalSubcircuitPortBinding(error) => {
+            let detail = messages.format(
+                MessageId::NetlistGlobalPortDetail,
+                &[
+                    ("subcircuit", &error.subcircuit_name.to_string()),
+                    (
+                        "subcircuit_read",
+                        &error.canonical_subcircuit_name.to_string(),
+                    ),
+                    ("instance", &error.qualified_instance_name.to_string()),
+                    ("formal", &error.formal_port.to_string()),
+                    ("position", &error.position.to_string()),
+                    ("node", &error.actual_node.to_string()),
+                ],
+            );
+            Diagnostic::error(format!("{error}\n{detail}"))
+        }
+        ParseError::UndefinedSubcircuit(error) => {
+            let detail = messages.format(
+                MessageId::NetlistUndefinedSubcircuitDetail,
+                &[
+                    ("subcircuit", &error.subcircuit_name.to_string()),
+                    (
+                        "subcircuit_read",
+                        &error.canonical_subcircuit_name.to_string(),
+                    ),
+                    ("instance", &error.qualified_instance_name.to_string()),
+                    ("instance_read", &error.canonical_instance_name.to_string()),
+                ],
+            );
+            Diagnostic::error(format!("{error}\n{detail}"))
+        }
+        ParseError::MissingDeviceModel(error) => {
+            let detail = messages.format(
+                MessageId::NetlistMissingModelDetail,
+                &[
+                    ("device", &error.device_name.to_string()),
+                    ("device_read", &error.canonical_device_name.to_string()),
+                    ("kind", &error.device_type.to_string()),
+                ],
+            );
+            Diagnostic::error(format!("{error}\n{detail}"))
+        }
+        ParseError::UndefinedMutualInductorReference(error) => {
+            let scope = error
+                .scope_name
+                .clone()
+                .unwrap_or_else(|| messages.text(MessageId::NetlistTopLevel));
+            let detail = messages.format(
+                MessageId::NetlistCouplingDetail,
+                &[
+                    ("coupling", &error.qualified_coupling_name.to_string()),
+                    ("coupling_read", &error.canonical_coupling_name.to_string()),
+                    ("inductor", &error.qualified_inductor_name.to_string()),
+                    ("inductor_read", &error.canonical_inductor_name.to_string()),
+                    ("scope", &scope),
+                    ("position", &error.reference_position.to_string()),
+                ],
+            );
+            Diagnostic::error(format!("{error}\n{detail}"))
+                .with_source_location(&error.origin, editor_source_path)
+        }
         ParseError::OutputSymbolValidation(error) => Diagnostic::error(error.to_string()),
         ParseError::OutputExpressionValidation(error) => Diagnostic::error(format!(
-            "{}\nDirective: {} · expression: {{{}}}",
-            error, error.directive, error.expression
+            "{error}\n{}",
+            messages.format(
+                MessageId::NetlistExpressionDetail,
+                &[
+                    ("directive", &error.directive.to_string()),
+                    ("expression", &format!("{{{}}}", error.expression)),
+                ],
+            )
         ))
         .with_source_location(&error.origin, editor_source_path),
         ParseError::StartupDirectiveConflict(error) => Diagnostic::error(format!(
-            "{}\nFirst startup mode: {} at {} · conflicting mode: {} at {}",
-            error,
-            error.first_kind.as_spice_directive(),
-            error.first,
-            error.conflicting_kind.as_spice_directive(),
-            error.conflicting,
+            "{error}\n{}",
+            messages.format(
+                MessageId::NetlistStartupConflictDetail,
+                &[
+                    ("first", &error.first_kind.as_spice_directive().to_string()),
+                    ("first_place", &error.first.to_string()),
+                    (
+                        "second",
+                        &error.conflicting_kind.as_spice_directive().to_string()
+                    ),
+                    ("second_place", &error.conflicting.to_string()),
+                ],
+            )
         ))
         .with_source_location(&error.conflicting, editor_source_path),
         ParseError::DeviceInitialCondition(error) => {
@@ -1836,17 +1928,31 @@ fn device_initial_condition_diagnostic_origin(
 }
 
 /// Completion symbols from a clean parse: model cards and subcircuits.
-fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntry> {
+fn harvest_symbols(
+    netlist: &rspice_core::Netlist,
+    messages: MessageCatalog,
+) -> Vec<completion::SymbolEntry> {
     let mut symbols = Vec::new();
     for model in &netlist.models {
         symbols.push(completion::SymbolEntry {
             name: model.name.clone(),
             kind: "model",
             detail: model.model_type.to_ascii_uppercase(),
-            doc: format!(
-                "{} model card from this deck · {} parameter(s).",
-                model.model_type.to_ascii_uppercase(),
-                model.params.len() + model.expr_params.len() + model.string_params.len()
+            doc: messages.format(
+                MessageId::NetlistModelCardDoc,
+                &[
+                    ("kind", &model.model_type.to_ascii_uppercase()),
+                    (
+                        "parameters",
+                        &messages.counted(
+                            model.params.len()
+                                + model.expr_params.len()
+                                + model.string_params.len(),
+                            MessageId::NetlistParameterCountSingular,
+                            MessageId::NetlistParameterCount,
+                        ),
+                    ),
+                ],
             ),
         });
     }
@@ -1854,7 +1960,11 @@ fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntr
         symbols.push(completion::SymbolEntry {
             name: subckt.name.clone(),
             kind: "subckt",
-            detail: format!("{} ports", subckt.ports.len()),
+            detail: messages.counted(
+                subckt.ports.len(),
+                MessageId::NetlistPortCountSingular,
+                MessageId::NetlistPortCount,
+            ),
             doc: format!(".subckt {} {}", subckt.name, subckt.ports.join(" ")),
         });
     }
@@ -1923,6 +2033,9 @@ mod include_shadow_tests {
         let diagnostics = shadowed_include_diagnostics(
             &harness.state.code_workspace.include_resolutions,
             "shadow deck\n.include models.lib\n.end\n",
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
         );
 
         assert_eq!(diagnostics.len(), 1);
@@ -1968,6 +2081,9 @@ mod include_shadow_tests {
             shadowed_include_diagnostics(
                 &harness.state.code_workspace.include_resolutions,
                 "shadow deck\n.include models.lib\n.end\n",
+                crate::workbench::MessageCatalog::new(
+                    crate::workbench::UiTextLocale::EnglishUnitedStates
+                ),
             )
             .is_empty()
         );

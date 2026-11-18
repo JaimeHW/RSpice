@@ -24,6 +24,7 @@ fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
         &mut state.code.code_workspace,
         &state.code.netlist,
         &state.platform,
+        state.workbench.messages(),
     )
 }
 
@@ -161,7 +162,10 @@ fn an_open_deck_states_its_properties_without_identity_jargon() {
                 || node.value().is_some_and(|value| value.contains(text))
         })
     };
-    assert!(says("Top deck"), "the deck row is missing");
+    assert!(
+        nodes.values().any(|node| node.label() == Some("Deck")),
+        "the deck row is missing"
+    );
     assert!(says("Line endings"), "the line endings row is missing");
     for jargon in [
         "Identity",
@@ -292,7 +296,7 @@ fn the_lifecycle_rows_share_the_dialog_titles_left_edge() {
         .max_by(|a, b| a.y1.total_cmp(&b.y1))
         .expect("the footer's Close");
     let title = surface.x0 + (surface.x1 - footer.x1);
-    for row in ["Top deck", "Line endings"] {
+    for row in ["Deck", "Line endings"] {
         let left = node_left(&nodes, row);
         assert!(
             (left - title).abs() < 1.0,

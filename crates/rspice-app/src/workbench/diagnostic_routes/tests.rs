@@ -142,7 +142,7 @@ fn a_netlist_route_to_a_retired_record_states_its_refusal() {
 
     assert_eq!(
         app.state.prompt_text(),
-        Some("The selected diagnostic is no longer available."),
+        Some("That finding is no longer listed."),
         "an unresolvable record must say so rather than opening nothing silently"
     );
 }

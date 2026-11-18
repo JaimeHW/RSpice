@@ -47,6 +47,7 @@ fn deck_page() -> Replay {
         &mut replay.app.state.model,
         &mut replay.app.state.code.netlist,
         vec![OwnedNetlistReplacement::root(&typed, DECK.to_owned(), 1)],
+        replay.app.state.workbench.messages(),
     )
     .expect("the deck is open");
     replay.frames(Vec::new());

@@ -376,6 +376,7 @@ pub fn activate_netlist_dependency(
     runs: &mut RunsState,
     root: &crate::state::NetlistDocumentId,
     logical_identity: &str,
+    messages: crate::workbench::MessageCatalog,
 ) -> bool {
     let root_kind = if model
         .netlist_artifacts
@@ -402,6 +403,7 @@ pub fn activate_netlist_dependency(
             runs,
             root_kind,
             logical_identity,
+            messages,
         )
         .is_ok()
     })

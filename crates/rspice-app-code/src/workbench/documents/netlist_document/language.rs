@@ -1199,6 +1199,7 @@ pub(crate) fn open_project_location_in(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     location: &ProjectSourceLocation,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     if let Some(identity) = location.dependency_identity.as_deref() {
         super::open_netlist_dependency_from_root_in(
@@ -1208,6 +1209,7 @@ pub(crate) fn open_project_location_in(
             runs,
             location.root,
             identity,
+            messages,
         )?;
     } else {
         match location.root {
@@ -1218,19 +1220,17 @@ pub(crate) fn open_project_location_in(
             }
             NetlistRoot::Deck => {
                 if !crate::workbench::documents::deck_files::show_deck(model, netlist) {
-                    return Err("The deck is no longer open.".to_owned());
+                    return Err(messages.text(MessageId::NetlistDeckClosed));
                 }
             }
             NetlistRoot::AddedLines => {
                 super::show_added_lines(model, netlist);
             }
             NetlistRoot::Comparison => {
-                return Err("A comparison has no project symbol definitions.".to_owned());
+                return Err(messages.text(MessageId::NetlistComparisonHasNoDefinitions));
             }
             NetlistRoot::RunInput => {
-                return Err(
-                    "The deck a completed run used has no project symbol definitions.".to_owned(),
-                );
+                return Err(messages.text(MessageId::NetlistRunInputHasNoDefinitions));
             }
         }
     }
@@ -1276,7 +1276,7 @@ pub fn go_to_definition_at_cursor_in(
     match definitions.as_slice() {
         [] => Err(messages.format(MessageId::NetlistNoDefinition, &[("name", &symbol)])),
         [definition] => {
-            open_project_location_in(model, netlist, open_documents, runs, definition)?;
+            open_project_location_in(model, netlist, open_documents, runs, definition, messages)?;
             Ok(messages.format(MessageId::NetlistOpenedDefinition, &[("name", &symbol)]))
         }
         _ => {
@@ -1347,9 +1347,10 @@ pub(crate) fn open_workspace_symbols(
     let count = index.symbols().len();
     workbench.navigator_visible = true;
     workbench.clear_navigator_filter();
-    Ok(messages.format(
+    Ok(messages.counted(
+        count,
+        MessageId::NetlistShowingSymbolSingular,
         MessageId::NetlistShowingSymbols,
-        &[("count", &count.to_string())],
     ))
 }
 
@@ -1360,10 +1361,11 @@ pub(crate) fn preferred_quick_fix_available(netlist: &NetlistDocumentState) -> b
 pub fn apply_preferred_quick_fix(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
+    messages: MessageCatalog,
 ) -> Result<String, String> {
-    let fix = preferred_quick_fix(netlist)
-        .ok_or_else(|| "No preferred quick fix is available at the caret.".to_owned())?;
-    apply_quick_fix(model, netlist, &fix)
+    let fix =
+        preferred_quick_fix(netlist).ok_or_else(|| messages.text(MessageId::NetlistNoQuickFix))?;
+    apply_quick_fix(model, netlist, &fix, messages)
 }
 
 /// Apply the fix one named finding offered.
@@ -1377,14 +1379,15 @@ pub fn apply_quick_fix_for_finding(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     finding: uuid::Uuid,
+    messages: MessageCatalog,
 ) -> Result<String, String> {
     let fix = netlist
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.canonical.diagnostic_id == finding && diagnostic.is_current())
         .and_then(BoundQuickFix::of)
-        .ok_or_else(|| "That finding no longer offers a fix.".to_owned())?;
-    apply_quick_fix(model, netlist, &fix)
+        .ok_or_else(|| messages.text(MessageId::NetlistFindingHasNoFix))?;
+    apply_quick_fix(model, netlist, &fix, messages)
 }
 
 /// The file the finding `finding` offers to add to its deck, when its fix
@@ -1440,9 +1443,10 @@ fn apply_quick_fix(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     bound: &BoundQuickFix,
+    messages: MessageCatalog,
 ) -> Result<String, String> {
     if !super::active_netlist_source_is_editable_in(model, netlist) {
-        return Err("Quick fixes cannot edit this read-only source.".to_owned());
+        return Err(messages.text(MessageId::NetlistQuickFixReadOnly));
     }
     let source = model.simulation.source.netlist_content.clone();
     // The revision is the binding every editor path moves; the digest is what
@@ -1450,7 +1454,7 @@ fn apply_quick_fix(
     if netlist.revision != bound.revision
         || crate::state::content_digest(&source).to_string() != *bound.validation_id
     {
-        return Err("The text has changed since this fix was offered.".to_owned());
+        return Err(messages.text(MessageId::NetlistQuickFixTextChanged));
     }
     let fix = &bound.fix;
     if fix.add_file.is_some() {
@@ -1461,7 +1465,7 @@ fn apply_quick_fix(
         || !source.is_char_boundary(fix.span.start)
         || !source.is_char_boundary(fix.span.end)
     {
-        return Err("The fix no longer fits the text.".to_owned());
+        return Err(messages.text(MessageId::NetlistQuickFixNoLongerFits));
     }
     let mut replacement = source.clone();
     replacement.replace_range(fix.span.clone(), &fix.replacement);
@@ -1470,8 +1474,8 @@ fn apply_quick_fix(
     } else {
         super::OwnedNetlistReplacement::root(&source, replacement, 1)
     };
-    super::replace_deck_files(model, netlist, vec![edit])?;
-    Ok(format!("Applied quick fix: {}", fix.label))
+    super::replace_deck_files(model, netlist, vec![edit], messages)?;
+    Ok(messages.format(MessageId::NetlistQuickFixApplied, &[("fix", &fix.label)]))
 }
 
 fn preferred_quick_fix(netlist: &NetlistDocumentState) -> Option<BoundQuickFix> {

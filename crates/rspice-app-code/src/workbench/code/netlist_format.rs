@@ -36,19 +36,30 @@ pub fn format_owned_netlist(cx: &mut Cx<'_, CodeFeature>) {
                 == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
     });
     if has_errors {
-        cx.wb
-            .prompt("Fix the errors the check found before formatting.");
+        cx.wb.prompt(
+            cx.wb
+                .messages()
+                .text(crate::workbench::MessageId::NetlistFormatHasErrors),
+        );
         return;
     }
     let source = cx.model.simulation.source.netlist_content.clone();
     let formatted = formatted_deck_text(&source, shows_spectre(cx));
     if formatted == source {
-        cx.wb.prompt("The file is already formatted.");
+        cx.wb.prompt(
+            cx.wb
+                .messages()
+                .text(crate::workbench::MessageId::NetlistFormatUnchanged),
+        );
     } else if crate::workbench::documents::netlist_document::edit_deck_file(
         cx.model,
         &mut cx.state.netlist,
         formatted,
     ) {
-        cx.wb.prompt("Formatted the file.");
+        cx.wb.prompt(
+            cx.wb
+                .messages()
+                .text(crate::workbench::MessageId::NetlistFormatted),
+        );
     }
 }

@@ -463,6 +463,7 @@ fn the_deck_compared_with_its_file_shows_the_edit_on_a_tab_naming_both() {
         &app.state.runs,
         CompareSide::DiskFile(deck),
         CompareSide::Deck(deck),
+        app.state.workbench.messages(),
     )
     .expect("the deck and its file compare");
     application_frame(&mut app);
@@ -530,6 +531,7 @@ fn a_comparison_tab_names_the_two_texts_it_compares() {
         &app.state.runs,
         CompareSide::Deck(deck),
         CompareSide::Generated,
+        app.state.workbench.messages(),
     )
     .expect("the deck and the generated netlist compare");
 

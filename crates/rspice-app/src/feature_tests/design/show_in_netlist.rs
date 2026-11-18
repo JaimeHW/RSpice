@@ -203,7 +203,10 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
     // the caret request and the cursor have to agree about which card it is.
     assert_eq!(state.code.netlist.requested_line, Some(3));
     assert_eq!(state.code.netlist.cursor_line, 2);
-    assert_eq!(prompt(&state), "Located instance R1 at generated line 3.");
+    assert_eq!(
+        prompt(&state),
+        "Instance R1 is on line 3 of the generated netlist."
+    );
 }
 
 /// A stale deck still resolves — it is what the project last generated — but
@@ -231,7 +234,7 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
     assert_eq!(state.code.netlist.requested_line, Some(2));
     assert_eq!(
         prompt(&state),
-        "Located instance V1 at generated line 2 in a stale deck; regenerating it may move the card."
+        "Instance V1 is on line 2 of the generated netlist, which is older than the schematic; the line may move when the netlist is generated again."
     );
 }
 

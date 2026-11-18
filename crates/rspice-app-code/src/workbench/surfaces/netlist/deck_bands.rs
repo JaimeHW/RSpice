@@ -78,17 +78,17 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
         let answered = match pressed {
             Some(DiskAnswer::Reload) => {
                 deck_files::reload_from_disk(cx.model, &mut cx.state.netlist, include.as_deref())
-                    .map(|()| format!("Reloaded {name} from disk."))
+                    .map(|()| messages.format(MessageId::NetlistDeckReloaded, &[("name", &name)]))
             }
             Some(DiskAnswer::KeepMine) => {
                 deck_files::keep_mine(&mut cx.state.netlist, include.as_deref());
-                Ok(format!(
-                    "Kept your {name}: the next Save writes it over the file."
-                ))
+                Ok(messages.format(MessageId::NetlistDeckKeptMine, &[("name", &name)]))
             }
             Some(DiskAnswer::Compare) => {
                 deck_files::compare_with_disk(cx.model, &mut cx.state.netlist, include.as_deref())
-                    .map(|()| format!("{name} on disk, against yours."))
+                    .map(|()| {
+                        messages.format(MessageId::NetlistDeckComparedWithDisk, &[("name", &name)])
+                    })
             }
             None => return,
         };
@@ -206,9 +206,9 @@ fn answer_missing(
             &mut cx.state.netlist_open_documents,
             missing.id,
         ) {
-            Ok(name) => cx.wb.prompt(format!(
-                "Removed {name} from the project; its file stays on disk."
-            )),
+            Ok(name) => cx
+                .wb
+                .prompt(messages.format(MessageId::NetlistDeckRemoved, &[("name", &name)])),
             Err(error) => cx.wb.prompt(error),
         }
     }
@@ -224,10 +224,12 @@ fn answer_missing(
             missing.id,
             &path,
         ) {
-            Ok(()) => cx.wb.prompt(format!(
-                "{} is now read from {}.",
-                missing.name,
-                path.display()
+            Ok(()) => cx.wb.prompt(messages.format(
+                MessageId::NetlistDeckLocated,
+                &[
+                    ("name", &missing.name),
+                    ("path", &path.display().to_string()),
+                ],
             )),
             Err(error) => cx.wb.prompt(error),
         }

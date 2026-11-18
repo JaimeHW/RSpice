@@ -816,6 +816,7 @@ pub(crate) fn commit_rename(
             MessageId::NetlistRenameStep,
             &[("old", &old), ("new", &new_name)],
         ),
+        messages,
     )?;
     Ok(messages.format(
         MessageId::NetlistRenamed,
@@ -867,6 +868,7 @@ pub fn open_deck_place(
             line,
             column,
         },
+        workbench.messages(),
     )?;
     workbench.activate(crate::workbench::state::Workspace::Netlist);
     let buffer = &model.simulation.source.netlist_content;

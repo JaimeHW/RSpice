@@ -26,7 +26,12 @@ fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
 fn deck_facts_read_the_live_document_rather_than_placeholders() {
     let mut app = netlist_first_app();
     let index = root_deck_source_index_now(&app.state.model, &mut app.state.code.netlist);
-    let facts = deck_facts(&app.state.model, &app.state.code.netlist, &index);
+    let facts = deck_facts(
+        &app.state.model,
+        &app.state.code.netlist,
+        &index,
+        app.state.workbench.messages(),
+    );
 
     assert!(facts.name.contains("front_end"), "name: {}", facts.name);
     assert_eq!(facts.lines, 13);

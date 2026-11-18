@@ -55,7 +55,7 @@ fn export_is_a_command_form_without_the_sealing_boxes() {
 fn every_refusal_is_one_footer_line() {
     let refusals = [
         (
-            "Fix the netlist's problems, then export.",
+            "Fix the netlist's errors, then export.",
             Some("unresolved model"),
             None,
         ),

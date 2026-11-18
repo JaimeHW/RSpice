@@ -28,8 +28,7 @@ pub const MAX_RETAINED_RUNS: usize = 4;
 pub fn absent_deck_reason() -> &'static str {
     static REASON: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         format!(
-            "the archive keeps the last {MAX_RETAINED_RUNS} runs' decks, so this run's was \
-             dropped or predates deck retention"
+            "only the last {MAX_RETAINED_RUNS} runs' inputs are kept, and this run is older"
         )
     });
     &REASON

@@ -110,7 +110,7 @@ fn no_source_page_carries_an_editor_menu_of_its_own() {
     frame(&ctx, &mut app, DESKTOP);
     let output = frame(&ctx, &mut app, DESKTOP);
     assert!(
-        has_label(&output, "Find in active netlist document"),
+        has_label(&output, "Find in this document"),
         "the Netlist workspace was drawn"
     );
     assert!(!has_label(&output, "Editor"), "Netlist workspace");

@@ -218,6 +218,7 @@ fn undo_past_the_editor_history_steps_the_decks_own_edit() {
         &mut replay.app.state.model,
         &mut replay.app.state.code.netlist,
         vec![OwnedNetlistReplacement::root(&before, replaced.clone(), 1)],
+        replay.app.state.workbench.messages(),
     )
     .expect("the deck is open");
     replay.frames(Vec::new());

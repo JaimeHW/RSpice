@@ -429,8 +429,14 @@ fn compare_deck_menu(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: La
         );
     });
     if let Some((left, right)) = chosen
-        && let Err(error) =
-            netlist_document::compare(cx.model, &mut cx.state.netlist, cx.runs, left, right)
+        && let Err(error) = netlist_document::compare(
+            cx.model,
+            &mut cx.state.netlist,
+            cx.runs,
+            left,
+            right,
+            cx.wb.messages(),
+        )
     {
         cx.wb.prompt(error);
     }

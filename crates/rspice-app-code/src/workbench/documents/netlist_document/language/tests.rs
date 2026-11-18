@@ -748,8 +748,13 @@ fn validated_fix_state() -> (CodeHarness, uuid::Uuid) {
 fn a_quick_fix_pressed_twice_applies_once() {
     let (mut harness, finding) = validated_fix_state();
 
-    apply_quick_fix_for_finding(&mut harness.model, &mut harness.state.netlist, finding)
-        .expect("the fix applies to its own bytes");
+    apply_quick_fix_for_finding(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        finding,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
+    .expect("the fix applies to its own bytes");
     let fixed = FIX_DECK.replace("1kk", "1k");
     assert_eq!(harness.model.simulation.source.netlist_content, fixed);
     assert!(
@@ -762,9 +767,13 @@ fn a_quick_fix_pressed_twice_applies_once() {
         "precondition: nothing marked the finding stale between the presses",
     );
 
-    let refused =
-        apply_quick_fix_for_finding(&mut harness.model, &mut harness.state.netlist, finding)
-            .expect_err("a second press has no bytes of its own left to fix");
+    let refused = apply_quick_fix_for_finding(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        finding,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
+    .expect_err("a second press has no bytes of its own left to fix");
     assert!(refused.contains("has changed"), "{refused}");
     assert_eq!(
         harness.model.simulation.source.netlist_content, fixed,
@@ -782,12 +791,17 @@ fn a_refused_quick_fix_does_not_ask_for_a_validate_the_page_no_longer_has() {
         &mut harness.model,
         &mut harness.state.netlist,
         uuid::Uuid::new_v4(),
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     )
     .expect_err("no finding has that identity");
     harness.state.netlist.revision += 1;
-    let moved =
-        apply_quick_fix_for_finding(&mut harness.model, &mut harness.state.netlist, finding)
-            .expect_err("the text moved on since the finding");
+    let moved = apply_quick_fix_for_finding(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        finding,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
+    .expect_err("the text moved on since the finding");
     for refusal in [gone, moved] {
         assert!(!refusal.to_lowercase().contains("validat"), "{refusal}");
     }
@@ -802,16 +816,30 @@ fn a_quick_fix_is_refused_after_an_intervening_edit() {
     harness.model.simulation.source.netlist_content = edited.clone();
     harness.state.netlist.revision += 1;
     assert!(
-        apply_quick_fix_for_finding(&mut harness.model, &mut harness.state.netlist, finding)
-            .is_err()
+        apply_quick_fix_for_finding(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            finding,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates
+            )
+        )
+        .is_err()
     );
     assert_eq!(harness.model.simulation.source.netlist_content, edited);
 
     let (mut harness, finding) = validated_fix_state();
     harness.model.simulation.source.netlist_content = edited.clone();
     assert!(
-        apply_quick_fix_for_finding(&mut harness.model, &mut harness.state.netlist, finding)
-            .is_err(),
+        apply_quick_fix_for_finding(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            finding,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates
+            )
+        )
+        .is_err(),
         "the digest refuses bytes a writer replaced without moving the revision",
     );
     assert_eq!(harness.model.simulation.source.netlist_content, edited);
@@ -824,9 +852,13 @@ fn a_quick_fix_is_refused_after_an_intervening_edit() {
 fn a_quick_fix_is_refused_when_only_the_revision_moved() {
     let (mut harness, finding) = validated_fix_state();
     harness.state.netlist.revision += 1;
-    let refused =
-        apply_quick_fix_for_finding(&mut harness.model, &mut harness.state.netlist, finding)
-            .expect_err("the finding was validated at an earlier revision");
+    let refused = apply_quick_fix_for_finding(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        finding,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    )
+    .expect_err("the finding was validated at an earlier revision");
     assert!(refused.contains("has changed"), "{refused}");
     assert_eq!(harness.model.simulation.source.netlist_content, FIX_DECK);
 }

@@ -17,6 +17,7 @@ use egui::Context;
 
 use crate::state::ViewType;
 use crate::state::command_catalog::CommandKey;
+use crate::workbench::MessageId;
 use crate::workbench::app::actions::veriloga_symbol::can_open_veriloga_symbol;
 use crate::workbench::app::dialogs::library::new_veriloga_device::{
     self, new_veriloga_device_available_in, open_new_veriloga_device_form_in,
@@ -282,14 +283,8 @@ impl CommandSet for CodeCommand {
                 new_veriloga_device_available_in(model),
                 "no library can be written",
             ),
-            Self::OpenNetlist => (
-                !execution_active,
-                "an active simulation execution still owns the project",
-            ),
-            Self::NewDeck => (
-                !execution_active,
-                "an active simulation execution still owns the project",
-            ),
+            Self::OpenNetlist => (!execution_active, "a run is in progress"),
+            Self::NewDeck => (!execution_active, "a run is in progress"),
             Self::SaveDeckAs => (
                 cfg!(not(target_arch = "wasm32")) && reads.state.netlist.open_deck.is_some(),
                 if cfg!(target_arch = "wasm32") {
@@ -301,7 +296,7 @@ impl CommandSet for CodeCommand {
             Self::SaveNetlistAsDeck => (
                 !execution_active && !model.netlist_artifacts.generated_source.trim().is_empty(),
                 if execution_active {
-                    "an active simulation execution still owns the project"
+                    "a run is in progress"
                 } else {
                     "the netlist has not been generated"
                 },
@@ -382,14 +377,14 @@ impl CommandSet for CodeCommand {
                     .wb
                     .active_source_editor
                     .is_some_and(|editor| editor.navigable),
-                "the source document is read-only",
+                "the document is read-only",
             ),
             Self::RenameSymbol => (
                 reads
                     .wb
                     .active_source_editor
                     .is_some_and(|editor| editor.navigable && editor.editable),
-                "the source document is read-only",
+                "the document is read-only",
             ),
             Self::CompareGeneratedRevisions => (
                 netlist_page_on_screen(reads)
@@ -425,7 +420,7 @@ impl CommandSet for CodeCommand {
             | Self::ShowProblemAtCaret
             | Self::ShowValueAtCaret => (
                 reads.wb.active_source_editor.is_some(),
-                "the source document is read-only",
+                "no document is open",
             ),
             Self::ToggleLineComment
             | Self::IndentLines
@@ -442,10 +437,7 @@ impl CommandSet for CodeCommand {
             | Self::FoldSelection
             | Self::UnfoldAtCaret
             | Self::FoldAll
-            | Self::UnfoldAll => (
-                editor_takes(reads.wb, self),
-                "the source document is read-only",
-            ),
+            | Self::UnfoldAll => (editor_takes(reads.wb, self), "the document is read-only"),
         };
         if enabled {
             CommandAvailability::Available
@@ -590,9 +582,13 @@ pub(crate) fn show_in_schematic(cx: &mut Cx<'_, CodeFeature>) {
                 .outbox
                 .push(CodeRequest::ShowNetInSchematic { schematic, net });
         }
-        Err(reason) => cx
-            .wb
-            .prompt(format!("Cannot show the line in the schematic: {reason}.")),
+        Err(reason) => {
+            let text = cx.wb.messages().format(
+                MessageId::NetlistCannotShowInSchematic,
+                &[("reason", reason)],
+            );
+            cx.wb.prompt(text);
+        }
     }
 }
 
@@ -612,10 +608,14 @@ pub fn source_menu_label(
     key: CommandKey,
     model: &crate::workbench::app_state::Model,
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+    messages: crate::workbench::MessageCatalog,
 ) -> Option<String> {
     let quantity = plot_quantity(CodeCommand::from_key(key)?)?;
     let (name, _) = quantity.of(cross_probe::caret_name(model, netlist)?)?;
-    Some(format!("Plot {}", quantity.vector(name)))
+    Some(messages.format(
+        MessageId::NetlistPlotVector,
+        &[("vector", &quantity.vector(name))],
+    ))
 }
 
 /// Put the quantity of the name under the caret on the waveform viewer's
@@ -634,7 +634,11 @@ fn plot_from_source(cx: &mut Cx<'_, CodeFeature>, quantity: cross_probe::PlotQua
     let target = match target {
         Ok(target) => target,
         Err(reason) => {
-            cx.wb.prompt(format!("Cannot plot: {reason}."));
+            let text = cx
+                .wb
+                .messages()
+                .format(MessageId::NetlistCannotPlot, &[("reason", reason)]);
+            cx.wb.prompt(text);
             return;
         }
     };

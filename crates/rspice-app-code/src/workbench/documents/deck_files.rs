@@ -430,7 +430,7 @@ fn take_disk_text(
         None => OwnedNetlistReplacement::root(&original, change.text.clone(), 1),
         Some(key) => OwnedNetlistReplacement::dependency(key, &original, change.text.clone(), 1),
     };
-    let _ = crate::workbench::documents::netlist_document::replace_deck_files(
+    let _ = crate::workbench::documents::netlist_document::apply_deck_replacements(
         model,
         netlist,
         vec![replacement],
@@ -859,6 +859,7 @@ pub fn add_file_to_deck(
     request: &crate::state::netlist_diagnostics::DeckFileRequest,
     text: String,
     encoding: TextEncoding,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<String, String> {
     let deck = netlist
         .open_deck
@@ -882,7 +883,7 @@ pub fn add_file_to_deck(
     }
     let added = kept.is_none();
     if let Some(to) = &request.rewrite_to {
-        rewrite_named_path(model, netlist, request, to)?;
+        rewrite_named_path(model, netlist, request, to, messages)?;
     }
     let Some(deck) = netlist.open_deck.as_mut() else {
         return Err("No deck is open.".to_owned());
@@ -929,6 +930,7 @@ fn rewrite_named_path(
     netlist: &mut NetlistDocumentState,
     request: &crate::state::netlist_diagnostics::DeckFileRequest,
     to: &str,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<(), String> {
     let deck = netlist
         .open_deck
@@ -972,6 +974,7 @@ fn rewrite_named_path(
             model,
             netlist,
             vec![edit],
+            messages,
         )?;
         return Ok(());
     }
@@ -1753,6 +1756,7 @@ pub fn show_include(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     path: &Path,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<(), String> {
     let deck = netlist
         .open_deck
@@ -1809,6 +1813,7 @@ pub fn show_include(
         root,
         &key,
         text,
+        messages,
     )
 }
 

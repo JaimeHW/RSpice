@@ -256,6 +256,7 @@ fn parse_native_fixture(
         IncludeAccess::NativeFilesystem,
         None,
         &NoAbort,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
     (diagnostics, symbols)
 }
@@ -414,16 +415,13 @@ fn live_lint_fails_closed_when_browser_cannot_resolve_include() {
         IncludeAccess::AuthenticatedBundleOnly,
         None,
         &NoAbort,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
 
     assert!(symbols.is_none());
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].line, Some(1));
-    assert!(
-        diagnostics[0]
-            .message
-            .contains("must come from an imported source bundle")
-    );
+    assert!(diagnostics[0].message.contains("must be imported first"));
 }
 
 #[test]
@@ -437,14 +435,15 @@ fn live_lint_parses_dependency_free_browser_deck_without_a_bundle() {
         IncludeAccess::AuthenticatedBundleOnly,
         None,
         &NoAbort,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
 
     assert!(symbols.is_some());
-    assert!(diagnostics.iter().all(|diagnostic| {
-        !diagnostic
-            .message
-            .contains("must come from an imported source bundle")
-    }));
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| { !diagnostic.message.contains("must be imported first") })
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -472,6 +471,7 @@ fn live_lint_parses_authenticated_browser_model_bundle_without_filesystem_fallba
         IncludeAccess::AuthenticatedBundleOnly,
         Some(&sealed),
         &NoAbort,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
 
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
@@ -494,12 +494,17 @@ fn live_lint_uses_abort_aware_parser_contract() {
         IncludeAccess::NativeFilesystem,
         None,
         &rspice_core::abort_signal::ImmediateAbort,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
 
     assert!(symbols.is_none());
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
-    assert!(diagnostics[0].message.contains("cancelled"));
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("stopped before it finished")
+    );
 }
 
 /// A deck in the editor, validated the way the editor validates it.
@@ -699,7 +704,7 @@ fn the_reference_lint_counts_only_the_branch_the_parser_takes() {
         .collect::<Vec<_>>();
     assert_eq!(
         unknown,
-        vec!["Unknown model `dsel` in this deck.".to_owned()]
+        vec!["Unknown model 'dsel' in this deck.".to_owned()]
     );
 }
 
@@ -770,7 +775,7 @@ fn control_commands_reach_the_document_line_by_line_and_feed_the_band() {
             .map(String::as_str)
             .collect::<Vec<_>>(),
         vec![
-            "line 5 · Control command `tran` was promoted into `.tran 1n 100n`.",
+            "line 5 · Control command 'tran' became '.tran 1n 100n'.",
             "line 6 · control command 'print' ignored; .control scripting is not executed, so whatever it requests (output, plotting, control flow) will not run",
         ],
         "the hover walks down the block rather than listing promotions and drops apart"
@@ -995,7 +1000,7 @@ fn output_symbol_diagnostics_preserve_origins_order_and_repetitions() {
     assert_eq!(diagnostics.len(), 2);
     assert_eq!(diagnostics[0].line, Some(6));
     assert_eq!(diagnostics[1].line, Some(10));
-    assert!(diagnostics[0].message.contains("node `missing`"));
+    assert!(diagnostics[0].message.contains("node 'missing'"));
     assert!(diagnostics[1].message.contains("device `Rbogus`"));
     assert_eq!(diagnostics[1].message.matches("device `Rbogus`").count(), 2);
 }
@@ -1041,7 +1046,7 @@ fn editor_keeps_completion_symbols_when_only_output_validation_fails() {
     );
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].line, Some(2));
-    assert!(diagnostics[0].message.contains("node `missing` via V"));
+    assert!(diagnostics[0].message.contains("node 'missing' via V"));
     assert!(diagnostics[0].message.contains(".PRINT"));
 }
 
@@ -1071,7 +1076,11 @@ fn output_expression_diagnostic_is_localized_to_the_authored_request() {
             },
         },
     ));
-    let diagnostic = parse_error_diagnostic_at(error, Some(Path::new("deck.cir")));
+    let diagnostic = parse_error_diagnostic_at(
+        error,
+        Some(Path::new("deck.cir")),
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+    );
     assert_eq!(diagnostic.line, Some(8));
     assert_eq!(diagnostic.source_line, Some(8));
     assert!(diagnostic.message.contains(".PRINT"));
@@ -1413,6 +1422,9 @@ fn a_spectre_deck_is_checked_as_spectre_under_its_own_name() {
             access,
             None,
             &NoAbort,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
         );
         let case = format!("{file:?} {name:?} {access:?}");
         assert!(
@@ -1435,6 +1447,7 @@ fn a_finding_about_unnamed_text_names_no_file() {
         platform_include_access(),
         None,
         &NoAbort,
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
     assert!(
         !diagnostics.is_empty(),

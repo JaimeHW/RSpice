@@ -13,6 +13,8 @@ use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
+use crate::workbench::{MessageCatalog, MessageId};
+
 const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
 
 mod added_lines;
@@ -128,9 +130,53 @@ impl OwnedNetlistReplacement {
 
 #[derive(Debug, Clone)]
 struct NetlistEditJournalEntry {
-    description: String,
+    description: EditDescription,
     forward: Vec<OwnedNetlistReplacement>,
     reverse: Vec<OwnedNetlistReplacement>,
+}
+
+/// What a step of the netlist page's history did, as Undo and Redo name it.
+#[derive(Debug, Clone)]
+enum EditDescription {
+    /// Matches replaced, counted.
+    Replaced(usize),
+    /// A step its maker named, such as a rename.
+    Named(String),
+}
+
+impl EditDescription {
+    fn text(&self, messages: MessageCatalog) -> String {
+        match self {
+            Self::Replaced(count) => messages.counted(
+                *count,
+                MessageId::NetlistReplaceStepSingular,
+                MessageId::NetlistReplaceStep,
+            ),
+            Self::Named(text) => text.clone(),
+        }
+    }
+}
+
+/// Why a set of replacements changed nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckEditRefusal {
+    /// No deck is open.
+    NoDeck,
+    /// A file a replacement names is no longer open.
+    FileClosed,
+    /// A file changed after the replacements were prepared from it.
+    FileChanged,
+}
+
+impl DeckEditRefusal {
+    #[must_use]
+    pub fn text(self, messages: MessageCatalog) -> String {
+        messages.text(match self {
+            Self::NoDeck => MessageId::NetlistReplaceNoDeck,
+            Self::FileClosed => MessageId::NetlistReplaceFileClosed,
+            Self::FileChanged => MessageId::NetlistReplaceFileChanged,
+        })
+    }
 }
 
 const MAX_NETLIST_EDIT_JOURNAL_ENTRIES: usize = 32;
@@ -155,7 +201,17 @@ pub fn replace_deck_files(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     replacements: Vec<OwnedNetlistReplacement>,
+    messages: MessageCatalog,
 ) -> Result<usize, String> {
+    apply_deck_replacements(model, netlist, replacements).map_err(|refusal| refusal.text(messages))
+}
+
+/// [`replace_deck_files`], refused for a reason rather than in words.
+pub(crate) fn apply_deck_replacements(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    replacements: Vec<OwnedNetlistReplacement>,
+) -> Result<usize, DeckEditRefusal> {
     replace_deck_files_impl(model, netlist, replacements, true)
 }
 
@@ -164,7 +220,7 @@ fn replace_deck_files_impl(
     netlist: &mut NetlistDocumentState,
     replacements: Vec<OwnedNetlistReplacement>,
     record_edit: bool,
-) -> Result<usize, String> {
+) -> Result<usize, DeckEditRefusal> {
     let applied = replacements
         .into_iter()
         .filter(|replacement| {
@@ -174,19 +230,13 @@ fn replace_deck_files_impl(
     if applied.is_empty() {
         return Ok(0);
     }
-    let deck = netlist
-        .open_deck
-        .as_mut()
-        .ok_or_else(|| "No deck is open; nothing was changed.".to_owned())?;
+    let deck = netlist.open_deck.as_mut().ok_or(DeckEditRefusal::NoDeck)?;
     for replacement in &applied {
-        let file = deck.file(replacement.include()).ok_or_else(|| {
-            "A file the replacement names is no longer open; nothing was changed.".to_owned()
-        })?;
+        let file = deck
+            .file(replacement.include())
+            .ok_or(DeckEditRefusal::FileClosed)?;
         if crate::state::content_digest(&file.text) != replacement.expected_digest {
-            return Err(
-                "A file changed after the replacement was prepared; nothing was changed."
-                    .to_owned(),
-            );
+            return Err(DeckEditRefusal::FileChanged);
         }
     }
     let changed_count = applied
@@ -213,7 +263,7 @@ fn replace_deck_files_impl(
         record_netlist_edit(
             netlist,
             NetlistEditJournalEntry {
-                description: format!("replace {changed_count} netlist match(es)"),
+                description: EditDescription::Replaced(changed_count),
                 forward: applied,
                 reverse,
             },
@@ -229,6 +279,7 @@ pub(crate) fn replace_deck_files_a_step_per_file(
     netlist: &mut NetlistDocumentState,
     replacements: Vec<OwnedNetlistReplacement>,
     description: &str,
+    messages: MessageCatalog,
 ) -> Result<usize, String> {
     let steps = replacements
         .iter()
@@ -237,13 +288,14 @@ pub(crate) fn replace_deck_files_a_step_per_file(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let changed = replace_deck_files_impl(model, netlist, replacements, false)?;
+    let changed = replace_deck_files_impl(model, netlist, replacements, false)
+        .map_err(|refusal| refusal.text(messages))?;
     for step in steps {
         let reverse = vec![step.reversed()];
         record_netlist_edit(
             netlist,
             NetlistEditJournalEntry {
-                description: description.to_owned(),
+                description: EditDescription::Named(description.to_owned()),
                 forward: vec![step],
                 reverse,
             },
@@ -265,15 +317,16 @@ pub fn can_redo_netlist_edit(netlist: &NetlistDocumentState) -> bool {
 pub fn undo_netlist_edit(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
+    messages: MessageCatalog,
 ) -> Result<Option<String>, String> {
     let Some(entry) = netlist.edit_undo.pop() else {
         return Ok(None);
     };
-    if let Err(error) = replace_deck_files_impl(model, netlist, entry.reverse.clone(), false) {
+    if let Err(refusal) = replace_deck_files_impl(model, netlist, entry.reverse.clone(), false) {
         netlist.edit_undo.push(entry);
-        return Err(error);
+        return Err(refusal.text(messages));
     }
-    let description = entry.description.clone();
+    let description = entry.description.text(messages);
     netlist.edit_redo.push(entry);
     Ok(Some(description))
 }
@@ -281,15 +334,16 @@ pub fn undo_netlist_edit(
 pub fn redo_netlist_edit(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
+    messages: MessageCatalog,
 ) -> Result<Option<String>, String> {
     let Some(entry) = netlist.edit_redo.pop() else {
         return Ok(None);
     };
-    if let Err(error) = replace_deck_files_impl(model, netlist, entry.forward.clone(), false) {
+    if let Err(refusal) = replace_deck_files_impl(model, netlist, entry.forward.clone(), false) {
         netlist.edit_redo.push(entry);
-        return Err(error);
+        return Err(refusal.text(messages));
     }
-    let description = entry.description.clone();
+    let description = entry.description.text(messages);
     netlist.edit_undo.push(entry);
     Ok(Some(description))
 }
@@ -418,6 +472,7 @@ pub(crate) fn open_netlist_dependency_in(
     open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
     runs: &mut RunsState,
     logical_identity: &str,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     let root = netlist.front.root_kind();
     open_netlist_dependency_from_root_in(
@@ -427,6 +482,7 @@ pub(crate) fn open_netlist_dependency_in(
         runs,
         root,
         logical_identity,
+        messages,
     )
 }
 
@@ -440,27 +496,31 @@ pub fn open_netlist_dependency_from_root_in(
     runs: &mut RunsState,
     root: NetlistRoot,
     logical_identity: &str,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     if root == NetlistRoot::Deck {
         let path = std::path::PathBuf::from(logical_identity);
-        return super::deck_files::show_include(model, netlist, open_documents, runs, &path);
+        return super::deck_files::show_include(
+            model,
+            netlist,
+            open_documents,
+            runs,
+            &path,
+            messages,
+        );
     }
     if root == NetlistRoot::Comparison {
-        return Err("Revision comparisons do not own dependency documents.".to_owned());
+        return Err(messages.text(MessageId::NetlistComparisonHasNoIncludes));
     }
-    let document = canonical_root_document_in(model, netlist, root).ok_or_else(|| {
-        "The selected dependency root is no longer available in this workspace.".to_owned()
-    })?;
+    let document = canonical_root_document_in(model, netlist, root)
+        .ok_or_else(|| messages.text(MessageId::NetlistIncludeRootGone))?;
     let root_document_id = document.id();
     let source = document
         .dependencies()
         .iter()
         .find(|dependency| dependency.locator().logical_identity() == logical_identity)
         .and_then(crate::state::DependencyMetadata::source)
-        .ok_or_else(|| {
-            "The selected dependency is unresolved or no longer belongs to this source closure."
-                .to_owned()
-        })?
+        .ok_or_else(|| messages.text(MessageId::NetlistIncludeGone))?
         .to_owned();
     put_dependency_in_front(
         model,
@@ -471,6 +531,7 @@ pub fn open_netlist_dependency_from_root_in(
         root_document_id,
         logical_identity,
         source,
+        messages,
     )
 }
 
@@ -486,6 +547,7 @@ pub(crate) fn put_dependency_in_front(
     root_document_id: crate::state::NetlistDocumentId,
     logical_identity: &str,
     source: String,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     let tab = crate::workbench::state::WorkspaceDocumentId::NetlistDependency {
         root: root_document_id,
@@ -494,8 +556,9 @@ pub(crate) fn put_dependency_in_front(
     if !open_documents.contains(&tab)
         && open_documents.len() >= MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS
     {
-        return Err(format!(
-            "Close an include tab before opening another; the workspace retains at most {MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS} secondary netlist documents."
+        return Err(messages.format(
+            MessageId::NetlistIncludeTabsFull,
+            &[("count", &MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS.to_string())],
         ));
     }
     netlist.front = NetlistTab::Include {

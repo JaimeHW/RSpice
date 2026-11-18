@@ -70,7 +70,7 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     // page tabs, then the page's outline).
     header(ui, app);
     if section.container_draws_search {
-        workspace_search(ui, app, workspace, section.placeholder);
+        workspace_search(ui, app, workspace, &section.placeholder);
     }
     if let Some(requires_scroll) = section.pins_scroll_bar {
         // The salt the verification flows, the one section that scrolls,
@@ -104,7 +104,8 @@ pub fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let title = app.navigator_section(app.workbench().workspace).title;
+    let section = app.navigator_section(app.workbench().workspace);
+    let title: &str = &section.title;
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
     ui.ctx().accesskit_node_builder(response.id, |node| {
@@ -133,7 +134,7 @@ fn workspace_search(
     ui: &mut Ui,
     app: &mut impl WorkbenchHost,
     workspace: Workspace,
-    placeholder: &'static str,
+    placeholder: &str,
 ) -> bool {
     let mut focus =
         search_focus_requested::<FocusNavigatorSearch>(ui, &mut app.workbench_mut().outbox);
@@ -169,7 +170,7 @@ pub fn panel_search(
     ui: &mut Ui,
     query: &mut String,
     id: &'static str,
-    placeholder: &'static str,
+    placeholder: &str,
     focus_pending: &mut bool,
 ) -> bool {
     panel_search_keys(ui, query, id, placeholder, focus_pending).rows
@@ -189,7 +190,7 @@ pub fn panel_search_keys(
     ui: &mut Ui,
     query: &mut String,
     id: &'static str,
-    placeholder: &'static str,
+    placeholder: &str,
     focus_pending: &mut bool,
 ) -> PanelSearchKeys {
     let t = Tokens::get(ui.ctx());

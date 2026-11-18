@@ -113,12 +113,12 @@ pub enum ToolbarScope<W, S> {
 }
 
 /// What the navigator container draws around a workspace's navigator.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct NavigatorSection {
     /// The panel heading.
-    pub title: &'static str,
+    pub title: std::borrow::Cow<'static, str>,
     /// What the container's filter field shows while it is empty.
-    pub placeholder: &'static str,
+    pub placeholder: std::borrow::Cow<'static, str>,
     /// Whether the container draws the filter field above the navigator. A
     /// navigator that filters by facets of its own draws its own.
     pub container_draws_search: bool,

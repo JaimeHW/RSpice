@@ -54,6 +54,7 @@ fn include_in_front_app() -> RSpiceApp {
         &mut state.runs,
         NetlistRoot::Deck,
         DECK_INCLUDE,
+        state.workbench.messages(),
     )
     .expect("the include opens");
     let ctx = themed_context();

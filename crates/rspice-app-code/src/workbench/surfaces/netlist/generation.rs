@@ -14,6 +14,7 @@ use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
 };
+use crate::workbench::MessageId;
 use crate::workbench::app_state::Model;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::documents::netlist_document::{
@@ -56,8 +57,7 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
         cx.model.record(
             LogSeverity::Warning,
             LogSource::Netlist,
-            "The open include file is no longer part of the netlist; the top-level deck is shown \
-             instead.",
+            cx.wb.messages().text(MessageId::NetlistIncludeTabLeft),
         );
     }
 
@@ -158,8 +158,11 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
         return;
     }
     if cx.model.schematic.document().components.is_empty() {
-        cx.model.netlist_artifacts.generation_error =
-            Some("Add a circuit before generating the primary netlist.".to_owned());
+        cx.model.netlist_artifacts.generation_error = Some(
+            cx.wb
+                .messages()
+                .text(MessageId::NetlistGeneratedUnavailableDescription),
+        );
         return;
     }
     // This runs every frame the page is shown. Inputs that already failed
@@ -218,8 +221,7 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
                         failed(
                             cx.model,
                             &mut cx.state.netlist,
-                            "Generated document publication returned no generated artifact."
-                                .to_owned(),
+                            cx.wb.messages().text(MessageId::NetlistGenerationNotKept),
                         );
                         return;
                     };
@@ -241,7 +243,10 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
             cx.model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
-                crate::workbench::menu_bar::netlist_failure_text("Netlist generation", &reasons),
+                crate::workbench::menu_bar::netlist_failure_text(
+                    &cx.wb.messages().text(MessageId::NetlistGenerationHeading),
+                    &reasons,
+                ),
             );
             failed(cx.model, &mut cx.state.netlist, reasons.join("; "));
         }

@@ -19,8 +19,13 @@ pub struct SourceMenuLookup<'c, 'a>(pub &'c Cx<'a, CodeFeature>);
 
 impl MenuLookup for SourceMenuLookup<'_, '_> {
     fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str> {
-        crate::workbench::code::source_menu_label(key, self.0.model, &self.0.state.netlist)
-            .map_or_else(|| self.0.commands.label(key).into(), Into::into)
+        crate::workbench::code::source_menu_label(
+            key,
+            self.0.model,
+            &self.0.state.netlist,
+            self.0.wb.messages(),
+        )
+        .map_or_else(|| self.0.commands.label(key).into(), Into::into)
     }
 
     fn shortcut_label(

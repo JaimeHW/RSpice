@@ -118,11 +118,12 @@ fn the_page_names_the_deck_its_actions_and_its_facts() {
     let mut app = netlist_first_app();
     let text = painted_text(vec2(1440.0, 900.0), |ui| landing(&mut app, ui)).join("\n");
     for expected in [
-        EYEBROW,
+        "NETLIST-FIRST PROJECT \u{00b7} NO SCHEMATIC",
         "Open netlist workspace",
         "Create schematic\u{2026}",
-        "Promote to a schematic-driven project",
-        "Deck source",
+        "The netlist is then generated from the schematic",
+        "Deck",
+        "Includes",
         "front_end",
         "Deck summary",
         "Devices",
@@ -142,14 +143,20 @@ fn a_restored_session_shows_its_deck_before_the_editor_has_been_opened() {
     assert!(app.state.is_netlist_first_without_schematic());
 
     let text = painted_text(vec2(1440.0, 900.0), |ui| landing(&mut app, ui)).join("\n");
-    assert!(!text.contains("The deck has no source text."), "{text}");
+    assert!(!text.contains("The deck has no text."), "{text}");
     assert!(
         text.contains("R1 in inn 4.7k"),
         "deck lines missing in:\n{text}"
     );
     let index = root_deck_source_index_now(&app.state.model, &mut app.state.code.netlist);
     assert_eq!(
-        deck_facts(&app.state.model, &app.state.code.netlist, &index).lines,
+        deck_facts(
+            &app.state.model,
+            &app.state.code.netlist,
+            &index,
+            app.state.workbench.messages(),
+        )
+        .lines,
         13
     );
 }

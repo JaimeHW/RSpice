@@ -783,7 +783,7 @@ mod tests {
         assert!(
             english()
                 .text(*documentation)
-                .contains("device initial-condition")
+                .contains("initial conditions for devices")
         );
     }
 

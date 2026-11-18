@@ -10,6 +10,7 @@
 // `app_state` is being retired, and a submodule of it does not need its own.
 use super::{CompareSide, Model, NetlistDocumentState, NetlistTab};
 use crate::workbench::state::WorkbenchSession;
+use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// How many lines a comparison's second text adds to the first, and how
@@ -52,6 +53,7 @@ pub fn compare_generated_revision(
     netlist: &mut NetlistDocumentState,
     runs: &RunsState,
     index: usize,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     compare(
         model,
@@ -59,6 +61,7 @@ pub fn compare_generated_revision(
         runs,
         CompareSide::PreviousGenerated(index),
         CompareSide::Generated,
+        messages,
     )
 }
 
@@ -71,16 +74,20 @@ pub fn compare(
     runs: &RunsState,
     left: CompareSide,
     right: CompareSide,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
-    let (before, before_label) = side_text(model, netlist, runs, left)?;
-    let (after, after_label) = side_text(model, netlist, runs, right)?;
+    let (before, before_label) = side_text(model, netlist, runs, left, messages)?;
+    let (after, after_label) = side_text(model, netlist, runs, right, messages)?;
     let diff = similar::TextDiff::from_lines(before.as_str(), after.as_str())
         .unified_diff()
         .context_radius(3)
         .header(&before_label, &after_label)
         .to_string();
     netlist.generated_diff_source = if diff.is_empty() {
-        format!("--- {before_label}\n+++ {after_label}\n No changes\n")
+        format!(
+            "--- {before_label}\n+++ {after_label}\n {}\n",
+            messages.text(MessageId::NetlistComparisonNoChanges)
+        )
     } else {
         diff
     };
@@ -110,13 +117,14 @@ fn side_text(
     netlist: &NetlistDocumentState,
     runs: &RunsState,
     side: CompareSide,
+    messages: MessageCatalog,
 ) -> Result<(String, String), String> {
     let open_deck = |id| {
         netlist
             .open_deck
             .as_ref()
             .filter(|deck| deck.id == id)
-            .ok_or_else(|| "The deck is no longer open.".to_owned())
+            .ok_or_else(|| messages.text(MessageId::NetlistDeckClosed))
     };
     match side {
         CompareSide::Generated => model
@@ -126,56 +134,85 @@ fn side_text(
             .map(|_| {
                 (
                     model.netlist_artifacts.generated_source.clone(),
-                    "Generated netlist".to_owned(),
+                    messages.text(MessageId::CodeGeneratedNetlist),
                 )
             })
-            .ok_or_else(|| "There is no generated netlist to compare.".to_owned()),
+            .ok_or_else(|| messages.text(MessageId::NetlistCompareNoGenerated)),
         CompareSide::PreviousGenerated(index) => netlist
             .generated_history
             .get(index)
-            .map(|previous| (previous.source().to_owned(), "Previous build".to_owned()))
-            .ok_or_else(|| "That build of the generated netlist is no longer kept.".to_owned()),
+            .map(|previous| {
+                (
+                    previous.source().to_owned(),
+                    messages.text(MessageId::NetlistComparePreviousBuild),
+                )
+            })
+            .ok_or_else(|| messages.text(MessageId::NetlistPreviousBuildGone)),
         CompareSide::Deck(id) => {
             let deck = open_deck(id)?;
             Ok((deck.root.text.clone(), deck.root.name()))
         }
         CompareSide::DiskFile(id) => {
             let deck = open_deck(id)?;
-            Ok((disk_text(deck)?, format!("{} on disk", deck.root.name())))
+            Ok((
+                disk_text(deck, messages)?,
+                messages.format(
+                    MessageId::NetlistCompareOnDisk,
+                    &[("name", &deck.root.name())],
+                ),
+            ))
         }
         CompareSide::RunInput(run) => Ok((
-            run_input_text(model, runs, run)?,
-            format!("Run {run} input"),
+            run_input_text(model, runs, run, messages)?,
+            messages.format(
+                MessageId::NetlistRunSnapshotDocument,
+                &[("id", &run.to_string())],
+            ),
         )),
     }
 }
 
 /// The text of the open deck's file as it is on disk now.
 #[cfg(not(target_arch = "wasm32"))]
-fn disk_text(deck: &super::super::deck_files::OpenDeck) -> Result<String, String> {
+fn disk_text(
+    deck: &super::super::deck_files::OpenDeck,
+    messages: MessageCatalog,
+) -> Result<String, String> {
     if deck.is_stored() {
-        return Err(format!(
-            "{} is kept in the project, with no file to compare.",
-            deck.root.name()
+        return Err(messages.format(
+            MessageId::NetlistDeckKeptInProject,
+            &[("name", &deck.root.name())],
         ));
     }
-    let bytes = std::fs::read(&deck.root.path)
-        .map_err(|error| format!("{} cannot be read: {error}", deck.root.name()))?;
+    let bytes = std::fs::read(&deck.root.path).map_err(|error| {
+        messages.format(
+            MessageId::NetlistFileUnreadable,
+            &[("name", &deck.root.name()), ("error", &error.to_string())],
+        )
+    })?;
     Ok(super::super::deck_files::OpenFile::from_bytes(deck.root.path.clone(), &bytes)?.text)
 }
 
 /// A deck in the browser is kept in the project, with no file to read.
 #[cfg(target_arch = "wasm32")]
-fn disk_text(deck: &super::super::deck_files::OpenDeck) -> Result<String, String> {
-    Err(format!(
-        "{} is kept in the project, with no file to compare.",
-        deck.root.name()
+fn disk_text(
+    deck: &super::super::deck_files::OpenDeck,
+    messages: MessageCatalog,
+) -> Result<String, String> {
+    Err(messages.format(
+        MessageId::NetlistDeckKeptInProject,
+        &[("name", &deck.root.name())],
     ))
 }
 
 /// The input run `run` read: the deck the last manual run read, or the one
 /// point a run of one point read.
-fn run_input_text(model: &Model, runs: &RunsState, run: u64) -> Result<String, String> {
+fn run_input_text(
+    model: &Model,
+    runs: &RunsState,
+    run: u64,
+    messages: MessageCatalog,
+) -> Result<String, String> {
     if runs.manual_run.last_run_id == Some(run)
         && let Some(buffer) = runs.manual_run.last_run_buffer.as_ref()
     {
@@ -186,12 +223,17 @@ fn run_input_text(model: &Model, runs: &RunsState, run: u64) -> Result<String, S
         .retained
         .executed_decks
         .get(run)
-        .ok_or_else(|| format!("The input of Run {run} is no longer kept."))?;
+        .ok_or_else(|| {
+            messages.format(MessageId::NetlistRunInputGone, &[("run", &run.to_string())])
+        })?;
     match deck.points.as_slice() {
         [point] => Ok(point.deck.to_string()),
-        _ => Err(format!(
-            "Run {run} read {} points: open one point's input to compare it.",
-            deck.points.len()
+        _ => Err(messages.format(
+            MessageId::NetlistRunInputPoints,
+            &[
+                ("run", &run.to_string()),
+                ("count", &deck.points.len().to_string()),
+            ],
         )),
     }
 }
@@ -422,21 +464,17 @@ pub fn compare_run_deck_snapshot_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     runs: &RunsState,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     if netlist.executed_deck_view.is_some() {
         // Not a refusal to be worked around: an executed deck is the source a
         // point was handed after expansion, corner materialization and
         // per-point overrides. Diffing it against the deck somebody is editing
         // would report every one of those as an edit.
-        return Err(
-            "An executed deck has no working copy to compare against. Open the deck this \
-             session last ran manually to compare that."
-                .to_owned(),
-        );
+        return Err(messages.text(MessageId::NetlistPointInputNotCompared));
     }
-    let run_id = run_deck_snapshot_run_id_in(runs).ok_or_else(|| {
-        "No manual run has finished yet: there is no run input to compare.".to_owned()
-    })?;
+    let run_id = run_deck_snapshot_run_id_in(runs)
+        .ok_or_else(|| messages.text(MessageId::NetlistNoRunToCompare))?;
     // The deck or generated netlist the run input was opened over, else the
     // one in front.
     let working = if netlist.front.is_run_input() {
@@ -448,5 +486,12 @@ pub fn compare_run_deck_snapshot_in(
         NetlistTab::Deck(id) => CompareSide::Deck(id),
         _ => CompareSide::Generated,
     };
-    compare(model, netlist, runs, CompareSide::RunInput(run_id), right)
+    compare(
+        model,
+        netlist,
+        runs,
+        CompareSide::RunInput(run_id),
+        right,
+        messages,
+    )
 }

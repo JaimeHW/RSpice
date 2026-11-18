@@ -96,7 +96,8 @@ pub(in crate::workbench) fn netlist(
         missing_deck_outline(ui, parts, &missing, &mut asked);
         return asked;
     }
-    let root_label = active_netlist_artifact_name(parts.model, parts.netlist, parts.runs);
+    let root_label =
+        active_netlist_artifact_name(parts.model, parts.netlist, parts.runs, parts.messages);
     let messages = parts.messages;
     let index = crate::workbench::documents::netlist_document::visible_source_index_in(
         ui.ctx(),
@@ -574,7 +575,8 @@ pub(in crate::workbench) fn netlist(
         parts.netlist.requested_line = Some(line);
     }
     if let Some((line, section)) = use_section {
-        match lib_sections::section_edit(parts.model, parts.netlist, line, &section) {
+        match lib_sections::section_edit(parts.model, parts.netlist, line, &section, parts.messages)
+        {
             Ok(rewrite) => asked.use_section = Some(rewrite),
             Err(text) => asked.prompt = Some(text),
         }
@@ -609,6 +611,7 @@ pub(in crate::workbench) fn netlist(
                         parts.open_documents,
                         parts.runs,
                         &identity,
+                        parts.messages,
                     )
                 {
                     asked.prompt = Some(error);
@@ -632,6 +635,7 @@ pub(in crate::workbench) fn netlist(
                 parts.open_documents,
                 parts.runs,
                 &location,
+                parts.messages,
             )
     {
         asked.prompt = Some(error);
@@ -744,6 +748,7 @@ fn open_deck_include(parts: &mut NetlistNavigator<'_>, requested: &str) -> Resul
         parts.open_documents,
         parts.runs,
         &path,
+        parts.messages,
     )
 }
 
@@ -751,10 +756,13 @@ pub(super) fn active_netlist_artifact_name(
     model: &Model,
     netlist: &NetlistDocumentState,
     runs: &RunsState,
+    messages: crate::workbench::MessageCatalog,
 ) -> String {
     match netlist.front.root_kind() {
         NetlistRoot::Generated => "generated.sp".to_owned(),
-        NetlistRoot::AddedLines => "Added lines".to_owned(),
+        NetlistRoot::AddedLines => {
+            messages.text(crate::workbench::MessageId::NetlistAddedLinesDocument)
+        }
         NetlistRoot::Deck => netlist
             .open_deck
             .as_ref()

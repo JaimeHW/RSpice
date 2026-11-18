@@ -220,6 +220,7 @@ fn comparing_an_include_with_its_file_names_the_include_on_the_tab() {
         &mut state.code.netlist_open_documents,
         &mut state.runs,
         &include,
+        state.workbench.messages(),
     )
     .expect("the include opens");
     assert!(edit_deck_file(
@@ -272,6 +273,7 @@ fn run_saves_an_edited_include_and_the_run_reads_it() {
         &mut state.code.netlist_open_documents,
         &mut state.runs,
         &include,
+        state.workbench.messages(),
     )
     .expect("the include opens");
     assert!(edit_deck_file(
@@ -416,6 +418,7 @@ fn a_library_named_twice_is_two_lines_of_the_check_and_one_tab() {
             &mut state.code.netlist_open_documents,
             &mut state.runs,
             &library,
+            state.workbench.messages(),
         )
         .expect("the library opens");
         assert!(deck_files::show_deck(

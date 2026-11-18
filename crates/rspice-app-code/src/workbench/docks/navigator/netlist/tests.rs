@@ -758,15 +758,15 @@ fn an_include_row_states_the_chain_stage_it_resolved_through() {
     for (stage, expected) in [
         (
             rspice_core::netlist::IncludeSearchStage::IncludingFile,
-            "via including-file dir",
+            "beside the including file",
         ),
         (
             rspice_core::netlist::IncludeSearchStage::LibraryPath(1),
-            "via search path 2",
+            "in include folder 2",
         ),
         (
             rspice_core::netlist::IncludeSearchStage::Conventional("lib"),
-            "via lib/",
+            "in lib/",
         ),
     ] {
         let facts = IncludeRowFacts {
@@ -819,19 +819,19 @@ fn a_search_path_past_the_projects_own_is_named_a_library_folder() {
     let messages = english();
     assert_eq!(
         chain_stage_text(messages, IncludeSearchStage::LibraryPath(1), 2),
-        "via search path 2"
+        "in include folder 2"
     );
     assert_eq!(
         chain_stage_text(messages, IncludeSearchStage::LibraryPath(2), 2),
-        "via library folder"
+        "in a library folder"
     );
     assert_eq!(
         chain_stage_text(messages, IncludeSearchStage::LibraryPath(0), 0),
-        "via library folder"
+        "in a library folder"
     );
     assert_eq!(
         chain_stage_text(messages, IncludeSearchStage::TopLevel, 0),
-        "via top-level dir"
+        "beside the deck"
     );
 }
 
@@ -847,7 +847,7 @@ fn a_shadowed_include_row_carries_a_warning_marker_and_names_the_other_file() {
             messages,
             rspice_core::netlist::IncludeSearchStage::LibraryPath(0),
         )),
-        chain: Some("Search chain for models.lib".to_owned()),
+        chain: Some("Where models.lib was looked for".to_owned()),
         shadowed_by: Some("/opt/pdk/second/models.lib".to_owned()),
         sections: Vec::new(),
     };
@@ -994,7 +994,7 @@ fn a_library_include_row_states_the_section_its_own_card_binds() {
     assert!(tooltip.contains("Sections in corners.lib"), "{tooltip}");
     assert!(tooltip.contains("tt · 2 models · 1 subckt"), "{tooltip}");
     assert!(
-        tooltip.contains("ff · 1 model  — bound by this deck"),
+        tooltip.contains("ff · 1 model  — chosen by this deck"),
         "{tooltip}"
     );
     assert!(
@@ -1049,7 +1049,7 @@ fn an_include_of_a_file_without_sections_gains_nothing() {
     assert!(row.sections.is_none(), "no sections, no section action");
     assert_eq!(
         row.meta.as_deref(),
-        Some("via including-file dir"),
+        Some("beside the including file"),
         "a file with no sections keeps stating where it came from"
     );
     assert!(

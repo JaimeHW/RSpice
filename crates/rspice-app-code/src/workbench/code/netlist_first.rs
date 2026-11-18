@@ -28,6 +28,7 @@ use crate::workbench::documents::netlist_document::{NetlistDocumentState, root_d
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Cx, Execute};
 use crate::workbench::state::WorkbenchSession;
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// Geometry shared with the no-project landing, so the two landing surfaces
 /// sit on the same grid.
@@ -47,12 +48,6 @@ const PREVIEW_TOP_PAD: f32 = 7.0;
 const PREVIEW_FOOTER_HEIGHT: f32 = 24.0;
 const PREVIEW_MIN_HEIGHT: f32 = 180.0;
 const STACKED_PREVIEW_HEIGHT: f32 = 320.0;
-
-pub const EYEBROW: &str = "NETLIST-FIRST PROJECT \u{00b7} NO SCHEMATIC";
-const DESCRIPTION: &str = "This project is driven by its SPICE deck, edited in the Netlist \
-    workspace; simulation, probing, and results work exactly as in schematic projects. \
-    Creating a schematic promotes this into a schematic-driven design.";
-const PREVIEW_ACTION_LABEL: &str = "Open the deck in the Netlist workspace";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetlistFirstAction {
@@ -88,6 +83,7 @@ pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
         cx.runs,
     );
     let mut action = None;
+    let messages = cx.wb.messages();
     // The row dispatches this exact command, so it reads the command's own
     // label rather than keeping a second copy of the workspace name.
     let open_label = cx.commands.label(ids::NETLIST_WORKSPACE);
@@ -95,16 +91,24 @@ pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
         .fill(Tokens::get(ui.ctx()).color.bg_app)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            header(ui, cx.model.workspace.content.project.name());
-            body(ui, cx.model, &mut cx.state.netlist, open_label, &mut action);
+            header(ui, cx.model.workspace.content.project.name(), messages);
+            body(
+                ui,
+                cx.model,
+                &mut cx.state.netlist,
+                open_label,
+                &mut action,
+                messages,
+            );
         });
     if let Some(action) = action {
         raise_netlist_first_action(cx.wb, action);
     }
 }
 
-fn header(ui: &mut Ui, project_name: &str) {
+fn header(ui: &mut Ui, project_name: &str, messages: MessageCatalog) {
     let t = Tokens::get(ui.ctx());
+    let description = messages.text(MessageId::NetlistFirstDescription);
     let width = ui.available_width().max(1.0);
     let content_width = centered_content_rect(
         Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 1.0)),
@@ -118,7 +122,7 @@ fn header(ui: &mut Ui, project_name: &str) {
     let description_height = ui
         .painter()
         .layout(
-            DESCRIPTION.to_owned(),
+            description.clone(),
             theme::sans(tokens::FS_1, FontWeight::Regular),
             Color32::PLACEHOLDER,
             description_width,
@@ -143,7 +147,7 @@ fn header(ui: &mut Ui, project_name: &str) {
     );
     header.add_space(26.0);
     header.label(
-        egui::RichText::new(EYEBROW)
+        egui::RichText::new(messages.text(MessageId::NetlistFirstEyebrow))
             .font(theme::mono(tokens::FS_0, FontWeight::Medium))
             .color(t.color.text_faint)
             .extra_letter_spacing(0.09 * tokens::FS_0),
@@ -162,7 +166,7 @@ fn header(ui: &mut Ui, project_name: &str) {
         ui.set_max_width(description_width);
         ui.add(
             egui::Label::new(
-                egui::RichText::new(DESCRIPTION)
+                egui::RichText::new(description)
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(t.color.text_dim),
             )
@@ -173,7 +177,7 @@ fn header(ui: &mut Ui, project_name: &str) {
         WidgetInfo::labeled(
             WidgetType::Label,
             ui.is_enabled(),
-            format!("Netlist-first project, no schematic. {project_name}"),
+            messages.format(MessageId::NetlistFirstAccessible, &[("name", project_name)]),
         )
     });
 }
@@ -184,9 +188,10 @@ fn body(
     netlist: &mut NetlistDocumentState,
     open_label: &str,
     action: &mut Option<NetlistFirstAction>,
+    messages: MessageCatalog,
 ) {
     let index = root_deck_source_index(ui.ctx(), model, netlist);
-    let facts = deck_facts(model, netlist, &index);
+    let facts = deck_facts(model, netlist, &index, messages);
 
     let available = ui.available_rect_before_wrap();
     ui.allocate_rect(available, Sense::hover());
@@ -209,7 +214,14 @@ fn body(
                 .layout(Layout::top_down(Align::Min)),
         );
         left.set_clip_rect(left_rect);
-        deck_preview(&mut left, &index, &facts, left_rect.height(), action);
+        deck_preview(
+            &mut left,
+            &index,
+            &facts,
+            left_rect.height(),
+            action,
+            messages,
+        );
 
         let mut right = ui.new_child(
             UiBuilder::new()
@@ -220,7 +232,9 @@ fn body(
         ScrollArea::vertical()
             .id_salt("workbench.design.netlist-first.rail")
             .auto_shrink([false, false])
-            .show(&mut right, |ui| rail(ui, &facts, open_label, action));
+            .show(&mut right, |ui| {
+                rail(ui, &facts, open_label, action, messages)
+            });
     } else {
         let mut stacked = ui.new_child(
             UiBuilder::new()
@@ -233,48 +247,60 @@ fn body(
             .auto_shrink([false, false])
             .show(&mut stacked, |ui| {
                 ui.set_min_width(content.width());
-                deck_preview(ui, &index, &facts, STACKED_PREVIEW_HEIGHT, action);
+                deck_preview(ui, &index, &facts, STACKED_PREVIEW_HEIGHT, action, messages);
                 ui.add_space(16.0);
-                rail(ui, &facts, open_label, action);
+                rail(ui, &facts, open_label, action, messages);
             });
     }
 }
 
-fn rail(ui: &mut Ui, facts: &DeckFacts, open_label: &str, action: &mut Option<NetlistFirstAction>) {
+fn rail(
+    ui: &mut Ui,
+    facts: &DeckFacts,
+    open_label: &str,
+    action: &mut Option<NetlistFirstAction>,
+    messages: MessageCatalog,
+) {
+    let create_label = messages.text(MessageId::NetlistFirstCreateSchematic);
     for (title, detail, icon, primary, next) in [
         (
             open_label,
-            "Deck source \u{00b7} outline \u{00b7} diagnostics \u{00b7} overlay",
+            messages.text(MessageId::NetlistFirstOpenDetail),
             WorkbenchIcon::Code,
             true,
             NetlistFirstAction::OpenNetlistWorkspace,
         ),
         (
-            "Create schematic\u{2026}",
-            "Promote to a schematic-driven project",
+            create_label.as_str(),
+            messages.text(MessageId::NetlistFirstCreateSchematicDetail),
             WorkbenchIcon::Design,
             false,
             NetlistFirstAction::CreateSchematic,
         ),
     ] {
-        if action_row(ui, title, detail, icon, primary).clicked() {
+        if action_row(ui, title, &detail, icon, primary).clicked() {
             *action = Some(next);
         }
         ui.add_space(5.0);
     }
     ui.add_space(9.0);
-    deck_summary_card(ui, facts);
+    deck_summary_card(ui, facts, messages);
 }
 
-fn deck_summary_card(ui: &mut Ui, facts: &DeckFacts) {
-    property_card(ui, "Deck summary", |ui| {
-        property_row(ui, "Source", &facts.name);
-        property_row(ui, "Lines", &facts.lines.to_string());
-        property_row(ui, "Devices", &facts.devices.to_string());
-        property_row(ui, "Analyses", &facts.analyses.to_string());
-        property_row(ui, "Models", &facts.models.to_string());
-        property_row(ui, "Subcircuits", &facts.subcircuits.to_string());
-        property_row(ui, "Dependencies", &facts.dependencies.to_string());
+fn deck_summary_card(ui: &mut Ui, facts: &DeckFacts, messages: MessageCatalog) {
+    let label = |id| messages.text(id);
+    property_card(ui, &label(MessageId::NetlistFirstSummary), |ui| {
+        property_row(ui, &label(MessageId::NetlistFirstDeck), &facts.name);
+        for (id, count) in [
+            (MessageId::NetlistFirstLines, facts.lines),
+            (MessageId::NetlistFirstDevices, facts.devices),
+            (MessageId::NetlistFirstAnalyses, facts.analyses),
+            (MessageId::NetlistFirstModels, facts.models),
+            (MessageId::NetlistFirstSubcircuits, facts.subcircuits),
+            (MessageId::NetlistFirstIncludes, facts.dependencies),
+        ] {
+            property_row(ui, &label(id), &count.to_string());
+        }
     });
 }
 
@@ -291,6 +317,7 @@ fn deck_preview(
     facts: &DeckFacts,
     max_height: f32,
     action: &mut Option<NetlistFirstAction>,
+    messages: MessageCatalog,
 ) {
     let t = Tokens::get(ui.ctx());
     let needed = PREVIEW_TOOLBAR_HEIGHT
@@ -336,7 +363,7 @@ fn deck_preview(
         toolbar.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    preview_toolbar_text(ui, toolbar, facts, &t);
+    preview_toolbar_text(ui, toolbar, facts, &t, messages);
 
     let body = Rect::from_min_max(
         pos2(rect.left() + 1.0, toolbar.bottom() + 1.0),
@@ -354,10 +381,14 @@ fn deck_preview(
             t.color.bg_hover,
         );
     }
-    preview_rows(ui, body, index, &t);
+    preview_rows(ui, body, index, &t, messages);
 
     response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), PREVIEW_ACTION_LABEL)
+        WidgetInfo::labeled(
+            WidgetType::Button,
+            ui.is_enabled(),
+            messages.text(MessageId::NetlistFirstOpenPreview),
+        )
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_description(format!("{} \u{00b7} {} lines", facts.name, facts.lines));
@@ -382,11 +413,17 @@ fn activated(ui: &Ui, response: &Response) -> bool {
         })
 }
 
-fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
+fn preview_toolbar_text(
+    ui: &Ui,
+    toolbar: Rect,
+    facts: &DeckFacts,
+    t: &Tokens,
+    messages: MessageCatalog,
+) {
     let title_rect = ui.painter().text(
         pos2(toolbar.left() + 11.0, toolbar.center().y),
         Align2::LEFT_CENTER,
-        "Deck source",
+        messages.text(MessageId::NetlistFirstPreviewTitle),
         theme::sans(tokens::FS_1, FontWeight::SemiBold),
         t.color.text,
     );
@@ -405,14 +442,20 @@ fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
     }
 }
 
-fn preview_rows(ui: &Ui, body: Rect, index: &NetlistSourceIndex, t: &Tokens) {
+fn preview_rows(
+    ui: &Ui,
+    body: Rect,
+    index: &NetlistSourceIndex,
+    t: &Tokens,
+    messages: MessageCatalog,
+) {
     let painter = ui.painter().with_clip_rect(body);
     let line_count = index.line_count();
     if line_count == 0 {
         painter.text(
             body.center(),
             Align2::CENTER_CENTER,
-            "The deck has no source text.",
+            messages.text(MessageId::NetlistFirstNoText),
             theme::sans(tokens::FS_1, FontWeight::Regular),
             t.color.text_dim,
         );
@@ -478,9 +521,9 @@ fn preview_rows(ui: &Ui, body: Rect, index: &NetlistSourceIndex, t: &Tokens) {
         painter.text(
             pos2(footer.left() + 11.0, footer.center().y),
             Align2::LEFT_CENTER,
-            format!(
-                "\u{2026} {} more lines \u{00b7} open in the Netlist workspace",
-                line_count - shown
+            messages.format(
+                MessageId::NetlistFirstMoreLines,
+                &[("count", &(line_count - shown).to_string())],
             ),
             theme::sans(tokens::FS_0, FontWeight::Regular),
             t.color.text_faint,
@@ -528,6 +571,7 @@ pub fn deck_facts(
     model: &Model,
     netlist: &NetlistDocumentState,
     index: &NetlistSourceIndex,
+    messages: MessageCatalog,
 ) -> DeckFacts {
     let name = netlist
         .open_deck
@@ -541,7 +585,7 @@ pub fn deck_facts(
                 .first()
                 .map(|deck| deck.name())
         })
-        .unwrap_or_else(|| "Untitled deck".to_owned());
+        .unwrap_or_else(|| messages.text(MessageId::NetlistFirstUntitled));
 
     let (mut devices, mut analyses, mut models, mut subcircuits, mut dependencies) =
         (0, 0, 0, 0, 0);

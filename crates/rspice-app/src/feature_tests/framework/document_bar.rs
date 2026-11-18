@@ -84,6 +84,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
         &mut state.runs,
         rspice_app_code::workbench::documents::netlist_document::NetlistRoot::Generated,
         "models/resistor.inc",
+        state.workbench.messages(),
     )
     .unwrap();
     rspice_app_code::workbench::documents::netlist_document::open_netlist_dependency_from_root_in(
@@ -93,6 +94,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
         &mut state.runs,
         rspice_app_code::workbench::documents::netlist_document::NetlistRoot::Deck,
         DECK_INCLUDE,
+        state.workbench.messages(),
     )
     .unwrap();
     rspice_app_code::workbench::documents::netlist_document::open_generated_primary_in(

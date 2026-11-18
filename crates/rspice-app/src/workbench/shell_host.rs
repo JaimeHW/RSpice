@@ -519,44 +519,45 @@ impl Host for RSpiceApp {
 
     fn navigator_section(&self, workspace: Workspace) -> NavigatorSection {
         let app = self;
-        let title = match workspace {
+        let messages = app.state.workbench.messages();
+        let title: std::borrow::Cow<'static, str> = match workspace {
             Workspace::Project => match app.state.project.project_page {
-                ProjectPage::Overview | ProjectPage::Library => "Project",
-                ProjectPage::Configuration => "Configurations",
-                ProjectPage::Dependencies => "Dependencies",
-                ProjectPage::Recovery => "Recovery",
+                ProjectPage::Overview | ProjectPage::Library => "Project".into(),
+                ProjectPage::Configuration => "Configurations".into(),
+                ProjectPage::Dependencies => "Dependencies".into(),
+                ProjectPage::Recovery => "Recovery".into(),
             },
-            Workspace::Design => "Design navigator",
-            Workspace::Simulate => "Simulation setup",
-            Workspace::Stimulus => "Library browser",
-            Workspace::Results => "Data browser",
+            Workspace::Design => "Design navigator".into(),
+            Workspace::Simulate => "Simulation setup".into(),
+            Workspace::Stimulus => "Library browser".into(),
+            Workspace::Results => "Data browser".into(),
             // The views, then the plan's runs under their own header.
-            Workspace::Verify => "Views",
-            Workspace::Models => "Library browser",
-            Workspace::Netlist => "Netlist outline",
+            Workspace::Verify => "Views".into(),
+            Workspace::Models => "Library browser".into(),
+            Workspace::Netlist => messages.text(MessageId::NetlistNavigatorTitle).into(),
         };
-        let placeholder = match workspace {
+        let placeholder: std::borrow::Cow<'static, str> = match workspace {
             Workspace::Project => match app.state.project.project_page {
                 // The rail lists libraries; a cell's or a view's name finds
                 // the library that holds it.
-                ProjectPage::Overview | ProjectPage::Library => "Filter libraries…",
-                ProjectPage::Configuration => "Filter configurations…",
-                ProjectPage::Dependencies => "Filter dependencies…",
-                ProjectPage::Recovery => "Filter checkpoints…",
+                ProjectPage::Overview | ProjectPage::Library => "Filter libraries…".into(),
+                ProjectPage::Configuration => "Filter configurations…".into(),
+                ProjectPage::Dependencies => "Filter dependencies…".into(),
+                ProjectPage::Recovery => "Filter checkpoints…".into(),
             },
-            Workspace::Design => "Find instance, net or port…",
-            Workspace::Simulate => "Filter setup…",
-            Workspace::Stimulus => "Search definitions…",
-            Workspace::Results => "Find signal, expression or run…",
+            Workspace::Design => "Find instance, net or port…".into(),
+            Workspace::Simulate => "Filter setup…".into(),
+            Workspace::Stimulus => "Search definitions…".into(),
+            Workspace::Results => "Find signal, expression or run…".into(),
             // The filter narrows the open view's rows, so it names them.
             Workspace::Verify => match app.state.simulate.verification_page {
                 VerificationPage::Specifications
                 | VerificationPage::Corners
-                | VerificationPage::MonteCarlo => "Filter specifications…",
-                VerificationPage::Checks | VerificationPage::Reference => "Filter checks…",
+                | VerificationPage::MonteCarlo => "Filter specifications…".into(),
+                VerificationPage::Checks | VerificationPage::Reference => "Filter checks…".into(),
             },
-            Workspace::Models => "Search model, device or library…",
-            Workspace::Netlist => "Find symbol or line…",
+            Workspace::Models => "Search model, device or library…".into(),
+            Workspace::Netlist => messages.text(MessageId::NetlistNavigatorFilterHint).into(),
         };
         NavigatorSection {
             title,
@@ -749,6 +750,7 @@ impl Host for RSpiceApp {
             key,
             &self.state.model,
             &self.state.code.netlist,
+            self.state.workbench.messages(),
         ) {
             return label.into();
         }
@@ -897,7 +899,7 @@ impl ProblemsHost for AppState {
         rspice_app_code::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
             &mut self.model,
             &mut self.code.netlist,
-            finding,
+            finding, self.workbench.messages(),
         )
     }
 }
@@ -1168,6 +1170,7 @@ impl DocumentHost for AppState {
                 &mut state.runs,
                 root,
                 logical_identity,
+                state.workbench.messages(),
             ),
             WorkspaceDocumentId::NetlistComparison => {
                 activate_netlist_comparison(&mut state.model, &mut state.code.netlist)

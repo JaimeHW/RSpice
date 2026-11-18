@@ -10,6 +10,7 @@ use crate::state::netlist_diagnostics::{
     Diagnostic, DiagnosticFix, NetlistDiagnosticCollection, line_column_for_span,
 };
 use crate::workbench::documents::virtual_text_editor::SourceMark;
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// Severity levels shown by the gutter, strip, and syntax highlighter: the
 /// shared source-diagnostic severity, so an editor finding and a compiler
@@ -28,6 +29,7 @@ pub(super) fn as_the_reader_sees_them(
     diagnostics: &mut [Diagnostic],
     buffer: &str,
     shown: Option<&std::path::Path>,
+    messages: MessageCatalog,
 ) {
     let lines = buffer.lines().collect::<Vec<_>>();
     for diagnostic in diagnostics {
@@ -36,7 +38,8 @@ pub(super) fn as_the_reader_sees_them(
         };
         diagnostic.source_path = shown.map(std::path::Path::to_path_buf);
         diagnostic.refresh_canonical_location();
-        if let Some(message) = expected_found_in_words(&diagnostic.message, &lines, line) {
+        if let Some(message) = expected_found_in_words(&diagnostic.message, &lines, line, messages)
+        {
             diagnostic.message = message;
         }
     }
@@ -140,7 +143,12 @@ fn card_word(text: &str) -> Range<usize> {
 
 /// "Expected node name, found Eof" on `line` (zero-based), in words: what the
 /// card is missing, or what is written where the parser wanted something else.
-fn expected_found_in_words(message: &str, lines: &[&str], line: usize) -> Option<String> {
+fn expected_found_in_words(
+    message: &str,
+    lines: &[&str],
+    line: usize,
+    messages: MessageCatalog,
+) -> Option<String> {
     let rest = message.strip_prefix("Expected ")?;
     let (expected, found) = rest.split_once(", found ")?;
     if expected.is_empty() || found.contains('\n') {
@@ -148,9 +156,15 @@ fn expected_found_in_words(message: &str, lines: &[&str], line: usize) -> Option
     }
     let card = card_head_on(lines, line)?;
     let expected = with_article(expected);
-    Some(match found_in_words(found) {
-        None => format!("{card} is missing {expected}."),
-        Some(found) => format!("{card}: {expected} was expected, not {found}."),
+    Some(match found_in_words(found, messages) {
+        None => messages.format(
+            MessageId::NetlistCardMissing,
+            &[("card", card), ("expected", &expected)],
+        ),
+        Some(found) => messages.format(
+            MessageId::NetlistCardExpected,
+            &[("card", card), ("expected", &expected), ("found", &found)],
+        ),
     })
 }
 
@@ -166,7 +180,7 @@ fn card_head_on<'a>(lines: &[&'a str], line: usize) -> Option<&'a str> {
 
 /// The token a parser message names, the way it is written: `None` for the
 /// end of the card.
-fn found_in_words(found: &str) -> Option<String> {
+fn found_in_words(found: &str, messages: MessageCatalog) -> Option<String> {
     let quoted = |inner: &str| {
         let text = inner
             .strip_prefix('"')
@@ -200,7 +214,7 @@ fn found_in_words(found: &str) -> Option<String> {
             } else if let Some(expression) = inside("Expression") {
                 format!("{{{}}}", expression.trim_matches('"'))
             } else if found.starts_with("Number") {
-                "a number".to_owned()
+                messages.text(MessageId::NetlistFoundNumber)
             } else if let Some(other) = inside("Other") {
                 format!("'{}'", other.trim_matches('\''))
             } else {
@@ -240,6 +254,7 @@ pub(super) fn in_authored_text(
     diagnostics: Vec<Diagnostic>,
     composed: &str,
     authored: &str,
+    messages: MessageCatalog,
 ) -> Vec<Diagnostic> {
     let composed_starts: Vec<usize> = std::iter::once(0)
         .chain(composed.match_indices('\n').map(|(index, _)| index + 1))
@@ -302,7 +317,10 @@ pub(super) fn in_authored_text(
                     });
                 }
                 None => {
-                    diagnostic.message = format!("{} (in the generated base)", diagnostic.message);
+                    diagnostic.message = messages.format(
+                        MessageId::NetlistInGeneratedNetlist,
+                        &[("message", &diagnostic.message)],
+                    );
                     diagnostic.line = None;
                     diagnostic.source_line = None;
                     diagnostic.column = None;
@@ -330,6 +348,7 @@ pub(super) fn in_authored_text(
 pub(super) fn unknown_reference_diagnostics(
     buffer: &str,
     unread: &[rspice_core::netlist::UnreadSourceRegion],
+    messages: MessageCatalog,
 ) -> Vec<Diagnostic> {
     if has_external_model_sources(buffer) {
         return Vec::new();
@@ -353,12 +372,12 @@ pub(super) fn unknown_reference_diagnostics(
 
         let replacement = nearest_definition(&reference.name, &visible);
         let (line, column) = line_column_for_span(buffer, reference.span.start);
-        let kind = match reference.kind {
-            ReferenceKind::Model => "model",
-            ReferenceKind::Subcircuit => "subcircuit",
+        let unknown = match reference.kind {
+            ReferenceKind::Model => MessageId::NetlistUnknownModel,
+            ReferenceKind::Subcircuit => MessageId::NetlistUnknownSubcircuit,
         };
         let fix = replacement.as_ref().map(|replacement| DiagnosticFix {
-            label: format!("Replace with {replacement}"),
+            label: messages.format(MessageId::NetlistReplaceWith, &[("name", replacement)]),
             span: reference.span.clone(),
             replacement: replacement.clone(),
             add_file: None,
@@ -371,7 +390,7 @@ pub(super) fn unknown_reference_diagnostics(
                 ReferenceKind::Subcircuit => "SPICE-UNKNOWN-SUBCIRCUIT",
             },
             DiagnosticSeverity::Error,
-            format!("Unknown {kind} `{}` in this deck.", reference.name),
+            messages.format(unknown, &[("name", &reference.name)]),
         );
         diagnostic.source_line = Some(line);
         diagnostic.span = Some(reference.span);
@@ -398,6 +417,7 @@ pub(super) const CONTROL_PROMOTED_CODE: &str = "SPICE-CONTROL-PROMOTED";
 pub(super) fn parser_diagnostics(
     netlist: &rspice_core::Netlist,
     editor_source_path: Option<&std::path::Path>,
+    messages: MessageCatalog,
 ) -> Vec<Diagnostic> {
     let origin_of = |line: usize,
                      origin: Option<&rspice_core::netlist::NetlistSourceLocation>|
@@ -452,10 +472,19 @@ pub(super) fn parser_diagnostics(
                     "rspice.netlist.parser",
                     CONTROL_PROMOTED_CODE,
                     DiagnosticSeverity::Info,
-                    format!(
-                        "Control command `{}` was promoted into `{}`.",
-                        record.command,
-                        directives.join("` `")
+                    messages.format(
+                        MessageId::NetlistControlBecame,
+                        &[
+                            ("command", &record.command),
+                            (
+                                "directives",
+                                &directives
+                                    .iter()
+                                    .map(|directive| format!("'{directive}'"))
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            ),
+                        ],
                     ),
                 )
                 .with_source_location(&origin, editor_source_path)
@@ -641,9 +670,18 @@ mod tests {
             rspice_simulation::netlist_preparation::splice_before_terminal_end_card(base, authored);
 
         let diagnostics = in_authored_text(
-            unknown_reference_diagnostics(&composed, &[]),
+            unknown_reference_diagnostics(
+                &composed,
+                &[],
+                crate::workbench::MessageCatalog::new(
+                    crate::workbench::UiTextLocale::EnglishUnitedStates,
+                ),
+            ),
             &composed,
             authored,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
         );
         assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
 
@@ -664,7 +702,7 @@ mod tests {
             .find(|diagnostic| diagnostic.message.contains("pchh"))
             .expect("the base's finding");
         assert!(
-            base_finding.message.ends_with("(in the generated base)"),
+            base_finding.message.ends_with("(in the generated netlist)"),
             "{}",
             base_finding.message,
         );
@@ -681,7 +719,13 @@ mod tests {
     fn unknown_model_lint_suggests_nearest_known_model() {
         let src = "deck\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.end\n";
 
-        let diagnostics = unknown_reference_diagnostics(src, &[]);
+        let diagnostics = unknown_reference_diagnostics(
+            src,
+            &[],
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        );
 
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
@@ -724,7 +768,13 @@ mod tests {
     fn unknown_subckt_lint_suggests_nearest_known_subckt() {
         let src = "deck\nX1 in out invv\n.subckt inv in out\n.ends\n.end\n";
 
-        let diagnostics = unknown_reference_diagnostics(src, &[]);
+        let diagnostics = unknown_reference_diagnostics(
+            src,
+            &[],
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        );
 
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
@@ -737,7 +787,13 @@ mod tests {
     fn unknown_reference_lint_skips_decks_with_external_includes() {
         let src = "deck\n.include models.scs\nM1 d g s b nchh W=1u L=1u\n.end\n";
 
-        let diagnostics = unknown_reference_diagnostics(src, &[]);
+        let diagnostics = unknown_reference_diagnostics(
+            src,
+            &[],
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        );
 
         assert!(diagnostics.is_empty());
     }
@@ -750,7 +806,14 @@ mod tests {
     fn unknown_reference_lint_skips_decks_with_a_veriloga_source() {
         let bare = "deck\nX1 a k my_diode\n.end\n";
         assert_eq!(
-            unknown_reference_diagnostics(bare, &[]).len(),
+            unknown_reference_diagnostics(
+                bare,
+                &[],
+                crate::workbench::MessageCatalog::new(
+                    crate::workbench::UiTextLocale::EnglishUnitedStates
+                )
+            )
+            .len(),
             1,
             "a master nothing declares is still reported"
         );
@@ -762,7 +825,14 @@ mod tests {
             ] {
                 let src = format!("deck\n{cased} \"models/dev.va\"\nX1 a k my_diode\n.end\n");
                 assert!(
-                    unknown_reference_diagnostics(&src, &[]).is_empty(),
+                    unknown_reference_diagnostics(
+                        &src,
+                        &[],
+                        crate::workbench::MessageCatalog::new(
+                            crate::workbench::UiTextLocale::EnglishUnitedStates
+                        )
+                    )
+                    .is_empty(),
                     "{cased} declares the master"
                 );
             }
@@ -770,14 +840,30 @@ mod tests {
 
         // A card that only looks like one of them is not one.
         let near_miss = "deck\n.vams2 \"models/dev.va\"\nX1 a k my_diode\n.end\n";
-        assert_eq!(unknown_reference_diagnostics(near_miss, &[]).len(), 1);
+        assert_eq!(
+            unknown_reference_diagnostics(
+                near_miss,
+                &[],
+                crate::workbench::MessageCatalog::new(
+                    crate::workbench::UiTextLocale::EnglishUnitedStates
+                )
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]
     fn unknown_model_lint_does_not_resolve_sibling_local_model() {
         let src = "deck\n.subckt amp in out\n.model nch nmos\n.ends\n.subckt buf in out\nM1 out in 0 0 nch\n.ends\n.end\n";
 
-        let diagnostics = unknown_reference_diagnostics(src, &[]);
+        let diagnostics = unknown_reference_diagnostics(
+            src,
+            &[],
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        );
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(&src[diagnostics[0].span.clone().unwrap()], "nch");
@@ -788,7 +874,13 @@ mod tests {
     fn parser_warnings_convert_to_editor_diagnostics() {
         let src = "deck\nV1 in 0 1\nR1 in 0 1k\n.options vendorcompat=1\n.end\n";
         let netlist = rspice_core::Netlist::parse(src).expect("deck parses with warning");
-        let diagnostics = parser_diagnostics(&netlist, None);
+        let diagnostics = parser_diagnostics(
+            &netlist,
+            None,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        );
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);

@@ -15,6 +15,7 @@
 //! line and why, with the deck in front.
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
@@ -126,7 +127,7 @@ pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
             cx.wb.run_press_route = Some(cx.wb.current_route());
             cx.model.simulation.execution.request_manual_deck_run();
         }
-        Err(error) => refuse(cx, &name, "did not run", &text, &error),
+        Err(error) => refuse(cx, &name, Verdict::DidNotRun, &text, &error),
     }
 }
 
@@ -134,49 +135,82 @@ pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
 /// would and start nothing. The notice says the deck has nothing that stops
 /// it running, or names the line and why, with the deck in front.
 pub fn check_deck(cx: &mut Cx<'_, CodeFeature>) {
+    let messages = cx.wb.messages();
     let CheckedDeck { name, text, result } = match check_deck_run(cx, false) {
         DeckCheck::Held => return,
         DeckCheck::Compiling => {
-            cx.wb.prompt(
-                "A Verilog-A source the deck reads is still compiling: check the deck again \
-                 once the compile ends."
-                    .to_owned(),
-            );
+            cx.wb
+                .prompt(messages.text(MessageId::NetlistDeckCheckWaitsForCompile));
             return;
         }
         DeckCheck::Checked(checked) => *checked,
     };
     match result {
         Ok(metadata) => {
-            let advisories = metadata.advisories.len();
-            let tasks = metadata.task_count;
-            let notice = format!(
-                "{name} checked · 0 blocking errors · {advisories} advisor{} · {tasks} task{}",
-                if advisories == 1 { "y" } else { "ies" },
-                if tasks == 1 { "" } else { "s" }
+            let warnings = messages.counted(
+                metadata.advisories.len(),
+                MessageId::NetlistDeckCheckedWarning,
+                MessageId::NetlistDeckCheckedWarnings,
+            );
+            let tasks = messages.counted(
+                metadata.task_count,
+                MessageId::NetlistDeckCheckedTask,
+                MessageId::NetlistDeckCheckedTasks,
+            );
+            let notice = messages.format(
+                MessageId::NetlistDeckChecked,
+                &[("name", &name), ("warnings", &warnings), ("tasks", &tasks)],
             );
             cx.model
                 .record(LogSeverity::Info, LogSource::Netlist, notice.clone());
             cx.wb.prompt(notice);
         }
-        Err(error) => refuse(cx, &name, "cannot run", &text, &error),
+        Err(error) => refuse(cx, &name, Verdict::CannotRun, &text, &error),
     }
 }
 
+/// What a deck the check stopped is said to have done.
+#[derive(Clone, Copy)]
+enum Verdict {
+    /// Run was pressed: the deck did not run.
+    DidNotRun,
+    /// Check and netlist was pressed: the deck cannot run.
+    CannotRun,
+}
+
 /// Bring the deck `name` the check stopped to the front, where the editor
-/// marks its errors, and say that it `verdict` (did not run, cannot run),
-/// on which line of `text` and why.
+/// marks its errors, and say what came of it (`verdict`), on which line of
+/// `text` and why.
 fn refuse(
     cx: &mut Cx<'_, CodeFeature>,
     name: &str,
-    verdict: &str,
+    verdict: Verdict,
     text: &str,
     error: &PreparationError,
 ) {
     crate::workbench::documents::deck_files::show_deck(cx.model, &mut cx.state.netlist);
+    let messages = cx.wb.messages();
+    let error_text = error.to_string();
+    let (at_line, without_line) = match verdict {
+        Verdict::DidNotRun => (
+            MessageId::NetlistDeckDidNotRunAt,
+            MessageId::NetlistDeckDidNotRun,
+        ),
+        Verdict::CannotRun => (
+            MessageId::NetlistDeckCannotRunAt,
+            MessageId::NetlistDeckCannotRun,
+        ),
+    };
     let notice = match failure_line(error, text) {
-        Some(line) => format!("{name} {verdict}: line {line}: {error}"),
-        None => format!("{name} {verdict}: {error}"),
+        Some(line) => messages.format(
+            at_line,
+            &[
+                ("name", name),
+                ("line", &line.to_string()),
+                ("error", &error_text),
+            ],
+        ),
+        None => messages.format(without_line, &[("name", name), ("error", &error_text)]),
     };
     cx.model
         .record(LogSeverity::Error, LogSource::Netlist, notice.clone());

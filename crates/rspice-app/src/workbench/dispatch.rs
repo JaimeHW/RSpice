@@ -658,10 +658,14 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
     ) {
         return true;
     }
-    state.prompt(format!(
-        "The source Run {sequence} executed cannot be opened: {}.",
-        rspice_app_state::state::absent_deck_reason()
-    ));
+    let text = state.workbench.messages().format(
+        rspice_app_workbench::workbench::localization::MessageId::NetlistRunSourceUnavailable,
+        &[
+            ("id", &sequence.to_string()),
+            ("reason", rspice_app_state::state::absent_deck_reason()),
+        ],
+    );
+    state.prompt(text);
     false
 }
 

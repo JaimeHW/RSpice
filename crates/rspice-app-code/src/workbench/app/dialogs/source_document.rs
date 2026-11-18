@@ -52,19 +52,20 @@ pub fn open_source_document_dialog_in(
     code: &mut CodeWorkspaceRuntimeState,
     netlist: &NetlistDocumentState,
     platform: &PlatformState,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     if !veriloga_is_visible_in(workspace, model) {
         if !platform.project_lifecycle.is_open() {
-            return Err("Open a project before managing its decks.".to_owned());
+            return Err(messages.text(MessageId::NetlistManageNeedsProject));
         }
         if let Some(refusal) = generated_deck_refusal(model, netlist) {
-            return Err(refusal.to_owned());
+            return Err(messages.text(refusal));
         }
         code.source_document_dialog = true;
         return Ok(());
     }
     if model.workspace.active_source_bundle().is_none() {
-        return Err("This project owns no Verilog-A source workspace yet.".to_owned());
+        return Err(messages.text(MessageId::VerilogAManageNoSources));
     }
     code.source_document_dialog = true;
     Ok(())
@@ -89,11 +90,11 @@ pub fn source_document_dialog_is_available(
 pub(crate) fn generated_deck_refusal(
     _model: &Model,
     netlist: &NetlistDocumentState,
-) -> Option<&'static str> {
+) -> Option<MessageId> {
     netlist
         .open_deck
         .is_none()
-        .then_some("The generated netlist is read-only. Open a deck to manage one.")
+        .then_some(MessageId::NetlistManageGenerated)
 }
 
 /// Whether the document the dialog manages is a Verilog-A cell view open in
@@ -474,7 +475,7 @@ fn render_netlist_source_document_dialog(
         messages.text(MessageId::CommonClose),
     )
     .description(messages.format(
-        MessageId::CodeSourceLifecycleDescription,
+        MessageId::NetlistManageDeckDescription,
         &[("document", &facts.logical_path)],
     ))
     .size(DialogSize::SimulationWorkflow)
@@ -634,10 +635,9 @@ fn include_search_paths(
     dialog_section(
         ui,
         &messages.text(MessageId::NetlistIncludeSearchPaths),
-        Some(&messages.format(
-            MessageId::NetlistIncludeSearchPathCount,
-            &[("count", &authored.len().to_string())],
-        )),
+        (!authored.is_empty())
+            .then(|| messages.text(MessageId::NetlistIncludeSearchPathCount))
+            .as_deref(),
         |ui| {
             // The chain goes on into the library folders set in Preferences,
             // so a list that ended here would misstate where a name is found.

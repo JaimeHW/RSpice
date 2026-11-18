@@ -88,6 +88,7 @@ fn an_include_in_front_leaves_the_deck_as_what_runs() {
         &mut app.state.code.netlist_open_documents,
         &mut app.state.runs,
         &folder.join("load.inc"),
+        app.state.workbench.messages(),
     )
     .expect("the include opens");
     press_run(&mut app);

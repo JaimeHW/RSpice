@@ -2122,11 +2122,24 @@ fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue()
         "rspice-app-code/src/workbench/documents/netlist_document/completion.rs",
         "rspice-app-code/src/workbench/documents/netlist_document/references.rs",
         "rspice-app-code/src/workbench/app/dialogs/source_language_tools.rs",
+        "rspice-app-code/src/workbench/app/dialogs/source_document.rs",
+        "rspice-app-code/src/workbench/code/deck_run.rs",
+        "rspice-app-code/src/workbench/code/netlist_first.rs",
+        "rspice-app-code/src/workbench/code/netlist_format.rs",
+        "rspice-app-code/src/workbench/docks/navigator/netlist/lib_sections.rs",
+        "rspice-app-code/src/workbench/documents/netlist_document.rs",
+        "rspice-app-code/src/workbench/documents/netlist_document/comparison.rs",
+        "rspice-app-code/src/workbench/documents/netlist_document/editor.rs",
+        "rspice-app-code/src/workbench/documents/netlist_document/language.rs",
+        "rspice-app-code/src/workbench/documents/netlist_document/navigation.rs",
+        "rspice-app-code/src/workbench/surfaces/netlist/deck_bands.rs",
+        "rspice-app-code/src/workbench/surfaces/netlist/transfer.rs",
     ];
-    // A literal on a line that names an id, a panic or an assertion is
-    // never shown to a reader.
-    const NOT_SHOWN: [&str; 8] = [
+    // A literal on a line that names an id, a panic, an assertion or a debug
+    // dump is never shown to a reader.
+    const NOT_SHOWN: [&str; 9] = [
         "Id::new(",
+        ".debug_struct(",
         ".with(",
         "expect(",
         "panic!(",
@@ -2157,6 +2170,114 @@ fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue()
         "these words are written in English in the code rather than taken from the \
          message catalogue:\n  {}\nAdd a MessageId for each and write it with \
          MessageCatalog::text or format.",
+        offenders.join("\n  ")
+    );
+}
+
+/// The Netlist workspace says what the engineer works with, never how RSpice
+/// keeps it: no catalogue entry its files write holds "owned", "seal",
+/// "authority", "origin", "artifact", "primary", or the parser's "Eof".
+///
+/// The entries are the ones its production code names as `MessageId::...`,
+/// read against the catalogue's English.
+#[test]
+fn the_netlist_workspace_writes_no_word_of_the_machinery() {
+    const ROOTS: &[&str] = &[
+        "rspice-app-code/src/workbench/surfaces/netlist.rs",
+        "rspice-app-code/src/workbench/surfaces/netlist",
+        "rspice-app-code/src/workbench/documents/netlist_document.rs",
+        "rspice-app-code/src/workbench/documents/netlist_document",
+        "rspice-app-code/src/workbench/documents/netlist_tabs.rs",
+        "rspice-app-code/src/workbench/documents/deck_files.rs",
+        "rspice-app-code/src/workbench/documents/virtual_text_editor.rs",
+        "rspice-app-code/src/workbench/documents/virtual_text_editor",
+        "rspice-app-code/src/workbench/documents/text_editor_commands.rs",
+        "rspice-app-code/src/workbench/docks/navigator/netlist.rs",
+        "rspice-app-code/src/workbench/docks/navigator/netlist",
+        "rspice-app-code/src/workbench/docks/inspector/code_workspace.rs",
+        "rspice-app-code/src/workbench/chrome/document_bar/code.rs",
+        "rspice-app-code/src/workbench/code",
+        "rspice-app-code/src/workbench/menu_bar/netlist_actions.rs",
+        "rspice-app-code/src/workbench/menu_bar/netlist_export.rs",
+        "rspice-app-code/src/workbench/workflows",
+        "rspice-app-code/src/workbench/app/dialogs/source_document.rs",
+    ];
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the crates directory");
+    let catalogue_path = crates.join("rspice-app-workbench/src/workbench/localization.rs");
+    let catalogue = fs::read_to_string(&catalogue_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", catalogue_path.display()));
+    let english = catalogue
+        .lines()
+        .filter_map(|line| {
+            let (name, text) = line.trim().split_once(" => ")?;
+            let text = text
+                .strip_suffix(',')?
+                .strip_prefix('"')?
+                .strip_suffix('"')?;
+            Some((name, text))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let banned = |word: &str| {
+        word == "owned"
+            || word.starts_with("seal")
+            || word.starts_with("unseal")
+            || word.starts_with("authorit")
+            || word == "origin"
+            || word == "origins"
+            || word.starts_with("artifact")
+            || word == "primary"
+            || word == "eof"
+    };
+    let mut files = Vec::new();
+    for root in ROOTS {
+        let path = crates.join(root);
+        if path.is_dir() {
+            files.extend(rust_sources(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    let mut read = std::collections::BTreeSet::new();
+    let mut offenders = Vec::new();
+    for file in files {
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if name == "tests.rs" || name.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
+        let code = without_test_items(&source);
+        for (at, _) in code.match_indices("MessageId::") {
+            let id = code[at + "MessageId::".len()..]
+                .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+                .next()
+                .unwrap_or("");
+            let Some(text) = english.get(id) else {
+                continue;
+            };
+            if !read.insert(id.to_owned()) {
+                continue;
+            }
+            let lower = text.to_lowercase();
+            if lower.split(|ch: char| !ch.is_alphabetic()).any(banned) {
+                offenders.push(format!("{id}: {text:?}"));
+            }
+        }
+    }
+    assert!(
+        read.len() > 200,
+        "the scan read {} catalogue entries; the Netlist workspace writes far more",
+        read.len()
+    );
+    assert!(
+        offenders.is_empty(),
+        "these Netlist workspace words name RSpice's machinery rather than the \
+         engineer's deck:\n  {}",
         offenders.join("\n  ")
     );
 }
@@ -2512,7 +2633,15 @@ fn without_test_items(source: &str) -> String {
     let mut index = 0;
     while index < lines.len() {
         let line = lines[index];
-        let Some(rest) = line.trim_start().strip_prefix(ATTRIBUTE) else {
+        // `#[cfg(all(test, …))]` marks a test item as surely as the bare
+        // attribute does.
+        let attribute = line.trim_start();
+        let Some(rest) = attribute.strip_prefix(ATTRIBUTE).or_else(|| {
+            attribute
+                .strip_prefix("#[cfg(all(test,")
+                .and_then(|rest| rest.split_once(")]"))
+                .map(|(_, after)| after)
+        }) else {
             kept.push(line);
             index += 1;
             continue;

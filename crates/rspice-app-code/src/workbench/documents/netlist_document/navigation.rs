@@ -13,6 +13,7 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 use super::{
     Model, NetlistDocumentState, canonical_root_document_in, open_netlist_dependency_from_root_in,
 };
+use crate::workbench::MessageId;
 use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 /// Open the exact source location owned by a canonical diagnostic. Problems,
@@ -32,9 +33,11 @@ pub fn open_diagnostic_location(
         .iter()
         .find(|diagnostic| diagnostic.canonical.diagnostic_id == diagnostic_id)
         .cloned()
-        .ok_or_else(|| "The selected diagnostic is no longer available.".to_owned())?;
+        .ok_or_else(|| workbench.messages().text(MessageId::NetlistFindingGone))?;
     if !diagnostic.is_current() {
-        return Err("That finding is from an earlier version of the text.".to_owned());
+        return Err(workbench
+            .messages()
+            .text(MessageId::NetlistFindingOutOfDate));
     }
 
     let included_source = diagnostic
@@ -91,9 +94,9 @@ pub fn open_source_location(
                 })
                 .map(|dependency| dependency.locator().logical_identity().to_owned())
                 .ok_or_else(|| {
-                    format!(
-                        "Diagnostic source {} is no longer among the deck's included files.",
-                        source_path.display()
+                    workbench.messages().format(
+                        MessageId::NetlistFindingFileGone,
+                        &[("file", &source_path.display().to_string())],
                     )
                 })
         }?;
@@ -104,6 +107,7 @@ pub fn open_source_location(
             runs,
             root,
             &dependency_identity,
+            workbench.messages(),
         )?;
     }
 

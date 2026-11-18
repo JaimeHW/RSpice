@@ -208,6 +208,7 @@ impl AppState {
             request,
             text,
             encoding,
+            self.workbench.messages(),
         )
     }
 

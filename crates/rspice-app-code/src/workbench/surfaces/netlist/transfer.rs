@@ -8,14 +8,6 @@ use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::framework::feature::Cx;
 
-fn files_phrase(count: usize) -> String {
-    if count == 1 {
-        "1 included file".to_owned()
-    } else {
-        format!("{count} included files")
-    }
-}
-
 pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
     if !cx.state.netlist.export_dialog.open {
         return;
@@ -46,19 +38,17 @@ pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeF
     let netlist = &cx.model.netlist_artifacts;
     // Each refusal is one line beside Cancel and Export… in the footer.
     let refusal = if netlist.generation_error.is_some() {
-        Some("Fix the netlist's problems, then export.".to_owned())
+        Some(MessageId::NetlistExportHasErrors)
     } else if netlist.generated_document.is_none() {
-        Some("No netlist has been generated yet.".to_owned())
+        Some(MessageId::NetlistExportNotGenerated)
     } else if !current {
-        Some("The netlist changed: regenerate it first.".to_owned())
+        Some(MessageId::NetlistExportOutOfDate)
     } else if dialog.bundle_dependencies && !dependencies_sealed {
-        Some(format!(
-            "Resolve the {} first.",
-            files_phrase(dependency_count)
-        ))
+        Some(MessageId::NetlistExportIncludeMissing)
     } else {
         None
-    };
+    }
+    .map(|refusal| messages.text(refusal));
     let error = dialog.error.clone();
     let status = match (error.as_deref(), refusal.as_deref()) {
         (Some(error), _) => Err(error),
@@ -68,11 +58,13 @@ pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeF
     let bundle_label = messages.text(MessageId::NetlistExportDependencyBundle);
     let source_map_label = messages.text(MessageId::NetlistExportSourceMap);
     let bundled_includes = requires_bundle.then(|| {
-        format!(
-            "The deck includes {}, so it exports as a .zip bundle.",
-            files_phrase(dependency_count)
+        messages.counted(
+            dependency_count,
+            MessageId::NetlistExportIncludesSingular,
+            MessageId::NetlistExportIncludes,
         )
     });
+    let include_column = messages.text(MessageId::NetlistExportIncludeColumn);
     let before = (dialog.bundle_dependencies, dialog.include_source_map);
     let choice = CommandForm::new(
         &messages.text(MessageId::NetlistExportTitle),
@@ -88,7 +80,7 @@ pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeF
             items.push((bundle_label.as_str(), &mut dialog.bundle_dependencies));
         }
         items.push((source_map_label.as_str(), &mut dialog.include_source_map));
-        rows.check_columns("Include", &mut items);
+        rows.check_columns(&include_column, &mut items);
         if let Some(bundled) = &bundled_includes {
             rows.derived(bundled);
         }
@@ -116,7 +108,7 @@ pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeF
                 dialog.open = false;
                 dialog.error = None;
             } else {
-                dialog.error = Some("Export failed: see the application log.".to_owned());
+                dialog.error = Some(messages.text(MessageId::NetlistExportFailed));
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,

@@ -35,7 +35,7 @@ pub(super) fn author_deck(replay: &mut Replay) {
         "the project keeps the new deck as text: {decks:?}"
     );
     replay.frames(Vec::new());
-    replay.click("Project SPICE netlist editor", Role::MultilineTextInput);
+    replay.click("Deck editor", Role::MultilineTextInput);
     replay.key(Key::A, PRIMARY);
     replay.type_text(DECK);
     // The editor publishes its text line by line, not as one value.

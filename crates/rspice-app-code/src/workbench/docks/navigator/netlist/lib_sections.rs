@@ -100,17 +100,19 @@ pub(super) fn section_edit(
     netlist: &NetlistDocumentState,
     line: usize,
     section: &str,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<super::LibSectionRewrite, String> {
+    use crate::workbench::MessageId;
     if !active_netlist_source_is_editable_in(model, netlist) {
-        return Err(
-            "This netlist source is read-only; its .lib section cannot be changed.".to_owned(),
-        );
+        return Err(messages.text(MessageId::NetlistLibSectionReadOnly));
     }
     let source = model.simulation.source.netlist_content.clone();
-    let span = section_token_span(&source, line)
-        .ok_or_else(|| format!("Line {line} does not write a `.lib \"file\" section` card."))?;
+    let line_text = line.to_string();
+    let span = section_token_span(&source, line).ok_or_else(|| {
+        messages.format(MessageId::NetlistLibLineNotSection, &[("line", &line_text)])
+    })?;
     if source[span.clone()].trim_matches(['"', '\'']) == section {
-        return Err(format!("The card already selects section {section}."));
+        return Err(messages.text(MessageId::NetlistLibSectionAlreadyBound));
     }
     let mut replacement = source.clone();
     replacement.replace_range(span, section);
@@ -118,7 +120,10 @@ pub(super) fn section_edit(
         dependency: netlist.front.include().map(str::to_owned),
         original: source,
         replacement,
-        selected: format!("Selected .lib section {section} on line {line}."),
+        selected: messages.format(
+            MessageId::NetlistLibSectionChosen,
+            &[("line", &line_text), ("section", section)],
+        ),
     })
 }
 
@@ -183,7 +188,15 @@ mod tests {
         line: usize,
         section: &str,
     ) -> Result<String, String> {
-        let rewrite = section_edit(&harness.model, &harness.state.netlist, line, section)?;
+        let rewrite = section_edit(
+            &harness.model,
+            &harness.state.netlist,
+            line,
+            section,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        )?;
         let edit = match rewrite.dependency.as_deref() {
             Some(identity) => OwnedNetlistReplacement::dependency(
                 identity,
@@ -193,7 +206,14 @@ mod tests {
             ),
             None => OwnedNetlistReplacement::root(&rewrite.original, rewrite.replacement, 1),
         };
-        replace_deck_files(&mut harness.model, &mut harness.state.netlist, vec![edit])?;
+        replace_deck_files(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            vec![edit],
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        )?;
         Ok(rewrite.selected)
     }
 
@@ -314,8 +334,14 @@ mod tests {
             "a rewritten card is an unsaved change"
         );
 
-        undo_netlist_edit(&mut harness.model, &mut harness.state.netlist)
-            .expect("the rewrite is one journal entry");
+        undo_netlist_edit(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        )
+        .expect("the rewrite is one journal entry");
         assert_eq!(
             deck_text(&harness),
             ROOT,
@@ -328,19 +354,19 @@ mod tests {
         let mut harness = corner_deck_state(ROOT);
         assert_eq!(
             use_section(&mut harness, 2, "tt").unwrap_err(),
-            "The card already selects section tt.",
+            "This line already reads this section.",
             "re-selecting the bound section is a no-op, not an edit"
         );
         assert_eq!(
             use_section(&mut harness, 3, "ff").unwrap_err(),
-            "Line 3 does not write a `.lib \"file\" section` card.",
+            "Line 3 is not a .lib line that chooses a section.",
             "only a library card has a section token to move"
         );
 
         harness.state.netlist.front = NetlistTab::Generated;
         assert_eq!(
             use_section(&mut harness, 2, "ff").unwrap_err(),
-            "This netlist source is read-only; its .lib section cannot be changed.",
+            "This file is read-only; its .lib line cannot be changed.",
             "a generated document is reviewed, not authored"
         );
         assert_eq!(
