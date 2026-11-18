@@ -1446,7 +1446,7 @@ pub fn prepare_loaded_project(
         model, platform, ..
     } = lifecycle;
     let accepted_execution_context = project.file.execution_context.clone();
-    let (simulation_plan, model_library_manager, execution_warnings) = match project
+    let (simulation_plan, model_library_manager, mut execution_warnings) = match project
         .file
         .execution_context
         .take()
@@ -1534,6 +1534,12 @@ pub fn prepare_loaded_project(
     // Edits a recovered copy holds go over them afterwards, as unsaved work.
     let unsaved_library_files = std::mem::take(&mut project.file.unsaved_library_files);
     let mut library_files = model.read_referenced_libraries(&mut project.file);
+    execution_warnings.extend(not_reopened_warning(
+        &crate::workbench::app_state::model::close_views_of_unread_libraries(
+            &mut project.file,
+            &library_files,
+        ),
+    ));
     let mut accepted_baseline = project.clone();
     accepted_baseline.file.execution_context = accepted_execution_context;
     model.restore_unsaved_library_files(
@@ -1568,6 +1574,32 @@ pub fn prepare_loaded_project(
             execution_warnings,
         },
     })
+}
+
+/// What the open says of the views it did not reopen, each of a library it
+/// could not read.
+fn not_reopened_warning(closed: &[crate::state::CellViewRef]) -> Option<String> {
+    if closed.is_empty() {
+        return None;
+    }
+    let views = closed
+        .iter()
+        .map(crate::state::CellViewRef::display_path)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let libraries = closed
+        .iter()
+        .map(|view| format!("'{}'", view.library))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let (libraries, them) = match libraries.as_slice() {
+        [one] => (format!("library {one}"), "it"),
+        many => (format!("libraries {}", many.join(", ")), "them"),
+    };
+    Some(format!(
+        "Did not reopen {views}: {libraries} could not be read. Relink {them} under Project \u{00b7} Dependencies."
+    ))
 }
 
 /// Make a loaded project's libraries, workspace, plan and model catalog the

@@ -1,7 +1,7 @@
 //! Reading a referenced library's folder into the project, and the lock
 //! this session writes beside a file it edits.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rspice_design::library::folder::{HostPlatform, LibraryFile, LibraryFileLock, Missing};
@@ -10,10 +10,13 @@ use rspice_project::library_folder::FolderProblem;
 use rspice_project::library_folder::{FileProblem, FolderRead};
 use rspice_project::{LibraryImage, ProjectFile};
 
+use super::super::library_catalog::{first_schematic_reference_in, reference_exists_in};
 use super::{
     FileSession, LibraryFileSession, LibraryReference, LibraryRoots, Model, OnDisk, ReferenceLoad,
     ReferenceSession,
 };
+use crate::state::workspace::DEFAULT_SCHEMATIC_VIEW;
+use crate::state::{CellViewRef, OpenCellView, ViewType};
 
 /// What reading one folder came to: the session's record of it and, when it
 /// could be read, the parts to put into the project.
@@ -231,6 +234,57 @@ impl Model {
         }
         session
     }
+}
+
+/// Close the views `file` would reopen of a library `session` could not
+/// read, as Virtuoso reopens no window of a library it cannot find: such a
+/// tab shows a drawing of nothing, and Relink would have to wait on it. The
+/// focus falls back to another open view, else the project top's
+/// schematic. Returns the views closed, for the open to say so.
+pub fn close_views_of_unread_libraries(
+    file: &mut ProjectFile,
+    session: &LibraryFileSession,
+) -> Vec<CellViewRef> {
+    let unread = session
+        .libraries()
+        .filter(|(_, reading)| !reading.load.is_read())
+        .map(|(name, _)| name.to_owned())
+        .collect::<BTreeSet<_>>();
+    let workspace = &mut file.workspace;
+    let closed = workspace
+        .open_views
+        .iter()
+        .filter(|open| unread.contains(&open.reference.library))
+        .map(|open| open.reference.clone())
+        .collect::<Vec<_>>();
+    if closed.is_empty() {
+        return closed;
+    }
+    workspace.retain_valid_occurrences(|reference| !unread.contains(&reference.library));
+    if workspace.open_views.is_empty() {
+        let top = CellViewRef::new(
+            &workspace.project.root_library,
+            &workspace.project.top_cell,
+            DEFAULT_SCHEMATIC_VIEW,
+        );
+        let fallback = reference_exists_in(&file.libraries, &top)
+            .then_some(top)
+            .or_else(|| first_schematic_reference_in(&file.libraries));
+        if let Some(fallback) = fallback {
+            let view_type = file
+                .libraries
+                .get_library(&fallback.library)
+                .and_then(|library| library.get_cell(&fallback.cell))
+                .and_then(|cell| cell.get_view(&fallback.view))
+                .map_or(ViewType::Schematic, |view| view.view_type);
+            workspace
+                .open_views
+                .push(OpenCellView::new(fallback.clone(), view_type));
+            workspace.active_view = fallback;
+            workspace.reroot_active_occurrence();
+        }
+    }
+    closed
 }
 
 /// The lock this session writes on a file it edits, for the project at

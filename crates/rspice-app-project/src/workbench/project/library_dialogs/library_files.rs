@@ -401,12 +401,16 @@ fn announce(
 
 fn relink(cx: &mut Cx<'_, ProjectFeature>, library: &str, folder: &Path, accept: bool) {
     match cx.model.relink_library(library, folder, accept) {
-        Ok(RelinkOutcome::Relinked) => {
+        Ok(RelinkOutcome::Relinked(rebound)) => {
             cx.state.library_files.close();
+            let closed = rebound.closed_sentence();
             announce(
                 cx,
-                Ok(WorkspacePruned::default()),
-                format!("Relinked library '{library}' to {}.", folder.display()),
+                Ok(rebound.pruned),
+                format!(
+                    "Relinked library '{library}' to {}.{closed}",
+                    folder.display()
+                ),
             );
         }
         Ok(RelinkOutcome::AsksFirst { .. }) => {
@@ -480,14 +484,17 @@ pub fn take_browser_folder(cx: &mut Cx<'_, ProjectFeature>) {
                 finish_embed_from_folder(cx, result);
             }
             (browser_folder::Purpose::ReadForSession(library), Ok((folder, files))) => {
-                let result = cx
-                    .model
-                    .read_library_for_session(&library, &folder, files)
-                    .map(|()| WorkspacePruned::default());
+                let result = cx.model.read_library_for_session(&library, &folder, files);
+                let closed = result
+                    .as_ref()
+                    .map(|rebound| rebound.closed_sentence())
+                    .unwrap_or_default();
                 announce(
                     cx,
-                    result,
-                    format!("Read library '{library}' from {folder} for this session, read-only."),
+                    result.map(|rebound| rebound.pruned),
+                    format!(
+                        "Read library '{library}' from {folder} for this session, read-only.{closed}"
+                    ),
                 );
             }
         }

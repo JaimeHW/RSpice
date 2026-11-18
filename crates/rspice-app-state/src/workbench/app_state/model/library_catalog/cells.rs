@@ -4,7 +4,10 @@
 use super::{Model, WorkspacePruned};
 use crate::state::{CellViewRef, OpenCellView, SchematicState, View, ViewType};
 
-fn reference_exists_in(libraries: &crate::state::LibraryManager, reference: &CellViewRef) -> bool {
+pub(in crate::workbench::app_state::model) fn reference_exists_in(
+    libraries: &crate::state::LibraryManager,
+    reference: &CellViewRef,
+) -> bool {
     libraries
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -12,7 +15,9 @@ fn reference_exists_in(libraries: &crate::state::LibraryManager, reference: &Cel
         .is_some()
 }
 
-fn first_schematic_reference_in(libraries: &crate::state::LibraryManager) -> Option<CellViewRef> {
+pub(in crate::workbench::app_state::model) fn first_schematic_reference_in(
+    libraries: &crate::state::LibraryManager,
+) -> Option<CellViewRef> {
     for library in libraries.libraries_sorted() {
         for cell in library.cells_sorted() {
             for view in cell.views_sorted() {
@@ -103,7 +108,7 @@ impl Model {
         }
     }
 
-    pub(super) fn restore_valid_workspace_focus_after_prune(
+    pub(in crate::workbench::app_state::model) fn restore_valid_workspace_focus_after_prune(
         &mut self,
         active_removed: bool,
         hierarchy_pruned: bool,

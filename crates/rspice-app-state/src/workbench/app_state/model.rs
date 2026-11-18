@@ -47,8 +47,9 @@ pub use library_catalog::{
 pub use library_files::{
     CellViewStatus, FileRevision, FileSession, FileStamp, LibraryFile, LibraryFileLock,
     LibraryFileSession, LibraryMode, LibraryPath, LibraryPathChoice, LibraryReference, Missing,
-    OnDisk, PUBLICATION_STORE_FOLDER, ReferenceLoad, ReferenceSession, ReferenceStatus, RefreshRow,
-    RelinkOutcome, StatusMark, publication_store,
+    OnDisk, PUBLICATION_STORE_FOLDER, ReboundViews, ReferenceLoad, ReferenceSession,
+    ReferenceStatus, RefreshRow, RelinkOutcome, StatusMark, close_views_of_unread_libraries,
+    publication_store,
 };
 pub use plan_outcome::AnalysisLifecycleOutcome;
 pub use project_technology::ProjectTechnologyVerdict;

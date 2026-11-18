@@ -23,6 +23,9 @@ mod libraries;
 mod project_root;
 mod properties;
 
+pub(in crate::workbench::app_state::model) use cells::{
+    first_schematic_reference_in, reference_exists_in,
+};
 pub use copies::HierarchyCopy;
 pub(crate) use libraries::{conflicting_library_name, require_no_configuration_roots};
 

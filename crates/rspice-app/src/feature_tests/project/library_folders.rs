@@ -21,7 +21,7 @@ use rspice_app_models::workbench::models::pdk_workflow::apply_pdk_configuration_
 use rspice_app_project::workbench::project::DependencyLibrary;
 use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_project::workbench::project::library_dialogs::library_files::{
-    LibraryFileIntent, run_library_file_intent,
+    LibraryFileIntent, answer_next_folder_pick, run_library_file_intent,
 };
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::overview::{OverviewSnapshot, Tone};
@@ -1041,7 +1041,8 @@ fn a_reference_this_session_cannot_read_is_saved_back_as_it_was() {
     );
     assert!(after == before, "and so does the rest of the project");
 
-    app.state
+    let _ = app
+        .state
         .model
         .read_library_for_session(LIBRARY, LIBRARY, files)
         .expect("the picked folder is read for this session");
@@ -1072,4 +1073,133 @@ fn a_reference_this_session_cannot_read_is_saved_back_as_it_was() {
     );
     assert!(after == before, "and the rest of the project");
     assert!(!folders.folder.exists(), "nothing is written by path");
+}
+
+/// Copy every file of `from` to `to`, as a reader copies a library folder.
+fn copied(from: &Path, to: &Path) {
+    for (inside, bytes) in uploaded(from) {
+        let path = to.join(inside);
+        std::fs::create_dir_all(path.parent().expect("a folder")).expect("its folder");
+        std::fs::write(path, bytes).expect("the copy");
+    }
+}
+
+/// Relink `LIBRARY` to `folder` from its row, as the reader picks it.
+fn relink_to(app: &mut RSpiceApp, folder: &Path) {
+    answer_next_folder_pick(folder);
+    with_cx(app, |cx| {
+        run_library_file_intent(cx, LibraryFileIntent::Relink(LIBRARY.to_owned()));
+    });
+    app.after_contribution();
+}
+
+fn open_views_of_library(app: &RSpiceApp) -> Vec<String> {
+    app.state
+        .model
+        .workspace
+        .content
+        .open_views
+        .iter()
+        .filter(|open| open.reference.library == LIBRARY)
+        .map(|open| open.reference.display_path())
+        .collect()
+}
+
+fn logged(app: &RSpiceApp, text: &str) -> bool {
+    app.state
+        .model
+        .log_buffer
+        .entries()
+        .any(|entry| entry.message == text)
+}
+
+/// A project saved with a view of a library open, whose folder then moved,
+/// reopens without that view and says so, as Virtuoso reopens no window of
+/// a library it cannot find; Relink then reads the folder at once.
+#[test]
+fn a_reopen_leaves_closed_the_views_of_a_library_it_cannot_read_and_says_so() {
+    let (mut app, folders) = kept_in_a_folder("library-reopen-unread");
+    open(&mut app, "amp");
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "the project is saved with the view open"
+    );
+    let away = folders.root.join("away");
+    std::fs::rename(&folders.folder, &away).expect("the folder moves");
+
+    let mut app = reopened(app, &folders);
+    assert!(matches!(
+        app.state.model.reference_status(LIBRARY),
+        Some(ReferenceStatus::NotFound(_))
+    ));
+    assert_eq!(
+        open_views_of_library(&app),
+        Vec::<String>::new(),
+        "no view of the library is reopened"
+    );
+    assert!(
+        logged(
+            &app,
+            &format!(
+                "Did not reopen {LIBRARY}/amp/schematic: library '{LIBRARY}' could not be read. \
+                 Relink it under Project \u{b7} Dependencies."
+            )
+        ),
+        "the open says which views it left closed"
+    );
+    assert!(
+        !has_unsaved_changes_fresh(&app.state),
+        "leaving them closed is no edit"
+    );
+
+    relink_to(&mut app, &away);
+    assert!(
+        matches!(
+            app.state.model.reference_status(LIBRARY),
+            Some(ReferenceStatus::Found { .. })
+        ),
+        "Relink reads the folder"
+    );
+}
+
+/// Relink with a view of the library open reads the picked folder at once,
+/// and the open view shows what that folder holds: nothing has to be closed
+/// first.
+#[test]
+fn relink_with_a_view_of_the_library_open_shows_the_picked_folders_drawing() {
+    let (mut app, folders) = kept_in_a_folder("library-relink-open-view");
+    let copy = folders.root.join("copy").join(LIBRARY);
+    copied(&folders.folder, &copy);
+    open(&mut app, "amp");
+    assert!(draw(&mut app), "the cellview is editable");
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "the wire is saved to the library's folder"
+    );
+    assert_eq!(app.state.model.schematic.document().wires.len(), 1);
+    std::fs::remove_dir_all(&folders.folder).expect("the folder goes");
+    focus(&mut app);
+    assert!(matches!(
+        app.state.model.reference_status(LIBRARY),
+        Some(ReferenceStatus::NotFound(_))
+    ));
+
+    relink_to(&mut app, &copy);
+    let amp = CellViewRef::new(LIBRARY, "amp", "schematic");
+    assert!(
+        logged(
+            &app,
+            &format!("Relinked library '{LIBRARY}' to {}.", copy.display())
+        ),
+        "Relink is not refused for the open view"
+    );
+    assert_eq!(
+        app.state.model.workspace.content.active_view, amp,
+        "the view stays open in front"
+    );
+    assert_eq!(
+        app.state.model.schematic.document().wires.len(),
+        0,
+        "and shows the drawing of the folder relinked to"
+    );
 }

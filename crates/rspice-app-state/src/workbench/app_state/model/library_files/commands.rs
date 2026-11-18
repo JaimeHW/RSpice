@@ -16,7 +16,7 @@ use super::super::library_catalog::WorkspacePruned;
 #[cfg(not(target_arch = "wasm32"))]
 use super::LibraryReference;
 use super::folders::{self, FolderReading};
-use super::{Model, OnDisk, ReferenceLoad, RelinkOutcome};
+use super::{Model, OnDisk, ReboundViews, ReferenceLoad, RelinkOutcome};
 
 impl Model {
     /// Attach the library in `folder`, read-only, written as `path`.
@@ -379,13 +379,13 @@ impl Model {
         library: &str,
         folder_name: &str,
         files: Vec<(String, Vec<u8>)>,
-    ) -> Result<(), String> {
+    ) -> Result<ReboundViews, String> {
         let reference = self
             .library_manager
             .reference(library)
             .cloned()
             .ok_or_else(|| format!("Library '{library}' is not kept in a folder of its own."))?;
-        self.require_library_closed(library, "reading it again")?;
+        self.require_no_library_edits(library, "reading it again")?;
         let read = read_library_files(files)
             .map_err(|problem| folder_refusal(Path::new(folder_name), problem))?;
         let reading = folders::from_read(
@@ -400,7 +400,8 @@ impl Model {
                 "{folder_name} holds library '{holds}', not '{library}' as this project knows it."
             ));
         }
-        self.put_reading(library, reading, true)
+        self.put_reading(library, reading, true)?;
+        Ok(self.rebind_open_views_of(library))
     }
 
     /// Make a referenced library Editable or Read-only. Make read-only is
@@ -464,7 +465,6 @@ impl Model {
                 .ok_or_else(|| {
                     format!("Library '{library}' is not kept in a folder of its own.")
                 })?;
-            self.require_library_closed(library, "relinking it")?;
             self.require_no_library_edits(library, "relinking it")?;
             let read =
                 read_library_folder(folder).map_err(|problem| folder_refusal(folder, problem))?;
@@ -493,8 +493,42 @@ impl Model {
             );
             self.put_reading(library, reading, !reference.mode.is_editable())?;
             self.library_manager.insert_reference(reference);
-            Ok(RelinkOutcome::Relinked)
+            Ok(RelinkOutcome::Relinked(self.rebind_open_views_of(library)))
         }
+    }
+
+    /// Bring the open views of `library` to what a new reading of it holds:
+    /// each one it holds shows the reading at once, and each it does not is
+    /// closed. Nothing here waits on a window to be closed first.
+    fn rebind_open_views_of(&mut self, library: &str) -> ReboundViews {
+        let prefix = format!("{library}/");
+        self.workspace
+            .session
+            .schematic_sessions
+            .retain(|key, _| !key.starts_with(&prefix));
+        let closed = self
+            .workspace
+            .content
+            .open_views
+            .iter()
+            .filter(|open| {
+                open.reference.library == library && self.cell_view_type(&open.reference).is_none()
+            })
+            .map(|open| open.reference.display_path())
+            .collect::<Vec<_>>();
+        let shown = self.workspace.content.active_view.library == library
+            || self
+                .workspace
+                .content
+                .open_views
+                .iter()
+                .any(|open| open.reference.library == library);
+        let pruned = if shown {
+            self.restore_valid_workspace_focus_after_prune(false, false, false)
+        } else {
+            WorkspacePruned::default()
+        };
+        ReboundViews { closed, pruned }
     }
 
     /// Read again each referenced library whose folder was not found, now

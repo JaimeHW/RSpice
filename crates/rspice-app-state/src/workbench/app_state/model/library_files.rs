@@ -33,11 +33,13 @@ mod recovery;
 mod saving;
 mod watch;
 
+pub use folders::close_views_of_unread_libraries;
 pub use publication::{PUBLICATION_STORE_FOLDER, publication_store};
 #[cfg(test)]
 mod tests;
 
 use super::Model;
+use super::library_catalog::WorkspacePruned;
 
 /// What this session knows of every library kept in a folder of its own.
 #[derive(Debug, Clone, Default)]
@@ -176,13 +178,46 @@ pub struct RefreshRow {
 /// What Relink did, or what it needs to be asked first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelinkOutcome {
-    Relinked,
+    Relinked(ReboundViews),
     /// The picked folder holds the same library under another identity:
     /// ask before relinking to it.
     AsksFirst {
         recorded: uuid::Uuid,
         found: uuid::Uuid,
     },
+}
+
+/// What reading a library from another folder did to its open views: each
+/// one the new reading holds shows it at once, and each it does not hold
+/// is closed, as Virtuoso rebinds the windows of a remapped library.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReboundViews {
+    /// The open views the new reading does not hold, closed.
+    pub closed: Vec<String>,
+    /// The editor's reload of the view in front.
+    pub pruned: WorkspacePruned,
+}
+
+impl ReboundViews {
+    /// What the notice adds about the views it closed, if any.
+    pub fn closed_sentence(&self) -> String {
+        match self.closed.as_slice() {
+            [] => String::new(),
+            [one] => format!(" Closed {one}: the folder does not hold it."),
+            many => format!(
+                " Closed {}: the folder does not hold them.",
+                many.join(", ")
+            ),
+        }
+    }
+}
+
+impl ReferenceLoad {
+    /// Whether the library's folder was read, so its cells are in the
+    /// catalog.
+    pub const fn is_read(&self) -> bool {
+        matches!(self, Self::Loaded | Self::ReadForSession(_))
+    }
 }
 
 impl Model {
