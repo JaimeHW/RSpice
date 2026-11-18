@@ -99,6 +99,7 @@ fn prepared_manual_run(source: &str, origin: &Path) -> Vec<Observation> {
         ManualSourceInputs {
             source,
             origin: Some(origin),
+            stored: None,
         },
     )
     .unwrap_or_else(|error| panic!("{} prepares: {error}", origin.display()));

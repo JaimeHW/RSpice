@@ -258,7 +258,7 @@ pub fn pick_files(
 ) {
     let max_bytes = active_text_import_kind()
         .map(BrowserTextImportKind::max_bytes)
-        .unwrap_or(crate::io::project_io::MAX_PROJECT_FILE_BYTES);
+        .unwrap_or(crate::io::project_io::BROWSER_FILE_BYTES);
     wasm_bindgen_futures::spawn_local(async move {
         let picked = rfd::AsyncFileDialog::new()
             .add_filter(filter_name, filter_extensions)
