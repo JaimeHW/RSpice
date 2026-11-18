@@ -191,10 +191,11 @@ fn at_1920_a_labelled_tool_takes_exactly_its_labels_room() {
             .iter()
             .find(|(label, _)| label.starts_with(name))
             .unwrap_or_else(|| panic!("{name} stands in the row: {controls:?}"));
+        // The button draws its verb; its accessible name adds the key.
         let text = replay.ctx().fonts_mut(|fonts| {
             fonts
                 .layout(
-                    label.clone(),
+                    name.to_owned(),
                     font.clone(),
                     egui::Color32::PLACEHOLDER,
                     f32::INFINITY,
