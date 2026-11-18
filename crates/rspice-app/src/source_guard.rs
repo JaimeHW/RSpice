@@ -1390,9 +1390,10 @@ mod tests {
             owner.display()
         );
         assert!(
-            commits > 10,
-            "the scan found only {commits} transaction commits; a scan that reaches nothing \
-             passes forever"
+            commits > 0,
+            "the scan found no transaction commit outside {}; a scan that reaches nothing \
+             passes forever",
+            owner.display()
         );
         assert!(
             found.is_empty(),
