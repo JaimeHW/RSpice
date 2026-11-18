@@ -218,17 +218,18 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         value_row(ui, "Technology", &binding.display_label());
         value_row(ui, "Model library", binding.model_library());
         let source = binding.root_source().display().to_string();
-        value_row(ui, "Model file", &source);
+        value_row(ui, "Main model file", &source);
+        let files = binding.source_closure().len();
         value_row(
             ui,
-            "Source files",
-            &binding.source_closure().len().to_string(),
+            "Model files",
+            &format!("{files} file{}", plural_suffix(files)),
         );
     } else {
         // An unset value is not a value: toning these faint keeps the reader
         // on the rows below that do report live state.
         property_row_toned(ui, "Technology", status.label, t.color.text_faint);
-        for unset in ["Model library", "Model file", "Source files"] {
+        for unset in ["Model library", "Main model file", "Model files"] {
             property_row_toned(ui, unset, UNSET, t.color.text_faint);
         }
     }
