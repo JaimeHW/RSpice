@@ -9,6 +9,8 @@ mod activity;
 mod cells;
 mod header;
 mod snapshot;
+#[cfg(any(test, feature = "test-support"))]
+pub use snapshot::CELL_ROW_BUILDS;
 mod status;
 
 use egui::{Ui, pos2, vec2};

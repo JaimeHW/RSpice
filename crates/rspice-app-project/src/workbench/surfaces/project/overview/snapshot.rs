@@ -19,7 +19,7 @@
 
 use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash as _, Hasher as _};
+use std::hash::{Hash, Hasher as _};
 use std::sync::Arc;
 
 use crate::state::{CellViewRef, ViewType};
@@ -316,7 +316,11 @@ impl OverviewSnapshot {
             ctx,
             "overview.cells",
             CellsKey::of(cx.model, cx.platform, netlist_first),
-            || cell_rows(cx.model, netlist_first),
+            || {
+                #[cfg(any(test, feature = "test-support"))]
+                CELL_ROW_BUILDS.with(|count| count.set(count.get() + 1));
+                cell_rows(cx.model, netlist_first)
+            },
         );
 
         let now_ms =
@@ -474,6 +478,7 @@ fn status_rows(
 struct CellsKey {
     catalog: u64,
     saved: u64,
+    /// The part count of every schematic the rows count instances from.
     schematics: (usize, u64, u64),
     configurations: u64,
     unsaved: u64,
@@ -500,7 +505,7 @@ impl CellsKey {
         Self {
             catalog: model.library_manager.catalog().stamp(),
             saved: accepted_generation(platform),
-            schematics: schematic_stamps(model),
+            schematics: schematic_part_counts(model),
             configurations: configurations.finish(),
             unsaved: unsaved.finish(),
             top: top.finish(),
@@ -686,12 +691,64 @@ impl OperationsKey {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Times this thread derived the Overview's Cells table.
+    pub static CELL_ROW_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The part count of each schematic the Cells table counts instances from,
+/// as it reads them: the editor's for the view in front and the buffer's for
+/// every other, folded without regard to the buffers' order. An edit that
+/// adds or removes a part moves the fold once, on the frame it is made; one
+/// that moves a part or draws a wire does not, and neither does the buffer
+/// the editor writes back for the view in front a frame later.
+fn schematic_part_counts(model: &Model) -> (usize, u64, u64) {
+    let active = model.workspace.content.active_view.key();
+    let editor = std::iter::once((
+        Some(&active),
+        model
+            .schematic
+            .editor_ref()
+            .design
+            .document()
+            .components
+            .len(),
+    ));
+    let buffers = model
+        .workspace
+        .content
+        .schematic_buffers
+        .iter()
+        .filter(|(key, _)| **key != active)
+        .map(|(key, schematic)| (Some(key), schematic.document().components.len()));
+    fold(
+        editor.chain(buffers),
+        model.workspace.content.schematic_buffers.len(),
+    )
+}
+
+/// `entries` folded without regard to their order.
+fn fold<K: Hash, V: Hash>(
+    entries: impl Iterator<Item = (K, V)>,
+    count: usize,
+) -> (usize, u64, u64) {
+    let mut folded_xor = 0_u64;
+    let mut folded_sum = 0_u64;
+    for entry in entries {
+        let mut hasher = DefaultHasher::new();
+        entry.hash(&mut hasher);
+        let entry = hasher.finish();
+        folded_xor ^= entry;
+        folded_sum = folded_sum.wrapping_add(entry.rotate_left(17));
+    }
+    (count, folded_xor, folded_sum)
+}
+
 /// The content stamps of the open editor's schematic and of every buffered
 /// one, folded without regard to the buffers' order: an edit to any of them,
 /// or a buffer added or dropped, moves the fold.
 fn schematic_stamps(model: &Model) -> (usize, u64, u64) {
-    let mut folded_xor = 0_u64;
-    let mut folded_sum = 0_u64;
     let editor = std::iter::once((None, model.schematic.editor_ref().design.content_stamp()));
     let buffers = model
         .workspace
@@ -699,18 +756,9 @@ fn schematic_stamps(model: &Model) -> (usize, u64, u64) {
         .schematic_buffers
         .iter()
         .map(|(key, schematic)| (Some(key), schematic.content_stamp()));
-    for (key, stamp) in editor.chain(buffers) {
-        let mut entry = DefaultHasher::new();
-        key.hash(&mut entry);
-        stamp.hash(&mut entry);
-        let entry = entry.finish();
-        folded_xor ^= entry;
-        folded_sum = folded_sum.wrapping_add(entry.rotate_left(17));
-    }
-    (
+    fold(
+        editor.chain(buffers),
         model.workspace.content.schematic_buffers.len(),
-        folded_xor,
-        folded_sum,
     )
 }
 
