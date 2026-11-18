@@ -266,7 +266,7 @@ impl CheckAndSaveParts<'_> {
             .status(status)
             .show(ctx, |rows| {
                 if has_findings {
-                    show_problems = rows.value_action("Checks", &checks, SHOW_IN_PROBLEMS);
+                    show_problems = rows.sentence_action("Checks", &checks, SHOW_IN_PROBLEMS);
                 } else {
                     rows.value("Checks", &checks);
                 }
@@ -275,7 +275,7 @@ impl CheckAndSaveParts<'_> {
                 if let Some(instance) = repair_instance.as_deref()
                     && let Some(repair) = self.commands.spec(ids::UPDATE_INSTANCE_INTERFACE)
                 {
-                    repair_requested = rows.value_action(
+                    repair_requested = rows.sentence_action(
                         "Instance",
                         &format!("{instance} is out of date"),
                         repair.label,
