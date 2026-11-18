@@ -109,8 +109,7 @@ fn an_absolute_include_of_a_deck_kept_as_text_is_the_error_on_its_line() {
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
-    let said =
-        "a deck kept in the project cannot read C:/pdk/models.lib; add the file to this deck";
+    let said = "C:/pdk/models.lib is outside this deck. Add the file to the deck to use it.";
 
     let error = app
         .state
@@ -118,11 +117,40 @@ fn an_absolute_include_of_a_deck_kept_as_text_is_the_error_on_its_line() {
         .netlist
         .diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.message.contains(said))
-        .expect("the check finds the line");
+        .find(|diagnostic| diagnostic.message == said)
+        .expect("the check finds the line, in plain words");
     // Lines count from zero: the third line, the include.
     assert_eq!(error.line, Some(2), "{error:?}");
-    assert!(error.message.contains(said), "{error:?}");
+    let refused = dispatched(&mut app.state).expect_err("nothing is read from a disk");
+    assert!(refused.contains(said), "{refused}");
+}
+
+/// A line naming a file the deck kept as text does not keep says so in
+/// plain words on that line, and the run refuses with them.
+#[test]
+fn an_include_the_deck_does_not_keep_is_the_error_on_its_line() {
+    let mut app = RSpiceApp::test_instance();
+    let deck = "* amp\nV1 a 0 1\n.include \"models/opamp.inc\"\nR1 a 0 1k\n.op\n.end\n";
+    assert!(
+        app.state
+            .import_deck_files(vec![("amp.cir".to_owned(), deck.as_bytes().to_vec())]),
+        "{:?}",
+        app.state.prompt_text()
+    );
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    let said = "models/opamp.inc is not in this deck. Add the file to the deck to use it.";
+
+    let error = app
+        .state
+        .code
+        .netlist
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message == said)
+        .expect("the check finds the line, in plain words");
+    assert_eq!(error.line, Some(2), "{error:?}");
     let refused = dispatched(&mut app.state).expect_err("nothing is read from a disk");
     assert!(refused.contains(said), "{refused}");
 }

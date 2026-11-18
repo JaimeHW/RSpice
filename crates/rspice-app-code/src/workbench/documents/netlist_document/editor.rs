@@ -1620,6 +1620,26 @@ fn parse_error_diagnostic_at(
             let (message, origin) = mapped_syntax_origin(message, line, editor_source_path);
             Diagnostic::error(message).with_source_location(&origin, editor_source_path)
         }
+        ParseError::SourceNotInDeck {
+            origin,
+            requested,
+            outside,
+        } => {
+            let id = if outside {
+                crate::workbench::MessageId::NetlistFileOutsideDeck
+            } else {
+                crate::workbench::MessageId::NetlistFileNotInDeck
+            };
+            let message = crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::default(),
+            )
+            .format(id, &[("path", &requested)]);
+            let origin = origin.unwrap_or_else(|| match editor_source_path {
+                Some(path) => rspice_core::netlist::NetlistSourceLocation::in_file(path, 0),
+                None => rspice_core::netlist::NetlistSourceLocation::in_memory(0),
+            });
+            Diagnostic::error(message).with_source_location(&origin, editor_source_path)
+        }
         ParseError::MissingSubcircuitEnds(error) => {
             Diagnostic::error(error.to_string())
                 .with_source_location(&error.opened_at, editor_source_path)

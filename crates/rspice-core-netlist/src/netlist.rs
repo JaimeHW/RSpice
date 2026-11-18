@@ -680,6 +680,22 @@ pub enum ParseError {
         detail: String,
     },
 
+    /// A deck kept as text with the files it reads names a file that is not
+    /// among them: by an absolute path, a file outside the deck, or by a
+    /// path the deck keeps no file at. Nothing is read from a disk for such
+    /// a deck, so the file has to be added to it. `origin` is the line that
+    /// names the file, once the include that met it says where it is.
+    #[error(
+        "{}{requested} is {}. Add the file to the deck to use it.",
+        located(.origin),
+        deck_place(*.outside)
+    )]
+    SourceNotInDeck {
+        origin: Option<NetlistSourceLocation>,
+        requested: String,
+        outside: bool,
+    },
+
     #[error("Unknown device type: {0}")]
     UnknownDevice(String),
 
@@ -769,6 +785,7 @@ impl ParseError {
         match self {
             Self::Syntax { line, .. } => Some(NetlistSourceLocation::in_memory(*line)),
             Self::UnsupportedCapability { origin, .. } => Some(origin.clone()),
+            Self::SourceNotInDeck { origin, .. } => origin.clone(),
             Self::DuplicateName { duplicate_line, .. } => {
                 Some(NetlistSourceLocation::in_memory(*duplicate_line))
             }
@@ -795,6 +812,22 @@ impl ParseError {
             | Self::InvalidValue(_)
             | Self::Io(_) => None,
         }
+    }
+}
+
+/// The `path:line: ` a located error starts with, or nothing.
+fn located(origin: &Option<NetlistSourceLocation>) -> String {
+    origin
+        .as_ref()
+        .map_or_else(String::new, |origin| format!("{origin}: "))
+}
+
+/// Where a file a deck kept as text names is not.
+const fn deck_place(outside: bool) -> &'static str {
+    if outside {
+        "outside this deck"
+    } else {
+        "not in this deck"
     }
 }
 

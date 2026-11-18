@@ -325,11 +325,10 @@ impl SealedSourceBundle {
         if is_portable_absolute_source_path(Path::new(requested))
             || windows_drive_relative_suffix(requested).is_some()
         {
-            return Err(ParseError::Syntax {
-                line: 0,
-                message: format!(
-                    "a deck kept in the project cannot read {requested}; add the file to this deck"
-                ),
+            return Err(ParseError::SourceNotInDeck {
+                origin: None,
+                requested: requested.to_owned(),
+                outside: true,
             });
         }
         let folder = portable_source_path_identity(owner.parent().unwrap_or(Path::new("/")));
@@ -356,11 +355,10 @@ impl SealedSourceBundle {
             format!("/{}", parts.join("/"))
         };
         self.canonical_member(Path::new(&candidate))
-            .ok_or_else(|| ParseError::Syntax {
-                line: 0,
-                message: format!(
-                    "Include file not found: {requested} (searched the files kept with this deck)"
-                ),
+            .ok_or_else(|| ParseError::SourceNotInDeck {
+                origin: None,
+                requested: requested.to_owned(),
+                outside: false,
             })
     }
 }
@@ -2106,9 +2104,28 @@ fn include_error_at(
     source_line: usize,
     directive: &str,
 ) -> ParseError {
-    if matches!(&error, ParseError::ResourceLimit(_)) {
-        return error;
-    }
+    let error = match error {
+        ParseError::ResourceLimit(_)
+        | ParseError::SourceNotInDeck {
+            origin: Some(_), ..
+        } => {
+            return error;
+        }
+        // The line that names a file a deck kept as text does not have is
+        // where the file is missing, however deep the include is.
+        ParseError::SourceNotInDeck {
+            origin: None,
+            requested,
+            outside,
+        } => {
+            return ParseError::SourceNotInDeck {
+                origin: Some(NetlistSourceLocation::in_file(source_path, source_line)),
+                requested,
+                outside,
+            };
+        }
+        other => other,
+    };
     let detail = match error {
         ParseError::Syntax { line, message } if line > 0 => {
             format!("{message} (nested source line {line})")
@@ -3265,28 +3282,54 @@ R1 1 0 {selected}
         }
         assert!(!expanded.contains("Rtt"), "{expanded}");
 
-        for (line, expected) in [
-            (
-                ".include \"C:/pdk/models.lib\"",
-                "a deck kept in the project cannot read C:/pdk/models.lib; add the file to this deck",
-            ),
-            (
-                ".include /pdk/models.lib",
-                "a deck kept in the project cannot read /pdk/models.lib; add the file to this deck",
-            ),
-            (
-                ".include models/absent.inc",
-                "Include file not found: models/absent.inc (searched the files kept with this deck)",
-            ),
+        for (line, requested, outside) in [
+            (".include \"C:/pdk/models.lib\"", "C:/pdk/models.lib", true),
+            (".include /pdk/models.lib", "/pdk/models.lib", true),
+            (".include models/absent.inc", "models/absent.inc", false),
         ] {
             let deck = format!("* amp\nR1 a 0 1k\n{line}\n");
             let error = IncludeProcessor::new_sealed(&root, bundle(&deck))
                 .expand_content_with_abort(&deck, &root, &NoAbort)
                 .expect_err("the line names no file of the deck");
             let message = error.to_string();
-            assert!(message.contains(expected), "{message}");
-            assert!(message.contains("amp.cir:3"), "{message}");
+            let place = if outside { "outside" } else { "not in" };
+            assert!(
+                message.ends_with(&format!(
+                    "amp.cir:3: {requested} is {place} this deck. Add the file to the deck to use it."
+                )),
+                "{message}"
+            );
+            let ParseWithAbortError::Parse(ParseError::SourceNotInDeck {
+                origin: Some(origin),
+                requested: named,
+                outside: said,
+            }) = error
+            else {
+                panic!("not a file missing from the deck: {message}");
+            };
+            assert_eq!((origin.line, named.as_str(), said), (3, requested, outside));
         }
+
+        // A file the deck keeps that names one it does not is the error on
+        // that file's line.
+        let nested = SealedSourceBundle::try_new_relative([
+            (root.clone(), "* amp\n.include models/a.inc\n".to_owned()),
+            (
+                PathBuf::from("/models/a.inc"),
+                "R1 a 0 1k\n.include ../absent.inc\n".to_owned(),
+            ),
+        ])
+        .expect("the deck and its file");
+        let error = IncludeProcessor::new_sealed(&root, nested)
+            .expand_content_with_abort("* amp\n.include models/a.inc\n", &root, &NoAbort)
+            .expect_err("the file names no file of the deck");
+        let message = error.to_string();
+        assert!(
+            message.ends_with(
+                "a.inc:2: ../absent.inc is not in this deck. Add the file to the deck to use it."
+            ),
+            "{message}"
+        );
     }
 
     #[test]
