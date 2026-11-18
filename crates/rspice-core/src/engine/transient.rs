@@ -5797,6 +5797,7 @@ impl Engine {
         // model's window is built from the same floor.
         circuit.set_analog_step_floor(hard_min_dt);
         circuit.set_absdelta_expression_tolerance(self.voltage_abstol());
+        circuit.set_foreign_event_tick(self.config.spice_dialect == SpiceDialect::Ngspice);
         publish_code_model_coincidence(&mut circuit, &breakpoints);
         let mut xyce_breakpoint_span_ceiling = XyceBreakpointSpanCeiling::new(
             self.config

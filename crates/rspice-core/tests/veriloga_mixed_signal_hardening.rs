@@ -468,7 +468,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         },
     ),
     (
-        "an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it",
+        "an_off_grid_xspice_wake_is_dated_at_the_nearest_tick",
         "hardening_ceil_wake",
         // Re-measured for faaf0e809's centred capacitor current: the same 190
         // points, 23 of them moved by at most 3.5e-22 s, OUT by at most
@@ -501,10 +501,15 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         // fell 7.97e-3 -> 2.68e-4 V in sum, and OUT's run-wide worst
         // 2.463e-3 -> 5.01e-4 V, its mean 1.10e-3 -> 2.49e-4 V. Every
         // CLK/FROMX/QDIV event stays bit-identical.
+        //
+        // Re-measured, 190 -> 194, when an XSPICE wake moved from the tick
+        // at or after it to the nearest one: each QDIV edge, a `#1` from a
+        // wake 0.4 ps past its tick, now falls 1 ps earlier, 0.6 ps after the
+        // FROMX edge. CLK and FROMX are bit-identical.
         Pinned::Whole(Fingerprint {
-            points: 190,
-            grid_hash: 0x593b_21a6_bcf0_a8c2,
-            volt_hash: 0xaf8a_b3ef_e073_1446,
+            points: 194,
+            grid_hash: 0xb464_fedf_940d_bb0e,
+            volt_hash: 0x468c_241b_592a_accc,
         }),
     ),
     (
@@ -3279,6 +3284,139 @@ fn femtosecond_steps_past_eight_seconds_keep_their_ticks() {
     );
 }
 
+/// A `1ns/1ns` inverter on the event net a `d_source` changes at 10.4 ns and
+/// 20.6 ns, printing each change it reads.
+const FOREIGN_WAKE: &str = "`timescale 1ns/1ns
+module wake(n, y);
+  input n; output y;
+  assign y = ~n;
+  always @(n) $display(\"n=%b at %0t\", n, $time);
+endmodule
+";
+
+/// The HDL lines a run printed after time zero, taken from `collector`.
+fn lines_after_zero(collector: &rspice_core::config::HdlOutputCollector) -> Vec<String> {
+    collector
+        .take()
+        .into_iter()
+        .map(|record| record.text.trim_end().to_owned())
+        .filter(|line| !line.ends_with(" at 0"))
+        .collect()
+}
+
+/// The deck of [`FOREIGN_WAKE`], its event net driven by `driver`.
+fn foreign_wake_deck(model: &ModelFile, driver: &str) -> String {
+    format!(
+        "* XSPICE events into a 1 ns module\n\
+         .hdl \"{}\"\n\
+         {driver}\n\
+         xw n y wake\n\
+         ada [n y] [an ay] dac1\n\
+         .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1p t_fall=1p)\n\
+         r1 an 0 1k\n\
+         r2 ay 0 1k\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// An XSPICE event wakes the HDL where each dialect's own tool wakes it.
+/// ngspice-46's `d_cosim` with Icarus Verilog 13, measured on this deck,
+/// delivers the `d_source` events at 10.4 ns and 20.6 ns to the `1ns`
+/// module at 10 and 20, the tick at or before each. The default dialect
+/// dates them at the nearest tick, 10 and 21, the rule Verilog-AMS LRM 2.4
+/// section 7.3.6.1 gives an analog event.
+#[test]
+fn an_xspice_event_wakes_the_hdl_at_its_dialects_tick() {
+    use rspice_core::engine::SpiceDialect;
+    let model = ModelFile::hdl("foreign_wake", FOREIGN_WAKE);
+    let source = ModelFile::with_extension(
+        "foreign_wake_source",
+        "0.0 0s\n10.4e-9 1s\n20.6e-9 0s\n",
+        "txt",
+    );
+    let deck = foreign_wake_deck(
+        &model,
+        &format!(
+            "asrc [n] src1\n.model src1 d_source(input_file=\"{}\")",
+            source.deck_path()
+        ),
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    for (dialect, second) in [
+        (SpiceDialect::BestAvailable, "n=0 at 21"),
+        (SpiceDialect::Ngspice, "n=0 at 20"),
+    ] {
+        let collector = std::sync::Arc::new(rspice_core::config::HdlOutputCollector::new());
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.hdl.output = Some(collector.clone());
+        Engine::new(config)
+            .run_tran(&netlist, 30e-9, 0.1e-9)
+            .expect("the deck runs");
+        assert_eq!(
+            lines_after_zero(&collector),
+            ["n=1 at 10", second],
+            "{dialect:?}"
+        );
+    }
+}
+
+/// A run resumed from a checkpoint taken between two XSPICE events dates the
+/// second by its dialect's rule, as the run it was taken from does. An
+/// `adc_bridge` 0.4 ns behind a step at 10 ns and another at 20.2 ns puts its
+/// events near 10.4 ns and 20.6 ns.
+#[test]
+fn a_resumed_run_dates_an_xspice_event_by_its_dialect() {
+    use rspice_core::engine::SpiceDialect;
+    let model = ModelFile::hdl("foreign_wake_resume", FOREIGN_WAKE);
+    let deck = foreign_wake_deck(
+        &model,
+        "vs s 0 pwl(0 0 10n 0 10.001n 1 20.2n 1 20.201n 0)\n\
+         aad [s] [n] adc1\n\
+         .model adc1 adc_bridge(in_low=0.5 in_high=0.5 rise_delay=0.4n fall_delay=0.4n)",
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    for (dialect, second) in [
+        (SpiceDialect::BestAvailable, "n=0 at 21"),
+        (SpiceDialect::Ngspice, "n=0 at 20"),
+    ] {
+        let collector = std::sync::Arc::new(rspice_core::config::HdlOutputCollector::new());
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.hdl.output = Some(collector.clone());
+        let engine = Engine::new(config);
+        let (_, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                &netlist,
+                30e-9,
+                0.1e-9,
+                TransientStartupMode::OperatingPoint,
+                &[15e-9],
+                &NoAbort,
+            )
+            .expect("the deck runs");
+        assert_eq!(
+            lines_after_zero(&collector),
+            ["n=1 at 10", second],
+            "{dialect:?}"
+        );
+        let saved = &scheduled[0].checkpoint;
+        let restored = TransientCheckpoint::from_bytes(
+            &saved
+                .to_bytes(TransientCheckpointEncoding::Unpacked)
+                .expect("the checkpoint encodes"),
+        )
+        .expect("the checkpoint decodes");
+        engine
+            .run_tran_resume_with_abort(&netlist, &restored, 30e-9, 0.1e-9, &NoAbort)
+            .expect("the run resumes");
+        assert_eq!(
+            lines_after_zero(&collector),
+            [second],
+            "{dialect:?} resumed"
+        );
+    }
+}
+
 /// A register that steps from 0 to 1 at 10 ns, converted by the inserted
 /// D/A, whose default `trise`/`tfall` are zero: an ideal step.
 const IDEAL_STEP: &str = "`timescale 1ns/1ps
@@ -5528,6 +5666,18 @@ fn picosecond_tick_seconds(ticks: u64) -> f64 {
         .expect("a tick inside the exactly-representable range")
 }
 
+/// The tick of that grid nearest `seconds`.
+fn nearest_picosecond_ticks(seconds: f64) -> u64 {
+    let ceil = ceil_picosecond_ticks(seconds);
+    if ceil > 0
+        && seconds - picosecond_tick_seconds(ceil - 1) < picosecond_tick_seconds(ceil) - seconds
+    {
+        ceil - 1
+    } else {
+        ceil
+    }
+}
+
 /// The least tick of that grid whose own instant is not before `seconds`.
 fn ceil_picosecond_ticks(seconds: f64) -> u64 {
     let mut ticks = (seconds / picosecond_tick()).ceil() as u64;
@@ -5541,24 +5691,23 @@ fn ceil_picosecond_ticks(seconds: f64) -> u64 {
 }
 
 /// **Property 5, case c.** A process woken by an XSPICE code model off the
-/// tick grid is dated at the tick at or after the wake, so a `#1` from it
-/// takes at least one whole time unit.
+/// tick grid is dated at the nearest tick, the rule Verilog-AMS LRM 2.4
+/// section 7.3.6.1 gives an analog event, so whatever crosses into the HDL at
+/// one instant reaches it at one tick.
 ///
 /// The deck is the E2 shape: an HDL clock drives a `d_inverter` whose delay is
 /// 100.4 ps — four tenths of a tick, in the half that rounds *down* — and the
 /// inverter's output drives an HDL divider whose reaction is a single tick.
 ///
-/// Both directions of the boundary are asserted, because the rule is one rule
-/// and the halves only mean something together. The HDL-to-XSPICE direction is
-/// exact: a clock edge on tick `T` reaches the code model at precisely the
+/// Both directions of the boundary are asserted. The HDL-to-XSPICE direction
+/// is exact: a clock edge on tick `T` reaches the code model at precisely the
 /// instant `T` names, which is why the inverter's output lands on a whole
 /// clock edge plus the declared delay and not on a quantized approximation of
-/// it. The XSPICE-to-HDL direction is that map's inverse, which is the least
-/// tick not before the instant. Dating the wake at the *nearest* tick instead
-/// puts `$realtime` 0.4 ps before the wake actually happened, and the `#1`
-/// then fires 0.6 ps after it — less than the one time unit it asked for.
+/// it. The XSPICE-to-HDL direction dates the wake at the nearest tick, 0.4 ps
+/// before the edge, and the `#1` then fires 0.6 ps after it, one unit on the
+/// wheel, as an A/D crossing's `#1` does under the same rule.
 #[test]
-fn an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it() {
+fn an_off_grid_xspice_wake_is_dated_at_the_nearest_tick() {
     /// The code model's declared propagation delay.
     const DELAY: f64 = 100.4e-12;
     const PERIOD: f64 = 5.0e-9;
@@ -5623,18 +5772,12 @@ fn an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it() {
         "one reaction per wake, plus the initial level: {reactions:?} against {rising:?}"
     );
     for (index, (wake, (reaction, _))) in rising.iter().zip(reactions.iter().skip(1)).enumerate() {
-        let dated = ceil_picosecond_ticks(*wake);
+        let dated = nearest_picosecond_ticks(*wake);
         let expected = picosecond_tick_seconds(dated + 1);
         assert!(
             (reaction - expected).abs() < 2.0e-20,
             "reaction {index} to a wake at {wake:.16e} s must fire one tick after tick \
              {dated}, at {expected:.16e} s, saw {reaction:.16e} s"
-        );
-        assert!(
-            reaction - wake >= picosecond_tick(),
-            "reaction {index} took {:.16e} s after a wake at {wake:.16e} s, which is less \
-             than the one time unit its `#1` asked for",
-            reaction - wake
         );
     }
 }

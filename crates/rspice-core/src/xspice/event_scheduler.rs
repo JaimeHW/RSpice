@@ -38,9 +38,10 @@
 //! 64-bit tick, because an instant also carries a tick's rank among the
 //! ticks that share one double of seconds. Reading an *analog* time as an
 //! HDL-visible tick is [`Instant::floor_tick`], [`Instant::nearest_tick`] or
-//! [`Instant::ceil_tick`], and which of the three a caller wants is a property
-//! of the question it is asking, not of the instant; the three are stated
-//! together on that type. All four conversions are exact integer arithmetic.
+//! [`Instant::foreign_event_tick`], and which of the three a caller wants is a
+//! property of the question it is asking, not of the instant; the three are
+//! stated together on that type. All the conversions are exact integer
+//! arithmetic.
 //!
 //! A caller whose event times are not on any declared grid needs no encoding of
 //! its own. The XSPICE path is that caller: its times come from code models and
@@ -494,33 +495,6 @@ impl TimeResolution {
 
     /// Convert analog seconds to the tick *at or after* them.
     ///
-    /// This is the conversion an event crossing from *another event kernel*
-    /// into the HDL time wheel is dated with, and it is the third of the three
-    /// mappings this type carries — see the module documentation of
-    /// [`crate::xspice::verilog`], which states all three in one place.
-    ///
-    /// The rule it implements is "not before". An XSPICE code model names its
-    /// event times in seconds and the HDL names them in ticks, so the two
-    /// directions of that boundary are the two halves of one map: an HDL tick
-    /// `T` reaches XSPICE as exactly [`Self::ticks_to_seconds`]`(T)`, and an
-    /// off-grid XSPICE instant reaches the HDL at the least tick whose own
-    /// instant is not before it — the HDL never labels a foreign-kernel event
-    /// earlier than it happened.
-    ///
-    /// Rounding to nearest is a defensible alternative rather than a forbidden
-    /// one: a `#1` from a process dated at `T` still fires at `T + 1`, one
-    /// whole unit later on the wheel. What it costs is that `$realtime` names
-    /// an instant before the event that caused the wake, and that the delay,
-    /// measured against the far kernel's clock, comes out short of a unit —
-    /// which is what the nearest-tick rule for *analog* events accepts on
-    /// purpose and what a two-discrete-kernel boundary need not.
-    ///
-    /// Neither of the other two mappings may be rewritten into this one.
-    /// [`Self::seconds_to_floor_ticks`] bounds how far the digital world may
-    /// be advanced; [`Self::seconds_to_ticks`] places an *analog* event, which
-    /// Verilog-AMS LRM 2.4 section 7.3.6.1 fixes at the nearest tick rather
-    /// than at the next one.
-    ///
     /// # Exactness
     ///
     /// Defined as the smallest `t` with `ticks_to_seconds(t) >= seconds`, the
@@ -528,11 +502,9 @@ impl TimeResolution {
     /// so the two agree: an instant that is a tick's image converts to that
     /// tick in both directions, and only a strictly interior one moves up.
     ///
-    /// Crate-visible and reached through [`Instant::ceil_tick`], and gated
-    /// with it: that method's only caller is the mixed interleave, which is a
-    /// `veriloga` module, so a build without the feature would carry an orphan
-    /// that `-D warnings` reports.
-    #[cfg(feature = "veriloga")]
+    /// No run dates anything at the ceiling; the exactness tests hold the
+    /// arithmetic every reading shares to it, from both sides.
+    #[cfg(all(test, feature = "veriloga"))]
     pub(crate) fn seconds_to_ceil_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
@@ -666,10 +638,11 @@ impl EventLattice {
 ///   accepted.
 /// * [`Self::nearest_tick`] — where an A/D transition's own timestamp lands,
 ///   which Verilog-AMS LRM 2.4 section 7.3.6.1 fixes at the nearest tick.
-/// * [`Self::ceil_tick`] — where an event crossing in from another event
-///   kernel lands, so the HDL never labels a foreign event earlier than it
-///   happened. A wake read off a coupled event uses its coincidence-aware
-///   form, [`Self::coincident_ceil_tick`]; see below.
+/// * [`Self::foreign_event_tick`] — where an event crossing in from the
+///   XSPICE kernel wakes the HDL: the nearest tick, the rule section 7.3.6.1
+///   gives an analog event, so everything that crosses into the HDL is dated
+///   one way; or, with the ngspice dialect, the tick at or before it, where
+///   ngspice-46's `d_cosim` hands it to Icarus ([`ForeignEventTick`]).
 ///
 /// # One instant, one key
 ///
@@ -696,13 +669,13 @@ impl EventLattice {
 /// than by rounding. An uncoupled run has no lattice, and its keys are the sums
 /// its code models computed.
 ///
-/// The ceiling reads the rule back. A wake from the other kernel lands on the
-/// least tick not before the event *after coincidence*: an instant less than
-/// one window past a tick image is that tick ([`Self::coincident_ceil_tick`]).
-/// Floor and nearest are unchanged, and the landing contract the analog
-/// stepper keeps with every lane is the same rule again: instants less than one
-/// floor apart are one instant, landed at the latest of them
-/// (`engine::transient`'s `accepted_veriloga_event_time`).
+/// A wake from the XSPICE kernel reads the rule back. It is dated from the
+/// event's own key, which a coupled run has already put on the tick image
+/// it is one rounding from, and the floor reads an instant less than one
+/// window before a tick image as that tick ([`Self::foreign_event_tick`]).
+/// The landing contract the analog stepper keeps with every lane is the same
+/// rule again: instants less than one floor apart are one instant, landed at
+/// the latest of them (`engine::transient`'s `accepted_veriloga_event_time`).
 ///
 /// Two words, compared image first: a pair of `u64`s keeps the eight-byte
 /// alignment of everything that holds a key, where a `u128` would double it.
@@ -799,8 +772,8 @@ impl Instant {
 
     /// The HDL tick at or before this instant.
     ///
-    /// Crate-visible and gated with its callers, as [`Self::nearest_tick`] and
-    /// [`Self::ceil_tick`] are.
+    /// Crate-visible and gated with its callers, as [`Self::nearest_tick`]
+    /// and [`Self::foreign_event_tick`] are.
     #[cfg(feature = "veriloga")]
     pub(crate) fn floor_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
         resolution.seconds_to_floor_ticks(self.seconds())
@@ -815,16 +788,6 @@ impl Instant {
     #[cfg(feature = "veriloga")]
     pub(crate) fn nearest_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
         resolution.seconds_to_ticks(self.seconds())
-    }
-
-    /// The HDL tick at or after this instant.
-    ///
-    /// Crate-visible and gated for the same reason [`Self::nearest_tick`] is:
-    /// the only caller is the wake the mixed interleave dates when an event
-    /// crosses in from the other event kernel.
-    #[cfg(feature = "veriloga")]
-    pub(crate) fn ceil_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
-        resolution.seconds_to_ceil_ticks(self.seconds())
     }
 
     /// This instant as a coupled run keys it: the exact image of the tick it
@@ -866,25 +829,48 @@ impl Instant {
         }
     }
 
-    /// The least HDL tick not before this instant, after coincidence: the
-    /// tick at or before it when it lies less than one coincidence window past
-    /// that tick's image, and otherwise [`Self::ceil_tick`].
-    ///
-    /// This is the wake a coupled code-model event dates in the HDL. The plain
-    /// ceiling of an instant one rounding past a tick image is the *next*
-    /// tick, so a `#d` that wake schedules would fire a whole tick late; the
-    /// two are one instant, and the wake is that tick. See "one instant, one
-    /// key" on this type.
+    /// The HDL tick an event crossing in from the XSPICE kernel wakes the
+    /// HDL at, by `rule`, after coincidence: under the floor, an instant less
+    /// than one coincidence window before a tick image is that tick, as the
+    /// nearest tick already reads it. See "one instant, one key" on this
+    /// type.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn coincident_ceil_tick(self, lattice: EventLattice) -> Result<u64, SchedulerError> {
-        let seconds = self.seconds();
+    pub(crate) fn foreign_event_tick(
+        self,
+        lattice: EventLattice,
+        rule: ForeignEventTick,
+    ) -> Result<u64, SchedulerError> {
         let resolution = lattice.resolution;
-        let floor = resolution.seconds_to_floor_ticks(seconds)?;
-        if seconds - resolution.tick_instant(floor) < lattice.window(seconds) {
-            return Ok(floor);
+        match rule {
+            ForeignEventTick::Nearest => self.nearest_tick(resolution),
+            ForeignEventTick::Floor => {
+                let seconds = self.seconds();
+                let floor = resolution.seconds_to_floor_ticks(seconds)?;
+                let window = lattice.window(seconds);
+                Ok(floor
+                    .checked_add(1)
+                    .filter(|next| resolution.tick_instant(*next) - seconds < window)
+                    .unwrap_or(floor))
+            }
         }
-        self.ceil_tick(resolution)
     }
+}
+
+/// Which tick an event crossing into the HDL from the XSPICE kernel wakes it
+/// at. Each dialect follows its own tool.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ForeignEventTick {
+    /// The nearest tick, ties to the later: the rule Verilog-AMS LRM 2.4
+    /// section 7.3.6.1 gives an analog event, so an XSPICE event and an A/D
+    /// crossing at one instant reach the HDL at one tick.
+    #[default]
+    Nearest,
+    /// The tick at or before the event, as ngspice-46's `d_cosim` delivers
+    /// an input to Icarus: the shim advances the simulator by
+    /// `(uint64_t)((vtime - vl_time) / tick_length)` ticks and only then
+    /// writes the input (src/xspice/verilog/vpi.c, `next_advance_cb`).
+    Floor,
 }
 
 /// The seconds, and a tick's rank after a plus sign when the tick shares its
@@ -2749,40 +2735,26 @@ mod tests {
         }
     }
 
-    /// The third rule, against the other two: an instant crossing in from
-    /// another event kernel is dated at the least tick not before it, so the
-    /// HDL never labels a foreign event earlier than it happened.
-    ///
-    /// The three agree exactly on a tick boundary and differ nowhere else by
-    /// more than one tick, which is what makes them substitutable nowhere and
-    /// comparable everywhere.
+    /// The third rule, against the other two: an event crossing in from the
+    /// XSPICE kernel wakes the HDL at the nearest tick, or with the ngspice
+    /// dialect at the tick at or before it. Measured on ngspice-46's
+    /// `d_cosim` with Icarus Verilog 13 under `timescale 1ns/1ns`, d_source
+    /// events at 10.4 ns and 20.6 ns reach the module at 10 and 20; the
+    /// nearest tick is 10 and 21.
     #[test]
-    fn the_three_rounding_rules_agree_on_a_boundary_and_part_inside_a_tick() {
+    fn an_xspice_event_wakes_the_hdl_at_its_dialects_tick() {
         let resolution = TimeResolution::new(-9).expect("1 ns");
-
+        let lattice = EventLattice::new(resolution, 1.0e-20);
+        let wake = |seconds: f64, rule| instant(seconds).foreign_event_tick(lattice, rule);
         for tick in [0u64, 1, 2, 7, 1_000] {
             let on_grid = Instant::from_tick(tick, resolution);
-            assert_eq!(on_grid.floor_tick(resolution), Ok(tick));
-            assert_eq!(on_grid.nearest_tick(resolution), Ok(tick));
-            assert_eq!(on_grid.ceil_tick(resolution), Ok(tick));
+            for rule in [ForeignEventTick::Nearest, ForeignEventTick::Floor] {
+                assert_eq!(on_grid.foreign_event_tick(lattice, rule), Ok(tick));
+            }
         }
-
-        // Strictly inside a tick: the floor stays, the ceiling moves on, and
-        // the nearest one picks whichever half the instant is in.
-        assert_eq!(instant(2.4e-9).ceil_tick(resolution), Ok(3));
-        assert_eq!(instant(2.5e-9).ceil_tick(resolution), Ok(3));
-        assert_eq!(instant(2.6e-9).ceil_tick(resolution), Ok(3));
-
-        let mut seconds = 0.0f64;
-        while seconds < 5.0e-9 {
-            let at = instant(seconds);
-            let floor = at.floor_tick(resolution).expect("in range");
-            let ceil = at.ceil_tick(resolution).expect("in range");
-            assert!(
-                ceil == floor || ceil == floor + 1,
-                "{seconds:e} s floored to {floor} but ceiled to {ceil}"
-            );
-            seconds += 3.7e-11;
+        for (seconds, nearest, floor) in [(10.4e-9, 10, 10), (20.6e-9, 21, 20), (2.5e-9, 3, 2)] {
+            assert_eq!(wake(seconds, ForeignEventTick::Nearest), Ok(nearest));
+            assert_eq!(wake(seconds, ForeignEventTick::Floor), Ok(floor));
         }
     }
 
@@ -2828,7 +2800,7 @@ mod tests {
                     for (rule, read) in [
                         ("floor", at.floor_tick(resolution)),
                         ("nearest", at.nearest_tick(resolution)),
-                        ("ceil", at.ceil_tick(resolution)),
+                        ("ceil", resolution.seconds_to_ceil_ticks(at.seconds())),
                     ] {
                         assert_eq!(read, Ok(tick), "1e{exponent} s tick {tick} {rule}");
                     }
@@ -3117,6 +3089,15 @@ mod tests {
         );
     }
 
+    /// `n` ulps below `at`.
+    fn ulps_below(at: Instant, n: usize) -> Instant {
+        let mut seconds = at.seconds();
+        for _ in 0..n {
+            seconds = seconds.next_down();
+        }
+        instant(seconds)
+    }
+
     /// `n` ulps above `at`.
     fn ulps_above(at: Instant, n: usize) -> Instant {
         let mut seconds = at.seconds();
@@ -3136,39 +3117,39 @@ mod tests {
         (EventLattice::new(resolution, floor), tick, image)
     }
 
-    /// The coincident ceiling of an instant less than one floor past a tick
-    /// image is that tick; one floor and more past it is the next one. The
-    /// plain ceiling moves on at the first ulp, which is the whole tick a
-    /// floor-landed wake used to lose.
+    /// Under the floor rule, an instant less than one floor before a tick
+    /// image is that tick; one floor and more before it is the tick before.
+    /// The plain floor moves back at the first ulp, a whole tick for a wake
+    /// computed a rounding short of the image. The nearest tick already reads
+    /// both as the tick.
     #[test]
-    fn the_coincident_ceiling_keeps_an_instant_within_a_floor_of_its_tick() {
+    fn the_coincident_floor_keeps_an_instant_within_a_floor_of_its_tick() {
         let (lattice, tick, image) = picosecond_lattice_at_a_millisecond();
         let window = lattice.window(image.seconds());
         assert_eq!(window, lattice.floor, "a floor under the cap is the window");
+        let floor = |at: Instant| at.foreign_event_tick(lattice, ForeignEventTick::Floor);
+        let nearest = |at: Instant| at.foreign_event_tick(lattice, ForeignEventTick::Nearest);
 
         let mut k = 0;
-        while ulps_above(image, k).seconds() - image.seconds() < window {
-            let at = ulps_above(image, k);
-            assert_eq!(at.coincident_ceil_tick(lattice), Ok(tick), "{k} ulps past");
+        while image.seconds() - ulps_below(image, k).seconds() < window {
+            let at = ulps_below(image, k);
+            assert_eq!(floor(at), Ok(tick), "{k} ulps short");
+            assert_eq!(nearest(at), Ok(tick), "{k} ulps short");
             if k > 0 {
-                assert_eq!(at.ceil_tick(lattice.resolution), Ok(tick + 1));
+                assert_eq!(at.floor_tick(lattice.resolution), Ok(tick - 1));
             }
             k += 1;
         }
-        assert_eq!(k, 8, "the floor at a millisecond is eight ulps");
+        assert!(k >= 8, "the floor at a millisecond is eight ulps or more");
         assert_eq!(
-            ulps_above(image, k).coincident_ceil_tick(lattice),
-            Ok(tick + 1),
-            "one whole floor past the image is another instant"
+            floor(ulps_below(image, k)),
+            Ok(tick - 1),
+            "one whole floor short of the image is another instant"
         );
-        assert_eq!(
-            instant(image.seconds() + 2.0 * window).coincident_ceil_tick(lattice),
-            Ok(tick + 1)
-        );
-        // Below the image the ceiling already is the tick.
-        let below = instant(image.seconds().next_down());
-        assert_eq!(below.coincident_ceil_tick(lattice), Ok(tick));
-        assert_eq!(image.coincident_ceil_tick(lattice), Ok(tick));
+        assert_eq!(floor(instant(image.seconds() - 2.0 * window)), Ok(tick - 1));
+        // Past the image the floor already is the tick.
+        assert_eq!(floor(ulps_above(image, 3)), Ok(tick));
+        assert_eq!(floor(image), Ok(tick));
     }
 
     /// The snap is onto the lattice: idempotent, the identity on a tick image,
@@ -3277,11 +3258,19 @@ mod tests {
         let near = instant(image.seconds() + 0.5e-15);
         assert_eq!(near.canonical(lattice, Instant::ZERO), image);
         assert_eq!(
-            instant(image.seconds() + 0.5e-12).coincident_ceil_tick(lattice),
-            Ok(tick + 1),
-            "a wake half a tick late is a tick late"
+            instant(image.seconds() + 0.5e-12).foreign_event_tick(lattice, ForeignEventTick::Floor),
+            Ok(tick),
+            "a wake half a tick late floors to its tick"
         );
-        assert_eq!(near.coincident_ceil_tick(lattice), Ok(tick));
+        assert_eq!(
+            instant(image.seconds() - 0.5e-12).foreign_event_tick(lattice, ForeignEventTick::Floor),
+            Ok(tick - 1),
+            "a wake half a tick early floors to the tick before"
+        );
+        assert_eq!(
+            near.foreign_event_tick(lattice, ForeignEventTick::Floor),
+            Ok(tick)
+        );
     }
 
     /// No declared floor still leaves the clock's own resolution as the

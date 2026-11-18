@@ -535,6 +535,23 @@ impl super::CircuitData {
         let _ = voltage_abstol;
     }
 
+    /// Tell the HDL wheel which tick a wake from the XSPICE kernel takes:
+    /// the tick at or before its event under the ngspice dialect, as
+    /// ngspice-46's `d_cosim` delivers it, and the nearest one otherwise
+    /// (`Instant::foreign_event_tick`).
+    pub(crate) fn set_foreign_event_tick(&mut self, ngspice: bool) {
+        #[cfg(feature = "veriloga")]
+        if let Some(coordinator) = self.scheduler.mixed_digital_coordinator.as_mut() {
+            coordinator.set_foreign_event_tick(if ngspice {
+                crate::xspice::event_scheduler::ForeignEventTick::Floor
+            } else {
+                crate::xspice::event_scheduler::ForeignEventTick::Nearest
+            });
+        }
+        #[cfg(not(feature = "veriloga"))]
+        let _ = ngspice;
+    }
+
     /// Lend the parked candidate ledgers to `hosts` for the length of `act`.
     ///
     /// An enrolled instance's ledger lives on the scheduler between trials —

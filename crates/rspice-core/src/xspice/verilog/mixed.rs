@@ -41,26 +41,28 @@
 //! never back into a slot the digital world has left.
 //!
 //! *Which tick does a wake from the other event kernel land on?* is answered
-//! by the **ceiling** —
-//! [`Instant::ceil_tick`](crate::xspice::event_scheduler::Instant::ceil_tick).
-//! This one is not an analog event and the LRM's nearest-tick rule does not
-//! reach it: XSPICE and the HDL are two discrete kernels on two time bases,
-//! and the two directions of that boundary are the two halves of *one* map.
-//! HDL to XSPICE is exact — an HDL tick `T` is delivered at precisely the
-//! instant `T` names, which is what `external_models.rs` stamps. The inverse
-//! of an exact map is "not before": an off-grid XSPICE instant is delivered at
-//! the least tick whose own instant is not before it, so the HDL never labels
-//! a foreign-kernel event earlier than it happened. Exact one way,
-//! least-tick-not-before the other.
+//! by **the dialect's own tool** —
+//! [`Instant::foreign_event_tick`](crate::xspice::event_scheduler::Instant::foreign_event_tick).
+//! By default it is the nearest tick: an XSPICE event reaches the HDL by the
+//! rule section 7.3.6.1 gives an analog event, so whatever crosses into the
+//! HDL at one instant reaches it at one tick, and a code model's 10.4 ns
+//! output wakes a `1ns` module at 10 and its 10.6 ns output at 11. With the
+//! ngspice dialect it is the tick at or before the event, which is where
+//! ngspice-46's `d_cosim` writes an input into Icarus: the shim advances the
+//! simulator by the whole ticks the event lies past it and then writes, so
+//! 10.4 ns and 20.6 ns reach the module at 10 and 20. Either way the wake is
+//! clamped forward against the ticks the trial has already run, so neither
+//! rule moves an event back into a slot the digital world has left; and
+//! HDL-to-XSPICE stays exact, an HDL tick `T` delivered at precisely the
+//! instant `T` names, which is what `external_models.rs` stamps.
 //!
-//! "Not before" is read after coincidence, because one instant has one key. In
-//! a coupled run a code model's output within one coincidence window of a tick
-//! image is keyed at that image, and a wake is dated from the event's own key
-//! by [`Instant::coincident_ceil_tick`](crate::xspice::event_scheduler::Instant::coincident_ceil_tick):
-//! an instant less than one window past a tick image is that tick, where the
-//! plain ceiling would move a `#d` the wake runs a whole tick late. The rule,
-//! its window and its causality clamp are stated once, as "one instant, one
-//! key" on [`Instant`](crate::xspice::event_scheduler::Instant).
+//! The tick is read off the event's own key. In a coupled run a code model's
+//! output within one coincidence window of a tick image is keyed at that
+//! image, so either rule names that tick; the floor also reads an instant less
+//! than one window before an image as that tick, where the plain floor would
+//! run the wake a whole tick early. The window and its causality clamp are
+//! stated once, as "one instant, one key" on
+//! [`Instant`](crate::xspice::event_scheduler::Instant).
 //!
 //! A fourth question is not a fourth base. It asks which of the answers above
 //! a particular crossing gets, and it is written here because the answer is
@@ -94,18 +96,6 @@
 //! trial — `CandidateLedger` carries that argument. It is the same question
 //! about the same movement, asked where the re-solve actually happens; nothing
 //! is dated by where it fell relative to another crossing.
-//!
-//! Nearest-tick here would not violate any standard, and this document does
-//! not claim it would. A `#1` from a process dated at tick `T` fires at
-//! `T + 1` — one whole time unit later in the digital base, whatever the
-//! physical instant that woke it — and measuring that delay against the *other*
-//! kernel's clock instead is exactly what the LRM's own nearest-tick A/D rule
-//! does by design one paragraph above, where a crossing at `T·Δ + 0.49Δ` is
-//! published at `T` and its `#1` elapses `0.51Δ` after the crossing. The
-//! ceiling is an engineering choice for a boundary whose far side names exact
-//! seconds and has no declared precision to round to: it keeps the two halves
-//! of the map inverse to each other, and keeps `$realtime` from naming an
-//! instant before the event that caused the wake.
 //!
 //! "Exact" in the HDL-to-XSPICE direction is exact for an event the wheel
 //! itself timed — the stepper lands on a scheduled tick bit-exactly, through a
@@ -203,7 +193,7 @@ use crate::xspice::threshold_crossing::{
 /// that is the kernel's key, and it is exact. This is the one direction that
 /// quantizes, and *which* of the three rules applies is the caller's question
 /// — advance floors, an A/D crossing takes the nearest, a wake from the other
-/// event kernel takes the ceiling — so the caller names the rule and this
+/// event kernel takes its dialect's — so the caller names the rule and this
 /// names the refusal. A time that is no instant at all (negative, infinite,
 /// NaN) is refused here, with exactly the error the rounding rules report for
 /// it.

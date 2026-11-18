@@ -7,6 +7,7 @@ pub mod checkpoint;
 mod observations;
 use crate::xspice::event_scheduler::EventLattice;
 use crate::xspice::event_scheduler::EventTarget;
+use crate::xspice::event_scheduler::ForeignEventTick;
 use crate::xspice::event_scheduler::SchedulerError;
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
 use rspice_veriloga::canonical_ir::digital_link::{
@@ -284,6 +285,9 @@ pub struct MixedDigitalCoordinator {
     /// zero when no solver has declared one; see
     /// [`Self::set_absdelta_expression_tolerance`].
     absdelta_expression_tolerance: f64,
+    /// The tick a wake from the XSPICE kernel is dated at, by the dialect;
+    /// see [`Self::set_foreign_event_tick`].
+    foreign_event_tick: ForeignEventTick,
     probes: Vec<Option<f64>>,
     drives: Vec<(DigitalSignalId, FourStateValue)>,
     /// Every A/D bit one settle pass moved, across every enrolled instance,
@@ -760,6 +764,7 @@ impl MixedDigitalCoordinator {
             accepted_time: None,
             analog_step_floor: 0.0,
             absdelta_expression_tolerance: 0.0,
+            foreign_event_tick: ForeignEventTick::default(),
             probes,
             drives: Vec::new(),
             publications: Vec::new(),
@@ -850,6 +855,7 @@ impl MixedDigitalCoordinator {
             accepted_time: None,
             analog_step_floor: self.analog_step_floor,
             absdelta_expression_tolerance: self.absdelta_expression_tolerance,
+            foreign_event_tick: self.foreign_event_tick,
             probes: vec![None; self.probes.len()],
             drives: Vec::new(),
             publications: Vec::new(),
@@ -1224,6 +1230,18 @@ impl MixedDigitalCoordinator {
         };
     }
 
+    /// Date a wake from the XSPICE kernel by `rule`
+    /// ([`Instant::foreign_event_tick`]): the nearest tick by default, the
+    /// tick at or before the event under the ngspice dialect.
+    pub(crate) fn set_foreign_event_tick(&mut self, rule: ForeignEventTick) {
+        self.foreign_event_tick = rule;
+    }
+
+    /// How a wake from the XSPICE kernel is dated.
+    pub(super) fn foreign_event_tick(&self) -> ForeignEventTick {
+        self.foreign_event_tick
+    }
+
     /// The `expr_tol` an observer runs with: its own when it gave a positive
     /// one, otherwise the declared default.
     pub(super) fn absdelta_expression_tolerance(&self, given: f64) -> f64 {
@@ -1258,7 +1276,7 @@ impl MixedDigitalCoordinator {
 
     /// The kernel's tick lattice under that floor: what a coupled code-model
     /// output is made canonical on, and what a wake from one is dated with
-    /// ([`Instant::coincident_ceil_tick`]).
+    /// ([`Instant::foreign_event_tick`]).
     #[doc(hidden)]
     pub fn event_lattice(&self) -> EventLattice {
         EventLattice::new(self.resolution, self.analog_step_floor)
@@ -1735,25 +1753,20 @@ impl MixedDigitalCoordinator {
             // Run that physical boundary through the causal lane so quantizing
             // its reporting tick cannot consume an unrelated future timer.
             //
-            // Dated at the tick *at or after* the instant, not the nearest
-            // one: this is a second event kernel's time base meeting the HDL
-            // wheel, and the reverse direction hands an HDL tick to XSPICE at
-            // exactly the instant that tick names. The inverse of an exact map
-            // is the least tick not before the instant — see this module's
-            // "three time bases", which also says why nearest-tick is the
-            // rejected alternative here rather than a forbidden one.
+            // Dated by the dialect's own tool: the nearest tick, as an analog
+            // event is (LRM 2.4 section 7.3.6.1), or under the ngspice dialect
+            // the tick at or before the event, where `d_cosim` writes it into
+            // Icarus — see this module's "three time bases".
             //
             // The instant is the due event's own key rather than the
-            // endpoint, and the ceiling is read after coincidence
-            // (`Instant::coincident_ceil_tick`). A coupled event landed one
-            // floor late has an endpoint one rounding past its tick image,
-            // whose plain ceiling is the next tick: the `#d` the wake runs
-            // would fire a whole tick late. The earliest due key names the
-            // instant of every event this wake delivers, because the stepper
-            // lands on the earliest activation, and on the latest of any
-            // instants less than one floor apart. An endpoint with no event
-            // due is an analog input's wake, dated at the endpoint itself.
-            // Never before a tick this trial has already run the wheel at.
+            // endpoint. A coupled event landed one floor late has an endpoint
+            // one rounding past its tick image, where the key is the image
+            // itself. The earliest due key names the instant of every event
+            // this wake delivers, because the stepper lands on the earliest
+            // activation, and on the latest of any instants less than one
+            // floor apart. An endpoint with no event due is an analog input's
+            // wake, dated at the endpoint itself. Never before a tick this
+            // trial has already run the wheel at.
             let lattice = coordinator.event_lattice();
             let wake = participant
                 .external
@@ -1761,7 +1774,8 @@ impl MixedDigitalCoordinator {
                 .and_then(DigitalActiveParticipant::next_event_time)
                 .filter(|due| *due <= cursor.time)
                 .unwrap_or(cursor.time);
-            let tick = hdl_tick(wake, |at| at.coincident_ceil_tick(lattice))?
+            let rule = coordinator.foreign_event_tick;
+            let tick = hdl_tick(wake, |at| at.foreign_event_tick(lattice, rule))?
                 .max(cursor.tick)
                 .max(cursor.published_tick);
             let advanced = settle_endpoint(
