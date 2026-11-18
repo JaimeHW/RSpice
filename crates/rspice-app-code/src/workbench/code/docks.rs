@@ -55,11 +55,6 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
     if let Some(reference) = asked.open_in_design {
         cx.wb.outbox.push(OpenInDesign(reference));
     }
-    if let Some(identity) = asked.relink {
-        cx.wb
-            .outbox
-            .push(CodeRequest::RelinkNetlistDependency(identity));
-    }
 }
 
 /// What a source bundle rail reads, lent from the feature's context.

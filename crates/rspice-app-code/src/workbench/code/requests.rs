@@ -28,7 +28,6 @@ use crate::workbench::state::Workspace;
 pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<CodeHandOff> {
     match request {
         CodeRequest::OpenNetlist => return Some(CodeHandOff::OpenNetlist),
-        CodeRequest::ImportNetlist => return Some(CodeHandOff::ImportNetlist),
         CodeRequest::ImportVerilogA => return Some(CodeHandOff::ImportVerilogA),
         CodeRequest::ImportLtspiceSchematic => return Some(CodeHandOff::ImportLtspiceSchematic),
         CodeRequest::ImportQspiceSchematic => return Some(CodeHandOff::ImportQspiceSchematic),
@@ -163,7 +162,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             selected,
         } => {
             use crate::workbench::documents::netlist_document::{
-                OwnedNetlistReplacement, replace_owned_sources_atomically,
+                OwnedNetlistReplacement, replace_deck_files,
             };
             let edit = match dependency.as_deref() {
                 Some(identity) => {
@@ -171,25 +170,10 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
                 }
                 None => OwnedNetlistReplacement::root(&original, replacement, 1),
             };
-            match replace_owned_sources_atomically(
-                cx.model,
-                &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
-                vec![edit],
-            ) {
+            match replace_deck_files(cx.model, &mut cx.state.netlist, vec![edit]) {
                 Ok(_) => cx.wb.prompt(selected),
                 Err(error) => cx.wb.prompt(error),
             }
-        }
-        CodeRequest::RelinkNetlistDependency(identity) => {
-            crate::workbench::workflows::netlist_workflow::request_dependency_relink(
-                cx.model,
-                &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
-                cx.runs,
-                cx.wb,
-                &identity,
-            );
         }
         CodeRequest::SourceFileAction {
             language,
@@ -218,43 +202,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         CodeRequest::ShowNetInSchematic { schematic, net } => {
             return Some(CodeHandOff::ShowNetInSchematic { schematic, net });
         }
-        // Each of the netlist page's transactions commits through a
-        // candidate copy, so the feature runs the body the dialog ran in
-        // place over what the dialog stored.
-        CodeRequest::RestoreOwnedNetlistRevision => {
-            let index = cx.state.netlist.comparison_dialog.selected_history_index;
-            match netlist_document::restore_owned_revision(
-                cx.model,
-                &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
-                index,
-            ) {
-                Ok(()) => cx.state.netlist.comparison_dialog.open = false,
-                Err(error) => cx.wb.prompt(error),
-            }
-        }
-        CodeRequest::ApplyExternalNetlistChange => {
-            match crate::workbench::workflows::netlist_workflow::apply_staged_external_netlist_change(
-                cx.model,
-                &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
-                cx.wb,
-            ) {
-                Ok(()) => {
-                    cx.model.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        "Applied the resolved external change to the SPICE source.",
-                    );
-                }
-                Err(error) => {
-                    if let Some(current) = cx.state.netlist.external_change.as_mut() {
-                        current.error = Some(error);
-                    }
-                }
-            }
-        }
-        CodeRequest::CommitNetlistImport => return Some(CodeHandOff::CommitNetlistImport),
         CodeRequest::ApplyNetlistFind => {
             if let Some(step) = cx.state.netlist.find.pending.take() {
                 crate::workbench::workflows::netlist_workflow::apply_netlist_find_step(
@@ -267,41 +214,26 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
                 );
             }
         }
-        CodeRequest::CopyNetlistDependency => {
-            let messages = cx.wb.messages();
-            match netlist_document::copy_active_dependency_to_project(
-                cx.model,
-                &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
-            ) {
-                Ok(_) => {
-                    cx.model.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        messages.text(crate::workbench::MessageId::NetlistCopySucceeded),
-                    );
-                }
-                Err(error) => {
-                    cx.model.record(LogSeverity::Error, LogSource::Studio, error);
-                }
-            }
-        }
         CodeRequest::ApplyNetlistQuickFix => {
             let answer = netlist_document::language::apply_preferred_quick_fix(
                 cx.model,
                 &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
             );
             cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
-        }
-        CodeRequest::BeginNetlistProfileReview => {
-            return Some(CodeHandOff::BeginNetlistProfileReview);
         }
         CodeRequest::FormatNetlistDocument => {
             crate::workbench::code::netlist_validation::format_owned_netlist(cx);
         }
-        CodeRequest::ImportDroppedNetlist(dropped) => {
-            return Some(CodeHandOff::ImportDroppedNetlist(dropped));
+        CodeRequest::SaveDeckFile => {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Err(error) =
+                crate::workbench::documents::deck_files::save_shown_file(&mut cx.state.netlist)
+            {
+                cx.wb.prompt(error);
+            }
+        }
+        CodeRequest::OpenDroppedDeck(dropped) => {
+            return Some(CodeHandOff::OpenDroppedDeck(dropped));
         }
     }
     None
@@ -319,8 +251,6 @@ pub fn answer_netlist_editor(cx: &mut Cx<'_, CodeFeature>, request: NetlistEdito
         } => netlist_document::commit_editor_edit(
             cx.model,
             &mut cx.state.netlist,
-            &mut cx.state.netlist_open_documents,
-            cx.wb,
             cx.runs,
             &buffer,
             cursor_line,
@@ -338,17 +268,9 @@ pub fn answer_netlist_editor(cx: &mut Cx<'_, CodeFeature>, request: NetlistEdito
 /// Redo's. `Ok(None)` when that history holds no step that way.
 pub fn step_history(cx: &mut Cx<'_, CodeFeature>, undo: bool) -> Result<Option<String>, String> {
     if undo {
-        netlist_document::undo_netlist_edit(
-            cx.model,
-            &mut cx.state.netlist,
-            &mut cx.state.netlist_open_documents,
-        )
+        netlist_document::undo_netlist_edit(cx.model, &mut cx.state.netlist)
     } else {
-        netlist_document::redo_netlist_edit(
-            cx.model,
-            &mut cx.state.netlist,
-            &mut cx.state.netlist_open_documents,
-        )
+        netlist_document::redo_netlist_edit(cx.model, &mut cx.state.netlist)
     }
 }
 
@@ -358,9 +280,9 @@ pub fn void_veriloga_evidence(cx: &mut Cx<'_, CodeFeature>) {
     cx.state.code_workspace.veriloga.void_evidence();
 }
 
-/// Carry out what a source document dialog handed over: the top deck its
-/// creation form drafted, or a lifecycle choice on the document it manages,
-/// then the close the same frame asked for.
+/// Carry out what a source document dialog handed over: a lifecycle choice
+/// on the Verilog-A document it manages, then the close the same frame
+/// asked for.
 fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentRequest) {
     match request {
         SourceDocumentRequest::Document {
@@ -378,25 +300,6 @@ fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentR
             if close {
                 source_document::close_document_lifecycle(&mut cx.state.code_workspace);
             }
-        }
-        SourceDocumentRequest::Netlist { action, close } => {
-            crate::workbench::app::netlist_lifecycle::apply_netlist_lifecycle_action(
-                &mut cx.state.code_workspace,
-                &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
-                cx.model,
-                cx.wb,
-                action,
-                close,
-            );
-        }
-        SourceDocumentRequest::CreateTopDeck => {
-            crate::workbench::app::netlist_lifecycle::commit_new_top_deck(
-                &mut cx.state.code_workspace,
-                &mut cx.state.netlist,
-                &mut cx.state.netlist_open_documents,
-                cx.model,
-            );
         }
     }
 }

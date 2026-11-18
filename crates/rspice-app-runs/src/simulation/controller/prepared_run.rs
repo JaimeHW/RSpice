@@ -1255,59 +1255,34 @@ impl SimulationController {
     }
 }
 
-/// The deck a manual run is prepared from: the netlist document the session
-/// shows, the file it came from, and what composing it reads.
+/// The deck a manual run is prepared from: the deck in front of the netlist
+/// editor, read from its file.
 pub fn manual_source_inputs(
     state: &impl RunHost,
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
-    manual_source_inputs_in(state.model(), state.netlist_shown())
+    manual_source_inputs_in(state.model(), state.manual_deck())
 }
 
-/// [`manual_source_inputs`], read from the model and which netlist document
-/// the editor shows.
-pub fn manual_source_inputs_in(
-    model: &Model,
-    shown: crate::simulation::NetlistShown,
-) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
-    if shown.settled && shown.comparison {
-        return Err(PreparationError::new(
-            PreparationStage::SourceChecks,
-            "Generated comparison documents cannot be executed",
-        ));
-    }
-    let owned_active = shown.owned_source
-        || (!shown.settled
-            && model.simulation.source.netlist_content.is_empty()
-            && model.workspace.content.netlist_source.is_some());
-    let source = if owned_active {
-        model
-            .workspace
-            .content
-            .netlist_source
-            .as_deref()
-            .unwrap_or(model.simulation.source.netlist_content.as_str())
-    } else {
-        model.simulation.source.netlist_content.as_str()
-    };
-    let origin = if owned_active {
-        model.workspace.content.netlist_source_path.as_deref()
-    } else {
-        model.schematic.session.current_file.as_deref()
-    };
-    Ok(
-        crate::simulation::execution::preparation::ManualSourceInputs {
-            source,
-            descriptor: model.workspace.content.netlist_descriptor.as_ref(),
-            generated_artifact: model
-                .workspace
-                .content
-                .netlist_document
-                .as_ref()
-                .and_then(|document| document.generated_artifact()),
-            owned: owned_active,
-            origin,
+/// [`manual_source_inputs`], read from the model and the deck in front. With
+/// no deck in front the run reads the editor's text, from beside the
+/// schematic's file.
+pub fn manual_source_inputs_in<'a>(
+    model: &'a Model,
+    deck: Option<crate::simulation::ManualDeck<'a>>,
+) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'a>, PreparationError> {
+    Ok(match deck {
+        Some(deck) => {
+            let crate::simulation::DeckOrigin::File(path) = deck.origin;
+            crate::simulation::execution::preparation::ManualSourceInputs {
+                source: deck.text,
+                origin: Some(path),
+            }
+        }
+        None => crate::simulation::execution::preparation::ManualSourceInputs {
+            source: model.simulation.source.netlist_content.as_str(),
+            origin: model.schematic.session.current_file.as_deref(),
         },
-    )
+    })
 }
 
 /// Stable cache identity for analysis-independent design inspection.

@@ -157,9 +157,6 @@ struct RunSetReads {
 /// What only preparing a manual deck reads, beside its text, which the
 /// snapshot holds.
 struct ManualDeckReads {
-    descriptor: Option<rspice_design::owned_netlist::OwnedNetlistDescriptor>,
-    generated_artifact: Option<rspice_design::netlist_document::GeneratedArtifact>,
-    owned: bool,
     origin: Option<PathBuf>,
     origin_identity: Option<PathBuf>,
     topology_revision: u64,
@@ -305,9 +302,6 @@ impl RunInputIdentity {
         let live = LiveInputs::of(state);
         let deck = super::prepared_run::manual_source_inputs(state)?;
         let reads = KindReads::ManualDeck(Box::new(ManualDeckReads {
-            descriptor: deck.descriptor.cloned(),
-            generated_artifact: deck.generated_artifact.cloned(),
-            owned: deck.owned,
             origin: deck.origin.map(Path::to_path_buf),
             origin_identity: origin_identity(deck.origin),
             topology_revision: live.schematic_topology_revision,
@@ -494,9 +488,6 @@ impl ManualDeckReads {
         let document_unchanged =
             super::prepared_run::manual_source_inputs(state).is_ok_and(|deck| {
                 Some(deck.source) == snapshot.manual_source()
-                    && deck.descriptor == self.descriptor.as_ref()
-                    && deck.generated_artifact == self.generated_artifact.as_ref()
-                    && deck.owned == self.owned
                     && deck.origin == self.origin.as_deref()
             });
         let first = vec![

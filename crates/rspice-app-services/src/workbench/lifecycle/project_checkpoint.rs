@@ -2015,7 +2015,10 @@ mod tests {
         assert!(validate_snapshot_bytes(&summary, &changed).is_err());
 
         let mut changed_state = state;
-        changed_state.model.workspace.content.netlist_source = Some("R1 1 0 1k\n.end\n".to_owned());
+        changed_state.model.workspace.content.decks = vec![crate::state::ProjectDeck::for_file(
+            std::path::Path::new("decks/amp.cir"),
+            None,
+        )];
         assert!(
             !matches_current_state(&summary, &changed_state)
                 .expect("changed state digest compares")
@@ -2023,7 +2026,7 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_closes_over_arbitrary_netlist_and_veriloga_sources() {
+    fn checkpoint_closes_over_deck_entries_and_veriloga_sources() {
         use crate::state::{
             ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
             ProjectSourceOwner, ProjectSourceRegistry, ProjectSourceRole, ProjectSourceRoleBinding,
@@ -2043,7 +2046,6 @@ mod tests {
                 .expect("source role fixture is valid")
         }
 
-        let netlist = "* production-owned deck\r\nVBIAS bias 0 1.250\r\n.op\r\n.end\r\n";
         let veriloga_root =
             "`include \"physics/thermal_constants.vams\"\nmodule sensor_core; endmodule\n";
         let veriloga_dependency = "`define ROOM_TEMPERATURE 300.15\n";
@@ -2071,13 +2073,9 @@ mod tests {
         let veriloga_id = veriloga.id();
 
         let mut state = ServicesHost::default();
-        assert!(
-            state
-                .model
-                .workspace
-                .content
-                .make_netlist_editable_copy(netlist)
-        );
+        let deck = crate::state::ProjectDeck::for_file(std::path::Path::new("decks/amp.cir"), None);
+        state.model.workspace.content.decks = vec![deck.clone()];
+        state.model.workspace.content.decks_dirty = true;
         state.model.workspace.content.project_sources =
             ProjectSourceRegistry::try_from_bundles([veriloga]).expect("source registry is valid");
         state.model.workspace.content.project_sources_dirty = true;
@@ -2089,10 +2087,7 @@ mod tests {
 
         let restored = crate::io::project_io::load_project_text(&serialized, None)
             .expect("checkpoint project restores");
-        assert_eq!(
-            restored.file.workspace.netlist_source.as_deref(),
-            Some(netlist)
-        );
+        assert_eq!(restored.file.workspace.decks, vec![deck]);
 
         let restored_veriloga = restored
             .file
@@ -2119,20 +2114,17 @@ mod tests {
             Some(ProjectSourceRole::VerilogABuildProfile)
         );
 
-        assert!(
-            state
-                .model
-                .workspace
-                .content
-                .replace_editable_netlist_source("* changed after checkpoint\n.end\n".to_owned())
-        );
+        state.model.workspace.content.decks = vec![crate::state::ProjectDeck::for_file(
+            std::path::Path::new("decks/other.cir"),
+            None,
+        )];
         assert_ne!(
             crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
                 .expect("changed project snapshots")
                 .file
                 .workspace
-                .netlist_source,
-            restored.file.workspace.netlist_source
+                .decks,
+            restored.file.workspace.decks
         );
         assert_eq!(manifest.snapshot_digest, digest(serialized.as_bytes()));
     }

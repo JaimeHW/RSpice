@@ -10,16 +10,15 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::code::CodeFeature;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
-use crate::workbench::slots::{netlist_shown_in, veriloga_compilation_in};
+use crate::workbench::slots::{manual_deck_in, veriloga_compilation_in};
 use crate::workbench::workflows::netlist_workflow::{
-    acknowledge_canonical_dependencies, acknowledge_canonical_validation, formatted_deck_text,
-    invalidate_canonical_validation, record_validation_failure,
+    acknowledge_canonical_validation, formatted_deck_text, invalidate_canonical_validation,
+    record_include_resolutions, record_validation_failure,
 };
 use rspice_app_runs::workbench::waiting::{self, WaitingValidation};
 
-/// Validate and retain the exact visible manual-deck snapshot, including its
-/// sealed dependency closure and execution-target contract. A later Run must
-/// match this one-shot authorized snapshot byte for byte.
+/// Validate the deck in front as a run reads it, includes read where they
+/// are, and record the receipt a later Run compares against.
 pub fn validate_visible_netlist_source(cx: &mut Cx<'_, CodeFeature>) -> bool {
     validate_visible(cx, true).unwrap_or(false)
 }
@@ -98,7 +97,7 @@ fn validate_visible(cx: &mut Cx<'_, CodeFeature>, waits: bool) -> Option<bool> {
     let validated = {
         let code = RunCodeFacts {
             veriloga_compilation: veriloga_compilation_in(&cx.state.code_workspace),
-            netlist_shown: netlist_shown_in(&cx.state.netlist),
+            manual_deck: manual_deck_in(&cx.state.netlist),
         };
         let host = RunView::new(
             &mut *cx.model,
@@ -119,18 +118,10 @@ fn validate_visible(cx: &mut Cx<'_, CodeFeature>, waits: bool) -> Option<bool> {
     let validated = validated?;
     Some(match validated {
         Ok(metadata) => {
-            if let Err(error) = acknowledge_canonical_dependencies(
-                cx.model,
-                &mut cx.state.netlist,
+            record_include_resolutions(
                 &mut cx.state.code_workspace.include_resolutions,
                 &metadata.sealed_source_dependencies,
-            ) {
-                invalidate_preflight(cx);
-                cx.model.netlist_artifacts.validation = None;
-                record_validation_failure(cx.model, &error);
-                cx.model.netlist_artifacts.validation_error = Some(error);
-                return Some(false);
-            }
+            );
             if let Err(error) = acknowledge_canonical_validation(cx.model, &mut cx.state.netlist) {
                 invalidate_preflight(cx);
                 cx.model.netlist_artifacts.validation = None;
@@ -227,10 +218,9 @@ fn format_netlist(cx: &mut Cx<'_, CodeFeature>, validation: FormatValidation) {
         let formatted = formatted_deck_text(&source, shows_spectre(cx));
         if formatted == source {
             cx.wb.prompt("The include file is already formatted.");
-        } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
+        } else if crate::workbench::documents::netlist_document::edit_deck_file(
             cx.model,
             &mut cx.state.netlist,
-            &mut cx.state.netlist_open_documents,
             formatted,
         ) {
             cx.wb
@@ -262,11 +252,9 @@ fn format_netlist(cx: &mut Cx<'_, CodeFeature>, validation: FormatValidation) {
         cx.wb.prompt("The netlist is already formatted.");
         return;
     }
-    if crate::workbench::documents::netlist_document::replace_owned_source(
+    if crate::workbench::documents::netlist_document::edit_deck_file(
         cx.model,
         &mut cx.state.netlist,
-        &mut cx.state.netlist_open_documents,
-        cx.wb,
         formatted,
     ) {
         cx.wb

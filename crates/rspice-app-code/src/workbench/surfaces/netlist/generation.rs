@@ -24,11 +24,8 @@ use crate::workbench::framework::feature::Cx;
 /// retains the prior valid artifact and marks it stale instead of publishing
 /// partial bytes.
 pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
-    if cx.state.netlist.owned_document.is_none() {
-        cx.state.netlist.owned_document = cx.model.workspace.content.netlist_document.clone();
-    }
     if !cx.state.netlist.active_document_initialized {
-        cx.state.netlist.active_document = if cx.model.workspace.content.netlist_source.is_some() {
+        cx.state.netlist.active_document = if cx.state.netlist.open_deck.is_some() {
             ActiveNetlistDocument::OwnedSource
         } else {
             ActiveNetlistDocument::Generated
@@ -42,6 +39,8 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
             &cx.state.netlist,
         )
         .is_none()
+        && crate::workbench::documents::netlist_document::active_deck_file_in(&cx.state.netlist)
+            .is_none()
     {
         crate::workbench::documents::netlist_document::close_active_dependency_in(
             cx.model,
@@ -58,6 +57,20 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
 
     refresh_generated_artifact(cx);
 
+    // The deck or the include in front is its file's text, which the editor
+    // edits in place: the buffer follows it, never the other way round.
+    if cx.state.netlist.active_document == ActiveNetlistDocument::OwnedSource {
+        if let Some(file) =
+            crate::workbench::documents::netlist_document::active_deck_file_in(&cx.state.netlist)
+            && cx.model.simulation.source.netlist_content != file.text
+        {
+            cx.model.simulation.source.netlist_content = file.text.clone();
+            cx.state.netlist.revision = cx.state.netlist.revision.wrapping_add(1);
+            cx.model.invalidate_source_evidence();
+        }
+        return;
+    }
+
     let projected = crate::workbench::documents::netlist_document::active_dependency_in(
         cx.model,
         &cx.state.netlist,
@@ -68,7 +81,7 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
         ActiveNetlistDocument::Generated => {
             Some(cx.model.netlist_artifacts.generated_source.clone())
         }
-        ActiveNetlistDocument::OwnedSource => cx.model.workspace.content.netlist_source.clone(),
+        ActiveNetlistDocument::OwnedSource => None,
         ActiveNetlistDocument::GeneratedDiff => {
             Some(cx.state.netlist.generated_diff_source.clone())
         }
@@ -136,10 +149,6 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
         if let Some(document) = cx.model.netlist_artifacts.generated_document.as_mut() {
             let _ = document.invalidate_validation(document.content_digest());
         }
-        if let Some(document) = cx.state.netlist.owned_document.as_mut() {
-            let _ = document.invalidate_validation(document.content_digest());
-            cx.model.workspace.content.netlist_document = Some(document.clone());
-        }
     }
     if cx.model.netlist_artifacts.generated_input_digest == Some(input_digest)
         && !cx.model.netlist_artifacts.generated_source.is_empty()
@@ -166,12 +175,11 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
         Ok(generated) => {
             match publish_generated_document(
                 cx.model,
-                &cx.state.netlist,
                 input_digest,
                 generated.source,
                 &generated.line_map,
             ) {
-                Ok((generated_document, owned_document)) => {
+                Ok(generated_document) => {
                     if let (Some(previous), Some(current)) = (
                         cx.model
                             .netlist_artifacts
@@ -216,8 +224,6 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
                     cx.model.netlist_artifacts.generated_source =
                         generated_artifact.source().to_owned();
                     cx.model.netlist_artifacts.generated_document = Some(generated_document);
-                    cx.model.workspace.content.netlist_document = owned_document.clone();
-                    cx.state.netlist.owned_document = owned_document;
                     cx.model.netlist_artifacts.generated_input_digest = Some(input_digest);
                     cx.model.netlist_artifacts.generation_error = None;
                     cx.state.netlist.failed_generation_input_digest = None;
@@ -242,11 +248,10 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
 
 pub(super) fn publish_generated_document(
     model: &Model,
-    netlist: &NetlistDocumentState,
     input_digest: crate::product::ContentDigest,
     source: String,
     line_map: &[rspice_simulation::netlist_gen::WrittenLine],
-) -> Result<(NetlistDocument, Option<NetlistDocument>), String> {
+) -> Result<NetlistDocument, String> {
     let provenance = GeneratedProvenance::try_new(
         "rspice-netlist-generator/v1",
         GenerationInput::new(model.workspace.content.project.revision(), input_digest),
@@ -271,13 +276,7 @@ pub(super) fn publish_generated_document(
         NetlistDocument::from_generated(NetlistDocumentId::new(), artifact.clone())
             .map_err(|error| error.to_string())?
     };
-
-    // An owned document retains the exact generated base from which it was
-    // created. Current generated revisions live in the primary registry and
-    // compare history; silently rebasing owned source would destroy the
-    // three-way ownership contract.
-    let owned_document = netlist.owned_document.clone();
-    Ok((generated_document, owned_document))
+    Ok(generated_document)
 }
 
 pub(super) fn generated_project_source_dependencies(

@@ -427,7 +427,7 @@ fn apply_registry_dirty_flags(state: &mut LifecycleParts<'_>) {
         // refresh can establish which documents are actually clean.
         state.model.schematic.session.is_dirty = true;
         state.model.workspace.content.project_metadata_dirty = true;
-        state.model.workspace.content.netlist_source_dirty = true;
+        state.model.workspace.content.decks_dirty = true;
         state.model.workspace.content.project_sources_dirty = true;
         state
             .model
@@ -523,14 +523,11 @@ fn apply_registry_dirty_flags(state: &mut LifecycleParts<'_>) {
         state.model.workspace.content.project_metadata_dirty = metadata_dirty;
     }
     if let Some(accepted) = state.platform.project_lifecycle.accepted() {
-        let (netlist_source, project_sources) =
-            accepted.source_dirty_flags(&state.model.workspace.content);
+        let (decks, project_sources) = accepted.source_dirty_flags(&state.model.workspace.content);
         let content = &state.model.workspace.content;
-        if (content.netlist_source_dirty, content.project_sources_dirty)
-            != (netlist_source, project_sources)
-        {
+        if (content.decks_dirty, content.project_sources_dirty) != (decks, project_sources) {
             let content = &mut *state.model.workspace.content;
-            content.netlist_source_dirty = netlist_source;
+            content.decks_dirty = decks;
             content.project_sources_dirty = project_sources;
         }
     }
@@ -2017,7 +2014,7 @@ fn mark_active_document_clean(state: &mut LifecycleParts<'_>) {
             );
         }
         ProjectDocumentId::NetlistSource => {
-            state.model.workspace.content.netlist_source_dirty = false;
+            state.model.workspace.content.decks_dirty = false;
             state.model.workspace.content.project_sources_dirty = false;
         }
         _ => {}
@@ -2180,15 +2177,7 @@ pub fn revert_document_model(
             RevertFollowUp::StimulusLibrary
         }
         ProjectDocumentId::NetlistSource => {
-            state.model.workspace.content.netlist_source = baseline.file.workspace.netlist_source;
-            state.model.workspace.content.netlist_source_path =
-                baseline.file.workspace.netlist_source_path;
-            state.model.workspace.content.netlist_document =
-                baseline.file.workspace.netlist_document;
-            state.model.workspace.content.netlist_descriptor =
-                baseline.file.workspace.netlist_descriptor;
-            state.model.workspace.content.retained_netlist_decks =
-                baseline.file.workspace.retained_netlist_decks;
+            state.model.workspace.content.decks = baseline.file.workspace.decks;
             state.model.workspace.content.added_lines = baseline.file.workspace.added_lines;
             state
                 .model
@@ -2197,7 +2186,7 @@ pub fn revert_document_model(
                 .project_sources
                 .synchronize_code_workspace_bundles_from(&baseline.file.workspace.project_sources)
                 .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-            state.model.workspace.content.netlist_source_dirty = false;
+            state.model.workspace.content.decks_dirty = false;
             state.model.workspace.content.project_sources_dirty = false;
             RevertFollowUp::NetlistSource
         }
@@ -2206,15 +2195,10 @@ pub fn revert_document_model(
 }
 
 /// The model's part of a netlist-source revert that follows the features'
-/// reset: the deck the run reads is the reverted source, no run is pending
-/// on the old one, and execution sees a new design.
+/// reset: the editor holds no deck text, no run is pending on the old one,
+/// and execution sees a new design.
 pub fn finish_netlist_source_revert(model: &mut Model) {
-    model.simulation.source.netlist_content = model
-        .workspace
-        .content
-        .netlist_source
-        .clone()
-        .unwrap_or_default();
+    model.simulation.source.netlist_content.clear();
     model.simulation.execution.trigger_simulation = false;
     model.design_execution_epoch = model.design_execution_epoch.wrapping_add(1);
 }

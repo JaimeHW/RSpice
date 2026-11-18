@@ -87,8 +87,6 @@ pub use model_bound_symbol::{
 pub use model_library::ModelLibraryManager;
 pub(crate) use netlist_artifacts::NetlistArtifacts;
 pub use netlist_artifacts::NetlistValidationReceipt;
-#[cfg(any(test, feature = "test-support"))]
-pub use netlist_document::DocumentOwnership;
 pub use netlist_document::{
     BoundedFindMatches, DependencyMetadata, DependencyResolution, DependencySourceAuthority,
     DiagnosticSeverity, FindDirection, FindError, FindMatch, FindOptions, GeneratedArtifact,
@@ -245,23 +243,20 @@ pub use viewer_cache::{SpecializedViewerAnalysisIdentity, SpecializedViewerCache
 pub use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, ComplexExpressionPolicy,
-    DEFAULT_STOP_VIEW_TYPES, DesignVariable, DesignVariableDefect, DesignVariableOverridePolicy,
-    DesignVariableQuantity, DesignVariableRange, DesignVariableScope,
+    DEFAULT_STOP_VIEW_TYPES, DeckId, DeckSource, DesignVariable, DesignVariableDefect,
+    DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange, DesignVariableScope,
     DesignVariableSweepEligibility, HierarchyBindingRule, MembershipMove, MissingMeasurementPolicy,
-    MonteCarloSpecificationGate, NetlistExecutionProfile, NetlistLineEnding, NetlistSourceDialect,
-    NetlistTextEncoding, NominalFailurePolicy, OpenCellView, OutputSelectionMode,
-    OwnedNetlistDescriptor, OwnedNetlistEditStrategy, OwnedNetlistIncludeDescriptor,
-    OwnedNetlistSaveRecord, PROJECT_DESCRIPTOR_SCHEMA_VERSION,
-    PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION, ProjectCloudPublicationBinding, ProjectDescriptor,
-    ProjectLibraryMutation, ProjectTechnologyBinding, ProjectTechnologyChangeAuthority,
-    ProjectTechnologyChangeContext, ProjectWorkspace, RegressionComparisonMethod,
-    RegressionComparisonWindow, RegressionSpecificationPolicy, RegressionTargetKind,
-    RegressionTargetSelector, RegressionToleranceRule, ResolvedHierarchyBinding,
-    RetainedOwnedNetlistDeck, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-    SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry, SpecPointScope,
-    SpecificationDefinition, SpecificationPolicy, SpecificationRole, UNGROUPED_NAME,
-    default_view_search_order, group_namer, validate_owned_netlist_artifact_path,
+    MonteCarloSpecificationGate, NominalFailurePolicy, OpenCellView, OutputSelectionMode,
+    PROJECT_DESCRIPTOR_SCHEMA_VERSION, PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
+    ProjectCloudPublicationBinding, ProjectDeck, ProjectDescriptor, ProjectLibraryMutation,
+    ProjectTechnologyBinding, ProjectTechnologyChangeAuthority, ProjectTechnologyChangeContext,
+    ProjectWorkspace, RegressionComparisonMethod, RegressionComparisonWindow,
+    RegressionSpecificationPolicy, RegressionTargetKind, RegressionTargetSelector,
+    RegressionToleranceRule, ResolvedHierarchyBinding, SavedOutput, SavedOutputCompatibility,
+    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
+    SpecPointScope, SpecificationDefinition, SpecificationPolicy, SpecificationRole, TextEncoding,
+    UNGROUPED_NAME, default_view_search_order, group_namer,
 };
 
 pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};

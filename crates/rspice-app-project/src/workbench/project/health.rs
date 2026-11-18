@@ -131,63 +131,24 @@ pub fn schematic_checks(model: &Model, facts: SlotFacts) -> SubjectStatus {
     }
 }
 
-/// The name a netlist-first project's deck goes by.
+/// The name a netlist-first project's deck goes by: its file's name.
 pub fn deck_name(model: &Model) -> Option<String> {
-    let document = model.workspace.content.netlist_document.as_ref()?;
-    Some(
-        document
-            .provenance()
-            .imported()
-            .map(|imported| imported.origin().display_name().to_owned())
-            .or_else(|| {
-                document
-                    .save_acknowledgement()
-                    .map(|saved| saved.origin().display_name().to_owned())
-            })
-            .or_else(|| {
-                model
-                    .workspace
-                    .content
-                    .netlist_source_path
-                    .as_ref()
-                    .and_then(|path| path.file_name())
-                    .map(|name| name.to_string_lossy().into_owned())
-            })
-            .unwrap_or_else(|| "Untitled SPICE deck".to_owned()),
-    )
+    model
+        .workspace
+        .content
+        .decks
+        .first()
+        .map(|deck| deck.name())
 }
 
-/// The deck a netlist-first project runs, as its last validation found it.
+/// The deck a netlist-first project runs. The deck is a file the run reads
+/// and checks, so the project knows its name and where it is, not how its
+/// text reads.
 pub fn source_deck(model: &Model) -> SubjectStatus {
-    let (Some(document), Some(name)) = (
-        model.workspace.content.netlist_document.as_ref(),
-        deck_name(model),
-    ) else {
-        return SubjectStatus::new(Tone::Error, "Unavailable", "The project has no SPICE deck");
+    let Some(name) = deck_name(model) else {
+        return SubjectStatus::new(Tone::Error, "Unavailable", "The project has no deck");
     };
-    match document.validation() {
-        None => SubjectStatus::neutral("Not validated", name),
-        Some(report) if report.content_digest() != document.content_digest() => SubjectStatus::new(
-            Tone::Warn,
-            "Out of date",
-            format!("{name} changed after it was validated"),
-        ),
-        Some(report) => {
-            let errors = report.error_count();
-            let advisories = report.diagnostics().len().saturating_sub(errors);
-            let state = if errors + advisories == 0 {
-                "Validated".to_owned()
-            } else {
-                finding_counts(errors, advisories)
-            };
-            let tone = if errors > 0 {
-                Tone::Error
-            } else {
-                Tone::Neutral
-            };
-            SubjectStatus::new(tone, state, name)
-        }
-    }
+    SubjectStatus::neutral("Checked at run", name)
 }
 
 /// The configuration runs use, and whether a run can be netlisted through

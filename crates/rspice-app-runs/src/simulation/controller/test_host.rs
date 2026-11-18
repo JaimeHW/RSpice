@@ -15,7 +15,7 @@ use rspice_results_ui::fft::{FftInputOptions, FftState};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
-use crate::simulation::{NetlistShown, RunHost, ViewerHost, ViewerReading};
+use crate::simulation::{ManualDeck, ManualDeckCopy, RunHost, ViewerHost, ViewerReading};
 use crate::state::pdk_config::PdkConfig;
 use crate::state::{CellViewRef, RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
 use crate::workbench::slots::runs::RunsState;
@@ -28,6 +28,8 @@ use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 pub struct RunTestHost {
     pub model: Model,
     pub runs: Box<RunsState>,
+    /// The deck in front of the netlist editor.
+    pub manual_deck: Option<ManualDeckCopy>,
 }
 
 impl Default for RunTestHost {
@@ -37,6 +39,7 @@ impl Default for RunTestHost {
         Self {
             model: Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
             runs: Box::default(),
+            manual_deck: None,
         }
     }
 }
@@ -160,13 +163,9 @@ impl RunHost for RunTestHost {
         None
     }
 
-    /// The editor shows the generated netlist and has settled nothing yet.
-    fn netlist_shown(&self) -> NetlistShown {
-        NetlistShown {
-            settled: false,
-            comparison: false,
-            owned_source: false,
-        }
+    /// The deck a test put in front, if any.
+    fn manual_deck(&self) -> Option<ManualDeck<'_>> {
+        self.manual_deck.as_ref().map(ManualDeckCopy::deck)
     }
 
     /// Bringing the reader to the findings is the workbench's.

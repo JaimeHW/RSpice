@@ -662,7 +662,7 @@ pub(crate) fn project_index_in(
         && let Some(document) = canonical_root_document_in(model, netlist, root).cloned()
     {
         let wake = ctx.clone();
-        let root_path = root_path_of(model, root);
+        let root_path = root_path_of(model, netlist, root);
         netlist.project_index.start(
             key,
             move || NetlistProjectIndex::build(root, &root_path, &document),
@@ -687,17 +687,21 @@ pub(crate) fn project_index_now(
     }
     let index = NetlistProjectIndex::build(
         root,
-        &root_path_of(model, root),
+        &root_path_of(model, netlist, root),
         canonical_root_document_in(model, netlist, root)?,
     );
     Some(netlist.project_index.store(key, index))
 }
 
-/// The file a root is read from: the project's deck, or none for the
+/// The file a root is read from: the open deck's, or none for the
 /// generated netlist.
-fn root_path_of(model: &Model, root: ActiveNetlistDocument) -> std::path::PathBuf {
+fn root_path_of(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    root: ActiveNetlistDocument,
+) -> std::path::PathBuf {
     match root {
-        ActiveNetlistDocument::OwnedSource => super::source_index::root_deck_path(model),
+        ActiveNetlistDocument::OwnedSource => super::source_index::root_deck_path(model, netlist),
         _ => std::path::PathBuf::new(),
     }
 }
@@ -1035,8 +1039,8 @@ pub(crate) fn open_project_location_in(
                 }
             }
             ActiveNetlistDocument::OwnedSource => {
-                if !super::open_owned_primary_in(model, netlist) {
-                    return Err("The project-owned root is no longer available.".to_owned());
+                if !crate::workbench::documents::deck_files::show_deck(model, netlist) {
+                    return Err("The deck is no longer open.".to_owned());
                 }
             }
             ActiveNetlistDocument::GeneratedDiff => {
@@ -1189,11 +1193,10 @@ pub(crate) fn preferred_quick_fix_available(netlist: &NetlistDocumentState) -> b
 pub fn apply_preferred_quick_fix(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    open_documents: &mut HashSet<WorkspaceDocumentId>,
 ) -> Result<String, String> {
     let fix = preferred_quick_fix(netlist)
         .ok_or_else(|| "No preferred quick fix is available at the caret.".to_owned())?;
-    apply_quick_fix(model, netlist, open_documents, &fix)
+    apply_quick_fix(model, netlist, &fix)
 }
 
 /// Apply the fix one named finding offered.
@@ -1206,7 +1209,6 @@ pub fn apply_preferred_quick_fix(
 pub fn apply_quick_fix_for_finding(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    open_documents: &mut HashSet<WorkspaceDocumentId>,
     finding: uuid::Uuid,
 ) -> Result<String, String> {
     let fix = netlist
@@ -1217,7 +1219,7 @@ pub fn apply_quick_fix_for_finding(
         .ok_or_else(|| {
             "That finding no longer offers a fix; validate the document again.".to_owned()
         })?;
-    apply_quick_fix(model, netlist, open_documents, &fix)
+    apply_quick_fix(model, netlist, &fix)
 }
 
 /// A fix, and the exact source it was computed against.
@@ -1249,7 +1251,6 @@ impl BoundQuickFix {
 fn apply_quick_fix(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    open_documents: &mut HashSet<WorkspaceDocumentId>,
     bound: &BoundQuickFix,
 ) -> Result<String, String> {
     if !super::active_netlist_source_is_editable_in(model, netlist) {
@@ -1281,7 +1282,7 @@ fn apply_quick_fix(
     } else {
         super::OwnedNetlistReplacement::root(&source, replacement, 1)
     };
-    super::replace_owned_sources_atomically(model, netlist, open_documents, vec![edit])?;
+    super::replace_deck_files(model, netlist, vec![edit])?;
     Ok(format!("Applied quick fix: {}", fix.label))
 }
 

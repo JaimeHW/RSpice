@@ -54,7 +54,6 @@ impl RSpiceApp {
                         action,
                         ConfirmationAction::ProjectNew
                             | ConfirmationAction::ProjectOpen
-                            | ConfirmationAction::OpenNetlistProject
                             | ConfirmationAction::CloseProject(_)
                             | ConfirmationAction::Exit
                     ) {
@@ -75,8 +74,6 @@ impl RSpiceApp {
                     Some(
                         ConfirmationAction::ProjectNew
                             | ConfirmationAction::ProjectOpen
-                            | ConfirmationAction::OpenNetlistProject
-                            | ConfirmationAction::ImportNetlist
                             | ConfirmationAction::CloseProject(_)
                             | ConfirmationAction::Exit
                     )
@@ -309,9 +306,6 @@ impl RSpiceApp {
                     self.restore_workspace_after_project_load();
                 }
             }
-            ConfirmationAction::OpenNetlistProject => {
-                self.state.open_netlist_project();
-            }
             ConfirmationAction::CloseProject(destination) => {
                 self.state.close_project_discard(destination);
             }
@@ -320,9 +314,6 @@ impl RSpiceApp {
                 if let (Some(path), Some(kind)) = (path, recent_kind) {
                     self.do_open_recent(path, kind);
                 }
-            }
-            ConfirmationAction::ImportNetlist => {
-                self.state.import_netlist();
             }
             ConfirmationAction::Exit => {
                 // Signal exit request - this will be handled by the frame update

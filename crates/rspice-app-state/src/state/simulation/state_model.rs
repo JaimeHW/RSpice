@@ -98,6 +98,10 @@ pub struct SimulationSourceState {
     /// Cross-probing mapping between schematic grid points and SPICE net names
     /// Populated during netlist generation, used for probe mode
     pub cross_probe: CrossProbeMapping,
+
+    /// The file of the deck the latest manual run read, which names the
+    /// lines its findings point at.
+    pub manual_deck_path: Option<std::path::PathBuf>,
 }
 
 /// Displayed waveforms, probe lookup and result selection.

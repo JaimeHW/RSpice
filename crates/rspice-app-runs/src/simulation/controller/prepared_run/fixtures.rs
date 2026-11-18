@@ -53,7 +53,7 @@ pub fn runnable_state() -> RunTestHost {
 pub fn manual_deck_state(deck: &str) -> RunTestHost {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(deck.to_owned());
+    state.model.simulation.source.netlist_content = deck.to_owned();
     state
 }
 

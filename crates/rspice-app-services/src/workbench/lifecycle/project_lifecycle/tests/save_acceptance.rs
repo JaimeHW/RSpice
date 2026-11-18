@@ -269,7 +269,7 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
                 .is_dirty())
     );
     assert!(state.model.workspace.content.project_metadata_dirty);
-    assert!(state.model.workspace.content.netlist_source_dirty);
+    assert!(state.model.workspace.content.decks_dirty);
     assert!(state.model.workspace.content.project_sources_dirty);
     assert!(
         state
@@ -321,7 +321,7 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
             .all(|view| !view.dirty)
     );
     assert!(!state.model.workspace.content.project_metadata_dirty);
-    assert!(!state.model.workspace.content.netlist_source_dirty);
+    assert!(!state.model.workspace.content.decks_dirty);
     assert!(!state.model.workspace.content.project_sources_dirty);
     assert!(
         state

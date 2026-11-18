@@ -25,7 +25,6 @@ use rspice_app_workbench::ui;
 pub mod workbench {
     //! The settings feature's modules, at their application paths.
 
-    pub(crate) use rspice_app_state::workbench::preferences;
     pub(crate) use rspice_app_state::workbench::preferences::{
         BackgroundTaskAttention, ChoicePreference, ConsoleLaunchBehavior, FolderListPreference,
         ScalarPreference, TogglePreference, UserPreferences, WorkspacePreferences, WorkspacePreset,

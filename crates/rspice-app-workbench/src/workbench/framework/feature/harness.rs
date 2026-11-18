@@ -167,24 +167,8 @@ impl HardcopyPort for NullPorts {
 /// A fresh session's netlist editor shows no source, its caret on the first
 /// line, and has settled nothing yet; no Verilog-A compilation is current.
 impl CodePort for NullPorts {
-    fn owned_source_active(&self) -> bool {
-        false
-    }
-
-    fn shows_owned_root(&self) -> bool {
-        false
-    }
-
-    fn netlist_cursor_line(&self) -> usize {
-        0
-    }
-
-    fn netlist_shown(&self) -> rspice_app_runs::simulation::NetlistShown {
-        rspice_app_runs::simulation::NetlistShown {
-            settled: false,
-            comparison: false,
-            owned_source: false,
-        }
+    fn manual_deck(&self) -> Option<rspice_app_runs::simulation::ManualDeck<'_>> {
+        None
     }
 
     fn veriloga_compilation(&self) -> Option<&rspice_app_runs::simulation::ProjectCompileReceipt> {

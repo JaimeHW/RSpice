@@ -8,7 +8,7 @@
 //! point and in the same order.
 
 use rspice_app_runs::simulation::{
-    NetlistShown, ProjectCompileReceipt, RunHost, ViewerHost, ViewerReading,
+    ManualDeck, ManualDeckCopy, ProjectCompileReceipt, RunHost, ViewerHost, ViewerReading,
 };
 use rspice_app_runs::workbench::slots::runs::{RunsState, request_run_set};
 use rspice_app_state::workbench::app_state::design_checks::CheckScope;
@@ -25,13 +25,13 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::workbench_session::WorkbenchSession;
 
 /// What code shows that a run reads: the receipt of the project's current
-/// Verilog-A compilation and which netlist document the editor shows. Read
+/// Verilog-A compilation and the deck in front of the netlist editor. Read
 /// once, when the host is built; while the host lives, code's state is lent
 /// only shared, so what was read is what code shows throughout.
 #[derive(Clone, Copy)]
 pub struct RunCodeFacts<'v> {
     pub veriloga_compilation: Option<&'v ProjectCompileReceipt>,
-    pub netlist_shown: NetlistShown,
+    pub manual_deck: Option<ManualDeck<'v>>,
 }
 
 /// The run tier's host over a feature command's context.
@@ -114,7 +114,7 @@ impl RunHost for RunView<'_, '_> {
             platform: self.platform.clone(),
             review_markers: self.peers.design().review_markers(),
             veriloga_compilation: self.code.veriloga_compilation.cloned(),
-            netlist_shown: self.code.netlist_shown,
+            manual_deck: self.code.manual_deck.map(ManualDeckCopy::of),
             results: self.peers.results().frozen(),
             commands: self.commands,
         }
@@ -144,8 +144,8 @@ impl RunHost for RunView<'_, '_> {
         self.code.veriloga_compilation
     }
 
-    fn netlist_shown(&self) -> NetlistShown {
-        self.code.netlist_shown
+    fn manual_deck(&self) -> Option<ManualDeck<'_>> {
+        self.code.manual_deck
     }
 
     fn show_problem_findings(&mut self) {
@@ -189,7 +189,7 @@ pub struct FrozenRun {
     platform: PlatformState,
     review_markers: SchematicReviewMarkerVisibility,
     veriloga_compilation: Option<ProjectCompileReceipt>,
-    netlist_shown: NetlistShown,
+    manual_deck: Option<ManualDeckCopy>,
     results: Box<dyn ResultsPeer>,
     commands: &'static Registry,
 }
@@ -236,7 +236,7 @@ impl RunHost for FrozenRun {
             platform: self.platform.clone(),
             review_markers: self.review_markers,
             veriloga_compilation: self.veriloga_compilation.clone(),
-            netlist_shown: self.netlist_shown,
+            manual_deck: self.manual_deck.clone(),
             results: self.results.frozen(),
             commands: self.commands,
         }
@@ -265,8 +265,8 @@ impl RunHost for FrozenRun {
         self.veriloga_compilation.as_ref()
     }
 
-    fn netlist_shown(&self) -> NetlistShown {
-        self.netlist_shown
+    fn manual_deck(&self) -> Option<ManualDeck<'_>> {
+        self.manual_deck.as_ref().map(ManualDeckCopy::deck)
     }
 
     /// Nobody reads a frozen copy's Problems page.

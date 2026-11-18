@@ -55,19 +55,17 @@ fn shown_kind(model: &Model, netlist: &NetlistDocumentState, source: &str) -> So
         .map_or(SourceKind::DeckRoot, |shown| shown.kind(source))
 }
 
-/// The file the project's own top-level deck is read from, or a name that
-/// carries its extension: what tells a `.scs` deck from a SPICE one.
-pub(super) fn root_deck_path(model: &Model) -> PathBuf {
+/// The file the deck is read from: the open deck's, else the project's first
+/// deck's. Its extension tells a `.scs` deck from a SPICE one.
+pub(super) fn root_deck_path(model: &Model, netlist: &NetlistDocumentState) -> PathBuf {
+    if let Some(deck) = &netlist.open_deck {
+        return deck.root.path.clone();
+    }
     let content = &model.workspace.content;
     content
-        .netlist_source_path
-        .clone()
-        .or_else(|| {
-            content
-                .netlist_descriptor
-                .as_ref()
-                .map(|descriptor| PathBuf::from(&descriptor.artifact_name))
-        })
+        .decks
+        .first()
+        .map(|deck| deck.file_path(content.project.data_root()))
         .unwrap_or_default()
 }
 
@@ -111,9 +109,10 @@ pub fn root_deck_source_index(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Arc<NetlistSourceIndex> {
-    match model.workspace.content.netlist_source.as_deref() {
-        Some(deck) if deck != model.simulation.source.netlist_content => {
-            let kind = SourceKind::of(&root_deck_path(model), deck, true);
+    let shown = model.simulation.source.netlist_content.as_str();
+    match netlist.open_deck.as_ref().map(|deck| deck.root.text.as_str()) {
+        Some(deck) if deck != shown => {
+            let kind = SourceKind::of(&root_deck_path(model, netlist), deck, true);
             now_in(&mut netlist.root_deck_index, kind, deck)
         }
         _ => visible_source_index_in(ctx, model, netlist),
@@ -126,9 +125,10 @@ pub fn root_deck_source_index_now(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Arc<NetlistSourceIndex> {
-    match model.workspace.content.netlist_source.as_deref() {
-        Some(deck) if deck != model.simulation.source.netlist_content => {
-            let kind = SourceKind::of(&root_deck_path(model), deck, true);
+    let shown = model.simulation.source.netlist_content.as_str();
+    match netlist.open_deck.as_ref().map(|deck| deck.root.text.as_str()) {
+        Some(deck) if deck != shown => {
+            let kind = SourceKind::of(&root_deck_path(model, netlist), deck, true);
             now_in(&mut netlist.root_deck_index, kind, deck)
         }
         _ => visible_source_index_now(model, netlist),

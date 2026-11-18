@@ -3,11 +3,11 @@
 //! editors' session, with the netlist documents opened and the outline groups
 //! collapsed; and what code shows other features.
 
-use crate::simulation::NetlistShown;
 use crate::workbench::app::dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::framework::feature::{CodePort, NetlistDocumentKey};
+use rspice_app_runs::simulation::{DeckOrigin, ManualDeck};
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 /// What the code feature keeps open between frames.
@@ -73,18 +73,18 @@ impl CodeState {
         }
     }
 
-    /// The project's netlist source went back to its accepted revision: the
-    /// netlist editor's session and the secondary documents it opened belong
-    /// to the source that was thrown away.
+    /// The project's decks went back to their accepted list: the netlist
+    /// editor's session, its open deck and the tabs it opened belong to the
+    /// list that was thrown away, and the project's first deck opens again.
     pub fn on_project_changed(&mut self) {
         self.netlist = Default::default();
         self.deck_rename = None;
         self.netlist_open_documents.clear();
     }
 
-    /// Which netlist document the editor shows, as a manual-deck run reads it.
-    pub fn netlist_shown(&self) -> NetlistShown {
-        netlist_shown_in(&self.netlist)
+    /// The deck in front, which a manual run reads.
+    pub fn manual_deck(&self) -> Option<ManualDeck<'_>> {
+        manual_deck_in(&self.netlist)
     }
 
     /// The receipt of the project's current Verilog-A compilation.
@@ -93,14 +93,22 @@ impl CodeState {
     }
 }
 
-/// Which netlist document the netlist editor's session shows, as a
-/// manual-deck run reads it.
-pub fn netlist_shown_in(netlist: &NetlistDocumentState) -> NetlistShown {
-    NetlistShown {
-        settled: netlist.active_document_initialized,
-        comparison: netlist.active_document == ActiveNetlistDocument::GeneratedDiff,
-        owned_source: netlist.active_document == ActiveNetlistDocument::OwnedSource,
-    }
+/// The deck in front of the netlist editor's session, which a manual run
+/// reads: the open deck while it, or an include open beside it, is shown.
+pub fn manual_deck_in(netlist: &NetlistDocumentState) -> Option<ManualDeck<'_>> {
+    let deck = netlist.open_deck.as_ref()?;
+    (crate::workbench::documents::netlist_document::effective_active_document_in(netlist)
+        == ActiveNetlistDocument::OwnedSource)
+        .then(|| ManualDeck {
+            name: deck
+                .root
+                .path
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or("deck"),
+            text: &deck.root.text,
+            origin: DeckOrigin::File(&deck.root.path),
+        })
 }
 
 /// The receipt of the project's current Verilog-A compilation, as the
@@ -116,21 +124,8 @@ pub fn veriloga_compilation_in(
 }
 
 impl CodePort for CodeState {
-    fn owned_source_active(&self) -> bool {
-        self.netlist.active_document == ActiveNetlistDocument::OwnedSource
-    }
-
-    fn shows_owned_root(&self) -> bool {
-        self.netlist.active_document == ActiveNetlistDocument::OwnedSource
-            && self.netlist.active_dependency_identity.is_none()
-    }
-
-    fn netlist_cursor_line(&self) -> usize {
-        self.netlist.cursor_line
-    }
-
-    fn netlist_shown(&self) -> NetlistShown {
-        CodeState::netlist_shown(self)
+    fn manual_deck(&self) -> Option<ManualDeck<'_>> {
+        CodeState::manual_deck(self)
     }
 
     fn shown_netlist_document_key(&self) -> NetlistDocumentKey {

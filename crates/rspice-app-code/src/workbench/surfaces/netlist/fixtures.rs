@@ -14,17 +14,16 @@ use super::generation;
 
 pub fn retain_generated(
     model: &mut rspice_app_state::workbench::app_state::model::Model,
-    netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+    _netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
     source: &str,
 ) {
     let input_digest = crate::product::ContentDigest::from_bytes([0x41; 32]);
     let source = source.to_owned();
-    let (document, owned) =
-        generation::publish_generated_document(model, netlist, input_digest, source.clone(), &[])
+    let document =
+        generation::publish_generated_document(model, input_digest, source.clone(), &[])
             .expect("canonical generated fixture");
     model.netlist_artifacts.generated_source = source;
     model.netlist_artifacts.generated_document = Some(document);
-    netlist.owned_document = owned;
     model.netlist_artifacts.generated_input_digest = Some(input_digest);
     model.netlist_artifacts.current_generation_input_digest = Some(input_digest);
 }

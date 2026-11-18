@@ -246,17 +246,9 @@ pub fn select_source_document(
 pub(crate) fn active_document_label(workspace: &crate::state::ProjectWorkspace) -> String {
     workspace
         .content
-        .netlist_descriptor
-        .as_ref()
-        .map(|descriptor| descriptor.artifact_name.clone())
-        .or_else(|| {
-            workspace
-                .content
-                .netlist_source_path
-                .as_deref()
-                .and_then(std::path::Path::file_name)
-                .map(|name| name.to_string_lossy().into_owned())
-        })
+        .decks
+        .first()
+        .map(crate::state::ProjectDeck::name)
         .unwrap_or_else(|| format!("{}.sp · generated", workspace.content.project.top_cell))
 }
 
@@ -287,8 +279,10 @@ mod tests {
 
         assert_eq!(active_document_label(&workspace), "afe.sp · generated");
 
-        workspace.content.netlist_source_path =
-            Some(std::path::PathBuf::from("/p/top_override.sp"));
+        workspace.content.decks = vec![crate::state::ProjectDeck::for_file(
+            std::path::Path::new("/p/top_override.sp"),
+            None,
+        )];
         assert_eq!(active_document_label(&workspace), "top_override.sp");
 
         // A Verilog-A cell view is a Design document with a tab of its own.

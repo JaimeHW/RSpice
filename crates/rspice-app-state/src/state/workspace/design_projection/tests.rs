@@ -151,7 +151,7 @@ fn projection_is_not_rebuilt_without_a_key_change() {
         "two calls with nothing changed must share one projection"
     );
 
-    workspace.content.netlist_source_dirty = true;
+    workspace.content.decks_dirty = true;
     assert!(
         Arc::ptr_eq(
             &first,

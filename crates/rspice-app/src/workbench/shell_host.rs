@@ -871,7 +871,6 @@ impl ProblemsHost for AppState {
         rspice_app_code::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
             &mut self.model,
             &mut self.code.netlist,
-            &mut self.code.netlist_open_documents,
             finding,
         )
     }

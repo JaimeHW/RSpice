@@ -21,8 +21,10 @@ fn deck_in(directory: &Path) -> RunTestHost {
     fs::write(&origin, DECK).expect("write deck");
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(DECK.to_owned());
-    state.model.workspace.content.netlist_source_path = Some(origin);
+    state.manual_deck = Some(crate::simulation::ManualDeckCopy::new(
+        origin,
+        DECK.to_owned(),
+    ));
     state
 }
 

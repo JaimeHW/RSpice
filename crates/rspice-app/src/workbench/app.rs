@@ -589,8 +589,6 @@ impl RSpiceApp {
                 .clear_transient_specialized_viewer_data();
         }
         #[cfg(target_arch = "wasm32")]
-        self.state.poll_browser_netlist_workflow();
-        #[cfg(target_arch = "wasm32")]
         rspice_app_results::workbench::workflows::result_import_workflow::poll_browser_result_dataset_import(
             &mut self.state.results_parts(),
         );

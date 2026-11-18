@@ -34,12 +34,8 @@ impl AppState {
     /// caller because open/import/new workflows each own those semantics.
     pub(crate) fn clear_design_execution_context(&mut self) {
         self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
-        self.model.workspace.content.netlist_source = None;
-        self.model.workspace.content.netlist_document = None;
-        self.model.workspace.content.netlist_descriptor = None;
-        self.model.workspace.content.retained_netlist_decks.clear();
-        self.model.workspace.content.netlist_source_path = None;
-        self.model.workspace.content.netlist_source_dirty = false;
+        self.model.workspace.content.decks.clear();
+        self.model.workspace.content.decks_dirty = false;
         self.model.simulation = rspice_app_state::state::SimulationState::default();
         // A notice's "Open in Results" names its run by number, and the new
         // history numbers its runs from one again: kept, the offer would

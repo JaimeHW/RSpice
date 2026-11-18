@@ -264,16 +264,15 @@ pub(in crate::workbench) fn run_project_file_action(
 
 /// Carry out what the code feature handed back from a request because it
 /// reaches past the feature's context, as the shell's table did in place:
-/// open or import a netlist or a Verilog-A file through the file workflow,
+/// open a deck or import a Verilog-A file through the file workflow,
 /// import an LTspice or QSPICE schematic, show the selected instance in the
 /// generated deck, open the symbol of the module the Verilog-A view
 /// compiles, create the drafted device or the imported cells and open them
-/// in Design, open a placed instance of the cell, and the netlist import's
-/// transactions over the whole project.
+/// in Design, open a placed instance of the cell, and open the deck dropped
+/// on the Netlist page.
 pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_off: CodeHandOff) {
     match hand_off {
         CodeHandOff::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
-        CodeHandOff::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
         CodeHandOff::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
         CodeHandOff::ImportLtspiceSchematic => {
             import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Ltspice)
@@ -347,14 +346,9 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
                     .prompt(format!("Net {net} is not on {} any more.", schematic.cell));
             }
         }
-        CodeHandOff::CommitNetlistImport => {
-            app.state.commit_staged_netlist_import();
-        }
-        CodeHandOff::BeginNetlistProfileReview => {
-            app.state.begin_owned_netlist_profile_review();
-        }
-        CodeHandOff::ImportDroppedNetlist(dropped) => {
-            app.state.import_dropped_netlist(dropped);
+        CodeHandOff::OpenDroppedDeck(dropped) => {
+            let new_project = !app.state.platform.project_lifecycle.is_open();
+            app.state.open_dropped_deck(&dropped, new_project);
         }
     }
 }

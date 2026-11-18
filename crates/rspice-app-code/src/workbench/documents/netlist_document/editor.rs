@@ -15,7 +15,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ use crate::ui::widgets::Problem;
 use crate::workbench::MessageId;
 use crate::workbench::code::commands::NetlistEditorRequest;
 use crate::workbench::documents::text_editor_commands::show_go_to_line;
-use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
+use crate::workbench::state::WorkbenchSession;
 
 use super::{
     DiagnosticSeverity, completion,
@@ -76,11 +76,9 @@ pub fn editor_id_in(model: &super::Model, netlist: &super::NetlistDocumentState)
             .generated_document
             .as_ref()
             .map(|document| document.id()),
-        super::ActiveNetlistDocument::OwnedSource => netlist
-            .owned_document
-            .as_ref()
-            .or(model.workspace.content.netlist_document.as_ref())
-            .map(|document| document.id()),
+        super::ActiveNetlistDocument::OwnedSource => {
+            netlist.open_deck.as_ref().map(|deck| deck.tab_id())
+        }
         super::ActiveNetlistDocument::GeneratedDiff | super::ActiveNetlistDocument::RunSnapshot => {
             None
         }
@@ -607,54 +605,22 @@ fn show_signature_help(
 pub fn commit_edit(
     model: &mut super::Model,
     netlist: &mut super::NetlistDocumentState,
-    open_documents: &mut HashSet<WorkspaceDocumentId>,
-    workbench: &mut WorkbenchSession,
     runs: &mut RunsState,
     buffer: &str,
     cursor_line: usize,
     now: f64,
 ) {
-    if commit_owned_source_edit(
-        model,
-        netlist,
-        open_documents,
-        workbench,
-        runs,
-        buffer,
-        cursor_line,
-        now,
-    ) && netlist.active_dependency_identity.is_none()
-    {
-        super::refresh_diff_pips_from_baseline_in(model, runs);
-    }
-}
-
-/// Commit a text/completion edit without promoting generated output to owned
-/// source. Returns whether an existing owned source actually changed.
-fn commit_owned_source_edit(
-    model: &mut super::Model,
-    netlist: &mut super::NetlistDocumentState,
-    open_documents: &mut HashSet<WorkspaceDocumentId>,
-    workbench: &mut WorkbenchSession,
-    runs: &mut RunsState,
-    buffer: &str,
-    cursor_line: usize,
-    now: f64,
-) -> bool {
-    let committed = if netlist.active_dependency_identity.is_some() {
-        super::replace_owned_dependency_source(model, netlist, open_documents, buffer.to_owned())
-    } else {
-        super::replace_owned_source(model, netlist, open_documents, workbench, buffer.to_owned())
-    };
-    if !committed {
-        return false;
+    // Only the open deck and its open includes take an edit: the generated
+    // netlist, a comparison and a run's input are read-only.
+    if !super::edit_deck_file(model, netlist, buffer.to_owned()) {
+        return;
     }
     netlist.last_edit_time = now;
     netlist.typed_revision = Some(netlist.revision);
     if netlist.active_dependency_identity.is_none() {
         runs.manual_run.edited_lines.insert(cursor_line);
+        super::refresh_diff_pips_from_baseline_in(model, runs);
     }
-    true
 }
 
 /// The gutter mark a diagnostic earns: a warning or an error, and nothing for
@@ -961,13 +927,6 @@ struct SourceCheck {
 enum CheckedDeck {
     /// The buffer, as its own deck.
     Buffer,
-    /// The buffer spliced into the generated base it narrowly overrides.
-    Override(
-        Box<(
-            crate::state::OwnedNetlistDescriptor,
-            Option<crate::state::GeneratedArtifact>,
-        )>,
-    ),
     /// The deck as already composed: `None` when it is the buffer itself.
     Composed(Result<Option<String>, String>),
 }
@@ -977,15 +936,6 @@ impl CheckedDeck {
     fn compose(self, buffer: &str) -> Result<Option<String>, String> {
         match self {
             Self::Buffer => Ok(None),
-            Self::Override(parts) => {
-                let (descriptor, generated) = *parts;
-                rspice_simulation::netlist_preparation::owned_source::compose_owned_netlist_execution_source(
-                    Some(&descriptor),
-                    generated.as_ref(),
-                    buffer,
-                )
-                .map(|deck| (deck != buffer).then_some(deck))
-            }
             Self::Composed(composed) => composed,
         }
     }
@@ -1002,30 +952,13 @@ impl SourceCheck {
     ) -> Self {
         let buffer = model.simulation.source.netlist_content.clone();
         let is_dependency = netlist.active_dependency_identity.is_some();
-        let deck = match model.workspace.content.netlist_descriptor.as_ref() {
-            Some(descriptor)
-                if !is_dependency
-                    && netlist.active_document == super::ActiveNetlistDocument::OwnedSource
-                    && descriptor.strategy
-                        != crate::state::OwnedNetlistEditStrategy::OwnedSource =>
-            {
-                let generated = model
-                    .workspace
-                    .content
-                    .netlist_document
-                    .as_ref()
-                    .and_then(|document| document.generated_artifact())
-                    .cloned();
-                CheckedDeck::Override(Box::new((descriptor.clone(), generated)))
-            }
-            _ => CheckedDeck::Buffer,
-        };
+        let deck = CheckedDeck::Buffer;
         let source_path = if let Some(dependency) = super::active_dependency_in(model, netlist) {
             dependency.locator().native_origin().map(PathBuf::from)
         } else {
             match netlist.active_document {
                 super::ActiveNetlistDocument::OwnedSource => {
-                    model.workspace.content.netlist_source_path.clone()
+                    super::active_deck_file_in(netlist).map(|file| file.path.clone())
                 }
                 super::ActiveNetlistDocument::Generated => {
                     model.schematic.session.current_file.clone()

@@ -234,19 +234,11 @@ impl CommandSet for CodeCommand {
                 "no library can be written",
             ),
             Self::OpenNetlist => (
-                !execution_active,
-                "an active simulation execution still owns the project",
-            ),
-            Self::ImportNetlist => (
-                reads.platform.project_lifecycle.is_open()
-                    && !model.safe_mode.project_read_only()
-                    && !execution_active,
+                !execution_active && cfg!(not(target_arch = "wasm32")),
                 if execution_active {
                     "an active simulation execution still owns the project"
-                } else if model.safe_mode.project_read_only() {
-                    "the project is open read-only"
                 } else {
-                    UNAVAILABLE
+                    "decks open from files on the desktop"
                 },
             ),
             Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
@@ -425,7 +417,6 @@ impl CommandSet for CodeCommand {
             // the shell carries it out over the whole application as its
             // table did, straight after this call returns.
             Self::OpenNetlist => cx.wb.outbox.push(CodeRequest::OpenNetlist),
-            Self::ImportNetlist => cx.wb.outbox.push(CodeRequest::ImportNetlist),
             Self::ImportVerilogA => cx.wb.outbox.push(CodeRequest::ImportVerilogA),
             Self::ImportLtspiceSchematic => {
                 cx.wb.outbox.push(CodeRequest::ImportLtspiceSchematic);
@@ -614,8 +605,8 @@ impl CodeFeature {
         // result belongs to the bundle, not to whichever editor host happens
         // to be on screen when the worker answers.
         poll_veriloga_compile(cx.model, &mut cx.state.code_workspace, cx.wb);
-        let shown = cx.state.netlist_shown();
-        consume_veriloga_compile_request(cx.model, &mut cx.state.code_workspace, shown, ctx);
+        let deck = crate::workbench::slots::code::manual_deck_in(&cx.state.netlist);
+        consume_veriloga_compile_request(cx.model, &mut cx.state.code_workspace, deck, ctx);
         // Where the open module's symbol stands is measured here, once per
         // library revision, so neither the editor nor the inspector parses it.
         refresh_symbol_standing(

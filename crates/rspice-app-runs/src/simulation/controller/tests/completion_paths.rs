@@ -832,8 +832,8 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("the sole run-set analysis disables");
-    state.model.workspace.content.netlist_source =
-        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
+    state.model.simulation.source.netlist_content =
+        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string();
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -872,8 +872,8 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("run-set analysis disables");
-    state.model.workspace.content.netlist_source =
-        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    state.model.simulation.source.netlist_content =
+        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
     let project_revision = state.model.workspace.content.project.revision();
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
@@ -957,8 +957,8 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
     plan.set_enabled(transient_id, false)
         .expect("the sole run-set analysis disables");
     state.model.sim_setup.options.reltol = 1.0e-4;
-    state.model.workspace.content.netlist_source =
-        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
+    state.model.simulation.source.netlist_content =
+        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string();
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -972,36 +972,6 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
     assert_eq!(cached_netlist, "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n");
     assert!(!cached_netlist.contains(".OPTIONS"));
     assert!(!cached_netlist.contains("RELTOL"));
-}
-
-#[test]
-fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
-    let mut state = RunTestHost::default();
-    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
-    state.model.workspace.content.netlist_source =
-        Some("deck\n.include models.lib\nV1 out 0 1\n.op\n.end\n".to_string());
-    state.model.workspace.content.netlist_source_path =
-        Some(PathBuf::from("decks").join("bias.cir"));
-
-    assert_eq!(
-        SimulationController::analysis_source_path(&state.model).as_deref(),
-        Some(std::path::Path::new("decks").join("bias.cir").as_path())
-    );
-}
-
-#[test]
-fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
-    let mut state = RunTestHost::default();
-    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
-    state.model.workspace.content.netlist_source =
-        Some("deck\nV1 out 0 1\n.op\n.end\n".to_string());
-
-    assert!(
-        SimulationController::analysis_source_path(&state.model).is_none(),
-        "manual netlist text without an origin must not resolve includes from the schematic file"
-    );
 }
 
 #[test]
@@ -1020,8 +990,8 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
         .insert_at(AnalysisKind::OperatingPoint, 0)
         .expect("OP inserts as the sole enabled analysis");
     assert_eq!(plan.instances()[0].id(), op_id);
-    state.model.workspace.content.netlist_source =
-        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
+    state.model.simulation.source.netlist_content =
+        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string();
     state.model.simulation.execution.request_simulate_run_set();
     let mut controller = SimulationController::new();
 

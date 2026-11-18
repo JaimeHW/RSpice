@@ -15,8 +15,6 @@ pub enum ConfirmationAction {
     ProjectNew,
     /// Open another project (discard current workspace)
     ProjectOpen,
-    /// Open a bare SPICE deck as a new netlist-first project.
-    OpenNetlistProject,
     /// Close the current project while leaving RSpice running, landing where
     /// the close was asked to.
     CloseProject(ProjectCloseDestination),
@@ -25,8 +23,6 @@ pub enum ConfirmationAction {
     /// Open a file from the recent-files list (path stored alongside the
     /// pending action in [`ConfirmationDialogState::pending_path`])
     OpenRecent,
-    /// Import a SPICE deck into the Netlist workspace.
-    ImportNetlist,
     /// Close the application
     Exit,
 }
@@ -38,7 +34,6 @@ impl ConfirmationAction {
         match self {
             ConfirmationAction::ProjectNew
             | ConfirmationAction::ProjectOpen
-            | ConfirmationAction::OpenNetlistProject
             | ConfirmationAction::CloseProject(_) => {
                 if project.is_empty() {
                     "Save changes to this project?".to_owned()
@@ -49,7 +44,6 @@ impl ConfirmationAction {
             ConfirmationAction::FileOpen | ConfirmationAction::OpenRecent => {
                 "Save changes to the current design?".to_owned()
             }
-            ConfirmationAction::ImportNetlist => "Save the current SPICE source?".to_owned(),
             ConfirmationAction::Exit => "Save changes before exiting?".to_owned(),
         }
     }
@@ -57,9 +51,6 @@ impl ConfirmationAction {
     /// The one sentence under the question: what "Don't save" gives up.
     pub fn prompt_consequence(&self) -> &'static str {
         match self {
-            ConfirmationAction::ImportNetlist => {
-                "Importing another deck replaces it, and your edits will be lost if you don't save them."
-            }
             // "Don't save" on exit also drops the Models & PDK drafts that a
             // save retains for recovery.
             ConfirmationAction::Exit => {
@@ -67,7 +58,6 @@ impl ConfirmationAction {
             }
             ConfirmationAction::ProjectNew
             | ConfirmationAction::ProjectOpen
-            | ConfirmationAction::OpenNetlistProject
             | ConfirmationAction::CloseProject(_)
             | ConfirmationAction::FileOpen
             | ConfirmationAction::OpenRecent => "Your changes will be lost if you don't save them.",
@@ -242,8 +232,6 @@ mod tests {
             ConfirmationAction::CloseProject(ProjectCloseDestination::EmptyWorkbench),
             ConfirmationAction::CloseProject(ProjectCloseDestination::LiveMirror),
             ConfirmationAction::ProjectOpen,
-            ConfirmationAction::OpenNetlistProject,
-            ConfirmationAction::ImportNetlist,
             ConfirmationAction::ProjectNew,
             ConfirmationAction::Exit,
         ] {
@@ -268,8 +256,6 @@ mod tests {
         for action in [
             ConfirmationAction::CloseProject(ProjectCloseDestination::EmptyWorkbench),
             ConfirmationAction::ProjectOpen,
-            ConfirmationAction::OpenNetlistProject,
-            ConfirmationAction::ImportNetlist,
             ConfirmationAction::ProjectNew,
             ConfirmationAction::Exit,
         ] {

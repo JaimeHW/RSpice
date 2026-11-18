@@ -78,8 +78,6 @@ pub(crate) struct NetlistNavigatorAsked {
     pub(crate) open_in_design: Option<crate::state::CellViewRef>,
     /// The library section a card was rewritten to.
     pub(crate) use_section: Option<LibSectionRewrite>,
-    /// The include whose file the reader picks again.
-    pub(crate) relink: Option<String>,
 }
 
 pub(in crate::workbench) fn netlist(
@@ -553,7 +551,13 @@ pub(in crate::workbench) fn netlist(
         }
     }
     asked.open_in_design = open_in_design;
-    if let Some(requested) = open_include {
+    if let Some(requested) = open_include.as_deref()
+        && parts.netlist.active_document == ActiveNetlistDocument::OwnedSource
+    {
+        if let Err(error) = open_deck_include(parts, requested) {
+            asked.prompt = Some(error);
+        }
+    } else if let Some(requested) = open_include {
         let dependency = active_canonical_netlist_document(parts.model, parts.netlist)
             .and_then(|document| {
                 document
@@ -581,7 +585,9 @@ pub(in crate::workbench) fn netlist(
                     asked.prompt = Some(error);
                 }
             }
-            Some((identity, false)) => asked.relink = Some(identity),
+            Some((_, false)) => {
+                asked.prompt = Some(format!("Include '{requested}' was not found."));
+            }
             None => {
                 asked.prompt = Some(format!(
                     "Include '{requested}' is no longer one of the active netlist's includes."
@@ -644,6 +650,30 @@ fn outline_group_row(
     response.clicked()
 }
 
+/// Open the file an include line of the open deck names, as the run read it
+/// when the deck was last checked, else where it is found now.
+fn open_deck_include(parts: &mut NetlistNavigator<'_>, requested: &str) -> Result<(), String> {
+    let traced = parts
+        .code_workspace
+        .include_resolutions
+        .get(requested)
+        .map(|resolution| resolution.resolved().to_path_buf());
+    #[cfg(not(target_arch = "wasm32"))]
+    let traced = traced.or_else(|| {
+        parts.netlist.open_deck.as_ref().and_then(|deck| {
+            crate::workbench::documents::deck_files::resolve_include(parts.model, deck, requested)
+        })
+    });
+    let path = traced.ok_or_else(|| format!("Include '{requested}' was not found."))?;
+    crate::workbench::documents::deck_files::show_include(
+        parts.model,
+        parts.netlist,
+        parts.open_documents,
+        parts.runs,
+        &path,
+    )
+}
+
 pub(super) fn active_netlist_artifact_name(
     model: &Model,
     netlist: &NetlistDocumentState,
@@ -651,22 +681,19 @@ pub(super) fn active_netlist_artifact_name(
 ) -> String {
     match netlist.active_document {
         ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
-        ActiveNetlistDocument::OwnedSource => model
-            .workspace
-            .content
-            .netlist_descriptor
+        ActiveNetlistDocument::OwnedSource => netlist
+            .open_deck
             .as_ref()
-            .map(|descriptor| descriptor.artifact_name.clone())
+            .map(|deck| deck.root.name())
             .or_else(|| {
                 model
                     .workspace
                     .content
-                    .netlist_source_path
-                    .as_deref()
-                    .and_then(std::path::Path::file_name)
-                    .map(|name| name.to_string_lossy().into_owned())
+                    .decks
+                    .first()
+                    .map(|deck| deck.name())
             })
-            .unwrap_or_else(|| "owned-source.sp".to_owned()),
+            .unwrap_or_else(|| "deck.cir".to_owned()),
         ActiveNetlistDocument::GeneratedDiff => "generated.diff".to_owned(),
         // A synthetic filename, like the two above it: an identifier, never
         // translated copy.
@@ -682,8 +709,9 @@ pub(super) fn active_canonical_netlist_document<'a>(
 ) -> Option<&'a crate::state::NetlistDocument> {
     match netlist.active_document {
         ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_document.as_ref(),
-        ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
-        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
+        ActiveNetlistDocument::OwnedSource
+        | ActiveNetlistDocument::GeneratedDiff
+        | ActiveNetlistDocument::RunSnapshot => None,
     }
 }
 
@@ -900,6 +928,34 @@ pub(super) fn retained_include_facts(
     messages: MessageCatalog,
 ) -> Vec<IncludeRowFacts> {
     let project_paths = model.workspace.content.project.include_search_paths().len();
+    if netlist.active_document == ActiveNetlistDocument::OwnedSource {
+        // A deck is a file: what is known about its includes is what the
+        // last check traced, each one a file the deck reads where it is.
+        return code_workspace
+            .include_resolutions
+            .iter()
+            .map(|(locator, resolution)| IncludeRowFacts {
+                state: MessageId::NetlistNavigatorAuthorityExternal,
+                via: Some(chain_stage_text(
+                    messages,
+                    resolution.stage(),
+                    project_paths,
+                )),
+                chain: Some(include_chain_text(
+                    messages,
+                    locator,
+                    resolution,
+                    project_paths,
+                )),
+                shadowed_by: resolution
+                    .shadowed()
+                    .next()
+                    .map(|candidate| candidate.path().display().to_string()),
+                sections: lib_sections::declared(code_workspace, locator),
+                locator: locator.clone(),
+            })
+            .collect();
+    }
     active_canonical_netlist_document(model, netlist).map_or_else(Vec::new, |document| {
         document
             .dependencies()

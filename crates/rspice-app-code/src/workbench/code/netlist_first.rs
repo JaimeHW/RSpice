@@ -5,9 +5,9 @@
 //! things that can change that: the Netlist workspace, and schematic
 //! promotion. The page shares the no-project landing's geometry and action
 //! idiom so the workbench's landing surfaces read as one product, and every
-//! fact on it is live document state: the deck preview, the outline counts,
-//! and the publication state all come from the project's own deck, indexed the
-//! way the Netlist workspace indexes it. It is the code feature's surface,
+//! fact on it is live document state: the deck preview and the outline counts
+//! come from the project's own deck, indexed the way the Netlist workspace
+//! indexes it. It is the code feature's surface,
 //! drawn in that feature's context while the deck owns the project.
 
 use egui::{
@@ -16,19 +16,15 @@ use egui::{
 };
 
 use crate::state::command_catalog::CommandKey;
-use crate::state::{DependencyResolution, NetlistSourceIndex, OutlineEntryKind};
+use crate::state::{NetlistSourceIndex, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::design_system::{
-    Problem, WorkbenchIcon, action_row, centered_content_rect, elide_text, paint_problem_mark,
-    property_card, property_row, property_row_problem,
+    WorkbenchIcon, action_row, centered_content_rect, elide_text, property_card, property_row,
 };
-use crate::workbench::documents::netlist_document::{
-    NetlistDocumentState, OwnedNetlistPublicationState, owned_netlist_publication_state_in,
-    root_deck_source_index,
-};
+use crate::workbench::documents::netlist_document::{NetlistDocumentState, root_deck_source_index};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Cx, Execute};
 use crate::workbench::state::WorkbenchSession;
@@ -44,11 +40,6 @@ const RAIL_WIDTH: f32 = 322.0;
 const COLUMN_GAP: f32 = 18.0;
 const STACK_BREAKPOINT: f32 = 900.0;
 
-/// Side of the publication state's problem mark and the air after it: the
-/// kit's own, so it matches every other marked line in the product.
-use crate::ui::widgets::{
-    PROBLEM_MARK_GAP as PUBLICATION_MARK_GAP, PROBLEM_MARK_SIDE as PUBLICATION_MARK_SIDE,
-};
 const PREVIEW_TOOLBAR_HEIGHT: f32 = 34.0;
 const PREVIEW_LINE_HEIGHT: f32 = 17.0;
 const PREVIEW_GUTTER_WIDTH: f32 = 44.0;
@@ -269,27 +260,12 @@ fn rail(ui: &mut Ui, facts: &DeckFacts, open_label: &str, action: &mut Option<Ne
 fn deck_summary_card(ui: &mut Ui, facts: &DeckFacts) {
     property_card(ui, "Deck summary", |ui| {
         property_row(ui, "Source", &facts.name);
-        if let Some(dialect) = facts.dialect {
-            property_row(ui, "Dialect", dialect);
-        }
         property_row(ui, "Lines", &facts.lines.to_string());
         property_row(ui, "Devices", &facts.devices.to_string());
         property_row(ui, "Analyses", &facts.analyses.to_string());
         property_row(ui, "Models", &facts.models.to_string());
         property_row(ui, "Subcircuits", &facts.subcircuits.to_string());
-        if facts.unresolved_dependencies > 0 {
-            property_row_problem(
-                ui,
-                "Dependencies",
-                &format!(
-                    "{} \u{00b7} {} unresolved",
-                    facts.dependencies, facts.unresolved_dependencies
-                ),
-                Some(Problem::Warning),
-            );
-        } else {
-            property_row(ui, "Dependencies", &facts.dependencies.to_string());
-        }
+        property_row(ui, "Dependencies", &facts.dependencies.to_string());
     });
 }
 
@@ -405,37 +381,7 @@ fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
         theme::sans(tokens::FS_1, FontWeight::SemiBold),
         t.color.text,
     );
-    let state_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let state_left = facts
-        .publication
-        .and_then(|publication| {
-            let (label, problem) = publication_presentation(publication);
-            let label = label?;
-            let mut left = ui
-                .painter()
-                .text(
-                    pos2(toolbar.right() - 11.0, toolbar.center().y),
-                    Align2::RIGHT_CENTER,
-                    label,
-                    state_font.clone(),
-                    t.color.text_dim,
-                )
-                .left();
-            if let Some(problem) = problem {
-                left -= PUBLICATION_MARK_GAP;
-                paint_problem_mark(
-                    ui.painter(),
-                    Rect::from_center_size(
-                        pos2(left - PUBLICATION_MARK_SIDE / 2.0, toolbar.center().y),
-                        vec2(PUBLICATION_MARK_SIDE, PUBLICATION_MARK_SIDE),
-                    ),
-                    problem,
-                );
-                left -= PUBLICATION_MARK_SIDE;
-            }
-            Some(left)
-        })
-        .unwrap_or(toolbar.right() - 11.0);
+    let state_left = toolbar.right() - 11.0;
     let name_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let name_left = title_rect.right() + 9.0;
     let name_width = (state_left - 9.0 - name_left).max(0.0);
@@ -557,38 +503,16 @@ fn card_tone(t: &Tokens, line: usize, card: &str) -> Color32 {
     }
 }
 
-/// What the deck toolbar says about the owned source's publication, and
-/// whether it is worth a mark.
-///
-/// Validation and synchronization are states the deck is in, not verdicts on
-/// it, so they are stated in the ordinary tone. A change made to the file
-/// outside this project is the one the reader has to act on.
-const fn publication_presentation(
-    publication: OwnedNetlistPublicationState,
-) -> (Option<&'static str>, Option<Problem>) {
-    (
-        publication.label(),
-        if publication.external_change_pending {
-            Some(Problem::Warning)
-        } else {
-            None
-        },
-    )
-}
-
 /// Everything the page states about the deck, derived once per frame from the
 /// canonical document and the editor's own cached source index.
 pub struct DeckFacts {
     pub name: String,
-    dialect: Option<&'static str>,
     pub lines: usize,
     pub devices: usize,
     pub analyses: usize,
     pub models: usize,
     pub subcircuits: usize,
     pub dependencies: usize,
-    unresolved_dependencies: usize,
-    pub publication: Option<OwnedNetlistPublicationState>,
 }
 
 pub fn deck_facts(
@@ -596,68 +520,40 @@ pub fn deck_facts(
     netlist: &NetlistDocumentState,
     index: &NetlistSourceIndex,
 ) -> DeckFacts {
-    let document = model.workspace.content.netlist_document.as_ref();
-    let name = model
-        .workspace
-        .content
-        .netlist_descriptor
+    let name = netlist
+        .open_deck
         .as_ref()
-        .map(|descriptor| descriptor.artifact_name.clone())
+        .map(|deck| deck.root.name())
         .or_else(|| {
-            document.and_then(|document| {
-                document
-                    .provenance()
-                    .imported()
-                    .map(|imported| imported.origin().display_name().to_owned())
-            })
+            model
+                .workspace
+                .content
+                .decks
+                .first()
+                .map(|deck| deck.name())
         })
         .unwrap_or_else(|| "Untitled deck".to_owned());
-    let dialect = model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .and_then(|descriptor| descriptor.imported_dialect)
-        .map(crate::state::NetlistSourceDialect::label);
 
-    let (mut devices, mut analyses, mut models, mut subcircuits) = (0, 0, 0, 0);
+    let (mut devices, mut analyses, mut models, mut subcircuits, mut dependencies) =
+        (0, 0, 0, 0, 0);
     for entry in index.outline().entries() {
         match entry.kind() {
             OutlineEntryKind::Device => devices += 1,
             OutlineEntryKind::Analysis => analyses += 1,
             OutlineEntryKind::Model => models += 1,
             OutlineEntryKind::Subcircuit => subcircuits += 1,
+            OutlineEntryKind::Include | OutlineEntryKind::Library => dependencies += 1,
             _ => {}
         }
     }
 
-    let (dependencies, unresolved_dependencies) = document.map_or((0, 0), |document| {
-        let unresolved = document
-            .dependencies()
-            .iter()
-            .filter(|dependency| {
-                !matches!(
-                    dependency.resolution(),
-                    DependencyResolution::Resolved { .. }
-                )
-            })
-            .count();
-        (document.dependencies().len(), unresolved)
-    });
-    let publication = document.map(|document| {
-        owned_netlist_publication_state_in(model, netlist, document.content_digest())
-    });
-
     DeckFacts {
         name,
-        dialect,
         lines: index.line_count(),
         devices,
         analyses,
         models,
         subcircuits,
         dependencies,
-        unresolved_dependencies,
-        publication,
     }
 }

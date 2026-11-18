@@ -12,7 +12,6 @@ use egui::{Context, DroppedFile};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::shell_host::project::launcher::dismiss_launcher;
-use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::workbench::workspace::Workspace;
 
 /// What a dropped file is, by its extension.
@@ -180,45 +179,17 @@ fn keep_dropped(file: &DroppedFile) -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-/// A deck comes into the open project as the Netlist page brings one in, or
-/// opens as a netlist project of its own.
+/// A deck opens in the open project, as the Netlist page opens one, or in a
+/// new project of its own when it is dropped on the launcher.
 fn open_deck(app: &mut RSpiceApp, file: &DroppedFile) {
-    if app.state.platform.project_lifecycle.is_open() && !app.state.project.project_launcher_open {
-        app.state.import_dropped_netlist(vec![file.clone()]);
-        return;
-    }
-    let source_path = file.path.clone();
-    let bytes = if let Some(bytes) = file.bytes.as_ref() {
-        Ok(bytes.to_vec())
-    } else {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            source_path
-                .as_deref()
-                .ok_or_else(|| "the drop carried neither its contents nor a file".to_owned())
-                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("the browser did not hand over the dropped file's contents".to_owned())
-        }
-    };
-    match bytes {
-        Ok(bytes) => {
-            let name = name_of(file);
-            if app
-                .state
-                .stage_dropped_netlist_project(bytes, source_path, name)
-            {
-                dismiss_launcher(app);
-            }
-        }
-        Err(error) => {
-            let message = format!("The dropped SPICE deck could not be read: {error}.");
-            app.state.prompt(message.clone());
-            app.state
-                .record(LogSeverity::Error, LogSource::Studio, message);
-        }
+    let new_project =
+        !app.state.platform.project_lifecycle.is_open() || app.state.project.project_launcher_open;
+    if app
+        .state
+        .open_dropped_deck(std::slice::from_ref(file), new_project)
+        && new_project
+    {
+        dismiss_launcher(app);
     }
 }
 

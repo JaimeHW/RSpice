@@ -453,18 +453,6 @@ impl Request for LiveMirrorEntry {
     const DRAIN: Drain = Drain::LiveSessionPump;
 }
 
-/// Adopt the project's own netlist source a live session replaced, with the
-/// root document rewritten over it when the project keeps one. Raised as the
-/// session applies a participant's source, and taken once the session's
-/// inbound half is done, before the host's project can replace the one it
-/// applied to.
-#[derive(Clone, Debug)]
-pub struct AdoptLiveOwnedSource(pub Option<rspice_app_state::state::NetlistDocument>);
-
-impl Request for AdoptLiveOwnedSource {
-    const DRAIN: Drain = Drain::LiveSessionPump;
-}
-
 /// Close the open project to make room for the live session host's as this
 /// install's mirror: through the close review when it holds unsaved work,
 /// at once otherwise. Raised by the live session's dialog, and taken straight

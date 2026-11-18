@@ -78,7 +78,7 @@ pub mod workbench {
     pub mod app_state {
         pub(crate) use rspice_app_runs::workbench::app_state::run_preflight;
         pub(crate) use rspice_app_services::workbench::slots::platform::PlatformState;
-        pub(crate) use rspice_app_state::workbench::app_state::model::{self, Model};
+        pub(crate) use rspice_app_state::workbench::app_state::model::Model;
     }
     pub mod chrome {
         pub mod presence;

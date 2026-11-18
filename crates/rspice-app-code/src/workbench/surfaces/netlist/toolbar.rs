@@ -2,8 +2,8 @@
 //!
 //! One 33-point row: the dialect chip and the check's status on the left,
 //! document actions on the right. Which actions appear is decided by the
-//! active document's ownership, and the advisory chip yields its space before
-//! the dialect chip or a blocking status can clip.
+//! document in front, and the advisory chip yields its space before the
+//! dialect chip or a blocking status can clip.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
@@ -20,13 +20,7 @@ use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::feature::Cx;
 
-use super::ownership::open_ownership_dialog;
-use super::revision::owned_source_save_ready;
-use super::{
-    active_document_available, document_syntax_status, generated_primary_ready_in,
-    generation_block_reason,
-};
-use crate::workbench::documents::netlist_document::open_owned_source_in;
+use super::{active_document_available, document_syntax_status, generated_primary_ready_in};
 
 pub const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 pub(super) const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
@@ -91,7 +85,6 @@ fn full_action_extent(
     ui: &Ui,
     execution_active: bool,
     messages: crate::workbench::MessageCatalog,
-    save_source_label: &str,
     context: ActionSetContext,
 ) -> f32 {
     let button = |label: &str| action_button_width(ui, label);
@@ -103,26 +96,14 @@ fn full_action_extent(
     ];
     if context.dependency_visible {
         widths.push(button(&messages.text(MessageId::NetlistReturnRoot)));
-        widths.push(button(&messages.text(MessageId::NetlistRelink)));
-        if !context.dependency_owned {
-            widths.push(button(&messages.text(MessageId::NetlistCopyProject)));
+        if context.active == ActiveNetlistDocument::OwnedSource {
+            widths.push(button(&messages.text(MessageId::NetlistSaveSourceDeck)));
         }
     } else {
         match context.active {
-            ActiveNetlistDocument::Generated => {
-                if !context.source_exists {
-                    widths.push(CODE_TOOLBAR_ICON_WIDTH);
-                }
-                widths.push(button(&messages.text(if context.source_exists {
-                    MessageId::NetlistOpenEditable
-                } else if context.generated_ready {
-                    MessageId::NetlistCreateEditable
-                } else {
-                    MessageId::CodeSourceCreateTitle
-                })));
-            }
+            ActiveNetlistDocument::Generated => {}
             ActiveNetlistDocument::OwnedSource => {
-                widths.push(button(save_source_label));
+                widths.push(button(&messages.text(MessageId::NetlistSaveSourceDeck)));
                 widths.push(button(&messages.text(MessageId::NetlistValidateSource)));
                 widths.push(button(&messages.text(if context.generated_ready {
                     MessageId::NetlistReturnPrimary
@@ -144,24 +125,17 @@ fn full_action_extent(
 struct ActionSetContext {
     active: ActiveNetlistDocument,
     dependency_visible: bool,
-    dependency_owned: bool,
     generated_ready: bool,
-    source_exists: bool,
 }
 
 /// Draw the toolbar in the code feature's context, lent with the dispatcher's
 /// answers for Run and Stop, and do what was pressed: in place for what the
 /// context holds, and raised for what the application carries out once the
-/// page has drawn: Run and Stop, copying an include into the project,
-/// picking its file again, validating the deck and the quick fix. It
-/// returns where it drew.
+/// page has drawn: Run and Stop, saving the file in front, validating the
+/// deck and the quick fix. It returns where it drew.
 pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLayout {
     let messages = cx.wb.messages();
-    let save_source_label = messages.text(if cfg!(target_arch = "wasm32") {
-        MessageId::NetlistDownloadSourceCopy
-    } else {
-        MessageId::NetlistSaveSourceDeck
-    });
+    let save_source_label = messages.text(MessageId::NetlistSaveSourceDeck);
     let t = Tokens::get(ui.ctx());
     // A child UI can retain the pre-dock available width while its painter is
     // clipped to the visible center document. Base both allocation and
@@ -179,11 +153,10 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     let content = rect.shrink2(vec2(CODE_TOOLBAR_PADDING_X, 0.0));
     let active = cx.state.netlist.active_document;
     let dependency_visible = cx.state.netlist.active_dependency_identity.is_some();
-    let dependency_owned =
-        crate::workbench::documents::netlist_document::active_dependency_is_owned_in(
-            cx.model,
-            &cx.state.netlist,
-        );
+    // The deck or an include beside it: a file, which Save writes.
+    let deck_file_dirty =
+        crate::workbench::documents::netlist_document::active_deck_file_in(&cx.state.netlist)
+            .map(|file| file.dirty);
     let generated_ready = generated_primary_ready_in(cx.model);
     let active_available = active_document_available(cx.model, &cx.state.netlist, cx.runs);
     let active_editable =
@@ -199,13 +172,10 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         ui,
         cx.model.simulation.execution.has_active_execution(),
         messages,
-        &save_source_label,
         ActionSetContext {
             active,
             dependency_visible,
-            dependency_owned,
             generated_ready,
-            source_exists: cx.model.workspace.content.netlist_source.is_some(),
         },
     );
     // Dock collapse can make the document wider at a smaller outer viewport.
@@ -302,28 +272,23 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 action = Some(language_action);
             }
             if dependency_visible {
-                let (label, candidate) = if dependency_owned {
-                    (
-                        messages.text(MessageId::NetlistReturnRoot),
-                        NetlistToolbarAction::CloseDependency,
-                    )
-                } else {
-                    (
-                        messages.text(MessageId::NetlistCopyProject),
-                        NetlistToolbarAction::CopyDependency,
-                    )
-                };
-                if ui
-                    .add_sized(
-                        [PHONE_PRIMARY_WIDTH, control_h],
-                        egui::Button::new(&label).truncate(),
-                    )
-                    .clicked()
-                {
-                    action = Some(candidate);
-                }
-                if !dependency_owned
-                    && icon_button(
+                if let Some(dirty) = deck_file_dirty {
+                    // An include of the deck: a file of its own, saved like
+                    // the deck, with the way back as an icon.
+                    if ui
+                        .add_enabled_ui(dirty, |ui| {
+                            ui.add_sized(
+                                [PHONE_PRIMARY_WIDTH, control_h],
+                                egui::Button::new(save_source_label.as_str()).truncate(),
+                            )
+                        })
+                        .inner
+                        .on_disabled_hover_text(messages.text(MessageId::NetlistNothingToSave))
+                        .clicked()
+                    {
+                        action = Some(NetlistToolbarAction::Save);
+                    }
+                    if icon_button(
                         ui,
                         WorkbenchIcon::ArrowLeft,
                         &messages.text(MessageId::NetlistReturnRoot),
@@ -331,75 +296,31 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                         vec2(28.0, 28.0),
                     )
                     .clicked()
+                    {
+                        action = Some(NetlistToolbarAction::CloseDependency);
+                    }
+                } else if ui
+                    .add_sized(
+                        [PHONE_PRIMARY_WIDTH, control_h],
+                        egui::Button::new(messages.text(MessageId::NetlistReturnRoot)).truncate(),
+                    )
+                    .clicked()
                 {
                     action = Some(NetlistToolbarAction::CloseDependency);
                 }
-                if icon_button(
-                    ui,
-                    WorkbenchIcon::Refresh,
-                    &messages.text(MessageId::NetlistRelinkTooltip),
-                    false,
-                    vec2(28.0, 28.0),
-                )
-                .clicked()
-                {
-                    action = Some(NetlistToolbarAction::RelinkDependency);
-                }
             } else {
                 match active {
-                    ActiveNetlistDocument::Generated => {
-                        let source_exists = cx.model.workspace.content.netlist_source.is_some();
-                        let (label, full_label, candidate) = if source_exists {
-                            (
-                                messages.text(MessageId::NetlistOpenEditableCompact),
-                                messages.text(MessageId::NetlistOpenEditable),
-                                NetlistToolbarAction::OpenOwned,
-                            )
-                        } else if generated_ready {
-                            (
-                                messages.text(MessageId::NetlistCreateEditableCompact),
-                                messages.text(MessageId::NetlistCreateEditable),
-                                NetlistToolbarAction::OpenOwnershipDialog(
-                                    crate::state::OwnedNetlistEditStrategy::OwnedSource,
-                                ),
-                            )
-                        } else {
-                            (
-                                messages.text(MessageId::CodeSourceCreateTitle),
-                                messages.text(MessageId::CodeSourceCreateTitle),
-                                NetlistToolbarAction::BeginFirstTopDeck,
-                            )
-                        };
-                        let primary_ready = source_exists
-                            || generated_ready
-                            || cx.platform.project_lifecycle.is_open();
-                        let primary = ui
-                            .add_enabled_ui(primary_ready, |ui| {
-                                ui.add_sized(
-                                    [PHONE_PRIMARY_WIDTH, control_h],
-                                    egui::Button::new(&label).truncate(),
-                                )
-                            })
-                            .inner
-                            .on_hover_text(full_label)
-                            .on_disabled_hover_text(generation_block_reason(cx.model, messages));
-                        if primary.clicked() {
-                            action = Some(candidate);
-                        }
-                    }
+                    ActiveNetlistDocument::Generated => {}
                     ActiveNetlistDocument::OwnedSource => {
-                        let save_ready = owned_source_save_ready(cx.model, &cx.state.netlist);
                         let save = ui
-                            .add_enabled_ui(save_ready, |ui| {
+                            .add_enabled_ui(deck_file_dirty.unwrap_or(false), |ui| {
                                 ui.add_sized(
                                     [PHONE_PRIMARY_WIDTH, control_h],
                                     egui::Button::new(save_source_label.as_str()).truncate(),
                                 )
                             })
                             .inner
-                            .on_disabled_hover_text(
-                                messages.text(MessageId::NetlistValidateBeforeSave),
-                            );
+                            .on_disabled_hover_text(messages.text(MessageId::NetlistNothingToSave));
                         if save.clicked() {
                             action = Some(NetlistToolbarAction::Save);
                         }
@@ -481,75 +402,24 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 {
                     action = Some(NetlistToolbarAction::CloseDependency);
                 }
-                if ui.button(messages.text(MessageId::NetlistRelink)).clicked() {
-                    action = Some(NetlistToolbarAction::RelinkDependency);
-                }
-                if !dependency_owned
+                if let Some(dirty) = deck_file_dirty
                     && ui
-                        .button(messages.text(MessageId::NetlistCopyProject))
+                        .add_enabled(dirty, egui::Button::new(save_source_label.as_str()))
+                        .on_disabled_hover_text(messages.text(MessageId::NetlistNothingToSave))
                         .clicked()
                 {
-                    action = Some(NetlistToolbarAction::CopyDependency);
+                    action = Some(NetlistToolbarAction::Save);
                 }
             } else {
                 match active {
-                    ActiveNetlistDocument::Generated => {
-                        let mut override_clicked = false;
-                        if !compact && cx.model.workspace.content.netlist_source.is_none() {
-                            ui.add_enabled_ui(generated_ready, |ui| {
-                                override_clicked = icon_button(
-                                    ui,
-                                    WorkbenchIcon::More,
-                                    "Create a narrow generated-source override",
-                                    false,
-                                    vec2(control_h, control_h),
-                                )
-                                .clicked();
-                            })
-                            .response
-                            .on_disabled_hover_text(generation_block_reason(cx.model, messages));
-                        }
-                        if override_clicked {
-                            action = Some(NetlistToolbarAction::OpenOwnershipDialog(
-                                crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
-                            ));
-                        }
-                        let source_exists = cx.model.workspace.content.netlist_source.is_some();
-                        let (label, candidate) = if source_exists {
-                            (
-                                messages.text(MessageId::NetlistOpenEditable),
-                                NetlistToolbarAction::OpenOwned,
-                            )
-                        } else if generated_ready {
-                            (
-                                messages.text(MessageId::NetlistCreateEditable),
-                                NetlistToolbarAction::OpenOwnershipDialog(
-                                    crate::state::OwnedNetlistEditStrategy::OwnedSource,
-                                ),
-                            )
-                        } else {
-                            (
-                                messages.text(MessageId::CodeSourceCreateTitle),
-                                NetlistToolbarAction::BeginFirstTopDeck,
-                            )
-                        };
-                        let primary_ready = source_exists
-                            || generated_ready
-                            || cx.platform.project_lifecycle.is_open();
-                        let response = ui
-                            .add_enabled(primary_ready, egui::Button::new(&label))
-                            .on_disabled_hover_text(generation_block_reason(cx.model, messages));
-                        if response.clicked() {
-                            action = Some(candidate);
-                        }
-                    }
+                    ActiveNetlistDocument::Generated => {}
                     ActiveNetlistDocument::OwnedSource => {
-                        let save_ready = owned_source_save_ready(cx.model, &cx.state.netlist);
                         if ui
-                            .add_enabled(save_ready, egui::Button::new(save_source_label.as_str()))
-                            .on_disabled_hover_text(
-                                messages.text(MessageId::NetlistValidateBeforeSave),
+                            .add_enabled(
+                                deck_file_dirty.unwrap_or(false),
+                                egui::Button::new(save_source_label.as_str()),
                             )
+                            .on_disabled_hover_text(messages.text(MessageId::NetlistNothingToSave))
                             .clicked()
                         {
                             action = Some(NetlistToolbarAction::Save);
@@ -675,19 +545,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     }
 
     match action {
-        Some(NetlistToolbarAction::OpenOwned) => {
-            let _ = open_owned_source_in(cx.model, &mut cx.state.netlist);
-        }
-        Some(NetlistToolbarAction::BeginFirstTopDeck) => {
-            if let Err(error) = crate::workbench::app::begin_new_top_deck_in(
-                cx.model,
-                &mut cx.state.code_workspace,
-                &mut cx.state.netlist,
-                cx.platform,
-            ) {
-                cx.wb.prompt(error);
-            }
-        }
         Some(NetlistToolbarAction::ManageTopDecks) => {
             if let Err(error) = crate::workbench::app::open_source_document_dialog_in(
                 cx.wb.workspace,
@@ -730,15 +587,8 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 cx.runs,
             );
         }
-        Some(NetlistToolbarAction::OpenOwnershipDialog(strategy)) => {
-            open_ownership_dialog(cx.model, &mut cx.state.netlist, cx.wb, strategy);
-        }
         Some(NetlistToolbarAction::Save) => {
-            crate::workbench::documents::netlist_document::open_netlist_save_dialog_in(
-                cx.model,
-                &mut cx.state.netlist,
-                false,
-            );
+            cx.wb.outbox.push(CodeRequest::SaveDeckFile);
         }
         Some(NetlistToolbarAction::GoToDefinition) => {
             let answer =
@@ -804,16 +654,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                     &cx.state.netlist,
                 ),
             );
-        }
-        Some(NetlistToolbarAction::CopyDependency) => {
-            cx.wb.outbox.push(CodeRequest::CopyNetlistDependency);
-        }
-        Some(NetlistToolbarAction::RelinkDependency) => {
-            if let Some(identity) = cx.state.netlist.active_dependency_identity.clone() {
-                cx.wb
-                    .outbox
-                    .push(CodeRequest::RelinkNetlistDependency(identity));
-            }
         }
         Some(NetlistToolbarAction::Validate) => {
             cx.wb.outbox.push(CodeRequest::ValidateCodeDocument);
@@ -1080,8 +920,6 @@ pub(super) const fn toolbar_status_visible(phone: bool, problem: Problem) -> boo
 
 #[derive(Debug, Clone, Copy)]
 enum NetlistToolbarAction {
-    OpenOwned,
-    BeginFirstTopDeck,
     ManageTopDecks,
     OpenGenerated,
     CloseComparison,
@@ -1089,7 +927,6 @@ enum NetlistToolbarAction {
     RunDeck,
     StopRun,
     CloseDependency,
-    OpenOwnershipDialog(crate::state::OwnedNetlistEditStrategy),
     Save,
     SignatureHelp,
     GoToDeclaration,
@@ -1097,8 +934,6 @@ enum NetlistToolbarAction {
     WorkspaceSymbols,
     Find,
     FormatDocument,
-    CopyDependency,
-    RelinkDependency,
     Validate,
     ApplyQuickFix,
 }

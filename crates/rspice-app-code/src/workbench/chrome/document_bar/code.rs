@@ -61,47 +61,24 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         }));
     }
 
-    if let Some(owned) = netlist.owned_document.as_ref() {
-        let owned_label = model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .map(|descriptor| descriptor.artifact_name.clone())
-            .filter(|label| !label.trim().is_empty())
-            .unwrap_or_else(|| "Project netlist".to_owned());
+    if let Some(deck) = netlist.open_deck.as_ref() {
+        let root = deck.tab_id();
         documents.push(WorkspaceDocument {
-            id: WorkspaceDocumentId::NetlistOwned(owned.id()),
-            label: owned_label,
+            id: WorkspaceDocumentId::NetlistOwned(root),
+            label: deck.root.name(),
             icon: WorkbenchIcon::Netlist,
-            dirty: model.workspace.content.netlist_source_dirty,
+            dirty: deck.root.dirty,
         });
-        documents.extend(owned.dependencies().iter().filter_map(|dependency| {
-            dependency.source()?;
-            let identity = dependency.locator().logical_identity();
+        documents.extend(deck.includes.iter().filter_map(|file| {
             let id = WorkspaceDocumentId::NetlistDependency {
-                root: owned.id(),
-                logical_identity: identity.to_owned(),
+                root,
+                logical_identity: file.key(),
             };
-            if !open_documents.contains(&id) {
-                return None;
-            }
-            let project_owned = model
-                .workspace
-                .content
-                .netlist_descriptor
-                .as_ref()
-                .and_then(|descriptor| descriptor.owned_include(identity))
-                .is_some();
-            Some(WorkspaceDocument {
+            open_documents.contains(&id).then(|| WorkspaceDocument {
                 id,
-                label: if project_owned {
-                    dependency.locator().display_name().to_owned()
-                } else {
-                    format!("{} · external", dependency.locator().display_name())
-                },
+                label: file.name(),
                 icon: WorkbenchIcon::Code,
-                dirty: project_owned && model.workspace.content.netlist_source_dirty,
+                dirty: file.dirty,
             })
         }));
     }
@@ -138,7 +115,7 @@ fn code_workspace_document(model: &Model) -> WorkspaceDocument {
         id: WorkspaceDocumentId::NetlistSource,
         label: crate::workbench::documents::code_workspace::active_document_label(&model.workspace),
         icon: WorkbenchIcon::Netlist,
-        dirty: model.workspace.content.netlist_source_dirty,
+        dirty: model.workspace.content.decks_dirty,
     }
 }
 
@@ -156,21 +133,23 @@ pub fn active_netlist_document_id(
         .active_dependency_root
         .unwrap_or(netlist.active_document);
     let document = match root {
-        ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_document.as_ref(),
-        ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
+        ActiveNetlistDocument::Generated => model
+            .netlist_artifacts
+            .generated_document
+            .as_ref()
+            .map(|document| document.id()),
+        ActiveNetlistDocument::OwnedSource => netlist.open_deck.as_ref().map(|deck| deck.tab_id()),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }?;
     if let Some(logical_identity) = netlist.active_dependency_identity.as_ref() {
         Some(WorkspaceDocumentId::NetlistDependency {
-            root: document.id(),
+            root: document,
             logical_identity: logical_identity.clone(),
         })
     } else {
         Some(match root {
-            ActiveNetlistDocument::Generated => {
-                WorkspaceDocumentId::NetlistGenerated(document.id())
-            }
-            ActiveNetlistDocument::OwnedSource => WorkspaceDocumentId::NetlistOwned(document.id()),
+            ActiveNetlistDocument::Generated => WorkspaceDocumentId::NetlistGenerated(document),
+            ActiveNetlistDocument::OwnedSource => WorkspaceDocumentId::NetlistOwned(document),
             ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
                 return None;
             }
@@ -197,22 +176,21 @@ pub fn activate_generated_netlist(
             ))
 }
 
-/// Show the project's own netlist, when it is the one this tab names.
+/// Show the open deck, when it is the one this tab names.
 pub fn activate_owned_netlist(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     document_id: &crate::state::NetlistDocumentId,
 ) -> bool {
     let available = netlist
-        .owned_document
+        .open_deck
         .as_ref()
-        .is_some_and(|document| document.id() == *document_id);
-    available
-        && crate::workbench::documents::netlist_document::open_owned_primary_in(model, netlist)
+        .is_some_and(|deck| deck.tab_id() == *document_id);
+    available && crate::workbench::documents::deck_files::show_deck(model, netlist)
 }
 
-/// Show an include of the generated or the owned netlist, as a tab the
-/// reader opened, leaving the manual run's edited lines behind.
+/// Show an include of the generated netlist or of the open deck, as a tab
+/// the reader opened, leaving the manual run's edited lines behind.
 pub fn activate_netlist_dependency(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -229,9 +207,9 @@ pub fn activate_netlist_dependency(
     {
         Some(ActiveNetlistDocument::Generated)
     } else if netlist
-        .owned_document
+        .open_deck
         .as_ref()
-        .is_some_and(|document| document.id() == *root)
+        .is_some_and(|deck| deck.tab_id() == *root)
     {
         Some(ActiveNetlistDocument::OwnedSource)
     } else {

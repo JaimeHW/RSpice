@@ -557,8 +557,6 @@ pub enum ChoicePreference {
     /// The schematic canvas's cursor under a mouse: the tool's own cursor,
     /// or a full-screen crosshair (D1 section 5).
     SchematicCursor,
-    /// The dialect an imported deck with no dialect markers is read as.
-    ImportedNetlistDialect,
     /// What the mouse wheel does over a schematic or symbol canvas.
     CanvasWheel,
     /// How far one wheel notch zooms. Zero is Normal, then Slow, then Fast.
@@ -582,7 +580,7 @@ pub enum ChoicePreference {
 }
 
 impl ChoicePreference {
-    pub const ALL: [Self; 56] = [
+    pub const ALL: [Self; 55] = [
         Self::InterfaceScale,
         Self::EditorFontSize,
         Self::MinimumTouchTarget,
@@ -629,7 +627,6 @@ impl ChoicePreference {
         Self::ExtensionPolicy,
         Self::ExtensionUpdates,
         Self::SchematicCursor,
-        Self::ImportedNetlistDialect,
         Self::CanvasWheel,
         Self::CanvasZoomSpeed,
         Self::CanvasPanButton,
@@ -689,7 +686,6 @@ impl ChoicePreference {
             Self::ExtensionPolicy => "extension-policy",
             Self::ExtensionUpdates => "extension-updates",
             Self::SchematicCursor => "schematic-cursor",
-            Self::ImportedNetlistDialect => "imported-netlist-dialect",
             Self::CanvasWheel => "canvas-wheel",
             Self::CanvasZoomSpeed => "canvas-zoom-speed",
             Self::CanvasPanButton => "canvas-pan-button",
@@ -750,7 +746,6 @@ impl ChoicePreference {
             Self::DefaultSolverPreset | Self::WireJunctionBehavior => 3,
             Self::InterfaceScale => 5,
             Self::EditorFontSize => 8,
-            Self::ImportedNetlistDialect => 5,
             Self::CanvasWheel
             | Self::CanvasPanButton
             | Self::AcMagnitude
@@ -1461,12 +1456,6 @@ impl UserPreferences {
         self.scalar(ScalarPreference::RunsKept) as usize
     }
 
-    /// The dialect an imported deck is read as when nothing in it names one.
-    #[must_use]
-    pub fn imported_netlist_dialect(&self) -> crate::state::NetlistSourceDialect {
-        IMPORTABLE_NETLIST_DIALECTS[self.choice(ChoicePreference::ImportedNetlistDialect)]
-    }
-
     /// How the schematic and symbol canvases answer the wheel and the pan
     /// button, as the Navigation page sets it.
     #[must_use]
@@ -1571,17 +1560,6 @@ impl UserPreferences {
 }
 
 const COMPONENT_SHELF_STORAGE_KEY: &str = "component-shelf";
-
-/// The dialects an imported deck can be read as, in stored-index order: each
-/// one RSpice can execute. "Unknown" is a detection outcome, not a choice.
-pub const IMPORTABLE_NETLIST_DIALECTS: [crate::state::NetlistSourceDialect; 6] = [
-    crate::state::NetlistSourceDialect::RSpice,
-    crate::state::NetlistSourceDialect::Spice3Ngspice,
-    crate::state::NetlistSourceDialect::Hspice,
-    crate::state::NetlistSourceDialect::Pspice,
-    crate::state::NetlistSourceDialect::Spectre,
-    crate::state::NetlistSourceDialect::Ads,
-];
 
 /// The Component shelf's personal pin set and placement history.
 ///

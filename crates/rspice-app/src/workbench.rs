@@ -64,7 +64,7 @@ pub(crate) mod system_contrast;
 /// The shell's transactions over the whole project, run where a feature's
 /// work asks for one.
 pub(crate) mod session {
-    pub(crate) mod netlist_import_transactions;
+    pub(crate) mod deck_transactions;
     pub(crate) mod project_transactions;
 }
 pub(crate) mod shell_host;

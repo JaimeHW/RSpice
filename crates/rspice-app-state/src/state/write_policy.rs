@@ -146,15 +146,13 @@ impl LocalSafeModeState {
 
 /// Documents another live-session participant currently holds the write
 /// lease on, projected each frame by the live-session engine. Runtime-only:
-/// empty whenever no live session is attached. The netlist entry doubles as
-/// that document's edit gate; schematic buffers gate through their own
-/// `read_only` flag and use these entries for the deny message.
+/// empty whenever no live session is attached. Schematic buffers gate
+/// through their own `read_only` flag and use these entries for the deny
+/// message.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LiveWriteLocks {
     /// Locked schematic buffers, by cell-view key → holder display name.
     pub schematic_views: HashMap<String, String>,
-    /// Who holds netlist write authority when this install does not.
-    pub netlist: Option<String>,
     /// This install is a live-session guest mirroring the host's project,
     /// so documents without a held lease are read-only wholesale.
     pub mirror: bool,

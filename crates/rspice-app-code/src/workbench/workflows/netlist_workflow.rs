@@ -9,45 +9,22 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-pub mod bundle;
-mod external_change;
 mod find;
-#[cfg(any(test, feature = "test-support"))]
-pub mod fixtures;
-mod import;
 mod platform;
-mod save;
-mod staging;
 #[cfg(test)]
 mod tests;
 
-pub use external_change::apply_staged_external_netlist_change;
 pub use find::apply_netlist_find_step;
-#[cfg(any(test, feature = "test-support"))]
-pub use import::sha256;
-pub use import::{
-    ImportFailure, NetlistImportMetadata, NetlistImportMode, canonical_import_document,
-    imported_deck_refusal, install_imported_deck, netlist_import_start_block_reason,
-    record_import_failure,
-};
 #[cfg(not(target_arch = "wasm32"))]
-pub use platform::show_open_netlist_dialog;
-#[cfg(target_arch = "wasm32")]
-pub use platform::{
-    BrowserNetlistImportResult, pick_browser_netlist, poll_browser_dependency_relink,
-    take_browser_netlist_completion,
-};
-pub use platform::{request_dependency_relink, route_started_netlist_import};
-pub use save::save_owned_netlist_source;
-pub use staging::{
-    cancel_staged_netlist_import, commit_owned_netlist_profile_review, committable_staged_import,
-    open_owned_netlist_profile_review, owned_netlist_profile_candidate,
-    stage_validated_netlist_import, staged_import_commit, staged_import_still_valid,
-};
+pub use platform::show_open_deck_dialog;
 
-pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);
+pub const NETLIST_FILTER: (&str, &[&str]) = (
+    "SPICE Deck",
+    &[
+        "cir", "sp", "spi", "spice", "net", "ckt", "cki", "scs", "lib", "inc", "txt",
+    ],
+);
 
 pub fn normalize_owned_netlist_whitespace(source: &str) -> String {
     if source.is_empty() {
@@ -201,7 +178,7 @@ pub fn record_validation_failure(model: &mut Model, error: &str) {
 /// Retain where each dependency resolved so the navigator and the Problems
 /// pipeline can state it. The engine walked the chain; nothing here re-walks
 /// it, so the two can never disagree.
-fn record_include_resolutions(
+pub fn record_include_resolutions(
     include_resolutions: &mut std::collections::BTreeMap<
         String,
         rspice_core::netlist::IncludeResolution,
@@ -217,414 +194,64 @@ fn record_include_resolutions(
     }
 }
 
-pub fn acknowledge_canonical_dependencies(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-    include_resolutions: &mut std::collections::BTreeMap<
-        String,
-        rspice_core::netlist::IncludeResolution,
-    >,
-    sealed: &[rspice_core::netlist::ResolvedIncludeDependency],
-) -> Result<(), String> {
-    record_include_resolutions(include_resolutions, sealed);
-    let authority_paths = dependency_authority_paths(model);
-    let dependencies_belong_to_generated_base = netlist.active_document
-        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-        && model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .is_some_and(|descriptor| {
-                matches!(
-                    descriptor.strategy,
-                    crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride
-                        | crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck
-                )
-            });
-    let document = match netlist.active_document {
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
-            model.netlist_artifacts.generated_document.as_mut()
-        }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
-            netlist.owned_document.as_mut()
-        }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-        | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
-    }
-    .ok_or_else(|| "The active source has no netlist document.".to_owned())?;
-
-    use std::collections::HashSet;
-
-    let source_origin = match netlist.active_document {
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
-            model.schematic.session.current_file.as_deref()
-        }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
-            model.workspace.content.netlist_source_path.as_deref()
-        }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-        | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
-    };
-    let root = source_origin.map(dependency_root_path).transpose()?;
-    let root_directory = root
-        .as_deref()
-        .and_then(std::path::Path::parent)
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let root_directives = if dependencies_belong_to_generated_base {
-        let backing = document
-            .generated_artifact()
-            .ok_or_else(|| "The override source has no retained generated base.".to_owned())?;
-        external_dependency_locators(backing.source())
-    } else {
-        document
-            .include_directives()
-            .iter()
-            .map(|include| include.locator().to_owned())
-            .collect()
-    };
-    if !root_directives.is_empty() && root.is_none() {
-        return Err(
-                "External dependencies require an imported source origin before their closure can be retained."
-                    .to_owned(),
-            );
-    }
-
-    let mut dependencies = Vec::with_capacity(sealed.len());
-    let mut edges = HashSet::new();
-    let mut direct_cursor = 0usize;
-    for dependency in sealed {
-        let resolved = dependency.resolved_path();
-        let locator = dependency_locator(resolved, root_directory, dependency.source())?;
-        let authority = dependency_source_authority(&authority_paths, resolved);
-        let owner = dependency.owner_path();
-        let source = dependency.source().as_bytes().to_vec();
-        if root.as_deref() == Some(owner) {
-            let index = root_directives
-                .iter()
-                .enumerate()
-                .skip(direct_cursor)
-                .find_map(|(index, requested)| {
-                    (requested == dependency.requested_path()).then_some(index)
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "Resolved root dependency '{}' has no matching include line in the source.",
-                        dependency.requested_path()
-                    )
-                })?;
-            direct_cursor = index + 1;
-            if !edges.insert((None, index)) {
-                continue;
-            }
-            let record = crate::state::DependencyMetadata::unresolved_direct_to(
-                index,
-                dependency.requested_path(),
-                locator,
-            )
-            .map(|record| record.with_authority(authority))
-            .and_then(|record| record.resolve_utf8(source))
-            .map_err(|error| error.to_string())?;
-            dependencies.push(record);
-        } else {
-            let parent_source = sealed
-                .iter()
-                .find(|candidate| candidate.resolved_path() == owner)
-                .map(rspice_core::netlist::ResolvedIncludeDependency::source)
-                .ok_or_else(|| {
-                    format!(
-                        "Resolved dependency parent '{}' is absent from the sealed closure.",
-                        owner.display()
-                    )
-                })?;
-            let index =
-                external_dependency_index_at_line(parent_source, dependency.directive_line())?;
-            let parent = dependency_locator(owner, root_directory, parent_source)?;
-            let parent_key = parent.logical_identity().to_owned();
-            if !edges.insert((Some(parent_key), index)) {
-                continue;
-            }
-            let record = crate::state::DependencyMetadata::unresolved_transitive_to(
-                parent,
-                index,
-                dependency.requested_path(),
-                locator,
-            )
-            .map(|record| record.with_authority(authority))
-            .and_then(|record| record.resolve_utf8(source))
-            .map_err(|error| error.to_string())?;
-            dependencies.push(record);
-        }
-    }
-
-    if dependencies_belong_to_generated_base {
-        let backing = document
-            .generated_artifact()
-            .cloned()
-            .ok_or_else(|| "The override source has no retained generated base.".to_owned())?;
-        let next = crate::state::GeneratedArtifact::try_from_utf8(
-            backing.provenance().clone(),
-            backing.source_bytes().to_vec(),
-            dependencies,
-            backing.source_map().to_vec(),
-        )
-        .map_err(|error| error.to_string())?;
-        if !next.dependency_graph_is_sealed() {
-            return Err(
-                "The retained generated-base dependency graph is not fully sealed.".to_owned(),
-            );
-        }
-        document
-            .update_generated_artifact(backing.content_digest(), next)
-            .map_err(|error| error.to_string())?;
-    } else {
-        document
-            .acknowledge_dependencies(document.content_digest(), dependencies)
-            .map_err(|error| error.to_string())?;
-        if !document.dependency_graph_is_sealed() {
-            return Err("Not every dependency of the deck is resolved.".to_owned());
-        }
-    }
-
-    if netlist.active_document
-        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-    {
-        model.workspace.content.netlist_document = netlist.owned_document.clone();
-    }
-    Ok(())
-}
-
-fn dependency_root_path(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        if rspice_model_library::is_portable_absolute_path(path) {
-            return Ok(path.to_path_buf());
-        }
-        Err(format!(
-            "Browser dependency origin must retain an absolute portable identity: {}",
-            path.display()
-        ))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let joined = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map_err(|error| format!("Could not resolve dependency origin: {error}"))?
-                .join(path)
-        };
-        Ok(joined.canonicalize().unwrap_or(joined))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn dependency_locator(
-    path: &std::path::Path,
-    root_directory: &std::path::Path,
-    source: &str,
-) -> Result<crate::state::SourceLocator, String> {
-    let display = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "dependency.sp".to_owned());
-    let identity = path.strip_prefix(root_directory).map_or_else(
-        |_| {
-            let digest = crate::state::content_digest(source);
-            format!("external/{}-{display}", &digest.to_string()[..12])
-        },
-        |relative| relative.to_string_lossy().replace('\\', "/"),
-    );
-    let native_origin = path.to_string_lossy().into_owned();
-    crate::state::SourceLocator::try_new(identity.clone(), display)
-        .and_then(|locator| locator.with_native_origin(native_origin))
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn dependency_locator(
-    path: &std::path::Path,
-    _root_directory: &std::path::Path,
-    _source: &str,
-) -> Result<crate::state::SourceLocator, String> {
-    let identity = path.to_string_lossy().replace('\\', "/");
-    let display = identity
-        .rsplit('/')
-        .find(|segment| !segment.is_empty())
-        .unwrap_or("dependency.sp")
-        .to_owned();
-    crate::state::SourceLocator::try_new(identity, display).map_err(|error| error.to_string())
-}
-
-fn external_dependency_index_at_line(source: &str, line: usize) -> Result<usize, String> {
-    let mut index = 0usize;
-    for (zero_line, raw) in source.lines().enumerate() {
-        let current_line = zero_line + 1;
-        let external = rspice_core::netlist::parse_include_directive(raw).is_some()
-            || rspice_core::netlist::parse_lib_directive(raw)
-                .is_some_and(|(_, section)| section.is_some());
-        if external {
-            if current_line == line {
-                return Ok(index);
-            }
-            index += 1;
-        }
-    }
-    Err(format!(
-        "Resolved transitive dependency at line {line} has no matching include line."
-    ))
-}
-
-fn external_dependency_locators(source: &str) -> Vec<String> {
-    source
-        .lines()
-        .filter_map(|raw| {
-            rspice_core::netlist::parse_include_directive(raw).or_else(|| {
-                rspice_core::netlist::parse_lib_directive(raw)
-                    .and_then(|(locator, section)| section.map(|_| locator))
-            })
-        })
-        .collect()
-}
-
-fn dependency_authority_paths(
-    model: &Model,
-) -> (
-    std::collections::HashSet<std::path::PathBuf>,
-    std::collections::HashSet<std::path::PathBuf>,
-) {
-    let technology = model
-        .workspace
-        .content
-        .project
-        .technology_binding()
-        .into_iter()
-        .flat_map(|binding| {
-            binding
-                .source_closure()
-                .iter()
-                .map(|source| source.path.clone())
-        })
-        .collect();
-    let vendor = model
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .flat_map(|library| {
-            library.root_path.iter().cloned().chain(
-                library
-                    .source_closure
-                    .iter()
-                    .map(|source| source.path.clone()),
-            )
-        })
-        .collect();
-    (technology, vendor)
-}
-
-fn dependency_source_authority(
-    authority_paths: &(
-        std::collections::HashSet<std::path::PathBuf>,
-        std::collections::HashSet<std::path::PathBuf>,
-    ),
-    path: &std::path::Path,
-) -> crate::state::DependencySourceAuthority {
-    if authority_paths.0.contains(path) {
-        crate::state::DependencySourceAuthority::TechnologyPackage
-    } else if authority_paths.1.contains(path) {
-        crate::state::DependencySourceAuthority::Vendor
-    } else {
-        crate::state::DependencySourceAuthority::External
-    }
-}
-
+/// Bind the editor's settled findings to the generated document they were
+/// checked against. A deck is a file, not a document: its check is the
+/// validation receipt the run reads.
 pub fn acknowledge_canonical_validation(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
 ) -> Result<(), String> {
-    let owned = netlist.active_document
-        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
-    let narrow_owned = owned
-        && model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .is_some_and(|descriptor| {
-                descriptor.strategy != crate::state::OwnedNetlistEditStrategy::OwnedSource
-            });
-    // Diagnostics for a narrow override are computed against its materialized
-    // generated base, so those line coordinates do not identify the small
-    // authored document. The exact prepared-run receipt remains authoritative;
-    // never attach invented base-deck coordinates to the owned fragment.
-    let diagnostics = if narrow_owned {
-        Vec::new()
-    } else {
-        netlist
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.is_current())
-            .map(|diagnostic| {
-                let severity = match diagnostic.severity {
-                    crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint
-                    | crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
-                        crate::state::DiagnosticSeverity::Info
-                    }
-                    crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
-                        crate::state::DiagnosticSeverity::Warning
-                    }
-                    crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
-                        crate::state::DiagnosticSeverity::Error
-                    }
-                };
-                crate::state::ValidationDiagnostic::try_new(
-                    severity,
-                    diagnostic.message.clone(),
-                    diagnostic.line.unwrap_or(0) + 1,
-                    diagnostic.column.unwrap_or(0) + 1,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?
-    };
-    let document = match netlist.active_document {
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
-            model.netlist_artifacts.generated_document.as_mut()
-        }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
-            netlist.owned_document.as_mut()
-        }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-        | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
+    if netlist.active_document
+        != crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
+    {
+        return Ok(());
     }
-    .ok_or_else(|| "The active source has no netlist document.".to_owned())?;
+    let diagnostics = netlist
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.is_current())
+        .map(|diagnostic| {
+            let severity = match diagnostic.severity {
+                crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint
+                | crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
+                    crate::state::DiagnosticSeverity::Info
+                }
+                crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
+                    crate::state::DiagnosticSeverity::Warning
+                }
+                crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
+                    crate::state::DiagnosticSeverity::Error
+                }
+            };
+            crate::state::ValidationDiagnostic::try_new(
+                severity,
+                diagnostic.message.clone(),
+                diagnostic.line.unwrap_or(0) + 1,
+                diagnostic.column.unwrap_or(0) + 1,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let document = model
+        .netlist_artifacts
+        .generated_document
+        .as_mut()
+        .ok_or_else(|| "The active source has no netlist document.".to_owned())?;
     document
         .acknowledge_validation(document.content_digest(), diagnostics)
-        .map_err(|error| error.to_string())?;
-    if owned {
-        model.workspace.content.netlist_document = netlist.owned_document.clone();
-    }
-    Ok(())
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
+/// Withdraw the generated document's validation when it is the document
+/// shown.
 pub fn invalidate_canonical_validation(model: &mut Model, netlist: &mut NetlistDocumentState) {
-    let document = match netlist.active_document {
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
-            model.netlist_artifacts.generated_document.as_mut()
-        }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
-            netlist.owned_document.as_mut()
-        }
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-        | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
-    };
-    if let Some(document) = document {
-        let _ = document.invalidate_validation(document.content_digest());
-    }
     if netlist.active_document
-        == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
+        != crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
     {
-        model.workspace.content.netlist_document = netlist.owned_document.clone();
+        return;
+    }
+    if let Some(document) = model.netlist_artifacts.generated_document.as_mut() {
+        let _ = document.invalidate_validation(document.content_digest());
     }
 }

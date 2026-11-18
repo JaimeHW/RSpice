@@ -30,12 +30,9 @@ use crate::services::live_protocol::{
 use crate::state::SchematicState;
 use crate::state::write_policy::LiveWriteLocks;
 use crate::time_compat::Instant;
-use crate::workbench::app_state::model::LiveOwnedSource;
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::framework::feature::{CodePort, DesignPort};
-use crate::workbench::framework::requests::{
-    AdoptLiveOwnedSource, CloseForLiveMirror, LiveMirrorEntry, Outbox,
-};
+use crate::workbench::framework::feature::DesignPort;
+use crate::workbench::framework::requests::{CloseForLiveMirror, LiveMirrorEntry, Outbox};
 use crate::workbench::lifecycle::project_lifecycle::{
     LifecycleSource, LifecycleView, ResultPresentationSource,
 };
@@ -53,12 +50,8 @@ const MAX_PENDING_RUN_REQUESTS: usize = 32;
 
 /// Wire content contract of a schematic cell-view buffer.
 const SCHEMATIC_CONTENT_TYPE: &str = "rspice.schematic-view.v1";
-/// Wire content contract of the project-owned netlist source.
-const NETLIST_CONTENT_TYPE: &str = "rspice.netlist-source.v1";
 /// Wire content contract of the whole-project snapshot.
 const PROJECT_CONTENT_TYPE: &str = "rspice.project.v1";
-/// Wire key of the project's single owned netlist document.
-const NETLIST_DOC: &str = "netlist";
 /// Wire key of the whole-project snapshot. It carries everything a mirror
 /// cannot reconstruct from per-document replaces — libraries, hierarchy,
 /// execution context — and is sent only on sync, reconnect, and structural
@@ -214,7 +207,6 @@ pub struct LiveHost<'a> {
     pub platform: &'a PlatformState,
     pub presentation: &'a dyn ResultPresentationSource,
     pub design: &'a dyn DesignPort,
-    pub code: &'a dyn CodePort,
 }
 
 /// A host's whole-project snapshot reads the project from the parts the
@@ -357,7 +349,7 @@ impl LiveSessionEngine {
         self.broadcast_local_changes(state);
         self.stream_run_status(state);
         self.send_presence_heartbeat(state);
-        self.send_cursor_update(&*state.model, &*state.workbench, state.design, state.code);
+        self.send_cursor_update(&*state.model, &*state.workbench, state.design);
         self.prune_peers();
         self.project_locks(state);
     }
@@ -1113,12 +1105,7 @@ impl LiveSessionEngine {
     /// Apply a leaseholder's completed proposal onto the host working copy
     /// and rebroadcast it with host authority.
     fn host_apply_proposal(&mut self, state: &mut LiveHost<'_>, completed: CompletedContent) {
-        let applied = if completed.doc == NETLIST_DOC {
-            match String::from_utf8(completed.bytes.clone()) {
-                Ok(source) => apply_owned_source(state, source),
-                Err(_) => false,
-            }
-        } else if let Some(cell_key) = completed.doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
+        let applied = if let Some(cell_key) = completed.doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
             match std::str::from_utf8(&completed.bytes)
                 .ok()
                 .and_then(|text| load_schematic_text(text, None).ok())
@@ -1186,9 +1173,6 @@ impl LiveSessionEngine {
             .keys()
             .map(|key| schematic_doc_key(key))
             .collect();
-        if state.model.workspace.content.netlist_document.is_some() {
-            current.push(NETLIST_DOC.to_owned());
-        }
         current.push(PROJECT_DOC.to_owned());
         for doc in &current {
             host.tracked
@@ -1531,12 +1515,7 @@ impl LiveSessionEngine {
             guest.pending_project = Some(completed);
             return;
         }
-        let applied = if completed.doc == NETLIST_DOC {
-            match String::from_utf8(completed.bytes.clone()) {
-                Ok(source) => apply_owned_source(state, source),
-                Err(_) => false,
-            }
-        } else if let Some(cell_key) = completed.doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
+        let applied = if let Some(cell_key) = completed.doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
             match std::str::from_utf8(&completed.bytes)
                 .ok()
                 .and_then(|text| load_schematic_text(text, None).ok())
@@ -1630,14 +1609,12 @@ impl LiveSessionEngine {
     }
 
     /// Tell the peers where this participant points: the canvas point of
-    /// the schematic `design` hovers in the Design workspace, or the line of
-    /// the project's own netlist source `code` shows in the Netlist one.
+    /// the schematic `design` hovers in the Design workspace.
     fn send_cursor_update(
         &mut self,
         model: &Model,
         workbench: &WorkbenchSession,
         design: &dyn DesignPort,
-        code: &dyn CodePort,
     ) {
         if self.connection.is_none()
             || self
@@ -1654,14 +1631,6 @@ impl LiveSessionEngine {
                     x,
                     y,
                 })
-            })
-        } else if workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && code.owned_source_active()
-        {
-            Some(CursorLocus::Netlist {
-                doc: NETLIST_DOC.to_owned(),
-                line: u32::try_from(code.netlist_cursor_line().saturating_add(1))
-                    .unwrap_or(u32::MAX),
             })
         } else {
             None
@@ -1751,9 +1720,7 @@ impl LiveSessionEngine {
                 for (doc, holder) in host.leases.entries() {
                     if Some(holder.client_instance_id) != identity.map(|i| i.client_instance_id) {
                         let name = self.display_name(&holder);
-                        if doc == NETLIST_DOC {
-                            locks.netlist = Some(name);
-                        } else if let Some(cell_key) = doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
+                        if let Some(cell_key) = doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
                             locks.schematic_views.insert(cell_key.to_owned(), name);
                         }
                     }
@@ -1773,9 +1740,7 @@ impl LiveSessionEngine {
                             .holder(doc)
                             .map(|holder| self.display_name(&holder))
                             .unwrap_or_else(|| host_name.clone());
-                        if doc == NETLIST_DOC {
-                            locks.netlist = Some(owner);
-                        } else if let Some(cell_key) = doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
+                        if let Some(cell_key) = doc.strip_prefix(SCHEMATIC_DOC_PREFIX) {
                             locks.schematic_views.insert(cell_key.to_owned(), owner);
                         }
                     }
@@ -1788,26 +1753,6 @@ impl LiveSessionEngine {
             .contains_key(&state.model.workspace.content.active_key());
         state.model.live_write_locks = locks;
         state.model.schematic.session.read_only = active_locked;
-    }
-}
-
-/// Apply a participant's netlist source as the project's own, and have the
-/// netlist editor adopt what changed. `false` when it could not be applied.
-fn apply_owned_source(state: &mut LiveHost<'_>, source: String) -> bool {
-    let shows_owned_root = state.code.shows_owned_root();
-    match state
-        .model
-        .apply_live_owned_source(source, shows_owned_root)
-    {
-        LiveOwnedSource::Unchanged => true,
-        LiveOwnedSource::Applied(document) => {
-            state
-                .workbench
-                .outbox
-                .push(AdoptLiveOwnedSource(document.map(|document| *document)));
-            true
-        }
-        LiveOwnedSource::Rejected => false,
     }
 }
 
@@ -1839,8 +1784,6 @@ fn install_schematic_buffer(
 fn content_type_for(doc: &str) -> &'static str {
     if doc == PROJECT_DOC {
         PROJECT_CONTENT_TYPE
-    } else if doc == NETLIST_DOC {
-        NETLIST_CONTENT_TYPE
     } else {
         SCHEMATIC_CONTENT_TYPE
     }
@@ -1848,24 +1791,14 @@ fn content_type_for(doc: &str) -> &'static str {
 
 /// The document's own change counter, host- and guest-side alike.
 fn host_document_version(state: &LiveHost<'_>, doc: &str) -> Option<u64> {
-    if doc == NETLIST_DOC {
-        state
-            .model
-            .workspace
-            .content
-            .netlist_document
-            .as_ref()
-            .map(|document| document.revision().get())
-    } else {
-        let cell_key = doc.strip_prefix(SCHEMATIC_DOC_PREFIX)?;
-        state
-            .model
-            .workspace
-            .content
-            .schematic_buffers
-            .get(cell_key)
-            .map(|schematic| schematic.content_version())
-    }
+    let cell_key = doc.strip_prefix(SCHEMATIC_DOC_PREFIX)?;
+    state
+        .model
+        .workspace
+        .content
+        .schematic_buffers
+        .get(cell_key)
+        .map(|schematic| schematic.content_version())
 }
 
 fn guest_document_version(state: &LiveHost<'_>, doc: &str) -> Option<u64> {
@@ -1896,15 +1829,7 @@ fn serialize_host_document(state: &LiveHost<'_>, doc: &str) -> Option<Vec<u8>> {
             }
         };
     }
-    if doc == NETLIST_DOC {
-        state
-            .model
-            .workspace
-            .content
-            .netlist_document
-            .as_ref()
-            .map(|document| document.source_bytes().to_vec())
-    } else {
+    {
         let cell_key = doc.strip_prefix(SCHEMATIC_DOC_PREFIX)?;
         let buffer = state
             .model
@@ -1954,7 +1879,6 @@ mod tests {
                 platform: &self.platform,
                 presentation: &NoReads,
                 design: &NoReads,
-                code: &NoReads,
             }
         }
     }
@@ -1985,50 +1909,6 @@ mod tests {
             _component: &crate::state::Component,
         ) -> Vec<(String, String)> {
             Vec::new()
-        }
-    }
-
-    impl CodePort for NoReads {
-        fn owned_source_active(&self) -> bool {
-            false
-        }
-
-        fn shows_owned_root(&self) -> bool {
-            false
-        }
-
-        fn netlist_cursor_line(&self) -> usize {
-            0
-        }
-
-        fn netlist_shown(&self) -> rspice_app_runs::simulation::NetlistShown {
-            rspice_app_runs::simulation::NetlistShown {
-                settled: false,
-                comparison: false,
-                owned_source: false,
-            }
-        }
-
-        fn veriloga_compilation(
-            &self,
-        ) -> Option<&rspice_app_runs::simulation::ProjectCompileReceipt> {
-            None
-        }
-
-        fn interface_check_finding(
-            &self,
-            _sources: &crate::state::ProjectSourceRegistry,
-            _libraries: &crate::state::LibraryManager,
-        ) -> Option<(crate::state::CellViewRef, String)> {
-            None
-        }
-
-        fn manual_deck_run_block_reason(
-            &self,
-            _model: &crate::workbench::app_state::Model,
-            _messages: rspice_app_workbench::workbench::localization::MessageCatalog,
-        ) -> Option<String> {
-            None
         }
     }
 

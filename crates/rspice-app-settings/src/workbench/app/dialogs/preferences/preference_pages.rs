@@ -1039,10 +1039,7 @@ pub fn restore_defaults(
             &[],
         ),
         PreferenceCategory::Simulation => preferences.restore_defaults(
-            &[
-                ChoicePreference::DefaultSolverPreset,
-                ChoicePreference::ImportedNetlistDialect,
-            ],
+            &[ChoicePreference::DefaultSolverPreset],
             &[],
             &[
                 ScalarPreference::LocalParallelSlots,

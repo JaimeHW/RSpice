@@ -6,7 +6,9 @@ use rspice_ui_kit::panels::{Problem, code_inspector_section, panel_inset, sectio
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::MessageCatalog;
-use crate::workbench::documents::netlist_document::{NetlistDocumentState, active_dependency_in};
+use crate::workbench::documents::netlist_document::{
+    NetlistDocumentState, active_deck_file_in, active_dependency_in,
+};
 use rspice_app_state::workbench::app_state::model::Model;
 
 use super::super::super::design_system::{WorkbenchIcon, property_row, property_row_problem};
@@ -112,7 +114,7 @@ pub(in crate::workbench) fn code_workspace_inspector(
         dependency_provenance(ui, reads);
     } else {
         match reads.netlist.active_document {
-            ActiveNetlistDocument::OwnedSource => owned_source_provenance(ui, reads),
+            ActiveNetlistDocument::OwnedSource => deck_file_provenance(ui, reads),
             ActiveNetlistDocument::RunSnapshot => {} // its run's, stated by the strip over the deck
             _ => generated_provenance(ui, reads.model),
         }
@@ -230,28 +232,15 @@ fn generated_provenance(ui: &mut Ui, model: &Model) {
     }
 }
 
-/// Which file the owned deck lives in, and what is wrong with it.
-///
-/// The project revision, the document revision, the generated base and the
-/// two digests were five counters and hashes with nothing a designer can do
-/// about them; the document state reported success in catalog words. What is
-/// left is the file and a marked line when the deck needs attention.
-fn owned_source_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
-    if let Some(path) = reads.model.workspace.content.netlist_source_path.as_ref() {
-        property_row(ui, "File", &path.display().to_string());
-    }
-    let digest = crate::state::content_digest(&reads.model.simulation.source.netlist_content);
-    if let Some(label) = owned_source_state(reads.model, reads.netlist, digest) {
-        // The same split the deck toolbar paints, and for the same reason:
-        // not yet checked is where the deck is, not a verdict on it. A file
-        // that changed underneath the editor is the one to act on.
-        let problem = reads
-            .netlist
-            .external_change
-            .is_some()
-            .then_some(Problem::Warning);
-        property_row_problem(ui, "State", label, problem);
-    }
+/// The file in front, the deck or one of its includes: where it is, and the
+/// encoding and line endings Save writes it back in.
+fn deck_file_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
+    let Some(file) = active_deck_file_in(reads.netlist) else {
+        return;
+    };
+    property_row(ui, "File", &file.path.display().to_string());
+    property_row(ui, "Encoding", file.encoding.label());
+    property_row(ui, "Line endings", file.line_ending.label());
 }
 
 fn dependency_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
@@ -314,36 +303,6 @@ fn dependency_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
             parent.display_name(),
         );
     }
-    let owned = reads
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .and_then(|descriptor| descriptor.owned_include(dependency.locator().logical_identity()));
-    property_row(
-        ui,
-        &messages.text(crate::workbench::MessageId::NetlistOwnership),
-        &owned.map_or_else(
-            || {
-                messages.text(match dependency.authority() {
-                    crate::state::DependencySourceAuthority::External => {
-                        crate::workbench::MessageId::NetlistExternalReferenceReadOnly
-                    }
-                    crate::state::DependencySourceAuthority::Vendor => {
-                        crate::workbench::MessageId::NetlistVendorSourceReadOnly
-                    }
-                    crate::state::DependencySourceAuthority::TechnologyPackage => {
-                        crate::workbench::MessageId::NetlistTechnologyPackageReadOnly
-                    }
-                    crate::state::DependencySourceAuthority::StandardLibrary => {
-                        crate::workbench::MessageId::NetlistStandardLibraryReadOnly
-                    }
-                })
-            },
-            |_| messages.text(crate::workbench::MessageId::NetlistProjectOwnedEditable),
-        ),
-    );
 }
 
 /// What is wrong with the generated deck, or nothing when it matches the
@@ -362,17 +321,6 @@ fn generated_state(model: &Model) -> Option<(&'static str, Problem)> {
     } else {
         None
     }
-}
-
-fn owned_source_state(
-    model: &Model,
-    netlist: &NetlistDocumentState,
-    digest: crate::product::ContentDigest,
-) -> Option<&'static str> {
-    crate::workbench::documents::netlist_document::owned_netlist_publication_state_in(
-        model, netlist, digest,
-    )
-    .label()
 }
 
 fn diagnostic_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> String {

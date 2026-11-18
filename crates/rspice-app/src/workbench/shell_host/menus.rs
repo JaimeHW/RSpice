@@ -182,7 +182,6 @@ const OPEN_RECENT_MENU: &[MenuEntry] = &[
 ];
 
 const IMPORT_MENU: &[MenuEntry] = &[
-    MenuEntry::command_as(CodeCommand::ImportNetlist.key(), "SPICE deck\u{2026}").access('S'),
     MenuEntry::command_as(CodeCommand::ImportVerilogA.key(), "Verilog-A\u{2026}").access('V'),
     MenuEntry::command_as(
         CodeCommand::ImportLtspiceSchematic.key(),

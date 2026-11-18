@@ -511,6 +511,15 @@ impl SimulationController {
         let dispatched_save_policy = dispatch.save_policy();
         let run_receipt = dispatch.prepared_run_receipt(source_domain)?;
 
+        // A typed deck is named by its file, and its findings point at lines
+        // of that file.
+        let manual_deck = (dispatch.intent() == SimulationRunIntent::ManualDeck)
+            .then(|| {
+                state
+                    .manual_deck()
+                    .map(crate::simulation::ManualDeckCopy::of)
+            })
+            .flatten();
         // A run outside every plan is kept under the project's own limit, or
         // under the one Preferences sets when the project names none.
         let model = state.model_mut();
@@ -557,14 +566,11 @@ impl SimulationController {
         let cross_probe = dispatch.take_cross_probe();
         let design = match &cross_probe {
             Some(cross_probe) => Some(cross_probe.source_reference.cell.clone()),
-            None => model
-                .workspace
-                .content
-                .netlist_source_path
-                .as_deref()
-                .and_then(std::path::Path::file_name)
-                .map(|name| name.to_string_lossy().into_owned()),
+            None => manual_deck.as_ref().map(|deck| deck.name.clone()),
         };
+        if dispatch.intent() == SimulationRunIntent::ManualDeck {
+            model.simulation.source.manual_deck_path = manual_deck.map(|deck| deck.path);
+        }
         if let Some(cross_probe) = cross_probe
             && campaign_membership.is_none()
         {
@@ -684,14 +690,6 @@ impl SimulationController {
             || self.total_analyses != 0
             || !self.pending_analyses.is_empty()
             || !self.runner.can_accept_prepared_task()
-    }
-
-    #[cfg(test)]
-    fn analysis_source_path(model: &Model) -> Option<PathBuf> {
-        match model.simulation.execution.run_intent {
-            SimulationRunIntent::ManualDeck => model.workspace.content.netlist_source_path.clone(),
-            SimulationRunIntent::SimulateRunSet => model.schematic.session.current_file.clone(),
-        }
     }
 
     fn reset_if_design_replaced(&mut self, state: &mut impl RunHost) {

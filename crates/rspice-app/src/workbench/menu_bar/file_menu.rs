@@ -20,7 +20,6 @@ pub(crate) enum FileMenuAction {
     Open,
     Save,
     OpenNetlist,
-    ImportNetlist,
     ExportCsvWaveforms,
     ImportVerilogA,
     Exit,
@@ -81,6 +80,25 @@ pub(crate) fn dispatch_file_menu_action(
             );
         }
         FileMenuAction::Save => {
+            // The deck, or an include of it, in front of the Netlist page is
+            // a file of its own: Save writes it.
+            #[cfg(not(target_arch = "wasm32"))]
+            if state.workbench.workspace
+                == rspice_app_state::workbench::workspace::Workspace::Netlist
+                && rspice_app_code::workbench::documents::netlist_document::active_deck_file_in(
+                    &state.code.netlist,
+                )
+                .is_some()
+            {
+                if let Err(error) =
+                    rspice_app_code::workbench::documents::deck_files::save_shown_file(
+                        &mut state.code.netlist,
+                    )
+                {
+                    state.prompt(error);
+                }
+                return;
+            }
             if state.platform.project_lifecycle.is_open() {
                 let _ = state.save_project_scope(
                     rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope::ActiveDocument,
@@ -93,22 +111,7 @@ pub(crate) fn dispatch_file_menu_action(
             }
         }
         FileMenuAction::OpenNetlist => {
-            if require_project_save_confirmation_if_dirty(
-                state,
-                ConfirmationAction::OpenNetlistProject,
-            ) {
-                return;
-            }
-            state.open_netlist_project();
-        }
-        FileMenuAction::ImportNetlist => {
-            if require_netlist_source_save_confirmation_if_dirty(
-                state,
-                ConfirmationAction::ImportNetlist,
-            ) {
-                return;
-            }
-            state.import_netlist();
+            state.open_deck();
         }
         // The format is asked first; the frame runs the export once it is
         // answered, because the picker is a dialog that lives across frames.
@@ -163,18 +166,6 @@ fn request_exit(state: &mut AppState) {
     }
 }
 
-fn require_netlist_source_save_confirmation_if_dirty(
-    state: &mut AppState,
-    action: ConfirmationAction,
-) -> bool {
-    if !state.model.workspace.content.netlist_source_dirty {
-        return false;
-    }
-
-    state.workbench.confirmation_dialog.show(action);
-    true
-}
-
 fn require_project_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
@@ -217,10 +208,6 @@ mod tests {
         for (action, held) in [
             (FileMenuAction::NewProject, ConfirmationAction::ProjectNew),
             (FileMenuAction::OpenProject, ConfirmationAction::ProjectOpen),
-            (
-                FileMenuAction::OpenNetlist,
-                ConfirmationAction::OpenNetlistProject,
-            ),
             (FileMenuAction::Exit, ConfirmationAction::Exit),
         ] {
             state.project.configuration_dialog.leaving = None;
@@ -275,27 +262,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn netlist_import_only_prompts_for_source_bytes_it_will_replace() {
-        let mut state = AppState::default();
-        state.model.schematic.session.is_dirty = true;
-
-        assert!(!require_netlist_source_save_confirmation_if_dirty(
-            &mut state,
-            ConfirmationAction::ImportNetlist,
-        ));
-        assert!(!state.workbench.confirmation_dialog.visible);
-
-        state.model.workspace.content.set_netlist_source_dirty(true);
-        assert!(require_netlist_source_save_confirmation_if_dirty(
-            &mut state,
-            ConfirmationAction::ImportNetlist,
-        ));
-        assert_eq!(
-            state.workbench.confirmation_dialog.pending_action,
-            Some(ConfirmationAction::ImportNetlist)
-        );
-    }
     struct NoIo;
 
     impl rspice_app_services::io::FileWorkflowIo for NoIo {

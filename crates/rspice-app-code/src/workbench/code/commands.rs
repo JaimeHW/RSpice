@@ -28,8 +28,8 @@ pub enum CodeCommand {
     /// A cell whose Verilog-A module the reader writes next, with the symbol
     /// its ports generate.
     NewVerilogADevice,
+    /// Open deck…: a SPICE file, as one of the project's decks.
     OpenNetlist,
-    ImportNetlist,
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
@@ -103,16 +103,14 @@ pub enum CodeCommand {
 /// section a Netlist outline row chose, picking an include's file again,
 /// a source rail's file action and opening a placed instance of the
 /// Verilog-A cell; and, from the netlist page's dialogs, the revision
-/// restore, the external change and the import each confirmed, and
-/// a find window press; and, from the netlist page itself, copying an
-/// include into the project, picking its file again, validating the deck,
-/// the quick fix, the profile review, formatting and a dropped file.
+/// comparison and a find window press; and, from the netlist page itself,
+/// validating the deck, saving the file in front, the quick fix,
+/// formatting and a dropped file.
 /// Each command, dialog step, navigator, page dialog or page that raises one
 /// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CodeRequest {
     OpenNetlist,
-    ImportNetlist,
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
@@ -147,8 +145,6 @@ pub enum CodeRequest {
         replacement: String,
         selected: String,
     },
-    /// Pick the file again for the netlist include with this identity.
-    RelinkNetlistDependency(String),
     /// Open `action`'s form for `path`: the file it renames or deletes, or
     /// the file a new one is included from.
     SourceFileAction {
@@ -165,27 +161,17 @@ pub enum CodeRequest {
         schematic: CellViewRef,
         net: String,
     },
-    /// Restore the owned revision the netlist page's revision dialog has
-    /// selected.
-    RestoreOwnedNetlistRevision,
-    /// Apply the external change the netlist page's review resolved.
-    ApplyExternalNetlistChange,
-    /// Commit the netlist import the netlist page's review holds.
-    CommitNetlistImport,
     /// Carry out the press the netlist page's find window stored: going to a
     /// match, replacing it, or replacing every match.
     ApplyNetlistFind,
-    /// Copy the include the netlist page shows into the project.
-    CopyNetlistDependency,
     /// Apply the preferred quick fix at the netlist editor's caret.
     ApplyNetlistQuickFix,
-    /// Begin reviewing the owned deck's execution profile, as the netlist
-    /// page's banner asked.
-    BeginNetlistProfileReview,
     /// Format the deck or the include the netlist editor shows.
     FormatNetlistDocument,
-    /// Stage the files dropped on the netlist page as an import.
-    ImportDroppedNetlist(Vec<egui::DroppedFile>),
+    /// Save the file in front: the deck, or the include on its tab.
+    SaveDeckFile,
+    /// Open the file dropped on the netlist page as a deck.
+    OpenDroppedDeck(Vec<egui::DroppedFile>),
 }
 
 impl Request for CodeRequest {
@@ -198,12 +184,11 @@ impl Request for CodeRequest {
 /// schematic, showing design's selected instance in the generated deck,
 /// opening the compiled module's symbol, creating the drafted device or the
 /// imported cells as Design documents, opening a placed instance of the
-/// cell, and the netlist import's transactions over the whole project. Each
-/// carries out the request of the same name.
+/// cell, and opening a dropped deck. Each carries out the request of the
+/// same name.
 #[derive(Debug)]
 pub enum CodeHandOff {
     OpenNetlist,
-    ImportNetlist,
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
@@ -213,9 +198,7 @@ pub enum CodeHandOff {
     ImportVerilogACells,
     OpenCellInstance(rspice_app_state::workbench::app_state::cell_usage::CellInstanceUse),
     ShowNetInSchematic { schematic: CellViewRef, net: String },
-    CommitNetlistImport,
-    BeginNetlistProfileReview,
-    ImportDroppedNetlist(Vec<egui::DroppedFile>),
+    OpenDroppedDeck(Vec<egui::DroppedFile>),
 }
 
 /// What the netlist page's editor typed, undid or redid in its frame, which
@@ -278,15 +261,6 @@ pub enum SourceDocumentRequest {
         logical_path: String,
         close: bool,
     },
-    /// A lifecycle choice on the netlist page's deck or include, then the
-    /// dialog's close when the same frame closed it.
-    Netlist {
-        action: NetlistLifecycleAction,
-        close: bool,
-    },
-    /// Create the top deck the creation form drafted on a project that owns
-    /// no deck, then close the dialog once the deck is made.
-    CreateTopDeck,
 }
 
 /// What the source document dialog's body asked for of a Verilog-A
@@ -304,28 +278,6 @@ pub enum LifecycleAction {
     /// Replace this Verilog-A file's content from a picked file, through the
     /// import transaction's own confirmation. File > Import never does it.
     ReplaceFromFile,
-}
-
-/// What the source document dialog's body asked for of the netlist page's
-/// deck or include, applied the same way.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NetlistLifecycleAction {
-    None,
-    Begin(CodeSourceFileAction),
-    Commit,
-    Cancel,
-    SelectDeck(uuid::Uuid),
-    OpenHistory,
-    CopyIncludeOwnership,
-    ReleaseIncludeOwnership,
-    BeginInclude(CodeSourceFileAction),
-    CommitInclude,
-    CancelInclude,
-    SaveSourceAs,
-    /// The whole ordered include search chain, as the rows now read it. The
-    /// list is applied as one value so add, remove and reorder cannot each
-    /// invent their own idea of the order.
-    SetIncludeSearchPaths(Vec<std::path::PathBuf>),
 }
 
 const ALL: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -444,10 +396,9 @@ const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 40] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
-        Self::ImportNetlist,
         Self::ImportVerilogA,
         Self::ImportLtspiceSchematic,
         Self::ImportQspiceSchematic,
@@ -493,7 +444,6 @@ impl CodeCommand {
         match self {
             Self::NewVerilogADevice => ids::NEW_VERILOGA_DEVICE,
             Self::OpenNetlist => ids::OPEN_NETLIST,
-            Self::ImportNetlist => CommandKey::new("import-netlist"),
             Self::ImportVerilogA => CommandKey::new("import-veriloga"),
             Self::ImportLtspiceSchematic => CommandKey::new("import-ltspice-schematic"),
             Self::ImportQspiceSchematic => CommandKey::new("import-qspice-schematic"),
@@ -664,8 +614,7 @@ impl CodeCommand {
         let navigates = open.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let (label, group, flags) = match self {
             Self::NewVerilogADevice => ("New Verilog-A device\u{2026}", "File", imports),
-            Self::OpenNetlist => ("Open netlist as project\u{2026}", "File", opens_file),
-            Self::ImportNetlist => ("Import SPICE deck\u{2026}", "File", imports),
+            Self::OpenNetlist => ("Open deck\u{2026}", "File", opens_file),
             Self::ImportVerilogA => ("Import Verilog/Verilog-A/AMS\u{2026}", "File", imports),
             Self::ImportLtspiceSchematic => ("Import LTspice schematic\u{2026}", "File", imports),
             Self::ImportQspiceSchematic => ("Import QSPICE schematic\u{2026}", "File", imports),

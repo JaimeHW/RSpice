@@ -340,7 +340,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CodeCommand::NewVerilogADevice.key(),
     ProjectCommand::OpenSchematic.key(),
     CodeCommand::OpenNetlist.key(),
-    CodeCommand::ImportNetlist.key(),
     CodeCommand::ImportVerilogA.key(),
     CodeCommand::ImportLtspiceSchematic.key(),
     CodeCommand::ImportQspiceSchematic.key(),

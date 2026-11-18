@@ -19,7 +19,7 @@ pub fn run_host<'v, 'a>(
     let code = cx.peers.code();
     let code = RunCodeFacts {
         veriloga_compilation: code.veriloga_compilation(),
-        netlist_shown: code.netlist_shown(),
+        manual_deck: code.manual_deck(),
     };
     let host = RunView::new(
         &mut *cx.model,

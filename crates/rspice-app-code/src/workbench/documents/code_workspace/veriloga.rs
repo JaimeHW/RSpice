@@ -10,7 +10,6 @@ use rspice_veriloga::{RuntimeCompileReport, RuntimeTargetMaturity, RuntimeTarget
 use sha2::Digest as _;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::simulation::NetlistShown;
 use crate::state::{
     ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceRole,
@@ -413,7 +412,7 @@ fn add_build_profile_document(
 fn start_veriloga_compile(
     model: &Model,
     code: &mut CodeWorkspaceRuntimeState,
-    shown: NetlistShown,
+    deck: Option<rspice_app_runs::simulation::ManualDeck<'_>>,
     selected: SelectedVerilogASource,
     repaint: &egui::Context,
 ) {
@@ -431,7 +430,7 @@ fn start_veriloga_compile(
         use crate::simulation::controller::{SimulationController, prepared_run};
         match model.simulation.execution.run_intent {
             crate::state::SimulationRunIntent::ManualDeck => {
-                prepared_run::manual_source_inputs_in(model, shown)
+                prepared_run::manual_source_inputs_in(model, deck)
                     .and_then(|manual| {
                         rspice_simulation::execution::preparation::manual_deck_hdl(
                             &prepared_run::run_preparation_inputs_in(
@@ -523,11 +522,11 @@ pub(crate) fn compile_time_text(elapsed: Duration, tenths: bool) -> String {
 pub fn consume_veriloga_compile_request(
     model: &Model,
     code: &mut CodeWorkspaceRuntimeState,
-    shown: NetlistShown,
+    deck: Option<rspice_app_runs::simulation::ManualDeck<'_>>,
     repaint: &egui::Context,
 ) {
     if let Some(selected) = code.veriloga.compile_request.take() {
-        start_veriloga_compile(model, code, shown, selected, repaint);
+        start_veriloga_compile(model, code, deck, selected, repaint);
     }
 }
 

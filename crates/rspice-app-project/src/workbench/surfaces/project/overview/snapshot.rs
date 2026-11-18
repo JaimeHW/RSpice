@@ -22,7 +22,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 use std::sync::Arc;
 
-use crate::state::netlist_document::DiagnosticSeverity;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::design_checks::finding_identities;
@@ -177,13 +176,8 @@ impl OperationSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SourceDeckSnapshot {
     pub(super) name: String,
-    pub(super) line_count: usize,
-    pub(super) dependency_count: usize,
-    pub(super) dependencies_sealed: bool,
-    /// The deck's current errors, which the strip under the status rows
-    /// names. A deck not validated, or changed since, is its status row's to
-    /// say.
-    problems: Vec<ProblemSnapshot>,
+    /// Where the deck's file is, as the project stores it.
+    pub(super) path: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -229,45 +223,12 @@ impl OverviewSnapshot {
     }
 }
 
-fn source_deck_snapshot(ctx: &egui::Context, model: &Model) -> Option<SourceDeckSnapshot> {
-    let document = model.workspace.content.netlist_document.as_ref()?;
-    let name = health::deck_name(model)?;
-    let line_count = derived(
-        ctx,
-        "overview.deck lines",
-        document.content_digest(),
-        || document.source().lines().count(),
-    );
-    let current = document
-        .validation()
-        .filter(|report| report.content_digest() == document.content_digest());
-    // Its errors only: a warning does not stop a run, and the Source deck
-    // row says how the deck validated.
-    let problems = current
-        .map(|report| {
-            report
-                .diagnostics()
-                .iter()
-                .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
-                .map(|diagnostic| {
-                    let position = diagnostic.position();
-                    ProblemSnapshot {
-                        message: diagnostic.message().to_owned(),
-                        path: format!("{}:{}:{}", name, position.line(), position.column()),
-                        tone: Tone::Error,
-                        finding: None,
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
+fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
+    let deck = model.workspace.content.decks.first()?;
+    let crate::state::DeckSource::File { path } = &deck.source;
     Some(SourceDeckSnapshot {
-        name,
-        line_count,
-        dependency_count: document.dependencies().len(),
-        dependencies_sealed: document.dependency_graph_is_sealed(),
-        problems,
+        name: deck.name(),
+        path: path.to_string_lossy().into_owned(),
     })
 }
 
@@ -277,21 +238,8 @@ fn deck_row(deck: &SourceDeckSnapshot) -> CellRowSnapshot {
         name: deck.name.clone(),
         library: String::new(),
         role: "Deck",
-        // What it is and how long, then what it includes when it includes
-        // anything: how it validated is the Source deck row's to say.
-        views: format!(
-            "SPICE \u{b7} {} {}{}",
-            deck.line_count,
-            singular_or_plural(deck.line_count, "line", "lines"),
-            match (deck.dependency_count, deck.dependencies_sealed) {
-                (0, _) => String::new(),
-                (count, sealed) => format!(
-                    " \u{b7} {count} {}{}",
-                    singular_or_plural(count, "include", "includes"),
-                    if sealed { "" } else { ", not all found" }
-                ),
-            }
-        ),
+        // What it is and where its file is.
+        views: format!("SPICE \u{b7} {}", deck.path),
         instances: None,
         unsaved: false,
         intent: OverviewIntent::Command(ids::open_workspace(Workspace::Netlist)),
@@ -316,15 +264,13 @@ impl OverviewSnapshot {
                 })
                 .count();
         let netlist_first = cx.model.is_netlist_first_without_schematic();
-        let source_deck = source_deck_snapshot(ctx, cx.model);
+        let source_deck = source_deck_snapshot(cx.model);
 
         let location = health::location(cx.model, cx.platform);
         let statuses = status_rows(ctx, cx, netlist_first, dirty_documents, location.is_some());
+        // A deck's findings are its run's: the deck is checked when it runs.
         let problems = if netlist_first {
-            source_deck
-                .as_ref()
-                .map(|deck| deck.problems.clone())
-                .unwrap_or_default()
+            Vec::new()
         } else {
             blocking_findings(ctx, cx)
         };

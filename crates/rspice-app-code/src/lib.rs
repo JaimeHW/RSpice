@@ -43,7 +43,6 @@ pub mod services {
 }
 
 pub mod simulation {
-    pub(crate) use rspice_app_runs::simulation::NetlistShown;
     pub(crate) use rspice_app_runs::simulation::controller;
     pub(crate) use rspice_app_state::simulation::plan;
     pub(crate) use rspice_app_state::simulation::table_route;
@@ -77,11 +76,9 @@ pub mod workbench {
             pub mod source_language_tools;
             pub mod veriloga_build_settings;
         }
-        pub mod netlist_lifecycle;
 
         pub(crate) use dialogs::source_document::{
-            begin_new_top_deck_in, open_source_document_dialog_in,
-            source_document_dialog_is_available,
+            open_source_document_dialog_in, source_document_dialog_is_available,
         };
         pub(crate) use dialogs::veriloga_build_settings::{
             VerilogABuildSettingsDraft, veriloga_build_settings_available,
@@ -142,6 +139,7 @@ pub mod workbench {
         pub use rspice_app_workbench::workbench::documents::*;
 
         pub mod code_workspace;
+        pub mod deck_files;
         pub mod editor_font;
         pub mod netlist_document;
         pub mod text_document_model;
@@ -162,7 +160,7 @@ pub mod workbench {
     pub mod slots {
         pub(crate) use rspice_app_services::workbench::slots::platform;
 
-        pub(crate) use code::{CodeState, netlist_shown_in, veriloga_compilation_in};
+        pub(crate) use code::{CodeState, manual_deck_in, veriloga_compilation_in};
         pub(crate) use platform::PlatformState;
 
         pub mod code;

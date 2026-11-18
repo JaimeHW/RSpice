@@ -59,20 +59,14 @@ pub(crate) fn shown_source_in(
     }
     let path = match netlist.active_document {
         ActiveNetlistDocument::OwnedSource => {
-            let content = &model.workspace.content;
-            content.netlist_source_path.clone().or_else(|| {
-                content
-                    .netlist_descriptor
-                    .as_ref()
-                    .map(|descriptor| PathBuf::from(&descriptor.artifact_name))
-            })
+            super::active_deck_file_in(netlist).map(|file| file.path.clone())
         }
         ActiveNetlistDocument::Generated | ActiveNetlistDocument::RunSnapshot => None,
         ActiveNetlistDocument::GeneratedDiff => return None,
     };
     Some(ShownSource {
         path: path.unwrap_or_default(),
-        root: true,
+        root: netlist.active_dependency_identity.is_none(),
     })
 }
 

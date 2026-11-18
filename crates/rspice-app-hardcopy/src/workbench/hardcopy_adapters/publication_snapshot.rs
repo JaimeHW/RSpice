@@ -1500,22 +1500,14 @@ fn publication_contract_display(
 // ---------------------------------------------------------------------------
 
 /// The deck the publication carries: the exact buffer from the last
-/// completed manual-deck run when one exists, otherwise the same effective
-/// source the run gate would execute. Line endings are normalized to the
-/// contract's canonical form.
+/// completed manual-deck run when one exists, otherwise the editor's text.
+/// Line endings are normalized to the contract's canonical form.
 pub fn effective_deck(reads: PublicationReads<'_>) -> Option<NetlistSection> {
     let raw = reads
         .runs
         .manual_run
         .last_run_buffer
         .as_deref()
-        .or(reads
-            .sources
-            .model
-            .workspace
-            .content
-            .netlist_source
-            .as_deref())
         .filter(|deck| !deck.trim().is_empty())
         .or_else(|| {
             let live = reads

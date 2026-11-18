@@ -81,10 +81,7 @@ fn code_document_overlay_copies_project_sources_atomically() {
         target.file.workspace.project_sources,
         working.file.workspace.project_sources
     );
-    assert_eq!(
-        target.file.workspace.netlist_source,
-        working.file.workspace.netlist_source
-    );
+    assert_eq!(target.file.workspace.decks, working.file.workspace.decks);
 }
 
 #[test]

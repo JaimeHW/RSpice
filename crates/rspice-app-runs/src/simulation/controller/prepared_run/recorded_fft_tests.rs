@@ -369,7 +369,7 @@ fn a_hand_written_fft_deck_is_read_as_the_fft_analysis() {
          .fft V(out) NP=256 WINDOW=HANN\n.fft V(out) NP=512 WINDOW=RECT FORMAT=UNORM\n.end\n";
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(DECK.to_owned());
+    state.model.simulation.source.netlist_content = DECK.to_owned();
     let tasks = dispatch_tasks(&mut state, SimulationRunIntent::ManualDeck);
     let transient = tasks
         .iter()
@@ -404,11 +404,10 @@ fn a_hand_written_fft_binds_the_first_transient_as_the_engine_does() {
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     // Two transients, which the Studio refuses for `.FOUR` and the engine
     // accepts for `.FFT`: the card belongs to the first one.
-    state.model.workspace.content.netlist_source = Some(
+    state.model.simulation.source.netlist_content =
         "two transients\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 10u 8m\n.tran 5u 4m\n\
          .fft V(out) NP=256 WINDOW=RECT\n.end\n"
-            .to_owned(),
-    );
+            .to_owned();
     let tasks = dispatch_tasks(&mut state, SimulationRunIntent::ManualDeck);
     let first_transient = tasks
         .iter()
@@ -426,11 +425,10 @@ fn a_hand_written_fft_binds_the_first_transient_as_the_engine_does() {
 fn a_hand_written_fft_without_a_transient_is_refused_in_the_engine_s_words() {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(
+    state.model.simulation.source.netlist_content =
         "fft with no transient\nV1 out 0 dc 0 ac 1\nR1 out 0 1k\n.ac dec 10 1 1k\n\
          .fft V(out) NP=256 WINDOW=RECT\n.end\n"
-            .to_owned(),
-    );
+            .to_owned();
     let error =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect_err("a card with no transient to post-process is refused");

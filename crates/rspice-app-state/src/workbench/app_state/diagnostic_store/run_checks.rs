@@ -124,9 +124,9 @@ impl Model {
         let scope = super::producers::run_scope(self, run_sequence);
         let manual_deck = self.ran_a_manual_deck(run_sequence);
         let deck_path = self
-            .workspace
-            .content
-            .netlist_source_path
+            .simulation
+            .source
+            .manual_deck_path
             .as_deref()
             .filter(|_| manual_deck);
         let place = |kind: &str, object: &str, file: &str, line: u32| {

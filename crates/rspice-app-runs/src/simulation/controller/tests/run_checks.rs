@@ -17,7 +17,7 @@ fn a_runs_assertion_report_is_retained_saved_and_restored() {
     let export_io = MockExportWorkflowIo::default();
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(RC.to_owned());
+    state.model.simulation.source.netlist_content = RC.to_owned();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -143,8 +143,7 @@ fn corpus_c12_fail_files_one_row_per_testbench_error_as_the_cli_prints_them() {
     let export_io = MockExportWorkflowIo::default();
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(deck);
-    state.model.workspace.content.netlist_source_path = Some(path);
+    state.manual_deck = Some(crate::simulation::ManualDeckCopy::new(path, deck));
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -230,10 +229,10 @@ fn samples_after_the_stop_time_are_one_warning_row_and_warn_the_run() {
     let export_io = MockExportWorkflowIo::default();
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.workspace.content.netlist_source = Some(
+    state.manual_deck = Some(crate::simulation::ManualDeckCopy::new(
+        path,
         "* vec late\nr1 a y 1\nr2 y 0 1meg\n.vec 'late.vec'\n.tran 0.1n 20n\n.end\n".to_owned(),
-    );
-    state.model.workspace.content.netlist_source_path = Some(path);
+    ));
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)

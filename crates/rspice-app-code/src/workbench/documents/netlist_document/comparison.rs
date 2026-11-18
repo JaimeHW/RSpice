@@ -1,17 +1,13 @@
-//! Immutable revision comparison and restore for the netlist deck.
+//! Read-only comparisons for the netlist editor.
 //!
-//! Comparing two retained revisions, restoring one as a new working revision,
-//! and the read-only documents those transactions project are one concern:
-//! each of them replaces the visible source with text nobody may edit and
-//! remembers which deck to return to. The deck a completed run consumed is
-//! the third such document and lives beside them here.
+//! Comparing two generated revisions, and the deck a completed run consumed
+//! against the deck in the editor, are one concern: each replaces the visible
+//! source with text nobody may edit and remembers which deck to return to.
 
 // Through the parent rather than `crate::workbench`: the module's edge onto
 // `app_state` is being retired, and a submodule of it does not need its own.
-use std::collections::HashSet;
-
-use super::{ActiveNetlistDocument, DeckTransaction, Model, NetlistDocumentState};
-use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
+use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
+use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// Reopen the already-materialized comparison document. Creating a new
@@ -72,138 +68,11 @@ pub fn compare_generated_revision(
     Ok(())
 }
 
-pub fn compare_owned_revision(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-    index: usize,
-) -> Result<(), String> {
-    let snapshot = model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .and_then(|descriptor| descriptor.revision_history.get(index))
-        .ok_or_else(|| "The selected owned-source revision is no longer retained.".to_owned())?;
-    let current = netlist
-        .owned_document
-        .as_ref()
-        .ok_or_else(|| "No current owned source document is available.".to_owned())?;
-    let previous_label = format!(
-        "owned-r{}-{}",
-        snapshot.document_revision,
-        short_digest(snapshot.content_digest)
-    );
-    let current_label = format!(
-        "owned-r{}-{}",
-        current.revision().get(),
-        short_digest(current.content_digest())
-    );
-    let diff = similar::TextDiff::from_lines(snapshot.source.as_str(), current.source())
-        .unified_diff()
-        .context_radius(3)
-        .header(&previous_label, &current_label)
-        .to_string();
-    netlist.generated_diff_source = if diff.is_empty() {
-        format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
-    } else {
-        diff
-    };
-    netlist.comparison_return_document = ActiveNetlistDocument::OwnedSource;
-    netlist.active_dependency_identity = None;
-    netlist.active_dependency_root = None;
-    netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
-    netlist.revision = netlist.revision.wrapping_add(1);
-    netlist.completion_open = false;
-    model.invalidate_source_evidence();
-    Ok(())
-}
-
-pub fn restore_owned_revision(
-    model: &mut Model,
-    netlist: &mut NetlistDocumentState,
-    open_documents: &mut HashSet<WorkspaceDocumentId>,
-    index: usize,
-) -> Result<(), String> {
-    let snapshot = model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .and_then(|descriptor| descriptor.revision_history.get(index))
-        .cloned()
-        .ok_or_else(|| "The selected owned-source revision is no longer retained.".to_owned())?;
-    let current = netlist
-        .owned_document
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| "No current owned source document is available.".to_owned())?;
-    if current.content_digest() == snapshot.content_digest
-        && current.dependencies() == snapshot.dependencies
-    {
-        return Err("The selected revision is already the current owned source.".to_owned());
-    }
-
-    let mut next_document = current.clone();
-    next_document
-        .replace_editable_source(
-            next_document.content_digest(),
-            snapshot.source.as_bytes().to_vec(),
-        )
-        .map_err(|error| error.to_string())?;
-    next_document
-        .acknowledge_dependencies(
-            next_document.content_digest(),
-            snapshot.dependencies.clone(),
-        )
-        .map_err(|error| error.to_string())?;
-
-    let mut descriptor = model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| "Owned source metadata is unavailable.".to_owned())?;
-    descriptor.retain_revision(&current, "Working state before revision restore")?;
-    descriptor.source_encoding = snapshot.source_encoding;
-    descriptor.source_line_ending = snapshot.source_line_ending;
-    descriptor.owned_includes = snapshot.owned_includes.clone();
-    descriptor.retain_revision(
-        &next_document,
-        format!("Restored revision {}", snapshot.document_revision),
-    )?;
-
-    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
-    candidate.model.workspace.content.netlist_source = Some(snapshot.source.clone());
-    candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.model.workspace.content.netlist_document = Some(next_document.clone());
-    candidate.model.workspace.content.netlist_descriptor = Some(descriptor);
-    candidate.netlist.owned_document = Some(next_document);
-    candidate.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    candidate.netlist.active_dependency_identity = None;
-    candidate.netlist.active_dependency_root = None;
-    candidate.netlist.active_document_initialized = true;
-    candidate.model.simulation.source.netlist_content = snapshot.source;
-    candidate.netlist.generated_diff_source.clear();
-    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
-    candidate.model.invalidate_source_evidence();
-    candidate
-        .model
-        .workspace
-        .content
-        .validate_simulation_configuration()
-        .map_err(|error| error.to_string())?;
-    candidate.commit_deck(model, netlist, open_documents);
-    Ok(())
-}
-
 /// Put the working deck back in the editor after a read-only document.
 ///
-/// The working deck is the retained project source, not the document that was
-/// on screen: leaving a viewer must never overwrite an edit the engineer has
-/// not saved yet.
+/// The working deck is the open deck's text, not the document that was on
+/// screen: leaving a viewer must never overwrite an edit the engineer has not
+/// saved yet.
 fn return_to_working_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -211,7 +80,11 @@ fn return_to_working_deck(
 ) {
     netlist.active_dependency_identity = None;
     netlist.active_dependency_root = None;
-    match (root, model.workspace.content.netlist_source.clone()) {
+    let deck = netlist
+        .open_deck
+        .as_ref()
+        .map(|deck| deck.root.text.clone());
+    match (root, deck) {
         (ActiveNetlistDocument::OwnedSource, Some(source)) => {
             netlist.active_document = ActiveNetlistDocument::OwnedSource;
             model.simulation.source.netlist_content = source;
@@ -431,23 +304,11 @@ pub fn compare_run_deck_snapshot_in(
     let root = netlist.run_snapshot_return_document;
     let (working, current_label) = match root {
         ActiveNetlistDocument::OwnedSource => {
-            let document = netlist
-                .owned_document
+            let deck = netlist
+                .open_deck
                 .as_ref()
-                .ok_or_else(|| "No current owned source document is available.".to_owned())?;
-            (
-                model
-                    .workspace
-                    .content
-                    .netlist_source
-                    .clone()
-                    .unwrap_or_else(|| document.source().to_owned()),
-                format!(
-                    "owned-r{}-{}",
-                    document.revision().get(),
-                    short_digest(document.content_digest())
-                ),
-            )
+                .ok_or_else(|| "No deck is open.".to_owned())?;
+            (deck.root.text.clone(), deck.root.name())
         }
         _ => {
             let document = model

@@ -13,7 +13,6 @@
 
 mod dialect_chip;
 pub mod generation;
-mod ownership;
 mod revision;
 pub mod search;
 pub mod source_menu;
@@ -182,6 +181,14 @@ pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
         active_netlist_source_is_editable_in, editor_id_in,
     };
 
+    // A project with decks opens its first one, which the page then shows.
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::workbench::documents::deck_files::open_project_deck(
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.netlist_open_documents,
+        cx.runs,
+    );
     generation::reconcile_documents(cx);
     crate::workbench::documents::netlist_document::prepare(
         cx.model,
@@ -219,13 +226,10 @@ pub fn source_menu_open(
 /// the feature reads, and its menu's while [`source_menu_open`] says the
 /// source editor's menu is open or opening.
 pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
-    // A file dropped on the page is staged as an import once the page has
-    // drawn.
+    // A file dropped on the page opens as a deck once the page has drawn.
     let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
     if !dropped.is_empty() {
-        cx.wb
-            .outbox
-            .push(CodeRequest::ImportDroppedNetlist(dropped));
+        cx.wb.outbox.push(CodeRequest::OpenDroppedDeck(dropped));
     }
     let toolbar = toolbar::code_toolbar(ui, cx);
     // The strip aligns to the toolbar's own content rect, so the two rows keep
@@ -295,9 +299,6 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
         }
         None => {}
     }
-    if execution_profile_review_banner(ui, cx.model, cx.wb.messages()) {
-        cx.wb.outbox.push(CodeRequest::BeginNetlistProfileReview);
-    }
     dialect_chip::deck_hint_band(ui, cx.model, &cx.state.netlist, cx.wb.messages());
     control_disposition_band(ui, &cx.state.netlist, cx.wb.messages());
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
@@ -316,49 +317,28 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
         ui.set_min_size(ui.available_size());
         if generated_primary_unavailable(cx.model, &cx.state.netlist) {
             let messages = cx.wb.messages();
-            if cx.model.workspace.content.netlist_source.is_none()
+            if cx.state.netlist.open_deck.is_none()
                 && cx.model.netlist_artifacts.generated_document.is_none()
             {
-                let mut action = None;
+                let mut open_deck = false;
                 empty_state_with_actions(
                     ui,
                     WorkbenchIcon::Netlist,
                     &messages.text(MessageId::NetlistEmptyWorkspaceTitle),
                     &messages.text(MessageId::NetlistEmptyWorkspaceDescription),
                     |ui| {
-                        if ui
-                            .button(messages.text(MessageId::NetlistNewTopDeck))
-                            .clicked()
-                        {
-                            action = Some(EmptyNetlistAction::NewTopDeck);
-                        }
-                        if ui
-                            .button(messages.text(MessageId::NetlistImportDeck))
-                            .clicked()
-                        {
-                            action = Some(EmptyNetlistAction::ImportDeck);
+                        // A deck is a file, so only the desktop opens one.
+                        if cfg!(not(target_arch = "wasm32")) {
+                            open_deck = ui
+                                .button(messages.text(MessageId::NetlistOpenDeck))
+                                .clicked();
                         }
                     },
                 );
-                match action {
-                    Some(EmptyNetlistAction::NewTopDeck) => {
-                        if let Err(error) = crate::workbench::app::begin_new_top_deck_in(
-                            cx.model,
-                            &mut cx.state.code_workspace,
-                            &mut cx.state.netlist,
-                            cx.platform,
-                        ) {
-                            cx.wb.prompt(error);
-                        }
-                    }
-                    Some(EmptyNetlistAction::ImportDeck) => {
-                        // The dispatcher carries the import out once the
-                        // page has drawn.
-                        cx.execute(
-                            crate::workbench::code::commands::CodeCommand::ImportNetlist.key(),
-                        );
-                    }
-                    None => {}
+                if open_deck {
+                    // The dispatcher carries the open out once the page has
+                    // drawn.
+                    cx.execute(crate::workbench::code::commands::CodeCommand::OpenNetlist.key());
                 }
             } else {
                 let title = messages.text(MessageId::NetlistGeneratedUnavailable);
@@ -442,18 +422,8 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     // The dialogs draw in the code feature's context. What one raises is
     // answered once the page has drawn.
     search::find_replace_window(ui.ctx(), cx);
-    ownership::ownership_dialog_window(ui.ctx(), cx);
     revision::comparison_dialog_window(ui.ctx(), cx);
-    revision::save_source_dialog_window(ui.ctx(), cx);
-    transfer::external_change_dialog_window(ui.ctx(), cx);
     transfer::export_generated_dialog_window(ui.ctx(), cx);
-    transfer::import_review_dialog_window(ui.ctx(), cx);
-}
-
-#[derive(Clone, Copy)]
-enum EmptyNetlistAction {
-    NewTopDeck,
-    ImportDeck,
 }
 
 /// Height of the post-run strip, matching the mockup's `.netlist-override-strip`.
@@ -522,7 +492,7 @@ pub fn run_strip_projection(
         effective_active_document_in, working_deck_source_in,
     };
 
-    let active = effective_active_document_in(model, netlist);
+    let active = effective_active_document_in(netlist);
     let (run_id, phase) = if active == ActiveNetlistDocument::RunSnapshot {
         // Which run the snapshot belongs to is whichever binding put it there.
         // `last_run_id` is the *manual baseline* binding, and an executed deck
@@ -982,36 +952,6 @@ fn advisory_band(ui: &mut Ui, problem: Option<Problem>, contents: impl FnOnce(&m
         });
 }
 
-/// The banner over a deck whose execution profile needs review, and whether
-/// its action was pressed.
-fn execution_profile_review_banner(
-    ui: &mut Ui,
-    model: &crate::workbench::app_state::Model,
-    messages: crate::workbench::MessageCatalog,
-) -> bool {
-    if !model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .is_some_and(|descriptor| descriptor.execution_profile_review_required())
-    {
-        return false;
-    }
-    let description = messages.text(MessageId::NetlistProfileReviewRequiredDescription);
-    let mut review = false;
-    advisory_band(ui, Some(Problem::Warning), |ui| {
-        ui.label(
-            egui::RichText::new(messages.text(MessageId::NetlistProfileReviewRequired)).strong(),
-        );
-        ui.label(description);
-        review = ui
-            .button(messages.text(MessageId::NetlistProfileReviewAction))
-            .clicked();
-    });
-    review
-}
-
 /// What became of the active document's `.control` region, stated once above
 /// the deck.
 ///
@@ -1079,11 +1019,13 @@ fn active_document_available(
 ) -> bool {
     if netlist.active_dependency_identity.is_some() {
         return crate::workbench::documents::netlist_document::active_dependency_in(model, netlist)
-            .is_some();
+            .is_some()
+            || crate::workbench::documents::netlist_document::active_deck_file_in(netlist)
+                .is_some();
     }
     match netlist.active_document {
         ActiveNetlistDocument::Generated => generated_primary_ready_in(model),
-        ActiveNetlistDocument::OwnedSource => model.workspace.content.netlist_source.is_some(),
+        ActiveNetlistDocument::OwnedSource => netlist.open_deck.is_some(),
         ActiveNetlistDocument::GeneratedDiff => !netlist.generated_diff_source.is_empty(),
         ActiveNetlistDocument::RunSnapshot => {
             crate::workbench::documents::netlist_document::run_deck_snapshot_run_id_in(runs)
@@ -1092,16 +1034,6 @@ fn active_document_available(
     }
 }
 
-fn generation_block_reason(
-    model: &crate::workbench::app_state::Model,
-    messages: crate::workbench::MessageCatalog,
-) -> String {
-    model
-        .netlist_artifacts
-        .generation_error
-        .clone()
-        .unwrap_or_else(|| messages.text(MessageId::NetlistGenerateBeforeAction))
-}
 /// What is wrong with the active document, or `None` when nothing is.
 ///
 /// A deck that parses, a comparison that is ready and a sealed run snapshot

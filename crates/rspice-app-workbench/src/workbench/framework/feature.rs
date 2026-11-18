@@ -23,7 +23,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::localization::MessageId;
 use crate::workbench::state::workbench_session::WorkbenchSession;
-use rspice_app_runs::simulation::{NetlistShown, ProjectCompileReceipt};
+use rspice_app_runs::simulation::{ManualDeck, ProjectCompileReceipt};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_schematic_editor::session::visibility::{
     SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
@@ -126,15 +126,8 @@ impl NetlistDocumentKey {
 
 /// What code shows that another feature reads.
 pub trait CodePort {
-    /// Whether the netlist editor shows the project's own netlist source.
-    fn owned_source_active(&self) -> bool;
-    /// Whether the netlist editor shows the project's own root source, and
-    /// not a file that source includes.
-    fn shows_owned_root(&self) -> bool;
-    /// The zero-based line holding the netlist editor's caret.
-    fn netlist_cursor_line(&self) -> usize;
-    /// Which netlist document the editor shows, as a manual-deck run reads it.
-    fn netlist_shown(&self) -> NetlistShown;
+    /// The deck in front of the netlist editor, which a manual run reads.
+    fn manual_deck(&self) -> Option<ManualDeck<'_>>;
     /// Which netlist document the editor shows, as a change check compares
     /// it. A port with no netlist editor always shows the same one.
     fn shown_netlist_document_key(&self) -> NetlistDocumentKey {

@@ -111,7 +111,6 @@ fn render_save_confirmation_dialog(app: &mut impl ConfirmationHost, ctx: &Contex
                     action,
                     ConfirmationAction::ProjectNew
                         | ConfirmationAction::ProjectOpen
-                        | ConfirmationAction::OpenNetlistProject
                         | ConfirmationAction::CloseProject(_)
                 )
             {

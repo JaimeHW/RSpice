@@ -324,25 +324,20 @@ fn render_presence_popover(
     );
     ui.add_space(6.0);
 
-    // Write-lease affordance for the document in front of a mirroring guest.
-    if !facts.hosting && reads.model.live_write_locks.mirror {
-        let (doc, held_by_other) = if reads.workspace == Workspace::Netlist {
-            (
-                "netlist".to_owned(),
-                reads.model.live_write_locks.netlist.clone(),
-            )
-        } else {
-            let key = reads.model.workspace.content.active_key();
-            (
-                format!("schematic/{key}"),
-                reads
-                    .model
-                    .live_write_locks
-                    .schematic_views
-                    .get(&key)
-                    .cloned(),
-            )
-        };
+    // Write-lease affordance for the schematic in front of a mirroring
+    // guest. A deck is a file on the host's disk, not a mirrored document.
+    if !facts.hosting
+        && reads.model.live_write_locks.mirror
+        && reads.workspace != Workspace::Netlist
+    {
+        let key = reads.model.workspace.content.active_key();
+        let doc = format!("schematic/{key}");
+        let held_by_other = reads
+            .model
+            .live_write_locks
+            .schematic_views
+            .get(&key)
+            .cloned();
         match held_by_other {
             Some(holder) => {
                 if ui

@@ -13,7 +13,6 @@ use crate::workbench::app_state::services_access;
 use rspice_app_cloud::workbench::live_session::{
     CloudHandles, DiscardMirror, LiveHost, MirrorApply,
 };
-use rspice_app_code::workbench::documents::netlist_document::adopt_live_owned_source;
 use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 #[cfg(target_arch = "wasm32")]
 use rspice_app_project::workbench::workflows::file_workflow::BrowserSchematic;
@@ -48,7 +47,8 @@ use rspice_app_state::workbench::app_state::model::WorkspacePruned;
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::feature::ModelsPort;
-use rspice_app_workbench::workbench::framework::requests::{self, AdoptLiveOwnedSource};
+use rspice_app_workbench::workbench::framework::requests;
+
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
 use rspice_project::lifecycle::SaveContinuationEvent;
@@ -1654,13 +1654,6 @@ pub(crate) fn pump_live_session(state: &mut AppState, cloud: &mut CloudHandles) 
     if !live_session.pump_inbound(&mut live_host(state), account) {
         return;
     }
-    requests::drain(
-        state,
-        |state| &mut state.workbench.outbox,
-        |state, AdoptLiveOwnedSource(document)| {
-            adopt_live_owned_source(&mut state.code.netlist, document);
-        },
-    );
     if let Some(snapshot) = live_session.take_mirror_snapshot() {
         let outcome =
             match state.apply_live_project_snapshot(snapshot.bytes(), snapshot.host_label()) {
@@ -1683,7 +1676,6 @@ fn live_host(state: &mut AppState) -> LiveHost<'_> {
         platform: &state.platform,
         presentation: &state.results.results,
         design: &*state.design,
-        code: &*state.code,
     }
 }
 

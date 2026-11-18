@@ -52,8 +52,8 @@ pub trait RunHost: ViewerHost {
     fn slot_facts(&self) -> SlotFacts;
     /// The receipt of the project's Verilog-A compilation, when one is current.
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt>;
-    /// Which netlist document the editor shows.
-    fn netlist_shown(&self) -> NetlistShown;
+    /// The deck in front of the netlist editor, which a manual run reads.
+    fn manual_deck(&self) -> Option<ManualDeck<'_>>;
     /// A run gate filed findings that stop the run: bring the reader to them.
     fn show_problem_findings(&mut self);
     /// The run gate authorized the retained run set: queue it. The reader
@@ -66,16 +66,61 @@ pub trait RunHost: ViewerHost {
     fn ensure_design_check(&mut self, subject: CellViewRef) -> Result<(), String>;
 }
 
-/// Which netlist document the editor shows, as a manual-deck run reads it.
-#[derive(Debug, Clone, Copy)]
-pub struct NetlistShown {
-    /// Whether the editor has settled which document a just-opened project
-    /// shows.
-    pub settled: bool,
-    /// The generated revision comparison, which is not a deck.
-    pub comparison: bool,
-    /// The project's own source.
-    pub owned_source: bool,
+/// A deck a manual run reads: its name, its text as the editor holds it,
+/// and where it is read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ManualDeck<'a> {
+    pub name: &'a str,
+    pub text: &'a str,
+    pub origin: DeckOrigin<'a>,
+}
+
+/// Where a deck is read from, which its relative includes resolve against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckOrigin<'a> {
+    /// A file on disk.
+    File(&'a std::path::Path),
+}
+
+/// A [`ManualDeck`] that owns what it names, for a host that keeps a copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualDeckCopy {
+    pub name: String,
+    pub text: String,
+    pub path: std::path::PathBuf,
+}
+
+impl ManualDeckCopy {
+    /// The deck `text` read from the file at `path`, named by its file.
+    #[must_use]
+    pub fn new(path: std::path::PathBuf, text: String) -> Self {
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        Self { name, text, path }
+    }
+
+    /// A copy of `deck`.
+    #[must_use]
+    pub fn of(deck: ManualDeck<'_>) -> Self {
+        let DeckOrigin::File(path) = deck.origin;
+        Self {
+            name: deck.name.to_owned(),
+            text: deck.text.to_owned(),
+            path: path.to_path_buf(),
+        }
+    }
+
+    /// The deck this copy holds.
+    #[must_use]
+    pub fn deck(&self) -> ManualDeck<'_> {
+        ManualDeck {
+            name: &self.name,
+            text: &self.text,
+            origin: DeckOrigin::File(&self.path),
+        }
+    }
 }
 
 /// What the transient viewers hold, read when the run tier asks.

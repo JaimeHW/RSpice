@@ -79,6 +79,7 @@ impl CachedResults {
                 crate::state::SimulationSourceState {
                     netlist_content: _,
                     cross_probe: _,
+                    manual_deck_path: _,
                 },
         } = state;
         self.history == runs.revision()

@@ -38,8 +38,7 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
     }
     if let Some(command) = CodeCommand::from_key(key) {
         return match command {
-            CodeCommand::ImportNetlist
-            | CodeCommand::ImportVerilogA
+            CodeCommand::ImportVerilogA
             | CodeCommand::ExportNetlist
             | CodeCommand::ExportBillOfMaterials => Some(Icon::File),
             _ => None,

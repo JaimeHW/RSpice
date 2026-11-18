@@ -5,7 +5,6 @@
 use egui::Ui;
 
 use crate::ui::widgets::select;
-use crate::workbench::preferences::IMPORTABLE_NETLIST_DIALECTS;
 use crate::workbench::{ChoicePreference, ScalarPreference};
 
 use super::super::preferences_shell::{
@@ -28,9 +27,8 @@ pub(super) fn page(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     );
     solver_threads_row(ui, state);
 
-    section_heading(ui, "Runs and decks");
+    section_heading(ui, "Runs");
     runs_kept_row(ui, state);
-    imported_dialect_row(ui, state);
 }
 
 /// How many runs a new plan keeps before it discards the oldest.
@@ -62,43 +60,6 @@ fn runs_kept_row(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
                         .preferences
                         .set_scalar(ScalarPreference::RunsKept, RUNS_KEPT[selected])
                         .expect("every offered count is inside the preference domain");
-                }
-            });
-        },
-    );
-}
-
-/// The dialect the import review starts from when a deck names none.
-fn imported_dialect_row(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
-    let labels = IMPORTABLE_NETLIST_DIALECTS
-        .map(|dialect| dialect.label().to_owned())
-        .to_vec();
-    let mut terms = labels.iter().map(String::as_str).collect::<Vec<_>>();
-    terms.extend(["ngspice", "hspice", "pspice", "spectre", "ads", "import"]);
-    searchable_row(
-        ui,
-        "Netlist dialect for imported decks",
-        "Used for a deck with no dialect markers. The import review can change it.",
-        &terms,
-        |ui| {
-            value_column(ui, |ui| {
-                let active = state
-                    .model
-                    .preferences
-                    .choice(ChoicePreference::ImportedNetlistDialect);
-                if let Some(selected) = select(
-                    ui,
-                    "preferences.simulation.imported-netlist-dialect",
-                    "Netlist dialect for imported decks",
-                    &labels[active],
-                    &labels,
-                    control_width(ui),
-                ) {
-                    state
-                        .model
-                        .preferences
-                        .set_choice(ChoicePreference::ImportedNetlistDialect, selected)
-                        .expect("the offered dialects are the complete preference domain");
                 }
             });
         },

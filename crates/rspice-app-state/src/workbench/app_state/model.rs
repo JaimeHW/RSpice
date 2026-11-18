@@ -19,7 +19,6 @@ mod generated_instance;
 mod in_place_layout;
 mod library_catalog;
 mod library_files;
-mod owned_source;
 mod physical_layout;
 mod plan_outcome;
 mod project_technology;
@@ -47,9 +46,6 @@ pub use library_files::{
     LibraryFileSession, LibraryMode, LibraryPath, LibraryPathChoice, LibraryReference, Missing,
     OnDisk, PUBLICATION_STORE_FOLDER, ReferenceLoad, ReferenceSession, ReferenceStatus, RefreshRow,
     RelinkOutcome, StatusMark, publication_store,
-};
-pub use owned_source::{
-    LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
 pub use plan_outcome::AnalysisLifecycleOutcome;
 pub use project_technology::ProjectTechnologyVerdict;
@@ -319,20 +315,16 @@ impl Model {
         *self = candidate;
     }
 
-    /// Whether this project is intentionally owned by an authored or imported
-    /// netlist-first SPICE deck and has no schematic-derived baseline.
+    /// Whether this project holds decks and no drawn schematic: a project
+    /// opened from a deck.
     ///
     /// A pristine bootstrap buffer remains present for legacy document/save
     /// invariants, but it is not a user-visible schematic and must never be
     /// advertised or checked as one.
     pub fn is_netlist_first_without_schematic(&self) -> bool {
-        let netlist_first_deck_owns_the_project = self
-            .workspace
-            .content
-            .netlist_document
-            .as_ref()
-            .is_some_and(|document| document.generated_artifact().is_none());
-        if !netlist_first_deck_owns_the_project || schematic_has_authored_content(&self.schematic) {
+        if self.workspace.content.decks.is_empty()
+            || schematic_has_authored_content(&self.schematic)
+        {
             return false;
         }
 
