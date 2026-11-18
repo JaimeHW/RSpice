@@ -326,9 +326,9 @@ fn connect_refusals_point_at_the_line_the_author_wrote() {
     assert!(text.contains(&at) && text.contains("d2a_missing"), "{text}");
 
     // A body the analog domain cannot compile: the operator in it.
-    let source = LOCATED_DESIGN.replace("transition(d ?", "transition((d === 1) ?");
+    let source = LOCATED_DESIGN.replace("transition(d ?", "transition((d ~^ 1) ?");
     let text = refusal("body.vams", &source, "hyst");
-    let at = format!("body.vams:{}:", line_of(&source, "==="));
+    let at = format!("body.vams:{}:", line_of(&source, "~^"));
     assert!(
         text.contains(&at) && !text.contains("offset") && !text.contains(".vams:0"),
         "{text}"

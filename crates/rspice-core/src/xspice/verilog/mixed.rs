@@ -2589,7 +2589,8 @@ impl MixedSignalHost {
             detail: format!(
                 "at {} the analog block read a discrete value that is x or z: {}; a continuous \
                  quantity has no x or z level, so every bit an analog expression reads must be \
-                 0 or 1 when it reads it",
+                 0 or 1 when it reads it (Verilog-AMS LRM 2.4 section 7.3.2), and only `===`, \
+                 `!==` and `case` compare an x or z bit, which maps it to a level",
                 si_seconds(self.analog_inputs.time_seconds),
                 unknown.join(", ")
             ),

@@ -3756,18 +3756,32 @@ impl SemanticAnalyzer {
                 });
             }
             AnalogStatement::Case(case_stmt) => {
+                // A selector of discrete storage, or a label holding `x` or
+                // `z`, compares the four-state bits as `===` does (IEEE
+                // 1364-2005 section 9.5; Verilog-AMS LRM 2.4 section 7.3.2),
+                // so an `x` or `z` selector takes its own arm or the default
+                // rather than refusing the read.
+                let compares_bits = self.analog_case_compares_bits(case_stmt);
                 // The selector and ALL match comparisons are evaluated
                 // before any arm executes (LRM case semantics); snapshot
-                // them so arm bodies cannot perturb later guards.
-                let selector =
-                    self.lower_expression_with_side_effects(&case_stmt.expr, module, sink)?;
-                let mut dynamic_case = !self.expression_is_simulation_invariant(&selector);
-                // The structured form keeps the comparisons as written; a case
-                // arm's condition is evaluated once at its branch, so the
-                // snapshot the flat form needs would only be a variable the
-                // region body never assigns.
-                let unsnapshotted_selector = selector.clone();
-                let selector = self.snapshot_guard(selector, case_stmt.span, module, sink)?;
+                // them so arm bodies cannot perturb later guards. Analog
+                // code cannot write discrete storage, so a bit comparison
+                // reads its selector where it compares.
+                let (selector, unsnapshotted_selector, mut dynamic_case) = if compares_bits {
+                    let none = Self::number_expr(0.0, case_stmt.span);
+                    (none.clone(), none, true)
+                } else {
+                    let selector =
+                        self.lower_expression_with_side_effects(&case_stmt.expr, module, sink)?;
+                    let dynamic = !self.expression_is_simulation_invariant(&selector);
+                    // The structured form keeps the comparisons as written; a
+                    // case arm's condition is evaluated once at its branch, so
+                    // the snapshot the flat form needs would only be a
+                    // variable the region body never assigns.
+                    let unsnapshotted = selector.clone();
+                    let selector = self.snapshot_guard(selector, case_stmt.span, module, sink)?;
+                    (selector, unsnapshotted, dynamic)
+                };
 
                 let mut item_guards: Vec<Option<Expression>> = Vec::new();
                 let mut unsnapshotted_guards: Vec<Option<Expression>> = Vec::new();
@@ -3775,19 +3789,31 @@ impl SemanticAnalyzer {
                     let mut item_match: Option<Expression> = None;
                     let mut unsnapshotted_match: Option<Expression> = None;
                     for m in &item.matches {
-                        let m_lowered = self.lower_expression_with_side_effects(m, module, sink)?;
-                        dynamic_case |= !self.expression_is_simulation_invariant(&m_lowered);
-                        let eq =
-                            Self::binary_expr(BinaryOp::Eq, selector.clone(), m_lowered.clone());
+                        let (eq, raw_eq) = if compares_bits {
+                            let matched =
+                                self.lower_case_match(&case_stmt.expr, m, "case", m.span())?;
+                            (matched.clone(), matched)
+                        } else {
+                            let m_lowered =
+                                self.lower_expression_with_side_effects(m, module, sink)?;
+                            dynamic_case |= !self.expression_is_simulation_invariant(&m_lowered);
+                            (
+                                Self::binary_expr(
+                                    BinaryOp::Eq,
+                                    selector.clone(),
+                                    m_lowered.clone(),
+                                ),
+                                Self::binary_expr(
+                                    BinaryOp::Eq,
+                                    unsnapshotted_selector.clone(),
+                                    m_lowered,
+                                ),
+                            )
+                        };
                         item_match = Some(match item_match {
                             Some(acc) => Self::binary_expr(BinaryOp::Or, acc, eq),
                             None => eq,
                         });
-                        let raw_eq = Self::binary_expr(
-                            BinaryOp::Eq,
-                            unsnapshotted_selector.clone(),
-                            m_lowered,
-                        );
                         unsnapshotted_match = Some(match unsnapshotted_match {
                             Some(acc) => Self::binary_expr(BinaryOp::Or, acc, raw_eq),
                             None => raw_eq,
@@ -7986,6 +8012,10 @@ impl SemanticAnalyzer {
                         select.span,
                     )?
                 }
+            }
+            // Section 7.3.2's comparison of four-state bits.
+            Expression::Digital(DigitalExpr::CaseEquality(equality)) => {
+                self.lower_analog_case_equality(equality)?
             }
             // Other discrete syntax still requires its own continuous-domain contract.
             Expression::Digital(digital) => {

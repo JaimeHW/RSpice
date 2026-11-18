@@ -1253,20 +1253,19 @@ fn part_selects_of_analog_owned_arrays_are_refused() {
     );
 }
 
-/// The three operators this wave added are discrete-domain forms, so the
-/// continuous domain refuses each by name rather than by token.
+/// The discrete-domain operators the continuous domain has no form for are
+/// refused there by name rather than by token.
 ///
-/// Before they lexed at all, `a ~^ b` died as an unexpected `~` and `a === b`
-/// as an invalid expression — diagnostics that blamed a character rather than
-/// the construct. What the analog half must say now is which operator it is and
-/// that the discrete half is where it belongs.
+/// Before they lexed at all, `a ~^ b` died as an unexpected `~` — a diagnostic
+/// that blamed a character rather than the construct. What the analog half
+/// must say now is which operator it is and that the discrete half is where it
+/// belongs. `===` and `!==` are not among them: Verilog-AMS LRM 2.4 section
+/// 7.3.2 makes them how analog code compares bits, which the next test pins.
 #[test]
 fn the_new_discrete_operators_are_refused_in_the_continuous_domain() {
     for (expression, construct) in [
         ("(a ~^ b)", "bitwise XNOR operator"),
         ("(a ^~ b)", "bitwise XNOR operator"),
-        ("(a === b)", "case equality operator"),
-        ("(a !== b)", "case equality operator"),
         ("(&a)", "reduction operator"),
         ("(~&a)", "reduction operator"),
         ("(|a)", "reduction operator"),
@@ -1298,6 +1297,37 @@ fn the_new_discrete_operators_are_refused_in_the_continuous_domain() {
             "expected `{expression}` to be refused as a {construct}, got {message:?}"
         );
     }
+}
+
+/// `===` and `!==` compile in analog code (Verilog-AMS LRM 2.4 section
+/// 7.3.2). Between two analog integers, which have no `x` or `z` bit, they
+/// are `==` and `!=`; a real operand is refused, as section 4.2.1 makes both
+/// illegal on a real.
+#[test]
+fn case_equality_compiles_in_the_continuous_domain_and_refuses_a_real() {
+    let module = |expression: &str| {
+        format!(
+            "module analog_case_equality(p, n);\n\
+             \x20   inout p, n;\n\
+             \x20   electrical p, n;\n\
+             \x20   integer a, b;\n\
+             \x20   real gain, r;\n\
+             \x20   analog begin\n\
+             \x20       a = 1; b = 2; r = 1.5;\n\
+             \x20       gain = {expression};\n\
+             \x20       I(p, n) <+ gain * V(p, n);\n\
+             \x20   end\n\
+             endmodule\n"
+        )
+    };
+    for expression in ["(a === b)", "(a !== b)", "(a === 4'b0001)", "(a !== 1'bx)"] {
+        analyze(&module(expression));
+    }
+    let message = analyze_error(&module("(r === 1'bx)"));
+    assert!(
+        message.contains("`===` in analog code compares the bits") && message.contains("real"),
+        "{message}"
+    );
 }
 
 /// `~^` and `^~` are one operator with two spellings, sitting on XOR's tier of
