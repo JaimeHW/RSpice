@@ -154,11 +154,7 @@ fn document_digests_with_results_cache(
     documents.insert(
         ProjectDocumentId::NetlistSource,
         digest(&(
-            &project.workspace.netlist_source,
-            &project.workspace.netlist_source_path,
-            &project.workspace.netlist_document,
-            &project.workspace.netlist_descriptor,
-            &project.workspace.retained_netlist_decks,
+            &project.workspace.decks,
             code_workspace_sources,
             &project.workspace.added_lines,
         ))?,

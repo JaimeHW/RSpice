@@ -68,12 +68,7 @@ impl ProjectFile {
                 self.workspace.stimulus_library = working.workspace.stimulus_library.clone();
             }
             ProjectDocumentId::NetlistSource => {
-                self.workspace.netlist_source = working.workspace.netlist_source.clone();
-                self.workspace.netlist_source_path = working.workspace.netlist_source_path.clone();
-                self.workspace.netlist_document = working.workspace.netlist_document.clone();
-                self.workspace.netlist_descriptor = working.workspace.netlist_descriptor.clone();
-                self.workspace.retained_netlist_decks =
-                    working.workspace.retained_netlist_decks.clone();
+                self.workspace.decks = working.workspace.decks.clone();
                 self.workspace.added_lines = working.workspace.added_lines.clone();
                 self.workspace
                     .project_sources

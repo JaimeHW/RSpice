@@ -17,7 +17,7 @@ use super::search::FindError;
 
 const DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
-/// Non-nil identity retained across every ownership and source transition.
+/// Non-nil identity retained across every source transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct NetlistDocumentId(Uuid);
@@ -62,17 +62,6 @@ impl fmt::Display for NetlistDocumentId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(formatter)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DocumentOwnership {
-    /// Immutable source projected from project inputs.
-    Generated,
-    /// Exact source bytes most recently loaded from an external origin.
-    Imported,
-    /// User-owned buffer; it may descend from generated or imported source.
-    Editable,
 }
 
 /// Versioned project inputs from which a generated deck was produced.
@@ -245,66 +234,16 @@ impl GeneratedProvenance {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImportedProvenance {
-    origin: SourceLocator,
-    imported_digest: ContentDigest,
-}
-
-impl ImportedProvenance {
-    #[must_use]
-    pub fn origin(&self) -> &SourceLocator {
-        &self.origin
-    }
-
-    #[must_use]
-    pub const fn imported_digest(&self) -> ContentDigest {
-        self.imported_digest
-    }
-}
-
-/// Audit provenance survives a Generated -> Imported -> Editable sequence.
-/// `last_saved` is historical; the document's current persisted target is
-/// exposed separately by [`NetlistDocument::save_acknowledgement`].
+/// Where a generated document's text came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceProvenance {
     generated: Option<GeneratedProvenance>,
-    imported: Option<ImportedProvenance>,
-    last_saved: Option<SaveAcknowledgement>,
 }
 
 impl SourceProvenance {
     #[must_use]
     pub const fn generated(&self) -> Option<&GeneratedProvenance> {
         self.generated.as_ref()
-    }
-
-    #[must_use]
-    pub const fn imported(&self) -> Option<&ImportedProvenance> {
-        self.imported.as_ref()
-    }
-
-    #[must_use]
-    pub const fn last_saved(&self) -> Option<&SaveAcknowledgement> {
-        self.last_saved.as_ref()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SaveAcknowledgement {
-    origin: SourceLocator,
-    digest: ContentDigest,
-}
-
-impl SaveAcknowledgement {
-    #[must_use]
-    pub fn origin(&self) -> &SourceLocator {
-        &self.origin
-    }
-
-    #[must_use]
-    pub const fn digest(&self) -> ContentDigest {
-        self.digest
     }
 }
 
@@ -929,8 +868,6 @@ pub struct TransitionReceipt {
     document_id: NetlistDocumentId,
     previous_revision: ObjectRevision,
     revision: ObjectRevision,
-    previous_ownership: DocumentOwnership,
-    ownership: DocumentOwnership,
     previous_digest: ContentDigest,
     content_digest: ContentDigest,
 }
@@ -949,16 +886,6 @@ impl TransitionReceipt {
     #[must_use]
     pub const fn revision(self) -> ObjectRevision {
         self.revision
-    }
-
-    #[must_use]
-    pub const fn previous_ownership(self) -> DocumentOwnership {
-        self.previous_ownership
-    }
-
-    #[must_use]
-    pub const fn ownership(self) -> DocumentOwnership {
-        self.ownership
     }
 
     #[must_use]
@@ -983,12 +910,10 @@ impl TransitionReceipt {
 pub struct NetlistDocument {
     id: NetlistDocumentId,
     revision: ObjectRevision,
-    ownership: DocumentOwnership,
     source: String,
     content_digest: ContentDigest,
     generated_artifact: Option<GeneratedArtifact>,
     provenance: SourceProvenance,
-    save_acknowledgement: Option<SaveAcknowledgement>,
     dependencies: Vec<DependencyMetadata>,
     validation: Option<ValidationReport>,
     include_directives: Vec<IncludeDirective>,
@@ -1005,94 +930,15 @@ impl NetlistDocument {
         let value = Self {
             id,
             revision: ObjectRevision::INITIAL,
-            ownership: DocumentOwnership::Generated,
             content_digest: generated_artifact.content_digest,
             provenance: SourceProvenance {
                 generated: Some(generated_artifact.provenance.clone()),
-                imported: None,
-                last_saved: None,
             },
-            save_acknowledgement: None,
             dependencies: generated_artifact.dependencies.clone(),
             validation: None,
             include_directives,
             source,
             generated_artifact: Some(generated_artifact),
-        };
-        value.validate_invariants()?;
-        Ok(value)
-    }
-
-    /// Create a project-owned source document that has no generated or
-    /// imported baseline. This is the canonical constructor for a netlist-first
-    /// project and deliberately does not manufacture generated provenance.
-    pub fn from_authored_source(
-        id: NetlistDocumentId,
-        source_bytes: Vec<u8>,
-    ) -> Result<Self, DocumentError> {
-        let source = decode_utf8(source_bytes)?;
-        let include_directives = parse_include_directives(&source);
-        let dependencies = normalize_dependencies(&include_directives, Vec::new())?;
-        let value = Self {
-            id,
-            revision: ObjectRevision::INITIAL,
-            ownership: DocumentOwnership::Editable,
-            content_digest: digest(source.as_bytes()),
-            provenance: SourceProvenance {
-                generated: None,
-                imported: None,
-                last_saved: None,
-            },
-            save_acknowledgement: None,
-            dependencies,
-            validation: None,
-            include_directives,
-            source,
-            generated_artifact: None,
-        };
-        value.validate_invariants()?;
-        Ok(value)
-    }
-
-    /// Create an exact imported document without pretending that the imported
-    /// bytes were produced by the schematic generator.
-    pub fn from_imported_source(
-        id: NetlistDocumentId,
-        origin: SourceLocator,
-        source_bytes: Vec<u8>,
-        dependencies: Vec<DependencyMetadata>,
-    ) -> Result<Self, DocumentError> {
-        origin.validate()?;
-        let source = decode_utf8(source_bytes)?;
-        let include_directives = parse_include_directives(&source);
-        let dependencies = normalize_dependencies(&include_directives, dependencies)?;
-        let content_digest = digest(source.as_bytes());
-        let acknowledgement = origin
-            .native_origin()
-            .is_some()
-            .then(|| SaveAcknowledgement {
-                origin: origin.clone(),
-                digest: content_digest,
-            });
-        let value = Self {
-            id,
-            revision: ObjectRevision::INITIAL,
-            ownership: DocumentOwnership::Imported,
-            content_digest,
-            provenance: SourceProvenance {
-                generated: None,
-                imported: Some(ImportedProvenance {
-                    origin,
-                    imported_digest: content_digest,
-                }),
-                last_saved: acknowledgement.clone(),
-            },
-            save_acknowledgement: acknowledgement,
-            dependencies,
-            validation: None,
-            include_directives,
-            source,
-            generated_artifact: None,
         };
         value.validate_invariants()?;
         Ok(value)
@@ -1106,11 +952,6 @@ impl NetlistDocument {
     #[must_use]
     pub const fn revision(&self) -> ObjectRevision {
         self.revision
-    }
-
-    #[must_use]
-    pub const fn ownership(&self) -> DocumentOwnership {
-        self.ownership
     }
 
     #[must_use]
@@ -1136,24 +977,6 @@ impl NetlistDocument {
     #[must_use]
     pub const fn provenance(&self) -> &SourceProvenance {
         &self.provenance
-    }
-
-    #[must_use]
-    pub const fn save_acknowledgement(&self) -> Option<&SaveAcknowledgement> {
-        self.save_acknowledgement.as_ref()
-    }
-
-    #[must_use]
-    pub fn saved_digest(&self) -> Option<ContentDigest> {
-        self.save_acknowledgement
-            .as_ref()
-            .map(SaveAcknowledgement::digest)
-    }
-
-    #[must_use]
-    pub fn is_dirty(&self) -> bool {
-        self.ownership != DocumentOwnership::Generated
-            && self.saved_digest() != Some(self.content_digest)
     }
 
     #[must_use]
@@ -1206,91 +1029,6 @@ impl NetlistDocument {
         false
     }
 
-    pub fn make_editable(
-        &mut self,
-        expected_digest: ContentDigest,
-    ) -> Result<TransitionReceipt, DocumentError> {
-        self.ensure_current(expected_digest)?;
-        if self.ownership == DocumentOwnership::Editable {
-            return Ok(self.noop_receipt());
-        }
-        let next_revision = self.revision.next()?;
-        let before = self.receipt_before();
-        self.ownership = DocumentOwnership::Editable;
-        self.revision = next_revision;
-        Ok(self.finish_receipt(before))
-    }
-
-    /// Create a separate, unsaved owned document without mutating the source
-    /// document. Workbench document registries use this for the mockup's
-    /// generated-primary plus editable-copy workflow.
-    pub fn create_editable_copy(
-        &self,
-        id: NetlistDocumentId,
-        expected_digest: ContentDigest,
-    ) -> Result<Self, DocumentError> {
-        self.ensure_current(expected_digest)?;
-        let mut copy = self.clone();
-        copy.id = id;
-        copy.revision = ObjectRevision::INITIAL;
-        copy.ownership = DocumentOwnership::Editable;
-        copy.save_acknowledgement = None;
-        copy.validation = None;
-        copy.validate_invariants()?;
-        Ok(copy)
-    }
-
-    pub fn replace_editable_source(
-        &mut self,
-        expected_digest: ContentDigest,
-        source_bytes: Vec<u8>,
-    ) -> Result<TransitionReceipt, DocumentError> {
-        self.ensure_current(expected_digest)?;
-        if self.ownership != DocumentOwnership::Editable {
-            return Err(DocumentError::SourceIsNotEditable(self.ownership));
-        }
-        let source = decode_utf8(source_bytes)?;
-        if source == self.source {
-            return Ok(self.noop_receipt());
-        }
-        let next_revision = self.revision.next()?;
-        let before = self.receipt_before();
-        self.install_unowned_source(source)?;
-        self.revision = next_revision;
-        Ok(self.finish_receipt(before))
-    }
-
-    pub fn import_source(
-        &mut self,
-        expected_digest: ContentDigest,
-        origin: SourceLocator,
-        source_bytes: Vec<u8>,
-    ) -> Result<TransitionReceipt, DocumentError> {
-        self.ensure_current(expected_digest)?;
-        origin.validate()?;
-        let source = decode_utf8(source_bytes)?;
-        let next_revision = self.revision.next()?;
-        let before = self.receipt_before();
-        let imported_digest = digest(source.as_bytes());
-        self.install_unowned_source(source)?;
-        self.ownership = DocumentOwnership::Imported;
-        let acknowledgement = origin
-            .native_origin()
-            .is_some()
-            .then(|| SaveAcknowledgement {
-                origin: origin.clone(),
-                digest: imported_digest,
-            });
-        self.provenance.imported = Some(ImportedProvenance {
-            origin,
-            imported_digest,
-        });
-        self.provenance.last_saved = acknowledgement.clone();
-        self.save_acknowledgement = acknowledgement;
-        self.revision = next_revision;
-        Ok(self.finish_receipt(before))
-    }
-
     /// Replace the canonical generated backing. User-owned source is never
     /// overwritten; returning to generated later selects the new artifact.
     pub fn update_generated_artifact(
@@ -1314,191 +1052,16 @@ impl NetlistDocument {
         }
         let next_revision = self.revision.next()?;
         let before = self.receipt_before();
-        let active_generated = self.ownership == DocumentOwnership::Generated;
         self.generated_artifact = Some(generated_artifact.clone());
-        if active_generated {
-            self.source.clone_from(&generated_artifact.source);
-            self.content_digest = generated_artifact.content_digest;
-            self.dependencies
-                .clone_from(&generated_artifact.dependencies);
-            self.provenance.generated = Some(generated_artifact.provenance);
-            self.save_acknowledgement = None;
-            self.validation = None;
-            self.rebuild_derived();
-        }
-        self.revision = next_revision;
-        Ok(self.finish_receipt(before))
-    }
-
-    /// Accept a completed save only if its bytes still identify the current
-    /// buffer. This prevents a slow native or browser save from clearing the
-    /// dirty flag after a later edit.
-    pub fn acknowledge_save(
-        &mut self,
-        expected_digest: ContentDigest,
-        origin: SourceLocator,
-    ) -> Result<TransitionReceipt, DocumentError> {
-        self.ensure_current(expected_digest)?;
-        if self.ownership == DocumentOwnership::Generated {
-            return Err(DocumentError::GeneratedSourceIsReadOnly);
-        }
-        origin.validate()?;
-        let acknowledgement = SaveAcknowledgement {
-            origin,
-            digest: self.content_digest,
-        };
-        if self.save_acknowledgement.as_ref() == Some(&acknowledgement) {
-            return Ok(self.noop_receipt());
-        }
-        let next_revision = self.revision.next()?;
-        let before = self.receipt_before();
-        self.save_acknowledgement = Some(acknowledgement.clone());
-        self.provenance.last_saved = Some(acknowledgement);
-        self.revision = next_revision;
-        Ok(self.finish_receipt(before))
-    }
-
-    /// Apply exact dependency resolution metadata to the current source.
-    pub fn acknowledge_dependencies(
-        &mut self,
-        expected_digest: ContentDigest,
-        dependencies: Vec<DependencyMetadata>,
-    ) -> Result<TransitionReceipt, DocumentError> {
-        self.ensure_current(expected_digest)?;
-        let dependencies = normalize_dependencies(&self.include_directives, dependencies)?;
-        if dependencies == self.dependencies {
-            return Ok(self.noop_receipt());
-        }
-        let next_revision = self.revision.next()?;
-        let before = self.receipt_before();
-        self.dependencies = dependencies;
+        self.source.clone_from(&generated_artifact.source);
+        self.content_digest = generated_artifact.content_digest;
+        self.dependencies
+            .clone_from(&generated_artifact.dependencies);
+        self.provenance.generated = Some(generated_artifact.provenance);
         self.validation = None;
+        self.rebuild_derived();
         self.revision = next_revision;
         Ok(self.finish_receipt(before))
-    }
-
-    /// Replace one dependency's retained bytes and physical grant without
-    /// changing the logical include edge. The expected document revision
-    /// closes picker races even though the root source digest itself does not
-    /// change when another dependency is edited or relinked.
-    pub fn relink_dependency_source(
-        &mut self,
-        expected_revision: ObjectRevision,
-        logical_identity: &str,
-        locator: SourceLocator,
-        source_bytes: Vec<u8>,
-    ) -> Result<TransitionReceipt, DocumentError> {
-        if self.revision != expected_revision {
-            return Err(DocumentError::DocumentRevisionConflict {
-                expected: expected_revision.get(),
-                found: self.revision.get(),
-            });
-        }
-        locator.validate()?;
-        if locator.logical_identity() != logical_identity {
-            return Err(DocumentError::InvalidDependency(
-                "a relink cannot change the canonical logical include identity".to_owned(),
-            ));
-        }
-        let Some(index) = self
-            .dependencies
-            .iter()
-            .position(|dependency| dependency.locator.logical_identity() == logical_identity)
-        else {
-            return Err(DocumentError::InvalidDependency(format!(
-                "dependency {logical_identity:?} is no longer in the canonical closure"
-            )));
-        };
-
-        let mut dependencies = self.dependencies.clone();
-        let source = decode_utf8(source_bytes)?;
-        dependencies[index].locator = locator.clone();
-        dependencies[index].resolution = DependencyResolution::Resolved {
-            content_digest: digest(source.as_bytes()),
-            source,
-        };
-        for dependency in &mut dependencies {
-            if dependency
-                .parent
-                .as_ref()
-                .is_some_and(|parent| parent.logical_identity() == logical_identity)
-            {
-                dependency.parent = Some(locator.clone());
-            }
-        }
-
-        if self.ownership == DocumentOwnership::Generated {
-            let backing = self
-                .generated_artifact
-                .as_ref()
-                .ok_or(DocumentError::GeneratedArtifactUnavailable)?;
-            let artifact = GeneratedArtifact::try_from_utf8(
-                backing.provenance().clone(),
-                backing.source_bytes().to_vec(),
-                dependencies,
-                backing.source_map().to_vec(),
-            )?;
-            self.update_generated_artifact(backing.content_digest(), artifact)
-        } else {
-            self.acknowledge_dependencies(self.content_digest(), dependencies)
-        }
-    }
-
-    /// Rename or move one retained dependency's project-logical identity while
-    /// preserving the consumer's requested include spelling and exact source
-    /// bytes. Child edges are rebound to the successor locator in the same
-    /// document revision, so no transient broken graph can be observed.
-    pub fn rename_dependency_identity(
-        &mut self,
-        expected_revision: ObjectRevision,
-        logical_identity: &str,
-        locator: SourceLocator,
-    ) -> Result<TransitionReceipt, DocumentError> {
-        if self.revision != expected_revision {
-            return Err(DocumentError::DocumentRevisionConflict {
-                expected: expected_revision.get(),
-                found: self.revision.get(),
-            });
-        }
-        if self.ownership == DocumentOwnership::Generated {
-            return Err(DocumentError::GeneratedSourceIsReadOnly);
-        }
-        locator.validate()?;
-        if locator.logical_identity() == logical_identity {
-            return Ok(self.noop_receipt());
-        }
-        if self
-            .dependencies
-            .iter()
-            .any(|dependency| dependency.locator.logical_identity() == locator.logical_identity())
-        {
-            return Err(DocumentError::InvalidDependency(format!(
-                "dependency identity {:?} already belongs to this source closure",
-                locator.logical_identity()
-            )));
-        }
-        let Some(index) = self
-            .dependencies
-            .iter()
-            .position(|dependency| dependency.locator.logical_identity() == logical_identity)
-        else {
-            return Err(DocumentError::InvalidDependency(format!(
-                "dependency {logical_identity:?} is no longer in the canonical closure"
-            )));
-        };
-
-        let mut dependencies = self.dependencies.clone();
-        dependencies[index].locator = locator.clone();
-        for dependency in &mut dependencies {
-            if dependency
-                .parent
-                .as_ref()
-                .is_some_and(|parent| parent.logical_identity() == logical_identity)
-            {
-                dependency.parent = Some(locator.clone());
-            }
-        }
-        self.acknowledge_dependencies(self.content_digest, dependencies)
     }
 
     /// Apply diagnostics produced for the exact current content identity.
@@ -1540,18 +1103,6 @@ impl NetlistDocument {
         Ok(self.finish_receipt(before))
     }
 
-    fn install_unowned_source(&mut self, source: String) -> Result<(), DocumentError> {
-        let include_directives = parse_include_directives(&source);
-        let dependencies = normalize_dependencies(&include_directives, Vec::new())?;
-        self.content_digest = digest(source.as_bytes());
-        self.source = source;
-        self.include_directives = include_directives;
-        self.dependencies = dependencies;
-        self.save_acknowledgement = None;
-        self.validation = None;
-        Ok(())
-    }
-
     fn rebuild_derived(&mut self) {
         self.include_directives = parse_include_directives(&self.source);
     }
@@ -1567,21 +1118,16 @@ impl NetlistDocument {
         }
     }
 
-    fn receipt_before(&self) -> (ObjectRevision, DocumentOwnership, ContentDigest) {
-        (self.revision, self.ownership, self.content_digest)
+    fn receipt_before(&self) -> (ObjectRevision, ContentDigest) {
+        (self.revision, self.content_digest)
     }
 
-    fn finish_receipt(
-        &self,
-        before: (ObjectRevision, DocumentOwnership, ContentDigest),
-    ) -> TransitionReceipt {
+    fn finish_receipt(&self, before: (ObjectRevision, ContentDigest)) -> TransitionReceipt {
         TransitionReceipt {
             document_id: self.id,
             previous_revision: before.0,
             revision: self.revision,
-            previous_ownership: before.1,
-            ownership: self.ownership,
-            previous_digest: before.2,
+            previous_digest: before.1,
             content_digest: self.content_digest,
         }
     }
@@ -1607,61 +1153,18 @@ impl NetlistDocument {
             }
             validate_diagnostics(&self.source, &validation.diagnostics)?;
         }
-        if self.ownership == DocumentOwnership::Generated {
-            let Some(generated_artifact) = &self.generated_artifact else {
-                return Err(DocumentError::InvalidPersistedDocument(
-                    "generated ownership requires a canonical generated artifact".to_owned(),
-                ));
-            };
-            if self.source != generated_artifact.source
-                || self.dependencies != generated_artifact.dependencies
-                || self.provenance.generated.as_ref() != Some(&generated_artifact.provenance)
-            {
-                return Err(DocumentError::InvalidPersistedDocument(
-                    "generated ownership does not match the canonical generated artifact"
-                        .to_owned(),
-                ));
-            }
-        } else if self.generated_artifact.is_none() && self.provenance.generated.is_some() {
+        let Some(generated_artifact) = &self.generated_artifact else {
             return Err(DocumentError::InvalidPersistedDocument(
-                "authored source without a generated artifact cannot claim generated provenance"
-                    .to_owned(),
+                "a netlist document requires its generated artifact".to_owned(),
             ));
-        }
-        if self.ownership == DocumentOwnership::Generated && self.save_acknowledgement.is_some() {
-            return Err(DocumentError::InvalidPersistedDocument(
-                "generated ownership cannot carry an active save acknowledgement".to_owned(),
-            ));
-        }
-        if let Some(acknowledgement) = &self.save_acknowledgement
-            && self.provenance.last_saved.as_ref() != Some(acknowledgement)
+        };
+        if self.source != generated_artifact.source
+            || self.dependencies != generated_artifact.dependencies
+            || self.provenance.generated.as_ref() != Some(&generated_artifact.provenance)
         {
             return Err(DocumentError::InvalidPersistedDocument(
-                "active save acknowledgement is not the latest provenance save".to_owned(),
+                "the document does not match its generated artifact".to_owned(),
             ));
-        }
-        if self.ownership == DocumentOwnership::Imported {
-            let Some(imported) = &self.provenance.imported else {
-                return Err(DocumentError::InvalidPersistedDocument(
-                    "imported ownership requires imported provenance".to_owned(),
-                ));
-            };
-            if imported.imported_digest != self.content_digest {
-                return Err(DocumentError::InvalidPersistedDocument(
-                    "an unedited imported source must match its import digest".to_owned(),
-                ));
-            }
-            if imported.origin.native_origin().is_some() {
-                if self.saved_digest() != Some(self.content_digest) {
-                    return Err(DocumentError::InvalidPersistedDocument(
-                        "an imported native source must retain its persisted digest".to_owned(),
-                    ));
-                }
-            } else if self.save_acknowledgement.is_some() {
-                return Err(DocumentError::InvalidPersistedDocument(
-                    "a browser import cannot claim a reopenable saved-source binding".to_owned(),
-                ));
-            }
         }
         Ok(())
     }
@@ -1672,12 +1175,10 @@ struct NetlistDocumentRef<'a> {
     schema_version: u32,
     id: NetlistDocumentId,
     revision: ObjectRevision,
-    ownership: DocumentOwnership,
     source: &'a str,
     content_digest: ContentDigest,
     generated_artifact: &'a Option<GeneratedArtifact>,
     provenance: &'a SourceProvenance,
-    save_acknowledgement: &'a Option<SaveAcknowledgement>,
     dependencies: &'a [DependencyMetadata],
     validation: &'a Option<ValidationReport>,
 }
@@ -1691,12 +1192,10 @@ impl Serialize for NetlistDocument {
             schema_version: DOCUMENT_SCHEMA_VERSION,
             id: self.id,
             revision: self.revision,
-            ownership: self.ownership,
             source: &self.source,
             content_digest: self.content_digest,
             generated_artifact: &self.generated_artifact,
             provenance: &self.provenance,
-            save_acknowledgement: &self.save_acknowledgement,
             dependencies: &self.dependencies,
             validation: &self.validation,
         }
@@ -1710,12 +1209,10 @@ struct NetlistDocumentData {
     schema_version: u32,
     id: NetlistDocumentId,
     revision: ObjectRevision,
-    ownership: DocumentOwnership,
     source: String,
     content_digest: ContentDigest,
     generated_artifact: Option<GeneratedArtifact>,
     provenance: SourceProvenance,
-    save_acknowledgement: Option<SaveAcknowledgement>,
     dependencies: Vec<DependencyMetadata>,
     validation: Option<ValidationReport>,
 }
@@ -1736,13 +1233,11 @@ impl<'de> Deserialize<'de> for NetlistDocument {
         let value = Self {
             id: data.id,
             revision: data.revision,
-            ownership: data.ownership,
             include_directives,
             source: data.source,
             content_digest: data.content_digest,
             generated_artifact: data.generated_artifact,
             provenance: data.provenance,
-            save_acknowledgement: data.save_acknowledgement,
             dependencies: data.dependencies,
             validation: data.validation,
         };
@@ -1782,10 +1277,6 @@ pub enum DocumentError {
     },
     #[error("this source document has no generated baseline")]
     GeneratedArtifactUnavailable,
-    #[error("source ownership {0:?} is not editable")]
-    SourceIsNotEditable(DocumentOwnership),
-    #[error("generated source is read-only; make an editable copy before saving")]
-    GeneratedSourceIsReadOnly,
     #[error("invalid dependency metadata: {0}")]
     InvalidDependency(String),
     #[error("invalid validation diagnostic: {0}")]

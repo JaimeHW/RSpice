@@ -19,9 +19,8 @@ use crate::netlist_preparation::dependencies::{
     expand_generated_dependencies_with_sealed_sources, expand_manual_dependencies,
 };
 use crate::netlist_preparation::{
-    contains_external_include_directive, deferred_external_source_reason, executable_logical_lines,
-    measurements, owned_source, reject_deferred_external_sources_with_project_runtimes,
-    validated_executable_hierarchy,
+    deferred_external_source_reason, executable_logical_lines, measurements,
+    reject_deferred_external_sources_with_project_runtimes, validated_executable_hierarchy,
 };
 use crate::output_contract::selection::{effective_plan_capture, projection_occurrence_nets};
 use crate::preparation::{QueuedAnalysis, validate_prepared_periodic_sources};
@@ -102,11 +101,10 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
     }
 }
 
+/// A deck a manual run executes: its text as written, and the file it is
+/// read from, which its relative includes resolve against.
 pub struct ManualSourceInputs<'a> {
     pub source: &'a str,
-    pub descriptor: Option<&'a rspice_design::owned_netlist::OwnedNetlistDescriptor>,
-    pub generated_artifact: Option<&'a rspice_design::netlist_document::GeneratedArtifact>,
-    pub owned: bool,
     pub origin: Option<&'a Path>,
 }
 
@@ -689,7 +687,7 @@ pub fn manual_deck_hdl<R, A>(
     })
 }
 
-/// Compose and expand the manual deck `manual` as its run executes it. With
+/// Expand the manual deck `manual` as its run executes it. With
 /// `seal_hdl`, the Verilog-A sources its own lines name are read and sealed
 /// first, and their lines name the sealed runtimes; without, they are left
 /// as written, for a caller that only reads the deck's cells.
@@ -699,7 +697,6 @@ fn expand_manual_deck<R, A>(
     seal_hdl: bool,
 ) -> Result<ExpandedManualDeck, PreparationError> {
     let source = manual.source;
-    let owned_active = manual.owned;
     if source.trim().is_empty() {
         return Err(PreparationError::new(
             PreparationStage::SourceChecks,
@@ -707,20 +704,6 @@ fn expand_manual_deck<R, A>(
         ));
     }
 
-    let owned_materialized = if owned_active {
-        owned_source::compose_owned_netlist_execution_source(
-            manual.descriptor,
-            manual.generated_artifact,
-            source,
-        )
-        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?
-    } else {
-        source.to_owned()
-    };
-    let descriptor = owned_active.then_some(manual.descriptor).flatten();
-    let owned_materialized =
-        owned_source::adapt_owned_execution_profile(descriptor, &owned_materialized)
-            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     let has_project_technology = inputs.technology.project_technology_in_effect();
     let sealed_models = if has_project_technology {
         inputs.technology.seal_project_execution_model_sources()
@@ -745,7 +728,7 @@ fn expand_manual_deck<R, A>(
         Vec::new,
         rspice_model_library::ModelExecutionPlan::model_cards,
     );
-    let composed = manual_deck::compose_manual_deck_source(&owned_materialized);
+    let composed = manual_deck::compose_manual_deck_source(source);
     let mut composed = crate::analysis_preparation::apply_reference_model_bindings_to_netlist(
         &composed,
         &model_cards,
@@ -764,12 +747,6 @@ fn expand_manual_deck<R, A>(
         );
     }
     let origin = manual.origin;
-    if origin.is_none() && contains_external_include_directive(&composed) {
-        return Err(PreparationError::new(
-            PreparationStage::SourceChecks,
-            "Relative .include/.inc/.lib sources require an imported deck origin before they can be sealed",
-        ));
-    }
     let sealed_hdl = if seal_hdl {
         crate::netlist_preparation::seal_deck_hdl_sources(
             &composed,
@@ -808,11 +785,6 @@ fn expand_manual_deck<R, A>(
         expanded,
         origin.and_then(Path::parent),
     );
-    let expanded = owned_source::bind_execution_profile(
-        descriptor.and_then(|descriptor| descriptor.execution_profile),
-        expanded,
-    )
-    .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     let expanded = rebind_project_veriloga_source_keys(
         inputs.technology.project.id(),
         inputs.project_sources,
@@ -1415,9 +1387,6 @@ mod tests {
     fn manual<'a>(source: &'a str, origin: &'a Path) -> ManualSourceInputs<'a> {
         ManualSourceInputs {
             source,
-            descriptor: None,
-            generated_artifact: None,
-            owned: false,
             origin: Some(origin),
         }
     }

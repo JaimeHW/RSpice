@@ -382,8 +382,8 @@ impl ProjectWorkspace {
         Ok(())
     }
 
-    pub fn set_netlist_source_dirty(&mut self, dirty: bool) {
-        self.netlist_source_dirty = dirty;
+    pub fn set_decks_dirty(&mut self, dirty: bool) {
+        self.decks_dirty = dirty;
     }
 
     /// Replace exact source bytes and enter the ordinary project dirty
@@ -597,73 +597,11 @@ impl ProjectWorkspace {
         self.project_sources_dirty = false;
     }
 
-    /// Whether the Netlist workspace owns an editable source deck.
-    ///
-    /// A missing source is intentional: in that state the editor is showing a
-    /// generated schematic artifact and must never promote edits implicitly.
-    pub fn has_editable_netlist_source(&self) -> bool {
-        self.netlist_source.is_some()
-    }
-
-    /// Create a project-owned source deck from the current generated artifact.
-    ///
-    /// This is the one ownership transition used by the explicit Netlist
-    /// workspace "Make editable copy" action. Creating the source changes the
-    /// persisted project, so it participates in the ordinary project dirty and
-    /// save lifecycle on both native and browser targets.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn make_netlist_editable_copy(&mut self, generated: &str) -> bool {
-        if self.netlist_source.is_some() {
-            return false;
-        }
-
-        self.netlist_source = Some(generated.to_owned());
-        self.netlist_source_path = None;
-        self.netlist_source_dirty = true;
-        true
-    }
-
-    /// Replace an existing project-owned source deck.
-    ///
-    /// Returns `false` for generated artifacts instead of silently creating an
-    /// editable source. That guard makes editor, completion, and tuner writes
-    /// safe even if a caller accidentally reaches a mutation path while the
-    /// generated document is active.
-    pub fn replace_editable_netlist_source(&mut self, source: String) -> bool {
-        let Some(owned_source) = self.netlist_source.as_mut() else {
-            return false;
-        };
-
-        if *owned_source == source {
-            return false;
-        }
-
-        *owned_source = source;
-        self.netlist_source_dirty = true;
-        true
-    }
-
-    /// Remove the project-owned source and return to schematic-generated output.
-    ///
-    /// Removing persisted source ownership is itself a project modification;
-    /// the dirty bit remains set until an actual project save succeeds.
-    pub fn return_to_generated_netlist(&mut self) -> bool {
-        if self.netlist_source.take().is_none() {
-            return false;
-        }
-
-        self.netlist_document = None;
-        self.netlist_descriptor = None;
-        self.netlist_source_path = None;
-        self.netlist_source_dirty = true;
-        true
-    }
-
     pub fn mark_all_clean(&mut self) {
         for view in &mut self.open_views {
             view.dirty = false;
         }
-        self.netlist_source_dirty = false;
+        self.decks_dirty = false;
         self.project_sources_dirty = false;
         self.project_metadata_dirty = false;
         self.report_documents_dirty = false;
@@ -677,7 +615,7 @@ impl ProjectWorkspace {
 
     pub fn any_dirty(&self) -> bool {
         self.open_views.iter().any(|view| view.dirty)
-            || self.netlist_source_dirty
+            || self.decks_dirty
             || self.project_sources_dirty
             || self.project_metadata_dirty
             || self.report_documents_dirty

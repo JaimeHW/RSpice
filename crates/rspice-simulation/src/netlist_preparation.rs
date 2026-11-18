@@ -15,7 +15,6 @@ pub mod startup_nets;
 pub use include_search::{IncludeSearchChain, IncludeSearchEntry};
 
 pub mod measurements;
-pub mod owned_source;
 
 mod external_sources;
 mod hdl_sources;

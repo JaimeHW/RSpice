@@ -1,8 +1,8 @@
 //! Project-owned documents, configuration and revisioned catalogs.
 
 use crate::OpenCellView;
+use rspice_design::deck::ProjectDeck;
 use rspice_design::library::ViewType;
-use rspice_design::owned_netlist::*;
 use rspice_design::project_sources::*;
 use rspice_design::stamped::Stamped;
 use rspice_design_model::cell_view::{CellViewRef, DEFAULT_SCHEMATIC_VIEW};
@@ -21,7 +21,6 @@ use rspice_vocabulary::product::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
 mod annotation_restore;
 pub use annotation_restore::PreparedAnnotation;
 mod catalog;
@@ -159,40 +158,19 @@ pub struct ProjectWorkspace {
         skip_serializing_if = "rspice_design::stimulus_library::library::StimulusLibrary::is_empty"
     )]
     pub stimulus_library: rspice_design::stimulus_library::library::StimulusLibrary,
-    /// Manually edited netlist source. When set, simulations run this
-    /// deck instead of regenerating from the schematic (text-first mode);
-    /// `None` means the netlist view shows the generated artifact.
-    #[serde(default)]
-    pub netlist_source: Option<String>,
-    /// Canonical owned-source identity, provenance, generated base, sealed
-    /// dependency metadata, revision, and validation evidence. The legacy
-    /// `netlist_source` projection remains for backwards compatibility and
-    /// must exactly match this document when both are present.
-    #[serde(default)]
-    pub netlist_document: Option<rspice_design::netlist_document::NetlistDocument>,
-    /// Ownership-dialog selection for the project-owned source artifact.
-    #[serde(default)]
-    pub netlist_descriptor: Option<OwnedNetlistDescriptor>,
-    /// Complete inactive top-level source decks. Only the active deck is
-    /// projected into `netlist_source`/`netlist_document` and may execute.
+    /// The SPICE decks the project refers to. A deck is a file: the project
+    /// keeps where it is, never its text.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub retained_netlist_decks: Vec<RetainedOwnedNetlistDeck>,
+    pub decks: Vec<ProjectDeck>,
     /// Project-owned source documents, edited where their Verilog-A cell
     /// views are open. Older projects intentionally restore an
     /// empty registry rather than receiving demonstration content.
     #[serde(default, skip_serializing_if = "ProjectSourceRegistry::is_empty")]
     pub project_sources: ProjectSourceRegistry,
-    /// Native filesystem origin for `netlist_source`, used to resolve relative
-    /// `.include`/`.lib` paths for imported decks. Edits retain this origin:
-    /// changing document bytes does not change the directory against which its
-    /// authored relative dependencies resolve. Browser imports have no native
-    /// path authority and therefore leave it absent.
-    #[serde(default)]
-    pub netlist_source_path: Option<PathBuf>,
-    /// Runtime dirty bit for `netlist_source`; skipped because dirty state is
-    /// session-local while the source itself is persisted with the project.
+    /// Runtime dirty state for `decks`: a deck added or removed since the
+    /// project was last saved.
     #[serde(default, skip)]
-    pub netlist_source_dirty: bool,
+    pub decks_dirty: bool,
     /// Runtime dirty state for `project_sources`. Source bytes and validation
     /// identities persist; dirty state is derived against the accepted project
     /// and remains session-local.
@@ -266,13 +244,9 @@ impl Default for ProjectWorkspace {
             visualization_documents: Vec::new(),
             added_lines: Vec::new(),
             stimulus_library: rspice_design::stimulus_library::library::StimulusLibrary::default(),
-            netlist_source: None,
-            netlist_document: None,
-            netlist_descriptor: None,
-            retained_netlist_decks: Vec::new(),
+            decks: Vec::new(),
             project_sources: ProjectSourceRegistry::default(),
-            netlist_source_path: None,
-            netlist_source_dirty: false,
+            decks_dirty: false,
             project_sources_dirty: false,
             project_metadata_dirty: false,
             report_documents_dirty: false,

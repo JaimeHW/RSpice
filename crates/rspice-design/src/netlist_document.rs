@@ -1,11 +1,9 @@
-//! The project-owned netlist source document.
+//! The generated netlist document, and the include outline and find/replace
+//! every netlist text shares.
 //!
-//! `ProjectWorkspace` stores a `NetlistDocument` directly, so the document
-//! model, its include-directive outline, and its find/replace live here rather
-//! than beside the Code & Automation surface that edits them. None of this
-//! module touches egui: it owns source text, provenance, validation identity,
-//! and document transitions, which must behave identically on native and in
-//! the browser.
+//! None of this module touches egui: it owns source text, provenance,
+//! validation identity and document transitions, which must behave
+//! identically on native and in the browser.
 
 mod document;
 mod outline;
@@ -13,9 +11,8 @@ mod search;
 
 pub use document::{
     DependencyMetadata, DependencyResolution, DependencySourceAuthority, DiagnosticSeverity,
-    DocumentOwnership, GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry,
-    GenerationInput, NetlistDocument, NetlistDocumentId, SourceLocator, ValidationDiagnostic,
-    content_digest,
+    GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
+    NetlistDocument, NetlistDocumentId, SourceLocator, ValidationDiagnostic, content_digest,
 };
 pub use outline::{
     NetlistSourceIndex, OutlineEntry, OutlineEntryKind, OutlineSection, OutlineSectionKind,

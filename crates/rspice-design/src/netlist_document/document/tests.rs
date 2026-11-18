@@ -1,8 +1,8 @@
-//! Tests for the netlist document's edit and schema rules.
+//! Tests for the generated netlist document's rules.
 //!
-//! Generated source cannot be edited or saved directly, an editable
-//! replacement is one atomic transition, and a document from a future schema
-//! is rejected rather than partially understood.
+//! A refresh is one atomic transition, validation is bound to exact content,
+//! and a document from a future schema is rejected rather than partially
+//! understood.
 
 use serde_json::Value;
 
@@ -52,171 +52,12 @@ fn generated_document_preserves_exact_utf8_and_crlf_bytes() {
         document.content_digest(),
         content_digest(GENERATED.as_bytes())
     );
-    assert_eq!(document.ownership(), DocumentOwnership::Generated);
-    assert!(!document.is_dirty());
     assert_eq!(document.include_directives().len(), 1);
     assert_eq!(document.dependencies().len(), 1);
     assert!(matches!(
         document.dependencies()[0].resolution(),
         DependencyResolution::Unresolved
     ));
-}
-
-#[test]
-fn invalid_utf8_never_partially_mutates_a_document() {
-    let mut document = document();
-    let before = document.clone();
-    let error = document
-        .import_source(
-            document.content_digest(),
-            locator("bad.cir"),
-            vec![b'R', 0xff],
-        )
-        .expect_err("invalid UTF-8");
-    assert!(matches!(error, DocumentError::InvalidUtf8 { .. }));
-    assert_eq!(document, before);
-}
-
-#[test]
-fn imported_origin_survives_make_editable_edit_and_save_as() {
-    let mut document = document();
-    let imported = b"Imported deck\nR9 x 0 9k\n.end\n".to_vec();
-    let import_locator = locator("imports/a.cir")
-        .with_native_origin("C:/work/imports/a.cir")
-        .expect("native origin");
-    document
-        .import_source(document.content_digest(), import_locator, imported)
-        .expect("import");
-    assert_eq!(document.ownership(), DocumentOwnership::Imported);
-    assert!(!document.is_dirty());
-    let import_origin = document
-        .provenance()
-        .imported()
-        .expect("import provenance")
-        .clone();
-
-    document
-        .make_editable(document.content_digest())
-        .expect("make editable");
-    document
-        .replace_editable_source(
-            document.content_digest(),
-            b"Imported deck\nR9 x 0 10k\n.end\n".to_vec(),
-        )
-        .expect("edit");
-    assert!(document.is_dirty());
-    document
-        .acknowledge_save(document.content_digest(), locator("saved/b.cir"))
-        .expect("save as");
-
-    assert_eq!(document.provenance().imported(), Some(&import_origin));
-    assert_eq!(
-        document
-            .save_acknowledgement()
-            .expect("save acknowledgement")
-            .origin()
-            .locator(),
-        "saved/b.cir"
-    );
-    assert!(!document.is_dirty());
-}
-
-#[test]
-fn browser_import_retains_provenance_without_claiming_a_saved_binding() {
-    let source = b"Browser import\nR1 1 0 1k\n.end\n".to_vec();
-    let document = NetlistDocument::from_imported_source(
-        NetlistDocumentId::new(),
-        locator("browser-import/deck.cir"),
-        source,
-        Vec::new(),
-    )
-    .expect("browser import");
-
-    assert_eq!(document.ownership(), DocumentOwnership::Imported);
-    assert!(document.provenance().imported().is_some());
-    assert!(document.save_acknowledgement().is_none());
-    assert!(document.saved_digest().is_none());
-    assert!(document.is_dirty());
-}
-
-#[test]
-fn stale_edit_save_validation_and_dependency_results_are_rejected() {
-    let mut document = document();
-    let generated_digest = document.content_digest();
-    document.make_editable(generated_digest).expect("editable");
-    document
-        .replace_editable_source(
-            generated_digest,
-            b"edited\n.include new.lib\nR1 1 0 2k\n.end\n".to_vec(),
-        )
-        .expect("edit");
-    let after_edit = document.clone();
-
-    assert!(matches!(
-        document.acknowledge_save(generated_digest, locator("stale.cir")),
-        Err(DocumentError::ContentConflict { .. })
-    ));
-    assert!(matches!(
-        document.acknowledge_validation(generated_digest, Vec::new()),
-        Err(DocumentError::ContentConflict { .. })
-    ));
-    assert!(matches!(
-        document.acknowledge_dependencies(generated_digest, Vec::new()),
-        Err(DocumentError::ContentConflict { .. })
-    ));
-    assert_eq!(document, after_edit);
-}
-
-#[test]
-fn generated_refresh_never_overwrites_user_owned_source() {
-    let mut document = document();
-    document
-        .make_editable(document.content_digest())
-        .expect("editable");
-    let owned_source = "owned\nR7 n 0 7k\n.end\n";
-    document
-        .replace_editable_source(document.content_digest(), owned_source.as_bytes().to_vec())
-        .expect("edit");
-    let replacement = generated("new generated\nR2 n 0 2k\n.end\n", b"input-b");
-    let replacement_digest = replacement.content_digest();
-    document
-        .update_generated_artifact(
-            document.generated_artifact().unwrap().content_digest(),
-            replacement,
-        )
-        .expect("refresh backing");
-
-    assert_eq!(document.source(), owned_source);
-    assert_eq!(document.ownership(), DocumentOwnership::Editable);
-    assert_eq!(
-        document.generated_artifact().unwrap().content_digest(),
-        replacement_digest
-    );
-}
-
-#[test]
-fn editable_copy_is_a_distinct_unsaved_document_and_primary_is_unchanged() {
-    let primary = document();
-    let primary_before = primary.clone();
-    let owned_id = NetlistDocumentId::try_from_uuid(
-        Uuid::parse_str("9702bcf0-e52b-4eb5-bdc1-1421d11205c1").expect("UUID"),
-    )
-    .expect("identity");
-    let owned = primary
-        .create_editable_copy(owned_id, primary.content_digest())
-        .expect("editable copy");
-
-    assert_eq!(primary, primary_before);
-    assert_eq!(owned.id(), owned_id);
-    assert_ne!(owned.id(), primary.id());
-    assert_eq!(owned.ownership(), DocumentOwnership::Editable);
-    assert_eq!(owned.source_bytes(), primary.source_bytes());
-    assert_eq!(
-        owned.generated_artifact().unwrap().content_digest(),
-        primary.generated_artifact().unwrap().content_digest()
-    );
-    assert!(owned.is_dirty());
-    assert!(owned.validation().is_none());
 }
 
 #[test]
@@ -237,29 +78,23 @@ fn stale_generated_refresh_is_transactional() {
 }
 
 #[test]
-fn source_changes_invalidate_validation_and_dependency_resolution() {
+fn a_refresh_revokes_validation_and_resolves_its_own_includes() {
     let mut document = document();
-    let resolved = document.dependencies()[0]
-        .clone()
-        .resolve_utf8(b"model member\n.model core r r=1k\n".to_vec())
-        .expect("resolved dependency");
-    document
-        .acknowledge_dependencies(document.content_digest(), vec![resolved])
-        .expect("dependency acknowledgement");
     document
         .acknowledge_validation(document.content_digest(), Vec::new())
         .expect("validation receipt");
     assert!(document.validation().is_some());
 
+    let current = document
+        .generated_artifact()
+        .expect("generated")
+        .content_digest();
     document
-        .make_editable(document.content_digest())
-        .expect("editable");
-    document
-        .replace_editable_source(
-            document.content_digest(),
-            b"changed\n.include other.lib\nR1 1 0 1k\n.end\n".to_vec(),
+        .update_generated_artifact(
+            current,
+            generated("changed\n.include other.lib\nR1 1 0 1k\n.end\n", b"input-b"),
         )
-        .expect("edit");
+        .expect("refresh");
     assert!(document.validation().is_none());
     assert!(matches!(
         document.dependencies()[0].resolution(),
@@ -270,16 +105,11 @@ fn source_changes_invalidate_validation_and_dependency_resolution() {
 
 #[test]
 fn validation_is_bound_to_exact_content() {
-    let mut document = document();
-    document
-        .make_editable(document.content_digest())
-        .expect("editable");
-    document
-        .replace_editable_source(
-            document.content_digest(),
-            b"broken\nR1 only-one-node\n.end\n".to_vec(),
-        )
-        .expect("edit");
+    let mut document = NetlistDocument::from_generated(
+        NetlistDocumentId::new(),
+        generated("broken\nR1 only-one-node\n.end\n", b"input-a"),
+    )
+    .expect("document");
     let diagnostic =
         ValidationDiagnostic::try_new(DiagnosticSeverity::Error, "invalid resistor", 2, 1)
             .expect("diagnostic");
@@ -301,16 +131,11 @@ fn validation_is_bound_to_exact_content() {
 
 #[test]
 fn diagnostic_positions_are_unicode_scalar_columns_and_checked() {
-    let mut document = document();
-    document
-        .make_editable(document.content_digest())
-        .expect("editable");
-    document
-        .replace_editable_source(
-            document.content_digest(),
-            "unicode\nRμ μ 0 1k\n.end\n".as_bytes().to_vec(),
-        )
-        .expect("edit");
+    let mut document = NetlistDocument::from_generated(
+        NetlistDocumentId::new(),
+        generated("unicode\nRμ μ 0 1k\n.end\n", b"input-a"),
+    )
+    .expect("document");
     let diagnostic = ValidationDiagnostic::try_new(DiagnosticSeverity::Warning, "review μ", 2, 4)
         .expect("diagnostic");
     document
@@ -328,42 +153,6 @@ fn diagnostic_positions_are_unicode_scalar_columns_and_checked() {
         Err(DocumentError::InvalidDiagnostic(_))
     ));
     assert_eq!(document, before);
-}
-
-#[test]
-fn dependency_metadata_requires_exact_direct_relationships() {
-    let mut document = document();
-    let wrong = DependencyMetadata::unresolved_direct(0, locator("models/wrong.lib"));
-    let before = document.clone();
-    assert!(matches!(
-        document.acknowledge_dependencies(document.content_digest(), vec![wrong]),
-        Err(DocumentError::InvalidDependency(_))
-    ));
-    assert_eq!(document, before);
-
-    let parent = locator("models/core.lib");
-    let resolved_parent = document.dependencies()[0]
-        .clone()
-        .resolve_utf8(b"core models\n.include models/transistors.lib\n".to_vec())
-        .expect("resolved parent");
-    let child =
-        DependencyMetadata::unresolved_transitive(parent, 0, locator("models/transistors.lib"))
-            .with_resolution(DependencyResolution::Missing {
-                reason: "not present in sealed source bundle".to_owned(),
-            })
-            .expect("missing dependency");
-    document
-        .acknowledge_validation(document.content_digest(), Vec::new())
-        .expect("validation receipt");
-    assert!(document.validation().is_some());
-    document
-        .acknowledge_dependencies(document.content_digest(), vec![resolved_parent, child])
-        .expect("valid transitive metadata");
-    assert_eq!(document.dependencies().len(), 2);
-    assert!(
-        document.validation().is_none(),
-        "dependency identity changes must revoke source validation"
-    );
 }
 
 #[test]
@@ -648,31 +437,33 @@ fn dependency_graph_rejects_missing_ambiguous_and_cyclic_edges() {
 fn revision_and_identity_are_stable_and_noops_do_not_create_revisions() {
     let mut document = document();
     let id = document.id();
+    let current = document
+        .generated_artifact()
+        .expect("generated")
+        .content_digest();
     let receipt = document
-        .make_editable(document.content_digest())
+        .update_generated_artifact(current, generated("next\n.end\n", b"input-b"))
         .expect("transition");
     assert_eq!(receipt.document_id(), id);
     assert_eq!(document.id(), id);
-    assert_eq!(receipt.previous_ownership(), DocumentOwnership::Generated);
-    assert_eq!(receipt.ownership(), DocumentOwnership::Editable);
     assert!(receipt.revision() > receipt.previous_revision());
+    let current = document
+        .generated_artifact()
+        .expect("generated")
+        .content_digest();
+    let noop = document
+        .update_generated_artifact(current, generated("next\n.end\n", b"input-b"))
+        .expect("noop");
+    assert_eq!(noop.revision(), receipt.revision());
 }
 
 #[test]
 fn serde_round_trip_rebuilds_derived_navigation_without_losing_state() {
-    let mut document = document();
-    document
-        .import_source(
-            document.content_digest(),
-            locator("imports/unicode.cir"),
-            "Imported μ\n.include μ.lib\nRμ μ 0 1k\n.end\n"
-                .as_bytes()
-                .to_vec(),
-        )
-        .expect("import");
-    document
-        .make_editable(document.content_digest())
-        .expect("editable");
+    let document = NetlistDocument::from_generated(
+        NetlistDocumentId::new(),
+        generated("Generated μ\n.include μ.lib\nRμ μ 0 1k\n.end\n", b"input-a"),
+    )
+    .expect("document");
     let json = serde_json::to_string(&document).expect("serialize");
     let restored: NetlistDocument = serde_json::from_str(&json).expect("restore");
 
@@ -739,23 +530,6 @@ fn deserialization_rejects_future_schema_and_stale_validation() {
     let mut value = serde_json::to_value(&document).expect("serialize");
     value["validation"]["content_digest"] = Value::String(content_digest(b"other").to_string());
     assert!(serde_json::from_value::<NetlistDocument>(value).is_err());
-}
-
-#[test]
-fn generated_source_cannot_be_saved_or_edited_directly() {
-    let mut document = document();
-    assert_eq!(
-        document
-            .acknowledge_save(document.content_digest(), locator("out.cir"))
-            .expect_err("read only"),
-        DocumentError::GeneratedSourceIsReadOnly
-    );
-    assert!(matches!(
-        document.replace_editable_source(document.content_digest(), b"replacement".to_vec()),
-        Err(DocumentError::SourceIsNotEditable(
-            DocumentOwnership::Generated
-        ))
-    ));
 }
 
 #[test]
