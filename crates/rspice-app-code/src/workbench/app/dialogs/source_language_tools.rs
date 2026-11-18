@@ -365,10 +365,10 @@ pub(in crate::workbench) fn render_deck_rename_form(
     } else if unchanged {
         None
     } else {
-        rename.plan(cx.model).as_ref().err().cloned()
+        rename.plan().as_ref().err().cloned()
     };
     let plan = (refusal.is_none() && !unchanged)
-        .then(|| rename.plan(cx.model).as_ref().ok().cloned())
+        .then(|| rename.plan().as_ref().ok().cloned())
         .flatten();
     let status = match (refusal.as_deref(), unchanged) {
         (Some(refusal), _) => Err(refusal),
@@ -437,18 +437,15 @@ pub(in crate::workbench) fn render_deck_rename_form(
         rename.error = None;
     }
     match choice {
-        DialogChoice::Primary => match references::commit_rename(
-            cx.model,
-            &mut cx.state.netlist,
-            &mut cx.state.netlist_open_documents,
-            &mut rename,
-        ) {
-            Ok(done) => cx.wb.prompt(done),
-            Err(error) => {
-                rename.error = Some(error);
-                cx.state.deck_rename = Some(rename);
+        DialogChoice::Primary => {
+            match references::commit_rename(cx.model, &mut cx.state.netlist, &mut rename) {
+                Ok(done) => cx.wb.prompt(done),
+                Err(error) => {
+                    rename.error = Some(error);
+                    cx.state.deck_rename = Some(rename);
+                }
             }
-        },
+        }
         DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {}
         DialogChoice::None => cx.state.deck_rename = Some(rename),
     }

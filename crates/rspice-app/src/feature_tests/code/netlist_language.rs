@@ -39,7 +39,7 @@ fn a_deck_finding_names_the_decks_file_and_its_row_goes_to_its_line() {
     let mut app = RSpiceApp::test_instance();
     assert!(
         app.state
-            .apply_imported_netlist(deck.to_owned(), None, "amp_tb.cir")
+            .open_test_deck(deck.to_owned(), None, "amp_tb.cir")
     );
     app.state.workbench.workspace = Workspace::Netlist;
     let ctx = egui::Context::default();

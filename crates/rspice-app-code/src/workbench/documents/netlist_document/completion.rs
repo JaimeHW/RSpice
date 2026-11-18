@@ -755,7 +755,7 @@ mod tests {
     /// selected row's note.
     fn offered(deck: &str, token: &str) -> (Vec<(&'static str, String, String)>, String) {
         let mut harness = crate::workbench::code::tests::harness();
-        super::super::fixtures::seed_owned_deck(
+        super::super::fixtures::seed_deck(
             &mut harness.model,
             &mut harness.state.netlist,
             deck,

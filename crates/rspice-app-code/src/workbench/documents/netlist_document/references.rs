@@ -7,7 +7,7 @@
 //! them. A rename refuses, and says where and why, rather than leave the
 //! deck reading something else: a read of the name the index cannot bind
 //! (inside a string, an expression it does not read, a `.control` block),
-//! a file the project cannot write, or a new name a reader of the old one
+//! a file not open beside the deck, or a new name a reader of the old one
 //! would already see.
 
 use std::collections::BTreeMap;
@@ -80,26 +80,46 @@ const fn kind_word(kind: DeckSymbolKind) -> &'static str {
 }
 
 /// The texts `index` was built from, one to a file in its order, read from
-/// the root document it was built for; `None` once any of them has changed.
+/// the open deck and its includes, or the generated netlist and the files it
+/// includes; `None` once any of them has changed.
 fn indexed_texts(
     model: &Model,
     netlist: &NetlistDocumentState,
     index: &NetlistProjectIndex,
 ) -> Option<Arc<[String]>> {
-    let document = canonical_root_document_in(model, netlist, index.root()?)?;
+    let root = index.root()?;
     let texts = (0..index.deck().files().len())
-        .map(|file| match index.file_dependency(file) {
-            None => Some(document.source().to_owned()),
-            Some(identity) => document
-                .dependencies()
-                .iter()
-                .find(|dependency| dependency.locator().logical_identity() == identity)
-                .and_then(crate::state::DependencyMetadata::source)
-                .map(str::to_owned),
-        })
+        .map(|file| file_text(model, netlist, root, index.file_dependency(file)))
         .collect::<Option<Vec<_>>>()?;
     let borrowed = texts.iter().map(String::as_str).collect::<Vec<_>>();
     index.indexed(&borrowed).then(|| texts.into())
+}
+
+/// The text of the file `identity` names under `root`, the root itself for
+/// `None`.
+fn file_text(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    root: ActiveNetlistDocument,
+    identity: Option<&str>,
+) -> Option<String> {
+    if root == ActiveNetlistDocument::OwnedSource {
+        return netlist
+            .open_deck
+            .as_ref()?
+            .file(identity)
+            .map(|file| file.text.clone());
+    }
+    let document = canonical_root_document_in(model, netlist, root)?;
+    match identity {
+        None => Some(document.source().to_owned()),
+        Some(identity) => document
+            .dependencies()
+            .iter()
+            .find(|dependency| dependency.locator().logical_identity() == identity)
+            .and_then(crate::state::DependencyMetadata::source)
+            .map(str::to_owned),
+    }
 }
 
 /// The name under the caret of the source the editor shows, as the deck's
@@ -291,6 +311,8 @@ pub(crate) struct DeckRename {
     pub(crate) error: Option<String>,
     /// The revision of the deck the name was read from.
     revision: Option<u64>,
+    /// The includes open beside the deck, which a rename may change.
+    writable: Vec<String>,
     planned: Option<(String, Result<RenamePlan, String>)>,
 }
 
@@ -338,11 +360,21 @@ impl DeckRename {
         }
         let caret = name_at_caret(model, netlist)?;
         let replacement = caret.written.clone();
+        let writable = netlist
+            .open_deck
+            .iter()
+            .flat_map(|deck| {
+                deck.includes
+                    .iter()
+                    .map(super::super::deck_files::OpenFile::key)
+            })
+            .collect();
         Ok(Self {
             caret,
             replacement,
             error: None,
             revision: deck_revision(model, netlist),
+            writable,
             planned: None,
         })
     }
@@ -362,9 +394,8 @@ impl DeckRename {
         self.new_name().is_empty() || self.new_name() == self.caret.written
     }
 
-    /// What renaming to the new name does, or why it refuses: worked out
-    /// against the files the project can write in `model`.
-    pub(crate) fn plan(&mut self, model: &Model) -> &Result<RenamePlan, String> {
+    /// What renaming to the new name does, or why it refuses.
+    pub(crate) fn plan(&mut self) -> &Result<RenamePlan, String> {
         let new_name = self.new_name().to_owned();
         if self
             .planned
@@ -374,29 +405,17 @@ impl DeckRename {
             self.planned = None;
         }
         let caret = &self.caret;
+        let writable = &self.writable;
         &self
             .planned
             .get_or_insert_with(|| {
-                let plan = plan(caret, &new_name, |identity| owned_include(model, identity));
+                let plan = plan(caret, &new_name, |identity| {
+                    writable.iter().any(|open| open == identity)
+                });
                 (new_name.clone(), plan)
             })
             .1
     }
-}
-
-/// Whether the project writes the include `identity`.
-fn owned_include(model: &Model, identity: &str) -> bool {
-    model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref()
-        .is_some_and(|descriptor| {
-            descriptor
-                .owned_includes
-                .iter()
-                .any(|include| include.logical_identity == identity)
-        })
 }
 
 /// Whether `name` is one a deck reads as a single name.
@@ -452,7 +471,7 @@ fn plan(
             && !writable(identity)
         {
             return Err(format!(
-                "{} is read-only, so {old} cannot be renamed in it.",
+                "{} is not open beside the deck, so {old} cannot be renamed in it.",
                 caret.index.file_name(file)
             ));
         }
@@ -676,11 +695,15 @@ pub(crate) fn still_current(
     indexed_texts(model, netlist, &caret.index).is_some_and(|texts| texts == caret.texts)
 }
 
-/// The revision of the deck the editor's names are read from.
+/// The revision of the deck the editor's names are read from: the editor's
+/// of the open deck's text, or the generated netlist's own.
 fn deck_revision(model: &Model, netlist: &NetlistDocumentState) -> Option<u64> {
     let root = netlist
         .active_dependency_root
         .unwrap_or(netlist.active_document);
+    if root == ActiveNetlistDocument::OwnedSource {
+        return netlist.open_deck.as_ref().map(|_| netlist.revision);
+    }
     canonical_root_document_in(model, netlist, root).map(|document| document.revision().get())
 }
 
@@ -739,7 +762,6 @@ pub(crate) fn settle_deck_references(
 pub(crate) fn commit_rename(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
     rename: &mut DeckRename,
 ) -> Result<String, String> {
     if !rename.is_current(model, netlist) || !still_current(model, netlist, &rename.caret) {
@@ -747,12 +769,11 @@ pub(crate) fn commit_rename(
     }
     let new_name = rename.new_name().to_owned();
     let old = rename.caret.written.clone();
-    let plan = rename.plan(model).clone()?;
+    let plan = rename.plan().clone()?;
     let replacements = replacements(&rename.caret, &plan);
-    super::replace_owned_sources_a_step_per_file(
+    super::replace_deck_files_a_step_per_file(
         model,
         netlist,
-        open_documents,
         replacements,
         &format!("rename {old} to {new_name}"),
     )?;

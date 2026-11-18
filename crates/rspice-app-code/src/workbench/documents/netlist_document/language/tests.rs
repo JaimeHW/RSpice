@@ -400,7 +400,7 @@ fn a_hover_names_the_definition_a_name_is_bound_to_and_its_references() {
                 C1 b 0 {w}\n\
                 .end\n";
     let mut harness = harness();
-    crate::workbench::documents::netlist_document::fixtures::seed_owned_deck(
+    crate::workbench::documents::netlist_document::fixtures::seed_deck(
         &mut harness.model,
         &mut harness.state.netlist,
         deck,

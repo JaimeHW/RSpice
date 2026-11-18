@@ -217,10 +217,9 @@ fn replace_deck_files_impl(
 
 /// Publish `replacements` as one all-or-nothing change that Undo takes back
 /// one file at a time: each file's change is its own step, `description`.
-pub(crate) fn replace_owned_sources_a_step_per_file(
+pub(crate) fn replace_deck_files_a_step_per_file(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
     replacements: Vec<OwnedNetlistReplacement>,
     description: &str,
 ) -> Result<usize, String> {
@@ -231,8 +230,7 @@ pub(crate) fn replace_owned_sources_a_step_per_file(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let changed =
-        replace_owned_sources_atomically_impl(model, netlist, open_documents, replacements, false)?;
+    let changed = replace_deck_files_impl(model, netlist, replacements, false)?;
     for step in steps {
         let reverse = vec![step.reversed()];
         record_netlist_edit(
