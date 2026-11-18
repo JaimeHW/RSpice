@@ -126,6 +126,8 @@ fn list<T: ToString>(values: &[T]) -> String {
         .collect::<Vec<_>>()
         .join(",")
 }
+/// A source or node name, quoted as the card's parser reads it back: as
+/// written, since a deck name holds no `"`.
 fn name(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    format!("\"{value}\"")
 }

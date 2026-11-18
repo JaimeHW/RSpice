@@ -68,7 +68,7 @@ pub fn execute(
         crate::console::line(format_args!(""))?;
     }
     // The usage example's source line carries the same macros, as `define=`.
-    let usage_defines: String = options
+    let usage_defines = options
         .defines
         .iter()
         .map(|(name, value)| {
@@ -76,9 +76,9 @@ pub fn execute(
                 Some(value) => format!("{name}={value}"),
                 None => name.clone(),
             };
-            format!(" define={}", quote_netlist_token(&definition))
+            Ok(format!(" define={}", quote_netlist_token(&definition)?))
         })
-        .collect();
+        .collect::<Result<String, CliError>>()?;
 
     // Compile the model
     if !quiet {
@@ -254,7 +254,7 @@ pub fn execute(
         crate::console::line(format_args!(
             "  .va {} module={}{}",
             source,
-            quote_netlist_token(&model.name),
+            quote_netlist_token(&model.name)?,
             usage_defines
         ))?;
         crate::console::line(format_args!(
@@ -399,7 +399,7 @@ fn usage_source_path(input: &std::path::Path) -> Result<String, CliError> {
             message: "--show-usage requires a UTF-8 source path without line breaks".into(),
             suggestion: Some("rename the source file or omit --show-usage".into()),
         })?;
-    Ok(quote_netlist_token(source))
+    quote_netlist_token(source)
 }
 
 /// A `-D`/`-U` macro name: a simple identifier, as `` `define `` takes.
@@ -424,10 +424,15 @@ fn macro_name<'a>(name: &'a str, flag: &str) -> Result<&'a str, CliError> {
     }
 }
 
-// The netlist source-directive grammar treats backslashes as escapes inside
-// quotes, including Windows separators. Preserve the literal path and name.
-fn quote_netlist_token(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+/// One field of the printed source line, quoted as the deck reads it back:
+/// as written, so a Windows path keeps its separators.
+fn quote_netlist_token(value: &str) -> Result<String, CliError> {
+    rspice_core::netlist::lexer::quote_deck_path(value).ok_or_else(|| CliError::InvalidArgument {
+        message: format!(
+            "{value} holds both quote characters, which a SPICE source line cannot quote"
+        ),
+        suggestion: Some("rename it or omit --show-usage".into()),
+    })
 }
 
 struct ProcessControl;

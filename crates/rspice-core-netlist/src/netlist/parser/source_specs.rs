@@ -568,21 +568,17 @@ pub(in crate::netlist) fn normalize_deferred_source_file_path(
     let Some(file) = deferred_source_file_dependency(raw)? else {
         return Ok(());
     };
-    let candidate = std::path::Path::new(&file.path);
+    let candidate = crate::naming::source_path_literal_to_host_path(&file.path);
     if candidate.is_absolute() {
         return Ok(());
     }
     let resolved = base.join(candidate).to_string_lossy().into_owned();
-    let quote = if !resolved.contains('"') {
-        '"'
-    } else if !resolved.contains('\'') {
-        '\''
-    } else {
-        return Err(ParseError::InvalidValue(format!(
+    let quoted = crate::netlist::lexer::quote_deck_path(&resolved).ok_or_else(|| {
+        ParseError::InvalidValue(format!(
             "PWL filename cannot be represented as a quoted SPICE path: {resolved}"
-        )));
-    };
-    raw.replace_range(file.span, &format!("{quote}{resolved}{quote}"));
+        ))
+    })?;
+    raw.replace_range(file.span, &quoted);
     Ok(())
 }
 

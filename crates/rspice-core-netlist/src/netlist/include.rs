@@ -23,6 +23,9 @@ use super::{
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::config::ExpressionDialect;
+/// Every path a deck writes, not only an include's, resolves by this rule.
+pub use crate::naming::source_path_literal_to_host_path;
+use crate::naming::spice_relative_path;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 
 mod expanded_lines;
@@ -2196,28 +2199,6 @@ fn windows_drive_relative_suffix(path: &str) -> Option<&str> {
         return None;
     }
     Some(&path[2..])
-}
-
-/// Convert a SPICE source-path literal to the current host's path syntax.
-/// Both slash styles are directive separators regardless of the host that is
-/// doing discovery; native absolute paths retain their prefix/root semantics.
-pub fn source_path_literal_to_host_path(path: &str) -> PathBuf {
-    let path = path.trim().trim_matches('"').trim_matches('\'');
-    let native = Path::new(path);
-    if native.is_absolute() {
-        native.to_path_buf()
-    } else {
-        spice_relative_path(path)
-    }
-}
-
-fn spice_relative_path(path: &str) -> PathBuf {
-    path.split(['/', '\\'])
-        .filter(|component| !component.is_empty() && *component != ".")
-        .fold(PathBuf::new(), |mut out, component| {
-            out.push(component);
-            out
-        })
 }
 
 /// Parse a lib directive line

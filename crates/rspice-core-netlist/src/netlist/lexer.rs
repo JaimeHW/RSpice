@@ -891,6 +891,30 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
     lexer.tokenize()
 }
 
+/// `text` written as a deck string, which [`tokenize`] reads back as `text`:
+/// in double quotes, as written. A string runs to the next `"` with nothing
+/// escaped, so text holding a `"` or a line break has no such spelling.
+pub fn quote_deck_string(text: &str) -> Option<String> {
+    (!text.contains(['"', '\n', '\r'])).then(|| format!("\"{text}\""))
+}
+
+/// `path` written as the quoted operand of a directive that takes either
+/// quote (`.include`, `.lib`, `.va`, `PWL FILE=`): in double quotes, or in
+/// single quotes when it holds a `"`. Nothing inside is escaped, so a
+/// Windows path keeps its backslashes; a path holding both quotes or a line
+/// break has no quoted spelling.
+pub fn quote_deck_path(path: &str) -> Option<String> {
+    if path.contains(['\n', '\r']) {
+        None
+    } else if !path.contains('"') {
+        Some(format!("\"{path}\""))
+    } else if !path.contains('\'') {
+        Some(format!("'{path}'"))
+    } else {
+        None
+    }
+}
+
 /// Parse a single SPICE value with engineering suffix
 pub fn parse_spice_value(s: &str) -> Result<Value, LexError> {
     let s = s.trim();
@@ -1772,9 +1796,12 @@ mod tests {
     fn a_backslash_does_not_hide_the_closing_quote() {
         // LTspice reads `file="q\"x.txt"` as `q\` followed by `x.txt"`.
         let tokens = tokenize(r#"V1 a 0 PWL file="q\"x.txt"#).expect("tokenize");
-        assert!(tokens.iter().any(|token| token.kind
-            == TokenKind::StringLit(r"q\".to_owned())
-            && token.lexeme == r#""q\""#));
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::StringLit(r"q\".to_owned())
+                    && token.lexeme == r#""q\""#)
+        );
         assert_eq!(
             tokenize(r#"V1 a 0 PWL file="q\"x.txt""#),
             Err(LexError::UnterminatedString(1))

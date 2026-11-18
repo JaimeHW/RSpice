@@ -371,7 +371,13 @@ fn format_builtin_xspice_parameters(
             return Err(format!("parameter `{ordered_name}` is empty"));
         }
         let emitted = match specification.param_type {
-            ParamType::String => quote_xspice_string(decoded),
+            ParamType::String => {
+                rspice_core::netlist::lexer::quote_deck_string(decoded).ok_or_else(|| {
+                    format!(
+                        "parameter `{ordered_name}` holds a double quote, which a SPICE string cannot"
+                    )
+                })?
+            }
             ParamType::StringVector
             | ParamType::RealVector
             | ParamType::IntegerVector
@@ -429,10 +435,6 @@ fn decode_persisted_parameter_value(value: &str) -> Result<String, String> {
         }
     }
     Ok(decoded)
-}
-
-fn quote_xspice_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn format_builtin_xspice_port(

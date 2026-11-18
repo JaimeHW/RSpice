@@ -267,18 +267,11 @@ fn take_token(input: &str) -> Option<(&str, &str)> {
     let input = input.trim_start();
     let first = input.chars().next()?;
     if matches!(first, '\'' | '"') {
+        // As the deck lexer reads it: to the next quote of its kind, with a
+        // backslash kept as a Windows separator.
         let quoted = &input[first.len_utf8()..];
-        let mut escaped = false;
-        for (index, character) in quoted.char_indices() {
-            if escaped {
-                escaped = false;
-            } else if character == '\\' {
-                escaped = true;
-            } else if character == first {
-                return Some((&quoted[..index], &quoted[index + character.len_utf8()..]));
-            }
-        }
-        return None;
+        let end = quoted.find(first)?;
+        return Some((&quoted[..end], &quoted[end + first.len_utf8()..]));
     }
     let end = input.find(char::is_whitespace).unwrap_or(input.len());
     (end > 0).then_some((&input[..end], &input[end..]))

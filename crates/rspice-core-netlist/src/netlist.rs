@@ -3281,7 +3281,7 @@ impl Netlist {
             if file.path().contains("://") {
                 continue;
             }
-            let candidate = Path::new(file.path());
+            let candidate = source_path_literal_to_host_path(file.path());
             if !candidate.is_absolute() {
                 file.resolve_path(base_dir.join(candidate).to_string_lossy().into_owned());
             }
@@ -3296,7 +3296,7 @@ impl Netlist {
             return;
         };
         for reference in &mut self.vector_files {
-            let candidate = Path::new(&reference.path);
+            let candidate = source_path_literal_to_host_path(&reference.path);
             if !candidate.is_absolute() {
                 reference.path = base_dir.join(candidate).to_string_lossy().into_owned();
             }
@@ -3329,7 +3329,7 @@ fn normalize_source_spec_file_paths(spec: &mut SourceSpec, source_base_dir: &Pat
             normalize_source_spec_file_paths(inner, source_base_dir);
         }
         SourceSpec::PwlFile { path, .. } => {
-            let candidate = Path::new(path);
+            let candidate = source_path_literal_to_host_path(path);
             if !candidate.is_absolute() {
                 *path = source_base_dir
                     .join(candidate)
@@ -3375,14 +3375,14 @@ pub fn normalize_model_string_path_value(
         return value.to_string();
     }
 
-    let candidate = Path::new(path_value);
+    let candidate = source_path_literal_to_host_path(path_value);
     if candidate.is_absolute() {
         return value.to_string();
     }
     if suffix.is_empty()
         && name.eq_ignore_ascii_case("process_file")
         && !path_value.contains(['/', '\\'])
-        && !base_dir.join(candidate).is_file()
+        && !base_dir.join(&candidate).is_file()
     {
         return value.to_string();
     }

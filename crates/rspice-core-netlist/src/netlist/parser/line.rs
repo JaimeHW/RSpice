@@ -30,23 +30,17 @@ pub(super) fn strip_inline_semicolon_comment_with_non_semicolon_comments(
         return &line[..0];
     }
 
+    // A quote runs to the next of its kind, as the lexer reads it: LTspice
+    // ends `file="d\";junk"` at `d\` and drops `;junk"` as a comment, and
+    // Xyce's field scanner gives a backslash no meaning. ngspice alone
+    // (`inp_stripcomments_line`) keeps a quote open past `\"`.
     let mut in_single_quote = false;
     let mut in_double_quote = false;
-    let mut escaped = false;
     let mut chars = line.char_indices().peekable();
-    let mut prev_char = None;
+    let mut prev_char: Option<char> = None;
 
     while let Some((idx, ch)) = chars.next() {
-        if escaped {
-            escaped = false;
-            prev_char = Some(ch);
-            continue;
-        }
-
         match ch {
-            '\\' if in_single_quote || in_double_quote => {
-                escaped = true;
-            }
             '\'' if !in_double_quote => {
                 in_single_quote = !in_single_quote;
             }
@@ -290,34 +284,21 @@ fn parse_source_define(definition: &str) -> Option<(String, Option<String>)> {
     identifier.then(|| (name.to_owned(), value))
 }
 
+/// One field of a Verilog source line: a quoted one up to its closing quote,
+/// as written, so `"C:\hdl\top.v"` keeps the separators the deck lexer
+/// keeps, or one run of non-blank characters.
 pub(super) fn consume_quoted_or_token(input: &str) -> Option<(String, &str)> {
     let trimmed = input.trim_start();
     let first = trimmed.chars().next()?;
 
     if first == '"' || first == '\'' {
-        let quote = first;
-        let mut escaped = false;
-        let mut value = String::new();
-        for (idx, ch) in trimmed.char_indices().skip(1) {
-            if escaped {
-                value.push(ch);
-                escaped = false;
-                continue;
-            }
-            if ch == '\\' {
-                escaped = true;
-                continue;
-            }
-            if ch == quote {
-                let rest = &trimmed[idx + ch.len_utf8()..];
-                if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
-                    return None;
-                }
-                return Some((value, rest.trim_start()));
-            }
-            value.push(ch);
+        let body = &trimmed[1..];
+        let end = body.find(first)?;
+        let rest = &body[end + 1..];
+        if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+            return None;
         }
-        return None;
+        return Some((body[..end].to_owned(), rest.trim_start()));
     }
 
     let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());

@@ -1426,21 +1426,12 @@ impl LibParser {
         let mut fields = Vec::new();
         let mut current = String::new();
         let mut quote = None;
-        let mut escaped = false;
         let mut brace_depth = 0usize;
         let mut paren_depth = 0usize;
 
         for character in header.chars() {
-            if escaped {
-                current.push(character);
-                escaped = false;
-                continue;
-            }
-            if quote.is_some() && character == '\\' {
-                current.push(character);
-                escaped = true;
-                continue;
-            }
+            // A quote runs to the next of its kind, as the deck lexer reads
+            // it; a backslash inside one is text.
             if let Some(delimiter) = quote {
                 current.push(character);
                 if character == delimiter {
@@ -1589,19 +1580,10 @@ impl LibParser {
     fn strip_model_parameter_parentheses(parameters: &str) -> Result<&str, String> {
         debug_assert!(parameters.starts_with('('));
         let mut quote = None;
-        let mut escaped = false;
         let mut paren_depth = 0usize;
         let mut brace_depth = 0usize;
 
         for (index, character) in parameters.char_indices() {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if quote.is_some() && character == '\\' {
-                escaped = true;
-                continue;
-            }
             if let Some(delimiter) = quote {
                 if character == delimiter {
                     quote = None;
@@ -1700,21 +1682,10 @@ impl LibParser {
 
             let value_start = index;
             let mut quote = None;
-            let mut escaped = false;
             let mut brace_depth = 0usize;
             let mut paren_depth = 0usize;
             while index < bytes.len() {
                 let character = bytes[index];
-                if escaped {
-                    escaped = false;
-                    index += 1;
-                    continue;
-                }
-                if quote.is_some() && character == b'\\' {
-                    escaped = true;
-                    index += 1;
-                    continue;
-                }
                 if let Some(delimiter) = quote {
                     if character == delimiter {
                         quote = None;
@@ -1787,34 +1758,21 @@ impl LibParser {
         Ok(())
     }
 
-    /// Decode one quoted string-valued `.model` parameter while preserving
-    /// the established unquoted-token behavior used by foundry libraries.
+    /// One string-valued `.model` parameter: a quoted one without its quotes
+    /// and otherwise as written, as the deck lexer reads it (a backslash in
+    /// `file="C:\data\x.tbl"` is a separator), and an unquoted token as
+    /// foundry libraries write it.
     fn parse_model_string_value(value: &str) -> String {
-        let inner = value
+        value
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
             .or_else(|| {
                 value
                     .strip_prefix('\'')
                     .and_then(|value| value.strip_suffix('\''))
-            });
-        let Some(inner) = inner else {
-            return value.to_owned();
-        };
-        let mut decoded = String::with_capacity(inner.len());
-        let mut characters = inner.chars();
-        while let Some(character) = characters.next() {
-            if character == '\\' {
-                if let Some(escaped) = characters.next() {
-                    decoded.push(escaped);
-                } else {
-                    decoded.push('\\');
-                }
-            } else {
-                decoded.push(character);
-            }
-        }
-        decoded
+            })
+            .unwrap_or(value)
+            .to_owned()
     }
 
     /// Parse one `.lib` numeric value with the deck's own number grammar.
@@ -2514,20 +2472,32 @@ mod tests {
     }
 
     #[test]
-    fn quoted_model_string_parameters_are_decoded_exactly() {
+    fn quoted_model_string_parameters_are_read_as_written() {
+        // A quote runs to the next one with nothing escaped, as the deck
+        // lexer reads it, so a Windows path keeps its separators, a trailing
+        // one included.
         let mut parser = LibParser::new(".");
-        let result = parser
-            .parse_string(".model nch NMOS (LEVEL=1 VERSION_TAG=\"release\\\\candidate\\\"1\")\n");
+        let result = parser.parse_string(
+            ".model nch NMOS (LEVEL=1 VERSION_TAG=\"release\\candidate\" \
+             FILE=\"C:\\lib\\nmos.tbl\" DIR=\"tables\\\")\n",
+        );
 
-        assert!(result.is_ok(), "quoted model parameter must parse");
+        assert!(result.is_ok(), "{:?}", result.errors);
         let model = result
             .top_level_models
             .first()
             .expect("one top-level model");
-        assert_eq!(
-            model.string_params.get("version_tag").map(String::as_str),
-            Some("release\\candidate\"1")
-        );
+        for (name, value) in [
+            ("version_tag", r"release\candidate"),
+            ("file", r"C:\lib\nmos.tbl"),
+            ("dir", r"tables\"),
+        ] {
+            assert_eq!(
+                model.string_params.get(name).map(String::as_str),
+                Some(value),
+                "{name}"
+            );
+        }
     }
 
     #[test]

@@ -553,8 +553,9 @@ fn resolve_hdl_options(hdl: &mut crate::config::HdlRunConfig, options: &NetlistS
     {
         // A deck's relative run directory is relative to the deck, as its
         // other file references are; the command line's to the working
-        // directory.
-        let directory = std::path::PathBuf::from(directory);
+        // directory. Either slash separates its directories, as in an
+        // `.include`.
+        let directory = crate::netlist::source_path_literal_to_host_path(directory);
         hdl.run_directory = Some(match &hdl.deck_directory {
             Some(deck) if directory.is_relative() => deck.join(directory),
             _ => directory,
@@ -576,7 +577,7 @@ fn resolve_hdl_options(hdl: &mut crate::config::HdlRunConfig, options: &NetlistS
         hdl.timing_checks = enabled;
     }
     if let Some(map) = &options.hdl_libmap {
-        hdl.library_map = Some(map.into());
+        hdl.library_map = Some(crate::netlist::source_path_literal_to_host_path(map));
     }
 }
 
@@ -1414,6 +1415,40 @@ mod tests {
             Some(std::path::Path::new("cli"))
         );
         assert_eq!(resolved.hdl.delay_select, HdlDelaySelect::Min);
+
+        // A deck written on Windows names the same directories on every host:
+        // a backslash separates them, as in an `.include`, and is kept by the
+        // quoted string that carries it.
+        let netlist = crate::Netlist::parse(
+            "* windows hdl paths\nR1 a 0 1k\n\
+             .options hdl_rundir=\"runs\\x\\\" hdl_libmap=\"maps\\lib.map\"\n.end\n",
+        )
+        .expect("the HDL paths parse");
+        let mut base = SimulationConfig::default();
+        base.hdl.deck_directory = Some("deck".into());
+        let resolved = resolve_simulation_config(
+            &base,
+            Some(&netlist.options),
+            &SimulationConfigOverrides::default(),
+        );
+        assert_eq!(
+            resolved.hdl.run_directory.as_deref(),
+            Some(
+                ["deck", "runs", "x"]
+                    .iter()
+                    .collect::<std::path::PathBuf>()
+                    .as_path()
+            )
+        );
+        assert_eq!(
+            resolved.hdl.library_map.as_deref(),
+            Some(
+                ["maps", "lib.map"]
+                    .iter()
+                    .collect::<std::path::PathBuf>()
+                    .as_path()
+            )
+        );
 
         let error = crate::Netlist::parse("* bad\nR1 a 0 1k\n.options hdlseed=4294967296\n.end\n")
             .expect_err("the seed is 32-bit")

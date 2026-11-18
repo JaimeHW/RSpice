@@ -119,7 +119,9 @@ pub fn name_resolved_includes(
         } else {
             dependency.resolved_path()
         };
-        let quoted = format!("\"{}\"", path.to_string_lossy().replace('"', "\\\""));
+        let path = path.to_string_lossy();
+        let quoted = rspice_core::netlist::lexer::quote_deck_path(&path)
+            .unwrap_or_else(|| format!("\"{path}\""));
         // The path follows the directive's keyword.
         let keyword = line.split_whitespace().next().unwrap_or("");
         let after = line.find(keyword).map_or(0, |start| start + keyword.len());

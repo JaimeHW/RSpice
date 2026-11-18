@@ -642,15 +642,17 @@ fn barycentric_weights(points: &[(Value, Value)]) -> Vec<Value> {
         .collect()
 }
 
+/// The file a table function's quoted name reads: beside the deck that
+/// wrote it, split at either slash as an `.include` is.
 fn resolve_table_path(path: &str, source_path: Option<&Path>) -> PathBuf {
-    let raw = Path::new(path);
-    if raw.is_absolute() {
-        return raw.to_path_buf();
+    let host = crate::naming::source_path_literal_to_host_path(path);
+    if host.is_absolute() {
+        return host;
     }
     source_path
         .and_then(Path::parent)
         .unwrap_or_else(|| Path::new("."))
-        .join(raw)
+        .join(host)
 }
 
 fn load_lookup_points(

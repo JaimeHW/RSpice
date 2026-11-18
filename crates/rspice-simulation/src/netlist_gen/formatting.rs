@@ -19,9 +19,11 @@ impl<'a> NetlistGenerator<'a> {
         )
     }
 
+    /// A library path quoted as `.include`, `.lib` and `.VERILOGA` read it
+    /// back: as written, so a Windows path keeps its separators. A path that
+    /// no quote can hold is written in double quotes for the parser to refuse.
     pub(super) fn quote_path_for_netlist(path: &str) -> String {
-        let escaped = path.replace('"', "\\\"");
-        format!("\"{}\"", escaped)
+        rspice_core::netlist::lexer::quote_deck_path(path).unwrap_or_else(|| format!("\"{path}\""))
     }
 
     /// The reference a component's card carries, and the stem of every name
