@@ -10,8 +10,9 @@ pub use super::*;
 use crate::workbench::app::dialogs::project::{CheckpointComparison, CheckpointDeletion};
 use crate::workbench::design_system::{property_row_path, property_row_problem};
 use crate::workbench::lifecycle::project_checkpoint::{
-    CheckpointEdit, ProjectCheckpointQuarantine, ProjectCheckpointSummary, TechnologyRestore,
-    budget_label, budget_use, normalized_note, technology_restore,
+    CheckpointEdit, CheckpointRetention, ProjectCheckpointQuarantine, ProjectCheckpointReason,
+    ProjectCheckpointSummary, TechnologyRestore, budget_label, budget_use, normalized_note,
+    technology_restore,
 };
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::lifecycle_view;
@@ -530,7 +531,11 @@ pub fn recovery(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
                 recovery_header(ui, &snapshot, inset, content_width),
             );
             ui.add_space(BODY_TOP);
-            if content_width >= STACK_BREAKPOINT {
+            // The list sits beside Storage only where its column shows every
+            // row whole; elsewhere it takes the page's width, Storage under it.
+            if content_width >= STACK_BREAKPOINT
+                && page::column_widths(content_width).0 >= checkpoint_rows_width(ui, &snapshot)
+            {
                 let (mut left_intent, mut right_intent) = (None, None);
                 page::columns(
                     ui,
@@ -1087,10 +1092,13 @@ fn checkpoint_menu(
     } else {
         ("Pin", "Keep it until you delete it")
     };
-    if ui
-        .add_enabled(!busy, egui::Button::new(pin_label))
-        .on_hover_text(pin_hover)
-        .clicked()
+    // A save removes every autosave, so pinning one could not keep it; the
+    // one a recovery keeps is kept by the recovery.
+    if checkpoint.reason() != ProjectCheckpointReason::Autosave
+        && ui
+            .add_enabled(!busy, egui::Button::new(pin_label))
+            .on_hover_text(pin_hover)
+            .clicked()
     {
         *intent = Some(RecoveryIntent::Pin(
             checkpoint.clone(),
@@ -1259,6 +1267,55 @@ struct RowState {
     busy: bool,
 }
 
+/// A row's second line: when the checkpoint was taken and at which revision.
+/// A checkpoint the reader wrote a note on is named by it, so its reason
+/// moves here; a pinned one says so first.
+fn row_detail(checkpoint: &ProjectCheckpointSummary, now_unix_ms: Option<u64>) -> String {
+    let pinned = match checkpoint.retention() {
+        CheckpointRetention::ForRecovery => "Kept for recovery until you save \u{b7} ",
+        _ if checkpoint.pinned() => "Pinned \u{b7} ",
+        _ => "",
+    };
+    let reason = if checkpoint.note().is_some() {
+        format!("{} \u{b7} ", checkpoint.reason().label())
+    } else {
+        String::new()
+    };
+    format!(
+        "{pinned}{reason}{} \u{b7} revision {}",
+        checkpoint_created(checkpoint.created_unix_ms(), now_unix_ms),
+        checkpoint.project_revision()
+    )
+}
+
+/// The width the list's rows need to show their text whole beside their
+/// actions: the widest row's name or detail, the actions, and the row's
+/// insets and the card's border.
+fn checkpoint_rows_width(ui: &mut Ui, snapshot: &RecoverySnapshot) -> f32 {
+    let measure = |text: String, font: egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text, font, egui::Color32::WHITE)
+            .size()
+            .x
+    };
+    let text = snapshot
+        .checkpoints
+        .iter()
+        .map(|checkpoint| {
+            measure(checkpoint.title().to_owned(), row_title_font()).max(measure(
+                row_detail(checkpoint, snapshot.now_unix_ms),
+                detail_font(),
+            ))
+        })
+        .fold(0.0_f32, f32::max);
+    let actions = Button::new("Comparing\u{2026}").measured_width(ui)
+        + 6.0
+        + Button::new("Restoring\u{2026}").measured_width(ui)
+        + 6.0
+        + Button::new("More").menu().measured_width(ui);
+    ROW_INSET + text + 12.0 + actions + ROW_INSET + 2.0
+}
+
 fn checkpoint_row(
     ui: &mut Ui,
     checkpoint: &ProjectCheckpointSummary,
@@ -1276,26 +1333,10 @@ fn checkpoint_row(
     let width = ui.available_width().max(1.0);
     let stacked = width < CHECKPOINT_ROW_STACK_WIDTH;
     let control_height = prompt_control_height(ui);
-    let created = checkpoint_created(checkpoint.created_unix_ms(), now_unix_ms);
     // The size goes to the hover: checkpoints of one project differ little,
-    // and the time is what tells two of them apart. A checkpoint the reader
-    // wrote a note on is named by it, so its reason moves here; a pinned one
-    // says so first.
+    // and the time is what tells two of them apart.
     let size = format_bytes(checkpoint.snapshot_byte_len());
-    let pinned = if checkpoint.pinned() {
-        "Pinned \u{b7} "
-    } else {
-        ""
-    };
-    let reason = if checkpoint.note().is_some() {
-        format!("{} \u{b7} ", checkpoint.reason().label())
-    } else {
-        String::new()
-    };
-    let detail = format!(
-        "{pinned}{reason}{created} \u{b7} revision {}",
-        checkpoint.project_revision()
-    );
+    let detail = row_detail(checkpoint, now_unix_ms);
     // Over its actions on a narrow card, a row's detail wraps rather than
     // being cut: there is no pointer to hover for the rest of it.
     let detail_galley = stacked.then(|| {

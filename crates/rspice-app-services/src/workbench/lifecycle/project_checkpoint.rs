@@ -167,6 +167,9 @@ pub enum CheckpointRetention {
     UntilDeleted,
     /// An autosave: only the newest is kept, and a save removes it.
     UntilNextSave,
+    /// The autosave a recovery offered: kept through the autosaves after
+    /// it, so the work it holds is not replaced, until a save removes it.
+    ForRecovery,
     /// Every other automatic checkpoint: kept inside the disk budget the
     /// Preferences set, oldest dropped first.
     WithinBudget,
@@ -178,6 +181,7 @@ impl CheckpointRetention {
         match self {
             Self::UntilDeleted => "Until you delete it",
             Self::UntilNextSave => "Until the next save",
+            Self::ForRecovery => "Kept for recovery until you save",
             Self::WithinBudget => "While it fits the automatic space",
         }
     }
@@ -463,7 +467,11 @@ impl ProjectCheckpointSummary {
     }
 
     pub const fn retention(&self) -> CheckpointRetention {
-        if self.pinned || matches!(self.reason, ProjectCheckpointReason::Manual) {
+        // A save removes every autosave, so an autosave held from
+        // retention is the one a recovery keeps, never one kept for good.
+        if self.pinned && matches!(self.reason, ProjectCheckpointReason::Autosave) {
+            CheckpointRetention::ForRecovery
+        } else if self.pinned || matches!(self.reason, ProjectCheckpointReason::Manual) {
             CheckpointRetention::UntilDeleted
         } else if matches!(self.reason, ProjectCheckpointReason::Autosave) {
             CheckpointRetention::UntilNextSave
@@ -1172,7 +1180,7 @@ fn retention_removals(checkpoints: &[ProjectCheckpointSummary], budget_bytes: u6
     let mut budget_full = false;
     for (index, checkpoint) in checkpoints.iter().enumerate() {
         match checkpoint.retention() {
-            CheckpointRetention::UntilDeleted => {}
+            CheckpointRetention::UntilDeleted | CheckpointRetention::ForRecovery => {}
             CheckpointRetention::UntilNextSave => {
                 if autosave_kept {
                     removals.push(index);

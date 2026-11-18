@@ -296,7 +296,8 @@ fn after_a_crash_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
 }
 
 /// "Open the saved project" leaves the saved project open, clean, and the
-/// autosave on the Recovery page until the next save.
+/// autosave on the Recovery page until the next save, which its row says:
+/// the recovery keeps it, the reader never pinned it.
 #[test]
 fn after_a_crash_open_the_saved_project_keeps_the_autosave_on_the_recovery_page() {
     let (folder, saved_parts) = crashed_session("autosave-crash-saved");
@@ -503,6 +504,12 @@ fn closing_the_window_leaves_unsaved_work_for_the_next_start_to_offer() {
     assert_eq!(parts(&app), saved_parts, "the saved project opened");
     assert!(
         !has_unsaved_changes_fresh(&app.state),
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Recovery;
+    let shown = paint_until(&ctx, &mut app, |text| {
+        text.contains("Kept for recovery until you save \u{b7} ")
+    });
+    assert!(!painted(&shown).contains("Pinned"), "{}", painted(&shown));
         "the session brought back nothing unsaved"
     );
     let ctx = offscreen();
