@@ -201,6 +201,58 @@ fn compare_shows_the_file_on_disk_against_the_tab() {
     assert!(root(&state).dirty);
 }
 
+/// Comparing an include with its file on disk names the include on the
+/// comparison's tab, not the deck that reads it.
+#[test]
+fn comparing_an_include_with_its_file_names_the_include_on_the_tab() {
+    let folder = Folder::new();
+    let include = folder.write("models.inc", ".model dmod d is=1e-14\n");
+    let deck = folder.write(
+        "inc.cir",
+        "* include\n.include models.inc\nV1 in 0 1\nR1 in a 1k\nD1 a 0 dmod\n.op\n.end\n",
+    );
+    let mut app = app_with_deck(&deck);
+    app.state.workbench.activate(Workspace::Netlist);
+    let state = &mut app.state;
+    deck_files::show_include(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        &include,
+    )
+    .expect("the include opens");
+    assert!(edit_deck_file(
+        &mut state.model,
+        &mut state.code.netlist,
+        ".model dmod d is=3e-14\n".to_owned()
+    ));
+    std::fs::write(&include, ".model dmod d is=5e-14\n").expect("another writer");
+    let _ = deck_files::check_disk(&mut state.model, &mut state.code.netlist);
+    let key = state
+        .code
+        .netlist
+        .front
+        .include()
+        .map(str::to_owned)
+        .expect("the include is in front");
+
+    deck_files::compare_with_disk(&mut state.model, &mut state.code.netlist, Some(&key))
+        .expect("compared");
+
+    let labels =
+        rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(&app.state)
+            .into_iter()
+            .map(|tab| tab.label)
+            .collect::<Vec<_>>();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.starts_with("models.inc on disk") && label.ends_with("models.inc")),
+        "{labels:?}"
+    );
+}
+
 /// An include edited on its tab is saved by Run, and the run reads the
 /// edit (NL-10).
 #[test]

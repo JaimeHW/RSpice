@@ -515,6 +515,7 @@ pub fn compare_with_disk(
         crate::workbench::documents::netlist_document::CompareSide::DiskFile(deck),
         crate::workbench::documents::netlist_document::CompareSide::Deck(deck),
     ));
+    netlist.comparison_include = include.map(str::to_owned);
     crate::workbench::documents::netlist_document::open_netlist_comparison(model, netlist);
     Ok(())
 }

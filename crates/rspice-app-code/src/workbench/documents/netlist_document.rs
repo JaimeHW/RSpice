@@ -655,6 +655,10 @@ pub struct NetlistDocumentState {
     pub comparison_return: NetlistTab,
     /// The two sides of the open comparison, while a comparison tab is open.
     pub comparison_sides: Option<(CompareSide, CompareSide)>,
+    /// The include of the open deck that the open comparison with the disk
+    /// compares, when it is an include rather than the deck's own file: the
+    /// comparison's tab names it.
+    pub comparison_include: Option<String>,
     /// The tab in front of the page.
     pub front: NetlistTab,
     /// Whether initial active-document selection has been reconciled with a

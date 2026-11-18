@@ -147,12 +147,27 @@ fn comparison_label(
             })
             .unwrap_or_default()
     };
+    // A comparison of one of the deck's includes with its file names the
+    // include, not the deck that reads it.
+    let file_name = |id: crate::state::DeckId| {
+        netlist
+            .comparison_include
+            .as_deref()
+            .and_then(|key| {
+                netlist
+                    .open_deck
+                    .as_ref()
+                    .filter(|deck| deck.id == id)?
+                    .include(key)
+            })
+            .map_or_else(|| deck_name(id), |file| file.name())
+    };
     let side = |side: CompareSide| match side {
         CompareSide::Generated => messages.text(MessageId::CodeGeneratedNetlist),
         CompareSide::PreviousGenerated(_) => messages.text(MessageId::NetlistComparePreviousBuild),
-        CompareSide::Deck(id) => deck_name(id),
+        CompareSide::Deck(id) => file_name(id),
         CompareSide::DiskFile(id) => {
-            messages.format(MessageId::NetlistCompareOnDisk, &[("name", &deck_name(id))])
+            messages.format(MessageId::NetlistCompareOnDisk, &[("name", &file_name(id))])
         }
         CompareSide::RunInput(run) => messages.format(
             MessageId::NetlistRunSnapshotDocument,
@@ -385,6 +400,7 @@ pub fn close_netlist_comparison(model: &mut Model, netlist: &mut NetlistDocument
     } else {
         netlist.generated_diff_source.clear();
         netlist.comparison_sides = None;
+        netlist.comparison_include = None;
     }
 }
 

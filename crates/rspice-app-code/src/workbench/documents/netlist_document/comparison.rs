@@ -221,6 +221,7 @@ pub fn close_revision_comparison(model: &mut Model, netlist: &mut NetlistDocumen
     return_to_working_deck(model, netlist, &root);
     netlist.generated_diff_source.clear();
     netlist.comparison_sides = None;
+    netlist.comparison_include = None;
     true
 }
 
@@ -231,6 +232,7 @@ fn put_comparison_in_front(
     right: CompareSide,
 ) {
     netlist.comparison_sides = Some((left, right));
+    netlist.comparison_include = None;
     netlist.front = NetlistTab::Compare { left, right };
 }
 
