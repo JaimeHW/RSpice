@@ -29,8 +29,6 @@ pub const STORE_UNREADABLE: &str = "Unreadable";
 /// The room over and under a checkpoint row's two lines, and between them.
 const ROW_PAD: f32 = 9.0;
 const LINE_GAP: f32 = 3.0;
-/// Below this card width a row's actions move under its text.
-const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
 const ROW_INSET: f32 = 12.0;
 /// Side of a problem mark set in front of a line on this page, and the
 /// advance from its left edge to the text after it: read from the kit.
@@ -694,6 +692,9 @@ fn checkpoints_card(
         }
         let mut intent = None;
         let count = snapshot.checkpoints.len();
+        // Where one row's text does not fit beside its actions, every row
+        // puts its actions under its text, so the list keeps one shape.
+        let stacked = ui.available_width() + 2.0 < checkpoint_rows_width(ui, snapshot);
         for (index, checkpoint) in snapshot.checkpoints.iter().enumerate() {
             let id = checkpoint.checkpoint_id();
             let selected = snapshot.selected.as_deref() == Some(id.to_string().as_str());
@@ -726,6 +727,7 @@ fn checkpoints_card(
                         comparing: snapshot.comparing == Some(id),
                         restoring: snapshot.restoring == Some(id),
                         busy: snapshot.busy,
+                        stacked,
                     },
                     snapshot.now_unix_ms,
                     separated && !prompted,
@@ -1278,6 +1280,9 @@ struct RowState {
     restoring: bool,
     /// Checkpoint work is running, so the row's comparison waits.
     busy: bool,
+    /// The list is too narrow for its rows' text beside their actions, so
+    /// the actions go under the text.
+    stacked: bool,
 }
 
 /// A row's second line: when the checkpoint was taken and at which revision.
@@ -1341,10 +1346,10 @@ fn checkpoint_row(
         comparing,
         restoring,
         busy,
+        stacked,
     } = state;
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let stacked = width < CHECKPOINT_ROW_STACK_WIDTH;
     let control_height = prompt_control_height(ui);
     // The size goes to the hover: checkpoints of one project differ little,
     // and the time is what tells two of them apart.
