@@ -469,31 +469,6 @@ fn the_overview_follows_what_changed_since_its_last_frame() {
     );
 }
 
-/// A source deck's line count is kept beside the deck's digest: the deck
-/// replaced since the last frame is counted on the next.
-#[test]
-fn the_overview_counts_the_lines_of_the_deck_in_front() {
-    let mut app = overview_app();
-    assert!(
-        app.state
-            .open_test_deck("V1 out 0 1\n.op\n.end\n".to_owned(), None, "front_end.sp")
-    );
-    // Importing a deck opens it in the netlist editor.
-    show_overview(&mut app);
-    let ctx = offscreen();
-    let first = painted(&app_frame(&ctx, &mut app, Vec::new()));
-    assert!(first.contains("SPICE \u{b7} 3 lines"), "{first}");
-
-    assert!(app.state.open_test_deck(
-        "* front end\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
-        None,
-        "front_end.sp"
-    ));
-    show_overview(&mut app);
-    let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
-    assert!(next.contains("SPICE \u{b7} 5 lines"), "{next}");
-}
-
 /// The model library at `path`, imported from disk as the Models workspace
 /// imports it, attached with the test PDK package as the project's
 /// technology.

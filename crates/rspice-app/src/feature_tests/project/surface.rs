@@ -692,7 +692,7 @@ fn the_netlist_first_overview_names_the_deck() {
     for expected in [
         "Open SPICE deck",
         "Source deck",
-        "Not validated",
+        "Checked at run",
         "front_end.sp",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");

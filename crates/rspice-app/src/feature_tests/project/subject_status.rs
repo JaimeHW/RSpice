@@ -244,8 +244,9 @@ fn run_checks_opens_and_checks_the_root_its_row_describes() {
     assert_eq!(app.state.model.workspace.content.active_view, root);
 }
 
-/// A netlist-first project's inspector states its deck and the deck's
-/// validation, never the pristine bootstrap schematic or its checks.
+/// A netlist-first project's inspector states its deck and that it is
+/// checked when it runs, never the pristine bootstrap schematic or its
+/// checks.
 #[test]
 fn a_netlist_first_inspector_states_the_deck_as_the_overview_does() {
     let mut app = RSpiceApp::test_instance();
@@ -254,10 +255,15 @@ fn a_netlist_first_inspector_states_the_deck_as_the_overview_does() {
             .open_test_deck("V1 out 0 1\n.op\n.end\n".to_owned(), None, "front_end.sp")
     );
     let (state, _, _) = row(&mut app, "Source deck");
-    assert_eq!(state, "Not validated");
+    assert_eq!(state, "Checked at run");
 
     let overview = painted_on(&mut app, ProjectPage::Overview);
-    for line in ["Source deck", "front_end.sp", "Validation", "Not validated"] {
+    for line in [
+        "Source deck",
+        "front_end.sp",
+        "Validation",
+        "Checked at run",
+    ] {
         assert!(has_line(&overview, line), "{line:?}:\n{overview}");
     }
     for line in ["Testbench", "Schematic checks"] {

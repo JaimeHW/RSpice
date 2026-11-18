@@ -574,9 +574,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // work asks for one: they take the project workflows and the feature that
     // asked, so they sit above both.
     "session/project_transactions",
-    // The netlist import's project replacements: they take the netlist
-    // workflow's parts, so they sit above it.
-    "session/netlist_import_transactions",
+    // Opening a deck over the whole application state: it adds the file to
+    // the open project or makes a project around it, as the project
+    // transactions do.
+    "session/deck_transactions",
     // Command dispatch.
     "commands",
     // Following a finding to the object it is about. It reads a route a page
@@ -1147,6 +1148,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "code_context"),
             ("lib.rs", "code_workspace"),
             ("lib.rs", "commands"),
+            ("lib.rs", "deck_files"),
             ("lib.rs", "dialogs"),
             ("lib.rs", "docks"),
             ("lib.rs", "document_bar"),
@@ -1161,7 +1163,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "netlist_compat"),
             ("lib.rs", "netlist_document"),
             ("lib.rs", "netlist_export"),
-            ("lib.rs", "netlist_lifecycle"),
             ("lib.rs", "netlist_workflow"),
             ("lib.rs", "new_veriloga_device"),
             ("lib.rs", "services"),
@@ -1199,12 +1200,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/surfaces/netlist.rs", "source_menu"),
             ("workbench/surfaces/netlist.rs", "toolbar"),
             ("workbench/surfaces/netlist.rs", "transfer"),
-            ("workbench/workflows/netlist_workflow.rs", "bundle"),
-            ("workbench/workflows/netlist_workflow.rs", "fixtures"),
-            (
-                "workbench/workflows/netlist_workflow/fixtures.rs",
-                "vendor_profiles",
-            ),
         ],
     ),
     (

@@ -148,34 +148,33 @@ const PREPARE_FRAME: &[Step] = &[
             "self.state.results.analysis.clear_transient_specialized_viewer_data()",
         ],
     ),
-    ("5.27", &["self.state.poll_browser_netlist_workflow()"]),
     (
-        "5.28",
+        "5.27",
         &["result_import_workflow::poll_browser_result_dataset_import("],
     ),
     (
-        "5.29",
+        "5.28",
         &["self.simulation_controller.update(&mut self.state, self.export_workflow_io.as_ref())"],
     ),
     (
-        "5.29.1",
+        "5.28.1",
         &[".refresh_yield_evidence(&model.sim_setup, &model.workspace.content)"],
     ),
     (
-        "5.29.2",
+        "5.28.2",
         &[".refresh_verification(&model.sim_setup, &model.workspace.content)"],
     ),
-    ("5.30", &["accessibility::publish_workspace_context("]),
+    ("5.29", &["accessibility::publish_workspace_context("]),
     (
-        "5.31",
+        "5.30",
         &[
             "self.state.runs.preflight.checking.is_some()",
             "ctx.request_repaint_after(std::time::Duration::from_millis(50))",
         ],
     ),
-    ("5.32", &[".set_active_dirty(editor_dirty)"]),
-    ("5.33", &["self.sync_window_title(ctx)"]),
-    ("5.34", &["self.handle_image_export()"]),
+    ("5.31", &[".set_active_dirty(editor_dirty)"]),
+    ("5.32", &["self.sync_window_title(ctx)"]),
+    ("5.33", &["self.handle_image_export()"]),
 ];
 
 /// `workbench::show`, the chrome, docks and surface of step 11.
@@ -1174,20 +1173,20 @@ const END_FRAME: &[Step] = &[
     ("16.4", &["self.reset_code_after_project_change()"]),
 ];
 
-/// `sync_window_title`, step 5.33 of the frame: the title's dirty mark and
+/// `sync_window_title`, step 5.32 of the frame: the title's dirty mark and
 /// the browser's leave-page guard read the models feature's unsaved
 /// authoring beside the project's own unsaved changes.
 const SYNC_WINDOW_TITLE: &[Step] = &[
     (
-        "5.33.1",
+        "5.32.1",
         &["project_lifecycle::has_unsaved_changes(&self.state,)"],
     ),
     (
-        "5.33.2",
+        "5.32.2",
         &["ModelsPort::has_unsaved_authoring_changes(&*self.state.models)"],
     ),
     (
-        "5.33.3",
+        "5.32.3",
         &[
             "should_warn_before_browser_unload(",
             "project_has_unsaved_changes,",
@@ -1195,7 +1194,7 @@ const SYNC_WINDOW_TITLE: &[Step] = &[
         ],
     ),
     (
-        "5.33.4",
+        "5.32.4",
         &["if project_has_unsaved_changes || authoring_has_unsaved_changes"],
     ),
 ];

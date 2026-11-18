@@ -188,15 +188,18 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
             .iter()
             .all(|status| status.area != "Schematic checks")
     );
-    // An unvalidated deck is a state its row says, not a finding: the strip
-    // names findings only.
-    assert_eq!(snapshot.statuses[0].state(), "Not validated");
+    // The deck is checked when it runs: its row says so, and the strip names
+    // no finding of its own.
+    assert_eq!(snapshot.statuses[0].state(), "Checked at run");
     assert_eq!(snapshot.statuses[0].tone(), Tone::Neutral);
     assert!(snapshot.problems.is_empty());
     let deck = snapshot.deck.as_ref().expect("the deck is the first row");
     assert_eq!(deck.name, "front_end.sp");
     assert_eq!(deck.role, "Deck");
-    assert!(deck.views.starts_with("SPICE \u{b7} 3 lines"), "{deck:?}");
+    assert!(
+        deck.views.starts_with("SPICE \u{b7} ") && deck.views.ends_with("front_end.sp"),
+        "the deck row names its file: {deck:?}"
+    );
     assert_eq!(
         deck.intent,
         OverviewIntent::Command(ShellCommand::OpenWorkspace(Workspace::Netlist).key())
