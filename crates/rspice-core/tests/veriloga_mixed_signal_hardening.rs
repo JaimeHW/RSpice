@@ -3217,6 +3217,68 @@ fn a_femtosecond_design_runs_past_two_to_the_fifty_three_femtoseconds() {
     );
 }
 
+/// Femtosecond steps 8 s into a 1 fs design, where ticks 10 and 11 share one
+/// double of seconds.
+const FEMTOSECOND_BURST: &str = "`timescale 1fs/1fs
+module burst(q);
+  output q; reg q;
+  initial begin
+    q = 0;
+    #(64'd8000000000000000) q = 1;
+    #1 q = 0;
+    #1 q = 1;
+    #9 q = 0;
+    #(64'd100000000000000) q = 1;
+  end
+  always @(q) $display(\"q=%b at %0t\", q, $time);
+endmodule
+";
+
+/// Activations less than the solver's floor apart coalesce onto one analog
+/// point, and that point stays where the step was cut for them: from 8 s on
+/// the breakpoint merge tolerance spans several femtoseconds, and a landing
+/// moved onto the D/A edge's completion inside it reported an interval that
+/// started after the edges it had run. Icarus Verilog 13 prints the same five
+/// changes at the same ticks. Its sixth line, `q=0` at time 0, is the
+/// initial block racing the `always` it wakes, an order IEEE 1364-2005
+/// section 11.4.2 leaves open, so it is not compared.
+#[test]
+fn femtosecond_steps_past_eight_seconds_keep_their_ticks() {
+    let model = ModelFile::hdl("femtosecond_burst", FEMTOSECOND_BURST);
+    let deck = format!(
+        "* femtosecond steps 8 s in\n\
+         .hdl \"{}\"\n\
+         .param vcc=1.0\n\
+         xb q burst\n\
+         rq q 0 1k\n\
+         .tran 10m 9.2\n\
+         .end\n",
+        model.deck_path()
+    );
+    let collector = std::sync::Arc::new(rspice_core::config::HdlOutputCollector::new());
+    let mut config = SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    Engine::new(config)
+        .run_tran(&netlist, 9.2, 10.0e-3)
+        .expect("the deck runs");
+    let lines: Vec<_> = collector
+        .take()
+        .into_iter()
+        .map(|record| record.text.trim_end().to_owned())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "q=1 at 8000000000000000",
+            "q=0 at 8000000000000001",
+            "q=1 at 8000000000000002",
+            "q=0 at 8000000000000011",
+            "q=1 at 8100000000000011",
+        ]
+    );
+}
+
 /// A register that steps from 0 to 1 at 10 ns, converted by the inserted
 /// D/A, whose default `trise`/`tfall` are zero: an ideal step.
 const IDEAL_STEP: &str = "`timescale 1ns/1ps

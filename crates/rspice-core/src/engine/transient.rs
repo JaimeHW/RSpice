@@ -11763,8 +11763,11 @@ impl Engine {
                         scheduled_breakpoint,
                     );
                     if hit_breakpoint {
+                        // A step cut to an exact discrete landing keeps its
+                        // own time; see the accepted step's snap below.
                         if scheduled_breakpoint
                             && !landed_device_event
+                            && !landing_only
                             && !has_exact_transient_history
                             && !analysis_final_step
                         {
@@ -12751,8 +12754,17 @@ impl Engine {
             // point without perturbing the prescribed sample time. A refined
             // device root instead retains the source point for a strict follow-up
             // solve because its candidate was evaluated at the root's own time.
+            //
+            // A landing only is exact too. The step was cut to a discrete
+            // activation's own instant, and the discrete half ran its
+            // instants up to it against an interval ending there; moved onto
+            // a breakpoint inside the merge tolerance, the interval the
+            // acceptance reports would start after the accepted point and
+            // leave out what the trial ran. From 8 s on that tolerance spans
+            // the femtoseconds a 1 fs design schedules apart.
             if hit_breakpoint
                 && !landed_device_event
+                && !landing_only
                 && !has_exact_transient_history
                 && !locked_step_lands_on_grid
                 && !analysis_final_step
