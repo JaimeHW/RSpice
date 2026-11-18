@@ -44,6 +44,12 @@ fn application_frame_at(app: &mut RSpiceApp, seconds: f64) {
 /// One whole application frame `seconds` into the session, and every string
 /// it painted, one per line.
 fn drawn_frame_at(app: &mut RSpiceApp, seconds: f64) -> String {
+    drawn_frame_sized(app, seconds, DESKTOP)
+}
+
+/// One whole application frame `seconds` into the session on a window of
+/// `size`, and every string it painted, one per line.
+fn drawn_frame_sized(app: &mut RSpiceApp, seconds: f64, size: egui::Vec2) -> String {
     fn collect(shape: &egui::epaint::Shape, text: &mut String) {
         match shape {
             egui::epaint::Shape::Text(shape) => {
@@ -59,7 +65,7 @@ fn drawn_frame_at(app: &mut RSpiceApp, seconds: f64) -> String {
         }
     }
     let input = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, DESKTOP)),
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
         time: Some(seconds),
         ..Default::default()
     };
@@ -148,6 +154,15 @@ fn the_pinned_tabs_lead_the_strip_when_the_deck_opened_first() {
         .map(|tab| tab.label)
         .collect::<Vec<_>>();
     assert_eq!(strip, ["Generated netlist", "Added lines", "deck.cir"]);
+}
+
+/// On a 1024-point window the toolbar still says what Run runs: the deck's
+/// chip stays beside Run deck.
+#[test]
+fn the_deck_chip_stays_beside_run_on_a_small_window() {
+    let mut app = plan_and_deck_session();
+    let drawn = drawn_frame_sized(&mut app, 1.0, egui::vec2(1024.0, 768.0));
+    assert!(drawn.lines().any(|line| line == "Deck"), "{drawn}");
 }
 
 /// Each tab's toolbar holds only the verbs that tab has: the deck is saved,
