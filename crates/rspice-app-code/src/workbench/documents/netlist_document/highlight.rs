@@ -9,83 +9,50 @@
 //! the gutter pip and the bottom strip.
 
 use std::ops::Range;
-use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId};
 use rspice_core::netlist::{SourceKind, comment_ranges, comment_start, is_spectre_source};
 
+use super::index_worker::BackgroundIndex;
+use crate::state::TextSnapshot;
 use crate::ui::palette::Palette;
 
 use super::dialect::ShownSource;
 use super::param_scan::{expression_end, run_end};
-use crate::workbench::documents::text_document_model::TextDocumentModel;
 use crate::workbench::documents::virtual_text_editor::LayoutRow;
 
 /// Mockup contract: 11-point editor text at a 1.55 line-height.
 const EDITOR_LINE_HEIGHT: f32 = 17.05;
 
 /// Where the comments of the shown source are. A SPICE line's are read from
-/// the line alone; a source the Spectre front end reads is read whole, once
-/// per revision of its text, since a block comment carries from line to line.
+/// the line alone; a source the Spectre front end reads is read whole, since
+/// a block comment carries from line to line. The whole text is read away
+/// from the editor's thread, once per revision; until the reading of the
+/// text as it stands arrives, each line is read alone, in the reading the
+/// last one found, so what is marked is always the text on screen.
 #[derive(Clone, Default)]
 pub(crate) struct SourceComments {
-    /// The document revision and length, and the source, the reading is of.
-    read: Option<((u64, usize), ShownSource)>,
-    kind: Option<SourceKind>,
-    /// Each line's comments, for a source the Spectre front end reads.
-    by_line: Option<Arc<[Vec<Range<usize>>]>>,
+    reading: BackgroundIndex<ReadingKey, SourceReading>,
 }
 
-impl SourceComments {
-    /// The comments on the stretch of a line `row` shows, as byte ranges of
-    /// `row.text`, for the document read from `source`.
-    pub(crate) fn on_row(
-        &mut self,
-        row: &LayoutRow<'_>,
-        source: &ShownSource,
-    ) -> Vec<Range<usize>> {
-        let document = row.document;
-        let key = (document.revision(), document.len_chars());
-        if self
-            .read
-            .as_ref()
-            .is_none_or(|(read, read_source)| *read != key || read_source != source)
-        {
-            self.read_whole(document, source);
-            self.read = Some((key, source.clone()));
-        }
-        let line = document
-            .line_content_char_range(row.logical_line)
-            .map(|range| document.text_range(range))
-            .unwrap_or_default();
-        let on_line = self.on_line(row.logical_line, &line);
-        let start = line
-            .char_indices()
-            .nth(row.first_column)
-            .map_or(line.len(), |(index, _)| index);
-        if !line[start..].starts_with(row.text) {
-            // The row is not the line this frame read: read it alone rather
-            // than mark the wrong text.
-            return self
-                .kind
-                .and_then(|kind| comment_start(row.text, kind))
-                .map(|at| std::iter::once(at..row.text.len()).collect())
-                .unwrap_or_default();
-        }
-        let end = start + row.text.len();
-        on_line
-            .into_iter()
-            .filter(|range| range.start < end && range.end > start)
-            .map(|range| range.start.max(start) - start..range.end.min(end) - start)
-            .collect()
-    }
+/// The text a reading is of: its revision, and where it is read from.
+type ReadingKey = (u64, ShownSource);
 
-    fn read_whole(&mut self, document: &TextDocumentModel, source: &ShownSource) {
-        let text = document.to_source();
+/// How the engine reads one revision of a source, and for a source the
+/// Spectre front end reads, each line's comments.
+struct SourceReading {
+    key: ReadingKey,
+    kind: SourceKind,
+    by_line: Option<Box<[Vec<Range<usize>>]>>,
+}
+
+impl SourceReading {
+    fn of(text: &TextSnapshot, source: ShownSource) -> Self {
+        let revision = text.revision();
+        let text = text.to_string();
         let kind = source.kind(&text);
-        self.kind = Some(kind);
-        self.by_line = is_spectre_source(&source.path, &text).then(|| {
+        let by_line = is_spectre_source(&source.path, &text).then(|| {
             let mut by_line = vec![Vec::new(); text.split('\n').count()];
             let mut line_start = 0;
             let mut lines = by_line.iter_mut().zip(text.split('\n'));
@@ -102,27 +69,101 @@ impl SourceComments {
             }
             by_line.into()
         });
+        Self {
+            key: (revision, source),
+            kind,
+            by_line,
+        }
     }
+}
 
-    /// The comments on line `index`, whose text is `line`, as byte ranges of
-    /// the line.
-    fn on_line(&self, index: usize, line: &str) -> Vec<Range<usize>> {
-        if let Some(by_line) = &self.by_line {
-            return by_line
-                .get(index)
+impl SourceComments {
+    /// The comments on the stretch of a line `row` shows, as byte ranges of
+    /// `row.text`, for the document read from `source`. A reading of a newer
+    /// text is started here; `ctx` is woken when it is done.
+    pub(crate) fn on_row(
+        &mut self,
+        ctx: &egui::Context,
+        row: &LayoutRow<'_>,
+        source: &ShownSource,
+    ) -> Vec<Range<usize>> {
+        let document = row.document;
+        let key = (document.revision(), source.clone());
+        if self.reading.wants(|read| *read == key) {
+            let text = document.snapshot();
+            let read_from = source.clone();
+            let ctx = ctx.clone();
+            self.reading.start(
+                key.clone(),
+                move || SourceReading::of(&text, read_from),
+                move || ctx.request_repaint(),
+            );
+        }
+        let reading = self
+            .reading
+            .last_built()
+            .filter(|reading| reading.key.1 == *source);
+        let kind = reading
+            .as_ref()
+            .map_or_else(|| source.kind(""), |reading| reading.kind);
+        let current = reading.filter(|reading| reading.key == key);
+        let line = document
+            .line_content_char_range(row.logical_line)
+            .map(|range| document.text_range(range))
+            .unwrap_or_default();
+        let on_line = match current
+            .as_ref()
+            .and_then(|reading| reading.by_line.as_ref())
+        {
+            Some(by_line) => by_line
+                .get(row.logical_line)
                 .into_iter()
                 .flatten()
                 .filter(|range| range.end <= line.len())
                 .cloned()
-                .collect();
+                .collect(),
+            None => on_line_alone(row.logical_line, &line, kind),
+        };
+        let start = line
+            .char_indices()
+            .nth(row.first_column)
+            .map_or(line.len(), |(index, _)| index);
+        if !line[start..].starts_with(row.text) {
+            // The row is not the line this frame read: read it alone rather
+            // than mark the wrong text.
+            return comment_start(row.text, kind)
+                .map(|at| std::iter::once(at..row.text.len()).collect())
+                .unwrap_or_default();
         }
-        match self.kind {
-            Some(SourceKind::DeckRoot) if index == 0 => std::iter::once(0..line.len()).collect(),
-            Some(kind) => comment_start(line, kind)
-                .map(|at| std::iter::once(at..line.len()).collect())
-                .unwrap_or_default(),
-            None => Vec::new(),
-        }
+        let end = start + row.text.len();
+        on_line
+            .into_iter()
+            .filter(|range| range.start < end && range.end > start)
+            .map(|range| range.start.max(start) - start..range.end.min(end) - start)
+            .collect()
+    }
+
+    /// Read the text `document` holds now, here, as the frame after the
+    /// reading arrives would.
+    #[cfg(test)]
+    pub(crate) fn read_now(
+        &mut self,
+        document: &crate::workbench::documents::text_document_model::TextDocumentModel,
+        source: &ShownSource,
+    ) {
+        let reading = SourceReading::of(&document.snapshot(), source.clone());
+        self.reading.store(reading.key.clone(), reading);
+    }
+}
+
+/// The comments on line `index`, whose text is `line`, read from the line
+/// alone in the reading `kind`.
+fn on_line_alone(index: usize, line: &str, kind: SourceKind) -> Vec<Range<usize>> {
+    match kind {
+        SourceKind::DeckRoot if index == 0 => std::iter::once(0..line.len()).collect(),
+        kind => comment_start(line, kind)
+            .map(|at| std::iter::once(at..line.len()).collect())
+            .unwrap_or_default(),
     }
 }
 
@@ -413,6 +454,7 @@ mod tests {
 
     use super::*;
     use crate::ui::palette::INSTRUMENT_DARK;
+    use crate::workbench::documents::text_document_model::TextDocumentModel;
 
     /// Characters whose UTF-8 bytes include 0x85 or 0xA0 (both whitespace
     /// when a byte is read as a Latin-1 character), a CJK character and an
@@ -547,7 +589,9 @@ mod tests {
             path: path.into(),
             root,
         };
-        let comments = SourceComments::default().on_row(&row, &source);
+        let mut comments = SourceComments::default();
+        comments.read_now(&document, &source);
+        let comments = comments.on_row(&egui::Context::default(), &row, &source);
         let job = layout_job(
             row.text,
             &comments,
@@ -632,5 +676,53 @@ mod tests {
             "{closing:?}"
         );
         assert_eq!(faint(&row_tokens(deck, "amp.scs", true, 4, 0)), ["* star"]);
+    }
+
+    /// While the reading of the text as it stands is still being made, a
+    /// row is read alone: the reading of an earlier text, whose block
+    /// comment the edit took out, never marks the text on screen.
+    #[test]
+    fn a_reading_of_an_earlier_text_never_marks_the_text_on_screen() {
+        let source = ShownSource {
+            path: "amp.scs".into(),
+            root: true,
+        };
+        let mut document =
+            TextDocumentModel::from_source("// tb\n/* bias\nr1 (a b) resistor r=1k\n*/\n");
+        let mut comments = SourceComments::default();
+        comments.read_now(&document, &source);
+        let row = |document: &TextDocumentModel| {
+            document
+                .line_content_char_range(2)
+                .map(|range| document.text_range(range))
+                .expect("the line exists")
+        };
+        let inside = row(&document);
+        let marked = comments.on_row(
+            &egui::Context::default(),
+            &LayoutRow {
+                text: &inside,
+                logical_line: 2,
+                first_column: 0,
+                document: &document,
+            },
+            &source,
+        );
+        assert_eq!(marked, [0..inside.len()], "inside the block comment");
+
+        // The edit takes out the line that opened the block comment.
+        assert!(document.synchronize_source("// tb\nbias\nr1 (a b) resistor r=1k\n*/\n"));
+        let card = row(&document);
+        let marked = comments.on_row(
+            &egui::Context::default(),
+            &LayoutRow {
+                text: &card,
+                logical_line: 2,
+                first_column: 0,
+                document: &document,
+            },
+            &source,
+        );
+        assert!(marked.is_empty(), "{marked:?}");
     }
 }

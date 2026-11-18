@@ -236,6 +236,8 @@ impl TextDocumentModel {
         &self.folds
     }
 
+    /// The whole text as one string: a copy, for tests to compare.
+    #[cfg(test)]
     pub fn to_source(&self) -> String {
         self.text.to_string()
     }

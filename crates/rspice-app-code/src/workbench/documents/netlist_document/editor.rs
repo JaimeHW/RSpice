@@ -266,7 +266,7 @@ pub fn show(
                 let job = if diff_document {
                     highlight::diff_layout_job(row.text, font, &c)
                 } else {
-                    let comments = source_comments.on_row(row, &shown_source);
+                    let comments = source_comments.on_row(ui.ctx(), row, &shown_source);
                     highlight::layout_job(row.text, &comments, font, &c)
                 };
                 ui.fonts_mut(|fonts| fonts.layout_job(job))
