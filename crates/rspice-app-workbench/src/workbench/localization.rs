@@ -869,6 +869,10 @@ define_messages! {
     StimulusCopySpec => "Copy the source specification",
     StimulusReadopt => "Re-adopt r{revision}",
     NetlistShowValueNothing => "No value or name at the caret.",
+    // An include row's section select: its well when the card binds no
+    // section, and its spoken name.
+    NetlistLibSectionNone => "none",
+    NetlistLibSectionSelect => "Section of {name}: {section}",
 }
 
 #[derive(Debug, Clone, Copy)]

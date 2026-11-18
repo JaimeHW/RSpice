@@ -230,6 +230,35 @@ pub fn compact_select_mono_width(ui: &Ui, options: &[String]) -> f32 {
     widest.ceil() + VALUE_INSET + CHEVRON_ROOM
 }
 
+/// [`select_with_details`] at the height of a compact button, printing its
+/// choices in the chips' mono face: for a select that stands in a row of a
+/// dense list, where the row is no taller for it and the select reads as
+/// the value it stands in for.
+pub fn compact_select_mono_with_details(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    details: &[String],
+    width: f32,
+) -> SelectOutput {
+    select_with_font(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        width,
+        theme::chip_mono(),
+        true,
+        &[],
+        details,
+        None,
+    )
+    .0
+}
+
 /// Mockup-authored engineering-field select. Field values and options use the
 /// same mono face as adjacent exact-value inputs without changing toolbar or
 /// navigation selects globally.

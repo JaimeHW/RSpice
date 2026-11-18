@@ -1,6 +1,8 @@
 //! The Netlist workspace from the keyboard: every command it offers has a
-//! key or a row in a menu shown there, and Show value says at the caret what
-//! a hover says under the pointer.
+//! key or a row in a menu shown there, Show value says at the caret what a
+//! hover says under the pointer, and an include of a sectioned library binds
+//! its section from a select on its row, which Tab reaches as it reaches any
+//! control.
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
@@ -245,5 +247,98 @@ fn show_value_reads_the_name_the_caret_ends_and_says_when_there_is_none() {
     assert_eq!(
         app.state.prompt_text(),
         Some("No value or name at the caret.")
+    );
+}
+
+/// The amplifier deck kept as text with its corner library, whose `.lib`
+/// card binds `tt`.
+const CORNER_DECK: &str =
+    "* amplifier\n.lib \"corners.lib\" tt\nR1 out 0 {rload}\nV1 out 0 1\n.op\n.end\n";
+const CORNERS: &str =
+    "* corners\n.lib tt\n.param rload=10k\n.endl tt\n.lib ff\n.param rload=5k\n.endl ff\n";
+
+/// Where the frame put the node of `role` named `label`.
+fn node_rect(
+    output: &egui::FullOutput,
+    role: egui::accesskit::Role,
+    label: &str,
+) -> Option<egui::Rect> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()?
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == role && node.label() == Some(label))
+        .and_then(|(_, node)| node.bounds())
+        .map(|bounds| {
+            egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            )
+        })
+}
+
+/// A primary click at `at`, and the frames that settle it.
+fn click(ctx: &egui::Context, app: &mut RSpiceApp, at: egui::Pos2) -> egui::FullOutput {
+    frame_with(ctx, app, DESKTOP, vec![egui::Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        frame_with(
+            ctx,
+            app,
+            DESKTOP,
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    frame(ctx, app, DESKTOP);
+    frame(ctx, app, DESKTOP)
+}
+
+/// The include row of a sectioned library shows a select of its sections
+/// with the bound one in its well; choosing another from its list rewrites
+/// the deck's own `.lib` card to it.
+#[test]
+fn an_include_rows_section_select_binds_the_section_chosen() {
+    let mut app = open_project_app();
+    assert!(
+        app.state.import_deck_files(vec![
+            ("amp.cir".to_owned(), CORNER_DECK.as_bytes().to_vec()),
+            ("corners.lib".to_owned(), CORNERS.as_bytes().to_vec()),
+        ]),
+        "{:?}",
+        app.state.prompt_text()
+    );
+    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    let ctx = themed_context();
+    let mut output = frame(&ctx, &mut app, DESKTOP);
+    for _ in 0..4 {
+        output = frame(&ctx, &mut app, DESKTOP);
+    }
+    let select = node_rect(
+        &output,
+        egui::accesskit::Role::ComboBox,
+        "Section of corners.lib: tt",
+    )
+    .expect("the include row offers its section's select");
+
+    let opened = click(&ctx, &mut app, select.center());
+    let ff = node_rect(&opened, egui::accesskit::Role::ListBoxOption, "ff")
+        .expect("the select lists every section the library declares");
+    click(&ctx, &mut app, ff.center());
+
+    assert!(
+        app.state
+            .model
+            .simulation
+            .source
+            .netlist_content
+            .contains(".lib \"corners.lib\" ff\n"),
+        "the card binds the section chosen: {}",
+        app.state.model.simulation.source.netlist_content
     );
 }

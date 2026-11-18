@@ -315,11 +315,21 @@ pub(in crate::workbench) fn netlist(
                         }
                         continue;
                     }
-                    let response = netlist_outline_row(
+                    // A sectioned library's row ends in its section's select,
+                    // which states the bound section in the meta's place; a
+                    // warning keeps its place beside it.
+                    let selector = row
+                        .sections
+                        .as_ref()
+                        .map(|_| section_selector_width(ui.available_width()));
+                    let response = netlist_outline_row_beside(
                         ui,
                         OutlineRowVisual {
                             label: &row.label,
-                            meta: row.meta.as_deref(),
+                            meta: row
+                                .meta
+                                .as_deref()
+                                .filter(|_| selector.is_none() || row.shadowed),
                             meta_tone: row.shadowed.then(|| Tokens::get(ui.ctx()).color.warn),
                             icon: Some(netlist_outline_icon(row.kind)),
                             shape: NetlistOutlineRowShape::Leaf,
@@ -328,8 +338,18 @@ pub(in crate::workbench) fn netlist(
                             height,
                             hover: row.tooltip.as_deref(),
                         },
+                        selector.map_or(0.0, |width| width + NETLIST_OUTLINE_ICON_GAP),
                     );
-                    if let Some(choice) = row.sections.as_ref() {
+                    if let (Some(choice), Some(width)) = (row.sections.as_ref(), selector) {
+                        section_selector(
+                            ui,
+                            &response,
+                            width,
+                            row,
+                            source_editable,
+                            messages,
+                            &mut use_section,
+                        );
                         section_choice_menu(
                             &response,
                             choice,
@@ -889,6 +909,95 @@ fn section_choice_menu(
         .show(|ui| section_choice_entries(ui, choice, editable, messages, selection));
 }
 
+/// The width of an include row's section select: one share of the row, the
+/// same on every sectioned row so the selects stand in one column.
+fn section_selector_width(row_width: f32) -> f32 {
+    (row_width * 0.38).clamp(72.0, 150.0)
+}
+
+/// The include row's section select, at the row's right edge: the bound
+/// section in its well, every section the library declares in its list with
+/// what each declares. Choosing one rewrites the row's own card. A read-only
+/// deck shows the select disabled and says why; a card naming a section the
+/// library does not declare shows that name, with none of the list chosen.
+fn section_selector(
+    ui: &mut Ui,
+    row: &Response,
+    width: f32,
+    include: &NetlistNavigatorRow,
+    editable: bool,
+    messages: MessageCatalog,
+    selection: &mut Option<(usize, String)>,
+) {
+    let Some(choice) = include.sections.as_ref() else {
+        return;
+    };
+    let t = Tokens::get(ui.ctx());
+    let height = crate::ui::widgets::compact_height(&t.metrics).min(row.rect.height());
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(
+            row.rect.right() - NETLIST_OUTLINE_PADDING_X - width,
+            row.rect.center().y - height * 0.5,
+        ),
+        egui::vec2(width, height),
+    );
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let options = choice
+        .available
+        .iter()
+        .map(|section| section.name.clone())
+        .collect::<Vec<_>>();
+    let details = choice
+        .available
+        .iter()
+        .map(|section| section_detail_text(section, messages))
+        .collect::<Vec<_>>();
+    // The card's spelling of a declared section is the library's.
+    let selected = choice.selected.as_deref().map_or_else(
+        || messages.text(MessageId::NetlistLibSectionNone),
+        |selected| {
+            options
+                .iter()
+                .find(|name| name.eq_ignore_ascii_case(selected))
+                .map_or_else(|| selected.to_owned(), String::clone)
+        },
+    );
+    let label = messages.format(
+        MessageId::NetlistLibSectionSelect,
+        &[("name", &include.label), ("section", &selected)],
+    );
+    let picked = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.add_enabled_ui(editable, |ui| {
+                let output = crate::ui::widgets::compact_select_mono_with_details(
+                    ui,
+                    &format!("netlist-lib-section-{}", choice.line),
+                    &label,
+                    &selected,
+                    &options,
+                    &details,
+                    width,
+                );
+                let _ = output
+                    .response
+                    .on_disabled_hover_text(messages.text(MessageId::NetlistLibSectionReadOnly));
+                output.picked
+            })
+            .inner
+        })
+        .inner;
+    if let Some(name) = picked.and_then(|index| options.get(index))
+        && choice
+            .selected
+            .as_deref()
+            .is_none_or(|bound| !bound.eq_ignore_ascii_case(name))
+    {
+        *selection = Some((choice.line, name.clone()));
+    }
+}
+
 /// The chooser's own rows, painted wherever the menu puts them.
 pub(super) fn section_choice_entries(
     ui: &mut Ui,
@@ -935,6 +1044,19 @@ fn section_row_text(
     section: &rspice_core::library::LibSectionSummary,
     messages: MessageCatalog,
 ) -> String {
+    format!(
+        "{} · {}",
+        section.name,
+        section_detail_text(section, messages)
+    )
+}
+
+/// What one section declares: its models, and its subcircuits when it has
+/// any.
+fn section_detail_text(
+    section: &rspice_core::library::LibSectionSummary,
+    messages: MessageCatalog,
+) -> String {
     let models = messages.format(
         if section.model_count == 1 {
             MessageId::NetlistLibSectionModel
@@ -944,7 +1066,7 @@ fn section_row_text(
         &[("count", &section.model_count.to_string())],
     );
     if section.subcircuit_count == 0 {
-        return format!("{} · {models}", section.name);
+        return models;
     }
     let subcircuits = messages.format(
         if section.subcircuit_count == 1 {
@@ -954,7 +1076,7 @@ fn section_row_text(
         },
         &[("count", &section.subcircuit_count.to_string())],
     );
-    format!("{} · {models} · {subcircuits}", section.name)
+    format!("{models} · {subcircuits}")
 }
 
 /// Every section the library declares, with the bound one marked, for a row's
@@ -2045,6 +2167,12 @@ impl NetlistOutlineRowShape {
 }
 
 pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Response {
+    netlist_outline_row_beside(ui, row, 0.0)
+}
+
+/// An outline row whose last `trailing` points are a control's, drawn over
+/// the row once it is laid: the label and the meta stop short of it.
+fn netlist_outline_row_beside(ui: &mut Ui, row: OutlineRowVisual<'_>, trailing: f32) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), row.height),
@@ -2155,7 +2283,9 @@ pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Res
         theme::sans(tokens::FS_0, FontWeight::Regular)
     };
     let label_left = rect.left() + row.shape.label_left();
-    let room = (rect.right() - NETLIST_OUTLINE_PADDING_X - label_left).max(0.0);
+    // The control over the row's end keeps its `trailing` points.
+    let right = rect.right() - trailing;
+    let room = (right - NETLIST_OUTLINE_PADDING_X - label_left).max(0.0);
     // The name is what the row is: it keeps its whole width, and the value
     // beside it is what gives way, ending in an ellipsis.
     let label = crate::ui::panels::elide_text(ui, row.label, &label_font, room);
@@ -2182,7 +2312,7 @@ pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Res
     );
     if let Some(meta) = meta.filter(|meta| !meta.is_empty()) {
         ui.painter().text(
-            egui::pos2(rect.right() - NETLIST_OUTLINE_PADDING_X, rect.center().y),
+            egui::pos2(right - NETLIST_OUTLINE_PADDING_X, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             meta,
             meta_font,
