@@ -1458,7 +1458,10 @@ fn apply_quick_fix(
     }
     let fix = &bound.fix;
     if fix.add_file.is_some() {
-        return Err(format!("{} asks for the file to add first.", fix.label));
+        return Err(messages.format(
+            MessageId::NetlistQuickFixAsksForFile,
+            &[("fix", &fix.label)],
+        ));
     }
     if fix.span.start > fix.span.end
         || fix.span.end > source.len()

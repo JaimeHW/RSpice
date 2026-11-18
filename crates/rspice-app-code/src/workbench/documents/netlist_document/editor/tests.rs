@@ -1001,8 +1001,8 @@ fn output_symbol_diagnostics_preserve_origins_order_and_repetitions() {
     assert_eq!(diagnostics[0].line, Some(6));
     assert_eq!(diagnostics[1].line, Some(10));
     assert!(diagnostics[0].message.contains("node 'missing'"));
-    assert!(diagnostics[1].message.contains("device `Rbogus`"));
-    assert_eq!(diagnostics[1].message.matches("device `Rbogus`").count(), 2);
+    assert!(diagnostics[1].message.contains("device 'Rbogus'"));
+    assert_eq!(diagnostics[1].message.matches("device 'Rbogus'").count(), 2);
 }
 
 #[test]

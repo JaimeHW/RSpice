@@ -24,7 +24,7 @@ pub use rspice_vocabulary::diagnostics::DiagnosticSeverity;
 /// under: an unnamed buffer is checked as a made-up file, and that name means
 /// nothing to anyone. With no file to name it names none. A parser complaint
 /// of the shape "Expected node name, found Eof" says instead what is missing
-/// on which card: "R1 is missing a node name.".
+/// on which card: "'R1' is missing a node name.".
 pub(super) fn as_the_reader_sees_them(
     diagnostics: &mut [Diagnostic],
     buffer: &str,

@@ -1379,7 +1379,7 @@ mod tests {
         harness.state.netlist.diagnostics = std::sync::Arc::new(
             NetlistDiagnosticCollection::try_new(
                 vec![
-                    Diagnostic::error("Unknown model `nosuch` in this deck.").with_line(Some(1)),
+                    Diagnostic::error("Unknown model 'nosuch' in this deck.").with_line(Some(1)),
                     Diagnostic::error("Unknown subcircuit `nosub`.").with_line(Some(2)),
                     warning,
                 ],
