@@ -240,7 +240,7 @@ pub use xtradev::{
     SeeGeneratorAlias, Sidiode, Zener,
 };
 
-pub(crate) use xtraevt::VoltageToReal;
 pub use xtraevt::{DigitalToReal, RealDelay, RealGain, RealToVoltage, RealToVoltageAlias};
+pub(crate) use xtraevt::{RealBoundaryToVoltage, VoltageToReal};
 
 pub use debug::PrintParamTypes;

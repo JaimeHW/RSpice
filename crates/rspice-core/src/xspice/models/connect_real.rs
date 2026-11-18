@@ -16,9 +16,9 @@
 //!   sequence (the sampling ruling of `v_to_real`).
 //!
 //! At their defaults (`rout = 0` with `trise = tfall`, and `vdelta = ttol =
-//! 0`) the engine converts with the stock `real_to_v` and `v_to_real`
-//! instead, so a deck that names the modules without changing them converts
-//! exactly as one that names none.
+//! 0`) the engine converts with its own linear real-to-voltage converter and
+//! the stock `v_to_real` instead, so a deck that names the modules without
+//! changing them converts exactly as one that names none.
 //!
 //! Small-signal analyses hold the event state: `r2e` stamps its conductance,
 //! or an ideal source at its held level, and `e2r` reads its node and stamps

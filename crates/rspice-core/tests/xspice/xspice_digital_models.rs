@@ -2071,6 +2071,111 @@ r5 ae 0 1k
     );
 }
 
+/// `real_to_v` as ngspice-46's (icm/xtraevt/real_to_v/cfunc.mod): ngspice
+/// calls it at each input event and again at the end of every accepted step
+/// but the first (`EVTcall_hybrids`), and each call starts a new
+/// `transition_time` ramp to the input from the level reached. So a step `h`
+/// closes `h / transition_time` of the gap left, and with `gain` scaling only
+/// a ramp's change, `a2` reads `in * gain` until the second step has
+/// restarted its ramp and settles at the input itself after it. ngspice-46
+/// prints this deck as:
+///
+/// ```text
+/// time       a1 (gain 1)  a2 (gain 2)
+/// 0          -1           -2
+/// 5e-13      -1           -2
+/// 1e-12      -1           -2
+/// 2e-12      -1           -1
+/// 1.37e-08   -1           -1          r1 steps -1 -> 3 here
+/// 1.39e-08   -0.2          0.6
+/// 1.41e-08    0.44         1.08
+/// 1.43e-08    0.952        1.464
+/// 1.47e-08    1.68928      2.01696
+/// 3.99e-08    3            3
+/// ```
+///
+/// This run's steps are ngspice's up to the edge, so it prints those rows
+/// alike. It lands a step on the event and starts again from a short one,
+/// where ngspice steps on at 0.2 ns, so after it each point is held to
+/// ngspice's law over this run's own steps.
+#[test]
+fn real_to_v_closes_its_gap_by_a_share_of_each_step_as_ngspice_46_does() {
+    let netlist = Netlist::parse(
+        "\
+* real_to_v: the ramp under a 0.2 ns maximum step
+vs s 0 pulse(0 1 10n 1n 1n 30n 80n)
+aad [s] [d] adc1
+.model adc1 adc_bridge(in_low=0.5 in_high=0.5 rise_delay=1n fall_delay=1n)
+adr d NULL r1 d2r
+.model d2r d_to_real(zero=-1 one=3 delay=2n)
+arv1 r1 a1 rv1
+.model rv1 real_to_v(gain=1 transition_time=1n)
+arv2 r1 a2 rv2
+.model rv2 real_to_v(gain=2 transition_time=1n)
+r1 a1 0 1k
+r2 a2 0 1k
+.tran 0.05n 40n 0 0.2n
+.end
+",
+    )
+    .expect("the deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 40e-9, 0.2e-9)
+        .expect("transient solves");
+    let time = &result.time;
+    let a1 = transient_node_series(&result, "a1");
+    let a2 = transient_node_series(&result, "a2");
+    let edge = 13.7e-9;
+    assert_real_changes(
+        &real_event_changes(&result, "r1"),
+        &[(0.0, -1.0), (edge, 3.0)],
+    );
+
+    let rows = |at: f64| {
+        let k = time
+            .iter()
+            .position(|t| (t - at).abs() <= 1e-18)
+            .unwrap_or_else(|| panic!("no point at {at:e}: {time:?}"));
+        (a1[k], a2[k])
+    };
+    for (at, want) in [
+        (0.0, (-1.0, -2.0)),
+        (0.5e-12, (-1.0, -2.0)),
+        (1e-12, (-1.0, -2.0)),
+        (2e-12, (-1.0, -1.0)),
+        (edge, (-1.0, -1.0)),
+    ] {
+        assert_eq!(rows(at), want, "at {at:e}");
+    }
+
+    let (target, transition) = (3.0, 1e-9);
+    let first = time.iter().position(|t| (t - edge).abs() <= 1e-18).unwrap();
+    for k in first + 1..time.len() {
+        let (from, h) = (a1[k - 1], time[k] - time[k - 1]);
+        let share = if h < transition { h / transition } else { 1.0 };
+        let level = from + (target - from) * share;
+        let gained = if h < transition {
+            from + (target - from) * share * 2.0
+        } else {
+            target * 2.0
+        };
+        assert!(
+            (a1[k] - level).abs() <= 1e-9 && (a2[k] - gained).abs() <= 1e-9,
+            "at {:e} after a {h:e} step from {from}: a1 {} (want {level}), a2 {} (want {gained})",
+            time[k],
+            a1[k],
+            a2[k]
+        );
+    }
+    let last = time.len() - 1;
+    assert!(
+        (a1[last] - 3.0).abs() <= 1e-9 && (a2[last] - 3.0).abs() <= 1e-9,
+        "both settle at the input itself: a1 {} a2 {}",
+        a1[last],
+        a2[last]
+    );
+}
+
 #[test]
 fn control_esave_none_suppresses_digital_event_trace_output() {
     let result = run_temp_deck(

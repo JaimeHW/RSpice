@@ -10,8 +10,9 @@ use crate::xspice::{
 /// context, which a transient checkpoint's context image holds whole: the
 /// published output the change test compares against, the event time of each
 /// real input, `real_delay`'s last clock level in an integer state,
-/// `real_gain`'s pending call in two states, and `real_to_v`'s ramp (level,
-/// target, start time, start value) in four states. A resumed run therefore
+/// `real_gain`'s pending call in two states, `real_to_v`'s ramp (its two
+/// times and two levels) in four states, and the boundary converter's ramp
+/// (level, target, start time, start value) in four. A resumed run therefore
 /// continues each one from its saved state.
 fn context_checkpoint() -> XspiceCheckpointSupport {
     XspiceCheckpointSupport::Serializable
@@ -92,35 +93,35 @@ fn commit_event_outputs(ctx: &CmContext) -> bool {
     ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
 }
 
-fn real_to_v_output(
+/// The boundary converter's level at `time` on the ramp from `start_value`
+/// at `start_time` to `target`.
+fn boundary_ramp_output(
     time: Value,
     start_time: Value,
     start_value: Value,
     target: Value,
     transition_time: Value,
-    gain: Value,
 ) -> Value {
     // The left limit at the transition's own instant, whatever its duration:
     // the rule `bridges::dac_bridge_ramp_value` documents for every
     // digital-to-analog path.
     if time <= start_time {
-        return start_value * gain;
+        return start_value;
     }
     if transition_time <= 0.0 {
-        return target * gain;
+        return target;
     }
 
     let end_time = start_time + transition_time;
     if time >= end_time {
-        target * gain
+        target
     } else {
         let fraction = (time - start_time) / transition_time;
-        // ngspice's real_to_v model applies gain to the ramp delta only.
-        start_value + (target - start_value) * fraction * gain
+        start_value + (target - start_value) * fraction
     }
 }
 
-fn real_to_v_completion_time(
+fn boundary_ramp_end(
     start_time: Value,
     start_value: Value,
     target: Value,
@@ -137,6 +138,80 @@ fn real_to_v_completion_time(
     }
 
     Some(start_time + transition_time)
+}
+
+/// `real_to_v`'s event state, cfunc.mod's `t` and `v` pairs: the output
+/// moves from `v0` at `t0` to `v1` at `t1`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RealToVRamp {
+    t0: Value,
+    t1: Value,
+    v0: Value,
+    v1: Value,
+}
+
+impl RealToVRamp {
+    const STATES: usize = 4;
+
+    /// cfunc.mod's state at initialization and after its `TIME == 0` analog
+    /// call: both levels the input, on a ramp that ended before time zero.
+    fn settled(input: Value) -> Self {
+        Self {
+            t0: -2.0,
+            t1: -1.0,
+            v0: input,
+            v1: input,
+        }
+    }
+
+    fn accepted(ctx: &CmContext) -> Self {
+        Self {
+            t0: ctx.state_prev(0),
+            t1: ctx.state_prev(1),
+            v0: ctx.state_prev(2),
+            v1: ctx.state_prev(3),
+        }
+    }
+
+    /// Keep the state for the accepted point this evaluation is a candidate
+    /// for, or, at time zero and outside a transient, as the state every
+    /// later point starts from: no point is accepted before time zero, and
+    /// the transient's first step reads what its operating point left.
+    fn store(self, ctx: &mut CmContext) {
+        let initial = !ctx.is_transient() || ctx.time == 0.0;
+        for (index, value) in [self.t0, self.t1, self.v0, self.v1].into_iter().enumerate() {
+            if initial {
+                ctx.set_initial_state(index, value);
+            } else {
+                ctx.set_state(index, value);
+            }
+        }
+    }
+
+    /// cfunc.mod's event call at `time`, reading `input`: a new ramp to
+    /// `input`, `transition_time` long, from the level this one has reached.
+    fn call(&mut self, time: Value, input: Value, transition_time: Value) {
+        if time >= self.t1 {
+            self.v0 = self.v1;
+        } else {
+            self.v0 = self.v0 + (self.v1 - self.v0) * (time - self.t0) / (self.t1 - self.t0);
+        }
+        self.v1 = input;
+        self.t0 = time;
+        self.t1 = time + transition_time;
+    }
+
+    /// cfunc.mod's analog output at `time`. Partway along the ramp `gain`
+    /// scales the change from `v0`, not `v0` itself.
+    fn output(self, time: Value, gain: Value) -> Value {
+        if time <= self.t0 {
+            self.v0 * gain
+        } else if time >= self.t1 {
+            self.v1 * gain
+        } else {
+            self.v0 + (self.v1 - self.v0) * (time - self.t0) / (self.t1 - self.t0) * gain
+        }
+    }
 }
 
 fn set_real_output_when_changed(ctx: &mut CmContext, name: &str, value: Value, delay: Value) {
@@ -436,6 +511,18 @@ pub struct RealToVoltage;
 #[derive(Debug, Default)]
 pub struct RealToVoltageAlias;
 
+fn real_to_v_parameters() -> &'static [ParamSpec] {
+    use std::sync::OnceLock;
+    static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+    PARAMS.get_or_init(|| {
+        vec![
+            ParamSpec::real("gain", 1.0),
+            ParamSpec::real("transition_time", 1.0e-9)
+                .with_description("Output transition time, clamped to official lower limit"),
+        ]
+    })
+}
+
 impl CodeModel for RealToVoltage {
     fn name(&self) -> &str {
         "real_to_v"
@@ -454,11 +541,119 @@ impl CodeModel for RealToVoltage {
     }
 
     fn parameters(&self) -> &[ParamSpec] {
+        real_to_v_parameters()
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ctx.allocate_states(RealToVRamp::STATES);
+        RealToVRamp::settled(ctx.input_real("in").unwrap_or(0.0)).store(ctx);
+        Ok(())
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
+    }
+
+    /// As ngspice-46's `real_to_v` (icm/xtraevt/real_to_v/cfunc.mod). At time
+    /// zero, and outside a transient, the output is the input times `gain`.
+    /// After it ngspice calls the model at each input event, and again at
+    /// the end of every accepted step but the first (`EVTcall_hybrids`,
+    /// dctran.c), since it has an analog port and an event port. Each call
+    /// starts a new `transition_time` ramp to the input from the level the
+    /// last one reached, so a step `h` shorter than the transition closes the
+    /// share `h / transition_time` of the gap left: the output approaches a
+    /// new input geometrically, at a rate set by the steps the run takes, and
+    /// reaches it only on a step at least `transition_time` long. Partway
+    /// along a ramp `gain` scales only the change, so once a ramp has
+    /// restarted the output settles at the input itself. The model names no
+    /// future time.
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let gain = finite_event_param(ctx, "real_to_v", "gain", 1.0)?;
+        let transition_time = limited_event_delay(ctx, "real_to_v", "transition_time", 1.0e-9)?;
+        let input = ctx.input_real("in").unwrap_or(0.0);
+
+        if !ctx.is_transient() || ctx.time == 0.0 {
+            if commit_event_outputs(ctx) {
+                RealToVRamp::settled(input).store(ctx);
+            }
+            ctx.set_output("out", input * gain);
+            return Ok(());
+        }
+
+        let mut ramp = RealToVRamp::accepted(ctx);
+        // `v1` is the input the last call read, so a different one has had
+        // an event since the last accepted point; ngspice calls the model at
+        // the event's own instant. An event here lands a step on its instant,
+        // which reads the level before it: ngspice computes no point there,
+        // and the one it might, the event a step's end coincides with, it
+        // computes before calling the model.
+        let event = (input != ramp.v1).then(|| {
+            ctx.input_real_event_time("in")
+                .unwrap_or(ctx.time)
+                .min(ctx.time)
+        });
+        if let Some(at) = event.filter(|at| *at < ctx.time) {
+            ramp.call(at, input, transition_time);
+        }
+        let output = ramp.output(ctx.time, gain);
+        if let Some(at) = event.filter(|at| *at >= ctx.time) {
+            ramp.call(at, input, transition_time);
+        }
+        // The call that ends the step, which ngspice does not make after the
+        // first one.
+        if ctx.time_prev > 0.0 {
+            ramp.call(ctx.time, input, transition_time);
+        }
+        if commit_event_outputs(ctx) {
+            ramp.store(ctx);
+        }
+        ctx.set_output("out", output);
+        Ok(())
+    }
+
+    /// ngspice holds no truncation error against the output, as against no
+    /// bridge's: a ramp that restarts at every step bends at every step, and
+    /// a voltage error estimate would chase that bend down to the smallest
+    /// steps.
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
+    }
+}
+
+/// RSpice's own real-to-voltage converter: the one the build inserts where a
+/// real event net meets an analog node that no deck instance converts, and
+/// the connect rule's `r2e` at its ideal, equal-edged defaults. A change
+/// ramps linearly from the present level to the new value over
+/// `transition_time`, starting at the event, and the stepper lands on the
+/// ramp's end, as a Verilog-AMS `transition` does: whatever steps a run
+/// takes, the output is the same. ngspice's [`RealToVoltage`], which a deck
+/// names, approaches a change at a rate its steps set instead, and is not
+/// what an engine should choose on a deck's behalf.
+#[derive(Debug, Default)]
+pub(crate) struct RealBoundaryToVoltage;
+
+impl CodeModel for RealBoundaryToVoltage {
+    fn name(&self) -> &str {
+        "__rspice_real_to_v"
+    }
+
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        held_boundary_descriptor()
+    }
+
+    fn description(&self) -> &str {
+        "Real-valued event to analog boundary converter"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        real_to_v_ports()
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
         use std::sync::OnceLock;
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
         PARAMS.get_or_init(|| {
             vec![
-                ParamSpec::real("gain", 1.0),
                 ParamSpec::real("transition_time", 1.0e-9)
                     .with_description("Output transition time, clamped to official lower limit"),
             ]
@@ -475,20 +670,18 @@ impl CodeModel for RealToVoltage {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let gain = finite_event_param(ctx, "real_to_v", "gain", 1.0)?;
         let target = ctx.input_real("in").unwrap_or(0.0);
-        let target_output = target * gain;
 
         if !ctx.is_transient() {
-            ctx.set_initial_state(0, target_output);
+            ctx.set_initial_state(0, target);
             ctx.set_initial_state(1, target);
             ctx.set_initial_state(2, ctx.time);
             ctx.set_initial_state(3, target);
-            ctx.set_output("out", target_output);
+            ctx.set_output("out", target);
             return Ok(());
         }
 
-        let transition_time = limited_event_delay(ctx, "real_to_v", "transition_time", 1.0e-9)?;
+        let transition_time = limited_event_delay(ctx, self.name(), "transition_time", 1.0e-9)?;
         let accepted_output = ctx.state_prev(0);
         let accepted_target = ctx.state_prev(1);
         let accepted_start_time = ctx.state_prev(2);
@@ -512,27 +705,26 @@ impl CodeModel for RealToVoltage {
         };
 
         let output = if first_transient_point {
-            target_output
+            target
         } else {
-            real_to_v_output(
+            boundary_ramp_output(
                 ctx.time,
                 next_start_time,
                 next_start_value,
                 next_target,
                 transition_time,
-                gain,
             )
         };
 
         if commit_event_outputs(ctx) {
-            if let Some(completion_time) = real_to_v_completion_time(
+            if let Some(end) = boundary_ramp_end(
                 next_start_time,
                 next_start_value,
                 next_target,
                 transition_time,
-            ) && ctx.is_ahead(completion_time)
+            ) && ctx.is_ahead(end)
             {
-                ctx.request_breakpoint(completion_time);
+                ctx.request_breakpoint(end);
             }
             ctx.set_state(0, output);
             ctx.set_state(1, next_target);
@@ -583,6 +775,10 @@ impl CodeModel for RealToVoltageAlias {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         RealToVoltage.evaluate(ctx)
     }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        RealToVoltage.excludes_output_from_transient_voltage_lte(output_port)
+    }
 }
 
 /// Analog input observed into a real-valued event.
@@ -617,9 +813,9 @@ impl CodeModel for RealToVoltageAlias {
 ///   sequence by observing, which is what keeps D5 clause 6 — pure-analog
 ///   inertness — true of a deck it appears in.
 ///
-/// [`RealToVoltage`] is deliberately the contrast: the same boundary crossed
-/// the other way, and it *does* know a future time — its own ramp completion —
-/// and asks for it.
+/// [`RealBoundaryToVoltage`], which the build pairs with it, is deliberately
+/// the contrast: the same boundary crossed the other way, and it *does* know
+/// a future time — its own ramp completion — and asks for it.
 ///
 /// # Not an ngspice model
 ///
@@ -1068,18 +1264,13 @@ mod tests {
             .expect("rollbackable real_to_v probe evaluates");
 
         assert_eq!(
-            ctx.state(1),
-            0.0,
-            "rollbackable probes must not commit a new real_to_v event target"
-        );
-        assert_eq!(
-            ctx.state(2),
-            0.0,
-            "rollbackable probes must not commit a new real_to_v transition start time"
+            (0..4).map(|index| ctx.state(index)).collect::<Vec<_>>(),
+            [-2.0, -1.0, 0.0, 0.0],
+            "rollbackable probes must not commit the ramp a real_to_v event starts"
         );
         assert!(
             ctx.take_requested_breakpoints().is_empty(),
-            "rollbackable probes must not schedule real_to_v completion breakpoints"
+            "real_to_v names no future time"
         );
 
         ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
@@ -1087,9 +1278,12 @@ mod tests {
             .evaluate(&mut ctx)
             .expect("accepted real_to_v step evaluates");
 
-        assert_eq!(ctx.state(1), 4.0);
-        assert_eq!(ctx.state(2), 1.0e-9);
-        assert_eq!(ctx.take_requested_breakpoints(), vec![2.0e-9]);
+        assert_eq!(
+            (0..4).map(|index| ctx.state(index)).collect::<Vec<_>>(),
+            [1.0e-9, 2.0e-9, 0.0, 4.0],
+            "the event starts a ramp from 0 at 1 ns to 4 at 2 ns"
+        );
+        assert!(ctx.take_requested_breakpoints().is_empty());
     }
 
     // =======================================================================

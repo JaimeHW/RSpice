@@ -5596,8 +5596,10 @@ fn add_planned_xspice_auto_bridge(
             ],
             None,
         ),
+        // RSpice's own converter, not the deck's `real_to_v`: see
+        // `RealBoundaryToVoltage`.
         XspiceAutoBridgeKind::RealToV => (
-            "real_to_v",
+            "__rspice_real_to_v",
             format!("{AUTO_BRIDGE_PREFIX}real_to_v_{event_node}"),
             vec![
                 PortConnection::Real(event_node),
@@ -5639,12 +5641,17 @@ fn add_planned_xspice_auto_bridge(
         }
     };
 
-    let code_model = circuit.xspice_registry.get(model_name).ok_or_else(|| {
-        SimulationError::Circuit(format!(
-            "Failed to resolve generated XSPICE auto-bridge model '{}'",
-            model_name
-        ))
-    })?;
+    let code_model: std::sync::Arc<dyn crate::xspice::CodeModel> =
+        if bridge.kind == XspiceAutoBridgeKind::RealToV {
+            std::sync::Arc::new(crate::xspice::models::RealBoundaryToVoltage)
+        } else {
+            circuit.xspice_registry.get(model_name).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Failed to resolve generated XSPICE auto-bridge model '{}'",
+                    model_name
+                ))
+            })?
+        };
 
     let (code_model, connections) =
         boundary_supply::with_live_supply(bridge, live_supply, code_model, connections);
@@ -14169,7 +14176,7 @@ again mix robs rg
             "nothing drives the real event on 'mix' and the matrix owns the node, so the reader needs the observer"
         );
         assert_eq!(
-            xspice_model_count(&circuit, "real_to_v"),
+            xspice_model_count(&circuit, "__rspice_real_to_v"),
             0,
             "the observer direction must not also plan the driver"
         );
@@ -14233,7 +14240,7 @@ again mix rout rg
             .expect("circuit builds");
 
         assert_eq!(
-            xspice_model_count(&circuit, "real_to_v"),
+            xspice_model_count(&circuit, "__rspice_real_to_v"),
             1,
             "the driven event still reaches the matrix through the existing driver bridge"
         );

@@ -3,10 +3,10 @@
 //! boundary, and its insertion record.
 //!
 //! The declaration's defaults convert exactly as a real port no connect rule
-//! reaches: `r2e` with an ideal drive and equal edges is the stock
-//! `real_to_v` with that transition time, and `e2r` publishing every change
-//! is the stock `v_to_real`. Anything else, and every `rbidir`, converts
-//! through `xspice/models/connect_real.rs`.
+//! reaches: `r2e` with an ideal drive and equal edges is RSpice's own
+//! real-to-voltage converter with that transition time, and `e2r` publishing
+//! every change is the stock `v_to_real`. Anything else, and every `rbidir`,
+//! converts through `xspice/models/connect_real.rs`.
 
 use std::sync::Arc;
 
@@ -68,7 +68,10 @@ pub(super) fn materialize(
                 PortConnection::AnalogVector(vec![bridge.node])
             };
             let (model, parameters): (Arc<dyn CodeModel>, _) = if ideal && trise == tfall {
-                (stock("real_to_v")?, vec![("transition_time".into(), trise)])
+                (
+                    Arc::new(crate::xspice::models::RealBoundaryToVoltage),
+                    vec![("transition_time".into(), trise)],
+                )
             } else {
                 let mut parameters = vec![("trise".into(), trise), ("tfall".into(), tfall)];
                 if !ideal {

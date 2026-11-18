@@ -1277,7 +1277,8 @@ fn an_automatic_real_to_voltage_converter_resumes_bit_for_bit() {
 
 /// A real stepping 1 -> 3 at 50 ns and, halfway up that ramp, to 2 at 80 ns,
 /// behind the connect rule's `r2e` with equal 100 ns edges, which the build
-/// converts with the stock `real_to_v` at a 100 ns transition.
+/// converts with its own linear real-to-voltage converter at a 100 ns
+/// transition.
 const RAMPED_REAL: &str = r#"
 module ramped_real(r);
  output r; wreal r;
@@ -1320,7 +1321,7 @@ fn a_resumed_real_to_voltage_converter_continues_its_saved_ramp() {
         )
         .unwrap();
     let checkpoint = &scheduled[0].checkpoint;
-    assert!(image_names(checkpoint, "real_to_v"));
+    assert!(image_names(checkpoint, "__rspice_real_to_v"));
     let saved = through_disk(checkpoint);
     let (resumed, _) = engine
         .run_tran_resume_with_abort(&netlist, &saved, 200e-9, 1e-9, &rspice_core::NoAbort)

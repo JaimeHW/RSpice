@@ -5457,14 +5457,22 @@ endmodule
         });
     let result = Engine::default().run_tran(&netlist, 2e-9, 0.05e-9).unwrap();
     let out = waveform(&result, "out");
+    // The template's own `real_to_v`, as ngspice-46 runs it: `gain` doubles
+    // the input at time zero, and once a step shorter than the 200 ps
+    // transition restarts the ramp it scales only each step's change, so the
+    // output settles at the input itself. ngspice-46, with the real stepped
+    // by `d_to_real` at 1 ns, prints 2 at 0, 1 by 1 ps, 1.503 at 1.05 ns and
+    // 1.998 at 2 ns.
     assert!((out[0] - 2.0).abs() < 1e-7);
-    assert!((out.last().unwrap() - 4.0).abs() < 1e-7);
+    let before = result.time.iter().rposition(|&t| t < 1e-9).unwrap();
+    assert!((out[before] - 1.0).abs() < 1e-7, "{}", out[before]);
+    assert!((out.last().unwrap() - 2.0).abs() < 1e-2);
     assert!(
         result
             .time
             .iter()
             .zip(&out)
-            .any(|(&t, &v)| t > 1e-9 && t < 1.2e-9 && v > 2.1 && v < 3.9)
+            .any(|(&t, &v)| t > 1e-9 && t < 1.2e-9 && v > 1.1 && v < 1.9)
     );
 }
 
