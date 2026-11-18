@@ -61,12 +61,15 @@ fn master(ports: &[(&str, &str)]) -> SchematicDocument {
     document
 }
 
+/// A master cell: its library, its name, and its pins with their directions.
+type Master<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+
 /// `work/top` places `X1` and `X2` of `work/amp`, an input `IN` and an
 /// output `OUT`. Beside it: `vendor/amp` with the same pins, `work/amp_b`
 /// with them in the other order, `work/amp_trim` with a `TRIM` input of
 /// its own, and `work/amp_half` with no `OUT`.
 fn design() -> (Documents, LibraryCatalog) {
-    let masters: [(&str, &str, &[(&str, &str)]); 5] = [
+    let masters: [Master; 5] = [
         ("work", "amp", &[("IN", "in"), ("OUT", "out")]),
         ("vendor", "amp", &[("IN", "in"), ("OUT", "out")]),
         ("work", "amp_b", &[("OUT", "out"), ("IN", "in")]),
