@@ -19,7 +19,6 @@ use rspice_app_code::workbench::documents::netlist_document::{
     OwnedNetlistReplacement, editor_id_in, replace_owned_sources_atomically,
 };
 use rspice_app_code::workbench::documents::virtual_text_editor::context_menu_may_show;
-use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 use rspice_app_workbench::workbench::framework::feature::{Cx, Feature};
 
 /// A deck whose last instance calls the subcircuit it defines, under a name
@@ -357,7 +356,7 @@ fn the_arrows_step_the_open_menus_rows_and_escape_closes_it() {
     }
     assert_eq!(
         stepped,
-        ["Go to definition", "Cut", "Go to definition"].map(|row| Some(row.to_owned())),
+        ["Go to definition", FIND_REFERENCES, "Go to definition"].map(|row| Some(row.to_owned())),
         "the arrows step the menu's rows"
     );
     let netlist = &replay.app.state.code.netlist;
@@ -535,58 +534,59 @@ fn labels(controls: &[Control], role: Role) -> Vec<String> {
 const FIND_REFERENCES: &str = "Find references";
 const RENAME_SYMBOL: &str = "Rename symbol\u{2026}";
 
-/// A deck answers Go to definition and no other command of the language
-/// group: its index reads one physical line at a time, so Find references
-/// would list the wrong text and Rename symbol would rewrite it. Neither is
-/// a row of the deck's menu, and in the focused editor their keys leave the
-/// deck, the caret, the navigator and the status line as they were.
+/// A deck answers the whole language group through the engine's index of
+/// it and its includes: Go to definition, Find references and Rename symbol
+/// are rows of the deck's menu. In the focused editor Shift+F12 lists the
+/// places the subcircuit is written on the References page, and F2 opens
+/// the rename form on its name.
 #[test]
-fn the_decks_menu_and_keys_offer_neither_find_references_nor_rename() {
+fn the_decks_menu_and_keys_offer_find_references_and_rename() {
     let mut replay = deck_page();
     open_menu_on_the_call(&mut replay);
     let rows = labels(&replay.frames(Vec::new()), Role::MenuItem);
-    assert!(rows.iter().any(|row| row == "Go to definition"), "{rows:?}");
-    for absent in [FIND_REFERENCES, RENAME_SYMBOL] {
-        assert!(!rows.iter().any(|row| row == absent), "{absent}: {rows:?}");
+    for offered in ["Go to definition", FIND_REFERENCES, RENAME_SYMBOL] {
+        assert!(rows.iter().any(|row| row == offered), "{offered}: {rows:?}");
     }
     press(&mut replay, Key::Escape);
     replay.frame(Vec::new());
     assert!(editor_has_the_keyboard(&replay));
     for command in [CodeCommand::FindReferences, CodeCommand::RenameSymbol] {
-        assert_eq!(
-            replay.app.command_availability(command.key()),
-            CommandAvailability::Hidden,
+        assert!(
+            replay
+                .app
+                .command_availability(command.key())
+                .is_available(),
             "{command:?} on a deck"
         );
     }
 
-    let caret = replay.app.state.code.netlist.cursor_char_index;
-    let status = replay
+    replay.key(Key::F12, Modifiers::SHIFT);
+    let listed = replay
         .app
         .state
         .workbench
-        .prompt
+        .source_references
         .as_ref()
-        .map(|prompt| prompt.text.clone());
-    for (key, modifiers) in [(Key::F2, Modifiers::NONE), (Key::F12, Modifiers::SHIFT)] {
-        let shown = replay.key(key, modifiers);
-        assert!(
-            !shown.iter().any(|control| control.value == "Current name"),
-            "{key:?} opens no rename form"
-        );
-    }
-    let state = &replay.app.state;
-    assert_eq!(state.model.simulation.source.netlist_content, DECK);
-    assert_eq!(state.code.netlist.cursor_char_index, caret);
-    assert_eq!(state.workbench.navigator_filter(), "");
+        .map(|list| list.rows.iter().map(|row| row.line).collect::<Vec<_>>());
     assert_eq!(
-        state
-            .workbench
-            .prompt
-            .as_ref()
-            .map(|prompt| prompt.text.clone()),
-        status,
-        "neither key says anything"
+        listed,
+        Some(vec![2, 5]),
+        "the definition and the call; the status line says {:?}",
+        replay.app.state.prompt_text()
+    );
+
+    // The list took the keyboard; a click on the call gives it back.
+    click_the_call(&mut replay);
+    let shown = replay.key(Key::F2, Modifiers::NONE);
+    assert!(
+        shown
+            .iter()
+            .any(|control| control.label == "New name" && control.value == NAME),
+        "F2 opens the rename of {NAME}"
+    );
+    assert_eq!(
+        replay.app.state.model.simulation.source.netlist_content,
+        DECK
     );
 }
 
@@ -605,25 +605,20 @@ fn the_language_tools_menu_offers_neither_find_references_nor_rename() {
     }
 }
 
-/// The palette finds Go to definition on a deck, and neither Find
-/// references nor Rename symbol.
+/// The palette finds Go to definition, Find references and Rename symbol on
+/// a deck.
 #[test]
-fn the_palette_offers_neither_find_references_nor_rename_on_a_deck() {
+fn the_palette_offers_find_references_and_rename_on_a_deck() {
     let mut replay = deck_page();
     click_the_call(&mut replay);
     let opened = replay.key(Key::K, PRIMARY);
     only(&opened, "Command search", Role::ComboBox);
     replay.click("Command search", Role::ComboBox);
-    for (query, offered) in [
-        ("Go to definition", true),
-        (FIND_REFERENCES, false),
-        ("Rename symbol", false),
-    ] {
+    for query in ["Go to definition", FIND_REFERENCES, "Rename symbol"] {
         replay.key(Key::A, PRIMARY);
         let found = labels(&replay.type_text(query), Role::ListBoxOption);
-        assert_eq!(
+        assert!(
             found.iter().any(|row| row.starts_with(query)),
-            offered,
             "{query}: {found:?}"
         );
     }

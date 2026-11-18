@@ -31,6 +31,10 @@ pub struct CodeState {
     /// than expanded, so a deck that gains a category discloses it instead of
     /// hiding it behind a preference nobody set.
     pub netlist_outline_collapsed: std::collections::BTreeSet<crate::state::OutlineSectionKind>,
+    /// Rename symbol over the deck: the name, the new name and what renaming
+    /// to it does.
+    pub(crate) deck_rename:
+        Option<crate::workbench::documents::netlist_document::references::DeckRename>,
 }
 
 impl CodeState {
@@ -74,6 +78,7 @@ impl CodeState {
     /// to the source that was thrown away.
     pub fn on_project_changed(&mut self) {
         self.netlist = Default::default();
+        self.deck_rename = None;
         self.netlist_open_documents.clear();
     }
 

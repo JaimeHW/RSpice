@@ -117,6 +117,7 @@ pub fn show(
     let editor_id = editor_id_in(model, netlist);
 
     refresh_diagnostics(ui, model, netlist, include_resolutions);
+    super::references::settle_deck_references(model, netlist, workbench);
     // Hover, completion and the navigator read the project index of the deck
     // as it stands; its build starts once the text changes, off this thread.
     super::language::project_index_in(ui.ctx(), model, netlist);
@@ -349,8 +350,6 @@ pub fn show(
         completion::place_caret(ui, editor_id, caret);
     }
     show_signature_help(ui, netlist, editor_id, anchor);
-    let hover_symbol =
-        hover_char_index.and_then(|index| super::language::symbol_name_at(&buffer, index));
     let hover_value = hover_char_index.and_then(|index| {
         super::language::value_hover_at_in(netlist, workbench.messages(), &buffer, index)
     });
@@ -414,8 +413,8 @@ pub fn show(
         .filter(|hover| hover.value.is_some() || hover.not_read)
     {
         show_value_hover(&editor_response, hover);
-    } else if let Some(symbol) = hover_symbol
-        && let Some(hover) = super::language::symbol_hover(ui.ctx(), model, netlist, &symbol)
+    } else if let Some(index) = hover_char_index
+        && let Some(hover) = super::language::name_hover(ui.ctx(), model, netlist, index)
     {
         editor_response.clone().on_hover_ui_at_pointer(|ui| {
             ui.set_max_width(360.0);

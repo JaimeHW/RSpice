@@ -37,7 +37,10 @@ fn draw_editor(ctx: &egui::Context, app: &mut RSpiceApp, frames: usize) {
 fn a_deck_finding_names_the_decks_file_and_its_row_goes_to_its_line() {
     let deck = "amp\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.end\n";
     let mut app = RSpiceApp::test_instance();
-    assert!(app.state.apply_imported_netlist(deck.to_owned(), None, "amp_tb.cir"));
+    assert!(
+        app.state
+            .apply_imported_netlist(deck.to_owned(), None, "amp_tb.cir")
+    );
     app.state.workbench.workspace = Workspace::Netlist;
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
@@ -49,7 +52,10 @@ fn a_deck_finding_names_the_decks_file_and_its_row_goes_to_its_line() {
         .find(|row| row.message.contains("nchh"))
         .expect("the unknown model is listed");
     assert_eq!(row.subject, "amp_tb.cir");
-    let route = row.route.clone().expect("a current finding goes to its line");
+    let route = row
+        .route
+        .clone()
+        .expect("a current finding goes to its line");
 
     app.state.code.netlist.cursor_line = 3;
     app.state.model.diagnostics.request_route(route);

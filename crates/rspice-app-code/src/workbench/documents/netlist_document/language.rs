@@ -142,9 +142,13 @@ impl NetlistProjectIndex {
         root_path: &std::path::Path,
         document: &crate::state::NetlistDocument,
     ) -> Self {
+        // A location names the file the reader sees on the deck's tab.
         let root_name = match root {
             ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
-            ActiveNetlistDocument::OwnedSource => "project root".to_owned(),
+            ActiveNetlistDocument::OwnedSource => root_path.file_name().map_or_else(
+                || "deck".to_owned(),
+                |name| name.to_string_lossy().into_owned(),
+            ),
             ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {
                 return Self::default();
             }
@@ -343,6 +347,7 @@ impl NetlistProjectIndex {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn references_named(&self, name: &str) -> Vec<&ProjectReference> {
         self.references
             .iter()
@@ -350,9 +355,47 @@ impl NetlistProjectIndex {
             .collect()
     }
 
+    /// The engine's index of the deck and its SPICE includes.
+    pub(crate) const fn deck(&self) -> &DeckIndex {
+        &self.deck
+    }
+
+    /// The include file `file` of the index is, by its identity in the deck;
+    /// `None` for the deck itself.
+    pub(crate) fn file_dependency(&self, file: usize) -> Option<&str> {
+        self.files.get(file)?.dependency_identity.as_deref()
+    }
+
+    /// The name the reader knows file `file` of the index by.
+    pub(crate) fn file_name(&self, file: usize) -> &str {
+        self.files
+            .get(file)
+            .map_or("", |file| file.display_name.as_str())
+    }
+
+    /// The root the index was built for.
+    pub(crate) fn root(&self) -> Option<ActiveNetlistDocument> {
+        self.files.first().map(|file| file.root)
+    }
+
+    /// Whether `texts`, one to a file of the index in its order, are still
+    /// the texts it was built from.
+    pub(crate) fn indexed(&self, texts: &[&str]) -> bool {
+        texts.len() == self.files.len()
+            && self
+                .files
+                .iter()
+                .zip(texts)
+                .all(|(file, text)| file.digest == crate::state::content_digest(text))
+    }
+
     /// The file the index numbers the source `dependency_identity` names
     /// (the root for `None`), while `text` is still the text it indexed.
-    fn file_holding(&self, dependency_identity: Option<&str>, text: &str) -> Option<usize> {
+    pub(crate) fn file_holding(
+        &self,
+        dependency_identity: Option<&str>,
+        text: &str,
+    ) -> Option<usize> {
         let file = self
             .files
             .iter()
@@ -387,6 +430,74 @@ impl NetlistProjectIndex {
         )
     }
 
+    /// What a hover on the name at character `char_index` of `text`, the
+    /// source `dependency_identity` names, says: the definition the engine
+    /// binds the name to, the file and line it is written on and how many
+    /// references the index binds to it; or that nothing in scope defines
+    /// it. `None` where the
+    /// index has no such name, or was built from other text.
+    pub(crate) fn hover_at(
+        &self,
+        dependency_identity: Option<&str>,
+        text: &str,
+        char_index: usize,
+    ) -> Option<ProjectSymbolHover> {
+        let file = self.file_holding(dependency_identity, text)?;
+        let byte = text
+            .char_indices()
+            .nth(char_index)
+            .map_or(text.len(), |(byte, _)| byte);
+        let symbol = match self.deck.name_at(file, byte)? {
+            DeckNameAt::Definition(symbol) => symbol,
+            DeckNameAt::Reference(reference) => {
+                let read = &self.deck.references()[reference];
+                let Some(symbol) = read.target else {
+                    return Some(ProjectSymbolHover {
+                        title: read.name.clone(),
+                        detail: format!("Nothing in scope defines {}.", read.name),
+                    });
+                };
+                symbol
+            }
+        };
+        let definition = self.deck.symbols().get(symbol)?;
+        let (kind, what) = match definition.kind {
+            DeckSymbolKind::Instance => return None,
+            DeckSymbolKind::Parameter if definition.detail.is_empty() => {
+                ("Parameter", String::new())
+            }
+            DeckSymbolKind::Parameter => ("Parameter", format!("= {}", definition.detail)),
+            DeckSymbolKind::Subcircuit => (
+                "Subcircuit",
+                definition
+                    .opens
+                    .and_then(|scope| self.deck.scopes().get(scope))
+                    .map(|scope| format!("Ports {}", scope.ports.join(" ")))
+                    .unwrap_or_default(),
+            ),
+            DeckSymbolKind::Model => ("Model", definition.detail.clone()),
+            DeckSymbolKind::Function => ("Function", definition.detail.clone()),
+        };
+        let read = match self.deck.references_to(symbol).count() {
+            0 => "no references".to_owned(),
+            1 => "1 reference".to_owned(),
+            reads => format!("{reads} references"),
+        };
+        let place = format!(
+            "{} line {} · {read}",
+            self.file_name(definition.location.file),
+            definition.location.line
+        );
+        Some(ProjectSymbolHover {
+            title: format!("{kind} {}", definition.name),
+            detail: if what.is_empty() {
+                place
+            } else {
+                format!("{what} · {place}")
+            },
+        })
+    }
+
     /// The parameters a reader on one-based `line` of the source
     /// `dependency_identity` names sees, each the definition the engine binds
     /// there: a subcircuit's own and its formals inside it, the deck's
@@ -396,11 +507,7 @@ impl NetlistProjectIndex {
         dependency_identity: Option<&str>,
         line: usize,
     ) -> Vec<&DeckSymbol> {
-        let scope = self
-            .files
-            .iter()
-            .position(|file| file.dependency_identity.as_deref() == dependency_identity)
-            .map_or(0, |file| self.deck.scope_on_line(file, line));
+        let scope = self.scope_at(dependency_identity, line);
         self.deck
             .parameters_visible_in(scope)
             .into_iter()
@@ -408,26 +515,90 @@ impl NetlistProjectIndex {
             .collect()
     }
 
-    /// The project's subcircuits, models and functions for completion; its
-    /// parameters complete by what the caret's scope sees.
-    pub(crate) fn completion_symbols(&self) -> Vec<super::completion::SymbolEntry> {
-        let mut seen = std::collections::HashSet::new();
-        self.symbols
+    /// The scope a reader on one-based `line` of the source
+    /// `dependency_identity` names is in: the deck's top level, or the
+    /// subcircuit whose body the line is in.
+    pub(crate) fn scope_at(&self, dependency_identity: Option<&str>, line: usize) -> usize {
+        self.files
             .iter()
-            .filter(|symbol| symbol.kind != ProjectSymbolKind::Parameter)
-            .filter(|symbol| seen.insert((symbol.kind, symbol.name.to_ascii_lowercase())))
-            .map(|symbol| super::completion::SymbolEntry {
+            .position(|file| file.dependency_identity.as_deref() == dependency_identity)
+            .map_or(0, |file| self.deck.scope_on_line(file, line))
+    }
+
+    /// The definitions of `kinds` a reader in `scope` sees: those written in
+    /// it and in each scope enclosing it.
+    pub(crate) fn defined_in_reach(
+        &self,
+        scope: usize,
+        kinds: &[DeckSymbolKind],
+    ) -> Vec<&DeckSymbol> {
+        let reach = self.deck.scope_chain(scope).collect::<Vec<_>>();
+        self.deck
+            .symbols()
+            .iter()
+            .filter(|symbol| kinds.contains(&symbol.kind) && reach.contains(&symbol.scope))
+            .collect()
+    }
+
+    /// The node names written in `scope`, and the deck's global ones, each
+    /// once as first written.
+    pub(crate) fn nodes_in(&self, scope: usize) -> Vec<&str> {
+        let mut seen = HashSet::new();
+        self.deck
+            .nodes()
+            .iter()
+            .filter(|node| {
+                node.scope == scope
+                    || self.deck.cards().get(node.card).map(|card| card.kind)
+                        == Some(rspice_core::netlist::DeckCardKind::Global)
+                    || node.name == "0"
+            })
+            .filter(|node| seen.insert(node.name.to_ascii_lowercase()))
+            .map(|node| node.name.as_str())
+            .collect()
+    }
+
+    /// The ports of the subcircuit `symbol`, in order.
+    pub(crate) fn ports_of(&self, symbol: &DeckSymbol) -> &[String] {
+        symbol
+            .opens
+            .and_then(|scope| self.deck.scopes().get(scope))
+            .map_or(&[], |scope| scope.ports.as_slice())
+    }
+
+    /// The subcircuits, models and functions a reader in `scope` sees, for
+    /// completion, each name once.
+    pub(crate) fn completion_symbols_in(
+        &self,
+        scope: usize,
+    ) -> Vec<super::completion::SymbolEntry> {
+        let mut seen = HashSet::new();
+        self.defined_in_reach(
+            scope,
+            &[
+                DeckSymbolKind::Subcircuit,
+                DeckSymbolKind::Model,
+                DeckSymbolKind::Function,
+            ],
+        )
+        .into_iter()
+        .filter(|symbol| seen.insert((symbol.kind, symbol.name.to_ascii_lowercase())))
+        .filter_map(|symbol| {
+            let kind = ProjectSymbolKind::of(symbol.kind)?;
+            let definition = location_in(&self.files, &symbol.location);
+            Some(super::completion::SymbolEntry {
                 name: symbol.name.clone(),
-                kind: symbol.kind.label(),
+                kind: kind.label(),
                 detail: symbol.detail.clone(),
                 doc: format!(
                     "{} defined in {}:{}",
-                    symbol.kind.label(),
-                    symbol.definition.display_name,
-                    symbol.definition.line
+                    kind.label(),
+                    definition.display_name,
+                    definition.line
                 ),
             })
-            .collect()
+        })
+        .collect()
     }
 }
 
@@ -529,10 +700,6 @@ fn root_path_of(model: &Model, root: ActiveNetlistDocument) -> std::path::PathBu
         ActiveNetlistDocument::OwnedSource => super::source_index::root_deck_path(model),
         _ => std::path::PathBuf::new(),
     }
-}
-
-pub(crate) fn symbol_name_at(source: &str, char_index: usize) -> Option<String> {
-    symbol_at_cursor(source, char_index)
 }
 
 /// How far a re-parse of the engineering rendering may sit from the evaluated
@@ -796,45 +963,48 @@ pub(crate) fn value_hover_at_in(
     hover
 }
 
-pub(crate) fn symbol_hover(
+/// What a hover on the name at character `char_index` of the source the
+/// editor shows says, as the deck's index binds it. It is read once for each
+/// index, revision and position, so a held pointer does not re-read the deck
+/// every frame.
+pub(crate) fn name_hover(
     ctx: &egui::Context,
     model: &Model,
     netlist: &mut NetlistDocumentState,
-    name: &str,
+    char_index: usize,
 ) -> Option<ProjectSymbolHover> {
+    type Held = (
+        std::sync::Weak<NetlistProjectIndex>,
+        u64,
+        Option<String>,
+        usize,
+        Option<ProjectSymbolHover>,
+    );
     let index = project_index_in(ctx, model, netlist)?;
-    let definitions = index.definitions_named(name);
-    let references = index.references_named(name);
-    match definitions.as_slice() {
-        [symbol] => Some(ProjectSymbolHover {
-            title: format!("{} {}", symbol.kind.label(), symbol.name),
-            detail: format!(
-                "{} · {}:{} · {} semantic reference{}",
-                symbol.detail,
-                symbol.definition.display_name,
-                symbol.definition.line,
-                references.len(),
-                if references.len() == 1 { "" } else { "s" }
-            ),
-        }),
-        [] if !references.is_empty() => Some(ProjectSymbolHover {
-            title: format!("unresolved {name}"),
-            detail: format!(
-                "{} semantic reference{} in the project's sources; no definition is available",
-                references.len(),
-                if references.len() == 1 { "" } else { "s" }
-            ),
-        }),
-        [] => None,
-        _ => Some(ProjectSymbolHover {
-            title: format!("ambiguous {name}"),
-            detail: format!(
-                "{} definitions and {} semantic references in the project's sources",
-                definitions.len(),
-                references.len()
-            ),
-        }),
+    let id = egui::Id::new("netlist_name_hover");
+    let held = ctx.data(|data| data.get_temp::<Held>(id));
+    if let Some((built, revision, dependency, at, hover)) = held
+        && std::sync::Weak::ptr_eq(&built, &Arc::downgrade(&index))
+        && revision == netlist.revision
+        && dependency == netlist.active_dependency_identity
+        && at == char_index
+    {
+        return hover;
     }
+    let hover = index.hover_at(
+        netlist.active_dependency_identity.as_deref(),
+        &model.simulation.source.netlist_content,
+        char_index,
+    );
+    let held: Held = (
+        Arc::downgrade(&index),
+        netlist.revision,
+        netlist.active_dependency_identity.clone(),
+        char_index,
+        hover.clone(),
+    );
+    ctx.data_mut(|data| data.insert_temp(id, held));
+    hover
 }
 
 /// Open `location` in the editor. It reads the model, the netlist editor's

@@ -395,7 +395,7 @@ fn stroke(ctx: &egui::Context, app: &mut RSpiceApp, key: egui::Key, modifiers: e
     frame(ctx, app, DESKTOP);
 }
 
-/// A Verilog-A editor keeps the language group a deck does not offer: F2
+/// A Verilog-A editor keeps the whole language group: F2
 /// opens the rename of the name under the caret, Shift+F12 lists its
 /// references, and the palette lists both with those keys.
 #[test]

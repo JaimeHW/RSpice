@@ -171,7 +171,8 @@ pub mod workbench {
         pub(crate) use rspice_app_state::workbench::workspace::Workspace;
         pub use rspice_app_workbench::workbench::state::workbench_session::ActiveSourceEditor;
         pub(crate) use rspice_app_workbench::workbench::state::workbench_session::{
-            self, SourceReference, SourceReferences, WorkbenchSession, WorkspaceDocumentId,
+            self, ReferencesIn, SourceReference, SourceReferences, WorkbenchSession,
+            WorkspaceDocumentId,
         };
     }
     pub mod surfaces {

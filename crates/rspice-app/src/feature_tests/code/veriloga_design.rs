@@ -253,7 +253,10 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
             ("model.va", 6, 21, "analog I(p, n) <+ g * V(p, n);"),
         ]
     );
-    assert_eq!(list.bundle, bundle_id);
+    assert_eq!(
+        list.source,
+        rspice_app_workbench::workbench::state::ReferencesIn::Bundle(bundle_id)
+    );
     assert!(app.state.workbench.console_visible);
     assert_eq!(
         app.state.workbench.console_page,

@@ -30,13 +30,24 @@ pub(crate) const INCLUDE_NATIVE_ORIGIN: &str = "C:/project/models/resistor.inc";
 /// editor: a generated deck that includes one dependency, copied into the
 /// project's own root source, which the editor shows, validated.
 pub fn seed_owned_dependency(model: &mut Model, netlist: &mut NetlistDocumentState) {
+    seed_owned_deck(model, netlist, ROOT, ORIGINAL_INCLUDE);
+}
+
+/// The same, over a root of `root`'s text that includes
+/// [`INCLUDE_IDENTITY`] first, which reads `include`.
+pub fn seed_owned_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    root: &str,
+    include: &str,
+) {
     let locator = SourceLocator::try_new(INCLUDE_IDENTITY, "resistor.inc")
         .unwrap()
         .with_native_origin(INCLUDE_NATIVE_ORIGIN)
         .unwrap();
     let dependency = DependencyMetadata::unresolved_direct_to(0, INCLUDE_IDENTITY, locator)
         .unwrap()
-        .resolve_utf8(ORIGINAL_INCLUDE.as_bytes().to_vec())
+        .resolve_utf8(include.as_bytes().to_vec())
         .unwrap();
     let provenance = GeneratedProvenance::try_new(
         "rspice-owned-include-test",
@@ -48,7 +59,7 @@ pub fn seed_owned_dependency(model: &mut Model, netlist: &mut NetlistDocumentSta
     .unwrap();
     let artifact = GeneratedArtifact::try_from_utf8(
         provenance,
-        ROOT.as_bytes().to_vec(),
+        root.as_bytes().to_vec(),
         vec![dependency],
         Vec::new(),
     )
@@ -58,7 +69,7 @@ pub fn seed_owned_dependency(model: &mut Model, netlist: &mut NetlistDocumentSta
         .create_editable_copy(NetlistDocumentId::new(), generated.content_digest())
         .unwrap();
 
-    model.workspace.content.netlist_source = Some(ROOT.to_owned());
+    model.workspace.content.netlist_source = Some(root.to_owned());
     model.workspace.content.netlist_document = Some(owned.clone());
     model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),
@@ -74,12 +85,12 @@ pub fn seed_owned_dependency(model: &mut Model, netlist: &mut NetlistDocumentSta
         revision_history: Vec::new(),
         owned_includes: Vec::new(),
     });
-    model.netlist_artifacts.generated_source = ROOT.to_owned();
+    model.netlist_artifacts.generated_source = root.to_owned();
     model.netlist_artifacts.generated_document = Some(generated);
     netlist.owned_document = Some(owned);
     netlist.active_document = ActiveNetlistDocument::OwnedSource;
     netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = ROOT.to_owned();
+    model.simulation.source.netlist_content = root.to_owned();
     model
         .workspace
         .content

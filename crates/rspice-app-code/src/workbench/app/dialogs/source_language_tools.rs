@@ -141,6 +141,7 @@ fn list_references(
         .iter()
         .map(|reference| crate::workbench::state::SourceReference {
             logical_path: reference.logical_path.clone(),
+            include: None,
             line: reference.line,
             column: reference.column,
             text: reference.line_preview.clone(),
@@ -275,5 +276,156 @@ pub(in crate::workbench) fn render_rename_symbol_form(
             false
         }
         DialogChoice::None => false,
+    }
+}
+
+const DECK_NEW_NAME_FIELD: &str = "workbench.rename-symbol.deck-new-name";
+
+/// The characters of a changed line the rename preview shows: enough to
+/// read the name in its place on a long card.
+const PREVIEW_ROOM: usize = 20;
+
+/// A changed line, before and after, cut to the same window about its first
+/// change, so a long card still shows the name the rename changes; `…`
+/// stands for what is cut.
+fn around_the_change(before: &str, after: &str) -> (String, String) {
+    let first = before
+        .chars()
+        .zip(after.chars())
+        .take_while(|(was, is)| was == is)
+        .count();
+    // A change near the start shows the line from its start.
+    let start = if first <= PREVIEW_ROOM / 2 {
+        0
+    } else {
+        first - PREVIEW_ROOM / 3
+    };
+    let cut = |line: &str| {
+        let chars = line.chars().collect::<Vec<_>>();
+        if chars.len() <= PREVIEW_ROOM {
+            return line.to_owned();
+        }
+        let start = start.min(chars.len() - PREVIEW_ROOM);
+        let end = start + PREVIEW_ROOM;
+        let mut shown = String::new();
+        if start > 0 {
+            shown.push('\u{2026}');
+        }
+        shown.extend(&chars[start..end]);
+        if end < chars.len() {
+            shown.push('\u{2026}');
+        }
+        shown
+    };
+    (cut(before), cut(after))
+}
+
+/// Rename symbol over the deck: the name under the caret, the new name, and
+/// each line renaming to it changes, before and after; or why it refuses,
+/// naming the file and line. Enter renames, as one change Undo takes back a
+/// file at a time; Esc and Cancel close.
+pub(in crate::workbench) fn render_deck_rename_form(
+    cx: &mut crate::workbench::framework::feature::Cx<'_, crate::workbench::code::CodeFeature>,
+    ctx: &Context,
+) {
+    use crate::ui::widgets::TableColumn;
+    use crate::workbench::documents::netlist_document::references;
+
+    let Some(mut rename) = cx.state.deck_rename.take() else {
+        return;
+    };
+    let unchanged = rename.unchanged();
+    let refusal = if !rename.is_current(cx.model, &cx.state.netlist) {
+        Some("The deck changed after Rename opened. Close it and rename again.".to_owned())
+    } else if let Some(error) = rename.error.clone() {
+        Some(error)
+    } else if unchanged {
+        None
+    } else {
+        rename.plan(cx.model).as_ref().err().cloned()
+    };
+    let plan = (refusal.is_none() && !unchanged)
+        .then(|| rename.plan(cx.model).as_ref().ok().cloned())
+        .flatten();
+    let status = match (refusal.as_deref(), unchanged) {
+        (Some(refusal), _) => Err(refusal),
+        (None, true) => Ok(Some("Enter a new name.")),
+        (None, false) => Ok(None),
+    };
+    let extent = plan.as_ref().map(|plan| {
+        format!(
+            "Renames {}",
+            code_workspace::extent_words(plan.places, plan.file_count())
+        )
+    });
+    let table = plan.as_ref().map(|plan| {
+        plan.rows
+            .iter()
+            .map(|row| {
+                let (before, after) = around_the_change(&row.before, &row.after);
+                vec![row.file.clone(), row.line.to_string(), before, after]
+            })
+            .collect::<Vec<_>>()
+    });
+    let mut label = rename.caret.kind_word().to_owned();
+    if let Some(first) = label.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+
+    let mut replacement = rename.replacement.clone();
+    let mut edited = false;
+    let choice = CommandForm::new(RENAME_TITLE, RENAME_PRIMARY)
+        .wide()
+        .primary_enabled(plan.is_some())
+        .status(status)
+        .show(ctx, |rows| {
+            let field = Id::new(DECK_NEW_NAME_FIELD);
+            rows.value_mono(&label, &rename.caret.written);
+            edited = rows.text("New name", field, &mut replacement, "").changed();
+            if let (Some(extent), Some(table)) = (extent.as_deref(), table.as_deref()) {
+                rows.field_line(Some(field), FieldLine::Derived(extent));
+                rows.table(
+                    &[
+                        TableColumn {
+                            header: "File",
+                            mono: true,
+                        },
+                        TableColumn {
+                            header: "Line",
+                            mono: true,
+                        },
+                        TableColumn {
+                            header: "Before",
+                            mono: true,
+                        },
+                        TableColumn {
+                            header: "After",
+                            mono: true,
+                        },
+                    ],
+                    table,
+                );
+            }
+            Some(field)
+        });
+    rename.replacement = replacement;
+    if edited {
+        rename.error = None;
+    }
+    match choice {
+        DialogChoice::Primary => match references::commit_rename(
+            cx.model,
+            &mut cx.state.netlist,
+            &mut cx.state.netlist_open_documents,
+            &mut rename,
+        ) {
+            Ok(done) => cx.wb.prompt(done),
+            Err(error) => {
+                rename.error = Some(error);
+                cx.state.deck_rename = Some(rename);
+            }
+        },
+        DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {}
+        DialogChoice::None => cx.state.deck_rename = Some(rename),
     }
 }

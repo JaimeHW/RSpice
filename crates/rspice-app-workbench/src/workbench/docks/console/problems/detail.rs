@@ -592,6 +592,7 @@ fn related_route(
         Some(
             DiagnosticRoute::Anchor(_)
             | DiagnosticRoute::NetlistDiagnostic(_)
+            | DiagnosticRoute::DeckPlace { .. }
             | DiagnosticRoute::Repair(_)
             | DiagnosticRoute::RunLogLine { .. },
         )

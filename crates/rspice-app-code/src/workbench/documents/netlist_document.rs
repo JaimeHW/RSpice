@@ -37,6 +37,7 @@ pub mod language;
 mod navigation;
 mod owned_source;
 mod param_scan;
+pub(crate) mod references;
 mod relink;
 mod source_index;
 pub use import_review::{
@@ -45,6 +46,7 @@ pub use import_review::{
 };
 pub use navigation::{open_diagnostic_location, open_source_location};
 pub(crate) use owned_source::open_owned_source_in;
+pub use references::open_deck_place;
 pub(crate) use relink::{
     NetlistDependencyRelinkState, begin_dependency_relink, cancel_dependency_relink,
     commit_dependency_relink,
@@ -607,6 +609,38 @@ fn replace_owned_sources_atomically_impl(
     }
     candidate.commit_deck(model, netlist, open_documents);
     Ok(changed_count)
+}
+
+/// Publish `replacements` as one all-or-nothing change that Undo takes back
+/// one file at a time: each file's change is its own step, `description`.
+pub(crate) fn replace_owned_sources_a_step_per_file(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    replacements: Vec<OwnedNetlistReplacement>,
+    description: &str,
+) -> Result<usize, String> {
+    let steps = replacements
+        .iter()
+        .filter(|replacement| {
+            replacement.replacement_count > 0 && replacement.original != replacement.replacement
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let changed =
+        replace_owned_sources_atomically_impl(model, netlist, open_documents, replacements, false)?;
+    for step in steps {
+        let reverse = vec![step.reversed()];
+        record_netlist_edit(
+            netlist,
+            NetlistEditJournalEntry {
+                description: description.to_owned(),
+                forward: vec![step],
+                reverse,
+            },
+        );
+    }
+    Ok(changed)
 }
 
 #[must_use]

@@ -68,6 +68,26 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
             line,
             column,
         } => open_code_document(ctx, app, bundle, &logical_path, line, column),
+        DiagnosticRoute::DeckPlace {
+            include,
+            line,
+            column,
+        } => {
+            let state = &mut app.state;
+            if let Err(error) =
+                rspice_app_code::workbench::documents::netlist_document::open_deck_place(
+                    ctx,
+                    &mut state.model,
+                    &mut state.code.netlist,
+                    &mut state.code.netlist_open_documents,
+                    &mut state.runs,
+                    &mut state.workbench,
+                    (include.as_deref(), line, column),
+                )
+            {
+                state.prompt(error);
+            }
+        }
         DiagnosticRoute::Repair(remediation) => apply_remediation(app, remediation),
         DiagnosticRoute::RunLogLine { run_sequence, line } => {
             rspice_app_results::workbench::commands::result_navigation::show_run_line(

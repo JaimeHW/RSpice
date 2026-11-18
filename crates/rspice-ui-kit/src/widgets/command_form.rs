@@ -1239,9 +1239,16 @@ impl<'u> FormRows<'u> {
         let gaps = TABLE_COLUMN_GAP * columns.len().saturating_sub(1) as f32;
         let natural = widths.iter().sum::<f32>() + gaps;
         if natural > width {
-            let scale = ((width - gaps).max(1.0)) / (natural - gaps).max(1.0);
-            for column in &mut widths {
-                *column *= scale;
+            // Only the longest columns give up width: a column narrower than
+            // an even share of what is left keeps its own, and the rest share
+            // the remainder evenly.
+            let mut order = (0..widths.len()).collect::<Vec<_>>();
+            order.sort_by(|a, b| widths[*a].total_cmp(&widths[*b]));
+            let mut left = (width - gaps).max(1.0);
+            for (placed, column) in order.iter().enumerate() {
+                let share = left / (widths.len() - placed) as f32;
+                widths[*column] = widths[*column].min(share);
+                left -= widths[*column];
             }
         }
         // The air a line holds over or under its words' ink, set centred.

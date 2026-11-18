@@ -909,6 +909,7 @@ pub(crate) fn cycle_active_symbol_pin_finding(nav: &mut NavigationParts<'_>, ste
             }),
             Some(DiagnosticRoute::NetlistDiagnostic(_) | DiagnosticRoute::Repair(_))
             | Some(DiagnosticRoute::CodeDocument { .. } | DiagnosticRoute::RunLogLine { .. })
+            | Some(DiagnosticRoute::DeckPlace { .. })
             | None => None,
         })
         .collect();

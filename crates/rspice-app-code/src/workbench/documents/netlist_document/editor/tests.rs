@@ -1450,13 +1450,18 @@ fn a_problem_is_marked_under_exactly_the_word_it_names() {
                 .map(|(_, _, marks)| marks);
         }
     });
-    let marks = drawn.into_inner().expect("the editor marked the deck's findings");
+    let marks = drawn
+        .into_inner()
+        .expect("the editor marked the deck's findings");
     let unknown = marks
         .iter()
         .find(|mark| mark.message.contains("nchh"))
         .expect("the unknown model is a finding");
     assert_eq!(&source[unknown.bytes.clone()], "nchh");
-    assert_eq!((unknown.mark.line, unknown.mark.columns.clone()), (1, 11..15));
+    assert_eq!(
+        (unknown.mark.line, unknown.mark.columns.clone()),
+        (1, 11..15)
+    );
 
     let mut whole_card = Diagnostic::current(
         "lint",

@@ -422,10 +422,12 @@ fn navigate_active_source(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) {
     }
 }
 
-/// Go to definition from the caret of the netlist editor, through the deck's
-/// own language service: the only language command a deck offers.
+/// Go to definition, Find references and Rename symbol from the caret of
+/// the netlist editor, through the engine's index of the deck and its
+/// includes.
 fn navigate_netlist(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) -> Result<(), String> {
     use crate::workbench::documents::netlist_document::language as netlist;
+    use crate::workbench::documents::netlist_document::references;
 
     let message = match command {
         CodeCommand::GoToDefinition => Some(netlist::go_to_definition_at_cursor_in(
@@ -435,6 +437,18 @@ fn navigate_netlist(cx: &mut Cx<'_, CodeFeature>, command: CodeCommand) -> Resul
             cx.runs,
             cx.wb,
         )?),
+        CodeCommand::FindReferences => Some(references::find_references(
+            cx.model,
+            &mut cx.state.netlist,
+            cx.wb,
+        )?),
+        CodeCommand::RenameSymbol => {
+            cx.state.deck_rename = Some(references::DeckRename::at_caret(
+                cx.model,
+                &mut cx.state.netlist,
+            )?);
+            None
+        }
         _ => None,
     };
     if let Some(message) = message {

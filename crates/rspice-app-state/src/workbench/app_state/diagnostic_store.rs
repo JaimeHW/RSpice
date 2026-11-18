@@ -199,6 +199,14 @@ pub enum DiagnosticRoute {
         line: Option<usize>,
         column: Option<usize>,
     },
+    /// A place in the Netlist page's deck: the include it is in, by its
+    /// identity in the deck (none for the deck itself), and the one-based
+    /// line and column.
+    DeckPlace {
+        include: Option<Arc<str>>,
+        line: usize,
+        column: usize,
+    },
     /// The destination a blocking dispatch finding named for itself.
     Repair(PreflightRemediation),
     /// A line of one run's own log, opened in the Console with the line

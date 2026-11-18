@@ -152,7 +152,7 @@ const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
     },
     FeatureDialog {
         key: DialogKey("code.rename_symbol"),
-        is_open: |code| code.code_workspace.language_tools.is_some(),
+        is_open: |code| code.code_workspace.language_tools.is_some() || code.deck_rename.is_some(),
         render: CodeFeature::render_rename_symbol_form,
     },
     FeatureDialog {
@@ -191,13 +191,8 @@ impl CommandSet for CodeCommand {
     /// The source editor's own commands are offered only while a source
     /// editor is the document on screen, and language navigation only where
     /// the document's language service answers it. Elsewhere they are hidden
-    /// rather than offered disabled.
-    ///
-    /// A deck answers Go to definition only. Its index reads one physical
-    /// line at a time, so it misses `+` continuation lines, knows no
-    /// subcircuit scope and takes the suffix of `10n` for a name: Find
-    /// references would list the wrong text and Rename symbol would rewrite
-    /// it.
+    /// rather than offered disabled. A deck answers all three through the
+    /// engine's index of it and its includes.
     fn offered(self, reads: &Reads<'_, CodeFeature>) -> bool {
         if !self.source_editor_only() {
             return true;
@@ -219,11 +214,10 @@ impl CommandSet for CodeCommand {
                     .and_then(|name| quantity.of(name))
                     .is_some();
         }
-        reads.wb.active_source_editor.is_some_and(|editor| {
-            !self.navigates_source_language()
-                || (editor.navigable
-                    && (self == Self::GoToDefinition || !netlist_page_on_screen(reads)))
-        })
+        reads
+            .wb
+            .active_source_editor
+            .is_some_and(|editor| !self.navigates_source_language() || editor.navigable)
     }
 
     /// A source editor takes its own commands, and refuses the ones that
@@ -754,8 +748,13 @@ impl CodeFeature {
         }
     }
 
-    /// Rename symbol….
+    /// Rename symbol…: the deck's, while one is open, else a source
+    /// bundle's.
     fn render_rename_symbol_form(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        if cx.state.deck_rename.is_some() {
+            source_language_tools::render_deck_rename_form(cx, ctx);
+            return;
+        }
         if source_language_tools::render_rename_symbol_form(
             &mut cx.state.code_workspace,
             cx.model,

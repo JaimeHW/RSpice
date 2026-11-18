@@ -395,6 +395,59 @@ M1 d g s b nch W={w} L={l*2}\n\
 .param bad={nope*2}\n\
 .end\n";
 
+/// A hover on a name says what the engine binds it to: the definition's file
+/// and line, and the references the deck's index binds to that definition,
+/// so a subcircuit's own parameter of the same name is neither shown nor
+/// counted.
+#[test]
+fn a_hover_names_the_definition_a_name_is_bound_to_and_its_references() {
+    let deck = "hover deck\n\
+                .include \"models/resistor.inc\"\n\
+                .param w=1\n\
+                .subckt amp in out w=2\n\
+                R1 in out {w}\n\
+                .ends amp\n\
+                X1 a b amp\n\
+                R2 a 0 {w*2}\n\
+                C1 b 0 {w}\n\
+                .end\n";
+    let mut harness = harness();
+    crate::workbench::documents::netlist_document::fixtures::seed_owned_deck(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        deck,
+        "* models\n",
+    );
+    let index = project_index_now(&harness.model, &mut harness.state.netlist).expect("an index");
+    let file = index.file_name(0).to_owned();
+    let at = |needle: &str| deck.find(needle).expect("the deck writes it") + 1;
+
+    let hover = |char_index| index.hover_at(None, deck, char_index);
+    assert_eq!(
+        hover(at("{w*2}")),
+        Some(ProjectSymbolHover {
+            title: "Parameter w".to_owned(),
+            detail: format!("= 1 · {file} line 3 · 2 references"),
+        })
+    );
+    assert_eq!(
+        hover(at("{w}\n.ends")),
+        Some(ProjectSymbolHover {
+            title: "Parameter w".to_owned(),
+            detail: format!("= 2 · {file} line 4 · 1 reference"),
+        })
+    );
+    assert_eq!(
+        hover(at("amp\nR2")),
+        Some(ProjectSymbolHover {
+            title: "Subcircuit amp".to_owned(),
+            detail: format!("Ports in out · {file} line 4 · 2 references"),
+        })
+    );
+    // Text the index was not built from has no hover.
+    assert_eq!(index.hover_at(None, "other text", 1), None);
+}
+
 fn hover_state() -> CodeHarness {
     let mut harness = harness();
     harness.model.simulation.source.netlist_content = HOVER_DECK.to_owned();

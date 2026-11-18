@@ -284,7 +284,11 @@ impl ConsolePage {
 /// One place Find references found a name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceReference {
+    /// The file, as the reader knows it.
     pub logical_path: String,
+    /// In a deck's list, the include the place is in, by its identity in the
+    /// deck; none for the deck itself, and in a source bundle's list.
+    pub include: Option<String>,
     /// One-based.
     pub line: usize,
     /// One-based, in characters.
@@ -293,14 +297,26 @@ pub struct SourceReference {
     pub text: String,
 }
 
+/// What a Find references list was read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferencesIn {
+    /// A project source bundle; its rows' paths are inside it.
+    Bundle(crate::state::ProjectSourceId),
+    /// The Netlist page's deck and the files it includes.
+    Deck,
+}
+
 /// What Find references last found, for the References page. A reading
 /// position over the source, never persisted.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceReferences {
     pub name: String,
-    pub bundle: crate::state::ProjectSourceId,
-    /// The bundle's revision the rows were read from.
+    pub source: ReferencesIn,
+    /// The source's revision the rows were read from.
     pub revision: u64,
+    /// The source has changed since: its owner says so, where the page
+    /// cannot read the revision itself.
+    pub stale: bool,
     pub rows: Vec<SourceReference>,
     /// The row the keyboard stands on.
     pub selected: usize,
@@ -317,8 +333,22 @@ impl SourceReferences {
     ) -> Self {
         Self {
             name,
-            bundle,
+            source: ReferencesIn::Bundle(bundle),
             revision,
+            stale: false,
+            rows,
+            selected: 0,
+            take_focus: true,
+        }
+    }
+
+    /// The places a deck writes `name`, read at the deck's `revision`.
+    pub fn deck(name: String, revision: u64, rows: Vec<SourceReference>) -> Self {
+        Self {
+            name,
+            source: ReferencesIn::Deck,
+            revision,
+            stale: false,
             rows,
             selected: 0,
             take_focus: true,

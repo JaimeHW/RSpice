@@ -17,7 +17,7 @@ use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
-use crate::workbench::state::{ConsolePage, SourceReferences};
+use crate::workbench::state::{ConsolePage, ReferencesIn, SourceReferences};
 
 const HEADINGS: [&str; 4] = ["File", "Line", "Column", "Text"];
 
@@ -36,13 +36,15 @@ pub(super) fn settle(app: &mut impl WorkbenchHost) {
         .workbench()
         .source_references
         .as_ref()
-        .is_some_and(|list| {
-            app.model()
+        .is_some_and(|list| match list.source {
+            ReferencesIn::Bundle(bundle) => app
+                .model()
                 .workspace
                 .content
                 .project_sources
-                .get_bundle(list.bundle)
-                .is_some()
+                .get_bundle(bundle)
+                .is_some(),
+            ReferencesIn::Deck => true,
         });
     if !has_list {
         let workbench = app.workbench_mut();
@@ -73,13 +75,17 @@ pub(super) fn references(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let Some(list) = app.workbench().source_references.as_ref() else {
         return;
     };
-    let stale = app
-        .model()
-        .workspace
-        .content
-        .project_sources
-        .get_bundle(list.bundle)
-        .is_some_and(|bundle| bundle.revision().get() != list.revision);
+    let stale = list.stale
+        || match list.source {
+            ReferencesIn::Bundle(bundle) => app
+                .model()
+                .workspace
+                .content
+                .project_sources
+                .get_bundle(bundle)
+                .is_some_and(|bundle| bundle.revision().get() != list.revision),
+            ReferencesIn::Deck => false,
+        };
     let summary = summary(list);
     let clear = toolbar(ui, |ui| {
         ui.horizontal(|ui| {
@@ -303,11 +309,18 @@ fn body(ui: &mut Ui, rect: egui::Rect, current: Option<(egui::Id, egui::Rect)>) 
 /// Where a row opens: its document at its line and column.
 fn route_to(list: &SourceReferences, index: usize) -> Option<DiagnosticRoute> {
     let row = list.rows.get(index)?;
-    Some(DiagnosticRoute::CodeDocument {
-        bundle: list.bundle,
-        logical_path: row.logical_path.as_str().into(),
-        line: Some(row.line),
-        column: Some(row.column),
+    Some(match list.source {
+        ReferencesIn::Bundle(bundle) => DiagnosticRoute::CodeDocument {
+            bundle,
+            logical_path: row.logical_path.as_str().into(),
+            line: Some(row.line),
+            column: Some(row.column),
+        },
+        ReferencesIn::Deck => DiagnosticRoute::DeckPlace {
+            include: row.include.as_deref().map(Into::into),
+            line: row.line,
+            column: row.column,
+        },
     })
 }
 
