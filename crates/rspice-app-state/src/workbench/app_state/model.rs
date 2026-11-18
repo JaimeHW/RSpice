@@ -245,11 +245,23 @@ impl Model {
 
     /// The nets of the plan's simulation root and of every instance below
     /// it, root first, as the design names them: the nets an initial
-    /// condition or nodeset can name. Each master's nets are retained by the
-    /// design projection, so asking each frame costs a lookup per instance.
+    /// condition or nodeset can name. They are listed once per design and
+    /// kept while it is unchanged, so a page that asks each frame lists a
+    /// million instances once, not once a frame.
     pub fn simulation_occurrence_nets(
         &self,
-    ) -> Result<Vec<rspice_simulation::output_contract::selection::OccurrenceNets>, String> {
+    ) -> Result<
+        std::sync::Arc<Vec<rspice_simulation::output_contract::selection::OccurrenceNets>>,
+        String,
+    > {
+        use std::sync::Arc;
+        type Listed = Arc<Vec<rspice_simulation::output_contract::selection::OccurrenceNets>>;
+        thread_local! {
+            /// The last design asked about, and what was listed for it.
+            static LISTED: std::cell::RefCell<
+                Option<(std::sync::Weak<rspice_design::projection::DesignProjection>, Listed)>,
+            > = const { std::cell::RefCell::new(None) };
+        }
         let projection = self
             .workspace
             .configuration_execution_projection(
@@ -258,19 +270,31 @@ impl Model {
                 &self.schematic,
             )
             .map_err(|error| error.to_string())?;
+        let held = LISTED.with_borrow(|slot| {
+            slot.as_ref()
+                .filter(|(design, _)| std::ptr::eq(design.as_ptr(), Arc::as_ptr(&projection)))
+                .map(|(_, listed)| Arc::clone(listed))
+        });
+        if let Some(listed) = held {
+            return Ok(listed);
+        }
         let catalog = self.library_manager.catalog();
         let root = rspice_design::connectivity::summary::projection_nets(
             catalog,
             &projection,
             &projection.root().key(),
         );
-        Ok(
+        let listed = Arc::new(
             rspice_simulation::output_contract::selection::projection_occurrence_nets(
                 catalog,
                 &projection,
                 root,
             ),
-        )
+        );
+        LISTED.with_borrow_mut(|slot| {
+            *slot = Some((Arc::downgrade(&projection), Arc::clone(&listed)));
+        });
+        Ok(listed)
     }
 
     /// The folders searched for includes after every project's own paths.

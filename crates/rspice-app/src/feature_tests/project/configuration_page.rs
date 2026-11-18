@@ -403,6 +403,52 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
     assert!(collapsed > 1);
 }
 
+/// A hierarchy past a million instances lists the nets a run can start from
+/// once per design: the Solver page asks every frame and is handed what was
+/// listed, and an instance and what it places are found by halving, not by
+/// reading every instance.
+#[test]
+fn a_hierarchy_past_a_million_instances_lists_its_nets_once() {
+    use rspice_app_state::state::InstancePath;
+    use rspice_simulation::output_contract::selection::{occurrence_at, occurrences_inside};
+    let app = nested_app(4);
+    let expanded = 1 + 32 + 32 * 32 + 32 * 32 * 32 + 32 * 32 * 32 * 32;
+    let listed = app
+        .state
+        .model
+        .simulation_occurrence_nets()
+        .expect("the design resolves");
+    assert_eq!(listed.len(), expanded);
+    let again = app
+        .state
+        .model
+        .simulation_occurrence_nets()
+        .expect("the design resolves");
+    assert!(
+        std::sync::Arc::ptr_eq(&listed, &again),
+        "the next frame is handed the same list"
+    );
+
+    assert_eq!(occurrences_inside(&listed, 0).len(), 32);
+    for (scope, path) in [
+        ("x32.x32.x32.x32", "/X32/X32/X32/X32"),
+        ("/X1/X17", "/X1/X17"),
+    ] {
+        let at = occurrence_at(&listed, &InstancePath::parse(scope).expect("a path"))
+            .unwrap_or_else(|| panic!("{scope} is found"));
+        assert_eq!(listed[at].occurrence().to_string(), path);
+    }
+    let deepest = occurrence_at(
+        &listed,
+        &InstancePath::parse("/X32/X32/X32/X32").expect("a path"),
+    )
+    .expect("the deepest instance is found");
+    assert!(occurrences_inside(&listed, deepest).is_empty());
+    let middle = occurrence_at(&listed, &InstancePath::parse("/X1/X17").expect("a path"))
+        .expect("an instance two deep is found");
+    assert_eq!(occurrences_inside(&listed, middle).len(), 32);
+}
+
 /// A hierarchy that expands past a million instances opens on the page,
 /// which lists an instance's children when it is opened, and netlists as the
 /// cells it is: each written once, however often it is placed.

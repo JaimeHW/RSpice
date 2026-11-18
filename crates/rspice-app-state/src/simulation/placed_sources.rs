@@ -600,13 +600,16 @@ fn design_excitations(
     excitations
 }
 
-/// One walk of every occurrence the execution plan binds.
+/// One walk of the occurrences whose master places an excitation.
 ///
-/// Masters are resolved once each and shared by their occurrences: the net
-/// summary comes from `projection_nets`, which the projection itself retains,
-/// and the terminal map built over it is kept for the length of this walk. A
-/// design instantiating one master a hundred times therefore resolves its nets
-/// once, not a hundred times.
+/// Whether a master places one is asked once per context, and only those
+/// contexts' occurrences are walked: a source at the top of a design of a
+/// million resistors is found without visiting the resistors. Masters are
+/// resolved once each and shared by their occurrences: the net summary comes
+/// from `projection_nets`, which the projection itself retains, and the
+/// terminal map built over it is kept for the length of this walk. A design
+/// instantiating one master a hundred times therefore resolves its nets once,
+/// not a hundred times.
 fn walk_design(
     libraries: &LibraryManager,
     stimulus_library: &StimulusLibrary,
@@ -619,17 +622,17 @@ fn walk_design(
     let mut terminals: HashMap<String, Arc<TerminalNets>> = HashMap::new();
     let mut sources = Vec::new();
     let mut ports = Vec::new();
-    for binding in projection.plan().bindings() {
+    // A binding whose resolved view is not a schematic — a stop boundary, a
+    // SPICE or Verilog-A view — has no drawing to place an excitation in, and
+    // the projection is the authority on which buffers exist.
+    let places = |binding: &rspice_design::hierarchy::ConfigurationExecutionBinding| {
+        materialized(projection, binding.resolved_reference()).is_some_and(places_excitation)
+    };
+    for binding in projection.plan().bindings_where(places) {
         let master = binding.resolved_reference();
-        // A binding whose resolved view is not a schematic — a stop boundary,
-        // a SPICE or Verilog-A view — has no drawing to place an excitation
-        // in, and the projection is the authority on which buffers exist.
         let Some(schematic) = materialized(projection, master) else {
             continue;
         };
-        if !places_excitation(schematic) {
-            continue;
-        }
         let nets = Arc::clone(
             terminals
                 .entry(master.key().to_ascii_lowercase())
@@ -653,17 +656,13 @@ fn walk_design(
             }
         }
     }
-    sources.sort_by(|(left, _), (right, _)| {
+    sources.sort_by_cached_key(|(source, _)| {
         (
-            occurrence_order(left.occurrence.as_ref()),
-            source_order(left),
+            occurrence_order(source.occurrence.as_ref()),
+            source_order(source),
         )
-            .cmp(&(
-                occurrence_order(right.occurrence.as_ref()),
-                source_order(right),
-            ))
     });
-    ports.sort_by_key(port_order);
+    ports.sort_by_cached_key(port_order);
     DesignExcitations { sources, ports }
 }
 

@@ -7,7 +7,7 @@ use rspice_simulation_contract::options::{
 };
 use rspice_vocabulary::hierarchy_path::ProbeTarget;
 
-use crate::output_contract::selection::OccurrenceNets;
+use crate::output_contract::selection::{OccurrenceNets, occurrence_at};
 use crate::preparation::{PreparationError, PreparationStage};
 
 /// The net of `nets` that `name` names, compared as SPICE compares node
@@ -56,7 +56,7 @@ fn holds_voltage(net: &DesignNet) -> Result<&DesignNet, String> {
 /// [`projection_occurrence_nets`]: crate::output_contract::selection::projection_occurrence_nets
 pub fn startup_net(name: &str, occurrences: &[OccurrenceNets]) -> Result<String, String> {
     let name = name.trim();
-    let Some((root, below)) = occurrences.split_first() else {
+    let Some(root) = occurrences.first() else {
         return Err(format!("the design has no net {name}"));
     };
     let hierarchical = name.starts_with('/') || name.contains('.');
@@ -71,9 +71,8 @@ pub fn startup_net(name: &str, occurrences: &[OccurrenceNets]) -> Result<String,
         .ok()
         .filter(|target| !target.scope.is_root())
         .ok_or_else(|| format!("the design has no net {name}"))?;
-    let occurrence = below
-        .iter()
-        .find(|occurrence| occurrence.occurrence().same_engine_scope(&target.scope))
+    let occurrence = occurrence_at(occurrences, &target.scope)
+        .map(|at| &occurrences[at])
         .ok_or_else(|| format!("the design has no instance {}", target.scope))?;
     let path = occurrence.occurrence();
     let leaf = target.leaf.as_str();

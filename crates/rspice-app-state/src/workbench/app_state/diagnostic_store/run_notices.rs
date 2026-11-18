@@ -602,14 +602,12 @@ impl Model {
         let (occurrence, master) = if scope.is_root() {
             (InstancePath::root(), plan.root().clone())
         } else {
-            plan.bindings()
-                .find(|binding| binding.instance_path().same_engine_scope(&scope))
-                .map(|binding| {
-                    (
-                        binding.instance_path().clone(),
-                        binding.resolved_reference().clone(),
-                    )
-                })?
+            plan.engine_occurrence(&scope).map(|binding| {
+                (
+                    binding.instance_path().clone(),
+                    binding.resolved_reference().clone(),
+                )
+            })?
         };
         let key = master.key();
         let (_, schematic) = projection

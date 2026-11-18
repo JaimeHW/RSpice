@@ -305,6 +305,27 @@ impl ConfigurationExecutionPlan {
         PlanBindings::new(&self.occurrences)
     }
 
+    /// The occurrences whose binding `keep` accepts, with their own paths, in
+    /// the order the design places them. `keep` is asked once per context,
+    /// and the walk never enters a subtree holding none it accepted: a source
+    /// drawn in one cell is found at that cell's occurrences without walking
+    /// the million instances beside them.
+    pub fn bindings_where(
+        &self,
+        keep: impl FnMut(&ConfigurationExecutionBinding) -> bool,
+    ) -> PlanBindings<'_> {
+        PlanBindings::new_where(&self.occurrences, keep)
+    }
+
+    /// The occurrence the engine knows by `scope`, with its path as the
+    /// design spells it. The deck writes an instance drawn `amp` as `Xamp`,
+    /// so each segment is matched by the name it is written under, one level
+    /// at a time: finding one costs the depth of its path, not the size of
+    /// the design.
+    pub fn engine_occurrence(&self, scope: &InstancePath) -> Option<OccurrenceBinding<'_>> {
+        self.occurrences.engine_occurrence(scope)
+    }
+
     /// Each distinct binding once, in the order the design first places it,
     /// named by that first occurrence's path.
     pub fn distinct_bindings(&self) -> impl Iterator<Item = &ConfigurationExecutionBinding> {

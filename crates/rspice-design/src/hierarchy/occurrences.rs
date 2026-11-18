@@ -10,7 +10,9 @@
 //! asked for.
 
 use super::{ConfigurationExecutionBinding, MasterKey};
-use rspice_vocabulary::hierarchy_path::InstancePath;
+use rspice_vocabulary::hierarchy_path::{
+    InstancePath, SUBCIRCUIT_INSTANCE_PREFIX, written_instance_name,
+};
 use std::sync::Arc;
 
 /// One context every occurrence reaching it resolves in alike.
@@ -98,6 +100,30 @@ impl HierarchyOccurrences {
             node = edge.node;
         }
         Some((node, spelled))
+    }
+
+    /// The occurrence `scope` names to the engine, each segment matched by
+    /// the name the deck writes it under, with what runs there.
+    pub(super) fn engine_occurrence(&self, scope: &InstancePath) -> Option<OccurrenceBinding<'_>> {
+        let written = |name: &str| written_instance_name(SUBCIRCUIT_INSTANCE_PREFIX, name);
+        let mut node = self.root()?;
+        let mut spelled = InstancePath::root();
+        for segment in scope.segments() {
+            let at = self.child_at(node, &fold(segment)).or_else(|| {
+                let wanted = written(segment);
+                self.nodes[node]
+                    .children
+                    .iter()
+                    .position(|edge| written(&edge.name).eq_ignore_ascii_case(&wanted))
+            })?;
+            let edge = &self.nodes[node].children[at];
+            spelled = spelled.child(&edge.name).ok()?;
+            node = edge.node;
+        }
+        Some(OccurrenceBinding {
+            path: spelled,
+            binding: self.nodes[node].binding.as_ref()?,
+        })
     }
 
     /// The instances an occurrence of `node` places, in the order its master
@@ -473,16 +499,26 @@ pub struct PlanBindings<'a> {
 
 impl<'a> PlanBindings<'a> {
     pub(super) fn new(graph: &'a HierarchyOccurrences) -> Self {
+        Self::new_where(graph, |_| true)
+    }
+
+    /// The occurrences of the nodes whose binding `keep` accepts, asking it
+    /// once per node.
+    pub(super) fn new_where(
+        graph: &'a HierarchyOccurrences,
+        mut keep: impl FnMut(&ConfigurationExecutionBinding) -> bool,
+    ) -> Self {
         let wanted = graph
             .nodes
             .iter()
-            .map(|node| node.binding.is_some())
+            .map(|node| node.binding.as_ref().is_some_and(&mut keep))
             .collect::<Vec<_>>();
         let remaining = graph
             .nodes
             .iter()
-            .filter(|node| node.binding.is_some())
-            .fold(0_usize, |total, node| {
+            .zip(&wanted)
+            .filter(|(_, wanted)| **wanted)
+            .fold(0_usize, |total, (node, _)| {
                 total.saturating_add(node.multiplicity)
             });
         Self {

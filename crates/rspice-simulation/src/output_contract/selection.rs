@@ -12,7 +12,7 @@
 //! scope, and no occurrence contributes twice. The design root keeps today's
 //! spelling exactly: it owns no scope, so `V(OUT)` there is still `V(OUT)`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::preparation::{PreparationError, PreparationStage};
@@ -39,6 +39,9 @@ const AUTOMATIC_OUTPUT_HARD_LIMIT: usize = 32;
 /// One occurrence of the executed design and the nets its master owns.
 pub struct OccurrenceNets {
     occurrence: InstancePath,
+    /// The engine's name for the occurrence, `x1.x2`, empty at the root: the
+    /// key [`occurrence_at`] finds it by.
+    scope: String,
     nets: Arc<Vec<DesignNet>>,
 }
 
@@ -64,6 +67,11 @@ impl OccurrenceNets {
 /// instances of one master share a drawing and not one node. An occurrence the
 /// engine grammar cannot spell is left out, for the same reason a probe on it
 /// cannot be requested — there is no name to ask for.
+///
+/// The rows below the root are ordered shallowest first and then by engine
+/// name, which is the order [`occurrence_at`] and [`occurrences_inside`]
+/// search. Each context's nets are looked up once, however many occurrences
+/// share it.
 pub fn projection_occurrence_nets(
     libraries: &LibraryCatalog,
     projection: &DesignProjection,
@@ -71,26 +79,84 @@ pub fn projection_occurrence_nets(
 ) -> Vec<OccurrenceNets> {
     let mut occurrences = vec![OccurrenceNets {
         occurrence: InstancePath::root(),
+        scope: String::new(),
         nets: root_nets,
     }];
+    // Every occurrence of one context shares its binding, so the binding's
+    // address names the context.
+    let mut context_nets = HashMap::<*const _, Arc<Vec<DesignNet>>>::new();
     let mut below = projection
         .plan()
-        .bindings()
-        .filter(|binding| !binding.instance_path().is_root())
-        .filter(|binding| {
+        .bindings_where(|binding| {
             matches!(
                 binding.resolved_view_type(),
                 ViewType::Schematic | ViewType::Testbench
-            ) && binding.instance_path().to_engine_name().is_ok()
+            )
         })
-        .map(|binding| OccurrenceNets {
-            occurrence: binding.instance_path().clone(),
-            nets: projection_nets(libraries, projection, &binding.resolved_reference().key()),
+        .filter(|binding| !binding.instance_path().is_root())
+        .filter_map(|binding| {
+            let scope = binding.instance_path().to_engine_name().ok()?;
+            let nets = context_nets
+                .entry(std::ptr::from_ref(binding.binding()))
+                .or_insert_with(|| {
+                    projection_nets(libraries, projection, &binding.resolved_reference().key())
+                });
+            Some(OccurrenceNets {
+                occurrence: binding.instance_path().clone(),
+                scope,
+                nets: Arc::clone(nets),
+            })
         })
         .collect::<Vec<_>>();
-    below.sort_by_key(|entry| (entry.occurrence.depth(), entry.occurrence.fold_key()));
+    below.sort_by(|left, right| left.order().cmp(&right.order()));
     occurrences.append(&mut below);
     occurrences
+}
+
+impl OccurrenceNets {
+    /// Where [`projection_occurrence_nets`] orders it below the root.
+    fn order(&self) -> (usize, &str) {
+        (self.occurrence.depth(), &self.scope)
+    }
+}
+
+/// Where among `occurrences`, ordered as [`projection_occurrence_nets`]
+/// orders them, the occurrence the engine knows by `scope` is, `/X1/amp` or
+/// `x1.xamp` alike. Found by halving, so a design of a million instances
+/// answers in twenty comparisons.
+pub fn occurrence_at(occurrences: &[OccurrenceNets], scope: &InstancePath) -> Option<usize> {
+    let root = occurrences.first()?;
+    if scope.is_root() {
+        return root.occurrence.is_root().then_some(0);
+    }
+    let key = scope.to_engine_name().ok()?;
+    let wanted = (scope.depth(), key.as_str());
+    let below = &occurrences[1..];
+    let at = below.partition_point(|entry| entry.order() < wanted);
+    below
+        .get(at)
+        .filter(|entry| entry.order() == wanted)
+        .map(|_| at + 1)
+}
+
+/// The occurrences directly inside the one at `index` of `occurrences`,
+/// ordered as [`projection_occurrence_nets`] orders them: one run of them,
+/// found by halving.
+pub fn occurrences_inside(occurrences: &[OccurrenceNets], index: usize) -> &[OccurrenceNets] {
+    let (Some(parent), Some(below)) = (occurrences.get(index), occurrences.get(1..)) else {
+        return &[];
+    };
+    let depth = parent.occurrence.depth() + 1;
+    let prefix = if parent.occurrence.is_root() {
+        String::new()
+    } else {
+        format!("{}.", parent.scope)
+    };
+    let start = below.partition_point(|entry| entry.order() < (depth, prefix.as_str()));
+    let length = below[start..].partition_point(|entry| {
+        entry.occurrence.depth() == depth && entry.scope.starts_with(&prefix)
+    });
+    &below[start..start + length]
 }
 
 fn prepared_output_expression_key(expression: &str) -> String {
@@ -315,62 +381,66 @@ fn automatic_outputs(
         net.class != rspice_design::connectivity::summary::NetClass::Ground
     }
 
-    let non_ground_count = occurrences
-        .iter()
-        .map(|entry| entry.nets.iter().filter(carries_signal).count())
-        .sum::<usize>();
-    let include_unnamed = non_ground_count <= AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT;
-    let mut candidates = occurrences
-        .iter()
-        .flat_map(|entry| {
-            entry
-                .nets
-                .iter()
-                .filter(carries_signal)
-                .filter_map(move |net| {
-                    let priority = match net.port {
-                        Some(PortDirection::Out) => 0,
-                        Some(PortDirection::InOut) => 1,
-                        _ if net.authored_name => 2,
-                        _ if include_unnamed => 3,
-                        _ => return None,
-                    };
-                    Some(AutomaticCandidate {
-                        depth: entry.occurrence.depth(),
-                        priority,
-                        scope: entry.occurrence.fold_key(),
-                        // The root names a node by its leaf, so a leaf the
-                        // engine grammar cannot spell is still the name the
-                        // deck emitted there.
-                        canonical: entry
-                            .occurrence
-                            .engine_name_for(&net.name)
-                            .unwrap_or_else(|_| net.name.to_ascii_lowercase()),
-                        spelling: OccurrenceProbeSpelling::for_leaf(
-                            &entry.occurrence,
-                            'V',
-                            &net.name,
-                        )?,
-                    })
-                })
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| {
-        (
-            left.depth,
-            left.priority,
-            left.scope.as_str(),
-            left.canonical.as_str(),
-        )
-            .cmp(&(
-                right.depth,
-                right.priority,
-                right.scope.as_str(),
-                right.canonical.as_str(),
-            ))
+    // A small design saves its unnamed nets too. Counting stops once the
+    // design is past small.
+    let mut signal_nets = 0_usize;
+    let include_unnamed = occurrences.iter().all(|entry| {
+        signal_nets += entry.nets.iter().filter(carries_signal).count();
+        signal_nets <= AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT
     });
-    candidates
-        .dedup_by(|left, right| left.scope == right.scope && left.canonical == right.canonical);
+    // Shallower occurrences rank first, so once the bound is filled at one
+    // depth nothing deeper can enter it: the occurrences are read a depth at
+    // a time and the deeper ones never at all.
+    let mut by_depth = occurrences.iter().collect::<Vec<_>>();
+    by_depth.sort_by_key(|entry| entry.occurrence.depth());
+    let mut candidates = Vec::new();
+    for level in
+        by_depth.chunk_by(|left, right| left.occurrence.depth() == right.occurrence.depth())
+    {
+        for entry in level {
+            candidates.extend(entry.nets.iter().filter(carries_signal).filter_map(|net| {
+                let priority = match net.port {
+                    Some(PortDirection::Out) => 0,
+                    Some(PortDirection::InOut) => 1,
+                    _ if net.authored_name => 2,
+                    _ if include_unnamed => 3,
+                    _ => return None,
+                };
+                Some(AutomaticCandidate {
+                    depth: entry.occurrence.depth(),
+                    priority,
+                    scope: entry.occurrence.fold_key(),
+                    // The root names a node by its leaf, so a leaf the
+                    // engine grammar cannot spell is still the name the
+                    // deck emitted there.
+                    canonical: entry
+                        .occurrence
+                        .engine_name_for(&net.name)
+                        .unwrap_or_else(|_| net.name.to_ascii_lowercase()),
+                    spelling: OccurrenceProbeSpelling::for_leaf(&entry.occurrence, 'V', &net.name)?,
+                })
+            }));
+        }
+        candidates.sort_by(|left: &AutomaticCandidate, right: &AutomaticCandidate| {
+            (
+                left.depth,
+                left.priority,
+                left.scope.as_str(),
+                left.canonical.as_str(),
+            )
+                .cmp(&(
+                    right.depth,
+                    right.priority,
+                    right.scope.as_str(),
+                    right.canonical.as_str(),
+                ))
+        });
+        candidates
+            .dedup_by(|left, right| left.scope == right.scope && left.canonical == right.canonical);
+        if candidates.len() >= AUTOMATIC_OUTPUT_HARD_LIMIT {
+            break;
+        }
+    }
 
     let mut outputs = Vec::with_capacity(candidates.len().min(AUTOMATIC_OUTPUT_HARD_LIMIT));
     for candidate in candidates.into_iter().take(AUTOMATIC_OUTPUT_HARD_LIMIT) {

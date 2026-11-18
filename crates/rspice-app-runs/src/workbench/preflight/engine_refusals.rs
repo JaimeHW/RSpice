@@ -94,7 +94,7 @@ pub(super) fn no_verdict_issue() -> PreflightIssue {
     }
 }
 
-fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign) -> Vec<PreflightIssue> {
+fn issues_for(refusal: &EngineRefusal, drawing: &DrawnDesign<'_>) -> Vec<PreflightIssue> {
     let refused_by = refused_by(&refusal.tasks);
     match &refusal.kind {
         EngineRefusalKind::NoDcPath { nodes } => nodes
@@ -301,70 +301,64 @@ struct DrawnOccurrence {
     nets: Arc<Vec<DesignNet>>,
 }
 
-/// The configured design as the deck was written from it.
-struct DrawnDesign {
-    occurrences: Vec<DrawnOccurrence>,
+/// The configured design as the deck was written from it. An occurrence is
+/// looked up when a finding names it, so a design of a million instances
+/// costs what its findings name, not what it expands to.
+struct DrawnDesign<'a> {
+    model: &'a Model,
+    /// None when the configuration no longer projects, in which case every
+    /// name is located in the deck.
+    projection: Option<rspice_design::projection::ConfigurationExecutionProjection>,
 }
 
-impl DrawnDesign {
-    /// Every occurrence of the configured root that draws a schematic. Empty
-    /// when the configuration no longer projects, in which case every name is
-    /// located in the deck.
-    fn configured(model: &Model) -> Self {
-        let Ok(projection) = model.plan_execution_projection() else {
-            return Self {
-                occurrences: Vec::new(),
-            };
-        };
-        let catalog = model.library_manager.catalog();
-        let schematic_of = |cell_view: &CellViewRef| {
-            projection
-                .schematic_buffers()
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(&cell_view.key()))
-                .map(|(_, schematic)| schematic.document().components.clone())
-        };
-        let drawn = |path: InstancePath, cell_view: &CellViewRef| {
-            Some(DrawnOccurrence {
-                components: schematic_of(cell_view)?,
-                nets: rspice_design::connectivity::summary::projection_nets(
-                    catalog,
-                    &projection,
-                    &cell_view.key(),
-                ),
-                cell_view: cell_view.clone(),
-                path,
-            })
-        };
-        let root = drawn(InstancePath::root(), projection.root());
-        let below = projection
-            .plan()
-            .bindings()
-            .filter(|binding| {
-                !binding.instance_path().is_root()
-                    && matches!(
-                        binding.resolved_view_type(),
-                        ViewType::Schematic | ViewType::Testbench
-                    )
-            })
-            .filter_map(|binding| {
-                drawn(
-                    binding.instance_path().clone(),
-                    binding.resolved_reference(),
-                )
-            });
+impl<'a> DrawnDesign<'a> {
+    fn configured(model: &'a Model) -> Self {
         Self {
-            occurrences: root.into_iter().chain(below).collect(),
+            model,
+            projection: model.plan_execution_projection().ok(),
         }
     }
 
-    /// The occurrence an engine name belongs to, and the name below it.
-    fn occurrence(&self, engine_name: &str) -> Option<(&DrawnOccurrence, String)> {
+    /// The occurrence an engine name belongs to, when it draws a schematic,
+    /// and the name below it.
+    fn occurrence(&self, engine_name: &str) -> Option<(DrawnOccurrence, String)> {
+        let projection = self.projection.as_ref()?;
         let target = ProbeTarget::parse(engine_name.trim()).ok()?;
-        self.occurrences
+        let (path, cell_view) = if target.scope.is_root() {
+            (InstancePath::root(), projection.root().clone())
+        } else {
+            let binding = projection.plan().engine_occurrence(&target.scope)?;
+            if !matches!(
+                binding.resolved_view_type(),
+                ViewType::Schematic | ViewType::Testbench
+            ) {
+                return None;
+            }
+            (
+                binding.instance_path().clone(),
+                binding.resolved_reference().clone(),
+            )
+        };
+        let key = cell_view.key();
+        let components = projection
+            .schematic_buffers()
             .iter()
-            .find(|occurrence| occurrence.path.same_engine_scope(&target.scope))
-            .map(|occurrence| (occurrence, target.leaf))
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
+            .map(|(_, schematic)| schematic.document().components.clone())?;
+        let nets = rspice_design::connectivity::summary::projection_nets(
+            self.model.library_manager.catalog(),
+            projection,
+            &key,
+        );
+        Some((
+            DrawnOccurrence {
+                path,
+                cell_view,
+                components,
+                nets,
+            },
+            target.leaf,
+        ))
     }
 
     /// How a finding names a deck node, and where it is shown.
@@ -375,7 +369,7 @@ impl DrawnDesign {
                 .iter()
                 .find(|net| net.name.eq_ignore_ascii_case(&leaf))?;
             Some((
-                quoted_in(&net.name, occurrence),
+                quoted_in(&net.name, &occurrence),
                 PreflightRemediation::Drawing {
                     cell_view: occurrence.cell_view.clone(),
                     object: DrawnObject::Net {
@@ -408,7 +402,7 @@ impl DrawnDesign {
                 component.name.clone()
             };
             Some((
-                quoted_in(&name, occurrence),
+                quoted_in(&name, &occurrence),
                 PreflightRemediation::Drawing {
                     cell_view: occurrence.cell_view.clone(),
                     object: DrawnObject::Component {

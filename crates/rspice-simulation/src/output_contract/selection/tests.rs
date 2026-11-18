@@ -23,14 +23,17 @@ fn output_test_net(
 fn root_occurrence(nets: Vec<DesignNet>) -> Vec<OccurrenceNets> {
     vec![OccurrenceNets {
         occurrence: InstancePath::root(),
+        scope: String::new(),
         nets: std::sync::Arc::new(nets),
     }]
 }
 
 /// One occurrence below the root, owning the nets of the master it instantiates.
 fn instance_occurrence(path: &str, nets: Vec<DesignNet>) -> OccurrenceNets {
+    let occurrence = InstancePath::parse(path).expect("a legal occurrence path");
     OccurrenceNets {
-        occurrence: InstancePath::parse(path).expect("a legal occurrence path"),
+        scope: occurrence.to_engine_name().unwrap_or_default(),
+        occurrence,
         nets: std::sync::Arc::new(nets),
     }
 }
@@ -285,4 +288,47 @@ fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
     )
     .expect("deleted marker selection");
     assert!(deleted.is_empty());
+}
+
+/// An occurrence is found by the name the engine knows it by, however the
+/// design spells it, and the occurrences inside one are the run directly
+/// below it: not itself, not theirs, and not a sibling's whose name begins
+/// with its own.
+#[test]
+fn occurrences_are_found_by_engine_name_and_list_the_instances_inside() {
+    let mut occurrences = root_occurrence(Vec::new());
+    for path in [
+        "/X10/X2",
+        "/amp",
+        "/X1/X3",
+        "/X1",
+        "/X1/X2/X4",
+        "/X10",
+        "/X1/X2",
+    ] {
+        occurrences.push(instance_occurrence(path, Vec::new()));
+    }
+    occurrences[1..].sort_by(|left, right| left.order().cmp(&right.order()));
+    let at = |text: &str| {
+        occurrence_at(&occurrences, &InstancePath::parse(text).expect("a path"))
+            .map(|at| occurrences[at].occurrence().to_string())
+    };
+    assert_eq!(at("/").as_deref(), Some("/"));
+    assert_eq!(at("/x10").as_deref(), Some("/X10"));
+    assert_eq!(at("xamp").as_deref(), Some("/amp"));
+    assert_eq!(at("x1.x2.x4").as_deref(), Some("/X1/X2/X4"));
+    assert_eq!(at("/X2"), None);
+    let inside = |text: &str| {
+        let index = occurrence_at(&occurrences, &InstancePath::parse(text).expect("a path"))
+            .expect("the occurrence is listed");
+        occurrences_inside(&occurrences, index)
+            .iter()
+            .map(|inside| inside.occurrence().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(inside("/"), ["/X1", "/X10", "/amp"]);
+    assert_eq!(inside("/X1"), ["/X1/X2", "/X1/X3"]);
+    assert_eq!(inside("/X10"), ["/X10/X2"]);
+    assert_eq!(inside("/X1/X2"), ["/X1/X2/X4"]);
+    assert!(inside("/X1/X3").is_empty());
 }

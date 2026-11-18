@@ -879,6 +879,58 @@ fn a_hierarchy_past_a_million_occurrences_resolves_every_occurrence() {
     );
 }
 
+/// The plan finds the occurrence the engine names, `xamp1.x2`, as the design
+/// spells it, `/amp1/X2`, and walks only the contexts a caller keeps, asking
+/// about each context once rather than about each occurrence.
+#[test]
+fn the_plan_finds_an_engine_scope_and_walks_only_the_contexts_kept() {
+    let (mut documents, libraries) = nested_design(2, 8);
+    let top = CellViewRef::new("work", "top", "schematic").key();
+    for component in &mut documents.0.get_mut(&top).expect("the top").0.components {
+        component.name = component.name.replacen('X', "amp", 1);
+    }
+    let sources = ProjectSourceRegistry::default();
+    let context = HierarchyContext {
+        documents: &documents,
+        libraries: &libraries,
+        project_id: ProjectId::new(),
+        project_sources: &sources,
+        source_files: &NoSourceFiles,
+    };
+    let (_, plan) = resolve_hierarchy(context, CellViewRef::new("work", "top", "schematic"), None);
+
+    let scope = |text: &str| InstancePath::parse(text).expect("a path");
+    let found = plan
+        .engine_occurrence(&scope("xamp1.x2"))
+        .expect("the engine's name finds the drawn instance");
+    assert_eq!(found.instance_path().to_string(), "/amp1/X2");
+    assert_eq!(found.resolved_reference().cell, "l2");
+    assert_eq!(
+        plan.engine_occurrence(&scope("/amp7"))
+            .map(|found| found.instance_path().to_string()),
+        Some("/amp7".to_owned())
+    );
+    assert!(plan.engine_occurrence(&scope("xamp8")).is_none());
+    assert!(plan.engine_occurrence(&scope("xamp1.x8")).is_none());
+
+    let mut asked = 0;
+    let kept = plan
+        .bindings_where(|binding| {
+            asked += 1;
+            binding.resolved_reference().cell == "l2"
+        })
+        .map(|binding| binding.instance_path().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(kept.len(), 8 * 8);
+    assert_eq!(kept.first().map(String::as_str), Some("/amp0/X0"));
+    assert_eq!(kept.last().map(String::as_str), Some("/amp7/X7"));
+    assert!(
+        asked < kept.len(),
+        "asked {asked} times for {} occurrences",
+        kept.len()
+    );
+}
+
 /// An override reaches the occurrences its pattern names and no others,
 /// however deep they are and however many of their parents' occurrences
 /// resolve alike.

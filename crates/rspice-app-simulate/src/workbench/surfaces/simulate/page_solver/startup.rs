@@ -21,7 +21,9 @@ use crate::ui::widgets::{IconButton, editable_select_mono, name_control, text_fi
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
 use rspice_simulation::netlist_preparation::startup_nets::{settable, startup_net, startup_value};
-use rspice_simulation::output_contract::selection::OccurrenceNets;
+use rspice_simulation::output_contract::selection::{
+    OccurrenceNets, occurrence_at, occurrences_inside,
+};
 use rspice_simulation_contract::design_variable::DesignVariable;
 use rspice_simulation_contract::options::{NodeVoltage, StartupKind};
 use rspice_vocabulary::hierarchy_path::InstancePath;
@@ -44,7 +46,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .net_highlight
         .selected_net_name
         .clone();
-    let occurrences = occurrences.as_deref();
+    let occurrences = occurrences.as_deref().map(Vec::as_slice);
     let root = occurrences
         .map(|occurrences| scope_choices(occurrences, 0, selected.as_deref()))
         .unwrap_or_default();
@@ -118,15 +120,9 @@ fn scope_choices(
         choices.insert(0, choice);
     }
     choices.extend(
-        occurrences
+        occurrences_inside(occurrences, scope)
             .iter()
-            .map(OccurrenceNets::occurrence)
-            .filter(|child| {
-                child
-                    .parent()
-                    .is_some_and(|parent| parent.same_engine_scope(path))
-            })
-            .map(|child| Choice::Inside(format!("{child}/"))),
+            .map(|child| Choice::Inside(format!("{}/", child.occurrence()))),
     );
     choices
 }
@@ -143,10 +139,7 @@ fn scope_of(text: &str, occurrences: &[OccurrenceNets]) -> Option<usize> {
     if scope.is_empty() {
         return Some(0);
     }
-    let scope = InstancePath::parse(&scope).ok()?;
-    occurrences
-        .iter()
-        .position(|occurrence| occurrence.occurrence().same_engine_scope(&scope))
+    occurrence_at(occurrences, &InstancePath::parse(&scope).ok()?)
 }
 
 /// What one grid's row is called: the run's own word for it, then its
