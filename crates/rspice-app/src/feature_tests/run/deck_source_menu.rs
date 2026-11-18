@@ -500,8 +500,12 @@ fn opening_the_menu_closes_the_signature_hint() {
         .memory_mut(|memory| memory.request_focus(editor));
     replay.frame(Vec::new());
     let state = &mut replay.app.state;
-    show_signature_help_at_cursor(&state.model, &mut state.code.netlist)
-        .expect("the call has a signature");
+    show_signature_help_at_cursor(
+        &state.model,
+        &mut state.code.netlist,
+        state.workbench.messages(),
+    )
+    .expect("the call has a signature");
     replay.frame(Vec::new());
     assert!(
         replay.app.state.code.netlist.signature_help.open,

@@ -538,6 +538,137 @@ impl NetlistProjectIndex {
         })
     }
 
+    /// The signature of the call at character `char_index` of `text`, the
+    /// source `dependency_identity` names, as the engine's scoping binds it:
+    /// the definition a name there is bound to, or, anywhere else on an
+    /// instance's card, the subcircuit or model the instance is of. So a
+    /// subcircuit defined in an include, or one a subcircuit's own definition
+    /// shadows, shows its own ports and parameters. `None` where the index
+    /// has no name or call there, or was built from other text;
+    /// `Some(Err(name))` when nothing in scope defines the name.
+    pub(crate) fn signature_at(
+        &self,
+        dependency_identity: Option<&str>,
+        text: &str,
+        char_index: usize,
+        messages: MessageCatalog,
+    ) -> Option<Result<ProjectSymbolHover, String>> {
+        let file = self.file_holding(dependency_identity, text)?;
+        let byte = text
+            .char_indices()
+            .nth(char_index)
+            .map_or(text.len(), |(byte, _)| byte);
+        let bound = match self.deck.name_at(file, byte) {
+            Some(DeckNameAt::Definition(symbol))
+                if self.deck.symbols()[symbol].kind != DeckSymbolKind::Instance =>
+            {
+                Ok(symbol)
+            }
+            Some(DeckNameAt::Reference(reference)) => {
+                let read = &self.deck.references()[reference];
+                read.target.ok_or_else(|| read.name.clone())
+            }
+            _ => self.call_on_line(file, text[..byte].matches('\n').count() + 1)?,
+        };
+        let symbol = match bound {
+            Ok(symbol) => self.deck.symbols().get(symbol)?,
+            Err(name) => return Some(Err(name)),
+        };
+        let name = [("name", symbol.name.as_str())];
+        let mut parts = Vec::new();
+        let title = match symbol.kind {
+            DeckSymbolKind::Instance => return None,
+            DeckSymbolKind::Parameter => {
+                if !symbol.detail.is_empty() {
+                    parts.push(format!("= {}", symbol.detail));
+                }
+                messages.format(MessageId::NetlistSymbolParameter, &name)
+            }
+            DeckSymbolKind::Subcircuit => {
+                let ports = self.ports_of(symbol);
+                if !ports.is_empty() {
+                    parts.push(messages.format(
+                        MessageId::NetlistSymbolPorts,
+                        &[("ports", &ports.join(" "))],
+                    ));
+                }
+                // Its formals: the parameters its own card defines.
+                let formals = self
+                    .deck
+                    .symbols()
+                    .iter()
+                    .filter(|formal| {
+                        formal.kind == DeckSymbolKind::Parameter
+                            && formal.card == symbol.card
+                            && Some(formal.scope) == symbol.opens
+                    })
+                    .map(|formal| {
+                        if formal.detail.is_empty() {
+                            formal.name.clone()
+                        } else {
+                            format!("{}={}", formal.name, formal.detail)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if !formals.is_empty() {
+                    parts.push(messages.format(
+                        MessageId::NetlistSignatureParameters,
+                        &[("parameters", &formals.join(" "))],
+                    ));
+                }
+                messages.format(MessageId::NetlistSymbolSubcircuit, &name)
+            }
+            DeckSymbolKind::Model => {
+                if !symbol.detail.is_empty() {
+                    parts.push(symbol.detail.clone());
+                }
+                messages.format(MessageId::NetlistSymbolModel, &name)
+            }
+            DeckSymbolKind::Function => {
+                if !symbol.detail.is_empty() {
+                    parts.push(symbol.detail.clone());
+                }
+                messages.format(MessageId::NetlistSymbolFunction, &name)
+            }
+        };
+        parts.push(messages.format(
+            MessageId::NetlistSymbolPlace,
+            &[
+                ("file", self.file_name(symbol.location.file)),
+                ("line", &symbol.location.line.to_string()),
+            ],
+        ));
+        Some(Ok(ProjectSymbolHover {
+            title,
+            detail: parts.join(" · "),
+        }))
+    }
+
+    /// The subcircuit or model the instance written on one-based `line` of
+    /// `file` is of: the definition the engine binds, or `Err` with the name
+    /// when nothing in scope defines it. `None` when no instance that names
+    /// one is written there.
+    fn call_on_line(&self, file: usize, line: usize) -> Option<Result<usize, String>> {
+        let card = self.deck.card_on_line(file, line)?;
+        if let Some(target) = self
+            .deck
+            .symbols()
+            .iter()
+            .find(|symbol| symbol.card == card && symbol.kind == DeckSymbolKind::Instance)
+            .and_then(|instance| instance.target)
+        {
+            return Some(Ok(target));
+        }
+        let read = self.deck.references().iter().find(|read| {
+            read.card == card
+                && matches!(
+                    read.kind,
+                    DeckSymbolKind::Subcircuit | DeckSymbolKind::Model
+                )
+        })?;
+        Some(read.target.ok_or_else(|| read.name.clone()))
+    }
+
     /// The parameters a reader on one-based `line` of the source
     /// `dependency_identity` names sees, each the definition the engine binds
     /// there: a subcircuit's own and its formals inside it, the deck's
@@ -1147,46 +1278,35 @@ pub(crate) fn go_to_declaration_at_cursor(
         .map(|message| message.replace("definition", "declaration"))
 }
 
+/// Show the signature of the directive or call at the caret: a directive's
+/// own, or the definition the deck's index binds the call to.
 pub fn show_signature_help_at_cursor(
     model: &Model,
     netlist: &mut NetlistDocumentState,
+    messages: MessageCatalog,
 ) -> Result<String, String> {
     let source = model.simulation.source.netlist_content.clone();
     let cursor = netlist.cursor_char_index;
-    let (title, detail) =
-        if let Some((title, detail)) = super::completion::directive_signature_at(&source, cursor) {
-            (title, detail)
-        } else {
-            let symbol = symbol_at_cursor(&source, cursor).ok_or_else(|| {
-                "Place the caret on an analysis, subcircuit, model, parameter, or function name."
-                    .to_owned()
-            })?;
+    let (title, detail) = match super::completion::directive_signature_at(&source, cursor) {
+        Some(directive) => directive,
+        None => {
             let index = project_index_now(model, netlist)
-                .ok_or_else(|| "The active source has no project index.".to_owned())?;
-            let definitions = index.definitions_named(&symbol);
-            match definitions.as_slice() {
-                [definition] => (
-                    format!("{} {}", definition.kind.label(), definition.name),
-                    format!(
-                        "{} · declared at {}:{}",
-                        definition.detail,
-                        definition.definition.display_name,
-                        definition.definition.line
-                    ),
-                ),
-                [] => {
-                    return Err(format!(
-                        "No signature for '{symbol}' exists in the project's sources."
-                    ));
+                .ok_or_else(|| messages.text(MessageId::NetlistSignatureNoIndex))?;
+            match index.signature_at(
+                netlist.active_dependency_identity.as_deref(),
+                &source,
+                cursor,
+                messages,
+            ) {
+                Some(Ok(signature)) => (signature.title, signature.detail),
+                Some(Err(name)) => {
+                    return Err(messages
+                        .format(MessageId::NetlistNothingInScopeDefines, &[("name", &name)]));
                 }
-                _ => {
-                    return Err(format!(
-                        "Signature help is ambiguous because '{symbol}' has {} declarations.",
-                        definitions.len()
-                    ));
-                }
+                None => return Err(messages.text(MessageId::NetlistSignaturePlaceCaret)),
             }
-        };
+        }
+    };
     netlist.signature_help = NetlistSignatureHelpState {
         open: true,
         revision: netlist.revision,
@@ -1194,7 +1314,7 @@ pub fn show_signature_help_at_cursor(
         title: title.clone(),
         detail,
     };
-    Ok(format!("Showing signature help for {title}"))
+    Ok(messages.format(MessageId::NetlistSignatureShowing, &[("name", &title)]))
 }
 
 pub(crate) fn open_workspace_symbols(

@@ -436,6 +436,103 @@ fn a_hover_names_the_definition_a_name_is_bound_to_and_its_references() {
     assert_eq!(index.hover_at(None, "other text", 1), None);
 }
 
+/// The signature help shown with the caret at the first `needle` of `deck`,
+/// plus `offset` characters: its title and detail, or the refusal.
+fn signature_at(
+    harness: &mut CodeHarness,
+    deck: &str,
+    needle: &str,
+    offset: usize,
+) -> Result<(String, String), String> {
+    harness.state.netlist.cursor_char_index =
+        deck.find(needle).expect("the deck writes it") + offset;
+    let messages = harness.wb.messages();
+    show_signature_help_at_cursor(&harness.model, &mut harness.state.netlist, messages)?;
+    let shown = &harness.state.netlist.signature_help;
+    Ok((shown.title.clone(), shown.detail.clone()))
+}
+
+/// Anywhere on an instance's line, signature help shows the subcircuit the
+/// instance calls, with its ports and parameters, from the include that
+/// defines it.
+#[test]
+fn signature_help_shows_the_ports_and_parameters_of_a_subcircuit_an_include_defines() {
+    let deck = "signature deck\n\
+                .include \"models/resistor.inc\"\n\
+                X1 a b cell gain=3\n\
+                X2 a b missing\n\
+                .op\n\
+                .end\n";
+    let include = ".subckt cell in out params: gain=1\nR1 in out {gain}\n.ends cell\n";
+    let mut harness = harness();
+    crate::workbench::documents::netlist_document::fixtures::seed_owned_deck(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        deck,
+        include,
+    );
+    let shown = Ok((
+        "Subcircuit cell".to_owned(),
+        "Ports in out · Parameters gain=1 · resistor.inc line 1".to_owned(),
+    ));
+
+    // On a node, on the subcircuit's name and on the instance's own name.
+    assert_eq!(signature_at(&mut harness, deck, "X1 a", 3), shown);
+    assert_eq!(signature_at(&mut harness, deck, "cell gain", 1), shown);
+    assert_eq!(signature_at(&mut harness, deck, "X1 a", 0), shown);
+    assert_eq!(
+        signature_at(&mut harness, deck, "X2 a", 3),
+        Err("Nothing in scope defines missing.".to_owned())
+    );
+}
+
+/// A subcircuit defined inside another shadows one of the same name for the
+/// instances in that other's body, so each call shows the ports and
+/// parameters of the definition it binds.
+#[test]
+fn signature_help_shows_the_subcircuit_the_callers_scope_binds() {
+    let deck = "shadow deck\n\
+                .include \"models/resistor.inc\"\n\
+                .subckt leaf a b\n\
+                R1 a b 1k\n\
+                .ends leaf\n\
+                .subckt outer x y\n\
+                .subckt leaf p q r w=2\n\
+                R1 p q {w}\n\
+                .ends leaf\n\
+                X2 x y 0 leaf\n\
+                .ends outer\n\
+                X1 n1 n2 leaf\n\
+                .op\n\
+                .end\n";
+    let mut harness = harness();
+    crate::workbench::documents::netlist_document::fixtures::seed_owned_deck(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        deck,
+        "* models\n",
+    );
+    let file = project_index_now(&harness.model, &mut harness.state.netlist)
+        .expect("an index")
+        .file_name(0)
+        .to_owned();
+
+    assert_eq!(
+        signature_at(&mut harness, deck, "X2 x", 3),
+        Ok((
+            "Subcircuit leaf".to_owned(),
+            format!("Ports p q r · Parameters w=2 · {file} line 7"),
+        ))
+    );
+    assert_eq!(
+        signature_at(&mut harness, deck, "X1 n1", 3),
+        Ok((
+            "Subcircuit leaf".to_owned(),
+            format!("Ports a b · {file} line 3"),
+        ))
+    );
+}
+
 fn hover_state() -> CodeHarness {
     let mut harness = harness();
     harness.model.simulation.source.netlist_content = HOVER_DECK.to_owned();

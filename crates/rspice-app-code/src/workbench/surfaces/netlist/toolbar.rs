@@ -616,6 +616,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             match crate::workbench::documents::netlist_document::language::show_signature_help_at_cursor(
                 cx.model,
                 &mut cx.state.netlist,
+                cx.wb.messages(),
             ) {
                 Ok(message) => {
                     ui.ctx().memory_mut(|memory| {
