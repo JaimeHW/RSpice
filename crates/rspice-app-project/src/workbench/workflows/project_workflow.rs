@@ -1006,6 +1006,25 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
             parts.lifecycle.platform,
             transaction,
         );
+        // A save always says how it ended, even one this tab no longer
+        // takes: an action waiting on it hears only that it ended.
+        match &terminal {
+            SaveContinuationEvent::PublishedButNotAdopted(_, message) => {
+                parts
+                    .lifecycle
+                    .model
+                    .report_warning("Saved, but not taken here", message.clone());
+            }
+            SaveContinuationEvent::Conflict(_) => parts.lifecycle.model.report_failure(
+                "Project save failed",
+                "its file changed since it was opened here, so nothing was written.",
+            ),
+            SaveContinuationEvent::Failed(_, error) => parts
+                .lifecycle
+                .model
+                .report_failure("Project save failed", error.clone()),
+            _ => {}
+        }
         return (!project_copy).then_some(terminal);
     }
     let mut continuation = None;

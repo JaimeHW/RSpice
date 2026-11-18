@@ -180,20 +180,10 @@ pub(super) async fn run_browser_write_locked(
     persist_binding: bool,
     bytes: &[u8],
 ) -> BrowserWriteResult {
-    if target.intent.backend == BrowserBindingBackend::ExternalFile {
-        let permission = match call_promise_method(
-            handle,
-            "requestPermission",
-            &[permission_options(BrowserPermissionMode::ReadWrite)],
-        ) {
-            Ok(permission) => permission,
-            Err(error) => return BrowserWriteResult::Failed(error.into()),
-        };
-        if let Err(error) =
-            ensure_browser_permission(permission, BrowserPermissionMode::ReadWrite).await
-        {
-            return BrowserWriteResult::Failed(error.into());
-        }
+    if target.intent.backend == BrowserBindingBackend::ExternalFile
+        && let Err(error) = ensure_write_permission(handle).await
+    {
+        return BrowserWriteResult::Failed(error.into());
     }
     if persist_binding
         && browser_binding_store_supported()
@@ -281,6 +271,28 @@ pub(super) async fn run_browser_write_locked(
 pub(super) enum BrowserPermissionMode {
     Read,
     ReadWrite,
+}
+
+/// Permission to write `handle`'s file, asked of the reader only when the
+/// browser does not already grant it. A file reopened after a reload is
+/// granted for reading only, so its first Save asks; one this tab already
+/// writes is never asked again, so a Save never waits on a prompt it does
+/// not need.
+#[cfg(target_arch = "wasm32")]
+async fn ensure_write_permission(handle: &wasm_bindgen::JsValue) -> Result<(), String> {
+    let mode = BrowserPermissionMode::ReadWrite;
+    let granted = match call_promise_method(handle, "queryPermission", &[permission_options(mode)])
+    {
+        Ok(query) => await_browser_promise(query, "browser file permission query")
+            .await
+            .is_ok_and(|state| state.as_string().as_deref() == Some("granted")),
+        Err(_) => false,
+    };
+    if granted {
+        return Ok(());
+    }
+    let permission = call_promise_method(handle, "requestPermission", &[permission_options(mode)])?;
+    ensure_browser_permission(permission, mode).await
 }
 
 #[cfg(target_arch = "wasm32")]
