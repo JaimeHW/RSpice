@@ -57,59 +57,10 @@ impl TextSnapshot {
         &self.text
     }
 
-    /// Its length in bytes.
-    pub fn len(&self) -> usize {
-        self.text.len_bytes()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.text.len_bytes() == 0
-    }
-
-    /// Whether the text holds nothing but white space.
-    pub fn is_blank(&self) -> bool {
-        self.text.chunks().all(|chunk| chunk.trim().is_empty())
-    }
-
-    /// The text in pieces, in order, without copying it.
-    pub fn chunks(&self) -> impl Iterator<Item = &str> + '_ {
-        self.text.chunks()
-    }
-
     /// The text as one string: borrowed when it is held in one piece, else a
-    /// copy. A reader that can walk [`TextSnapshot::chunks`] should.
+    /// copy. A reader that can walk the rope's chunks should.
     pub fn as_cow(&self) -> Cow<'_, str> {
         self.text.slice(..).into()
-    }
-
-    /// The number of lines, numbered as the editor numbers them, except
-    /// that a final line break does not begin another line.
-    pub fn line_count(&self) -> usize {
-        let lines = self.text.len_lines();
-        lines - usize::from(self.text.line(lines - 1).len_chars() == 0)
-    }
-
-    /// Zero-based line `index`, numbered as the editor numbers them, without
-    /// its line break.
-    pub fn line(&self, index: usize) -> Option<Cow<'_, str>> {
-        if index >= self.line_count() {
-            return None;
-        }
-        let line: Cow<'_, str> = self.text.line(index).into();
-        Some(match line {
-            Cow::Borrowed(line) => Cow::Borrowed(trim_line_break(line)),
-            Cow::Owned(mut line) => {
-                let kept = trim_line_break(&line).len();
-                line.truncate(kept);
-                Cow::Owned(line)
-            }
-        })
-    }
-
-    /// Whether this snapshot and `other` are the same revision: a check
-    /// that costs nothing, for a reader that kept a snapshot.
-    pub const fn same_revision(&self, other: &Self) -> bool {
-        self.revision == other.revision
     }
 
     /// Whether the text is `other`, compared piece by piece in place.
@@ -127,18 +78,6 @@ impl TextSnapshot {
         }
         true
     }
-}
-
-/// `line` without the line break that ends it: any the editor breaks lines
-/// at.
-fn trim_line_break(line: &str) -> &str {
-    if let Some(line) = line.strip_suffix("\r\n") {
-        return line;
-    }
-    line.strip_suffix([
-        '\n', '\r', '\u{000B}', '\u{000C}', '\u{0085}', '\u{2028}', '\u{2029}',
-    ])
-    .unwrap_or(line)
 }
 
 impl From<&str> for TextSnapshot {
@@ -237,24 +176,23 @@ mod tests {
         let second = TextSnapshot::new("R1 a b 1k\n");
         assert_ne!(first.revision(), second.revision());
         assert_eq!(first, second, "the same text compares equal");
-        assert!(first.clone().same_revision(&first));
+        assert_eq!(
+            first.clone().revision(),
+            first.revision(),
+            "a clone is the same text"
+        );
     }
 
-    /// Broken by `\n` and `\r\n` alone, the lines are those `str::lines`
-    /// reads.
+    /// A snapshot reads back, and compares equal to, the text it was made
+    /// from, whatever its line breaks.
     #[test]
-    fn lines_read_as_str_lines_reads_them() {
+    fn a_snapshot_reads_back_the_text_it_was_made_from() {
         for text in ["", "\n", "a", "a\n", "a\r\nb", "a\nb\n", "a\n\nb\r\n\r\n"] {
             let snapshot = TextSnapshot::new(text);
-            let lines = text.lines().collect::<Vec<_>>();
-            assert_eq!(snapshot.line_count(), lines.len(), "{text:?}");
-            for (index, line) in lines.iter().enumerate() {
-                assert_eq!(snapshot.line(index).as_deref(), Some(*line), "{text:?}");
-            }
-            assert_eq!(snapshot.line(lines.len()), None, "{text:?}");
+            assert_eq!(String::from(&snapshot), text);
             assert_eq!(snapshot.to_string(), text);
+            assert_eq!(snapshot.as_cow(), text);
             assert_eq!(snapshot, text);
-            assert_eq!(snapshot.is_blank(), text.trim().is_empty());
         }
     }
 }
