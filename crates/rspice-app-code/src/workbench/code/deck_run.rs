@@ -1,5 +1,10 @@
-//! Run and Check and netlist on the Netlist workspace while a deck is what
-//! Run runs.
+//! Run and Check and netlist while a deck is what Run runs: on the Netlist
+//! workspace, the deck tab Run runs; on every other, the project's deck,
+//! while the deck is the project's simulation.
+//!
+//! Away from the Netlist workspace the press first opens the project's deck
+//! as the Netlist workspace does and makes it what Run runs there; a deck
+//! whose file cannot be read holds the press, and the notice says why.
 //!
 //! The press checks the deck as a run reads it, includes read where they are,
 //! and starts the run in the same press when the check finds nothing to stop
@@ -17,9 +22,11 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
+use crate::workbench::documents::deck_files;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
 use crate::workbench::slots::{manual_deck_in, veriloga_compilation_in};
+use crate::workbench::state::Workspace;
 use crate::workbench::workflows::netlist_workflow::record_include_resolutions;
 use rspice_app_runs::workbench::waiting;
 use rspice_simulation::execution::PreparedRunMetadata;
@@ -49,10 +56,12 @@ enum DeckCheck {
 /// found its includes recorded. What it prepared is retained for the run
 /// that follows when `for_run`.
 fn check_deck_run(cx: &mut Cx<'_, CodeFeature>, for_run: bool) -> DeckCheck {
+    if cx.wb.workspace != Workspace::Netlist && !bring_project_deck(cx) {
+        return DeckCheck::Held;
+    }
     // A file changed on disk under edits holds the check until the reader
     // answers for it.
-    match crate::workbench::documents::deck_files::sync_before_run(cx.model, &mut cx.state.netlist)
-    {
+    match deck_files::sync_before_run(cx.model, &mut cx.state.netlist) {
         Ok(notices) => {
             for notice in notices {
                 cx.wb.prompt(notice);
@@ -105,6 +114,54 @@ fn check_deck_run(cx: &mut Cx<'_, CodeFeature>, for_run: bool) -> DeckCheck {
         );
     }
     DeckCheck::Checked(Box::new(CheckedDeck { name, text, result }))
+}
+
+/// Make the project's deck what Run runs, as Run away from the Netlist
+/// workspace runs it: opened as the Netlist workspace opens it and brought
+/// to the front there. Whether it is open; a deck whose file cannot be read
+/// is not, and the notice says why, in the words Run's own reason uses.
+fn bring_project_deck(cx: &mut Cx<'_, CodeFeature>) -> bool {
+    deck_files::show_project_deck(
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.netlist_open_documents,
+        cx.runs,
+    );
+    if cx.state.netlist.open_deck.is_some() {
+        return true;
+    }
+    let messages = cx.wb.messages();
+    let netlist = &cx.state.netlist;
+    let said = |id: MessageId, deck: deck_files::MissingDeck| {
+        messages.format(
+            id,
+            &[
+                ("name", &deck.name),
+                ("path", &deck.path.display().to_string()),
+            ],
+        )
+    };
+    let notice = deck_files::missing_deck(cx.model, netlist)
+        .map(|deck| said(MessageId::NetlistDeckMissing, deck))
+        .or_else(|| {
+            deck_files::desktop_deck(cx.model, netlist)
+                .map(|deck| said(MessageId::NetlistDeckOnTheDesktop, deck))
+        })
+        .or_else(|| {
+            let id = netlist.unreadable_deck?;
+            let deck = cx
+                .model
+                .workspace
+                .content
+                .decks
+                .iter()
+                .find(|deck| deck.id == id)?;
+            Some(messages.format(MessageId::NetlistDeckUnreadable, &[("name", &deck.name())]))
+        });
+    if let Some(notice) = notice {
+        cx.wb.prompt(notice);
+    }
+    false
 }
 
 /// Check the deck Run runs and run it, or say why it did not run.
@@ -189,7 +246,7 @@ fn refuse(
     text: &str,
     error: &PreparationError,
 ) {
-    crate::workbench::documents::deck_files::show_deck(cx.model, &mut cx.state.netlist);
+    deck_files::show_deck(cx.model, &mut cx.state.netlist);
     let messages = cx.wb.messages();
     let (at_line, without_line) = match verdict {
         Verdict::DidNotRun => (

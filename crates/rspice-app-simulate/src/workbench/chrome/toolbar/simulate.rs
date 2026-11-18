@@ -62,8 +62,9 @@ pub(in crate::workbench) struct RunControls<'a> {
     pub(in crate::workbench) options: RunEntry,
     /// Why the primary is unavailable, read only while it is.
     pub(in crate::workbench) unavailable_reason: Option<String>,
-    /// The deck Run runs on the Netlist workspace, by its file's name, when
-    /// Run runs a deck there rather than the plan.
+    /// The deck Run runs, by its file's name, when Run runs a deck rather
+    /// than the plan: on the Netlist workspace the deck tab Run runs, and
+    /// elsewhere the project's deck while the deck is its simulation.
     pub(in crate::workbench) deck: Option<String>,
 }
 

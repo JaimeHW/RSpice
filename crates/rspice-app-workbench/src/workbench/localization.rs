@@ -218,6 +218,7 @@ define_messages! {
     NetlistDeckMissingDescription => "It was last at {path}. Locate the file where it is now, or remove the deck from the project. Save and Run wait until it is found.",
     NetlistDeckMissingState => "Missing",
     NetlistDeckOnTheDesktop => "{name} is a file on the desktop ({path}). Open the project on the desktop to edit or run it.",
+    NetlistDeckUnreadable => "{name} could not be read.",
     NetlistFileOutsideDeck => "{path} is outside this deck. Add the file to the deck to use it.",
     NetlistFileNotInDeck => "{path} is not in this deck. Add the file to the deck to use it.",
     NetlistAddFileToDeck => "Add file…",

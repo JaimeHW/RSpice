@@ -107,10 +107,13 @@ impl Feature for CodeFeature {
 /// Netlist workspace opens the deck's own find bar, and View > Zoom over a
 /// source editor sizes the editors' text, as the editor's own Ctrl+= and
 /// Ctrl+- do. The shell asks it before the design feature, which would take
-/// both there too. Run on the Netlist workspace, while a deck is what Run
-/// runs, checks that deck and runs it as written, and Check and netlist
-/// checks it as Run would; with the plan as the target, Simulate's Run and
-/// check take them.
+/// both there too. Run runs the project's simulation whatever is in front:
+/// on the Netlist workspace, while a deck is what Run runs, it checks that
+/// deck and runs it as written; on every other workspace it runs the
+/// project's deck while the deck is the project's simulation, a project
+/// opened from a deck with no design. Check and netlist checks the same deck
+/// as Run would. With the plan as the target, Simulate's Run and check take
+/// them.
 const ROUTED: &[RoutedCommand<CodeFeature>] = &[
     RoutedCommand {
         key: ids::FIND_IN_DESIGN,
@@ -138,23 +141,23 @@ const ROUTED: &[RoutedCommand<CodeFeature>] = &[
     },
     RoutedCommand {
         key: ids::RUN_SIMULATION,
-        takes: |reads| reads.wb.workspace == Workspace::Netlist && runs_a_deck(reads),
-        // The deck Run names runs once it is open: a deck whose file is
+        takes: runs_a_deck,
+        // The deck Run names runs once it can be read: a deck whose file is
         // missing waits until it is found.
         enabled: |reads| {
             let execution = &reads.model.simulation.execution;
             !execution.has_active_execution()
                 && !execution.trigger_simulation
-                && reads.state.netlist.open_deck.is_some()
+                && run_deck_readable(reads)
         },
         execute: deck_run::request_deck_run,
     },
     RoutedCommand {
         key: ids::CHECK_AND_NETLIST,
-        takes: |reads| reads.wb.workspace == Workspace::Netlist && runs_a_deck(reads),
+        takes: runs_a_deck,
         // A deck whose file is missing has nothing to check until it is
         // found.
-        enabled: |reads| reads.state.netlist.open_deck.is_some(),
+        enabled: run_deck_readable,
         execute: deck_run::check_deck,
     },
 ];
@@ -164,12 +167,31 @@ fn source_editor_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.wb.active_source_editor.is_some()
 }
 
-/// Whether Run on the Netlist workspace runs a deck rather than the plan.
+/// Whether Run runs a deck rather than the plan: on the Netlist workspace,
+/// while a deck is the tab Run runs; on every other, while the project's
+/// simulation is its deck.
 fn runs_a_deck(reads: &Reads<'_, CodeFeature>) -> bool {
-    matches!(
-        reads.state.netlist.run_target(),
-        crate::workbench::documents::netlist_tabs::RunTarget::Deck(_)
-    )
+    if reads.wb.workspace == Workspace::Netlist {
+        matches!(
+            reads.state.netlist.run_target(),
+            crate::workbench::documents::netlist_tabs::RunTarget::Deck(_)
+        )
+    } else {
+        crate::workbench::documents::deck_files::project_run_deck(reads.model, &reads.state.netlist)
+            .is_some()
+    }
+}
+
+/// Whether the deck Run runs can be read: on the Netlist workspace, while
+/// it is open; on every other, until its file is found missing, as Run
+/// opens a deck that is not open yet.
+fn run_deck_readable(reads: &Reads<'_, CodeFeature>) -> bool {
+    if reads.wb.workspace == Workspace::Netlist {
+        reads.state.netlist.open_deck.is_some()
+    } else {
+        crate::workbench::documents::deck_files::project_run_deck(reads.model, &reads.state.netlist)
+            .is_some_and(|deck| !deck.missing)
+    }
 }
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
@@ -355,10 +377,7 @@ impl CommandSet for CodeCommand {
                     Err(reason) => (false, reason),
                 }
             }
-            Self::ShowRunDeck => (
-                reads.wb.workspace == Workspace::Netlist && runs_a_deck(reads),
-                "Run runs the plan, not a deck",
-            ),
+            Self::ShowRunDeck => (runs_a_deck(reads), "Run runs the plan, not a deck"),
             // Unlike its neighbours this one belongs to the source documents,
             // a Verilog-A cell view, not the deck: it manages a project source
             // bundle, which the deck is not.
@@ -529,6 +548,14 @@ impl CommandSet for CodeCommand {
                 if let Some(quantity) = plot_quantity(self) {
                     plot_from_source(cx, quantity);
                 }
+            }
+            // Away from the Netlist workspace the deck Run names is the
+            // project's, shown in front of the Netlist workspace as Open
+            // SPICE deck shows it.
+            Self::ShowRunDeck if cx.wb.workspace != Workspace::Netlist => {
+                cx.wb
+                    .outbox
+                    .push(crate::workbench::framework::requests::ShowProjectDeck);
             }
             Self::ShowRunDeck => {
                 use crate::workbench::documents::deck_files;

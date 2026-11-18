@@ -32,6 +32,7 @@ mod netlist_toolbar;
 mod netlist_transfer;
 mod netlist_workflow;
 mod new_veriloga_device;
+mod project_deck_run;
 mod run_target;
 mod source_document;
 mod source_editor_commands;

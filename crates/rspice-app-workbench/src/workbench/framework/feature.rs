@@ -124,6 +124,15 @@ impl NetlistDocumentKey {
     }
 }
 
+/// The deck Run runs away from the Netlist workspace, in a project whose
+/// simulation is its deck: which deck, and whether its file could not be
+/// read, so that Run waits until it is found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectRunDeck {
+    pub id: DeckId,
+    pub missing: bool,
+}
+
 /// What code shows that another feature reads.
 pub trait CodePort {
     /// The deck in front of the netlist editor, which a manual run reads.
@@ -132,6 +141,14 @@ pub trait CodePort {
     /// read: Run is that deck's, and unavailable until the file is found. A
     /// port with no netlist editor names none.
     fn unreadable_run_deck(&self) -> Option<DeckId> {
+        None
+    }
+    /// The deck Run runs from every other workspace while `model`'s
+    /// simulation is its deck, a project opened from a deck with no design;
+    /// `None` while Run runs the plan. A port with no netlist editor names
+    /// none.
+    fn project_run_deck(&self, model: &Model) -> Option<ProjectRunDeck> {
+        let _ = model;
         None
     }
     /// Which netlist document the editor shows, as a change check compares

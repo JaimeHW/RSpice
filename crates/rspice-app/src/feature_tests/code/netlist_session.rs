@@ -111,7 +111,7 @@ fn netlist_session(state: &AppState) -> NetlistSession {
 }
 
 /// Store the application's session, and launch again from it, drawn twice.
-fn relaunch(app: &mut RSpiceApp) -> RSpiceApp {
+pub(super) fn relaunch(app: &mut RSpiceApp) -> RSpiceApp {
     let mut storage = MemoryStorage::default();
     app.state.store_session(&mut storage);
     let mut restored = AppState::restore_eframe_session(&storage).expect("the session restores");

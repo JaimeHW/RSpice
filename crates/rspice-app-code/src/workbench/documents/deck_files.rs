@@ -1668,6 +1668,41 @@ pub fn show_project_deck(
     open_project_deck(model, netlist, open_documents, runs);
 }
 
+/// The deck Run runs away from the Netlist workspace, while the project's
+/// simulation is its deck (a project opened from a deck, with no design):
+/// the deck [`show_project_deck`] brings to the front, which Run opens
+/// first when it is not open yet. `None` for a project with a design, whose
+/// Run runs the plan.
+#[must_use]
+pub fn project_run_deck(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+) -> Option<crate::workbench::framework::feature::ProjectRunDeck> {
+    use crate::workbench::framework::feature::ProjectRunDeck;
+
+    if !model.is_netlist_first_without_schematic() {
+        return None;
+    }
+    if let Some(deck) = &netlist.open_deck {
+        return Some(ProjectRunDeck {
+            id: deck.id,
+            missing: false,
+        });
+    }
+    if let Some(id) = netlist.unreadable_deck {
+        return Some(ProjectRunDeck { id, missing: true });
+    }
+    model
+        .workspace
+        .content
+        .decks
+        .first()
+        .map(|deck| ProjectRunDeck {
+            id: deck.id,
+            missing: false,
+        })
+}
+
 /// Open the project's first deck when the project has decks and none is
 /// open, once per project: a deck that cannot be read is reported once.
 pub fn open_project_deck(

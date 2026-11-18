@@ -157,6 +157,13 @@ impl CodePort for CodeState {
         }
     }
 
+    fn project_run_deck(
+        &self,
+        model: &crate::workbench::app_state::Model,
+    ) -> Option<crate::workbench::framework::feature::ProjectRunDeck> {
+        crate::workbench::documents::deck_files::project_run_deck(model, &self.netlist)
+    }
+
     fn shown_netlist_document_key(&self) -> NetlistDocumentKey {
         netlist_document_key(self.netlist.front.root_kind())
     }

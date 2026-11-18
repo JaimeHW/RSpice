@@ -21,10 +21,10 @@ use super::commands::SimulateCommand;
 use super::{SimulateFeature, invalidate_preflight};
 
 /// Draw the trailing group: the run controls, then the plan chip and the PVT
-/// chip where `layout` has room for them. Where Run runs a deck, on the
-/// Netlist workspace, the deck's chip stands in the plan chip's place, and
-/// pressing it brings the deck's tab to the front. The Netlist workspace
-/// runs either, so there the chip naming what Run runs stays wherever the
+/// chip where `layout` has room for them. Where Run runs a deck, the deck's
+/// chip stands in the plan chip's place, and pressing it brings the deck's
+/// tab to the front of the Netlist workspace. The Netlist workspace runs
+/// either, so there the chip naming what Run runs stays wherever the
 /// toolbar's tools keep their labels.
 pub fn show_trailing(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     let names_target = layout.show_run_config_selector
@@ -100,34 +100,37 @@ fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunC
         ),
     };
     let primary = entry(primary);
-    // Run on the Netlist workspace runs the deck the code feature names, when
-    // it names one; the plan otherwise. A deck whose file is missing is named
-    // too, and Run waits until it is found.
-    let on_netlist = cx.wb.workspace == Workspace::Netlist;
-    let unreadable = on_netlist
-        .then(|| cx.peers.code().unreadable_run_deck())
-        .flatten()
-        .and_then(|id| {
-            cx.model
-                .workspace
-                .content
-                .decks
-                .iter()
-                .find(|deck| deck.id == id)
-        });
+    // Run runs the deck the code feature names, when it names one; the plan
+    // otherwise. On the Netlist workspace that is the deck tab Run runs;
+    // elsewhere, the project's deck while the deck is the project's
+    // simulation. A deck whose file is missing is named too, and Run waits
+    // until it is found.
+    let code = cx.peers.code();
+    let project_deck = |id| {
+        cx.model
+            .workspace
+            .content
+            .decks
+            .iter()
+            .find(|deck| deck.id == id)
+    };
+    let (unreadable, deck) = if cx.wb.workspace == Workspace::Netlist {
+        let unreadable = code.unreadable_run_deck().and_then(project_deck);
+        let deck = code
+            .manual_deck()
+            .map(|deck| deck.name.to_owned())
+            .or_else(|| unreadable.map(crate::state::ProjectDeck::name));
+        (unreadable, deck)
+    } else {
+        let run_deck = code.project_run_deck(cx.model);
+        let named = run_deck.and_then(|deck| project_deck(deck.id));
+        let unreadable = named.filter(|_| run_deck.is_some_and(|deck| deck.missing));
+        (unreadable, named.map(crate::state::ProjectDeck::name))
+    };
     let unavailable_reason = (!primary.enabled).then(|| match unreadable {
         Some(deck) if !execution_active => missing_deck_reason(cx, deck),
         _ => unavailable_reason(cx, primary.key, execution_active),
     });
-    let deck = on_netlist
-        .then(|| {
-            cx.peers
-                .code()
-                .manual_deck()
-                .map(|deck| deck.name.to_owned())
-                .or_else(|| unreadable.map(crate::state::ProjectDeck::name))
-        })
-        .flatten();
     RunControls {
         model: cx.model,
         checking,
