@@ -269,16 +269,20 @@ impl PlotQuantity {
             || (self == Self::Voltage && vector.eq_ignore_ascii_case(name))
     }
 
-    /// The name under the caret this quantity is of, when it is one.
+    /// The name under the caret this quantity is of, when it is one. A
+    /// subcircuit's instance (`X...`) has a current at each of its pins and
+    /// none of its own, so it is no device to plot the current of.
     pub fn of(self, name: &CaretName) -> Option<(&str, bool)> {
         match (self, name) {
-            (Self::Voltage, CaretName::Node { name, top_level })
-            | (
+            (Self::Voltage, CaretName::Node { name, top_level }) => {
+                Some((name.as_str(), *top_level))
+            }
+            (
                 Self::Current,
                 CaretName::Element {
                     name, top_level, ..
                 },
-            ) => Some((name.as_str(), *top_level)),
+            ) if !name.starts_with(['X', 'x']) => Some((name.as_str(), *top_level)),
             _ => None,
         }
     }

@@ -466,7 +466,6 @@ pub(crate) fn show_virtual_text_editor(
         scroll_area.show_viewport(ui, |ui, viewport| {
             session.viewport_size = Some(viewport.size());
             let content_size = content_size(&session, style, char_width).max(viewport.size());
-            let content_width = content_size.x;
             ui.set_min_size(content_size);
             let content_rect = egui::Rect::from_min_size(ui.min_rect().min, content_size);
             ui.painter()
@@ -859,12 +858,16 @@ pub(crate) fn show_virtual_text_editor(
                     .min(session.model.line_count().saturating_sub(1));
                 if let Some(visible_row) = session.model.visible_row_for_logical_line(logical_line)
                 {
+                    // The line's start, where the caret is put: centred
+                    // down the view, and the view back at the first column.
+                    // The whole line's width centred would scroll a
+                    // narrow view sideways off the caret.
                     let rect = egui::Rect::from_min_size(
                         egui::pos2(
                             origin.x,
                             origin.y + style.top_padding + visible_row as f32 * style.line_height,
                         ),
-                        Vec2::new(content_width, style.line_height),
+                        Vec2::new(char_width, style.line_height),
                     );
                     ui.scroll_to_rect(rect, Some(egui::Align::Center));
                 }

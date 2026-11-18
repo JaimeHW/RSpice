@@ -1,4 +1,4 @@
-use super::{CaretName, name_on};
+use super::{CaretName, PlotQuantity, name_on};
 use crate::state::NetlistSourceIndex;
 
 const DECK: &str = "* amplifier\n\
@@ -64,4 +64,17 @@ fn a_node_in_a_subcircuit_body_is_not_a_node_of_the_deck() {
 fn a_comment_or_a_control_card_has_no_name_to_read() {
     assert_eq!(name(1, 3), None);
     assert_eq!(name(11, 1), None);
+}
+
+#[test]
+fn a_device_has_a_current_to_plot_and_a_subcircuit_instance_none() {
+    let resistor = name(3, 0).expect("R1");
+    let instance = name(10, 0).expect("X1");
+    assert_eq!(PlotQuantity::Current.of(&resistor), Some(("R1", true)));
+    assert_eq!(PlotQuantity::Current.of(&instance), None);
+    assert_eq!(PlotQuantity::Voltage.of(&resistor), None);
+    assert_eq!(
+        PlotQuantity::Voltage.of(&name(3, 4).expect("in")),
+        Some(("in", true))
+    );
 }
