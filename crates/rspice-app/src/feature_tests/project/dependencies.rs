@@ -21,7 +21,7 @@ use super::recovery_frames::{app_frame, click_on, offscreen, painted, saved_proj
 
 /// What one place on the page says about a library: the status's word, and
 /// the severity a screen reader is told in front of it, if any.
-type Said = (String, Option<String>);
+pub(super) type Said = (String, Option<String>);
 
 /// A severity the kit announces in front of a marked line, and the words
 /// after it.
@@ -96,7 +96,7 @@ fn row_status(label: &str) -> &str {
 
 /// What the rail, the table and the inspector say about `library`, in the
 /// frame after it was selected.
-fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [Said; 3] {
+pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [Said; 3] {
     let kind = match library.kind {
         rspice_app_project::workbench::project::DependencyKind::Design => "Design",
         rspice_app_project::workbench::project::DependencyKind::Model => "Model",

@@ -1,0 +1,592 @@
+//! Libraries kept in folders of their own, through the application: the
+//! window regaining focus marks what another writer saved and reloads
+//! nothing, Refresh… reads again only the cellviews picked, Save refuses a
+//! cellview edited here that changed on disk until the reader chooses, every
+//! status reads alike on the Dependencies page's rail, table and inspector
+//! and in the Overview, and a reference this session cannot read is saved
+//! back as it was.
+
+#![cfg(not(target_arch = "wasm32"))]
+
+use std::path::{Path, PathBuf};
+
+use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::project::DependencyLibrary;
+use rspice_app_project::workbench::project::library_dialogs::library_files::{
+    LibraryFileIntent, run_library_file_intent,
+};
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_project::workbench::surfaces::project::overview::{OverviewSnapshot, Tone};
+use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
+use rspice_app_state::state::{Cell, CellViewRef, Library, SchematicState, View, ViewType};
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_design::library::folder::{CellViewStatus, LibraryFile, LibraryMode, ReferenceStatus};
+
+use super::dependencies::said_about;
+use super::recovery_frames::{app_frame, click_on, offscreen};
+use super::with_cx;
+
+const LIBRARY: &str = "work";
+const CELLS: [&str; 2] = ["amp", "stage"];
+
+/// The folders a test writes under, removed when it ends.
+struct Folders {
+    root: PathBuf,
+    /// The project file of the session under test.
+    project: PathBuf,
+    /// The folder the library `work` is kept in.
+    folder: PathBuf,
+}
+
+impl Folders {
+    /// The project file of another writer.
+    fn elsewhere(&self) -> PathBuf {
+        self.root.join("other").join("other.rspiceproj")
+    }
+
+    fn bytes(&self, cell: &str) -> Vec<u8> {
+        std::fs::read(self.folder.join(file(cell).relative_path())).expect("the cellview's file")
+    }
+}
+
+impl Drop for Folders {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn file(cell: &str) -> LibraryFile {
+    LibraryFile::cell_view(cell, &View::new("schematic", ViewType::Schematic))
+}
+
+/// An open project whose library `work`, an amplifier and a stage with a
+/// schematic each, is kept in a folder of its own, editable, drawn for
+/// `technology` (none when empty); as just saved, on the Project workspace.
+fn kept_in_a_folder_for(label: &str, technology: &str) -> (RSpiceApp, Folders) {
+    let root = unique_temp_dir(label);
+    let folders = Folders {
+        project: root.join("design").join("design.rspiceproj"),
+        folder: root.join("libraries").join(LIBRARY),
+        root,
+    };
+    std::fs::create_dir_all(folders.project.parent().expect("a folder"))
+        .expect("the project's folder");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let mut library = Library::new(LIBRARY);
+    library.technology = technology.to_owned();
+    for name in CELLS {
+        let mut cell = Cell::new(name);
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        app.state.model.workspace.insert_schematic_editor(
+            CellViewRef::new(LIBRARY, name, "schematic").key(),
+            SchematicState::default(),
+        );
+    }
+    app.state.model.library_manager.add_library(library);
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "the project is saved"
+    );
+    app.state
+        .model
+        .move_library_to_folder(LIBRARY, &folders.folder)
+        .expect("work moves to a folder of its own");
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "the project is saved with the library in its folder"
+    );
+    app.state.workbench.activate(Workspace::Project);
+    (app, folders)
+}
+
+fn kept_in_a_folder(label: &str) -> (RSpiceApp, Folders) {
+    kept_in_a_folder_for(label, "")
+}
+
+/// A second project with the same folder attached, editable: another
+/// writer.
+fn another_writer(folders: &Folders) -> RSpiceApp {
+    let project = folders.elsewhere();
+    std::fs::create_dir_all(project.parent().expect("a folder")).expect("its folder");
+    let mut writer = RSpiceApp::test_instance();
+    writer.state.open_project_session();
+    assert!(writer.state.save_project_to_path(&project), "it is saved");
+    let model = &mut writer.state.model;
+    let path = model
+        .library_path_choice(&folders.folder)
+        .expect("a path for the folder")
+        .stored;
+    model
+        .attach_library(&folders.folder, path)
+        .expect("the folder attaches");
+    model
+        .set_library_mode(LIBRARY, LibraryMode::Editable)
+        .expect("it becomes editable");
+    writer
+}
+
+/// Another writer saves `note` into each of `cells`' schematics.
+fn saved_elsewhere(writer: &mut RSpiceApp, folders: &Folders, cells: &[&str], note: &str) {
+    for cell in cells {
+        annotate(writer, cell, note);
+    }
+    assert!(
+        writer.state.save_project_to_path(&folders.elsewhere()),
+        "the other writer saves"
+    );
+}
+
+/// Change what `cell`'s schematic records, as an edit would.
+fn annotate(app: &mut RSpiceApp, cell: &str, note: &str) {
+    app.state
+        .model
+        .library_manager
+        .get_library_mut(LIBRARY)
+        .expect("work is in the catalog")
+        .cells
+        .get_mut(cell)
+        .expect("the cell")
+        .views
+        .get_mut("schematic")
+        .expect("its schematic")
+        .metadata
+        .insert("note".to_owned(), note.to_owned());
+}
+
+fn note(app: &RSpiceApp, cell: &str) -> Option<String> {
+    app.state.model.library_manager.get_library(LIBRARY)?.cells[cell].views["schematic"]
+        .metadata
+        .get("note")
+        .cloned()
+}
+
+fn status(app: &RSpiceApp, cell: &str) -> Option<CellViewStatus> {
+    app.state.model.library_file_status(LIBRARY, &file(cell))
+}
+
+/// One frame in which the window regains focus.
+fn focus(app: &mut RSpiceApp) {
+    app_frame(&offscreen(), app, vec![egui::Event::WindowFocused(true)]);
+}
+
+/// A press on the table row that `prefix` starts the announcement of.
+fn click_row(output: &egui::FullOutput, prefix: &str) -> Vec<egui::Event> {
+    let label = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .find_map(|(_, node)| {
+            node.label()
+                .filter(|label| label.starts_with(prefix))
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| panic!("the frame announces a row `{prefix}…`"));
+    click_on(output, &label)
+}
+
+fn row(cell: &str) -> String {
+    format!("Library: {LIBRARY}, Cell: {cell}, ")
+}
+
+/// The project opened again in a new session, the first one closed.
+fn reopened(app: RSpiceApp, folders: &Folders) -> RSpiceApp {
+    drop(app);
+    let mut reopened = RSpiceApp::test_instance();
+    assert!(
+        reopened.state.load_project_from_path(&folders.project),
+        "the project opens"
+    );
+    reopened.state.workbench.activate(Workspace::Project);
+    reopened
+}
+
+/// Spec test 6: another writer's save reads Changed on just its cellview
+/// once the window regains focus, and nothing is read again until Refresh…,
+/// which reads only the cellviews left picked.
+#[test]
+fn a_focus_check_marks_what_another_writer_saved_and_refresh_reads_only_the_picked() {
+    let (mut app, folders) = kept_in_a_folder("library-focus-check");
+    let mut writer = another_writer(&folders);
+    saved_elsewhere(&mut writer, &folders, &["amp"], "theirs");
+
+    let ctx = offscreen();
+    app_frame(&ctx, &mut app, Vec::new());
+    assert!(
+        matches!(status(&app, "amp"), Some(CellViewStatus::Found { .. })),
+        "a frame reads no folder"
+    );
+    focus(&mut app);
+    assert_eq!(
+        status(&app, "amp"),
+        Some(CellViewStatus::Changed {
+            loaded: 1,
+            on_disk: 2
+        })
+    );
+    assert!(matches!(
+        status(&app, "stage"),
+        Some(CellViewStatus::Found { revision: 1, .. })
+    ));
+    assert_eq!(
+        app.state.model.reference_status(LIBRARY),
+        Some(ReferenceStatus::Changed { cellviews: 1 })
+    );
+    assert_eq!(note(&app, "amp"), None, "what was loaded stays loaded");
+
+    saved_elsewhere(&mut writer, &folders, &["stage"], "theirs");
+    focus(&mut app);
+    with_cx(&mut app, |cx| {
+        run_library_file_intent(cx, LibraryFileIntent::Refresh);
+    });
+    app_frame(&ctx, &mut app, Vec::new());
+    let output = app_frame(&ctx, &mut app, Vec::new());
+    let press = click_row(&output, &row("amp"));
+    let output = app_frame(&ctx, &mut app, press);
+    let press = click_on(&output, "Reload picked");
+    app_frame(&ctx, &mut app, press);
+
+    assert!(!app.state.project.library_files.is_open(), "Refresh closes");
+    assert_eq!(note(&app, "amp").as_deref(), Some("theirs"), "the picked");
+    assert_eq!(note(&app, "stage"), None, "the one left unpicked");
+    assert!(matches!(
+        status(&app, "amp"),
+        Some(CellViewStatus::Found { revision: 2, .. })
+    ));
+    assert_eq!(
+        status(&app, "stage"),
+        Some(CellViewStatus::Changed {
+            loaded: 1,
+            on_disk: 2
+        })
+    );
+}
+
+/// Spec test 7: a cellview edited here that another writer saved is never
+/// written over; Save refuses until the reader chooses, and opens the
+/// choice. Keep my version writes that cellview at the next save, and Take
+/// the file's version reads that cellview, each touching no other.
+#[test]
+fn an_edited_cellview_changed_on_disk_is_never_overwritten_and_each_choice_acts_on_it_alone() {
+    let (mut app, folders) = kept_in_a_folder("library-changed-since-editing");
+    let project = std::fs::read(&folders.project).expect("the project file");
+    for cell in CELLS {
+        annotate(&mut app, cell, "mine");
+    }
+    let mut writer = another_writer(&folders);
+    saved_elsewhere(&mut writer, &folders, &CELLS, "theirs");
+    let theirs = CELLS.map(|cell| folders.bytes(cell));
+
+    assert!(
+        !app.state.save_project_to_path(&folders.project),
+        "Save refuses"
+    );
+    assert_eq!(
+        CELLS.map(|cell| folders.bytes(cell)),
+        theirs,
+        "nothing is written over"
+    );
+    assert_eq!(
+        std::fs::read(&folders.project).expect("the project file"),
+        project,
+        "nor the project file"
+    );
+    for cell in CELLS {
+        assert_eq!(
+            status(&app, cell),
+            Some(CellViewStatus::ChangedSinceEditing {
+                loaded: 1,
+                on_disk: 2
+            })
+        );
+    }
+
+    // The refusal asks which version to keep, the first cellview chosen.
+    let ctx = offscreen();
+    app_frame(&ctx, &mut app, Vec::new());
+    let output = app_frame(&ctx, &mut app, Vec::new());
+    let press = click_on(&output, "Keep my version");
+    let output = app_frame(&ctx, &mut app, press);
+    let press = click_row(&output, &row("stage"));
+    let output = app_frame(&ctx, &mut app, press);
+    let press = click_on(&output, "Take the file's version");
+    app_frame(&ctx, &mut app, press);
+
+    assert_eq!(note(&app, "amp").as_deref(), Some("mine"), "kept");
+    assert_eq!(note(&app, "stage").as_deref(), Some("theirs"), "taken");
+    assert_eq!(CELLS.map(|cell| folders.bytes(cell)), theirs, "no save yet");
+
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "Save writes once each is chosen"
+    );
+    let amp = String::from_utf8(folders.bytes("amp")).expect("text");
+    assert!(amp.contains("mine"), "my version is written: {amp}");
+    assert_eq!(
+        folders.bytes("stage"),
+        theirs[1],
+        "the file's version stays"
+    );
+    assert!(matches!(
+        status(&app, "amp"),
+        Some(CellViewStatus::Found { revision: 3, .. })
+    ));
+    assert!(matches!(
+        status(&app, "stage"),
+        Some(CellViewStatus::Found { revision: 2, .. })
+    ));
+}
+
+/// What the Dependencies page's rail, table and inspector say about `work`,
+/// and the Overview's Dependencies row, agree with `label` and `mark`.
+fn assert_every_place_says(app: &mut RSpiceApp, label: &str, mark: Option<&str>) {
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Dependencies;
+    let expected = (label.to_owned(), mark.map(str::to_owned));
+    assert_eq!(
+        said_about(app, &DependencyLibrary::design(LIBRARY)),
+        [expected.clone(), expected.clone(), expected],
+        "the rail, the table and the inspector"
+    );
+    let snapshot = OverviewSnapshot::capture(
+        &egui::Context::default(),
+        &features::cx_with_foreign_answers(app, |_| true),
+    );
+    let overview = snapshot
+        .statuses
+        .iter()
+        .find(|status| status.area == "Dependencies")
+        .expect("the Overview has a Dependencies row");
+    let status = app
+        .state
+        .model
+        .reference_status(LIBRARY)
+        .expect("work has a status");
+    assert_eq!(status.label(), label, "the one status function");
+    match mark {
+        None => {
+            assert_eq!(overview.tone(), Tone::Neutral, "{}", overview.text());
+            assert!(!overview.text().contains(LIBRARY), "{}", overview.text());
+        }
+        Some(mark) => {
+            let tone = if mark == "Warning" {
+                Tone::Warn
+            } else {
+                Tone::Error
+            };
+            assert_eq!(
+                (overview.tone(), overview.text()),
+                (
+                    tone,
+                    format!(
+                        "{LIBRARY}: {} \u{b7} {}",
+                        label.to_lowercase(),
+                        status.detail().unwrap_or_default()
+                    )
+                ),
+                "the Overview"
+            );
+        }
+    }
+}
+
+/// Spec test 10, one test per status.
+#[test]
+fn a_library_held_in_the_project_reads_in_project_in_every_place() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state
+        .model
+        .library_manager
+        .add_library(Library::new(LIBRARY));
+    assert_every_place_says(&mut app, "In project", None);
+}
+
+#[test]
+fn a_library_read_from_its_folder_reads_found_in_every_place() {
+    let (mut app, _folders) = kept_in_a_folder("library-status-found");
+    assert_every_place_says(&mut app, "Found", None);
+}
+
+#[test]
+fn a_library_another_writer_saved_reads_changed_in_every_place() {
+    let (mut app, folders) = kept_in_a_folder("library-status-changed");
+    let mut writer = another_writer(&folders);
+    saved_elsewhere(&mut writer, &folders, &["amp"], "theirs");
+    focus(&mut app);
+    assert_every_place_says(&mut app, "Changed", Some("Warning"));
+}
+
+#[test]
+fn a_library_edited_here_and_saved_elsewhere_reads_changed_since_editing_in_every_place() {
+    let (mut app, folders) = kept_in_a_folder("library-status-editing");
+    annotate(&mut app, "amp", "mine");
+    let mut writer = another_writer(&folders);
+    saved_elsewhere(&mut writer, &folders, &["amp"], "theirs");
+    focus(&mut app);
+    assert_every_place_says(
+        &mut app,
+        rspice_design::library::folder::CHANGED_SINCE_EDITING,
+        Some("Error"),
+    );
+}
+
+#[test]
+fn a_library_drawn_for_another_technology_reads_technology_differs_in_every_place() {
+    let (mut app, folders) = kept_in_a_folder_for("library-status-technology", "gpdk045");
+    app.state.model.workspace.content.project.technology = Some("gpdk090".to_owned());
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "the project is saved for another technology"
+    );
+    let mut app = reopened(app, &folders);
+    assert_every_place_says(&mut app, "Technology differs", Some("Warning"));
+}
+
+#[test]
+fn a_library_whose_folder_is_gone_reads_not_found_in_every_place() {
+    let (mut app, folders) = kept_in_a_folder("library-status-not-found");
+    std::fs::remove_dir_all(&folders.folder).expect("the folder goes");
+    focus(&mut app);
+    assert_every_place_says(&mut app, "Not found", Some("Error"));
+}
+
+#[test]
+fn a_library_with_a_damaged_file_reads_unreadable_in_every_place() {
+    let (mut app, folders) = kept_in_a_folder("library-status-unreadable");
+    std::fs::write(
+        folders.folder.join(file("amp").relative_path()),
+        b"{ not a cellview",
+    )
+    .expect("the file is damaged");
+    focus(&mut app);
+    assert_every_place_says(&mut app, "Unreadable", Some("Error"));
+}
+
+#[test]
+fn a_folder_holding_another_library_reads_different_library_in_every_place() {
+    let (app, folders) = kept_in_a_folder("library-status-different");
+    // Another project moves a library of its own out to a folder, which
+    // then takes `work`'s place.
+    let mut other = RSpiceApp::test_instance();
+    other.state.open_project_session();
+    let stray = folders.root.join("stray").join("other");
+    let mut library = Library::new("other");
+    library.add_cell(Cell::new("amp"));
+    other.state.model.library_manager.add_library(library);
+    other
+        .state
+        .model
+        .move_library_to_folder("other", &stray)
+        .expect("other moves to a folder of its own");
+    std::fs::remove_dir_all(&folders.folder).expect("work's folder goes");
+    std::fs::rename(&stray, &folders.folder).expect("other's takes its place");
+    let mut app = reopened(app, &folders);
+    assert_every_place_says(&mut app, "Different library", Some("Error"));
+}
+
+/// Every file under `folder`, by its path inside it, as a browser's folder
+/// upload hands them over.
+fn uploaded(folder: &Path) -> Vec<(String, Vec<u8>)> {
+    fn walk(root: &Path, at: &Path, files: &mut Vec<(String, Vec<u8>)>) {
+        for entry in std::fs::read_dir(at).expect("a folder") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                walk(root, &path, files);
+            } else {
+                let inside = path
+                    .strip_prefix(root)
+                    .expect("inside")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                files.push((inside, std::fs::read(&path).expect("its bytes")));
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(folder, folder, &mut files);
+    files
+}
+
+/// The project file as saved, but for the catalog's revision, which only
+/// moves forward, and the order its maps happen to be written in.
+fn saved(path: &Path) -> serde_json::Value {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).expect("the project file"))
+            .expect("the project file is JSON");
+    value["libraries"]["revision"] = serde_json::Value::from(0);
+    value
+}
+
+/// Spec test 11, as a browser opens a desktop project: a reference this
+/// session cannot read by path is listed with no cells and saved back
+/// unchanged, and a library read from a picked folder for this session
+/// leaves what is saved alone.
+#[test]
+fn a_reference_this_session_cannot_read_is_saved_back_as_it_was() {
+    let (app, folders) = kept_in_a_folder("library-browser-round-trip");
+    let before = saved(&folders.project);
+    let files = uploaded(&folders.folder);
+    let away = folders.root.join("away");
+    std::fs::rename(&folders.folder, &away).expect("the folder is out of reach");
+
+    let mut app = reopened(app, &folders);
+    assert!(matches!(
+        app.state.model.reference_status(LIBRARY),
+        Some(ReferenceStatus::NotFound(_))
+    ));
+    assert!(
+        app.state
+            .model
+            .library_manager
+            .get_library(LIBRARY)
+            .is_some_and(|library| library.cells.is_empty()),
+        "the library is listed, with no cells"
+    );
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "the project is saved"
+    );
+    let after = saved(&folders.project);
+    assert_eq!(
+        after["libraries"]["references"], before["libraries"]["references"],
+        "the reference round-trips unchanged"
+    );
+    assert!(after == before, "and so does the rest of the project");
+
+    app.state
+        .model
+        .read_library_for_session(LIBRARY, LIBRARY, files)
+        .expect("the picked folder is read for this session");
+    assert_eq!(
+        app.state.model.reference_status(LIBRARY),
+        Some(ReferenceStatus::Found {
+            mode: LibraryMode::Editable,
+            moved_on: 0,
+            read_for_session: Some(LIBRARY.to_owned()),
+        })
+    );
+    assert!(
+        app.state
+            .model
+            .library_manager
+            .get_library(LIBRARY)
+            .is_some_and(|library| CELLS.iter().all(|cell| library.cells.contains_key(*cell))),
+        "its cells are in the catalog"
+    );
+    assert!(
+        app.state.save_project_to_path(&folders.project),
+        "the project is saved"
+    );
+    let after = saved(&folders.project);
+    assert_eq!(
+        after["libraries"]["references"], before["libraries"]["references"],
+        "reading the folder for the session leaves the reference alone"
+    );
+    assert!(after == before, "and the rest of the project");
+    assert!(!folders.folder.exists(), "nothing is written by path");
+}
