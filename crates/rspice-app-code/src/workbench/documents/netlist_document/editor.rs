@@ -154,6 +154,17 @@ pub fn show(
     let text_size = editor_font::text_size(ui.ctx());
     let font = theme::mono(text_size, FontWeight::Regular);
     let diagnostics = Arc::clone(&netlist.diagnostics);
+    // Each finding is marked under what it is about, read once per check.
+    let problems = problem_marks_in(
+        ui.ctx(),
+        editor_id,
+        netlist,
+        &model.simulation.source.netlist_content,
+    );
+    let marks = problems
+        .iter()
+        .map(|problem| problem.mark.clone())
+        .collect::<Vec<_>>();
     let edited_lines = runs.manual_run.edited_lines.clone();
     let net_marks = super::cross_probe::net_marks(model, netlist).to_vec();
     let cross_probe_line = (netlist.active_document == super::ActiveNetlistDocument::Generated)
@@ -232,8 +243,7 @@ pub fn show(
             warning: c.warn,
             edited_lines: &edited_lines,
             cross_probe_line,
-            // The deck's findings are underlined in its own layout.
-            marks: &[],
+            marks: &marks,
             marks_outdated: false,
             occurrences: &net_marks,
         };
@@ -252,7 +262,7 @@ pub fn show(
                     highlight::diff_layout_job(row.text, font, &c)
                 } else {
                     let comments = source_comments.on_row(row, &shown_source);
-                    highlight::layout_job(row.text, &comments, font, &c, &[])
+                    highlight::layout_job(row.text, &comments, font, &c)
                 };
                 ui.fonts_mut(|fonts| fonts.layout_job(job))
             },
@@ -370,11 +380,36 @@ pub fn show(
             .outbox
             .push(NetlistEditorRequest::StepHistory(step));
     }
+    // A marked problem under the pointer is what the reader is pointing at.
     // A value the deck actually answers outranks the project symbol, and so
     // does the parser's word that a line is not read: the project symbol
     // would name that line's definition as if it bound something. A token
     // that resolves to neither still says so, so a hover never goes silent.
-    if let Some(hover) = hover_value
+    let hovered_problems = hover_char_index
+        .map(|index| {
+            let byte = buffer_byte_of(&model.simulation.source.netlist_content, index);
+            problems
+                .iter()
+                .filter(|problem| {
+                    problem.bytes.contains(&byte)
+                        || (problem.bytes.is_empty() && problem.bytes.start == byte)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !hovered_problems.is_empty() {
+        editor_response.clone().on_hover_ui_at_pointer(|ui| {
+            ui.set_max_width(360.0);
+            for problem in hovered_problems {
+                let tone = match problem.severity {
+                    DiagnosticSeverity::Error => c.err,
+                    DiagnosticSeverity::Warning => c.warn,
+                    DiagnosticSeverity::Info | DiagnosticSeverity::Hint => c.text_dim,
+                };
+                ui.label(egui::RichText::new(&problem.message).color(tone));
+            }
+        });
+    } else if let Some(hover) = hover_value
         .as_ref()
         .filter(|hover| hover.value.is_some() || hover.not_read)
     {
@@ -391,6 +426,54 @@ pub fn show(
         show_value_hover(&editor_response, hover);
     }
     editor_response
+}
+
+/// The marks the editor drew last, with the revision and the findings they
+/// were read from. The findings are held weakly, so their address names them
+/// for as long as the marks are kept.
+type HeldProblemMarks = (
+    u64,
+    std::sync::Weak<NetlistDiagnosticCollection>,
+    Arc<[super::diagnostics::ProblemMark]>,
+);
+
+/// Where the editor `editor_id` keeps the marks it drew.
+fn problem_marks_id(editor_id: egui::Id) -> egui::Id {
+    editor_id.with("problem-marks")
+}
+
+/// The findings of the shown text as the editor marks them, read once per
+/// check of the text rather than once per frame.
+fn problem_marks_in(
+    ctx: &egui::Context,
+    editor_id: egui::Id,
+    netlist: &super::NetlistDocumentState,
+    buffer: &str,
+) -> Arc<[super::diagnostics::ProblemMark]> {
+    let id = problem_marks_id(editor_id);
+    if let Some((revision, collection, marks)) =
+        ctx.data(|data| data.get_temp::<HeldProblemMarks>(id))
+        && revision == netlist.revision
+        && std::sync::Weak::ptr_eq(&collection, &Arc::downgrade(&netlist.diagnostics))
+    {
+        return marks;
+    }
+    let marks: Arc<[_]> =
+        super::diagnostics::problem_marks(&netlist.diagnostics, buffer, netlist.revision).into();
+    let held = (
+        netlist.revision,
+        Arc::downgrade(&netlist.diagnostics),
+        Arc::clone(&marks),
+    );
+    ctx.data_mut(|data| data.insert_temp::<HeldProblemMarks>(id, held));
+    marks
+}
+
+/// The byte of `text` its character `char_index` starts at.
+fn buffer_byte_of(text: &str, char_index: usize) -> usize {
+    text.char_indices()
+        .nth(char_index)
+        .map_or(text.len(), |(byte, _)| byte)
 }
 
 /// One mono line reading `token = value`, with the provenance or the reason
@@ -669,6 +752,10 @@ fn validate_visible_source_in(
         }
     };
     diagnostics.extend(shadowed_include_diagnostics(include_resolutions, &buffer));
+    let shown = super::dialect::shown_source_in(model, netlist)
+        .map(|shown| shown.path)
+        .filter(|path| !path.as_os_str().is_empty());
+    super::diagnostics::as_the_reader_sees_them(&mut diagnostics, &buffer, shown.as_deref());
     let validation_id = crate::state::content_digest(&buffer).to_string();
     for diagnostic in &mut diagnostics {
         diagnostic.bind_validation(revision, &validation_id);

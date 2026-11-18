@@ -1435,3 +1435,45 @@ fn a_dialect_choice_is_one_edit_that_one_undo_takes_back() {
         );
     }
 }
+
+/// A finding is marked under the word it is about and nothing else: the
+/// unknown model the check found under the model's name, and a finding that
+/// names only its line under the name of the card on that line.
+#[test]
+fn a_problem_is_marked_under_exactly_the_word_it_names() {
+    let source = "amp\nM1 d g s b nchh W=1u L=1u\n.model nch nmos\n.end\n";
+    let drawn = std::cell::RefCell::new(None);
+    drawn_deck("amp.cir", source, 2, |frame, context, editor_id| {
+        if frame == 1 {
+            *drawn.borrow_mut() = context
+                .data(|data| data.get_temp::<HeldProblemMarks>(problem_marks_id(editor_id)))
+                .map(|(_, _, marks)| marks);
+        }
+    });
+    let marks = drawn.into_inner().expect("the editor marked the deck's findings");
+    let unknown = marks
+        .iter()
+        .find(|mark| mark.message.contains("nchh"))
+        .expect("the unknown model is a finding");
+    assert_eq!(&source[unknown.bytes.clone()], "nchh");
+    assert_eq!((unknown.mark.line, unknown.mark.columns.clone()), (1, 11..15));
+
+    let mut whole_card = Diagnostic::current(
+        "lint",
+        "CARD",
+        DiagnosticSeverity::Warning,
+        "about the card",
+    )
+    .with_line(Some(1));
+    whole_card.bind_validation(7, "check");
+    let findings = NetlistDiagnosticCollection::try_new(vec![whole_card], source)
+        .expect("the fixture collection is well formed");
+    let marks = super::super::diagnostics::problem_marks(&findings, source, 7);
+    assert_eq!(
+        marks
+            .iter()
+            .map(|mark| (&source[mark.bytes.clone()], mark.mark.columns.clone()))
+            .collect::<Vec<_>>(),
+        [("M1", 0..2)]
+    );
+}

@@ -9,11 +9,216 @@ use rspice_core::netlist::{NetlistDefinition, NetlistReference, ReferenceKind};
 use crate::state::netlist_diagnostics::{
     Diagnostic, DiagnosticFix, NetlistDiagnosticCollection, line_column_for_span,
 };
+use crate::workbench::documents::virtual_text_editor::SourceMark;
 
 /// Severity levels shown by the gutter, strip, and syntax highlighter: the
 /// shared source-diagnostic severity, so an editor finding and a compiler
 /// service finding rank and serialize alike.
 pub use rspice_vocabulary::diagnostics::DiagnosticSeverity;
+
+/// Put the findings of a check of the shown text in the reader's terms.
+///
+/// A finding about the text itself (it has a line in it) names the file the
+/// reader sees, `shown`, rather than whatever name the check read the text
+/// under: an unnamed buffer is checked as a made-up file, and that name means
+/// nothing to anyone. With no file to name it names none. A parser complaint
+/// of the shape "Expected node name, found Eof" says instead what is missing
+/// on which card: "R1 is missing a node name.".
+pub(super) fn as_the_reader_sees_them(
+    diagnostics: &mut [Diagnostic],
+    buffer: &str,
+    shown: Option<&std::path::Path>,
+) {
+    let lines = buffer.lines().collect::<Vec<_>>();
+    for diagnostic in diagnostics {
+        let Some(line) = diagnostic.line else {
+            continue;
+        };
+        diagnostic.source_path = shown.map(std::path::Path::to_path_buf);
+        diagnostic.refresh_canonical_location();
+        if let Some(message) = expected_found_in_words(&diagnostic.message, &lines, line) {
+            diagnostic.message = message;
+        }
+    }
+}
+
+/// One finding as the editor marks it: the stretch of its line it is about,
+/// the same stretch as bytes of the text, and what it says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProblemMark {
+    pub(crate) mark: SourceMark,
+    pub(crate) bytes: Range<usize>,
+    pub(crate) severity: DiagnosticSeverity,
+    pub(crate) message: String,
+}
+
+/// The current findings of the shown text, each marked under the stretch of
+/// its line it is about: the bytes the finding names, else the word at the
+/// column it names, else the first word of the card on its line, which is the
+/// card a finding about the whole card is about. In source order.
+pub(super) fn problem_marks(
+    diagnostics: &NetlistDiagnosticCollection,
+    buffer: &str,
+    revision: u64,
+) -> Vec<ProblemMark> {
+    let line_starts = std::iter::once(0)
+        .chain(buffer.match_indices('\n').map(|(at, _)| at + 1))
+        .collect::<Vec<_>>();
+    let line_text = |line: usize| {
+        let start = *line_starts.get(line)?;
+        let end = line_starts
+            .get(line + 1)
+            .map_or(buffer.len(), |next| next - 1);
+        let text = buffer.get(start..end)?;
+        Some((start, text.strip_suffix('\r').unwrap_or(text)))
+    };
+    let mut marks = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.is_current() && diagnostic.canonical.revision == revision)
+        .filter_map(|diagnostic| {
+            let line = diagnostic.line?;
+            let (start, text) = line_text(line)?;
+            let bytes = match (&diagnostic.span, diagnostic.column) {
+                (Some(span), _) if span.start >= start && span.start <= start + text.len() => {
+                    span.start - start..span.end.clamp(span.start, start + text.len()) - start
+                }
+                (_, Some(column)) => word_at(text, column),
+                _ => card_word(text),
+            };
+            let column_of = |byte: usize| text.get(..byte).map_or(0, |head| head.chars().count());
+            Some(ProblemMark {
+                mark: SourceMark {
+                    line,
+                    columns: column_of(bytes.start)..column_of(bytes.end),
+                    severity: diagnostic.severity,
+                },
+                bytes: start + bytes.start..start + bytes.end,
+                severity: diagnostic.severity,
+                message: diagnostic.message.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    marks.sort_by_key(|mark| (mark.bytes.start, mark.bytes.end));
+    marks
+}
+
+/// Whether `character` separates two words of a card.
+fn separates_words(character: char) -> bool {
+    character.is_whitespace() || matches!(character, '=' | '(' | ')' | ',')
+}
+
+/// The word of `text` at byte `column`; at a separator or past the end, the
+/// empty stretch there.
+fn word_at(text: &str, column: usize) -> Range<usize> {
+    let column = column.min(text.len());
+    if !text.is_char_boundary(column) {
+        return column..column;
+    }
+    let start = text[..column]
+        .char_indices()
+        .rev()
+        .find(|(_, character)| separates_words(*character))
+        .map_or(0, |(at, character)| at + character.len_utf8());
+    let end = text[column..]
+        .find(separates_words)
+        .map_or(text.len(), |at| column + at);
+    start..end.max(start)
+}
+
+/// The first word of the card on `text`: its name, or on a `+` line the first
+/// word after the `+`.
+fn card_word(text: &str) -> Range<usize> {
+    let mut lead = text.len() - text.trim_start().len();
+    if let Some(rest) = text[lead..].strip_prefix('+') {
+        lead = text.len() - rest.trim_start().len();
+    }
+    let end = text[lead..]
+        .find(char::is_whitespace)
+        .map_or(text.len(), |at| lead + at);
+    lead..end
+}
+
+/// "Expected node name, found Eof" on `line` (zero-based), in words: what the
+/// card is missing, or what is written where the parser wanted something else.
+fn expected_found_in_words(message: &str, lines: &[&str], line: usize) -> Option<String> {
+    let rest = message.strip_prefix("Expected ")?;
+    let (expected, found) = rest.split_once(", found ")?;
+    if expected.is_empty() || found.contains('\n') {
+        return None;
+    }
+    let card = card_head_on(lines, line)?;
+    let expected = with_article(expected);
+    Some(match found_in_words(found) {
+        None => format!("{card} is missing {expected}."),
+        Some(found) => format!("{card}: {expected} was expected, not {found}."),
+    })
+}
+
+/// The first word of the card written on `line`, a `+` continuation line
+/// naming the card it continues.
+fn card_head_on<'a>(lines: &[&'a str], line: usize) -> Option<&'a str> {
+    let mut at = line.min(lines.len().checked_sub(1)?);
+    while lines[at].trim_start().starts_with('+') && at > 0 {
+        at -= 1;
+    }
+    lines[at].split_whitespace().next()
+}
+
+/// The token a parser message names, the way it is written: `None` for the
+/// end of the card.
+fn found_in_words(found: &str) -> Option<String> {
+    let quoted = |inner: &str| {
+        let text = inner
+            .strip_prefix('"')
+            .and_then(|inner| inner.strip_suffix('"'))
+            .unwrap_or(inner);
+        format!("'{text}'")
+    };
+    let inside = |name: &str| {
+        found
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('('))
+            .and_then(|rest| rest.strip_suffix(')'))
+    };
+    Some(match found {
+        "Eof" | "Newline" => return None,
+        "Equals" => "'='".to_owned(),
+        "Comma" => "','".to_owned(),
+        "LParen" => "'('".to_owned(),
+        "RParen" => "')'".to_owned(),
+        "LBracket" => "'['".to_owned(),
+        "RBracket" => "']'".to_owned(),
+        "Plus" => "'+'".to_owned(),
+        "Minus" => "'-'".to_owned(),
+        "Star" => "'*'".to_owned(),
+        "Slash" => "'/'".to_owned(),
+        "AtSign" => "'@'".to_owned(),
+        "Tilde" => "'~'".to_owned(),
+        _ => {
+            if let Some(name) = inside("Ident").or_else(|| inside("StringLit")) {
+                quoted(name)
+            } else if let Some(expression) = inside("Expression") {
+                format!("{{{}}}", expression.trim_matches('"'))
+            } else if found.starts_with("Number") {
+                "a number".to_owned()
+            } else if let Some(other) = inside("Other") {
+                format!("'{}'", other.trim_matches('\''))
+            } else {
+                found.to_owned()
+            }
+        }
+    })
+}
+
+/// `noun` after "a" or "an".
+fn with_article(noun: &str) -> String {
+    let article = if noun.starts_with(['a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U']) {
+        "an"
+    } else {
+        "a"
+    };
+    format!("{article} {noun}")
+}
 
 /// Carry diagnostics of a composed narrow-override deck back into the
 /// override's own text.

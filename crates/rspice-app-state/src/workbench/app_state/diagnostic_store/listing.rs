@@ -602,12 +602,17 @@ fn stored_subject(record: &super::DiagnosticRecord) -> String {
     }
 }
 
-/// What a netlist finding is about: the document the parser was reading. The
-/// position inside it is the row's location.
+/// What a netlist finding is about: the file the parser was reading, named the
+/// way its tab names it. The position inside it is the row's location.
 fn netlist_subject(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> String {
     diagnostic.source_path.as_deref().map_or_else(
-        || "netlist editor".to_owned(),
-        |path| path.display().to_string(),
+        || "Netlist".to_owned(),
+        |path| {
+            path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            )
+        },
     )
 }
 

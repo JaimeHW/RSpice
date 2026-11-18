@@ -121,7 +121,7 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
         }
         return;
     }
-    code_workspace_inspector(
+    let pressed = code_workspace_inspector(
         ui,
         &CodeInspector {
             model: cx.model,
@@ -129,4 +129,10 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
             messages: cx.wb.messages(),
         },
     );
+    // A pressed finding takes the road a Problems row takes to its line.
+    if let Some(finding) = pressed {
+        cx.model
+            .diagnostics
+            .request_route(DiagnosticRoute::NetlistDiagnostic(finding));
+    }
 }

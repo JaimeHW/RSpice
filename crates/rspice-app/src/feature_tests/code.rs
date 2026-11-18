@@ -16,6 +16,7 @@ pub(super) mod netlist_export;
 mod netlist_first;
 mod netlist_first_drawn;
 mod netlist_generation;
+mod netlist_language;
 mod netlist_search;
 mod netlist_source_menu;
 mod netlist_surface;

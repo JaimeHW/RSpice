@@ -20,8 +20,12 @@ pub(crate) struct CodeInspector<'a> {
     pub(crate) messages: MessageCatalog,
 }
 
-/// Draw the deck's inspector.
-pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, reads: &CodeInspector<'_>) {
+/// Draw the deck's inspector. Returns the finding whose row was pressed, which
+/// the caller sends down the route a Problems row takes.
+pub(in crate::workbench) fn code_workspace_inspector(
+    ui: &mut Ui,
+    reads: &CodeInspector<'_>,
+) -> Option<uuid::Uuid> {
     use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, DiagnosticSeverity,
     };
@@ -30,6 +34,7 @@ pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, reads: &CodeIn
     const DIAGNOSTIC_PREVIEW_LIMIT: usize = 20;
     let diagnostics = std::sync::Arc::clone(&reads.netlist.diagnostics);
     let summary = diagnostics.summary();
+    let mut pressed = None;
 
     if summary.current_errors > 0 {
         code_inspector_section(
@@ -45,7 +50,9 @@ pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, reads: &CodeIn
                     })
                     .take(DIAGNOSTIC_PREVIEW_LIMIT)
                 {
-                    diagnostic_row(ui, diagnostic);
+                    if diagnostic_row(ui, diagnostic) {
+                        pressed = Some(diagnostic.canonical.diagnostic_id);
+                    }
                 }
                 if summary.current_errors > DIAGNOSTIC_PREVIEW_LIMIT {
                     empty_diagnostic_row(
@@ -81,7 +88,9 @@ pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, reads: &CodeIn
                     })
                     .take(DIAGNOSTIC_PREVIEW_LIMIT)
                 {
-                    diagnostic_row(ui, diagnostic);
+                    if diagnostic_row(ui, diagnostic) {
+                        pressed = Some(diagnostic.canonical.diagnostic_id);
+                    }
                 }
                 if advisories > DIAGNOSTIC_PREVIEW_LIMIT {
                     empty_diagnostic_row(
@@ -108,9 +117,12 @@ pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, reads: &CodeIn
             _ => generated_provenance(ui, reads.model),
         }
     }
+    pressed
 }
 
-fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::Diagnostic) {
+/// One finding: its message, and the file and line it is on. Pressing it goes
+/// there; returns whether it was pressed.
+fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> bool {
     const ICON_COLUMN_W: f32 = 14.0;
     const COLUMN_GAP: f32 = 7.0;
     const PADDING_Y: f32 = 8.0;
@@ -135,10 +147,10 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::D
     );
     let message_height = message_galley.size().y;
     let height = PADDING_Y * 2.0 + message_height + DETAIL_GAP + location_galley.size().y;
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
+            egui::WidgetType::Button,
             ui.is_enabled(),
             format!(
                 "{}: {}. {location}",
@@ -147,11 +159,16 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::D
             ),
         )
     });
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
+    rspice_ui_kit::theme::paint_focus_ring(ui, &response, rect);
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
 
     let icon = match diagnostic.severity {
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint
@@ -183,6 +200,7 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::D
         location_galley,
         t.color.text_faint,
     );
+    response.clicked()
 }
 
 fn empty_diagnostic_row(ui: &mut Ui, message: &str) {
@@ -366,11 +384,16 @@ fn diagnostic_location(diagnostic: &crate::state::netlist_diagnostics::Diagnosti
         (Some(line), None) => format!("line {}", line + 1),
         (None, _) => "document scope".to_owned(),
     };
+    // The file is named the way its tab names it.
+    let file = |path: &std::path::Path| {
+        path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        )
+    };
     match diagnostic.source_path.as_deref() {
-        Some(path) if diagnostic.source_line.is_some() => {
-            format!("{} · {location}", path.display())
-        }
-        Some(path) => path.display().to_string(),
+        Some(path) if diagnostic.source_line.is_some() => format!("{} · {location}", file(path)),
+        Some(path) => file(path),
         None => location,
     }
 }

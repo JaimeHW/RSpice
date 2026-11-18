@@ -12,15 +12,13 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
-use egui::{Color32, FontId, Stroke};
+use egui::{Color32, FontId};
 use rspice_core::netlist::{SourceKind, comment_ranges, comment_start, is_spectre_source};
 
 use crate::ui::palette::Palette;
 
-use super::DiagnosticSeverity;
 use super::dialect::ShownSource;
 use super::param_scan::{expression_end, run_end};
-use crate::state::netlist_diagnostics::Diagnostic;
 use crate::workbench::documents::text_document_model::TextDocumentModel;
 use crate::workbench::documents::virtual_text_editor::LayoutRow;
 
@@ -131,13 +129,7 @@ impl SourceComments {
 /// Build the highlighted layout job for `text`, whose comments are at
 /// `comments` (byte ranges of `text`, in order). The job's text must equal
 /// `text` exactly — `TextEdit` maps cursor positions onto it.
-pub fn layout_job(
-    text: &str,
-    comments: &[Range<usize>],
-    font: FontId,
-    c: &Palette,
-    diagnostics: &[Diagnostic],
-) -> LayoutJob {
+pub fn layout_job(text: &str, comments: &[Range<usize>], font: FontId, c: &Palette) -> LayoutJob {
     let mut job = LayoutJob {
         break_on_newline: true,
         ..Default::default()
@@ -157,21 +149,20 @@ pub fn layout_job(
                     ..range.end.clamp(line_start, line_end) - line_start,
             );
         }
-        let line_fallback = line_only_severity(diagnostics, line_idx);
-        let mut next_offset = line_start;
-        let style = DiagnosticStyle {
-            font: &font,
-            palette: c,
-            diagnostics,
-            line_fallback,
-        };
         let mut push = |job: &mut LayoutJob, span: &str, color: Color32| {
             if span.is_empty() {
                 return;
             }
-            let span_start = next_offset;
-            next_offset += span.len();
-            append_diagnostic_span(job, span, span_start, color, &style);
+            job.append(
+                span,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color,
+                    line_height: Some(EDITOR_LINE_HEIGHT),
+                    ..Default::default()
+                },
+            );
         };
         highlight_line(&mut job, line, &line_comments, c, &mut push);
         if line_idx != last {
@@ -226,109 +217,6 @@ pub fn diff_layout_job(text: &str, font: FontId, c: &Palette) -> LayoutJob {
         );
     }
     job
-}
-
-struct DiagnosticStyle<'a> {
-    font: &'a FontId,
-    palette: &'a Palette,
-    diagnostics: &'a [Diagnostic],
-    line_fallback: Option<DiagnosticSeverity>,
-}
-
-fn append_diagnostic_span(
-    job: &mut LayoutJob,
-    span: &str,
-    global_start: usize,
-    color: Color32,
-    style: &DiagnosticStyle<'_>,
-) {
-    let global_end = global_start + span.len();
-    let mut split_points = vec![global_start, global_end];
-    for diagnostic in style.diagnostics {
-        if !diagnostic.is_current() {
-            continue;
-        }
-        let Some(range) = diagnostic.span.as_ref() else {
-            continue;
-        };
-        for point in [range.start, range.end] {
-            if point > global_start
-                && point < global_end
-                && span.is_char_boundary(point - global_start)
-            {
-                split_points.push(point);
-            }
-        }
-    }
-    split_points.sort_unstable();
-    split_points.dedup();
-
-    for window in split_points.windows(2) {
-        let part_start = window[0];
-        let part_end = window[1];
-        if part_start == part_end {
-            continue;
-        }
-        let local_start = part_start - global_start;
-        let local_end = part_end - global_start;
-        let severity =
-            span_severity(style.diagnostics, part_start..part_end).or(style.line_fallback);
-        job.append(
-            &span[local_start..local_end],
-            0.0,
-            TextFormat {
-                font_id: style.font.clone(),
-                color,
-                line_height: Some(EDITOR_LINE_HEIGHT),
-                underline: severity
-                    .map(|severity| severity_stroke(severity, style.palette))
-                    .unwrap_or(Stroke::NONE),
-                ..Default::default()
-            },
-        );
-    }
-}
-
-fn line_only_severity(diagnostics: &[Diagnostic], line_idx: usize) -> Option<DiagnosticSeverity> {
-    diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            diagnostic.is_current()
-                && diagnostic.span.is_none()
-                && diagnostic.line == Some(line_idx)
-        })
-        .map(|diagnostic| diagnostic.severity)
-        .max()
-}
-
-fn span_severity(
-    diagnostics: &[Diagnostic],
-    range: std::ops::Range<usize>,
-) -> Option<DiagnosticSeverity> {
-    diagnostics
-        .iter()
-        .filter_map(|diagnostic| {
-            if !diagnostic.is_current() {
-                return None;
-            }
-            let span = diagnostic.span.as_ref()?;
-            ranges_overlap(span, &range).then_some(diagnostic.severity)
-        })
-        .max()
-}
-
-fn ranges_overlap(a: &std::ops::Range<usize>, b: &std::ops::Range<usize>) -> bool {
-    a.start < b.end && b.start < a.end
-}
-
-fn severity_stroke(severity: DiagnosticSeverity, c: &Palette) -> Stroke {
-    let color = match severity {
-        DiagnosticSeverity::Hint => c.text_dim,
-        DiagnosticSeverity::Error => c.err,
-        DiagnosticSeverity::Warning => c.warn,
-        DiagnosticSeverity::Info => c.text_dim,
-    };
-    Stroke::new(1.0, color)
 }
 
 /// Append one line's tokens to the job, its `comments` (byte ranges of the
@@ -521,67 +409,10 @@ fn was_preceded_by_assign(text: &str, start: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
-
     use egui::FontId;
 
-    use super::super::DiagnosticSeverity;
     use super::*;
     use crate::ui::palette::INSTRUMENT_DARK;
-
-    fn underlined_ranges(job: &LayoutJob) -> Vec<Range<usize>> {
-        job.sections
-            .iter()
-            .filter(|section| section.format.underline.width > 0.0)
-            .map(|section| section.byte_range.start.0..section.byte_range.end.0)
-            .collect()
-    }
-
-    fn error_diagnostic(span: Option<Range<usize>>, line: Option<usize>) -> Diagnostic {
-        let mut diagnostic = Diagnostic::current(
-            "rspice.test",
-            "TEST-BAD-TOKEN",
-            DiagnosticSeverity::Error,
-            "bad token",
-        );
-        diagnostic.source_line = line;
-        diagnostic.span = span;
-        diagnostic.line = line;
-        diagnostic.refresh_canonical_location();
-        diagnostic
-    }
-
-    #[test]
-    fn span_diagnostic_underlines_only_the_offending_range() {
-        let text = "R1 in out bad\n";
-        let diagnostic = error_diagnostic(Some(10..13), Some(0));
-
-        let job = layout_job(
-            text,
-            &[],
-            FontId::monospace(12.0),
-            &INSTRUMENT_DARK,
-            &[diagnostic],
-        );
-
-        assert_eq!(underlined_ranges(&job), vec![10..13]);
-    }
-
-    #[test]
-    fn line_only_diagnostic_underlines_the_reported_line() {
-        let text = "R1 in out 1k\nBAD\nC1 out 0 1p";
-        let diagnostic = error_diagnostic(None, Some(1));
-
-        let job = layout_job(
-            text,
-            &[],
-            FontId::monospace(12.0),
-            &INSTRUMENT_DARK,
-            &[diagnostic],
-        );
-
-        assert_eq!(underlined_ranges(&job), vec![13..16]);
-    }
 
     /// Characters whose UTF-8 bytes include 0x85 or 0xA0 (both whitespace
     /// when a byte is read as a Latin-1 character), a CJK character and an
@@ -607,7 +438,6 @@ mod tests {
             &comment_ranges(text, SourceKind::Included),
             FontId::monospace(12.0),
             &INSTRUMENT_DARK,
-            &[],
         )
     }
 
@@ -723,7 +553,6 @@ mod tests {
             &comments,
             FontId::monospace(12.0),
             &INSTRUMENT_DARK,
-            &[],
         );
         tokens(&job)
             .into_iter()
