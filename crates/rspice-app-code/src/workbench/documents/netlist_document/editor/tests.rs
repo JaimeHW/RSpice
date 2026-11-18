@@ -1455,15 +1455,18 @@ fn closing_an_include_tab_lets_go_of_its_editor() {
     use crate::workbench::state::WorkspaceDocumentId;
 
     let mut harness = harness();
-    let deck = crate::state::NetlistDocument::from_authored_source(
-        crate::state::NetlistDocumentId::new(),
-        b"deck\n.include \"a.inc\"\n.end\n".to_vec(),
-    )
-    .unwrap();
-    let root = deck.id();
-    harness.model.workspace.content.netlist_document = Some(deck);
-    harness.state.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    harness.model.simulation.source.netlist_content = "deck\n.include \"a.inc\"\n.end\n".into();
+    open_deck(
+        &mut harness,
+        "C:/p/deck.cir",
+        "deck\n.include \"a.inc\"\n.end\n",
+    );
+    let root = harness
+        .state
+        .netlist
+        .open_deck
+        .as_ref()
+        .map(|deck| deck.tab_id())
+        .unwrap();
     let deck_editor = editor_id_in(&harness.model, &harness.state.netlist);
 
     let context = egui::Context::default();

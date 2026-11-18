@@ -104,8 +104,9 @@ pub fn editor_id_in(model: &super::Model, netlist: &super::NetlistDocumentState)
 pub fn open_editor_ids_in(
     model: &super::Model,
     netlist: &super::NetlistDocumentState,
-    open_documents: &HashSet<WorkspaceDocumentId>,
+    open_documents: &std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
 ) -> Vec<egui::Id> {
+    use crate::workbench::state::WorkspaceDocumentId;
     let base = egui::Id::new("rspice.netlist.editor.text");
     let roots = [
         model
@@ -113,11 +114,7 @@ pub fn open_editor_ids_in(
             .generated_document
             .as_ref()
             .map(|document| document.id()),
-        netlist
-            .owned_document
-            .as_ref()
-            .or(model.workspace.content.netlist_document.as_ref())
-            .map(|document| document.id()),
+        netlist.open_deck.as_ref().map(|deck| deck.tab_id()),
     ];
     let mut open = ["comparison", "generated", "owned", "run-snapshot"]
         .map(|name| base.with(name))
@@ -932,8 +929,8 @@ enum CheckedDeck {
 }
 
 impl CheckedDeck {
-    /// The deck composed over `buffer`: `None` when it is the buffer itself.
-    fn compose(self, buffer: &str) -> Result<Option<String>, String> {
+    /// The deck as composed: `None` when it is the buffer itself.
+    fn compose(self) -> Result<Option<String>, String> {
         match self {
             Self::Buffer => Ok(None),
             Self::Composed(composed) => composed,
@@ -972,7 +969,7 @@ impl SourceCheck {
         // here, where the libraries can be sealed.
         let (deck, sealed_sources) =
             if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly {
-                let composed = deck.compose(&buffer);
+                let composed = deck.compose();
                 let names_external = match &composed {
                     Ok(Some(deck)) => first_external_dependency_line(deck).is_some(),
                     Ok(None) => first_external_dependency_line(&buffer).is_some(),
@@ -1019,7 +1016,7 @@ impl SourceCheck {
         // generated base with the override spliced in. Every position the
         // parse reports is a position in that deck, and has to be carried
         // back into the text the editor shows and a fix edits.
-        let (composed, unmaterialized) = match deck.compose(&buffer) {
+        let (composed, unmaterialized) = match deck.compose() {
             Ok(composed) => (composed, None),
             Err(error) => (None, Some(error)),
         };
