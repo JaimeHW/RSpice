@@ -1,4 +1,5 @@
-//! Run on the Netlist workspace while a deck is what Run runs.
+//! Run and Check and netlist on the Netlist workspace while a deck is what
+//! Run runs.
 //!
 //! The press checks the deck as a run reads it, includes read where they are,
 //! and starts the run in the same press when the check finds nothing to stop
@@ -8,6 +9,10 @@
 //! thread waits for that compile beside the frame instead of holding it: the
 //! status bar says so, the frame loop runs the deck once the compile ends,
 //! and Stop drops it.
+//!
+//! Check and netlist checks the same deck the same way and starts nothing:
+//! the notice says that nothing stops it running, or names the deck, the
+//! line and why, with the deck in front.
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::code::CodeFeature;
@@ -16,17 +21,35 @@ use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
 use crate::workbench::slots::{manual_deck_in, veriloga_compilation_in};
 use crate::workbench::workflows::netlist_workflow::record_include_resolutions;
 use rspice_app_runs::workbench::waiting;
+use rspice_simulation::execution::PreparedRunMetadata;
+use rspice_simulation::preparation::PreparationError;
 
-/// Check the deck Run runs and run it, or say why it did not run.
-pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
-    cx.runs.waiting.deck_run = false;
-    if waiting::compiling() {
-        cx.runs.waiting.deck_run = true;
-        return;
-    }
-    // The deck's files are looked at on disk and saved first, so the run
-    // reads what their tabs show; a file changed on disk under edits holds
-    // the run until the reader answers for it.
+/// The deck Run runs, checked: its name, its text and what the check
+/// found.
+struct CheckedDeck {
+    name: String,
+    text: String,
+    result: Result<PreparedRunMetadata, PreparationError>,
+}
+
+/// What a check of the deck Run runs came to.
+enum DeckCheck {
+    /// There was no deck to check, or its files held the check, which the
+    /// notices have said.
+    Held,
+    /// The check reached a Verilog-A source still compiling.
+    Compiling,
+    /// The deck checked.
+    Checked(Box<CheckedDeck>),
+}
+
+/// Check the deck Run runs as a run reads it: its files looked at on disk
+/// and saved first, so the check reads what their tabs show; where the check
+/// found its includes recorded. What it prepared is retained for the run
+/// that follows when `for_run`.
+fn check_deck_run(cx: &mut Cx<'_, CodeFeature>, for_run: bool) -> DeckCheck {
+    // A file changed on disk under edits holds the check until the reader
+    // answers for it.
     match crate::workbench::documents::deck_files::sync_before_run(cx.model, &mut cx.state.netlist)
     {
         Ok(notices) => {
@@ -36,15 +59,15 @@ pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
         }
         Err(why) => {
             cx.wb.prompt(why);
-            return;
+            return DeckCheck::Held;
         }
     }
     let Some((name, text)) =
         manual_deck_in(&cx.state.netlist).map(|deck| (deck.name.to_owned(), deck.text.to_owned()))
     else {
-        return;
+        return DeckCheck::Held;
     };
-    let prepared = {
+    let result = {
         let code = RunCodeFacts {
             veriloga_compilation: veriloga_compilation_in(&cx.state.code_workspace),
             manual_deck: manual_deck_in(&cx.state.netlist),
@@ -59,41 +82,111 @@ pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
             cx.commands,
         );
         let controller = &mut *cx.handles.run_controller;
-        waiting::unless_compiling(|| controller.prepare_deck_run(&host))
+        waiting::unless_compiling(|| {
+            if for_run {
+                controller.prepare_deck_run(&host)
+            } else {
+                crate::simulation::controller::SimulationController::build_prepared_snapshot(
+                    &host,
+                    crate::state::SimulationRunIntent::ManualDeck,
+                )
+                .map(|snapshot| snapshot.metadata())
+            }
+        })
     };
-    let Some(prepared) = prepared else {
+    let Some(result) = result else {
+        return DeckCheck::Compiling;
+    };
+    if let Ok(metadata) = &result {
+        record_include_resolutions(
+            &mut cx.state.code_workspace.include_resolutions,
+            &metadata.sealed_source_dependencies,
+        );
+    }
+    DeckCheck::Checked(Box::new(CheckedDeck { name, text, result }))
+}
+
+/// Check the deck Run runs and run it, or say why it did not run.
+pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
+    cx.runs.waiting.deck_run = false;
+    if waiting::compiling() {
         cx.runs.waiting.deck_run = true;
         return;
+    }
+    let CheckedDeck { name, text, result } = match check_deck_run(cx, true) {
+        DeckCheck::Held => return,
+        DeckCheck::Compiling => {
+            cx.runs.waiting.deck_run = true;
+            return;
+        }
+        DeckCheck::Checked(checked) => *checked,
     };
-    match prepared {
-        Ok(metadata) => {
-            record_include_resolutions(
-                &mut cx.state.code_workspace.include_resolutions,
-                &metadata.sealed_source_dependencies,
-            );
+    match result {
+        Ok(_) => {
             cx.wb.run_press_route = Some(cx.wb.current_route());
             cx.model.simulation.execution.request_manual_deck_run();
         }
-        Err(error) => {
-            crate::workbench::documents::deck_files::show_deck(cx.model, &mut cx.state.netlist);
-            let notice = match failure_line(&error, &text) {
-                Some(line) => format!("{name} did not run: line {line}: {error}"),
-                None => format!("{name} did not run: {error}"),
-            };
+        Err(error) => refuse(cx, &name, "did not run", &text, &error),
+    }
+}
+
+/// Check and netlist while a deck is what Run runs: check the deck as Run
+/// would and start nothing. The notice says the deck has nothing that stops
+/// it running, or names the line and why, with the deck in front.
+pub fn check_deck(cx: &mut Cx<'_, CodeFeature>) {
+    let CheckedDeck { name, text, result } = match check_deck_run(cx, false) {
+        DeckCheck::Held => return,
+        DeckCheck::Compiling => {
+            cx.wb.prompt(
+                "A Verilog-A source the deck reads is still compiling: check the deck again \
+                 once the compile ends."
+                    .to_owned(),
+            );
+            return;
+        }
+        DeckCheck::Checked(checked) => *checked,
+    };
+    match result {
+        Ok(metadata) => {
+            let advisories = metadata.advisories.len();
+            let tasks = metadata.task_count;
+            let notice = format!(
+                "{name} checked · 0 blocking errors · {advisories} advisor{} · {tasks} task{}",
+                if advisories == 1 { "y" } else { "ies" },
+                if tasks == 1 { "" } else { "s" }
+            );
             cx.model
-                .record(LogSeverity::Error, LogSource::Netlist, notice.clone());
+                .record(LogSeverity::Info, LogSource::Netlist, notice.clone());
             cx.wb.prompt(notice);
         }
+        Err(error) => refuse(cx, &name, "cannot run", &text, &error),
     }
+}
+
+/// Bring the deck `name` the check stopped to the front, where the editor
+/// marks its errors, and say that it `verdict` (did not run, cannot run),
+/// on which line of `text` and why.
+fn refuse(
+    cx: &mut Cx<'_, CodeFeature>,
+    name: &str,
+    verdict: &str,
+    text: &str,
+    error: &PreparationError,
+) {
+    crate::workbench::documents::deck_files::show_deck(cx.model, &mut cx.state.netlist);
+    let notice = match failure_line(error, text) {
+        Some(line) => format!("{name} {verdict}: line {line}: {error}"),
+        None => format!("{name} {verdict}: {error}"),
+    };
+    cx.model
+        .record(LogSeverity::Error, LogSource::Netlist, notice.clone());
+    cx.wb.prompt(notice);
 }
 
 /// The line of the deck the check's failure is on: the line it names, or
 /// else the card of the instance it names first, as "Q1 (BJT) references
 /// unknown model" names Q1.
-fn failure_line(
-    error: &rspice_simulation::preparation::PreparationError,
-    text: &str,
-) -> Option<usize> {
+fn failure_line(error: &PreparationError, text: &str) -> Option<usize> {
     error.line().or_else(|| {
         let instance = error.message().split_whitespace().next()?;
         text.lines()

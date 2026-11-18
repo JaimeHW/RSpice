@@ -649,6 +649,7 @@ pub mod ids {
         ACCOUNT_ORGANIZATION = "account-organization";
         CALCULATOR = "calculator";
         CANCEL = "cancel-active-command";
+        CHECK_AND_NETLIST = "check";
         CLEAR_CONSOLE = "console-clear";
         COMMAND_PALETTE = "command-palette";
         COMPILE_VERILOG_A = "veriloga";

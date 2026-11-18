@@ -107,8 +107,9 @@ impl Feature for CodeFeature {
 /// source editor sizes the editors' text, as the editor's own Ctrl+= and
 /// Ctrl+- do. The shell asks it before the design feature, which would take
 /// both there too. Run on the Netlist workspace, while a deck is what Run
-/// runs, checks that deck and runs it as written; with the plan as the
-/// target, Simulate's Run runs it.
+/// runs, checks that deck and runs it as written, and Check and netlist
+/// checks it as Run would; with the plan as the target, Simulate's Run and
+/// check take them.
 const ROUTED: &[RoutedCommand<CodeFeature>] = &[
     RoutedCommand {
         key: ids::FIND_IN_DESIGN,
@@ -146,6 +147,14 @@ const ROUTED: &[RoutedCommand<CodeFeature>] = &[
                 && reads.state.netlist.open_deck.is_some()
         },
         execute: deck_run::request_deck_run,
+    },
+    RoutedCommand {
+        key: ids::CHECK_AND_NETLIST,
+        takes: |reads| reads.wb.workspace == Workspace::Netlist && runs_a_deck(reads),
+        // A deck whose file is missing has nothing to check until it is
+        // found.
+        enabled: |reads| reads.state.netlist.open_deck.is_some(),
+        execute: deck_run::check_deck,
     },
 ];
 

@@ -1,6 +1,7 @@
 //! Run on the Netlist workspace, in whole applications: what Run runs as
 //! tabs come to the front, the check that is Run's first step, where that
-//! check found the deck's includes, and how the toolbar names what runs.
+//! check found the deck's includes, how the toolbar names what runs, and
+//! what Check and netlist checks there.
 
 use crate::workbench::RSpiceApp;
 use rspice_app_code::workbench::code::commands::CodeCommand;
@@ -396,4 +397,68 @@ fn a_run_pressed_mid_compile_waits_while_frames_keep_coming() {
     frame(&ctx, &mut app, DESKTOP);
     assert!(!deck_run_started(&app), "a stopped run never starts");
     assert_eq!(deck_runs(&app), 0, "a stopped run never starts");
+}
+
+/// Check and netlist on the Netlist workspace, while a deck is what Run
+/// runs, checks that deck as Run would and starts nothing: neither the
+/// plan's check of the schematic nor a run.
+#[test]
+fn check_and_netlist_checks_the_deck_in_front_and_starts_nothing() {
+    let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
+    assert_eq!(
+        app.command_availability(ids::CHECK_AND_NETLIST),
+        CommandAvailability::Available
+    );
+
+    app.execute_command_key(ids::CHECK_AND_NETLIST);
+
+    let notice = app.state.prompt_text().unwrap_or_default().to_owned();
+    assert!(
+        notice.starts_with("amp_tb.cir checked \u{b7} 0 blocking errors"),
+        "the notice names the deck it checked: {notice}"
+    );
+    assert!(
+        app.state.runs.preflight.checking.is_none(),
+        "the schematic is not checked"
+    );
+    assert!(!deck_run_started(&app), "the deck does not run");
+    assert!(
+        !app.state.runs.preflight.take_run_and_queue_request(),
+        "the plan's run is not asked for"
+    );
+}
+
+/// Check and netlist names the line a deck cannot run from, as Run would,
+/// and starts nothing.
+#[test]
+fn check_and_netlist_names_the_line_a_deck_cannot_run_from() {
+    let source = "standalone\nV1 out 0 1\nQ1 out out 0 qn2\n.op\n.end\n";
+    let mut app = netlist_session_with_deck(source, "amp_tb.cir");
+
+    app.execute_command_key(ids::CHECK_AND_NETLIST);
+
+    let notice = app.state.prompt_text().unwrap_or_default().to_owned();
+    assert!(
+        notice.starts_with("amp_tb.cir cannot run: line 3"),
+        "the notice names the deck and the line: {notice}"
+    );
+    assert!(!deck_run_started(&app), "nothing starts");
+}
+
+/// With the generated netlist in front the plan is what runs, and Check and
+/// netlist is Simulate's check of it: the code feature leaves it alone.
+#[test]
+fn with_the_generated_netlist_in_front_check_and_netlist_is_the_plans() {
+    let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
+    assert_eq!(
+        app.routed_command_key_enabled(ids::CHECK_AND_NETLIST),
+        Some(true)
+    );
+    rspice_app_code::workbench::documents::netlist_document::show_generated_deck(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.workbench,
+    );
+
+    assert_eq!(app.routed_command_key_enabled(ids::CHECK_AND_NETLIST), None);
 }

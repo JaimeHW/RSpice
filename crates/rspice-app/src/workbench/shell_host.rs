@@ -1380,6 +1380,7 @@ mod tests {
         for (id, command) in [
             (ids::RUN_SIMULATION, SimulateCommand::Run),
             (ids::STOP_SIMULATION, SimulateCommand::Stop),
+            (ids::CHECK_AND_NETLIST, SimulateCommand::Preflight),
             (
                 ids::SIMULATION_ANALYSES,
                 SimulateCommand::Page(SimulationPage::Analyses),
