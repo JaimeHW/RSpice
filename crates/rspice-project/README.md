@@ -62,7 +62,7 @@ A project is one UTF-8 JSON document, pretty-printed with a trailing newline.
 | Element | Contract |
 | :--- | :--- |
 | Container version | `ProjectVersion::current()`; a file with a different major version is refused as `ProjectIoError::IncompatibleVersion` |
-| Size | `MAX_PROJECT_FILE_BYTES`, on both read and write; a legacy file that needs an identity injected has a smaller bound |
+| Size | No limit on the desktop: the file is read and written as a stream. The browser build refuses a file over 4 GiB and says to open it in RSpice for desktop |
 | Top-level fields | `version`, `workspace`, `libraries`, `simulation_results`, the flattened `ResultPresentation` fields (`result_markers` and the rest) and `execution_context` |
 | Project identity | `workspace.project`, versioned by `PROJECT_DESCRIPTOR_SCHEMA_VERSION`. A descriptor with neither a schema version nor an ID receives a UUID-v5 derived from the complete file bytes; a versioned descriptor without an ID, or an explicit `null` for either field, is refused |
 | Execution inputs | `execution_context`, versioned by `PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION`; earlier schemas migrate forward on load and a newer one fails the open |
