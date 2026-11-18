@@ -172,11 +172,14 @@ fn the_deck_chip_stays_beside_run_on_a_small_window() {
 #[test]
 fn the_toolbar_offers_each_tab_only_its_own_verbs() {
     let mut app = plan_and_deck_session();
+    let drawn = drawn_frame_at(&mut app, 1.0);
     assert_eq!(
-        toolbar_verbs(&drawn_frame_at(&mut app, 1.0)),
+        toolbar_verbs(&drawn),
         ["Save deck", "Save deck as", "Export deck", "Compare"],
         "the deck"
     );
+    // A verb's button says only the verb; its key is on its hover.
+    assert!(drawn.lines().any(|line| line == "Save deck"), "{drawn}");
 
     let generated = tab_labelled(&app, "Generated netlist").id;
     assert!(activate_document(&mut app.state, &generated));

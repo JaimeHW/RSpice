@@ -678,13 +678,15 @@ fn toolbar_command(
         crate::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
+    // A labelled tool's button says only its verb, as every verb's does; the
+    // key is on its hover, and an icon's hover is the verb and the key.
     let label = if shortcut.is_empty() {
         base_label.to_owned()
     } else {
         format!("{base_label} ({shortcut})")
     };
     let enabled = availability == CommandAvailability::Available;
-    let label_width = explicit_label_width(ui, &label, selected);
+    let label_width = explicit_label_width(ui, base_label, selected);
     // A labelled tool with no room for its label shows its icon, which
     // carries the same command and the same tooltip.
     let show_label = show_label && fits_the_lane(ui, layout, label_width);
@@ -702,14 +704,19 @@ fn toolbar_command(
     }
     let response = ui.add_enabled_ui(enabled, |ui| {
         if show_label {
-            labeled_icon_button_sized(
+            let button = labeled_icon_button_sized(
                 ui,
                 icon,
-                &label,
+                base_label,
                 selected,
                 label_width,
                 layout.toolbar_control_height,
-            )
+            );
+            if shortcut.is_empty() {
+                button
+            } else {
+                button.on_hover_text(&label)
+            }
         } else {
             icon_button(ui, icon, &label, selected, toolbar_icon_button_size(layout))
         }
