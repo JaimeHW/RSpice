@@ -3182,3 +3182,20 @@ fn model_temperature_dependency_inspection_cancels_without_sampling() {
     ));
     assert_eq!(abort.polls_after_abort(), 0);
 }
+
+/// A quoted string in an expression runs to the next quote with nothing
+/// escaped, as the deck lexer reads one: a Windows path keeps its separators,
+/// a trailing one included.
+#[test]
+fn an_expression_string_keeps_its_backslashes() {
+    for (source, expected) in [
+        (r#""C:\data\wave.tbl""#, r"C:\data\wave.tbl"),
+        (r#""\\server\share\t.tbl""#, r"\\server\share\t.tbl"),
+        (r#""data\""#, r"data\"),
+    ] {
+        match parse_expression(source) {
+            Ok(Expr::StringLiteral(value)) => assert_eq!(value, expected, "{source}"),
+            other => panic!("{source} parsed as {other:?}"),
+        }
+    }
+}

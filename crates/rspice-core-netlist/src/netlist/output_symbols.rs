@@ -1052,9 +1052,7 @@ fn first_xyce_ddx_issue_in_source(
         poll_parse_abort(abort, index)?;
         if let Some(delimiter @ b'"') = byte(bytes, index) {
             index += 1;
-            while index < bytes.len()
-                && (byte(bytes, index) != Some(delimiter) || is_backslash_escaped(bytes, index))
-            {
+            while index < bytes.len() && byte(bytes, index) != Some(delimiter) {
                 poll_parse_abort(abort, index)?;
                 index += 1;
             }
@@ -2360,7 +2358,7 @@ fn extract_output_expressions(source: &str) -> Vec<String> {
             index += 1;
             while let Some(byte) = byte(bytes, index) {
                 if let Some(active) = quote {
-                    if byte == active && !is_backslash_escaped(bytes, index) {
+                    if byte == active {
                         quote = None;
                     }
                 } else {
@@ -2388,9 +2386,7 @@ fn extract_output_expressions(source: &str) -> Vec<String> {
         if matches!(delimiter, b'\'' | b'"') {
             let start = index + 1;
             index += 1;
-            while index < bytes.len()
-                && (byte(bytes, index) != Some(delimiter) || is_backslash_escaped(bytes, index))
-            {
+            while index < bytes.len() && byte(bytes, index) != Some(delimiter) {
                 index += 1;
             }
             expressions.push(source[start..index.min(bytes.len())].trim().to_string());
@@ -2438,9 +2434,7 @@ fn protect_xyce_output_operands(
         }
         if let Some(delimiter @ (b'\'' | b'"')) = byte(bytes, index) {
             index += 1;
-            while index < bytes.len()
-                && (byte(bytes, index) != Some(delimiter) || is_backslash_escaped(bytes, index))
-            {
+            while index < bytes.len() && byte(bytes, index) != Some(delimiter) {
                 if index.is_multiple_of(64) && abort.is_aborted() {
                     return Err(OutputOperandProtectionError::Aborted);
                 }
@@ -2837,15 +2831,10 @@ fn strict_output_validation_expression(
                 output.push_str(&value.re.to_string());
             }
             Task::Expression(Expr::StringLiteral(value)) => {
+                // As written: a parsed string holds no `"`, and a backslash
+                // in it is text.
                 output.push('"');
-                for (index, character) in value.chars().enumerate() {
-                    poll_parse_abort(abort, index)?;
-                    match character {
-                        '\\' => output.push_str("\\\\"),
-                        '"' => output.push_str("\\\""),
-                        _ => output.push(character),
-                    }
-                }
+                output.push_str(value);
                 output.push('"');
             }
             Task::Expression(Expr::Param(name)) => {
@@ -2976,7 +2965,7 @@ fn matching_output_parenthesis_with_abort(
     for (index, byte) in bytes.iter().copied().enumerate().skip(open) {
         poll_parse_abort(abort, index)?;
         if let Some(active) = quote {
-            if byte == active && !is_backslash_escaped(bytes, index) {
+            if byte == active {
                 quote = None;
             }
             continue;
@@ -3013,16 +3002,6 @@ fn is_output_parameter_char(ch: char) -> bool {
 #[inline]
 fn byte(bytes: &[u8], index: usize) -> Option<u8> {
     bytes.get(index).copied()
-}
-
-fn is_backslash_escaped(bytes: &[u8], index: usize) -> bool {
-    let mut preceding = 0usize;
-    let mut cursor = index;
-    while cursor != 0 && byte(bytes, cursor - 1) == Some(b'\\') {
-        preceding += 1;
-        cursor -= 1;
-    }
-    !preceding.is_multiple_of(2)
 }
 
 fn extract_output_dependencies_with_context(

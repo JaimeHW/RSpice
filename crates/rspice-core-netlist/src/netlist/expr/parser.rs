@@ -583,14 +583,10 @@ impl<'a> ExprParser<'a> {
             let Some(character) = self.advance() else {
                 return Err(ExprError::MissingCloseQuote);
             };
+            // To the next quote, as the deck lexer reads a string: a
+            // backslash in a Windows path is a separator.
             match character {
                 '"' => break,
-                '\\' => {
-                    let Some(escaped) = self.advance() else {
-                        return Err(ExprError::MissingCloseQuote);
-                    };
-                    value.push(escaped);
-                }
                 _ => value.push(character),
             }
         }

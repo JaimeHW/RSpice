@@ -10222,18 +10222,10 @@ fn append_behavioral_expr_token(expression: &mut String, token: &TokenKind) {
     }
 }
 
+/// A deck string as the expression parser reads it back: as written, since
+/// neither gives a backslash a meaning and the lexer's string holds no `"`.
 fn format_behavioral_string_literal(value: &str) -> String {
-    let mut quoted = String::with_capacity(value.len() + 2);
-    quoted.push('"');
-    for ch in value.chars() {
-        match ch {
-            '\\' => quoted.push_str("\\\\"),
-            '"' => quoted.push_str("\\\""),
-            _ => quoted.push(ch),
-        }
-    }
-    quoted.push('"');
-    quoted
+    format!("\"{value}\"")
 }
 
 fn append_behavioral_expr_fragment(expression: &mut String, fragment: &str) {

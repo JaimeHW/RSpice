@@ -16439,6 +16439,50 @@ mod tests {
         }
     }
 
+    /// A deck written on Windows names the same data files on every host: a
+    /// backslash in a quoted PWL or code-model file name separates
+    /// directories beside the deck, as in an `.include`, a trailing one
+    /// included.
+    #[test]
+    fn backslashed_file_names_resolve_beside_the_deck() {
+        let deck_path = std::env::temp_dir()
+            .join("rspice-backslash-file-paths")
+            .join("deck.cir");
+        let deck_dir = deck_path.parent().expect("temp deck has parent");
+        std::fs::create_dir_all(deck_dir).expect("create temp deck dir");
+        let netlist = Netlist::parse_with_path(
+            "windows file names\n\
+             V1 out 0 PWL FILE=\"stim\\wave.csv\"\n\
+             R1 out 0 1k\n\
+             A1 %v(out) src\n\
+             .model src filesource (file=\"tables\\in.txt\\\" amploffset=[0] amplscale=[1])\n\
+             .tran 1n 10n\n\
+             .end\n",
+            &deck_path,
+        )
+        .expect("deck with Windows file names parses");
+
+        match first_source_spec(&netlist) {
+            SourceSpec::PwlFile { path, .. } => {
+                assert_eq!(
+                    std::path::Path::new(path),
+                    deck_dir.join("stim").join("wave.csv")
+                );
+            }
+            other => panic!("expected PWL FILE source, got {other:?}"),
+        }
+        let file = netlist
+            .models
+            .iter()
+            .flat_map(|model| &model.string_params)
+            .find(|(name, _)| name.eq_ignore_ascii_case("file"))
+            .map(|(_, value)| value.as_str());
+        assert_eq!(
+            file.map(std::path::Path::new),
+            Some(deck_dir.join("tables").join("in.txt").as_path())
+        );
+    }
+
     #[test]
     fn transient_source_arguments_reject_explicit_non_finite_values() {
         for (source, deck) in [

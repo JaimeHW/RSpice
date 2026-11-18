@@ -256,6 +256,44 @@ pub(crate) fn strip_semicolon_comment(line: &str) -> &str {
 mod end_card_tests {
     use super::*;
 
+    /// A quote ends at the next one, so a comment after a string that ends
+    /// in a backslash is stripped: LTspice reads `file="d\";junk"` as `d\`
+    /// and the comment `;junk"`.
+    #[test]
+    fn a_comment_after_a_trailing_backslash_is_stripped() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            assert_eq!(
+                strip_spice_inline_comment(r#"V1 a 0 PWL file="d\";junk""#, dialect),
+                r#"V1 a 0 PWL file="d\""#,
+                "{dialect:?}"
+            );
+            assert_eq!(
+                strip_spice_inline_comment(r#".options hdl_rundir="C:\runs\" ; c"#, dialect),
+                r#".options hdl_rundir="C:\runs\" "#,
+                "{dialect:?}"
+            );
+        }
+    }
+
+    /// A Verilog source line keeps a Windows path's separators, in either
+    /// quote, a trailing one included.
+    #[test]
+    fn a_verilog_source_path_keeps_its_backslashes() {
+        for (line, path, module) in [
+            (r#".va "C:\hdl\top.va" top"#, r"C:\hdl\top.va", Some("top")),
+            (r".hdl 'lib\leaf.v'", r"lib\leaf.v", None),
+            (
+                r#".va "\\server\share\cells\" module=cell"#,
+                r"\\server\share\cells\",
+                None,
+            ),
+        ] {
+            let include = parse_veriloga_source_directive(line).expect(line);
+            assert_eq!(include.file_path, std::path::Path::new(path), "{line}");
+            assert_eq!(include.model_name.as_deref(), module, "{line}");
+        }
+    }
+
     #[test]
     fn end_card_recognition_matches_dialect_termination() {
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {

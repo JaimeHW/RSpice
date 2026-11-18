@@ -434,19 +434,15 @@ pub(super) fn any_expression_identifier_with_abort(
             return Err(BehavioralPreparationError::Aborted);
         }
         if chars[index] == '"' {
+            // A string runs to the next quote; a backslash in it is text.
             index += 1;
-            let mut escaped = false;
             while index < chars.len() {
                 if index.is_multiple_of(64) && abort.is_aborted() {
                     return Err(BehavioralPreparationError::Aborted);
                 }
                 let character = chars[index];
                 index += 1;
-                if escaped {
-                    escaped = false;
-                } else if character == '\\' {
-                    escaped = true;
-                } else if character == '"' {
+                if character == '"' {
                     break;
                 }
             }
@@ -1599,18 +1595,13 @@ impl ProbeProtector {
             if c == '"' {
                 let start = i;
                 i += 1;
-                let mut escaped = false;
                 while i < chars.len() {
                     if i.is_multiple_of(64) && abort.is_aborted() {
                         return Err(BehavioralPreparationError::Aborted);
                     }
                     let current = chars[i];
                     i += 1;
-                    if escaped {
-                        escaped = false;
-                    } else if current == '\\' {
-                        escaped = true;
-                    } else if current == '"' {
+                    if current == '"' {
                         break;
                     }
                 }
@@ -1779,18 +1770,13 @@ fn extract_parenthesized_with_abort(
     }
     let mut depth = 0usize;
     let mut quote = None;
-    let mut escaped = false;
     for index in open_idx..chars.len() {
         if index % 64 == 0 && abort.is_aborted() {
             return Err(BehavioralPreparationError::Aborted);
         }
         let character = chars[index];
         if let Some(delimiter) = quote {
-            if escaped {
-                escaped = false;
-            } else if character == '\\' {
-                escaped = true;
-            } else if character == delimiter {
+            if character == delimiter {
                 quote = None;
             }
             continue;
@@ -2209,14 +2195,10 @@ fn serialize_expr(expr: &NetExpr) -> String {
                 }
             }
             Task::Expr(NetExpr::StringLiteral(value)) => {
+                // As written: a parsed string holds no `"`, and a backslash
+                // in it is text.
                 output.push('"');
-                for character in value.chars() {
-                    match character {
-                        '\\' => output.push_str("\\\\"),
-                        '"' => output.push_str("\\\""),
-                        _ => output.push(character),
-                    }
-                }
+                output.push_str(value);
                 output.push('"');
             }
             Task::Expr(NetExpr::Param(name)) => output.push_str(name),

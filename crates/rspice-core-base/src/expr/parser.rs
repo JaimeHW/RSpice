@@ -233,17 +233,13 @@ impl<'a> Lexer<'a> {
     fn read_string(&mut self, quote: char) -> Token {
         self.next_char();
         let mut value = String::new();
+        // To the next quote of its kind, as the deck lexer reads a string: a
+        // backslash in a Windows path is a separator.
         while let Some(c) = self.next_char() {
             if c == quote {
                 return Token::StringLiteral(value);
             }
-            if c == '\\' {
-                if let Some(escaped) = self.next_char() {
-                    value.push(escaped);
-                }
-            } else {
-                value.push(c);
-            }
+            value.push(c);
         }
         Token::Invalid(quote)
     }
@@ -1158,6 +1154,37 @@ mod tests {
                 "the abort must be observed from inside strict lexer traversal"
             );
         }
+    }
+
+    /// A table file named with Windows separators keeps them, and is read
+    /// beside the deck split at them, as an `.include` is.
+    #[test]
+    fn a_quoted_table_file_name_keeps_its_backslashes() {
+        for (written, name) in [
+            (r#"tablefile("data\wave.tbl")"#, r"data\wave.tbl"),
+            (r#"tablefile("data\")"#, r"data\"),
+            (
+                r#"tablefile("C:\data\wave.tbl", time)"#,
+                r"C:\data\wave.tbl",
+            ),
+        ] {
+            let ast = parse_expression_strict(written)
+                .unwrap_or_else(|error| panic!("parse `{written}` failed: {error}"));
+            let Expr::Function { args, .. } = &ast else {
+                panic!("{written} parsed as {ast:?}");
+            };
+            assert_eq!(
+                args.first(),
+                Some(&Expr::StringLiteral(name.to_owned())),
+                "{written}"
+            );
+        }
+        let ast = parse_expression_strict(r#"tablefile("data\wave.tbl")"#).unwrap();
+        let deck = std::path::Path::new("decks").join("top.cir");
+        assert_eq!(
+            crate::expr::file_lookup_dependency(&ast, Some(&deck)),
+            Some(["decks", "data", "wave.tbl"].iter().collect())
+        );
     }
 
     #[test]
