@@ -79,7 +79,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
     let mut prepared = prepare_browser_save(
         &mut state,
         SaveScope::ActiveDocument,
-        false,
+        BrowserSaveKind::Save,
         "browser-project.rspice".to_owned(),
     )
     .expect("prepare browser active save");

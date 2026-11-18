@@ -687,14 +687,36 @@ pub fn save_scope_in_browser(parts: SaveParts<'_>, scope: SaveScope) -> SaveRequ
         parts.workbench.prompt(message);
         return SaveRequestOutcome::Failed(message.to_owned());
     }
-    start_browser_project_save(parts, scope, false)
+    start_browser_project_save(
+        parts,
+        scope,
+        crate::workbench::lifecycle::project_lifecycle::BrowserSaveKind::Save,
+    )
+}
+
+/// Save the project to a file the reader picks and carry on there: the same
+/// project, saved to that file from then on. A browser without the file
+/// picker downloads it and says so. Returns whether the save started.
+#[cfg(target_arch = "wasm32")]
+pub fn save_project_as_in_browser(parts: SaveParts<'_>) -> bool {
+    start_browser_project_save(
+        parts,
+        SaveScope::AllDocuments,
+        crate::workbench::lifecycle::project_lifecycle::BrowserSaveKind::SaveAs,
+    )
+    .request_started()
 }
 
 /// Save a copy of the project through the browser. Returns whether the save
 /// started.
 #[cfg(target_arch = "wasm32")]
 pub fn save_project_copy_in_browser(parts: SaveParts<'_>) -> bool {
-    start_browser_project_save(parts, SaveScope::AllDocuments, true).request_started()
+    start_browser_project_save(
+        parts,
+        SaveScope::AllDocuments,
+        crate::workbench::lifecycle::project_lifecycle::BrowserSaveKind::Copy,
+    )
+    .request_started()
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -726,14 +748,17 @@ fn accept_browser_canonical_display_name(
 fn start_browser_project_save(
     mut parts: SaveParts<'_>,
     scope: SaveScope,
-    project_copy: bool,
+    kind: crate::workbench::lifecycle::project_lifecycle::BrowserSaveKind,
 ) -> SaveRequestOutcome {
+    use crate::workbench::lifecycle::project_lifecycle::BrowserSaveKind;
+
+    let project_copy = kind == BrowserSaveKind::Copy;
     let suggested_name =
         project_save_dialog_default_name(parts.lifecycle.model, parts.lifecycle.platform);
     let mut prepared = match crate::workbench::lifecycle::project_lifecycle::prepare_browser_save(
         &mut parts,
         scope,
-        project_copy,
+        kind,
         suggested_name,
     ) {
         Ok(prepared) => prepared,
@@ -755,10 +780,10 @@ fn start_browser_project_save(
     let save_surface_supported = browser_save_picker_is_safe(
         project_copy,
         prepared.source_handle_id,
-        if project_copy {
-            crate::workbench::lifecycle::project_lifecycle::browser_file_picker_supported()
-        } else {
+        if kind == BrowserSaveKind::Save {
             crate::workbench::lifecycle::project_lifecycle::browser_canonical_save_supported()
+        } else {
+            crate::workbench::lifecycle::project_lifecycle::browser_file_picker_supported()
         },
     );
     if prepared.handle_id.is_none()
@@ -789,18 +814,27 @@ fn start_browser_project_save(
                     platform,
                     prepared.save.transaction(),
                 );
-                if project_copy {
-                    model.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        "Downloaded a copy of the project; the open project is unchanged.",
-                    );
-                } else {
-                    model.report_warning(
+                match kind {
+                    BrowserSaveKind::Copy => {
+                        model.record(
+                            LogSeverity::Info,
+                            LogSource::Studio,
+                            "Downloaded a copy of the project; the open project is unchanged.",
+                        );
+                    }
+                    BrowserSaveKind::SaveAs => model.report_warning(
+                        "Downloaded instead",
+                        format!(
+                            "This browser cannot save to a file you choose, so the project was \
+                             downloaded as {}. The open project still saves where it did.",
+                            prepared.suggested_name
+                        ),
+                    ),
+                    BrowserSaveKind::Save => model.report_warning(
                         "Saved as a download instead",
                         "The project was downloaded as a copy, not saved; it still has unsaved \
                          changes.",
-                    );
+                    ),
                 }
                 return SaveRequestOutcome::CopyOnly;
             }
@@ -1097,7 +1131,8 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
             );
             parts.lifecycle.model.report_failure(
                 "Project save failed",
-                "the project changed outside RSpice; reopen it or save a copy.",
+                "its file changed outside RSpice, so nothing was written. Keep the work here \
+                 with Save as, or reopen the file from the recent list to take its changes.",
             );
             if !project_copy {
                 continuation = Some(SaveContinuationEvent::Conflict(transaction));

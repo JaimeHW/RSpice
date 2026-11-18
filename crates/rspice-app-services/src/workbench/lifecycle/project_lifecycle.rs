@@ -1270,13 +1270,27 @@ pub struct BrowserPreparedSave {
     pub source_handle_id: Option<u64>,
 }
 
+/// What a browser save writes.
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserSaveKind {
+    /// The project, to the file it saves to.
+    Save,
+    /// The project, to a file the reader picks, which it saves to from then
+    /// on: its identity, history and checkpoints go with it.
+    SaveAs,
+    /// An independent copy: a new project, and the open one is unchanged.
+    Copy,
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn prepare_browser_save(
     state: &mut dyn LifecycleSourceMut,
     requested_scope: SaveScope,
-    project_copy: bool,
+    kind: BrowserSaveKind,
     suggested_name: String,
 ) -> Result<BrowserPreparedSave, ProjectLifecycleError> {
+    let project_copy = kind == BrowserSaveKind::Copy;
     let state = &mut state.lifecycle_parts();
     require_open_project(state.platform)?;
     require_project_writable(state.model)?;
@@ -1285,7 +1299,9 @@ pub fn prepare_browser_save(
         .project_lifecycle
         .authority
         .require_browser_binding_ready()?;
-    if !project_copy
+    // A file changed outside RSpice blocks saving over it, not saving the
+    // project somewhere else.
+    if kind == BrowserSaveKind::Save
         && let Some(conflict) = state.platform.project_lifecycle.browser_conflict.as_ref()
     {
         let _ = conflict.observed_digest;
@@ -1322,7 +1338,7 @@ pub fn prepare_browser_save(
             project_copy,
             &suggested_name,
         )?;
-        let existing_binding = (!project_copy)
+        let existing_binding = (kind == BrowserSaveKind::Save)
             .then(|| {
                 state.platform.project_lifecycle.binding().or(state
                     .platform
@@ -1358,8 +1374,11 @@ pub fn prepare_browser_save(
         // A project already saved keeps the name it was saved under, which a
         // reload does not carry into the default save name.
         let suggested_name = binding.map_or(suggested_name, |binding| binding.display_name.clone());
+        // Save as and a copy go to a file the reader picks; a browser without
+        // the picker downloads them instead.
         let save = staged.bind(binding, || {
-            if project_copy || persistence::browser_external_canonical_supported() {
+            if kind != BrowserSaveKind::Save || persistence::browser_external_canonical_supported()
+            {
                 BrowserBindingBackend::ExternalFile
             } else if persistence::browser_opfs_supported() {
                 BrowserBindingBackend::Opfs

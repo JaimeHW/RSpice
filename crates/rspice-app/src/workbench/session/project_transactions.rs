@@ -1150,8 +1150,9 @@ impl AppState {
 impl AppState {
     /// Save the open project at another file and carry on working in it: the
     /// same project, with its revision history, audit records, checkpoints
-    /// and Undo. In the browser, a copy is downloaded. Returns whether it
-    /// saved, or, in the browser, whether the save started.
+    /// and Undo. A browser without the file picker downloads it instead.
+    /// Returns whether it saved, or, in the browser, whether the save
+    /// started.
     pub(crate) fn save_project_as(&mut self) -> bool {
         if !self.commit_pending_inspector_edit() {
             return false;
@@ -1176,7 +1177,7 @@ impl AppState {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = default_name;
-            self.save_project_copy_in_browser()
+            project_workflow::save_project_as_in_browser(save_parts(self))
         }
     }
 
