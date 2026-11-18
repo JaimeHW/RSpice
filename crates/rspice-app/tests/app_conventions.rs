@@ -2099,22 +2099,23 @@ fn every_submenu_row_draws_the_workbench_chevron() {
     );
 }
 
-/// The source editor's own words, and the words of Rename and Find
-/// references over a deck or a source bundle, come from the message
-/// catalogue: a reader in another language, or in the pseudo-locale that
-/// stands for one, sees none of them in English.
+/// The source editor's own words, its completion list over a deck, and the
+/// words of Rename and Find references over a deck or a source bundle, come
+/// from the message catalogue: a reader in another language, or in the
+/// pseudo-locale that stands for one, sees none of them in English.
 ///
 /// A string literal in these files' production code that reads as words (a
 /// capitalised word, or two words) is a sentence the catalogue does not
 /// hold. Identifiers, test code and panic messages are not read.
 #[test]
 fn the_source_editor_writes_its_words_from_the_catalogue() {
-    const FILES: [&str; 7] = [
+    const FILES: &[&str] = &[
         "rspice-app-code/src/workbench/documents/text_editor_commands.rs",
         "rspice-app-code/src/workbench/documents/virtual_text_editor.rs",
         "rspice-app-code/src/workbench/documents/virtual_text_editor/accessibility.rs",
         "rspice-app-code/src/workbench/documents/virtual_text_editor/context_menu.rs",
         "rspice-app-code/src/workbench/documents/virtual_text_editor/touch.rs",
+        "rspice-app-code/src/workbench/documents/netlist_document/completion.rs",
         "rspice-app-code/src/workbench/documents/netlist_document/references.rs",
         "rspice-app-code/src/workbench/app/dialogs/source_language_tools.rs",
     ];

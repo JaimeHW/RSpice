@@ -1287,7 +1287,8 @@ pub fn show_signature_help_at_cursor(
 ) -> Result<String, String> {
     let source = model.simulation.source.netlist_content.clone();
     let cursor = netlist.cursor_char_index;
-    let (title, detail) = match super::completion::directive_signature_at(&source, cursor) {
+    let (title, detail) = match super::completion::directive_signature_at(&source, cursor, messages)
+    {
         Some(directive) => directive,
         None => {
             let index = project_index_now(model, netlist)

@@ -404,8 +404,14 @@ pub fn show(
 
     // Completion is an edit and therefore exists only for project-owned source.
     if editable
-        && let Some((start, end, text, caret)) =
-            completion::show(ui, netlist, anchor, &buffer, completion_keys)
+        && let Some((start, end, text, caret)) = completion::show(
+            ui,
+            netlist,
+            anchor,
+            &buffer,
+            completion_keys,
+            workbench.messages(),
+        )
     {
         completion_changed = true;
         buffer.replace_range(start..end, &text);

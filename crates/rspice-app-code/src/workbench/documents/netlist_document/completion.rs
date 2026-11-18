@@ -14,6 +14,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 use super::NetlistDocumentState;
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// Symbol harvested from the parsed deck.
 #[derive(Debug, Clone)]
@@ -40,7 +41,7 @@ pub struct CompletionAnchor {
 
 /// One row offered by the popover.
 struct Candidate {
-    kind: &'static str,
+    kind: String,
     label: String,
     detail: String,
     doc: String,
@@ -57,120 +58,121 @@ const POPOVER_DESIRED_WIDTH: f32 = 300.0;
 const POPOVER_SCREEN_MARGIN: f32 = 8.0;
 
 /// Dot-commands with signatures (the popover's static source).
-const DOT_COMMANDS: &[(&str, &str, &str)] = &[
+const DOT_COMMANDS: &[(&str, &str, MessageId)] = &[
     (
         ".tran",
         "<step> <stop> [start [maxstep]]",
-        "Transient analysis.",
+        MessageId::NetlistDirectiveTran,
     ),
     (
         ".ac",
         "dec|oct|lin <points> <fstart> <fstop>",
-        "Small-signal frequency sweep.",
+        MessageId::NetlistDirectiveAc,
     ),
     (
         ".dc",
         "<source> <start> <stop> <step>",
-        "DC transfer sweep.",
+        MessageId::NetlistDirectiveDc,
     ),
-    (".op", "", "DC operating point."),
+    (".op", "", MessageId::NetlistDirectiveOp),
     (
         ".noise",
         "v(<out>) <source> dec <pts> <f0> <f1>",
-        "Output-referred noise analysis.",
+        MessageId::NetlistDirectiveNoise,
     ),
     (
         ".meas",
         "tran|ac|dc <name> <type> <signal> …",
-        "Post-run measurement (drives the specs matrix).",
+        MessageId::NetlistDirectiveMeas,
     ),
-    (".param", "<name>=<value> …", "Deck parameter."),
+    (
+        ".param",
+        "<name>=<value> …",
+        MessageId::NetlistDirectiveParam,
+    ),
     (
         ".model",
         "<name> <type> (<param>=<value> …)",
-        "Device model card.",
+        MessageId::NetlistDirectiveModel,
     ),
     (
         ".subckt",
         "<name> <ports…> [params:]",
-        "Subcircuit definition, closed by .ends.",
+        MessageId::NetlistDirectiveSubckt,
     ),
-    (".ends", "[name]", "End of the enclosing .subckt."),
-    (".include", "<path>", "Splice another deck file."),
-    (".lib", "<path> <section>", "Include a library section."),
+    (".ends", "[name]", MessageId::NetlistDirectiveEnds),
+    (".include", "<path>", MessageId::NetlistDirectiveInclude),
+    (".lib", "<path> <section>", MessageId::NetlistDirectiveLib),
     (
         ".options",
         "<name>=<value> …",
-        "Simulator options (reltol, abstol, temp…).",
+        MessageId::NetlistDirectiveOptions,
     ),
-    (
-        ".ic",
-        "v(<node>)=<value> …",
-        "Transient initial conditions.",
-    ),
+    (".ic", "v(<node>)=<value> …", MessageId::NetlistDirectiveIc),
     (
         ".initcond",
         "<device> ic=<value>[,<value>…] … | file <path>",
-        "Xyce-compatible device initial-condition overrides.",
+        MessageId::NetlistDirectiveInitcond,
     ),
-    (".nodeset", "v(<node>)=<value> …", "DC convergence hints."),
-    (".save", "<signal> …", "Restrict saved outputs."),
-    (".probe", "<signal> …", "Mark signals for output."),
+    (
+        ".nodeset",
+        "v(<node>)=<value> …",
+        MessageId::NetlistDirectiveNodeset,
+    ),
+    (".save", "<signal> …", MessageId::NetlistDirectiveSave),
+    (".probe", "<signal> …", MessageId::NetlistDirectiveProbe),
     (
         ".print",
         "<analysis> <signal> …",
-        "Tabular output selection.",
+        MessageId::NetlistDirectivePrint,
     ),
-    (".global", "<node> …", "Declare global nodes."),
+    (".global", "<node> …", MessageId::NetlistDirectiveGlobal),
     (
         ".func",
         "<name>(<args>) {<expression>}",
-        "User function for expressions.",
+        MessageId::NetlistDirectiveFunc,
     ),
-    (".endl", "[section]", "End of a library section."),
-    (
-        ".tf",
-        "v(<out>) <source>",
-        "DC transfer function and input/output resistance.",
-    ),
-    (".sens", "v(<out>) [ac …]", "Sensitivity of an output."),
+    (".endl", "[section]", MessageId::NetlistDirectiveEndl),
+    (".tf", "v(<out>) <source>", MessageId::NetlistDirectiveTf),
+    (".sens", "v(<out>) [ac …]", MessageId::NetlistDirectiveSens),
     (
         ".pz",
         "<in+> <in-> <out+> <out-> vol|cur pol|zer|pz",
-        "Pole-zero analysis.",
+        MessageId::NetlistDirectivePz,
     ),
     (
         ".step",
         "param <name> <start> <stop> <step>",
-        "Repeat the analyses over a parameter.",
+        MessageId::NetlistDirectiveStep,
     ),
-    (".plot", "<analysis> <signal> …", "Plot output selection."),
     (
-        ".if",
+        ".plot",
+        "<analysis> <signal> …",
+        MessageId::NetlistDirectivePlot,
+    ),
+    (".if", "(<condition>)", MessageId::NetlistDirectiveIf),
+    (
+        ".elseif",
         "(<condition>)",
-        "Read the cards up to .else only if true.",
+        MessageId::NetlistDirectiveElseif,
     ),
-    (".elseif", "(<condition>)", "Alternative branch of an .if."),
-    (".else", "", "The branch read when no condition held."),
-    (".endif", "", "End of an .if block."),
-    (
-        ".control",
-        "",
-        "Interactive command block, closed by .endc.",
-    ),
-    (".endc", "", "End of a .control block."),
-    (".temp", "<celsius>", "Simulation temperature."),
+    (".else", "", MessageId::NetlistDirectiveElse),
+    (".endif", "", MessageId::NetlistDirectiveEndif),
+    (".control", "", MessageId::NetlistDirectiveControl),
+    (".endc", "", MessageId::NetlistDirectiveEndc),
+    (".temp", "<celsius>", MessageId::NetlistDirectiveTemp),
     (
         ".four",
         "<freq> <signal> …",
-        "Fourier analysis of a transient.",
+        MessageId::NetlistDirectiveFour,
     ),
-    (".end", "", "End of the deck."),
+    (".end", "", MessageId::NetlistDirectiveEnd),
 ];
 
 pub(crate) fn directive_signature_at(
     source: &str,
     cursor_char_index: usize,
+    messages: MessageCatalog,
 ) -> Option<(String, String)> {
     let cursor_byte = source
         .char_indices()
@@ -192,7 +194,7 @@ pub(crate) fn directive_signature_at(
             } else {
                 format!("{name} {signature}")
             };
-            (title, (*documentation).to_owned())
+            (title, messages.text(*documentation))
         })
 }
 
@@ -236,6 +238,7 @@ pub fn show(
     anchor: CompletionAnchor,
     buffer: &str,
     keys: (i32, bool, bool),
+    messages: MessageCatalog,
 ) -> Option<(usize, usize, String, usize)> {
     let (move_delta, accept, dismiss) = keys;
 
@@ -259,13 +262,13 @@ pub fn show(
     // After a blank on an element line the next pin is what is offered.
     let (token_start, token, line_start) =
         token_at(buffer, caret).unwrap_or((caret, String::new(), usize::MAX));
-    let pins = pin_help(state, buffer, token_start);
+    let pins = pin_help(state, buffer, token_start, messages);
     if token.is_empty() && pins.is_none() {
         state.completion_open = false;
         return None;
     }
 
-    let candidates = collect_candidates(state, &token, token_start == line_start, pins);
+    let candidates = collect_candidates(state, &token, token_start == line_start, pins, messages);
     if candidates.is_empty() {
         state.completion_open = false;
         return None;
@@ -283,6 +286,7 @@ pub fn show(
         &candidates,
         selected,
         !token.is_empty(),
+        messages,
     );
     let take = if accept { Some(selected) } else { clicked };
 
@@ -366,15 +370,27 @@ struct PinHelp {
 
 /// The terminals an element of this letter connects, in the order its
 /// line writes them.
-fn device_terminals(letter: char) -> &'static [&'static str] {
+fn device_terminals(letter: char) -> &'static [MessageId] {
+    use MessageId::{
+        NetlistTerminalAnode as ANODE, NetlistTerminalBase as BASE, NetlistTerminalBulk as BULK,
+        NetlistTerminalCathode as CATHODE, NetlistTerminalCollector as COLLECTOR,
+        NetlistTerminalControlNegative as CONTROL_MINUS,
+        NetlistTerminalControlPositive as CONTROL_PLUS, NetlistTerminalDrain as DRAIN,
+        NetlistTerminalEmitter as EMITTER, NetlistTerminalGate as GATE,
+        NetlistTerminalNegative as MINUS, NetlistTerminalPortOneNegative as PORT_1_MINUS,
+        NetlistTerminalPortOnePositive as PORT_1_PLUS,
+        NetlistTerminalPortTwoNegative as PORT_2_MINUS,
+        NetlistTerminalPortTwoPositive as PORT_2_PLUS, NetlistTerminalPositive as PLUS,
+        NetlistTerminalSource as SOURCE, NetlistTerminalSubstrate as SUBSTRATE,
+    };
     match letter.to_ascii_uppercase() {
-        'R' | 'C' | 'L' | 'V' | 'I' | 'B' | 'F' | 'H' | 'W' => &["n+", "n-"],
-        'D' => &["anode", "cathode"],
-        'Q' => &["collector", "base", "emitter", "substrate"],
-        'M' => &["drain", "gate", "source", "bulk"],
-        'J' | 'Z' => &["drain", "gate", "source"],
-        'E' | 'G' | 'S' => &["n+", "n-", "control+", "control-"],
-        'T' => &["port 1+", "port 1-", "port 2+", "port 2-"],
+        'R' | 'C' | 'L' | 'V' | 'I' | 'B' | 'F' | 'H' | 'W' => &[PLUS, MINUS],
+        'D' => &[ANODE, CATHODE],
+        'Q' => &[COLLECTOR, BASE, EMITTER, SUBSTRATE],
+        'M' => &[DRAIN, GATE, SOURCE, BULK],
+        'J' | 'Z' => &[DRAIN, GATE, SOURCE],
+        'E' | 'G' | 'S' => &[PLUS, MINUS, CONTROL_PLUS, CONTROL_MINUS],
+        'T' => &[PORT_1_PLUS, PORT_1_MINUS, PORT_2_PLUS, PORT_2_MINUS],
         _ => &[],
     }
 }
@@ -383,7 +399,12 @@ fn device_terminals(letter: char) -> &'static [&'static str] {
 /// `token_start` of `buffer` is written for, when it is one: a subcircuit's
 /// port, by the subcircuit the line names or, before it names one, each
 /// subcircuit in scope with a port there; or a device's terminal.
-fn pin_help(state: &NetlistDocumentState, buffer: &str, token_start: usize) -> Option<PinHelp> {
+fn pin_help(
+    state: &NetlistDocumentState,
+    buffer: &str,
+    token_start: usize,
+    messages: MessageCatalog,
+) -> Option<PinHelp> {
     let start = char_to_byte(buffer, token_start);
     let line_start = buffer[..start].rfind('\n').map_or(0, |at| at + 1);
     if line_start == 0 {
@@ -444,11 +465,14 @@ fn pin_help(state: &NetlistDocumentState, buffer: &str, token_start: usize) -> O
             ports,
         });
     }
-    let terminals = device_terminals(letter);
+    let terminals = device_terminals(letter)
+        .iter()
+        .map(|terminal| messages.text(*terminal))
+        .collect::<Vec<_>>();
     let pin = terminals.get(written)?;
     Some(PinHelp {
         order: format!("{head}: {}", terminals.join(" ")),
-        pin: (*pin).to_owned(),
+        pin: pin.clone(),
         position: (written + 1, terminals.len()),
         ports: Vec::new(),
     })
@@ -460,6 +484,7 @@ fn collect_candidates(
     token: &str,
     at_line_start: bool,
     pins: Option<PinHelp>,
+    messages: MessageCatalog,
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
     let lower = token.to_ascii_lowercase();
@@ -468,16 +493,31 @@ fn collect_candidates(
     // each saying which pin it would connect.
     if let Some(pins) = pins {
         let (at, of) = pins.position;
-        let doc = format!("{}. Pin {at} of {of} is {}.", pins.order, pins.pin);
+        let doc = messages.format(
+            MessageId::NetlistCompletionPinNote,
+            &[
+                ("order", &pins.order),
+                ("position", &at.to_string()),
+                ("count", &of.to_string()),
+                ("pin", &pins.pin),
+            ],
+        );
         let mut seen = std::collections::HashSet::new();
         for (master, port, ports) in &pins.ports {
             if port.to_ascii_lowercase().starts_with(&lower)
                 && seen.insert(port.to_ascii_lowercase())
             {
                 out.push(Candidate {
-                    kind: "pin",
+                    kind: messages.text(MessageId::NetlistCompletionPin),
                     label: port.clone(),
-                    detail: format!("{master} pin {at} of {ports}"),
+                    detail: messages.format(
+                        MessageId::NetlistCompletionPinDetail,
+                        &[
+                            ("subcircuit", master),
+                            ("position", &at.to_string()),
+                            ("count", &ports.to_string()),
+                        ],
+                    ),
                     doc: doc.clone(),
                     insert: port.clone(),
                 });
@@ -498,9 +538,10 @@ fn collect_candidates(
             let node_lower = node.to_ascii_lowercase();
             if node_lower.starts_with(&lower) && node_lower != lower && seen.insert(node_lower) {
                 out.push(Candidate {
-                    kind: "node",
+                    kind: messages.text(MessageId::NetlistCompletionNode),
                     label: node.to_owned(),
-                    detail: format!("as {}", pins.pin),
+                    detail: messages
+                        .format(MessageId::NetlistCompletionAsPin, &[("pin", &pins.pin)]),
                     doc: doc.clone(),
                     insert: node.to_owned(),
                 });
@@ -519,10 +560,10 @@ fn collect_candidates(
         for (cmd, signature, doc) in DOT_COMMANDS {
             if cmd.starts_with(&lower) && *cmd != lower {
                 out.push(Candidate {
-                    kind: "cmd",
+                    kind: messages.text(MessageId::NetlistCompletionDirective),
                     label: (*cmd).to_owned(),
                     detail: (*signature).to_owned(),
-                    doc: format!("{cmd} {signature} — {doc}"),
+                    doc: format!("{cmd} {signature} — {}", messages.text(*doc)),
                     insert: format!("{cmd} "),
                 });
             }
@@ -560,7 +601,7 @@ fn collect_candidates(
             && seen.insert((symbol.kind, name_lower))
         {
             out.push(Candidate {
-                kind: symbol.kind,
+                kind: symbol.kind.to_owned(),
                 label: symbol.name.clone(),
                 detail: symbol.detail.clone(),
                 doc: symbol.doc.clone(),
@@ -580,10 +621,13 @@ fn collect_candidates(
         let name_lower = parameter.name.to_ascii_lowercase();
         if name_lower.starts_with(&lower) && name_lower != lower {
             out.push(Candidate {
-                kind: "param",
+                kind: messages.text(MessageId::NetlistCompletionParameter),
                 label: parameter.name.clone(),
                 detail: parameter.detail.clone(),
-                doc: format!("Deck parameter `{}` (.param).", parameter.name),
+                doc: messages.format(
+                    MessageId::NetlistCompletionParameterNote,
+                    &[("name", &parameter.name)],
+                ),
                 insert: parameter.name.clone(),
             });
         }
@@ -618,6 +662,7 @@ fn draw_popover(
     candidates: &[Candidate],
     selected: usize,
     takes_keys: bool,
+    messages: MessageCatalog,
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -652,9 +697,13 @@ fn draw_popover(
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::SelectableLabel,
                                 ui.is_enabled(),
-                                format!(
-                                    "{} completion: {}, {}",
-                                    candidate.kind, candidate.label, candidate.detail
+                                messages.format(
+                                    MessageId::NetlistCompletionAccessible,
+                                    &[
+                                        ("kind", &candidate.kind),
+                                        ("label", &candidate.label),
+                                        ("detail", &candidate.detail),
+                                    ],
                                 ),
                             )
                         });
@@ -673,7 +722,7 @@ fn draw_popover(
                         ui.painter().text(
                             egui::pos2(rect.left() + 10.0, rect.center().y),
                             egui::Align2::LEFT_CENTER,
-                            candidate.kind,
+                            &candidate.kind,
                             theme::mono(tokens::FS_0, FontWeight::Regular),
                             c.text_faint,
                         );
@@ -701,7 +750,8 @@ fn draw_popover(
                             // Non-breaking blanks keep the key's words
                             // together, and off the start of a line.
                             if takes_keys {
-                                format!("{doc}\u{a0}\u{a0}·\u{a0}\u{a0}⇥\u{a0}to\u{a0}accept")
+                                messages
+                                    .format(MessageId::NetlistCompletionAccept, &[("note", doc)])
                             } else {
                                 doc.clone()
                             },
@@ -730,6 +780,10 @@ fn draw_popover(
 mod tests {
     use super::*;
 
+    fn english() -> MessageCatalog {
+        MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
+    }
+
     #[test]
     fn dot_command_completion_includes_initcond_forms() {
         let (_, signature, documentation) = DOT_COMMANDS
@@ -738,14 +792,18 @@ mod tests {
             .expect(".initcond completion is registered");
         assert!(signature.contains("ic=<value>"));
         assert!(signature.contains("file <path>"));
-        assert!(documentation.contains("device initial-condition"));
+        assert!(
+            english()
+                .text(*documentation)
+                .contains("device initial-condition")
+        );
     }
 
     #[test]
     fn signature_help_uses_the_directive_on_the_caret_line() {
         let source = ".param gain=2\n.tran 1n 10n\n";
         let caret = source.find("10n").unwrap();
-        let (title, detail) = directive_signature_at(source, caret).unwrap();
+        let (title, detail) = directive_signature_at(source, caret, english()).unwrap();
         assert!(title.starts_with(".tran <step> <stop>"));
         assert_eq!(detail, "Transient analysis.");
     }
@@ -753,7 +811,7 @@ mod tests {
     /// What the popover offers with the caret at the end of `deck`, the
     /// deck's index built: each row's kind, label and detail, and the
     /// selected row's note.
-    fn offered(deck: &str, token: &str) -> (Vec<(&'static str, String, String)>, String) {
+    fn offered(deck: &str, token: &str) -> (Vec<(String, String, String)>, String) {
         let mut harness = crate::workbench::code::tests::harness();
         super::super::fixtures::seed_deck(
             &mut harness.model,
@@ -765,8 +823,8 @@ mod tests {
         assert!(super::super::language::project_index_now(&harness.model, state).is_some());
         state.cursor_line = deck.matches('\n').count();
         let caret = deck.chars().count() - token.chars().count();
-        let pins = pin_help(state, deck, caret);
-        let rows = collect_candidates(state, token, false, pins);
+        let pins = pin_help(state, deck, caret, english());
+        let rows = collect_candidates(state, token, false, pins, english());
         let note = rows.first().map(|row| row.doc.clone()).unwrap_or_default();
         (
             rows.into_iter()
@@ -784,11 +842,15 @@ mod tests {
         let (rows, note) = offered(&format!("{SUBCIRCUIT_DECK}X1 a b "), "");
         assert_eq!(
             rows.first(),
-            Some(&("pin", "vdd".to_owned(), "amp pin 3 of 3".to_owned()))
+            Some(&(
+                "pin".to_owned(),
+                "vdd".to_owned(),
+                "amp pin 3 of 3".to_owned()
+            ))
         );
         assert_eq!(note, "X1 → amp: in out vdd. Pin 3 of 3 is vdd.");
         // The deck's own nodes follow, each said as that pin.
-        assert!(rows.contains(&("node", "a".to_owned(), "as vdd".to_owned())));
+        assert!(rows.contains(&("node".to_owned(), "a".to_owned(), "as vdd".to_owned())));
     }
 
     #[test]
