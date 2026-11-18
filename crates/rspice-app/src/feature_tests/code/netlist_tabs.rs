@@ -111,7 +111,9 @@ fn toolbar_verbs(drawn: &str) -> Vec<&'static str> {
     [
         "Save",
         "Save deck",
+        "Save deck as",
         "Save include",
+        "Save as deck",
         "Export deck",
         "Export deck copy",
         "Export netlist",
@@ -149,15 +151,15 @@ fn the_pinned_tabs_lead_the_strip_when_the_deck_opened_first() {
 }
 
 /// Each tab's toolbar holds only the verbs that tab has: the deck is saved,
-/// exported and compared, with one Save; the generated netlist is exported
-/// and compared with an earlier build; the Added lines, saved with the
-/// project, add none.
+/// saved elsewhere, exported and compared, with one Save; the generated
+/// netlist is saved as a deck, exported and compared with an earlier build;
+/// the Added lines, saved with the project, add none.
 #[test]
 fn the_toolbar_offers_each_tab_only_its_own_verbs() {
     let mut app = plan_and_deck_session();
     assert_eq!(
         toolbar_verbs(&drawn_frame_at(&mut app, 1.0)),
-        ["Save deck", "Export deck", "Compare"],
+        ["Save deck", "Save deck as", "Export deck", "Compare"],
         "the deck"
     );
 
@@ -165,7 +167,11 @@ fn the_toolbar_offers_each_tab_only_its_own_verbs() {
     assert!(activate_document(&mut app.state, &generated));
     assert_eq!(
         toolbar_verbs(&drawn_frame_at(&mut app, 2.0)),
-        ["Export netlist", "Compare with earlier build"],
+        [
+            "Save as deck",
+            "Export netlist",
+            "Compare with earlier build"
+        ],
         "the generated netlist"
     );
 

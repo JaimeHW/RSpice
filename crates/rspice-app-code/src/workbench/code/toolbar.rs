@@ -194,10 +194,11 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
 }
 
 /// The Netlist workspace's toolbar follows the tab in front, with only the
-/// verbs that tab has: the generated netlist is exported and compared with
-/// an earlier build; a deck is saved, exported and compared; an include of
-/// a deck is saved. The Added lines are saved with the project, by the Save
-/// at the toolbar's head, and a run's input and a comparison are only read.
+/// verbs that tab has: the generated netlist is saved as a deck, exported
+/// and compared with an earlier build; a deck is saved, saved elsewhere
+/// when it is a file, exported and compared; an include of a deck is saved.
+/// The Added lines are saved with the project, by the Save at the toolbar's
+/// head, and a run's input and a comparison are only read.
 ///
 /// Find is deliberately absent: the page's own toolbar sits directly under
 /// this one and owns it.
@@ -205,6 +206,11 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
     ToolbarEntry::Only(
         generated_netlist_in_front,
         &[
+            labelled(
+                CodeCommand::SaveNetlistAsDeck.key(),
+                WorkbenchIcon::Save,
+                "Save as deck",
+            ),
             labelled(
                 CodeCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
@@ -221,6 +227,14 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
         deck_in_front,
         &[
             labelled(ids::SAVE, WorkbenchIcon::Save, "Save deck"),
+            ToolbarEntry::Only(
+                deck_file_in_front,
+                &[labelled(
+                    CodeCommand::SaveDeckAs.key(),
+                    WorkbenchIcon::Save,
+                    "Save deck as",
+                )],
+            ),
             labelled(
                 CodeCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
@@ -244,6 +258,19 @@ fn generated_netlist_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
 
 fn deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
     matches!(reads.state.netlist.front, NetlistTab::Deck(_))
+}
+
+/// A deck that is a file is in front: Save deck as writes it elsewhere. A
+/// deck the project keeps as text, as every deck in the browser is, has no
+/// file to write elsewhere.
+fn deck_file_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+    cfg!(not(target_arch = "wasm32"))
+        && reads
+            .state
+            .netlist
+            .open_deck
+            .as_ref()
+            .is_some_and(|deck| !deck.is_stored())
 }
 
 fn include_of_deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
