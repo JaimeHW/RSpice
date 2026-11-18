@@ -51,7 +51,7 @@ use std::collections::BTreeSet;
 use egui::{Key, Modifiers, Rect, Sense, Ui, pos2, vec2};
 
 use crate::icons::Icon;
-use crate::panels::elide_text;
+use crate::panels::elide_at_words;
 use crate::theme;
 use crate::tokens::Tokens;
 use crate::widgets::{Problem, paint_problem_mark};
@@ -1727,34 +1727,6 @@ struct Words<'a> {
     align: Align,
     color: egui::Color32,
     problem: Option<Problem>,
-}
-
-/// `text` cut to `room` where a reader expects a cut: after the last whole
-/// item of a list its middle dots set apart, else after the last whole word,
-/// and inside a word only when the first is too long for the room alone.
-fn elide_at_words(ui: &Ui, text: &str, font: &egui::FontId, room: f32) -> String {
-    const ELLIPSIS: char = '\u{2026}';
-    let cut = elide_text(ui, text, font, room);
-    let Some(kept) = cut.strip_suffix(ELLIPSIS) else {
-        return cut;
-    };
-    let rest = &text[kept.len()..];
-    let before = |boundary: &str| {
-        if rest.starts_with(boundary) {
-            Some(kept)
-        } else {
-            kept.rfind(boundary).map(|at| &kept[..at])
-        }
-    };
-    let head = before(" \u{b7} ")
-        .or_else(|| before(" "))
-        .unwrap_or_default()
-        .trim_end_matches([',', ';', ':', '\u{b7}', ' ']);
-    if head.is_empty() {
-        cut
-    } else {
-        format!("{head}{ELLIPSIS}")
-    }
 }
 
 /// Where a cell's words landed, and whether they were cut short to fit.

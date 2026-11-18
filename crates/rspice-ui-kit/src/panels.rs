@@ -1001,7 +1001,8 @@ fn property_row_with_problem(
         value,
         palette.text,
         problem.map(|problem| (problem.mark(), problem.color(&palette))),
-        elide_text,
+        // A status is words: cut after a whole one, never inside it.
+        elide_at_words,
     );
     if let Some(problem) = problem {
         // The mark is the row's only statement of severity, and a screen
@@ -2229,6 +2230,34 @@ pub fn measured_text_width(ui: &mut Ui, text: &str, font: egui::FontId) -> f32 {
             .size()
             .x
     })
+}
+
+/// `text` cut to `room` where a reader expects a cut: after the last whole
+/// item of a list its middle dots set apart, else after the last whole word,
+/// and inside a word only when the first is too long for the room alone.
+pub fn elide_at_words(ui: &Ui, text: &str, font: &egui::FontId, room: f32) -> String {
+    const ELLIPSIS: char = '\u{2026}';
+    let cut = elide_text(ui, text, font, room);
+    let Some(kept) = cut.strip_suffix(ELLIPSIS) else {
+        return cut;
+    };
+    let rest = &text[kept.len()..];
+    let before = |boundary: &str| {
+        if rest.starts_with(boundary) {
+            Some(kept)
+        } else {
+            kept.rfind(boundary).map(|at| &kept[..at])
+        }
+    };
+    let head = before(" \u{b7} ")
+        .or_else(|| before(" "))
+        .unwrap_or_default()
+        .trim_end_matches([',', ';', ':', '\u{b7}', ' ']);
+    if head.is_empty() {
+        cut
+    } else {
+        format!("{head}{ELLIPSIS}")
+    }
 }
 
 pub fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
