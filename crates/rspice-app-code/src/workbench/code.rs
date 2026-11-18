@@ -213,29 +213,19 @@ impl CommandSet for CodeCommand {
                 "no library can be written",
             ),
             Self::OpenNetlist => (
-                !execution_active && cfg!(not(target_arch = "wasm32")),
-                if execution_active {
-                    "an active simulation execution still owns the project"
-                } else {
-                    "decks open from files on the desktop"
-                },
+                !execution_active,
+                "an active simulation execution still owns the project",
             ),
             Self::NewDeck => (
                 !execution_active,
                 "an active simulation execution still owns the project",
             ),
             Self::SaveDeckAs => (
-                cfg!(not(target_arch = "wasm32"))
-                    && reads
-                        .state
-                        .netlist
-                        .open_deck
-                        .as_ref()
-                        .is_some_and(|deck| !deck.is_stored()),
+                cfg!(not(target_arch = "wasm32")) && reads.state.netlist.open_deck.is_some(),
                 if cfg!(target_arch = "wasm32") {
                     "decks are saved as files on the desktop"
                 } else {
-                    "no deck file is open"
+                    "no deck is open"
                 },
             ),
             Self::SaveNetlistAsDeck => (
@@ -245,6 +235,15 @@ impl CommandSet for CodeCommand {
                 } else {
                     "the netlist has not been generated"
                 },
+            ),
+            Self::ExportDeck | Self::ExportDeckFiles => (
+                reads
+                    .state
+                    .netlist
+                    .open_deck
+                    .as_ref()
+                    .is_some_and(|deck| deck.is_stored()),
+                "no deck kept in the project is open",
             ),
             Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
                 match foreign_import_refusal_in(model, reads.platform) {
@@ -425,6 +424,8 @@ impl CommandSet for CodeCommand {
             Self::NewDeck => cx.wb.outbox.push(CodeRequest::NewDeck),
             Self::SaveDeckAs => cx.wb.outbox.push(CodeRequest::SaveDeckAs),
             Self::SaveNetlistAsDeck => cx.wb.outbox.push(CodeRequest::SaveNetlistAsDeck),
+            Self::ExportDeck => cx.wb.outbox.push(CodeRequest::ExportDeck),
+            Self::ExportDeckFiles => cx.wb.outbox.push(CodeRequest::ExportDeckFiles),
             Self::ImportVerilogA => cx.wb.outbox.push(CodeRequest::ImportVerilogA),
             Self::ImportLtspiceSchematic => {
                 cx.wb.outbox.push(CodeRequest::ImportLtspiceSchematic);

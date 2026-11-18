@@ -44,6 +44,11 @@ pub enum CodeCommand {
     ImportQspiceSchematic,
     ExportNetlist,
     ExportBillOfMaterials,
+    /// Export deck…: the deck the project keeps as text, alone, as a file.
+    ExportDeck,
+    /// Export deck and files (ZIP)…: the deck the project keeps as text and
+    /// the files kept with it, as one ZIP.
+    ExportDeckFiles,
     GenerateNetlist,
     /// Sole owner of "locate this instance in the generated deck". The
     /// canvas context menu, the instance inspector and the design navigator
@@ -128,6 +133,8 @@ pub enum CodeRequest {
     ImportQspiceSchematic,
     ExportNetlist,
     ExportBillOfMaterials,
+    ExportDeck,
+    ExportDeckFiles,
     GenerateNetlist,
     ShowInNetlist,
     FindCodeDocument,
@@ -204,6 +211,8 @@ pub enum CodeHandOff {
     NewDeck,
     SaveDeckAs,
     SaveNetlistAsDeck,
+    ExportDeck,
+    ExportDeckFiles,
     ImportVerilogA,
     ImportLtspiceSchematic,
     ImportQspiceSchematic,
@@ -429,7 +438,7 @@ pub const fn new_deck_label(browser: bool) -> &'static str {
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 45] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::NewDeck,
@@ -440,6 +449,8 @@ impl CodeCommand {
         Self::ImportQspiceSchematic,
         Self::ExportNetlist,
         Self::ExportBillOfMaterials,
+        Self::ExportDeck,
+        Self::ExportDeckFiles,
         Self::GenerateNetlist,
         Self::ShowInNetlist,
         Self::ShowInSchematic,
@@ -488,6 +499,8 @@ impl CodeCommand {
             Self::ImportQspiceSchematic => CommandKey::new("import-qspice-schematic"),
             Self::ExportNetlist => CommandKey::new("export-netlist-spice"),
             Self::ExportBillOfMaterials => CommandKey::new("export-bill-of-materials"),
+            Self::ExportDeck => CommandKey::new("export-deck"),
+            Self::ExportDeckFiles => CommandKey::new("export-deck-files"),
             Self::GenerateNetlist => CommandKey::new("generated-netlist"),
             Self::ShowInNetlist => ids::SHOW_IN_NETLIST,
             Self::ShowInSchematic => CommandKey::new("show-in-schematic"),
@@ -667,6 +680,8 @@ impl CodeCommand {
             Self::ImportQspiceSchematic => ("Import QSPICE schematic\u{2026}", "File", imports),
             Self::ExportNetlist => ("Export SPICE netlist\u{2026}", "File", open),
             Self::ExportBillOfMaterials => ("Export bill of materials\u{2026}", "File", open),
+            Self::ExportDeck => ("Export deck\u{2026}", "File", open),
+            Self::ExportDeckFiles => ("Export deck and files (ZIP)\u{2026}", "File", open),
             Self::GenerateNetlist => (
                 "Open generated netlist",
                 "Simulate",

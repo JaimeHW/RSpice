@@ -226,6 +226,12 @@ const EXPORT_MENU: &[MenuEntry] = &[
         "Bill of materials (CSV)\u{2026}",
     )
     .access('B'),
+    MenuEntry::command_as(CodeCommand::ExportDeck.key(), "Deck\u{2026}").access('K'),
+    MenuEntry::command_as(
+        CodeCommand::ExportDeckFiles.key(),
+        "Deck and files (ZIP)\u{2026}",
+    )
+    .access('Z'),
 ];
 
 /// Edit acts on what the page shows: with a source editor as the document,

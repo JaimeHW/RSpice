@@ -1273,15 +1273,26 @@ pub fn manual_source_inputs_in<'a>(
     Ok(match deck {
         Some(deck) => crate::simulation::execution::preparation::ManualSourceInputs {
             source: deck.text,
-            // A deck the project keeps as text has no folder to read from.
+            // A deck the project keeps as text has no folder: it reads the
+            // files kept with it.
             origin: match deck.origin {
                 crate::simulation::DeckOrigin::File(path) => Some(path),
                 crate::simulation::DeckOrigin::Stored { .. } => None,
+            },
+            stored: match deck.origin {
+                crate::simulation::DeckOrigin::File(_) => None,
+                crate::simulation::DeckOrigin::Stored { files } => Some(
+                    crate::simulation::execution::preparation::StoredDeckInputs {
+                        name: deck.name,
+                        files,
+                    },
+                ),
             },
         },
         None => crate::simulation::execution::preparation::ManualSourceInputs {
             source: model.simulation.source.netlist_content.as_str(),
             origin: model.schematic.session.current_file.as_deref(),
+            stored: None,
         },
     })
 }

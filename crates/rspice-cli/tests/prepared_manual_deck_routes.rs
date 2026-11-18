@@ -131,6 +131,7 @@ fn prepared_manual_snapshot(
         ManualSourceInputs {
             source: &source,
             origin: Some(origin),
+            stored: None,
         },
     )
 }

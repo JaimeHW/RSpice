@@ -182,6 +182,7 @@ pub mod workbench {
     pub mod workflows {
         pub(crate) use rspice_app_services::workbench::workflows::export_workflow;
 
+        pub mod deck_import;
         pub mod netlist_workflow;
     }
 }

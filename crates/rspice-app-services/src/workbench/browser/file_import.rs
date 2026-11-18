@@ -248,6 +248,56 @@ pub fn pick_text_file(
     });
 }
 
+/// Pick files, as many as the reader chooses, and read each whole: its name
+/// and bytes, within the import's ceiling in all.
+#[cfg(target_arch = "wasm32")]
+pub fn pick_files(
+    filter_name: &'static str,
+    filter_extensions: &'static [&'static str],
+    on_complete: impl FnOnce(Result<Option<Vec<(String, Vec<u8>)>>, String>) + 'static,
+) {
+    let max_bytes = active_text_import_kind()
+        .map(BrowserTextImportKind::max_bytes)
+        .unwrap_or(crate::io::project_io::MAX_PROJECT_FILE_BYTES);
+    wasm_bindgen_futures::spawn_local(async move {
+        let picked = rfd::AsyncFileDialog::new()
+            .add_filter(filter_name, filter_extensions)
+            .pick_files()
+            .await;
+        let result = match picked.filter(|files| !files.is_empty()) {
+            None => Ok(None),
+            Some(files) => {
+                let mut read = Vec::with_capacity(files.len());
+                let mut total = 0_u64;
+                let mut refused = None;
+                let too_large = || {
+                    format!("The picked files come to more than the supported {max_bytes} bytes")
+                };
+                for file in files {
+                    let name = file.file_name();
+                    // The size the browser states is refused before any of
+                    // the file is read; the bytes read are counted after.
+                    let size = file.inner().size();
+                    if !size.is_finite() || size < 0.0 || total as f64 + size > max_bytes as f64 {
+                        refused = Some(too_large());
+                        break;
+                    }
+                    let bytes = file.read().await;
+                    total = total.saturating_add(bytes.len() as u64);
+                    if total > max_bytes {
+                        refused = Some(too_large());
+                        break;
+                    }
+                    read.push((name, bytes));
+                }
+                refused.map_or(Ok(Some(read)), Err)
+            }
+        };
+        on_complete(result);
+        request_browser_import_repaint();
+    });
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn request_browser_import_repaint() {
     if request_registered_import_repaint() {

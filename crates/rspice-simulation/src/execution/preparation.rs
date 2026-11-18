@@ -107,6 +107,17 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
 pub struct ManualSourceInputs<'a> {
     pub source: &'a str,
     pub origin: Option<&'a Path>,
+    /// A deck the project keeps as text, which has no file: its include
+    /// lines read the files kept with it.
+    pub stored: Option<StoredDeckInputs<'a>>,
+}
+
+/// A deck the project keeps as text: its name, and the files kept with it by
+/// their paths from it.
+#[derive(Debug, Clone, Copy)]
+pub struct StoredDeckInputs<'a> {
+    pub name: &'a str,
+    pub files: &'a [rspice_design::deck::StoredDeckFile],
 }
 
 /// The reviewed shipped ceilings, with the one the reader controls applied.
@@ -750,7 +761,9 @@ fn expand_manual_deck<R, A>(
     let origin = manual.origin;
     // An include resolves against the deck's folder; with no file there is
     // no folder, and the process's working directory is never read instead.
-    if origin.is_none() && contains_external_include_directive(&composed) {
+    // A deck the project keeps as text reads the files kept with it.
+    if origin.is_none() && manual.stored.is_none() && contains_external_include_directive(&composed)
+    {
         return Err(PreparationError::new(
             PreparationStage::SourceChecks,
             "The deck has no file, so its .include and .lib lines have no folder to be read from.",
@@ -778,6 +791,7 @@ fn expand_manual_deck<R, A>(
     } = expand_manual_dependencies(
         &sealed_hdl.source,
         origin,
+        manual.stored,
         &inputs.include_search(),
         &sealed_models,
         &|location| sealed_hdl.included_line(location),
@@ -1397,6 +1411,7 @@ mod tests {
         ManualSourceInputs {
             source,
             origin: Some(origin),
+            stored: None,
         }
     }
 

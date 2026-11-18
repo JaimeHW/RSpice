@@ -244,10 +244,14 @@ pub struct ExpandedManualDependencies {
 pub fn expand_manual_dependencies(
     source: &str,
     origin: Option<&Path>,
+    stored: Option<crate::execution::preparation::StoredDeckInputs<'_>>,
     include_search: &IncludeSearchChain,
     sealed_sources: &SealedModelExecutionSources,
     rewrite: &dyn Fn(&rspice_core::netlist::NetlistSourceLocation) -> Option<String>,
 ) -> Result<ExpandedManualDependencies, PreparationError> {
+    if let Some(stored) = stored {
+        return expand_stored_deck(source, stored, sealed_sources, rewrite);
+    }
     let Some(origin) = origin else {
         return Ok(ExpandedManualDependencies {
             expanded: source.to_owned(),
@@ -304,6 +308,40 @@ pub fn expand_manual_dependencies(
             source_lines: crate::execution::included_line_map(lines),
         })
     }
+}
+
+/// Expand a deck the project keeps as text through the files kept with it,
+/// each read from beside the deck by the path its include line writes, and
+/// through the model sources sealed for the run. Nothing is read from a
+/// disk: a path no file of the deck is, an absolute one among them, is the
+/// error on the line that names it.
+fn expand_stored_deck(
+    source: &str,
+    stored: crate::execution::preparation::StoredDeckInputs<'_>,
+    sealed_sources: &SealedModelExecutionSources,
+    rewrite: &dyn Fn(&rspice_core::netlist::NetlistSourceLocation) -> Option<String>,
+) -> Result<ExpandedManualDependencies, PreparationError> {
+    let (root, files) = rspice_design::deck::stored_deck_sources(stored.name, source, stored.files);
+    let bundle = sealed_sources
+        .relative_bundle_with(files)
+        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
+    let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(&root, bundle);
+    let (expanded, lines) = processor
+        .expand_content_rewriting_with_line_map_and_abort(
+            source,
+            &root,
+            &mut |location, _| rewrite(location),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .map_err(|error| {
+            PreparationError::new(PreparationStage::SourceChecks, error.to_string())
+        })?;
+    Ok(ExpandedManualDependencies {
+        expanded,
+        canonical_origin: None,
+        dependencies: processor.resolved_dependencies().to_vec(),
+        source_lines: crate::execution::included_line_map(lines),
+    })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

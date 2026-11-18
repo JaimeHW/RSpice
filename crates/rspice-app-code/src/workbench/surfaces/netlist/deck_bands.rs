@@ -1,6 +1,7 @@
 //! The bands over a deck's file: a file changed on disk while its tab held
-//! edits, an include's edits the check does not read yet, and a deck whose
-//! file is not where the project says.
+//! edits, an include's edits the check does not read yet, a deck whose file
+//! is not where the project says, and in the browser a deck that is a file
+//! on the desktop, which it cannot read or run.
 //!
 //! The disk is looked at when the page is shown and when the window takes
 //! the focus back with the page in front, never on every frame; a run and a
@@ -24,6 +25,22 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     }
     if let Some(missing) = deck_files::missing_deck(cx.model, &cx.state.netlist) {
         missing_band(ui, cx, &missing, messages);
+        return;
+    }
+    if let Some(deck) = deck_files::desktop_deck(cx.model, &cx.state.netlist) {
+        super::advisory_band(ui, None, |ui| {
+            band_row::<MissingAnswer>(
+                ui,
+                &messages.format(
+                    MessageId::NetlistDeckOnTheDesktop,
+                    &[
+                        ("name", &deck.name),
+                        ("path", &deck.path.display().to_string()),
+                    ],
+                ),
+                &[],
+            );
+        });
         return;
     }
     let Some(file) =

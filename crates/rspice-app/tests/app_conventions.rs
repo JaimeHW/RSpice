@@ -1149,6 +1149,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "code_workspace"),
             ("lib.rs", "commands"),
             ("lib.rs", "deck_files"),
+            ("lib.rs", "deck_import"),
             ("lib.rs", "dialogs"),
             ("lib.rs", "docks"),
             ("lib.rs", "document_bar"),

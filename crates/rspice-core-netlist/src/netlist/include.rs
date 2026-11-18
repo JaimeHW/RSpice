@@ -317,9 +317,10 @@ impl SealedSourceBundle {
         })
     }
 
-    /// The member `requested` names from the folder of `owner`. An absolute
-    /// path names a file outside the members, which only a file on disk
-    /// could be.
+    /// The member `requested` names from the folder of `owner`, on every
+    /// host alike: a `..` above the top folder stays at the top, as it does
+    /// on a disk. An absolute path names a file outside the members, which
+    /// only a file on disk could be.
     fn resolve_relative(&self, owner: &Path, requested: &str) -> Result<PathBuf, ParseError> {
         if is_portable_absolute_source_path(Path::new(requested))
             || windows_drive_relative_suffix(requested).is_some()
@@ -331,8 +332,30 @@ impl SealedSourceBundle {
                 ),
             });
         }
-        let folder = owner.parent().unwrap_or(Path::new("/"));
-        self.canonical_member(&folder.join(requested))
+        let folder = portable_source_path_identity(owner.parent().unwrap_or(Path::new("/")));
+        // A drive keeps its letter; any other identity is under `/`.
+        let anchored = usize::from(is_windows_source_path_literal(&folder));
+        let mut parts = folder
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        for part in requested.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => {
+                    if parts.len() > anchored {
+                        parts.pop();
+                    }
+                }
+                part => parts.push(part),
+            }
+        }
+        let candidate = if anchored == 1 {
+            parts.join("/")
+        } else {
+            format!("/{}", parts.join("/"))
+        };
+        self.canonical_member(Path::new(&candidate))
             .ok_or_else(|| ParseError::Syntax {
                 line: 0,
                 message: format!(
@@ -3231,7 +3254,7 @@ R1 1 0 {selected}
             ])
             .expect("the deck and its files")
         };
-        let deck = "* amp\n.include models\\opamp.inc\n.lib \"models/corners.lib\" ff\n";
+        let deck = "* amp\n.include models\\opamp.inc\n.lib \"../models/corners.lib\" ff\n";
 
         let expanded = IncludeProcessor::new_sealed(&root, bundle(deck))
             .expand_content_with_abort(deck, &root, &NoAbort)

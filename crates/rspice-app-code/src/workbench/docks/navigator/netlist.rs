@@ -741,6 +741,17 @@ pub(super) struct IncludeRowFacts {
     pub(super) sections: Vec<rspice_core::library::LibSectionSummary>,
 }
 
+/// Whether `path`, where the check read an include, is a file kept with the
+/// open deck the project keeps as text.
+fn kept_with_deck(netlist: &NetlistDocumentState, path: &std::path::Path) -> bool {
+    let kept = rspice_design::deck::stored_file_path(path);
+    netlist
+        .open_deck
+        .as_ref()
+        .and_then(|deck| deck.stored_files.as_ref())
+        .is_some_and(|files| files.iter().any(|file| file.path == kept))
+}
+
 /// The catalog word for the chain stage a dependency resolved through.
 fn include_stage_text(
     messages: MessageCatalog,
@@ -946,11 +957,13 @@ pub(super) fn retained_include_facts(
             .map(|include| IncludeRowFacts {
                 line: Some(include.line),
                 state: None,
-                // A file beside the file that names it is the ordinary case;
-                // the row names where else one was found.
+                // A file beside the file that names it is the ordinary case,
+                // and for a deck kept as text a file kept with it; the row
+                // names where else one was found.
                 via: (include.resolution.stage()
-                    != rspice_core::netlist::IncludeSearchStage::IncludingFile)
-                    .then(|| chain_stage_text(messages, include.resolution.stage(), project_paths)),
+                    != rspice_core::netlist::IncludeSearchStage::IncludingFile
+                    && !kept_with_deck(netlist, &include.path))
+                .then(|| chain_stage_text(messages, include.resolution.stage(), project_paths)),
                 chain: Some(include_chain_text(
                     messages,
                     &include.requested,

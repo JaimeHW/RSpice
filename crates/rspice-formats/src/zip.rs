@@ -23,6 +23,56 @@ impl std::fmt::Display for StoredZipError {
 
 impl std::error::Error for StoredZipError {}
 
+/// The files of the ZIP archive `bytes`, stored or deflated, each by its
+/// path in the archive; folders are left out. More than `max_members`
+/// members, a name given twice, or more than `max_bytes` of files once
+/// inflated is refused before what is past it is inflated.
+pub fn read_zip_files(
+    bytes: &[u8],
+    max_members: usize,
+    max_bytes: usize,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    use std::io::Read as _;
+    let mut archive =
+        reader::open_unique_archive(bytes, max_members).map_err(|error| match error {
+            reader::ArchiveReadError::Zip(error) => {
+                format!("the archive could not be read: {error}")
+            }
+            reader::ArchiveReadError::MemberCount { members, limit } => {
+                format!("the archive holds {members} members; at most {limit} are read")
+            }
+            reader::ArchiveReadError::DuplicateMember(name) => {
+                format!("the archive holds {name} twice")
+            }
+        })?;
+    let mut files = Vec::new();
+    let mut left = max_bytes;
+    for index in 0..archive.len() {
+        let member = archive
+            .by_index(index)
+            .map_err(|error| format!("the archive could not be read: {error}"))?;
+        if member.is_dir() {
+            continue;
+        }
+        let name = member
+            .name()
+            .map_err(|error| format!("a name in the archive could not be read: {error}"))?
+            .into_owned();
+        let mut content = Vec::new();
+        // One byte past what is left says the member is larger, whatever
+        // size its header claims.
+        member
+            .take(u64::try_from(left).unwrap_or(u64::MAX).saturating_add(1))
+            .read_to_end(&mut content)
+            .map_err(|error| format!("{name} could not be read from the archive: {error}"))?;
+        left = left
+            .checked_sub(content.len())
+            .ok_or_else(|| format!("the archive's files come to more than {max_bytes} bytes"))?;
+        files.push((name, content));
+    }
+    Ok(files)
+}
+
 pub fn deterministic_stored_zip(entries: &[(&str, &[u8])]) -> Result<Vec<u8>, StoredZipError> {
     if entries.is_empty() || entries.len() > u16::MAX as usize {
         return Err(StoredZipError::EntryCount {

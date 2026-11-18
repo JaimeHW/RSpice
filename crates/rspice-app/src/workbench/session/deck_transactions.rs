@@ -10,8 +10,115 @@ use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// What the browser's picker delivered for an import of decks, with the
+    /// lease it was asked under, until a frame takes it.
+    static DECK_IMPORT: std::cell::RefCell<
+        Option<(
+            rspice_app_services::workbench::browser::file_import::TextImportToken,
+            Result<Option<Vec<(String, Vec<u8>)>>, String>,
+        )>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
 /// Opening a deck file, over the whole application state.
 impl AppState {
+    /// Import deck…, where there is no file system: ask for SPICE files, or
+    /// a ZIP of them, and bring the decks among them into the project as
+    /// text once the browser has read them.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn open_deck(&mut self) -> bool {
+        use rspice_app_services::workbench::browser::file_import;
+        let new_project = !self.platform.project_lifecycle.is_open();
+        if let Some(reason) = self.deck_open_refusal(new_project) {
+            self.prompt(reason);
+            return false;
+        }
+        let token =
+            match file_import::try_begin_text_import(file_import::BrowserTextImportKind::Netlist) {
+                Ok(token) => token,
+                Err(error) => {
+                    self.prompt(error);
+                    return false;
+                }
+            };
+        file_import::pick_files(
+            "SPICE decks and ZIP",
+            DECK_IMPORT_EXTENSIONS,
+            move |result| {
+                if file_import::text_import_is_current(token) {
+                    DECK_IMPORT.with(|slot| *slot.borrow_mut() = Some((token, result)));
+                }
+            },
+        );
+        true
+    }
+
+    /// Bring in the decks the browser's picker read, once it has.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn poll_deck_import(&mut self) {
+        let Some((token, result)) = DECK_IMPORT.with(|slot| slot.borrow_mut().take()) else {
+            return;
+        };
+        if !rspice_app_services::workbench::browser::file_import::finish_text_import(token) {
+            return;
+        }
+        match result {
+            Ok(Some(files)) => {
+                self.import_deck_files(files);
+            }
+            Ok(None) => {}
+            Err(error) => self.prompt(error),
+        }
+    }
+
+    /// Bring the decks among `files`, picked together or one ZIP, into the
+    /// project as text, in a new project when none is open, and the first
+    /// to the front.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn import_deck_files(&mut self, files: Vec<(String, Vec<u8>)>) -> bool {
+        let decks = match rspice_app_code::workbench::workflows::deck_import::import_files(files) {
+            Ok(decks) => decks,
+            Err(error) => {
+                self.prompt(error);
+                return false;
+            }
+        };
+        let new_project = !self.platform.project_lifecycle.is_open();
+        if let Some(reason) = self.deck_open_refusal(new_project) {
+            self.prompt(reason);
+            return false;
+        }
+        let mut candidate = self.clone();
+        if new_project {
+            candidate.create_netlist_project(&decks[0].name);
+        }
+        let names = match rspice_app_code::workbench::documents::deck_files::add_stored_decks(
+            &mut candidate.model,
+            &mut candidate.code.netlist,
+            &mut candidate.code.netlist_open_documents,
+            &mut candidate.runs,
+            decks,
+        ) {
+            Ok(names) => names,
+            Err(error) => {
+                self.prompt(error);
+                return false;
+            }
+        };
+        candidate
+            .workbench
+            .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
+        self.commit_candidate(candidate);
+        self.record(
+            rspice_app_state::diagnostics::LogSeverity::Info,
+            rspice_app_state::diagnostics::LogSource::Netlist,
+            format!("Imported {}.", names.join(", ")),
+        );
+        true
+    }
+
     /// Ask for a deck file and open it. A deck that could not be opened now
     /// is refused before any file is asked for.
     #[cfg(not(target_arch = "wasm32"))]
@@ -65,7 +172,8 @@ impl AppState {
     }
 
     /// Save deck as…: ask where the open deck goes, write it there and read
-    /// it from there from now on.
+    /// it from there from now on; a deck the project keeps as text is
+    /// written as files, the deck and those kept with it.
     pub(crate) fn save_deck_as(&mut self) -> bool {
         #[cfg(target_arch = "wasm32")]
         {
@@ -74,27 +182,96 @@ impl AppState {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let Some(root) = self
-                .code
-                .netlist
-                .open_deck
-                .as_ref()
-                .filter(|deck| !deck.is_stored())
-                .map(|deck| &deck.root)
-            else {
-                self.prompt("Open a deck file to save it as another.");
+            let Some(deck) = self.code.netlist.open_deck.as_ref() else {
+                self.prompt("Open a deck to save it as another.");
                 return false;
+            };
+            let folder = if deck.is_stored() {
+                self.model
+                    .workspace
+                    .content
+                    .project
+                    .data_root()
+                    .map(std::path::Path::to_path_buf)
+                    .or_else(dirs::document_dir)
+            } else {
+                deck.root.path.parent().map(std::path::Path::to_path_buf)
             };
             let Some(path) =
                 rspice_app_code::workbench::workflows::netlist_workflow::show_deck_save_dialog(
-                    "Save Deck As",
-                    &root.name(),
-                    root.path.parent(),
+                    if deck.is_stored() {
+                        "Save Deck As Files"
+                    } else {
+                        "Save Deck As"
+                    },
+                    &deck.root.name(),
+                    folder.as_deref(),
                 )
             else {
                 return false;
             };
             self.save_deck_as_at(&path)
+        }
+    }
+
+    /// Export deck… or, `with_files`, Export deck and files (ZIP)…: the open
+    /// deck the project keeps as text, alone or with its files as one ZIP,
+    /// downloaded by the browser, or on the desktop written where the
+    /// reader says.
+    pub(crate) fn export_stored_deck(&mut self, with_files: bool) -> bool {
+        let (name, bytes) =
+            match rspice_app_code::workbench::documents::deck_files::export_stored_deck(
+                &self.model,
+                &self.code.netlist,
+                with_files,
+            ) {
+                Ok(export) => export,
+                Err(error) => {
+                    self.prompt(error);
+                    return false;
+                }
+            };
+        #[cfg(target_arch = "wasm32")]
+        let written = rspice_app_services::workbench::browser::download::download_bytes_file(
+            std::path::Path::new(&name),
+            &bytes,
+            if with_files {
+                "application/zip"
+            } else {
+                "text/plain"
+            },
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        let written = {
+            use rspice_app_code::workbench::workflows::netlist_workflow as pickers;
+            let folder = self
+                .model
+                .workspace
+                .content
+                .project
+                .data_root()
+                .map(std::path::Path::to_path_buf)
+                .or_else(dirs::document_dir);
+            let picked = if with_files {
+                pickers::show_zip_save_dialog("Export Deck and Files", &name, folder.as_deref())
+            } else {
+                pickers::show_deck_save_dialog("Export Deck", &name, folder.as_deref())
+            };
+            let Some(path) = picked else {
+                return false;
+            };
+            std::fs::write(&path, &bytes)
+                .map_err(|error| format!("{} could not be written: {error}", path.display()))
+        };
+        match written {
+            Ok(()) => {
+                self.prompt(format!("Exported {name}."));
+                true
+            }
+            Err(error) => {
+                self.prompt(error);
+                false
+            }
         }
     }
 
@@ -104,6 +281,8 @@ impl AppState {
         match rspice_app_code::workbench::documents::deck_files::save_deck_as(
             &mut self.model,
             &mut self.code.netlist,
+            &mut self.code.netlist_open_documents,
+            &mut self.runs,
             path,
         ) {
             Ok(name) => {
@@ -288,13 +467,6 @@ impl AppState {
         None
     }
 
-    /// A deck is a file, and the browser has no file to keep it in.
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn open_deck(&mut self) -> bool {
-        self.prompt("Decks open from files on the desktop.");
-        false
-    }
-
     /// Open the deck file at `path`, in a new project around it when
     /// `new_project` says so, else in the open project.
     #[cfg(not(target_arch = "wasm32"))]
@@ -418,3 +590,10 @@ impl AppState {
         self.open_deck_at(&path, new_project)
     }
 }
+
+/// What Import deck… offers the browser's picker: SPICE files, and ZIPs of
+/// them.
+#[cfg(target_arch = "wasm32")]
+const DECK_IMPORT_EXTENSIONS: &[&str] = &[
+    "cir", "sp", "spi", "spice", "net", "ckt", "cki", "scs", "lib", "inc", "txt", "zip",
+];

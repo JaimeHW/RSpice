@@ -346,6 +346,21 @@ impl SealedModelExecutionSources {
             .map_err(|error| format!("Failed to authorize active source dependencies: {error}"))
     }
 
+    /// The model sources and `files`, the deck the project keeps as text
+    /// and the files kept with it, as one bundle: a request the model
+    /// sources' edges do not answer is read from beside the file that writes
+    /// it, among the members.
+    pub fn relative_bundle_with(
+        &self,
+        files: Vec<(PathBuf, String)>,
+    ) -> Result<rspice_core::netlist::SealedSourceBundle, String> {
+        rspice_core::netlist::SealedSourceBundle::try_new_relative_with_edges(
+            self.sources.iter().cloned().chain(files),
+            self.edges.iter().cloned(),
+        )
+        .map_err(|error| format!("The deck's files could not be read together: {error}"))
+    }
+
     /// Expand an active root through the authenticated model source closure
     /// without consulting a filesystem.
     pub fn expand_root_dependencies(

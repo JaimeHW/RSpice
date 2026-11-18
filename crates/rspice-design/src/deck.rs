@@ -107,6 +107,18 @@ pub fn stored_file_identity(path: &str) -> PathBuf {
     PathBuf::from(format!("/{}", path.trim_start_matches(['/', '\\'])))
 }
 
+/// The path from the deck of the file the engine reads at `identity`: the
+/// inverse of [`stored_file_identity`], whichever separators the identity
+/// came back with. A path that is no identity is taken as a path already.
+#[must_use]
+pub fn stored_file_path(identity: &Path) -> String {
+    identity
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim_start_matches(['/', '\\'])
+        .to_owned()
+}
+
 /// The deck `name`, written `text`, and the files kept with it, as the
 /// engine reads them: the deck's identity, and every file, the deck first,
 /// at its identity.

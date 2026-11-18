@@ -548,11 +548,16 @@ pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
 
 /// Save As: write the open deck to `path`, in its own encoding and line
 /// endings, and read it from there from now on. The project lists the new
-/// file; the old one stays as it was. The new file's name.
+/// file; the old one stays as it was. A deck the project keeps as text is
+/// saved as files: the deck at `path` and each file kept with it beside it,
+/// and the project keeps the deck as that file from then on. The new
+/// file's name.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_deck_as(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
     path: &Path,
 ) -> Result<String, String> {
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
@@ -562,11 +567,13 @@ pub fn save_deck_as(
         .project
         .data_root()
         .map(Path::to_path_buf);
+    if netlist.open_deck.as_ref().is_some_and(OpenDeck::is_stored) {
+        return save_stored_deck_as_files(model, netlist, open_documents, runs, &path);
+    }
     let deck = netlist
         .open_deck
         .as_mut()
-        .filter(|deck| !deck.is_stored())
-        .ok_or_else(|| "Open a deck file to save it as another.".to_owned())?;
+        .ok_or_else(|| "Open a deck to save it as another.".to_owned())?;
     let was = (deck.root.path.clone(), deck.root.disk.take());
     deck.root.path = path.clone();
     deck.root.disk_change = None;
@@ -586,6 +593,108 @@ pub fn save_deck_as(
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
     Ok(name)
+}
+
+/// Save as files…: write the deck the project keeps as text to `path`, and
+/// each file kept with it beside it at its path from the deck, each in its
+/// own encoding; the project then keeps the deck as the file at `path`,
+/// and the deck is read from there. A file of the deck already on disk
+/// with other text is not overwritten, and nothing is written then.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_stored_deck_as_files(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    path: &Path,
+) -> Result<String, String> {
+    let deck = netlist
+        .open_deck
+        .as_ref()
+        .ok_or_else(|| "No deck is open.".to_owned())?;
+    let folder = path.parent().unwrap_or(Path::new("."));
+    let mut writes = vec![(
+        path.to_path_buf(),
+        deck.root
+            .encoding
+            .encode(&deck.root.line_ending.write(&deck.root.text))?,
+    )];
+    for file in deck.stored_files.iter().flatten() {
+        let at = folder.join(file.path.split('/').collect::<PathBuf>());
+        let bytes = file.encoding.encode(&file.text)?;
+        if std::fs::read(&at).is_ok_and(|there| there != bytes) {
+            return Err(format!(
+                "{} is already there, with other text: choose another folder for {}.",
+                at.display(),
+                deck.root.name()
+            ));
+        }
+        writes.push((at, bytes));
+    }
+    for (at, bytes) in &writes {
+        if let Some(parent) = at.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("{} could not be made: {error}", parent.display()))?;
+        }
+        std::fs::write(at, bytes)
+            .map_err(|error| format!("{} could not be written: {error}", at.display()))?;
+    }
+    let id = deck.id;
+    let project_folder = model
+        .workspace
+        .content
+        .project
+        .data_root()
+        .map(Path::to_path_buf);
+    let content = &mut *model.workspace.content;
+    let entry = content
+        .decks
+        .iter_mut()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+    entry.source = crate::state::ProjectDeck::for_file(path, project_folder.as_deref()).source;
+    content.decks_dirty = true;
+    let entry = entry.clone();
+    let open = read_project_deck(&entry, project_folder.as_deref())?;
+    let name = open.root.name();
+    close_open_deck(model, netlist, open_documents);
+    install_open_deck(model, netlist, open_documents, runs, open);
+    Ok(name)
+}
+
+/// Export deck…: the name and bytes of the open deck the project keeps as
+/// text, alone in its own encoding, or with `with_files` with the files
+/// kept with it as one ZIP named after it.
+pub fn export_stored_deck(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    with_files: bool,
+) -> Result<(String, Vec<u8>), String> {
+    let id = netlist
+        .open_deck
+        .as_ref()
+        .filter(|deck| deck.is_stored())
+        .map(|deck| deck.id)
+        .ok_or_else(|| "Open a deck kept in the project to export it.".to_owned())?;
+    let deck = model
+        .workspace
+        .content
+        .decks
+        .iter()
+        .find(|deck| deck.id == id)
+        .and_then(crate::state::ProjectDeck::stored_deck)
+        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+    if !with_files {
+        return Ok((deck.name.clone(), deck.encoding.encode(&deck.text)?));
+    }
+    let stem = deck
+        .name
+        .rsplit_once('.')
+        .map_or(deck.name.as_str(), |(stem, _)| stem);
+    Ok((
+        format!("{stem}.zip"),
+        crate::workbench::workflows::deck_import::export_zip(deck)?,
+    ))
 }
 
 /// The text of a deck saved from the generated netlist `source`: a first
@@ -689,6 +798,37 @@ pub fn missing_deck(model: &Model, netlist: &NetlistDocumentState) -> Option<Mis
         id,
         name: deck.name(),
         path,
+    })
+}
+
+/// The deck of the project the browser could not open because it is a
+/// file on the desktop, when that is why no deck is open.
+#[must_use]
+pub fn desktop_deck(model: &Model, netlist: &NetlistDocumentState) -> Option<MissingDeck> {
+    desktop_deck_in(model, netlist, cfg!(target_arch = "wasm32"))
+}
+
+/// [`desktop_deck`], where `browser` says whether there is no file system.
+#[must_use]
+pub fn desktop_deck_in(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    browser: bool,
+) -> Option<MissingDeck> {
+    if !browser || netlist.open_deck.is_some() {
+        return None;
+    }
+    let id = netlist.unreadable_deck?;
+    let deck = model
+        .workspace
+        .content
+        .decks
+        .iter()
+        .find(|deck| deck.id == id)?;
+    Some(MissingDeck {
+        id,
+        name: deck.name(),
+        path: deck.file_path(model.workspace.content.project.data_root())?,
     })
 }
 
@@ -809,6 +949,39 @@ pub fn save_shown_file(netlist: &mut NetlistDocumentState) -> Result<(), String>
     save_file(file)
 }
 
+/// For a deck the project keeps as text, in front of the page with `shown`
+/// the text of the file in front: where the engine reads that file, and
+/// every file of the deck where the engine reads it, the one in front with
+/// `shown`. `None` for a deck that is a file.
+#[must_use]
+pub fn stored_sources(
+    netlist: &NetlistDocumentState,
+    shown: &str,
+) -> Option<(PathBuf, Vec<(PathBuf, String)>)> {
+    let deck = netlist.open_deck.as_ref()?;
+    let files = deck.stored_files.as_ref()?;
+    let include = netlist.active_dependency_identity.as_deref();
+    let root_text = match include {
+        None => shown.to_owned(),
+        Some(_) => deck.root.line_ending.write(&deck.root.text).into_owned(),
+    };
+    let files = files
+        .iter()
+        .map(|file| StoredDeckFile {
+            text: if include == Some(file.path.as_str()) {
+                shown.to_owned()
+            } else {
+                file.text.clone()
+            },
+            ..file.clone()
+        })
+        .collect::<Vec<_>>();
+    let (root, sources) =
+        rspice_design::deck::stored_deck_sources(&deck.root.name(), &root_text, &files);
+    let at = include.map_or(root, rspice_design::deck::stored_file_identity);
+    Some((at, sources))
+}
+
 /// Whether the file in front of the Netlist workspace is a file on disk,
 /// which Save writes: a deck that is a file, or an include of one. A deck
 /// the project keeps as text is saved with the project.
@@ -904,6 +1077,69 @@ pub fn new_stored_deck(
     content.decks_dirty = true;
     install_open_deck(model, netlist, open_documents, runs, open);
     Ok(name)
+}
+
+/// Add `decks`, decks the project keeps as text, to the project, each under
+/// a name no other deck of it has, and bring the first to the front. Their
+/// names, or why none was added: the deck open before goes, so one with
+/// unsaved edits stops this.
+pub fn add_stored_decks(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    decks: Vec<StoredDeck>,
+) -> Result<Vec<String>, String> {
+    if let Some(unsaved) = netlist.open_deck.as_ref().and_then(OpenDeck::unsaved) {
+        return Err(format!(
+            "Save {} before opening another deck.",
+            unsaved.name()
+        ));
+    }
+    let content = &mut *model.workspace.content;
+    let mut names = content
+        .decks
+        .iter()
+        .map(crate::state::ProjectDeck::name)
+        .collect::<Vec<_>>();
+    let mut added = Vec::with_capacity(decks.len());
+    let mut first = None;
+    for mut deck in decks {
+        deck.name = unused_name(&deck.name, &names);
+        names.push(deck.name.clone());
+        let entry = crate::state::ProjectDeck::stored(deck.clone());
+        first.get_or_insert_with(|| OpenDeck::from_stored(entry.id, &deck));
+        added.push(deck.name);
+        content.decks.push(entry);
+    }
+    let Some(open) = first else {
+        return Err("No deck was found to add.".to_owned());
+    };
+    content.decks_dirty = true;
+    install_open_deck(model, netlist, open_documents, runs, open);
+    Ok(added)
+}
+
+/// `name`, or where a deck of `taken` has it, `name` with the first number
+/// after its stem that none has: `amp.cir`, `amp_2.cir`.
+fn unused_name(name: &str, taken: &[String]) -> String {
+    let free = |candidate: &str| {
+        !taken
+            .iter()
+            .any(|other| other.eq_ignore_ascii_case(candidate))
+    };
+    if free(name) {
+        return name.to_owned();
+    }
+    let (stem, extension) = name
+        .rsplit_once('.')
+        .map_or((name, String::new()), |(stem, extension)| {
+            (stem, format!(".{extension}"))
+        });
+    (2_u32..)
+        .map(|number| format!("{stem}_{number}{extension}"))
+        .find(|candidate| free(candidate))
+        .unwrap_or_else(|| name.to_owned())
 }
 
 /// Open the deck at `path`: add it to the project unless it is one of the
@@ -1125,11 +1361,22 @@ pub fn show_include(
     runs: &mut RunsState,
     path: &Path,
 ) -> Result<(), String> {
-    let key = path.to_string_lossy().into_owned();
     let deck = netlist
         .open_deck
         .as_mut()
         .ok_or_else(|| "No deck is open.".to_owned())?;
+    // A file of a deck kept as text is named by its path from the deck,
+    // whether asked for so or by where the engine read it.
+    let key = if deck.is_stored() {
+        rspice_design::deck::stored_file_path(path)
+    } else {
+        path.to_string_lossy().into_owned()
+    };
+    let path = &if deck.is_stored() {
+        PathBuf::from(&key)
+    } else {
+        path.to_path_buf()
+    };
     if deck.include(&key).is_none() {
         // A deck the project keeps as text reads its includes from what the
         // project keeps beside it.

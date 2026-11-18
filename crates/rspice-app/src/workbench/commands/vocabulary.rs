@@ -351,6 +351,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CloudCommand::PublishToWeb.key(),
     CodeCommand::ExportNetlist.key(),
     CodeCommand::ExportBillOfMaterials.key(),
+    CodeCommand::ExportDeck.key(),
+    CodeCommand::ExportDeckFiles.key(),
     SheetsCommand::SheetProperties.key(),
     SheetsCommand::SheetFormatManager.key(),
     SheetsCommand::SheetDefaults.key(),

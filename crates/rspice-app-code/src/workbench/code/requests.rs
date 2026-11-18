@@ -31,6 +31,8 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         CodeRequest::NewDeck => return Some(CodeHandOff::NewDeck),
         CodeRequest::SaveDeckAs => return Some(CodeHandOff::SaveDeckAs),
         CodeRequest::SaveNetlistAsDeck => return Some(CodeHandOff::SaveNetlistAsDeck),
+        CodeRequest::ExportDeck => return Some(CodeHandOff::ExportDeck),
+        CodeRequest::ExportDeckFiles => return Some(CodeHandOff::ExportDeckFiles),
         CodeRequest::ImportVerilogA => return Some(CodeHandOff::ImportVerilogA),
         CodeRequest::ImportLtspiceSchematic => return Some(CodeHandOff::ImportLtspiceSchematic),
         CodeRequest::ImportQspiceSchematic => return Some(CodeHandOff::ImportQspiceSchematic),

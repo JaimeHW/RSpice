@@ -933,6 +933,10 @@ struct SourceCheck {
     /// lines a run reads. A dependency's sections are selected, and its
     /// conditions decided, by the deck that includes it.
     is_dependency: bool,
+    /// For a deck the project keeps as text: where the engine reads the
+    /// shown file, and every file of the deck there, read through them
+    /// rather than any disk.
+    stored: Option<(PathBuf, Vec<(PathBuf, String)>)>,
     include_resolutions: BTreeMap<String, IncludeResolution>,
     /// The name the page shows the text under: what a source with no file
     /// is read as, and what its findings name.
@@ -983,23 +987,30 @@ impl SourceCheck {
                 | super::ActiveNetlistDocument::RunSnapshot => None,
             }
         };
+        let stored = (netlist.active_document == super::ActiveNetlistDocument::OwnedSource)
+            .then(|| crate::workbench::documents::deck_files::stored_sources(netlist, &buffer))
+            .flatten();
         // The browser build reads included sources from the libraries it
         // sealed, and checks in place: whether the deck names one is read
-        // here, where the libraries can be sealed.
-        let (deck, sealed_sources) =
-            if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly {
-                let composed = deck.compose();
-                let names_external = match &composed {
-                    Ok(Some(deck)) => first_external_dependency_line(deck).is_some(),
-                    Ok(None) => first_external_dependency_line(&buffer).is_some(),
-                    Err(_) => false,
-                };
-                let sealed =
-                    names_external.then(|| model.model_library_manager.seal_execution_sources());
-                (CheckedDeck::Composed(composed), sealed)
-            } else {
-                (deck, None)
+        // here, where the libraries can be sealed. A deck kept as text reads
+        // them beside its own files, on the desktop too.
+        let (deck, sealed_sources) = if stored.is_some() {
+            let sealed = first_external_dependency_line(&buffer)
+                .map(|_| model.model_library_manager.seal_execution_sources());
+            (deck, sealed)
+        } else if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly {
+            let composed = deck.compose();
+            let names_external = match &composed {
+                Ok(Some(deck)) => first_external_dependency_line(deck).is_some(),
+                Ok(None) => first_external_dependency_line(&buffer).is_some(),
+                Err(_) => false,
             };
+            let sealed =
+                names_external.then(|| model.model_library_manager.seal_execution_sources());
+            (CheckedDeck::Composed(composed), sealed)
+        } else {
+            (deck, None)
+        };
         Self {
             revision,
             library_folders: model.library_folders().to_vec(),
@@ -1009,6 +1020,7 @@ impl SourceCheck {
             include_search: model.include_search_chain(),
             sealed_sources,
             is_dependency,
+            stored,
             include_resolutions: include_resolutions.clone(),
             shown_path: super::dialect::shown_source_in(model, netlist)
                 .map(|shown| shown.path)
@@ -1028,6 +1040,7 @@ impl SourceCheck {
             include_search,
             sealed_sources,
             is_dependency,
+            stored,
             include_resolutions,
             shown_path,
         } = self;
@@ -1098,8 +1111,11 @@ impl SourceCheck {
         } else {
             match materialized {
                 Ok(source) => {
-                    let (diagnostics, symbols, unread, reading, includes) =
-                        parse_buffer_with_context(
+                    let (diagnostics, symbols, unread, reading, includes) = match &stored {
+                        Some((at, files)) => {
+                            parse_stored(source, at, files, sealed_sources.as_ref(), stop)
+                        }
+                        None => parse_buffer_with_context(
                             source,
                             source_path.as_deref(),
                             shown_path.as_deref(),
@@ -1107,7 +1123,8 @@ impl SourceCheck {
                             platform_include_access(),
                             sealed_sources.as_ref(),
                             stop,
-                        );
+                        ),
+                    };
                     (
                         in_buffer(diagnostics),
                         symbols,
@@ -1345,7 +1362,54 @@ fn parse_buffer_with_context(
             (Some(file), parsed)
         }
     };
-    let parse_source = parse_source.as_deref();
+    parse_findings(
+        parsed,
+        parse_source.as_deref(),
+        buffer,
+        spectre,
+        source_path,
+    )
+}
+
+/// Check `buffer`, the file of a deck the project keeps as text that the
+/// engine reads at `at`, among `files`, every file of the deck where the
+/// engine reads it, and beside the model sources sealed for it.
+fn parse_stored(
+    buffer: &str,
+    at: &Path,
+    files: &[(PathBuf, String)],
+    sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
+    abort: &dyn AbortSignal,
+) -> BufferParse {
+    let spectre = rspice_core::netlist::is_spectre_source(at, buffer);
+    let bundle = match sealed_sources {
+        Some(sealed) => sealed.relative_bundle_with(files.to_vec()),
+        None => rspice_core::netlist::SealedSourceBundle::try_new_relative(files.iter().cloned())
+            .map_err(|error| error.to_string()),
+    };
+    let bundle = match bundle {
+        Ok(bundle) => bundle,
+        Err(error) => return (vec![Diagnostic::error(error)], None, None, None, None),
+    };
+    let options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits: rspice_core::ResourceLimits::default(),
+        ..Default::default()
+    };
+    let parsed = rspice_core::Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+        buffer, at, bundle, options, abort,
+    );
+    parse_findings(parsed, Some(at), buffer, spectre, None)
+}
+
+/// What one parse of `buffer`, read under the name `parse_source`, found:
+/// its findings, symbols, unread lines, reading and includes.
+fn parse_findings(
+    parsed: Result<rspice_core::Netlist, rspice_core::netlist::ParseWithAbortError>,
+    parse_source: Option<&Path>,
+    buffer: &str,
+    spectre: bool,
+    source_path: Option<&Path>,
+) -> BufferParse {
     match parsed {
         Ok(netlist) => {
             let unread = netlist.unread_root_source().cloned().collect::<Vec<_>>();

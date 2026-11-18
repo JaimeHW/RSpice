@@ -282,6 +282,12 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
         CodeHandOff::SaveNetlistAsDeck => {
             app.state.save_generated_as_deck();
         }
+        CodeHandOff::ExportDeck => {
+            app.state.export_stored_deck(false);
+        }
+        CodeHandOff::ExportDeckFiles => {
+            app.state.export_stored_deck(true);
+        }
         CodeHandOff::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
         CodeHandOff::ImportLtspiceSchematic => {
             import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Ltspice)
