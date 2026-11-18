@@ -353,7 +353,7 @@ pub fn show(
         );
         changed = output.changed;
         if changed {
-            buffer = text.to_string();
+            buffer = String::from(&text);
         }
         crate::workbench::documents::virtual_text_editor::keep_string_owner_text(
             ui.ctx(),

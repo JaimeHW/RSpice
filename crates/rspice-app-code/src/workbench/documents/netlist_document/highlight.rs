@@ -50,7 +50,7 @@ struct SourceReading {
 impl SourceReading {
     fn of(text: &TextSnapshot, source: ShownSource) -> Self {
         let revision = text.revision();
-        let text = text.to_string();
+        let text = text.as_cow();
         let kind = source.kind(&text);
         let by_line = is_spectre_source(&source.path, &text).then(|| {
             let mut by_line = vec![Vec::new(); text.split('\n').count()];

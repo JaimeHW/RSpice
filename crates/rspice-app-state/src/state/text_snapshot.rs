@@ -159,6 +159,14 @@ impl From<&String> for TextSnapshot {
     }
 }
 
+/// A copy of the whole text, made in one allocation of its length. Prefer
+/// it to `to_string`, which grows the copy as it writes it.
+impl From<&TextSnapshot> for String {
+    fn from(snapshot: &TextSnapshot) -> Self {
+        Self::from(&snapshot.text)
+    }
+}
+
 impl fmt::Display for TextSnapshot {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.text
