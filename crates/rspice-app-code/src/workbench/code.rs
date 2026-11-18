@@ -66,6 +66,8 @@ pub const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
         ],
     ),
     MenuEntry::command(CodeCommand::ShowInSchematic.key()).access('S'),
+    MenuEntry::command(CodeCommand::PlotNodeVoltage.key()).access('V'),
+    MenuEntry::command(CodeCommand::PlotDeviceCurrent.key()).access('I'),
     Separator,
     MenuEntry::command(ids::CUT).access('T'),
     MenuEntry::command(ids::COPY).access('C'),
@@ -90,6 +92,8 @@ impl Feature for CodeFeature {
         CodeCommand::FindReferences.key(),
         CodeCommand::RenameSymbol.key(),
         CodeCommand::ShowInSchematic.key(),
+        CodeCommand::PlotNodeVoltage.key(),
+        CodeCommand::PlotDeviceCurrent.key(),
         ids::CUT,
         ids::COPY,
         ids::PASTE,
@@ -204,6 +208,17 @@ impl CommandSet for CodeCommand {
                 && netlist_page_on_screen(reads)
                 && cross_probe::generated_netlist_in_front(&reads.state.netlist);
         }
+        // A plot is of the name under the caret, so each is offered only on
+        // a name of its kind, in a document a run can be of.
+        if let Some(quantity) = plot_quantity(self) {
+            let netlist = &reads.state.netlist;
+            return reads.wb.active_source_editor.is_some()
+                && netlist_page_on_screen(reads)
+                && cross_probe::plottable_document_in_front(netlist)
+                && cross_probe::caret_name(reads.model, netlist)
+                    .and_then(|name| quantity.of(name))
+                    .is_some();
+        }
         reads.wb.active_source_editor.is_some_and(|editor| {
             !self.navigates_source_language()
                 || (editor.navigable
@@ -263,6 +278,19 @@ impl CommandSet for CodeCommand {
                 let netlist = &reads.state.netlist;
                 let name = cross_probe::caret_name(model, netlist);
                 match cross_probe::schematic_target(model, netlist, name) {
+                    Ok(_) => (true, UNAVAILABLE),
+                    Err(reason) => (false, reason),
+                }
+            }
+            Self::PlotNodeVoltage | Self::PlotDeviceCurrent => {
+                let netlist = &reads.state.netlist;
+                let target = plot_quantity(self)
+                    .zip(cross_probe::caret_name(model, netlist))
+                    .ok_or(cross_probe::NOT_A_NAME)
+                    .and_then(|(quantity, name)| {
+                        cross_probe::plot_target(model, netlist, reads.runs, quantity, name)
+                    });
+                match target {
                     Ok(_) => (true, UNAVAILABLE),
                     Err(reason) => (false, reason),
                 }
@@ -417,6 +445,11 @@ impl CommandSet for CodeCommand {
             Self::GenerateNetlist => cx.wb.outbox.push(CodeRequest::GenerateNetlist),
             Self::ShowInNetlist => cx.wb.outbox.push(CodeRequest::ShowInNetlist),
             Self::ShowInSchematic => show_in_schematic(cx),
+            Self::PlotNodeVoltage | Self::PlotDeviceCurrent => {
+                if let Some(quantity) = plot_quantity(self) {
+                    plot_from_source(cx, quantity);
+                }
+            }
             Self::FindCodeDocument => cx.wb.outbox.push(CodeRequest::FindCodeDocument),
             Self::ValidateCodeDocument => cx.wb.outbox.push(CodeRequest::ValidateCodeDocument),
             Self::ManageSourceDocument => cx.wb.outbox.push(CodeRequest::ManageSourceDocument),
@@ -464,6 +497,78 @@ pub(crate) fn show_in_schematic(cx: &mut Cx<'_, CodeFeature>) {
             .wb
             .prompt(format!("Cannot show the line in the schematic: {reason}.")),
     }
+}
+
+/// The quantity a plot command asks the run for.
+const fn plot_quantity(command: CodeCommand) -> Option<cross_probe::PlotQuantity> {
+    match command {
+        CodeCommand::PlotNodeVoltage => Some(cross_probe::PlotQuantity::Voltage),
+        CodeCommand::PlotDeviceCurrent => Some(cross_probe::PlotQuantity::Current),
+        _ => None,
+    }
+}
+
+/// What the source editor menu's row of `key` reads where it names what the
+/// caret is on: `Plot V(out)` for the node `out`, `Plot I(R1)` for `R1`.
+/// The page's menu and the host's read it alike.
+pub fn source_menu_label(
+    key: CommandKey,
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+) -> Option<String> {
+    let quantity = plot_quantity(CodeCommand::from_key(key)?)?;
+    let (name, _) = quantity.of(cross_probe::caret_name(model, netlist)?)?;
+    Some(format!("Plot {}", quantity.vector(name)))
+}
+
+/// Put the quantity of the name under the caret on the waveform viewer's
+/// plot, from the run of the document in front. The name is read from the
+/// text as it stands.
+fn plot_from_source(cx: &mut Cx<'_, CodeFeature>, quantity: cross_probe::PlotQuantity) {
+    use crate::workbench::framework::requests::ShowWaveforms;
+    use rspice_results::result_presentation::{
+        AnalysisPresentationKey, SourceWaveformPresentationKey,
+    };
+    let target = cross_probe::caret_name_now(cx.model, &mut cx.state.netlist)
+        .ok_or(cross_probe::NOT_A_NAME)
+        .and_then(|name| {
+            cross_probe::plot_target(cx.model, &cx.state.netlist, cx.runs, quantity, &name)
+        });
+    let target = match target {
+        Ok(target) => target,
+        Err(reason) => {
+            cx.wb.prompt(format!("Cannot plot: {reason}."));
+            return;
+        }
+    };
+    if !cx.model.simulation.select_run_by_sequence(target.run)
+        || !cx.model.simulation.select_analysis(target.analysis)
+    {
+        return;
+    }
+    let Some(run) = cx.model.simulation.active_run() else {
+        return;
+    };
+    let Some((analysis, waveform)) = run.analyses.get(target.analysis).and_then(|analysis| {
+        analysis
+            .waveforms
+            .get(target.waveform)
+            .map(|waveform| (analysis, waveform))
+    }) else {
+        return;
+    };
+    let key = SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(run.dataset_id, analysis),
+        waveform.name.clone(),
+    );
+    let shown = waveform.visible;
+    // Raised before the viewer's command and taken after it, as every
+    // hand-off into the waveform viewer is.
+    cx.wb.outbox.push(ShowWaveforms {
+        visibility: vec![(key, shown)],
+        selected: None,
+    });
+    cx.execute(ids::RESULT_WAVEFORMS);
 }
 
 /// Open the export dialog where the deck draws it; anywhere else the deck is

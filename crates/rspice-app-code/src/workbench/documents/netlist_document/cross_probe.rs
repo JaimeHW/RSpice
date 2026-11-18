@@ -7,9 +7,12 @@ use std::sync::Arc;
 use rspice_core::netlist::{DeckIndex, DeckLocation, DeckSymbolKind};
 
 use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
-use crate::state::{CellViewRef, NetlistDocument, NetlistSourceIndex};
+use crate::state::{
+    AnalysisResultSourceDomain, CellViewRef, NetlistDocument, NetlistSourceIndex, SimulationRun,
+};
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::documents::virtual_text_editor::SourceSpan;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// What the name under the caret is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,6 +241,181 @@ pub(crate) fn schematic_target(
         instance: entry.instance_identity().unwrap_or_default().to_owned(),
         component_id,
     }))
+}
+
+/// Which quantity a plot from the editor asks the run for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlotQuantity {
+    /// `V(node)`.
+    Voltage,
+    /// `I(device)`: the terminal current the probe tools plot.
+    Current,
+}
+
+impl PlotQuantity {
+    /// The vector a run keeps the quantity of `name` under.
+    pub fn vector(self, name: &str) -> String {
+        match self {
+            Self::Voltage => format!("V({name})"),
+            Self::Current => format!("I({name})"),
+        }
+    }
+
+    /// Whether a run keeps the quantity of `name` under `vector`: a voltage
+    /// under `V(name)`, or, as the engine names a deck's nodes, `name`
+    /// itself; a current under `I(name)`.
+    fn names(self, vector: &str, name: &str) -> bool {
+        vector.eq_ignore_ascii_case(&self.vector(name))
+            || (self == Self::Voltage && vector.eq_ignore_ascii_case(name))
+    }
+
+    /// The name under the caret this quantity is of, when it is one.
+    pub fn of(self, name: &CaretName) -> Option<(&str, bool)> {
+        match (self, name) {
+            (Self::Voltage, CaretName::Node { name, top_level })
+            | (
+                Self::Current,
+                CaretName::Element {
+                    name, top_level, ..
+                },
+            ) => Some((name.as_str(), *top_level)),
+            _ => None,
+        }
+    }
+}
+
+/// Why a plot has nothing to plot: the caret is on no node, or no device.
+pub const NOT_A_NAME: &str = "the caret is not on a name of this kind";
+
+/// The trace one run holds for a plot from the editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PlotTarget {
+    /// The run's display sequence.
+    pub run: u64,
+    pub analysis: usize,
+    pub waveform: usize,
+}
+
+/// Whether the editor shows a document a run can be of: the generated
+/// netlist, a deck, or the deck a run executed, each itself rather than an
+/// include it reads.
+pub(crate) fn plottable_document_in_front(netlist: &NetlistDocumentState) -> bool {
+    netlist.active_dependency_identity.is_none()
+        && matches!(
+            netlist.active_document,
+            ActiveNetlistDocument::Generated
+                | ActiveNetlistDocument::OwnedSource
+                | ActiveNetlistDocument::RunSnapshot
+        )
+}
+
+/// The finished run of the document in front whose results a plot reads.
+/// For the generated netlist that is a run of the design: the one Results
+/// shows when it is one, else the newest. For a deck it is the deck's last
+/// run, and for the deck a run executed, that run.
+fn document_run<'a>(
+    model: &'a Model,
+    netlist: &NetlistDocumentState,
+    runs: &RunsState,
+) -> Result<&'a SimulationRun, &'static str> {
+    let retained = &model.simulation.retained;
+    let kept = |run: Option<&'a SimulationRun>, reason| {
+        run.filter(|run| !run.analyses.is_empty()).ok_or(reason)
+    };
+    match netlist.active_document {
+        ActiveNetlistDocument::Generated => {
+            let of_design = |run: &&SimulationRun| {
+                !run.analyses.is_empty()
+                    && run.prepared_receipt().is_some_and(|receipt| {
+                        receipt.source_domain() == AnalysisResultSourceDomain::SimulationPlan
+                    })
+            };
+            model
+                .simulation
+                .active_run()
+                .filter(of_design)
+                .or_else(|| {
+                    retained
+                        .runs
+                        .iter()
+                        .filter(of_design)
+                        .max_by_key(|run| run.id)
+                })
+                .ok_or("the design has not been run")
+        }
+        ActiveNetlistDocument::OwnedSource => {
+            if runs.manual_run.pending_manual_run_id.is_some() {
+                return Err("the deck is still running");
+            }
+            let run = runs
+                .manual_run
+                .last_run_id
+                .ok_or("the deck has not been run")?;
+            kept(
+                retained.run_by_sequence(run),
+                "the deck's run is no longer kept",
+            )
+        }
+        ActiveNetlistDocument::RunSnapshot => {
+            let run = netlist
+                .executed_deck_view
+                .map(|selection| selection.run_id)
+                .or(runs.manual_run.last_run_id)
+                .ok_or("the run is no longer kept")?;
+            kept(retained.run_by_sequence(run), "the run is no longer kept")
+        }
+        ActiveNetlistDocument::GeneratedDiff => Err("a comparison is not a run's input"),
+    }
+}
+
+/// The trace the run of the document in front holds for `quantity` of the
+/// name under the caret, or why there is none to plot.
+pub(crate) fn plot_target(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    runs: &RunsState,
+    quantity: PlotQuantity,
+    name: &CaretName,
+) -> Result<PlotTarget, &'static str> {
+    let (name, top_level) = quantity.of(name).ok_or(NOT_A_NAME)?;
+    if !top_level {
+        return Err(match quantity {
+            PlotQuantity::Voltage => "a node inside a subcircuit has a voltage for each instance",
+            PlotQuantity::Current => "a device inside a subcircuit has a current for each instance",
+        });
+    }
+    if quantity == PlotQuantity::Voltage && name == "0" {
+        return Err("node 0 is the ground reference");
+    }
+    let run = document_run(model, netlist, runs)?;
+    let find = |analysis: usize| {
+        run.analyses.get(analysis).and_then(|result| {
+            result
+                .waveforms
+                .iter()
+                .position(|waveform| quantity.names(&waveform.name, name))
+                .map(|waveform| (analysis, waveform))
+        })
+    };
+    // The analysis Results shows outranks the run's others.
+    let shown = model
+        .simulation
+        .active_run()
+        .is_some_and(|active| active.id == run.id)
+        .then_some(model.simulation.view.active_analysis_idx)
+        .flatten();
+    let (analysis, waveform) = shown
+        .and_then(find)
+        .or_else(|| (0..run.analyses.len()).find_map(find))
+        .ok_or(match quantity {
+            PlotQuantity::Voltage => "the run saved no voltage for this node",
+            PlotQuantity::Current => "the run saved no current for this device",
+        })?;
+    Ok(PlotTarget {
+        run: run.id,
+        analysis,
+        waveform,
+    })
 }
 
 /// Where the generated netlist writes the net last shown from the

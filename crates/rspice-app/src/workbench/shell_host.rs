@@ -744,6 +744,14 @@ impl Host for RSpiceApp {
         if key == ShellCommand::RepeatLastCommand.key() {
             return crate::workbench::commands::repeat_menu_label(self);
         }
+        // A plot from the source editor names the vector it plots.
+        if let Some(label) = rspice_app_code::workbench::code::source_menu_label(
+            key,
+            &self.state.model,
+            &self.state.code.netlist,
+        ) {
+            return label.into();
+        }
         let label = self.label(key);
         // Check and save with a symbol in front is the save itself: no
         // dialog follows it, so its row promises none.

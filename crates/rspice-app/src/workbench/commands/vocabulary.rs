@@ -568,6 +568,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SimulateCommand::Options.key(),
     CodeCommand::GenerateNetlist.key(),
     CodeCommand::ShowInSchematic.key(),
+    CodeCommand::PlotNodeVoltage.key(),
+    CodeCommand::PlotDeviceCurrent.key(),
     CodeCommand::FindCodeDocument.key(),
     CodeCommand::ValidateCodeDocument.key(),
     CodeCommand::ManageSourceDocument.key(),

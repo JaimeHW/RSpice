@@ -43,6 +43,11 @@ pub enum CodeCommand {
     /// The way back: the instance or net the generated netlist's line under
     /// the caret was written for, selected on its schematic.
     ShowInSchematic,
+    /// The voltage of the node under the caret, from the run of the deck or
+    /// netlist in front, added to the waveform viewer's plot.
+    PlotNodeVoltage,
+    /// The current of the device under the caret, likewise.
+    PlotDeviceCurrent,
     FindCodeDocument,
     ValidateCodeDocument,
     ManageSourceDocument,
@@ -439,7 +444,7 @@ const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 41] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::ImportNetlist,
@@ -451,6 +456,8 @@ impl CodeCommand {
         Self::GenerateNetlist,
         Self::ShowInNetlist,
         Self::ShowInSchematic,
+        Self::PlotNodeVoltage,
+        Self::PlotDeviceCurrent,
         Self::FindCodeDocument,
         Self::ValidateCodeDocument,
         Self::ManageSourceDocument,
@@ -495,6 +502,8 @@ impl CodeCommand {
             Self::GenerateNetlist => CommandKey::new("generated-netlist"),
             Self::ShowInNetlist => ids::SHOW_IN_NETLIST,
             Self::ShowInSchematic => CommandKey::new("show-in-schematic"),
+            Self::PlotNodeVoltage => CommandKey::new("plot-node-voltage"),
+            Self::PlotDeviceCurrent => CommandKey::new("plot-device-current"),
             Self::FindCodeDocument => CommandKey::new("find-code"),
             Self::ValidateCodeDocument => CommandKey::new("validate-code"),
             Self::ManageSourceDocument => CommandKey::new("manage-source-document"),
@@ -606,6 +615,8 @@ impl CodeCommand {
             | Self::FindReferences
             | Self::RenameSymbol
             | Self::ShowInSchematic
+            | Self::PlotNodeVoltage
+            | Self::PlotDeviceCurrent
             | Self::FindCodeDocument => ShortcutContext::SourceEditor,
             Self::ShowInNetlist => ShortcutContext::DesignWorkspace,
             _ => ShortcutContext::Global,
@@ -667,6 +678,8 @@ impl CodeCommand {
             ),
             Self::ShowInNetlist => ("Show in netlist", "Design", navigates),
             Self::ShowInSchematic => ("Show in schematic", "Code", navigates),
+            Self::PlotNodeVoltage => ("Plot node voltage", "Code", open),
+            Self::PlotDeviceCurrent => ("Plot device current", "Code", open),
             Self::FindCodeDocument => ("Find in source\u{2026}", "Code", palette),
             Self::ValidateCodeDocument => ("Validate netlist", "Code", palette),
             Self::ManageSourceDocument => ("Manage source document\u{2026}", "Code", palette),
