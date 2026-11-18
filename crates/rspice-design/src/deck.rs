@@ -70,9 +70,15 @@ impl ProjectDeck {
     pub fn file_path(&self, project_folder: Option<&Path>) -> PathBuf {
         let DeckSource::File { path } = &self.source;
         match project_folder {
-            Some(folder) if path.is_relative() => folder.join(path),
+            Some(folder) if path.is_relative() => plain_path(folder).join(path),
             _ => path.clone(),
         }
+    }
+
+    /// Whether the deck is the file at `path`, however either is spelled.
+    #[must_use]
+    pub fn is_file(&self, path: &Path, project_folder: Option<&Path>) -> bool {
+        plain_path(&self.file_path(project_folder)) == plain_path(path)
     }
 
     /// The name the deck is shown and run under: its file name.
@@ -90,21 +96,50 @@ impl ProjectDeck {
 /// separators when it is under that folder, else as given.
 #[must_use]
 pub fn stored_deck_path(path: &Path, project_folder: Option<&Path>) -> PathBuf {
-    let Some(relative) = project_folder.and_then(|folder| path.strip_prefix(folder).ok()) else {
-        return path.to_path_buf();
+    let plain = plain_path(path);
+    let Some(relative) =
+        project_folder.and_then(|folder| plain.strip_prefix(plain_path(folder)).ok())
+    else {
+        return plain;
     };
     let mut parts = Vec::new();
     for component in relative.components() {
         match component {
             Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
             Component::CurDir => {}
-            _ => return path.to_path_buf(),
+            _ => return plain,
         }
     }
     if parts.is_empty() {
-        return path.to_path_buf();
+        return plain;
     }
     PathBuf::from(parts.join("/"))
+}
+
+/// `path` without the Windows verbatim prefix a canonical path carries
+/// (`\\?\C:\...`, `\\?\UNC\server\share`), so the folder a project was saved
+/// to and a deck picked in a file dialog compare as the same place. Any
+/// other path is returned as it is.
+#[must_use]
+pub fn plain_path(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{share}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(drive)
+            if drive
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphabetic)
+                && drive.get(1..3) == Some(":\\") =>
+        {
+            PathBuf::from(drive)
+        }
+        _ => path.to_path_buf(),
+    }
 }
 
 /// How a text file's characters are stored as bytes. Read from the file's
@@ -216,11 +251,33 @@ mod tests {
         assert_eq!(deck.name(), "amp.cir");
     }
 
+    /// A project saved through a canonical path still keeps a deck under its
+    /// folder by its relative path, and knows the deck by either spelling.
+    #[cfg(windows)]
+    #[test]
+    fn a_verbatim_project_folder_still_stores_its_decks_relative() {
+        let folder = PathBuf::from(r"\\?\C:\work\amp");
+        let file = PathBuf::from(r"C:\work\amp\decks\amp.cir");
+        let deck = ProjectDeck::for_file(&file, Some(&folder));
+        let DeckSource::File { path } = &deck.source;
+        assert_eq!(path, &PathBuf::from("decks/amp.cir"));
+        assert!(deck.is_file(&file, Some(&folder)));
+        assert!(deck.is_file(
+            &PathBuf::from(r"\\?\C:\work\amp\decks\amp.cir"),
+            Some(&folder)
+        ));
+    }
+
     #[test]
     fn a_deck_outside_the_project_folder_keeps_its_own_path() {
-        let folder = Path::new("projects").join("amp");
-        let file = Path::new("elsewhere").join("tb.sp");
+        // A deck is opened by its full path; one outside the project folder
+        // is stored as that path and read back unchanged.
+        let root = std::env::temp_dir();
+        let folder = root.join("projects").join("amp");
+        let file = root.join("elsewhere").join("tb.sp");
         let deck = ProjectDeck::for_file(&file, Some(&folder));
+        let DeckSource::File { path } = &deck.source;
+        assert_eq!(path, &file);
         assert_eq!(deck.file_path(Some(&folder)), file);
     }
 

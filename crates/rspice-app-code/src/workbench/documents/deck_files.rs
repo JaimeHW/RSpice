@@ -366,7 +366,7 @@ pub fn open_deck(
         .content
         .decks
         .iter()
-        .find(|deck| deck.file_path(folder.as_deref()) == path)
+        .find(|deck| deck.is_file(&path, folder.as_deref()))
     {
         Some(deck) => deck.id,
         None => {
