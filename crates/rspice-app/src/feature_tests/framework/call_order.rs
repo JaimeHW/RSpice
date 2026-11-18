@@ -246,7 +246,7 @@ const SHOW: &[Step] = &[
     ("11.21", &["docks::show_console(root, app, layout)"]),
     (
         "11.22",
-        &["CentralPanel::default()", "surfaces::show(ui, app)"],
+        &["CentralPanel::default()", "show_document(ui, app)"],
     ),
     ("11.23", &["docks::show_drawers(root, app, layout)"]),
     (
@@ -1747,7 +1747,7 @@ const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
         &[
             "docks::show_inspector(root, app, layout)",
             "CentralPanel::default()",
-            "surfaces::show(ui, app)",
+            "show_document(ui, app)",
         ],
     ),
     (

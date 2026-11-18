@@ -16,4 +16,10 @@ pub(crate) struct ShellState {
     /// Quitting asks whether to wait for the save copying its results to
     /// another volume, or to quit without saving.
     pub(crate) quit_while_saving: bool,
+    /// Whether the focused source editor has keys of this frame still to
+    /// apply, which it does as the page draws.
+    pub(crate) editor_keys_pending: bool,
+    /// The commands raised while the editor's keys were pending, carried out
+    /// in the order they were raised once the page has drawn.
+    pub(crate) held_commands: Vec<rspice_app_state::state::command_catalog::CommandKey>,
 }

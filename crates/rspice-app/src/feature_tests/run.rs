@@ -8,6 +8,8 @@ mod controller;
 #[cfg(not(target_arch = "wasm32"))]
 mod deck_edit_commit;
 #[cfg(not(target_arch = "wasm32"))]
+mod deck_run_as_shown;
+#[cfg(not(target_arch = "wasm32"))]
 mod deck_run_control;
 #[cfg(not(target_arch = "wasm32"))]
 mod deck_source_menu;

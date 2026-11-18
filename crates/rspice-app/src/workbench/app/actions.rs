@@ -28,6 +28,9 @@ fn shortcut_dispatch_blocked(state: &AppState, ctx: &Context) -> bool {
 impl RSpiceApp {
     /// Handle keyboard shortcuts
     pub(crate) fn handle_shortcuts(&mut self, ctx: &Context) {
+        // Commands held in a frame that drew no page are not held longer.
+        self.carry_out_held_commands();
+        self.note_editor_keys(ctx);
         if shortcut_dispatch_blocked(&self.state, ctx) {
             self.state.shortcut_resolver.reset();
             self.answer_help_over_dialog(ctx);
@@ -99,6 +102,8 @@ impl RSpiceApp {
                 resolution.deferred_start,
             )
         });
+        // What the chord left in the frame is the editor's to apply.
+        self.note_editor_keys(ctx);
         // A key has no behaviour of its own once it has been resolved: the
         // command it names runs through the dispatcher the menus, toolbar,
         // context menu and palette reach, so a key and a menu row cannot

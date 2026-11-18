@@ -56,6 +56,16 @@ fn poll_waiting_preparations(app: &mut RSpiceApp) {
     }
 }
 
+/// Draw the page in front, and then carry out the commands that waited for
+/// its editor to apply the frame's keys. A frame that carried one out asks
+/// for the next at once, so what it changed is drawn.
+fn show_document(ui: &mut egui::Ui, app: &mut RSpiceApp) {
+    surfaces::show(ui, app);
+    if app.carry_out_held_commands() {
+        ui.ctx().request_repaint();
+    }
+}
+
 /// Render one complete workbench frame.
 ///
 /// `root` is the frame `Ui` eframe hands to [`eframe::App::ui`]. Panels are
@@ -186,7 +196,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         .frame(Frame::new().fill(t.color.bg_app))
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            surfaces::show(ui, app);
+            show_document(ui, app);
         });
     app.state
         .workbench
@@ -868,7 +878,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         .frame(Frame::new().fill(t.color.bg_app))
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            surfaces::show(ui, app);
+            show_document(ui, app);
         });
     app.state
         .workbench
@@ -981,7 +991,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         .frame(Frame::new().fill(t.color.bg_app))
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            surfaces::show(ui, app);
+            show_document(ui, app);
         });
     if layout.has_overlay_drawer {
         docks::show_drawers(root, app, layout);
@@ -1013,7 +1023,7 @@ pub(crate) fn show_embedded_secondary(ui: &mut egui::Ui, app: &mut RSpiceApp, ti
         });
     });
     ui.separator();
-    surfaces::show(ui, app);
+    show_document(ui, app);
     app.state.reconcile_schematic_drag(ui.ctx(), true);
     reattach
 }

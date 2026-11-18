@@ -12,6 +12,17 @@
 //! shell ([`ShellCommand::carry_out`]). A command a feature's command
 //! raised runs as soon as that one returns, behind the same prologue.
 //!
+//! A command acts on a source editor's text as typed before it. The focused
+//! editor applies a frame's keys as the page draws, after the keys' own
+//! command and the toolbar have been read; so a command raised while that
+//! editor still has keys of the frame to apply waits until the page has
+//! drawn them. Run then runs, and Save writes, the text the reader typed
+//! just before pressing it, in a browser that hands the page the typing and
+//! the key in one frame too. The editor's own commands (Undo, Select all,
+//! Toggle comment and the like) do not wait: the editor takes them as it
+//! draws those keys, as it always has; nor does the palette, which takes
+//! the keystroke that opened it.
+//!
 //! The dispatcher is handed a key. A key names a command when the registry
 //! lists it, or when a feature declares it and leaves it out of the registry
 //! for the one container that holds its key; no menu, shortcut profile or
@@ -29,7 +40,7 @@ use crate::workbench::features;
 use crate::workbench::menu_bar::FileMenuAction;
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::code::commands::{
-    CodeRequest, NetlistEditorRequest, VerilogAStripRequest,
+    CodeCommand, CodeRequest, NetlistEditorRequest, VerilogAStripRequest,
 };
 use rspice_app_code::workbench::code::requests as code_requests;
 use rspice_app_design::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
@@ -59,6 +70,18 @@ use rspice_app_workbench::workbench::framework::requests::{
     ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
 };
 
+/// Whether the command `key` names runs at once while the focused source
+/// editor has keys of the frame to apply: the palette, which takes the
+/// keystroke that opened it, and a command the editor carries out itself as
+/// it draws those keys.
+fn runs_among_editor_keys(key: CommandKey) -> bool {
+    key == ShellCommand::CommandPalette.key()
+        || WorkbenchCommand::from_key(key)
+            .is_some_and(|command| command.source_editor_request().is_some())
+        || CodeCommand::from_key(key)
+            .is_some_and(|command| command.source_editor_request().is_some())
+}
+
 /// Who carries out a command once the prologue has let it through.
 #[derive(Debug, Clone, Copy)]
 enum Owner {
@@ -76,6 +99,10 @@ impl RSpiceApp {
     /// Carry out the command `key` names behind the prologue every command
     /// shares. A key no command answers to does nothing.
     pub(crate) fn execute_command_key(&mut self, key: CommandKey) {
+        if self.state.shell.editor_keys_pending && !runs_among_editor_keys(key) {
+            self.state.shell.held_commands.push(key);
+            return;
+        }
         if let Some(spec) = features::spec(key) {
             self.dispatch(*spec, Owner::Feature);
         } else if let Some(command) = WorkbenchCommand::from_key(key) {
@@ -83,6 +110,42 @@ impl RSpiceApp {
         } else if let Some(command) = ShellCommand::from_key(key) {
             self.dispatch(command.declared_spec(), Owner::Shell(command));
         }
+    }
+
+    /// Note whether the focused source editor has keys of this frame still
+    /// to apply: typed text, a paste, a composition or a key press that no
+    /// shortcut took. Until the page has drawn them, commands wait.
+    pub(crate) fn note_editor_keys(&mut self, ctx: &egui::Context) {
+        let focused = self
+            .state
+            .workbench
+            .active_source_editor
+            .is_some_and(|editor| ctx.memory(|memory| memory.has_focus(editor.id)));
+        self.state.shell.editor_keys_pending = focused
+            && ctx.input(|input| {
+                input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Text(_)
+                            | egui::Event::Paste(_)
+                            | egui::Event::Ime(_)
+                            | egui::Event::Key { pressed: true, .. }
+                    )
+                })
+            });
+    }
+
+    /// Carry out the commands that waited for the editor's keys, now that
+    /// the page has drawn them, in the order they were raised. Whether there
+    /// were any.
+    pub(crate) fn carry_out_held_commands(&mut self) -> bool {
+        self.state.shell.editor_keys_pending = false;
+        let held = std::mem::take(&mut self.state.shell.held_commands);
+        let any = !held.is_empty();
+        for key in held {
+            self.execute_command_key(key);
+        }
+        any
     }
 
     /// Whether the command `key` names can run here, and why not: the
