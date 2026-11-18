@@ -43,7 +43,6 @@ fn project(project: &Path) -> Model {
         None,
         crate::workbench::workspace::restore_model_library_manager,
     );
-    model.project_open.set_from_lifecycle(true);
     model.workspace.content.project.path = Some(project.to_path_buf());
     model
 }
