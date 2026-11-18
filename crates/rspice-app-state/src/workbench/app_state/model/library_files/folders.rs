@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rspice_design::library::folder::{HostPlatform, LibraryFile, LibraryFileLock, Missing};
-use rspice_project::library_folder::{FileProblem, FolderProblem, FolderRead};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_project::library_folder::FolderProblem;
+use rspice_project::library_folder::{FileProblem, FolderRead};
 use rspice_project::{LibraryImage, ProjectFile};
 
 use super::{

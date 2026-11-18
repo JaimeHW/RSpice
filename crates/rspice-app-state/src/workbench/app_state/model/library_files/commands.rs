@@ -13,8 +13,10 @@ use rspice_project::library_folder::{FolderProblem, FolderRead, read_library_fil
 use rspice_project::library_folder::{LockOutcome, read_library_folder};
 
 use super::super::library_catalog::WorkspacePruned;
+#[cfg(not(target_arch = "wasm32"))]
+use super::LibraryReference;
 use super::folders::{self, FolderReading};
-use super::{LibraryReference, Model, OnDisk, ReferenceLoad, RelinkOutcome};
+use super::{Model, OnDisk, ReferenceLoad, RelinkOutcome};
 
 impl Model {
     /// Attach the library in `folder`, read-only, written as `path`.

@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use rspice_design::library::folder::{FileRevision, LibraryFile, Missing};
 use rspice_project::ProjectFile;
 
