@@ -2645,18 +2645,26 @@ impl Vdmos {
         }
     }
 
+    /// `c0*potential*(1 - arg^(1-M))/(1-M)` from `log_arg = ln(arg)`; see
+    /// `graded_depletion_charge` for why the charge is not formed from `arg`.
     #[inline]
     fn junction_depletion_charge_term(
         c0: Value,
         potential: Value,
         grading: Value,
-        arg: Value,
-        scaling: Value,
+        log_arg: Value,
     ) -> Value {
-        if (1.0 - grading).abs() < 1e-12 {
-            -c0 * potential * arg.ln()
+        c0 * crate::device::semiconductor::graded_depletion_charge(potential, grading, log_arg)
+    }
+
+    /// ln(arg) for `arg = (1 - v/potential).max(1e-18)`, without rounding
+    /// 1 - v/potential to one near zero bias.
+    #[inline]
+    fn junction_depletion_log_arg(v: Value, potential: Value, arg: Value) -> Value {
+        if arg > 1e-18 {
+            (-v / potential).ln_1p()
         } else {
-            c0 * potential * (1.0 - arg * scaling) / (1.0 - grading)
+            arg.ln()
         }
     }
 
@@ -2833,8 +2841,9 @@ impl Vdmos {
         if vd < depletion_corner {
             let arg = (1.0 - vd / nominal_potential).max(1.0e-18);
             let scaling = Self::junction_depletion_scaling(arg, grading);
+            let log_arg = Self::junction_depletion_log_arg(vd, nominal_potential, arg);
             let charge =
-                Self::junction_depletion_charge_term(c0, nominal_potential, grading, arg, scaling);
+                Self::junction_depletion_charge_term(c0, nominal_potential, grading, log_arg);
             return (charge, (c0 * scaling).max(0.0));
         }
 
@@ -2940,7 +2949,8 @@ impl Vdmos {
         if v < depletion_corner {
             let arg = (1.0 - v / potential).max(1e-18);
             let scaling = Self::junction_depletion_scaling(arg, grading);
-            let charge = Self::junction_depletion_charge_term(c0, potential, grading, arg, scaling);
+            let log_arg = Self::junction_depletion_log_arg(v, potential, arg);
+            let charge = Self::junction_depletion_charge_term(c0, potential, grading, log_arg);
             return (charge, (c0 * scaling).max(0.0));
         }
 
@@ -2949,7 +2959,7 @@ impl Vdmos {
         let f2 = c0 * (1.0 - fc * (1.0 + grading)) * scaling / arg;
         let f3 = c0 * grading * scaling / arg / potential;
         let edge_charge =
-            Self::junction_depletion_charge_term(c0, potential, grading, arg, scaling);
+            Self::junction_depletion_charge_term(c0, potential, grading, (-fc).ln_1p());
         let f4 =
             edge_charge - 0.5 * f3 * depletion_corner * depletion_corner - depletion_corner * f2;
         let charge = f4 + v * (f2 + 0.5 * v * f3);
@@ -3651,6 +3661,48 @@ mod tests {
         assert_close_derivative("pmos gm", linearization.gm, gm);
         assert_close_derivative("pmos gds", linearization.gds, gds);
         assert_close_derivative("pmos gmb", linearization.gmb, gmb);
+    }
+
+    /// Near zero bias the body-diode and body-junction depletion charges are
+    /// `c0*v*(1 + M*v/(2*VJ))` to second order, and they keep that relative
+    /// precision however small the bias: a companion divides the charge's
+    /// absolute error by dt, so a charge rounded to a quantum of
+    /// `VJ*c0*EPSILON` left a 1e-19 s step unable to move it at all.
+    #[test]
+    fn junction_depletion_charges_keep_their_relative_precision_near_zero_bias() {
+        let biases = [1e-18, -1e-18, 3.4e-18, -3.4e-18, 1e-12, -1e-9];
+        let check = |charge: Value, expected: Value, label: &str| {
+            assert!(
+                (charge - expected).abs() <= expected.abs() * 1e-12,
+                "{label}: Q = {charge:e}, expected {expected:e}"
+            );
+        };
+        for (vj, grading) in [(1.11, 0.5), (0.3, 0.33), (0.8, 1.0), (9.99, 1.2861)] {
+            let mut params = HashMap::new();
+            params.insert("CJO".to_string(), 10.44e-12);
+            params.insert("VJ".to_string(), vj);
+            params.insert("M".to_string(), grading);
+            params.insert("FC".to_string(), 0.5);
+            let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3)
+                .with_params(&params, SpiceDialect::Ngspice);
+            // The body diode caps its grading at 0.9.
+            let (d1_vj, d1_m) = (vdmos.d1_vj, vdmos.d1_m);
+            let c0 = vdmos.d1_depletion_charge_and_capacitance(0.0).1;
+            assert!(c0 > 0.0);
+            for v in biases {
+                let (charge, _) = vdmos.d1_depletion_charge_and_capacitance(v);
+                let expected = c0 * v * (1.0 + 0.5 * d1_m * v / d1_vj);
+                check(charge, expected, &format!("D1 v={v:e} VJ={d1_vj} M={d1_m}"));
+                let (charge, _) =
+                    Vdmos::junction_component_charge_and_capacitance(5e-12, vj, grading, 0.5, v);
+                let expected = 5e-12 * v * (1.0 + 0.5 * grading * v / vj);
+                check(
+                    charge,
+                    expected,
+                    &format!("body v={v:e} PB={vj} M={grading}"),
+                );
+            }
+        }
     }
 
     #[test]
