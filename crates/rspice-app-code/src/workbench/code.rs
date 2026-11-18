@@ -9,6 +9,7 @@ mod docks;
 pub mod netlist_first;
 pub mod netlist_validation;
 pub mod requests;
+mod source_menus;
 pub mod toolbar;
 
 use egui::Context;
@@ -50,32 +51,7 @@ use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 /// The code feature.
 pub struct CodeFeature;
 
-/// The source editor's right-click menu: the language group, each row shown
-/// only where the document's language service can answer it, then the
-/// clipboard, then the line edits. Mutating rows are greyed on a read-only
-/// source. Every page that draws a source editor is the code feature's:
-/// the deck and a Verilog-A view.
-pub const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
-    MenuEntry::Only(
-        MenuContext::NavigableSourceEditor,
-        &[
-            MenuEntry::command(CodeCommand::GoToDefinition.key()).access('G'),
-            MenuEntry::command(CodeCommand::FindReferences.key()).access('F'),
-            MenuEntry::command(CodeCommand::RenameSymbol.key()).access('R'),
-            Separator,
-        ],
-    ),
-    MenuEntry::command(CodeCommand::ShowInSchematic.key()).access('S'),
-    MenuEntry::command(CodeCommand::PlotNodeVoltage.key()).access('V'),
-    MenuEntry::command(CodeCommand::PlotDeviceCurrent.key()).access('I'),
-    Separator,
-    MenuEntry::command(ids::CUT).access('T'),
-    MenuEntry::command(ids::COPY).access('C'),
-    MenuEntry::command(ids::PASTE).access('P'),
-    Separator,
-    MenuEntry::command(CodeCommand::ToggleLineComment.key()).access('M'),
-    MenuEntry::command(CodeCommand::FormatDocument.key()).access('O'),
-];
+pub use source_menus::{SOURCE_EDIT_MENU, SOURCE_EDITOR_MENU, SOURCE_FOLDING_MENU};
 
 impl Feature for CodeFeature {
     type State = CodeState;
@@ -91,14 +67,17 @@ impl Feature for CodeFeature {
         CodeCommand::GoToDefinition.key(),
         CodeCommand::FindReferences.key(),
         CodeCommand::RenameSymbol.key(),
+        CodeCommand::FormatDocument.key(),
         CodeCommand::ShowInSchematic.key(),
         CodeCommand::PlotNodeVoltage.key(),
         CodeCommand::PlotDeviceCurrent.key(),
+        ids::UNDO,
+        ids::REDO,
         ids::CUT,
         ids::COPY,
         ids::PASTE,
+        ids::SELECT_ALL,
         CodeCommand::ToggleLineComment.key(),
-        CodeCommand::FormatDocument.key(),
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {

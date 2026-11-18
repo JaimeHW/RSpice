@@ -134,6 +134,7 @@ fn page_editor(
             bundle_id,
             crate::workbench::framework::requests::StandardCommand::Redo,
         ),
+        has_selection: false,
     }
 }
 

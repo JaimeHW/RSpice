@@ -562,16 +562,25 @@ fn right_click_line_of(
     output
 }
 
-const CONTEXT_MENU: [&str; 8] = [
+/// The right-click menu's rows over a Verilog-A source, in order: its
+/// language, its history, the clipboard and the line's comment.
+const CONTEXT_MENU: [&str; 11] = [
     "Go to definition",
     "Find references",
     "Rename symbol…",
+    "Format document",
+    "Undo",
+    "Redo",
     "Cut",
     "Copy",
     "Paste",
+    "Select all",
     "Toggle line comment",
-    "Format document",
 ];
+
+/// The rows that wait for a step of the editor's history or for selected
+/// text, which a source just opened has neither of.
+const WAITING: [&str; 4] = ["Undo", "Redo", "Cut", "Copy"];
 
 #[test]
 fn right_click_opens_the_source_menu_and_toggle_line_comment_acts_on_the_clicked_line() {
@@ -588,15 +597,18 @@ fn right_click_opens_the_source_menu_and_toggle_line_comment_acts_on_the_clicked
             .all(|pair| pair[0].0.center().y < pair[1].0.center().y),
         "the menu lists its rows in order"
     );
-    assert!(
-        rows.iter().all(|(_, enabled)| *enabled),
-        "every row is live on an editable source"
-    );
+    for (label, (_, enabled)) in CONTEXT_MENU.iter().zip(&rows) {
+        assert_eq!(
+            *enabled,
+            !WAITING.contains(label),
+            "{label} on an editable source"
+        );
+    }
 
     press(
         &ctx,
         &mut app,
-        rows[6].0.center(),
+        rows[10].0.center(),
         egui::PointerButton::Primary,
     );
     frame(&ctx, &mut app, DESKTOP);
@@ -628,8 +640,69 @@ fn on_a_read_only_source_the_menu_disables_cut_and_paste() {
     assert!(!enabled("Paste"));
     assert!(!enabled("Toggle line comment"));
     assert!(!enabled("Rename symbol…"));
-    assert!(enabled("Copy"), "reading stays possible");
+    assert!(enabled("Select all"), "reading stays possible");
     assert!(enabled("Go to definition"));
+}
+
+/// Every command the source editor answers, the code feature's and the
+/// workbench's edit commands alike, has a row in a menu the editor shows:
+/// Edit, View's Folding or the editor's right-click menu. The two command
+/// tables are walked, so a command added to either without a row fails.
+#[test]
+fn every_source_editor_command_has_a_row_in_a_menu() {
+    use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
+    use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ApplicationMenu;
+    use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{
+        MenuRow, resolve_menu_rows,
+    };
+    use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
+    use rspice_app_workbench::workbench::framework::host::Host;
+
+    fn keys(rows: &[MenuRow], out: &mut Vec<CommandKey>) {
+        for row in rows {
+            match row {
+                MenuRow::Command(row) => out.push(row.command),
+                MenuRow::Submenu { rows, .. } => keys(rows, out),
+                MenuRow::Separator => {}
+            }
+        }
+    }
+    let (_ctx, app, _) = veriloga_with_focused_editor();
+    assert!(
+        app.state
+            .workbench
+            .active_source_editor
+            .is_some_and(|editor| editor.navigable),
+        "a source editor its language service answers for is in front"
+    );
+    let mut shown = Vec::new();
+    for entries in [
+        app.menu_entries(ApplicationMenu::Edit),
+        app.menu_entries(ApplicationMenu::View),
+        app.source_editor_menu(),
+    ] {
+        let rows = resolve_menu_rows(
+            entries,
+            &app,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
+        keys(&rows, &mut shown);
+    }
+    let missing: Vec<&str> = CodeCommand::ALL
+        .into_iter()
+        .filter(|command| command.source_editor_only() || *command == CodeCommand::FindCodeDocument)
+        .map(CodeCommand::key)
+        .chain(
+            WorkbenchCommand::ALL
+                .into_iter()
+                .filter(|command| command.source_editor_request().is_some())
+                .map(WorkbenchCommand::key),
+        )
+        .filter(|key| !shown.contains(key))
+        .map(|key| key.as_str())
+        .collect();
+    assert!(missing.is_empty(), "no menu row for {missing:?}");
 }
 
 #[test]

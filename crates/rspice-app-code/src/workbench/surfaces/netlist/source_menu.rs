@@ -45,10 +45,17 @@ impl MenuLookup for SourceMenuLookup<'_, '_> {
         None
     }
 
-    /// None of the menu's commands has a toolbar button whose icon its row
-    /// would wear.
-    fn command_icon(&self, _key: CommandKey) -> Option<WorkbenchIcon> {
-        None
+    /// Undo and Redo wear their toolbar buttons' icons, as on Edit; none of
+    /// the menu's other commands has a button whose icon its row would wear.
+    fn command_icon(&self, key: CommandKey) -> Option<WorkbenchIcon> {
+        use crate::workbench::framework::command_registry::ids;
+        if key == ids::UNDO {
+            Some(WorkbenchIcon::Undo)
+        } else if key == ids::REDO {
+            Some(WorkbenchIcon::Redo)
+        } else {
+            None
+        }
     }
 
     fn holds(&self, context: MenuContext, platform: CommandPlatform, os: OperatingSystem) -> bool {

@@ -205,6 +205,44 @@ fn undo_waits_for_a_step_of_the_editors_history() {
     );
 }
 
+/// Edit > Cut and Copy act on selected text, so they wait for the reader
+/// to select some.
+#[test]
+fn cut_and_copy_wait_for_selected_text() {
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut app = deck_page(DeckPage::Owned, true);
+    prepare_workspace(&mut features::cx(&mut app));
+    page_frame(&ctx, &mut app, Vec::new());
+    page_frame(&ctx, &mut app, Vec::new());
+    let nothing = CommandAvailability::Disabled("nothing is selected");
+    assert_eq!(edit_answers(&app)[1..3], [nothing, nothing]);
+
+    let editor = rspice_app_code::workbench::documents::netlist_document::editor_id_in(
+        &app.state.model,
+        &app.state.code.netlist,
+    );
+    ctx.memory_mut(|memory| memory.request_focus(editor));
+    page_frame(&ctx, &mut app, Vec::new());
+    let select_all = egui::Event::Key {
+        key: egui::Key::A,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+    };
+    page_frame(&ctx, &mut app, vec![select_all]);
+    page_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        edit_answers(&app)[1..3],
+        [
+            CommandAvailability::Available,
+            CommandAvailability::Available
+        ],
+        "the whole deck is selected"
+    );
+}
+
 /// On the read-only deck a run used, every edit is unavailable, Undo
 /// included, because the document is read-only, not because there is
 /// nothing to undo; reading it stays possible.
@@ -219,7 +257,7 @@ fn a_read_only_deck_shows_its_edits_unavailable_as_read_only() {
         [
             read_only,
             read_only,
-            CommandAvailability::Available,
+            CommandAvailability::Disabled("nothing is selected"),
             read_only,
             read_only,
             CommandAvailability::Available,

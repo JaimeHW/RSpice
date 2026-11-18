@@ -29,7 +29,8 @@ use super::{
 
 /// The request the active source editor takes in `command`'s place, with
 /// whether it accepts it: a read-only editor refuses a request that would
-/// change its text, and Undo and Redo need a step of its history to take.
+/// change its text, Undo and Redo need a step of its history to take, and
+/// Cut and Copy need selected text.
 /// `None` when no source editor takes the command.
 pub(in crate::workbench) fn source_editor_redirect(
     command: WorkbenchCommand,
@@ -40,6 +41,10 @@ pub(in crate::workbench) fn source_editor_redirect(
     let accepted = match request {
         SourceEditorRequest::Standard(StandardCommand::Undo) => editor.editable && editor.can_undo,
         SourceEditorRequest::Standard(StandardCommand::Redo) => editor.editable && editor.can_redo,
+        SourceEditorRequest::Standard(StandardCommand::Cut) => {
+            editor.editable && editor.has_selection
+        }
+        SourceEditorRequest::Standard(StandardCommand::Copy) => editor.has_selection,
         _ => editor.editable || !request.mutates_source(),
     };
     Some((request, accepted))
@@ -117,6 +122,13 @@ impl RSpiceApp {
                 .is_some_and(SourceEditorRequest::mutates_source)
         {
             return CommandAvailability::Disabled("the document is read-only");
+        }
+        // Text is cut or copied from a selection, which a source editor
+        // holds none of until the reader selects some.
+        if self.state.workbench.active_source_editor.is_some()
+            && matches!(command, WorkbenchCommand::Cut | WorkbenchCommand::Copy)
+        {
+            return CommandAvailability::Disabled("nothing is selected");
         }
         CommandAvailability::Disabled(match command {
             // A step taken mid-drag would be folded into the drag when it

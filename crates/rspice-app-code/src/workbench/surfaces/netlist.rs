@@ -224,6 +224,7 @@ pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
             navigable: true,
             can_undo: can_undo_netlist_edit(&cx.state.netlist),
             can_redo: can_redo_netlist_edit(&cx.state.netlist),
+            has_selection: false,
         };
         cx.wb.active_source_editor = Some(
             crate::workbench::documents::text_editor_commands::with_held_history_steps(
@@ -415,6 +416,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                             crate::workbench::documents::netlist_document::can_redo_netlist_edit(
                                 netlist,
                             ),
+                        has_selection: false,
                     }
                 };
             publish_source_editor(ui.ctx(), cx.wb, page_editor(&cx.state.netlist));

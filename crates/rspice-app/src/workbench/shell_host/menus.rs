@@ -1,10 +1,12 @@
 //! What each application menu holds, written down as entries the menu
-//! renderer draws and a test can read. The source editor's right-click menu
-//! is the code feature's (`code::SOURCE_EDITOR_MENU`).
+//! renderer draws and a test can read. The source editor's rows, of Edit,
+//! View's Folding and its right-click menu, are the code feature's
+//! (`code::SOURCE_EDIT_MENU` and its neighbours).
 
 use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::{SOURCE_EDIT_MENU, SOURCE_FOLDING_MENU};
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
@@ -227,82 +229,11 @@ const EXPORT_MENU: &[MenuEntry] = &[
 ];
 
 /// Edit acts on what the page shows: with a source editor as the document,
-/// on its text; otherwise on the drawing's selection. With the drawing's,
-/// 22 rows have 20 letters to give as access keys: Deselect all and the
-/// Select submenu go without.
+/// on its text, in the groups the editor's own command table gives; otherwise
+/// on the drawing's selection.
 const EDIT_MENU: &[MenuEntry] = &[
-    workbench(WorkbenchCommand::Undo).access('U'),
-    workbench(WorkbenchCommand::Redo).access('R'),
-    MenuEntry::Only(
-        MenuContext::Drawing,
-        &[command(ShellCommand::RepeatLastCommand).access('L')],
-    ),
-    Separator,
-    workbench(WorkbenchCommand::Cut).access('T'),
-    workbench(WorkbenchCommand::Copy).access('C'),
-    // A picture of the selection or the view, for a document or a message.
-    MenuEntry::Only(
-        MenuContext::Drawing,
-        &[hardcopy(HardcopyCommand::CopyAsImage).access('G')],
-    ),
-    workbench(WorkbenchCommand::Paste).access('P'),
-    MenuEntry::Only(
-        MenuContext::SourceEditor,
-        &[
-            code(CodeCommand::DuplicateLine).access('L'),
-            code(CodeCommand::DeleteLine).access('D'),
-        ],
-    ),
-    MenuEntry::Only(
-        MenuContext::Drawing,
-        &[
-            workbench(WorkbenchCommand::Duplicate).access('E'),
-            workbench(WorkbenchCommand::Delete).access('D'),
-        ],
-    ),
-    Separator,
-    workbench(WorkbenchCommand::SelectAll).access('A'),
-    MenuEntry::Only(
-        MenuContext::Drawing,
-        &[
-            workbench(WorkbenchCommand::DeselectAll),
-            // A symbol view's objects are its own; these kinds are a
-            // schematic's.
-            MenuEntry::Only(
-                MenuContext::NotSymbolView,
-                &[MenuEntry::submenu("Select", SELECT_MENU)],
-            ),
-        ],
-    ),
-    Separator,
-    MenuEntry::Only(
-        MenuContext::SourceEditor,
-        &[
-            code(CodeCommand::ToggleLineComment).access('M'),
-            code(CodeCommand::FormatDocument).access('O'),
-            code(CodeCommand::GoToLine).access('G'),
-            Separator,
-            code(CodeCommand::FindCodeDocument).access('F'),
-        ],
-    ),
-    // What is done to the selection, then to one object, then finding one.
-    MenuEntry::Only(
-        MenuContext::Drawing,
-        &[
-            design(DesignCommand::MoveSelection).access('V'),
-            design(DesignCommand::StretchSelection).access('H'),
-            design(DesignCommand::ArraySelection).access('Y'),
-            design(DesignCommand::ReplaceInstance).access('S'),
-            design(DesignCommand::SwapToRSpiceSymbols).access('W'),
-            design(DesignCommand::SelectionBulkEdit).access('B'),
-            Separator,
-            design(DesignCommand::RenameSelection).access('M'),
-            design(DesignCommand::ObjectProperties).access('O'),
-            Separator,
-            workbench(WorkbenchCommand::FindInDesign).access('F'),
-            design(DesignCommand::FindReplace).access('I'),
-        ],
-    ),
+    MenuEntry::Only(MenuContext::SourceEditor, SOURCE_EDIT_MENU),
+    MenuEntry::Only(MenuContext::Drawing, DRAWING_EDIT_MENU),
     // On macOS, Settings is the RSpice menu's.
     MenuEntry::Only(
         MenuContext::NoApplicationMenu,
@@ -311,6 +242,44 @@ const EDIT_MENU: &[MenuEntry] = &[
             settings(SettingsCommand::Preferences).access('N'),
         ],
     ),
+];
+
+/// Edit over a drawing. Its 22 rows have 20 letters to give as access keys:
+/// Deselect all and the Select submenu go without.
+const DRAWING_EDIT_MENU: &[MenuEntry] = &[
+    workbench(WorkbenchCommand::Undo).access('U'),
+    workbench(WorkbenchCommand::Redo).access('R'),
+    command(ShellCommand::RepeatLastCommand).access('L'),
+    Separator,
+    workbench(WorkbenchCommand::Cut).access('T'),
+    workbench(WorkbenchCommand::Copy).access('C'),
+    // A picture of the selection or the view, for a document or a message.
+    hardcopy(HardcopyCommand::CopyAsImage).access('G'),
+    workbench(WorkbenchCommand::Paste).access('P'),
+    workbench(WorkbenchCommand::Duplicate).access('E'),
+    workbench(WorkbenchCommand::Delete).access('D'),
+    Separator,
+    workbench(WorkbenchCommand::SelectAll).access('A'),
+    workbench(WorkbenchCommand::DeselectAll),
+    // A symbol view's objects are its own; these kinds are a schematic's.
+    MenuEntry::Only(
+        MenuContext::NotSymbolView,
+        &[MenuEntry::submenu("Select", SELECT_MENU)],
+    ),
+    Separator,
+    // What is done to the selection, then to one object, then finding one.
+    design(DesignCommand::MoveSelection).access('V'),
+    design(DesignCommand::StretchSelection).access('H'),
+    design(DesignCommand::ArraySelection).access('Y'),
+    design(DesignCommand::ReplaceInstance).access('S'),
+    design(DesignCommand::SwapToRSpiceSymbols).access('W'),
+    design(DesignCommand::SelectionBulkEdit).access('B'),
+    Separator,
+    design(DesignCommand::RenameSelection).access('M'),
+    design(DesignCommand::ObjectProperties).access('O'),
+    Separator,
+    workbench(WorkbenchCommand::FindInDesign).access('F'),
+    design(DesignCommand::FindReplace).access('I'),
 ];
 
 /// Every object of one kind on the active sheet, in place of the selection.
@@ -387,7 +356,7 @@ const VIEW_MENU: &[MenuEntry] = &[
     // Folding, offered while a source editor is the document on screen.
     MenuEntry::Only(
         MenuContext::SourceEditor,
-        &[MenuEntry::submenu("Folding", FOLDING_MENU).access('L')],
+        &[MenuEntry::submenu("Folding", SOURCE_FOLDING_MENU).access('L')],
     ),
     command_as(ShellCommand::ToggleFocusMode, "Focus mode").access('M'),
     command_as(ShellCommand::ToggleFullScreen, "Full screen").access('U'),
@@ -414,13 +383,6 @@ const GRID_MENU: &[MenuEntry] = &[
         "Grid, snap and routing\u{2026}",
     )
     .access('G'),
-];
-
-const FOLDING_MENU: &[MenuEntry] = &[
-    code(CodeCommand::FoldSelection).access('F'),
-    code(CodeCommand::UnfoldAtCaret).access('C'),
-    code(CodeCommand::FoldAll).access('A'),
-    code(CodeCommand::UnfoldAll).access('U'),
 ];
 
 /// Design: move through the hierarchy, place, arrange and lay out sheets,

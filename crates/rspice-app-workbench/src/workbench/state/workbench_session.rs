@@ -395,6 +395,9 @@ pub struct ActiveSourceEditor {
     pub can_undo: bool,
     /// Whether its history has a step to redo.
     pub can_redo: bool,
+    /// Whether any of its text was selected as it was last drawn: what Edit
+    /// > Cut and Copy act on.
+    pub has_selection: bool,
 }
 
 /// New workbench session state. Durable layout preferences are kept with the
