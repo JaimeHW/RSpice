@@ -1213,7 +1213,7 @@ pub(crate) fn show_virtual_text_editor(
     session.scroll_id = Some(scroll_output.inner.id);
     find_bar::paint_ticks(
         ui.painter(),
-        &session.find,
+        &session,
         scroll_output.inner.inner_rect,
         style,
     );

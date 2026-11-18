@@ -26,10 +26,12 @@ const FIELD_WIDTH: f32 = 260.0;
 /// How much of the accent a match's fill keeps, and the selected match's.
 const MATCH_FILL: f32 = 0.22;
 const SELECTED_MATCH_FILL: f32 = 0.45;
-/// The scroll bar's marks: their width in from the editor's right edge and
-/// how finely their places down the text are told apart.
+/// The scroll bar's marks: their width in from the editor's right edge,
+/// their height, and the least room between two before the second is
+/// left out.
 const TICK_WIDTH: f32 = 4.0;
-const TICK_RESOLUTION: f32 = 2048.0;
+const TICK_HEIGHT: f32 = 3.0;
+const TICK_SPACING: f32 = 1.0;
 /// The longest selection Find takes as its search when it opens.
 const SEEDED_QUERY_LIMIT: usize = 256;
 
@@ -56,9 +58,9 @@ struct Found {
     /// Each match as a byte range of the text and as a character range.
     bytes: Vec<Range<usize>>,
     chars: Vec<Range<usize>>,
-    /// Where the matches' lines fall down the text, from 0 to 1, each told
-    /// apart from the next by at least a scroll bar's pixel.
-    ticks: Vec<f32>,
+    /// Each matched line once, as its line and the column of its first
+    /// match, for the scroll bar's marks.
+    places: Vec<(usize, usize)>,
     invalid: bool,
 }
 
@@ -107,7 +109,6 @@ impl FindBar {
             }
             Err(_) => return,
         };
-        let lines = model.line_count().max(1) as f32;
         let (mut byte, mut char) = (0, 0);
         for found in matches.matches() {
             let bytes = found.byte_range();
@@ -118,11 +119,9 @@ impl FindBar {
             let start = char;
             char += text[bytes.clone()].chars().count();
             byte = bytes.end;
-            let tick = (model.line_column_for_char(start).0 as f32 / lines * TICK_RESOLUTION)
-                .floor()
-                / TICK_RESOLUTION;
-            if self.found.ticks.last() != Some(&tick) {
-                self.found.ticks.push(tick);
+            let place = model.line_column_for_char(start);
+            if self.found.places.last().map(|(line, _)| *line) != Some(place.0) {
+                self.found.places.push(place);
             }
             self.found.bytes.push(bytes);
             self.found.chars.push(start..char);
@@ -277,14 +276,14 @@ fn bar_rows(
         }
         let query_id = super::find_field_id(editor_id);
         let hint = messages.text(MessageId::EditorFindField);
-        let field = crate::ui::widgets::text_field(
+        let field = compact_field(
             ui,
             egui::TextEdit::singleline(&mut bar.query)
                 .id(query_id)
                 .hint_text(hint.as_str())
                 .font(style.font.clone())
                 .margin(egui::Margin::symmetric(6, 2)),
-            field_width,
+            Vec2::new(field_width, control),
         );
         if bar.focus_query {
             bar.focus_query = false;
@@ -418,14 +417,14 @@ fn bar_rows(
         ui.horizontal(|ui| {
             ui.add_space(control + BAR_GAP);
             let hint = messages.text(MessageId::EditorFindReplaceField);
-            let field = crate::ui::widgets::text_field(
+            let field = compact_field(
                 ui,
                 egui::TextEdit::singleline(&mut bar.replacement)
                     .id(editor_id.with("find-bar-replacement"))
                     .hint_text(hint.as_str())
                     .font(style.font.clone())
                     .margin(egui::Margin::symmetric(6, 2)),
-                field_width,
+                Vec2::new(field_width, control),
             );
             if field.lost_focus() {
                 let (enter, escape) = ui.input(|input| {
@@ -463,6 +462,12 @@ fn bar_rows(
         });
     }
     step
+}
+
+/// A field of the bar, `size` big: as tall as the bar's other controls
+/// rather than a form's, so the replace row fits under the search.
+fn compact_field(ui: &mut Ui, edit: egui::TextEdit<'_>, size: Vec2) -> egui::Response {
+    ui.add_sized(size, edit.vertical_align(Align::Center))
 }
 
 /// Select the whole of the search field's text, so typing replaces it.
@@ -629,22 +634,48 @@ pub(super) fn paint_matches(
     }
 }
 
-/// Mark on the scroll bar, along `track`'s right edge, where down the text
-/// the matches are.
+/// Mark on the scroll bar, along `track`'s right edge, the rows the
+/// matches are on: where they stand in the view while the whole text fits
+/// it, and in proportion down the scroll bar once it does not. A match
+/// inside a fold marks the fold's row.
 pub(super) fn paint_ticks(
     painter: &egui::Painter,
-    bar: &FindBar,
+    session: &VirtualEditorSession,
     track: egui::Rect,
     style: &VirtualEditorStyle<'_>,
 ) {
-    if !bar.open {
+    let bar = &session.find;
+    if !bar.open || bar.found.places.is_empty() {
         return;
     }
+    let content_height = super::content_size(session, style, 0.0).y;
+    let scale = track.height() / content_height.max(track.height());
     let x = (track.right() - TICK_WIDTH - 1.0)..=(track.right() - 1.0);
-    for tick in &bar.found.ticks {
-        let y = track.top() + tick * track.height();
+    let mut last_top = f32::NEG_INFINITY;
+    for &(line, column) in &bar.found.places {
+        let row = session
+            .rows
+            .row_of(&session.model, line, column)
+            .map(|(row, _)| row)
+            .or_else(|| {
+                session
+                    .model
+                    .projected_visible_row_for_logical_line(line)
+                    .map(|visible_row| session.rows.first_row_of(visible_row))
+            });
+        let Some(row) = row else {
+            continue;
+        };
+        let centre =
+            track.top() + (style.top_padding + (row as f32 + 0.5) * style.line_height) * scale;
+        let top = (centre - TICK_HEIGHT * 0.5)
+            .clamp(track.top(), (track.bottom() - TICK_HEIGHT).max(track.top()));
+        if top - last_top < TICK_SPACING {
+            continue;
+        }
+        last_top = top;
         painter.rect_filled(
-            egui::Rect::from_x_y_ranges(x.clone(), y..=(y + 2.0)),
+            egui::Rect::from_x_y_ranges(x.clone(), top..=(top + TICK_HEIGHT)),
             0.0,
             style.accent,
         );
