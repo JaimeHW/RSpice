@@ -354,6 +354,45 @@ fn the_design_is_resolved_once_until_an_edit_commits() {
     assert_eq!(app.state.project.configuration.resolution_builds(), 3);
 }
 
+/// A drawing edit that leaves the hierarchy as it resolved, a wire drawn,
+/// keeps the resolution the page shows; one that places an instance
+/// resolves the design again.
+#[test]
+fn a_drawing_edit_that_places_no_instance_keeps_the_resolution() {
+    use rspice_app_state::state::{LibraryCellInstance, Point};
+    let mut app = reference_app();
+    frame(&mut app, 1440.0);
+    assert_eq!(app.state.project.configuration.resolution_builds(), 1);
+
+    rspice_design::projection::reset_materialization_count();
+    app.state.model.schematic.with_undo("Wire", |schematic| {
+        schematic.add_wire(vec![Point::new(-800, -800), Point::new(-600, -800)]);
+    });
+    frame(&mut app, 1440.0);
+    assert!(
+        rspice_design::projection::materialization_count() > 0,
+        "the wire moved the design"
+    );
+    assert_eq!(
+        app.state.project.configuration.resolution_builds(),
+        1,
+        "a wire places no instance: the resolution holds"
+    );
+
+    app.state.model.schematic.with_undo("Place", |schematic| {
+        schematic.add_library_cell_component(
+            Point::new(-800, -1200),
+            LibraryCellInstance::new("missing_library", "omitted_master", "schematic"),
+        );
+    });
+    frame(&mut app, 1440.0);
+    assert_eq!(
+        app.state.project.configuration.resolution_builds(),
+        2,
+        "a placed instance resolves the design again"
+    );
+}
+
 #[test]
 fn a_dirty_configuration_offers_apply_and_revert() {
     let mut app = reference_app();

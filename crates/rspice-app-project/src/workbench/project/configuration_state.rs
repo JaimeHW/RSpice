@@ -380,7 +380,9 @@ impl ConfigurationPageState {
 
     /// The candidate hierarchy for what the page shows: the selection with
     /// its edits applied. It is rebuilt only when the selection, the edits or
-    /// the design change, never because a frame was drawn.
+    /// the design change, never because a frame was drawn, and a drawing
+    /// edit that leaves the hierarchy as it resolved, a part moved or a wire
+    /// drawn, keeps it: nothing the page shows moved.
     pub fn resolution(
         &mut self,
         workspace: &ProjectWorkspace,
@@ -402,13 +404,23 @@ impl ConfigurationPageState {
         let design = workspace.design_projection_key(libraries, active_view, schematic);
         let library = libraries.catalog().stamp();
         let project_revision = workspace.content.project.revision().get();
-        if let (Some(key), Some(value)) = (&self.resolution.key, &self.resolution.value)
-            && key.selection == selection
-            && key.draft_revision == self.draft_revision
-            && key.design == design
-            && key.library == library
-            && key.project_revision == project_revision
-        {
+        let open = open_views(workspace);
+        // Whether the held resolution is of this selection, these edits,
+        // these libraries and these open views, and if so whether of this
+        // design too.
+        let held = self
+            .resolution
+            .key
+            .as_ref()
+            .filter(|key| {
+                key.selection == selection
+                    && key.draft_revision == self.draft_revision
+                    && key.library == library
+                    && key.project_revision == project_revision
+                    && key.open == open
+            })
+            .map(|key| key.design == design);
+        if let (Some(true), Some(value)) = (held, &self.resolution.value) {
             return Arc::clone(value);
         }
         let candidates = self
@@ -416,16 +428,26 @@ impl ConfigurationPageState {
             .candidates
             .take()
             .unwrap_or_else(|| workspace.candidate_projection_cache());
+        let inputs = ResolutionInputs {
+            workspace,
+            libraries,
+            active_view,
+            schematic,
+            candidates: &candidates,
+        };
+        let hierarchy = ConfigurationResolution::resolve(&inputs, selection, draft);
+        if let (Some(false), Some(value)) = (held, &self.resolution.value)
+            && value.hierarchy == hierarchy
+        {
+            let value = Arc::clone(value);
+            self.resolution.candidates = Some(candidates);
+            if let Some(key) = &mut self.resolution.key {
+                key.design = design;
+            }
+            return value;
+        }
         let value = Arc::new(ConfigurationResolution::build(
-            ResolutionInputs {
-                workspace,
-                libraries,
-                active_view,
-                schematic,
-                candidates: &candidates,
-            },
-            selection,
-            draft,
+            &inputs, hierarchy, selection, draft,
         ));
         self.resolution = ResolutionCache {
             candidates: Some(candidates),
@@ -435,6 +457,7 @@ impl ConfigurationPageState {
                 design,
                 library,
                 project_revision,
+                open,
             }),
             value: Some(Arc::clone(&value)),
             visible: None,
@@ -520,6 +543,7 @@ struct ResolutionCache {
 /// live buffers and the project's authorities, the catalog among them; the
 /// library stamp and the project revision cover a design whose authorities
 /// cannot be digested, and the tables' view lists, which read the libraries.
+/// The open views are the top cells the page offers.
 #[derive(Debug, Clone, PartialEq)]
 struct ResolutionKey {
     selection: ConfigurationSelection,
@@ -527,6 +551,15 @@ struct ResolutionKey {
     design: Option<DesignProjectionKey>,
     library: u64,
     project_revision: u64,
+    open: BTreeSet<String>,
+}
+
+/// The views open in the workspace, the one in front among them: the
+/// top-cell choices the page offers.
+fn open_views(workspace: &ProjectWorkspace) -> BTreeSet<String> {
+    std::iter::once(workspace.content.active_view.key())
+        .chain(workspace.content.schematic_buffers.keys().cloned())
+        .collect()
 }
 
 /// What the selection, with its edits, resolves every instance to.
@@ -820,12 +853,14 @@ struct ResolutionInputs<'a> {
 }
 
 impl ConfigurationResolution {
-    fn build(
-        inputs: ResolutionInputs<'_>,
+    /// The hierarchy `selection` resolves the design to, with `draft`'s
+    /// edits applied.
+    fn resolve(
+        inputs: &ResolutionInputs<'_>,
         selection: ConfigurationSelection,
         draft: Option<&ConfigurationSetDefinition>,
-    ) -> Self {
-        let ResolutionInputs {
+    ) -> Result<HierarchyResolution, String> {
+        let &ResolutionInputs {
             workspace,
             libraries,
             active_view,
@@ -833,7 +868,7 @@ impl ConfigurationResolution {
             candidates,
         } = inputs;
         let catalog: &ConfigurationSetCatalog = &workspace.content.configuration_sets;
-        let hierarchy = candidate_catalog(catalog, selection, draft).and_then(|candidate| {
+        candidate_catalog(catalog, selection, draft).and_then(|candidate| {
             // The edits resolve against the workspace where it stands, with
             // only the configuration catalog swapped: no copy of the design.
             let projection = if candidate == *catalog {
@@ -850,7 +885,22 @@ impl ConfigurationResolution {
             projection
                 .map(|projection| projection.hierarchy_resolution().clone())
                 .map_err(|error| error.to_string())
-        });
+        })
+    }
+
+    /// What the page shows of `hierarchy`, the one `selection` resolved to.
+    fn build(
+        inputs: &ResolutionInputs<'_>,
+        hierarchy: Result<HierarchyResolution, String>,
+        selection: ConfigurationSelection,
+        draft: Option<&ConfigurationSetDefinition>,
+    ) -> Self {
+        let &ResolutionInputs {
+            workspace,
+            libraries,
+            ..
+        } = inputs;
+        let catalog: &ConfigurationSetCatalog = &workspace.content.configuration_sets;
         let cells = hierarchy.as_ref().map(cell_rows).unwrap_or_default();
         let top_cells = top_cell_choices(workspace, libraries);
         let view_names = project_view_names(libraries);
