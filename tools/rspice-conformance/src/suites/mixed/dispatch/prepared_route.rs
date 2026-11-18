@@ -89,6 +89,7 @@ fn prepared_manual_run(source: &str, origin: &Path) -> Vec<Observation> {
         imported_checkpoints: &Default::default(),
         imported_transient_checkpoints: &Default::default(),
         max_parallel_workers: None,
+        machine_memory: None,
         library_folders: &[],
         compilation: None,
         design_checks: Default::default(),
