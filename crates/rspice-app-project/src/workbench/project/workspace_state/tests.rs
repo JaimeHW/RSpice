@@ -22,7 +22,7 @@ fn project_page_catalog_is_the_complete_five_tab_contract() {
         ProjectPage::ALL.map(ProjectPage::label),
         [
             "Overview",
-            "Library",
+            "Library Manager",
             "Configuration",
             "Dependencies",
             "Recovery",

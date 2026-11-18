@@ -366,7 +366,7 @@ const VIEW_MENU: &[MenuEntry] = &[
 /// names.
 const PROJECT_PAGES_MENU: &[MenuEntry] = &[
     project(ProjectCommand::Page(ProjectPage::Overview)).access('O'),
-    MenuEntry::command_as(ProjectCommand::Page(ProjectPage::Library).key(), "Library").access('L'),
+    project(ProjectCommand::Page(ProjectPage::Library)).access('L'),
     project(ProjectCommand::Page(ProjectPage::Configuration)).access('C'),
     project(ProjectCommand::Page(ProjectPage::Dependencies)).access('D'),
     project(ProjectCommand::Page(ProjectPage::Recovery)).access('R'),

@@ -108,7 +108,9 @@ impl ProjectPage {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
-            Self::Library => "Library",
+            // The Library page is the Library Manager, and goes by
+            // Virtuoso's name for it wherever it is named.
+            Self::Library => "Library Manager",
             Self::Configuration => "Configuration",
             Self::Dependencies => "Dependencies",
             Self::Recovery => "Recovery",

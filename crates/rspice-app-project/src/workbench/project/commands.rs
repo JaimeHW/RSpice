@@ -351,9 +351,6 @@ impl ProjectCommand {
             Self::NewCell => ("New cell…", "File", open, global, NEW_CELL),
             Self::NewView => ("New cell view…", "File", open, global, NONE),
             Self::OpenSchematic => ("Open schematic…", "File", waits, global, NONE),
-            // The Library page is the Library Manager, and is found under
-            // Virtuoso's name for it.
-            Self::Page(ProjectPage::Library) => ("Library Manager", "Project", page, global, NONE),
             // A page goes by the name its tab shows, as Simulate's and
             // Verify's pages do; its group says whose page it is.
             Self::Page(page_shown) => (page_shown.label(), "Project", page, global, NONE),
