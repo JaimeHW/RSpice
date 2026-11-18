@@ -17,7 +17,7 @@ use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::overview::CELL_ROW_BUILDS;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
-    DIRTY_RECOMPUTES, active_document_is_dirty, has_unsaved_changes,
+    DIRTY_AUDITS, DIRTY_RECOMPUTES, active_document_is_dirty, has_unsaved_changes,
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{
@@ -544,6 +544,48 @@ fn drag_a_part(mut replay: Replay, folder: std::path::PathBuf, resolves: bool) {
         "the title marks the edit: {}",
         replay.app.last_window_title
     );
+    drop(replay);
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// An idle frame on any Project page of a project of five thousand cells
+/// derives nothing per cell: it compares, digests, captures and writes back
+/// nothing, and the debug audit of the answer it reads captures the project
+/// again ever more rarely: a page idle as long again as it was shown takes
+/// that capture at most once.
+#[test]
+fn an_idle_frame_on_a_project_of_five_thousand_cells_derives_nothing_per_cell() {
+    let (mut replay, folder) = saved_project("edit-work-idle-cells");
+    let mut cells = Library::new("bulk");
+    for index in 0..5_000 {
+        let mut cell = Cell::new(format!("cell{index:04}"));
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        cells.add_cell(cell);
+    }
+    replay.app.state.model.library_manager.add_library(cells);
+    replay.app.state.workbench.activate(Workspace::Project);
+    for page in [
+        ProjectPage::Overview,
+        ProjectPage::Library,
+        ProjectPage::Configuration,
+        ProjectPage::Dependencies,
+    ] {
+        replay.app.state.project.project_page = page;
+        idle(&mut replay, FRAMES);
+        let _ = take();
+        DIRTY_AUDITS.with(|count| count.set(0));
+        idle(&mut replay, FRAMES);
+        assert_eq!(
+            take(),
+            EditWork::default(),
+            "{page:?}: idle frames compare, digest, capture and write back nothing"
+        );
+        assert!(
+            DIRTY_AUDITS.with(std::cell::Cell::get) <= 1,
+            "{page:?}: idle as long again as it was shown, the page captures the project \
+             for the audit at most once"
+        );
+    }
     drop(replay);
     let _ = std::fs::remove_dir_all(folder);
 }

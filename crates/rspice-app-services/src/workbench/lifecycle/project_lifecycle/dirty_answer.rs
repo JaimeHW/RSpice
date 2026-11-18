@@ -23,7 +23,9 @@
 //! In debug builds and tests every held answer is checked: the project is
 //! captured again and a document whose identity moved under an unchanged
 //! stamp panics, naming it. A subject the stamp misses fails the suite; it
-//! cannot ship as lost work.
+//! cannot ship as lost work. A held answer is checked on its first read and
+//! again each time its reads double, so idle frames on a large project are
+//! not each a capture of it; every decision reads [`fresh`] and checks it.
 
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
@@ -132,6 +134,37 @@ struct Compared {
     /// first read; why the working project could not be digested.
     working: Result<OnceCell<DocumentFingerprints>, String>,
     comparison: DirtyComparison,
+    /// How many times the comparison was read while held, which says when
+    /// the debug audit checks it again.
+    #[cfg(debug_assertions)]
+    reads: std::cell::Cell<u32>,
+}
+
+impl Compared {
+    fn new(
+        working: Result<OnceCell<DocumentFingerprints>, String>,
+        comparison: DirtyComparison,
+    ) -> Self {
+        Self {
+            working,
+            comparison,
+            #[cfg(debug_assertions)]
+            reads: std::cell::Cell::default(),
+        }
+    }
+
+    /// Whether this read of the held comparison is one the debug audit
+    /// checks: the first, then each that doubles the reads before it. An
+    /// answer held across a thousand idle frames is captured again a dozen
+    /// times, not once per read, so an idle frame costs what the project's
+    /// size does only once in a long while; every decision reads [`fresh`],
+    /// which captures and checks the answer each time.
+    #[cfg(debug_assertions)]
+    fn audit_due(&self) -> bool {
+        let read = self.reads.get().saturating_add(1);
+        self.reads.set(read);
+        read.is_power_of_two()
+    }
 }
 
 impl DirtyAnswer {
@@ -161,14 +194,14 @@ impl DirtyAnswer {
             held.baseline == *baseline && held.stamp.differs_only_in_the_drawing(stamp)
         })?;
         if answer.compared.comparison.edit_in_progress() != Some(&editing) {
-            answer.compared = Rc::new(Compared {
-                working: Err("a gesture is editing the drawing".to_owned()),
-                comparison: answer
+            answer.compared = Rc::new(Compared::new(
+                Err("a gesture is editing the drawing".to_owned()),
+                answer
                     .compared
                     .comparison
                     .clone()
                     .with_edit_in_progress(editing),
-            });
+            ));
         }
         answer.stamp = stamp.clone();
         Some(Rc::clone(&answer.compared))
@@ -217,7 +250,9 @@ fn held_or_compared(state: &LifecycleView<'_>, through_gesture: bool) -> Rc<Comp
         .filter(|held| through_gesture || held.comparison.edit_in_progress().is_none())
     {
         #[cfg(debug_assertions)]
-        if !audit_suspended() && held.comparison.edit_in_progress().is_none() {
+        if !audit_suspended() && held.comparison.edit_in_progress().is_none() && held.audit_due() {
+            #[cfg(any(test, feature = "test-support"))]
+            DIRTY_AUDITS.with(|count| count.set(count.get() + 1));
             audit(
                 &held,
                 answer,
@@ -273,10 +308,7 @@ pub(super) fn fresh<R>(state: &LifecycleView<'_>, answer: impl FnOnce(&DirtyComp
     // The digests held are not the ones the capture took: the next
     // comparison digests and compares every document.
     dirty_answer.documents.borrow_mut().clear();
-    let compared = Rc::new(Compared {
-        working: working.map(OnceCell::from),
-        comparison,
-    });
+    let compared = Rc::new(Compared::new(working.map(OnceCell::from), comparison));
     dirty_answer.hold(Answer {
         stamp,
         baseline,
@@ -326,6 +358,9 @@ fn fingerprint(state: &LifecycleView<'_>) -> Result<DocumentFingerprints, String
 thread_local! {
     /// Comparisons of the working project made for a stamp that moved.
     pub static DIRTY_RECOMPUTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Captures of the working project the debug audit took to check a held
+    /// answer.
+    pub static DIRTY_AUDITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Compare the working project, digesting again only the documents whose
@@ -393,10 +428,7 @@ fn compare(
         Err(_) => lifecycle.authority.compare_working_documents(None, None),
     };
     drop(documents);
-    let compared = Rc::new(Compared {
-        working: changed.map(|_| OnceCell::new()),
-        comparison,
-    });
+    let compared = Rc::new(Compared::new(changed.map(|_| OnceCell::new()), comparison));
     dirty_answer.hold(Answer {
         stamp,
         baseline,
@@ -620,10 +652,7 @@ pub fn hold_accepted_answer(state: &dyn LifecycleSource) {
     lifecycle.dirty_answer.hold(Answer {
         stamp: WorkingStamp::of(&state),
         baseline: lifecycle.authority.dirty_baseline(),
-        compared: Rc::new(Compared {
-            working: working.map(OnceCell::from),
-            comparison,
-        }),
+        compared: Rc::new(Compared::new(working.map(OnceCell::from), comparison)),
     });
 }
 

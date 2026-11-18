@@ -46,7 +46,7 @@ use std::path::PathBuf;
 pub(crate) use crate::product::TransactionId;
 pub use dirty_answer::WorkingStamp;
 #[cfg(any(test, feature = "test-support"))]
-pub use dirty_answer::{DIRTY_RECOMPUTES, hold_accepted_answer, without_audit};
+pub use dirty_answer::{DIRTY_AUDITS, DIRTY_RECOMPUTES, hold_accepted_answer, without_audit};
 #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 pub use persistence::BrowserBindingBackend;
 #[cfg(target_arch = "wasm32")]
