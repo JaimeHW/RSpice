@@ -12,8 +12,8 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
 use crate::workbench::slots::{netlist_shown_in, veriloga_compilation_in};
 use crate::workbench::workflows::netlist_workflow::{
-    acknowledge_canonical_dependencies, acknowledge_canonical_validation,
-    invalidate_canonical_validation, normalize_owned_netlist_whitespace, record_validation_failure,
+    acknowledge_canonical_dependencies, acknowledge_canonical_validation, formatted_deck_text,
+    invalidate_canonical_validation, record_validation_failure,
 };
 use rspice_app_runs::workbench::waiting::{self, WaitingValidation};
 
@@ -189,6 +189,21 @@ enum FormatValidation {
     Ran,
 }
 
+/// Whether the file the netlist editor shows is a Spectre file, which a `+`
+/// does not continue.
+fn shows_spectre(cx: &Cx<'_, CodeFeature>) -> bool {
+    crate::workbench::documents::netlist_document::dialect::shown_source_in(
+        cx.model,
+        &cx.state.netlist,
+    )
+    .is_some_and(|shown| {
+        matches!(
+            shown.syntax(),
+            crate::workbench::documents::text_editor_commands::EditorSyntax::Spectre
+        )
+    })
+}
+
 fn format_netlist(cx: &mut Cx<'_, CodeFeature>, validation: FormatValidation) {
     if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
         cx.model,
@@ -209,7 +224,7 @@ fn format_netlist(cx: &mut Cx<'_, CodeFeature>, validation: FormatValidation) {
                 .prompt("Fix the include file's syntax errors before formatting it.");
             return;
         }
-        let formatted = normalize_owned_netlist_whitespace(&source);
+        let formatted = formatted_deck_text(&source, shows_spectre(cx));
         if formatted == source {
             cx.wb.prompt("The include file is already formatted.");
         } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
@@ -242,7 +257,7 @@ fn format_netlist(cx: &mut Cx<'_, CodeFeature>, validation: FormatValidation) {
         return;
     }
 
-    let formatted = normalize_owned_netlist_whitespace(&source);
+    let formatted = formatted_deck_text(&source, shows_spectre(cx));
     if formatted == source {
         cx.wb.prompt("The netlist is already formatted.");
         return;
