@@ -55,7 +55,12 @@ pub(in crate::workbench) fn results(
     // The workspace's memoized projection: taking it fresh re-digested the run.
     let manifest = active_manifest(state);
     let details = match state.model.simulation.active_run().zip(manifest.as_deref()) {
-        Some((run, manifest)) => result_authority::result_run(ui, run, &manifest.model),
+        Some((run, manifest)) => result_authority::result_run(
+            ui,
+            run,
+            &manifest.model,
+            &state.model.workspace.content.configuration_sets,
+        ),
         None => {
             muted_inspector_copy(ui, "No run selected.");
             None

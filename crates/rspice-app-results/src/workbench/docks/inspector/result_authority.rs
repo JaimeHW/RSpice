@@ -22,11 +22,22 @@ pub(super) fn result_run(
     ui: &mut Ui,
     run: &crate::state::SimulationRun,
     manifest: &rspice_results::manifest::ManifestViewModel,
+    configurations: &rspice_design::configuration_set::ConfigurationSetCatalog,
 ) -> Option<u64> {
     use crate::state::SimulationRunLifecycle;
 
     section_header(ui, "Run", None);
     property_row(ui, "Dataset", &manifest.run_label);
+    if let Some(recorded) = run
+        .prepared_receipt()
+        .and_then(|receipt| receipt.configuration())
+    {
+        property_row(
+            ui,
+            "Configuration",
+            &crate::state::workspace::recorded_configuration_words(configurations, recorded),
+        );
+    }
     property_row(ui, "Duration", &manifest.elapsed_time);
     let problem = match run.lifecycle {
         SimulationRunLifecycle::Completed => None,

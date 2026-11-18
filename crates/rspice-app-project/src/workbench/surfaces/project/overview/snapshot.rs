@@ -667,6 +667,8 @@ struct OperationsKey {
     publications: Option<crate::product::ContentDigest>,
     /// How many checkpoints are listed, and the first and last of them.
     checkpoints: (usize, Option<uuid::Uuid>, Option<uuid::Uuid>),
+    /// The configurations a run's row reads its configuration against.
+    configurations: u64,
 }
 
 impl OperationsKey {
@@ -691,6 +693,7 @@ impl OperationsKey {
                     .last()
                     .map(|checkpoint| checkpoint.checkpoint_id()),
             ),
+            configurations: model.workspace.content.configuration_sets.stamp(),
         }
     }
 }
@@ -744,6 +747,21 @@ fn retained_operations(
                 .sum();
             let (timestamp_ms, stamp) =
                 OperationSnapshot::dated(unix_seconds_to_millis(run.timestamp));
+            // The design the run elaborated leads, as an ADE result names
+            // its test's design; a run that recorded none says nothing.
+            let configuration = run
+                .prepared_receipt()
+                .and_then(|receipt| receipt.configuration())
+                .map(|recorded| {
+                    format!(
+                        "{} \u{b7} ",
+                        crate::state::workspace::recorded_configuration_words(
+                            &model.workspace.content.configuration_sets,
+                            recorded,
+                        )
+                    )
+                })
+                .unwrap_or_default();
             OperationSnapshot {
                 timestamp_ms,
                 stamp,
@@ -754,7 +772,7 @@ fn retained_operations(
                 ),
                 elapsed: Some(run.elapsed_time),
                 detail: format!(
-                    "{} {} \u{b7} {measurement_count} {} \u{b7} {}",
+                    "{configuration}{} {} \u{b7} {measurement_count} {} \u{b7} {}",
                     run.analyses.len(),
                     singular_or_plural(run.analyses.len(), "analysis", "analyses"),
                     singular_or_plural(measurement_count, "measurement", "measurements"),
