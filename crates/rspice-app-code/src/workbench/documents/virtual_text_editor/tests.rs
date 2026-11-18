@@ -875,6 +875,66 @@ struct ScriptState {
     left_from: (usize, Option<usize>),
 }
 
+/// An opening bracket or quote typed before a blank or the line's end
+/// brings its closing one, the caret between; the closing one typed there
+/// steps over it, and Backspace between an empty pair takes both.
+#[test]
+fn typing_an_opening_bracket_brings_its_closing_one() {
+    let mut editor = ScriptedEditor::new("");
+    for typed in ["V", "(", "a"] {
+        assert!(
+            editor
+                .frame(vec![egui::Event::Text(typed.to_owned())])
+                .changed
+        );
+    }
+    assert!(editor.source == "V(a)", "{}", String::from(&editor.source));
+    let _ = editor.frame(vec![egui::Event::Text(")".to_owned())]);
+    assert!(
+        editor.source == "V(a)",
+        "the closing bracket is stepped over"
+    );
+    assert_eq!(editor.frame(Vec::new()).cursor, 4);
+    let _ = editor.frame(vec![egui::Event::Text(" {".to_owned())]);
+    assert!(editor.source == "V(a) {", "pasted text comes as it is");
+    for typed in [" ", "'"] {
+        let _ = editor.frame(vec![egui::Event::Text(typed.to_owned())]);
+    }
+    assert!(
+        editor.source == "V(a) { ''",
+        "{}",
+        String::from(&editor.source)
+    );
+    assert!(editor.key(Key::Backspace, Modifiers::NONE).changed);
+    assert!(editor.source == "V(a) { ", "Backspace takes the empty pair");
+    for typed in ["x", "'"] {
+        let _ = editor.frame(vec![egui::Event::Text(typed.to_owned())]);
+    }
+    assert!(
+        editor.source == "V(a) { x'",
+        "a quote after a word is one quote"
+    );
+}
+
+/// An opening bracket typed over a selection wraps it and keeps it selected.
+#[test]
+fn an_opening_bracket_wraps_the_selection() {
+    let mut editor = ScriptedEditor::new("R1 a b 1k");
+    let _ = editor.key(Key::A, Modifiers::COMMAND);
+    assert!(
+        editor
+            .frame(vec![egui::Event::Text("[".to_owned())])
+            .changed
+    );
+    assert!(
+        editor.source == "[R1 a b 1k]",
+        "{}",
+        String::from(&editor.source)
+    );
+    assert!(editor.key(Key::Z, Modifiers::COMMAND).changed);
+    assert!(editor.source == "R1 a b 1k", "the wrap is one step");
+}
+
 /// Keys typed one after another are undone together, up to the space
 /// before the word.
 #[test]

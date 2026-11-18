@@ -736,6 +736,29 @@ impl TextDocumentModel {
         true
     }
 
+    /// Move each caret `by` characters within the typing step: the caret
+    /// typing leaves between the two characters of a pair, or takes over a
+    /// closing character that already stands there. The step, undone and
+    /// redone, puts the caret back where this leaves it.
+    pub fn move_carets_typing(&mut self, by: isize) {
+        let continues = self
+            .open_step
+            .as_ref()
+            .is_some_and(|open| open.carets == self.selections);
+        let moved = self
+            .selections
+            .iter()
+            .map(|selection| TextSelection::caret(selection.cursor.saturating_add_signed(by)))
+            .collect();
+        self.set_selections(moved);
+        if continues && let Some(open) = self.open_step.as_mut() {
+            open.carets = self.selections.clone();
+            if let Some(step) = self.undo.last_mut() {
+                step.after_selections = self.selections.clone();
+            }
+        }
+    }
+
     /// Whether the history has a step to undo.
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
