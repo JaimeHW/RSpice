@@ -25,6 +25,7 @@ use crate::workbench::project::dependency_status::{
 };
 use crate::workbench::project::library_dialogs::library_files::{
     LibraryFileIntent, library_file_blocker, library_file_label, run_library_file_intent,
+    take_browser_folder,
 };
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
@@ -78,6 +79,9 @@ struct LedgerView {
 }
 
 pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+    // Read from folder… is offered here too; what the browser read for it
+    // goes in before the page draws.
+    take_browser_folder(cx);
     // The rail draws first and does both of these; a phone width shows the
     // page without it.
     refresh_source_drift(ui.ctx(), cx.model);

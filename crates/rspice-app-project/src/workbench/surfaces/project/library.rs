@@ -10,12 +10,14 @@ use std::sync::Arc;
 use crate::state::shortcuts::ShortcutStroke;
 use crate::state::{CellViewRef, LibraryManager, ViewType};
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::model::LibraryMode;
 use crate::workbench::design_system::elide_text;
 use crate::workbench::docks::inspector::project::LibraryShown;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
 use crate::workbench::project::library_dialogs::library_files::{
     LibraryFileIntent, library_file_blocker, library_file_intents, library_file_label,
+    library_file_refusal,
 };
 use crate::workbench::project::workspace_state::LibraryDeletionTarget;
 use crate::workbench::slots::ProjectState;
@@ -255,6 +257,9 @@ thread_local! {
 /// intent is carried out before the detail draws. Then the reports.
 pub fn page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let ctx = ui.ctx().clone();
+    // A folder the browser finished reading for Embed library from folder…
+    // or Read from folder… goes in before the page draws.
+    crate::workbench::project::library_dialogs::library_files::take_browser_folder(cx);
     // What a command asked of the page since it last drew.
     if let Some(intent) = cx.state.library_browser.queued.take() {
         apply_library_intent(&ctx, cx, intent);
@@ -1230,6 +1235,11 @@ fn selection_summary(ui: &mut Ui, target: &Target) {
     }
 }
 
+/// A command over library folders, or the clause its refusal is stated in.
+fn file_command(model: &Model, intent: LibraryFileIntent) -> Result<LibraryIntent, &'static str> {
+    library_file_refusal(model, &intent).map_or(Ok(LibraryIntent::Files(intent)), Err)
+}
+
 /// Why a library kept in a folder of its own cannot be renamed.
 const KEEPS_ITS_NAME: &str = "A library in its own folder keeps its name; copy it to rename it.";
 
@@ -1732,6 +1742,19 @@ pub fn command_intent(
             .map_or(Ok(LibraryIntent::RestoreFromPublication), Err),
         LibraryCommand::AuditHistory if project_open => Ok(LibraryIntent::ShowAuditHistory),
         LibraryCommand::AuditHistory => Err("no project is open"),
+        // Attach, embed a folder and refresh act on the project's library
+        // folders from anywhere; the rest act on the library the page shows.
+        LibraryCommand::Attach | LibraryCommand::EmbedFromFolder | LibraryCommand::Refresh
+            if !project_open =>
+        {
+            Err("no project is open")
+        }
+        LibraryCommand::Attach => file_command(model, LibraryFileIntent::Attach),
+        LibraryCommand::EmbedFromFolder => file_command(model, LibraryFileIntent::EmbedFromFolder),
+        LibraryCommand::Refresh if model.library_manager.references().next().is_none() => {
+            Err("no library is kept in a folder of its own")
+        }
+        LibraryCommand::Refresh => file_command(model, LibraryFileIntent::Refresh),
         _ if !page_in_front => Err("open the Library page"),
         LibraryCommand::CopyCell if builtin.open => {
             let chosen = builtin_models::selected_model(builtin).ok_or("select a model")?;
@@ -1744,6 +1767,35 @@ pub fn command_intent(
             }
         }
         _ if builtin.open => Err("the built-in library is read-only"),
+        LibraryCommand::MoveToFolder
+        | LibraryCommand::Embed
+        | LibraryCommand::MakeEditable
+        | LibraryCommand::MakeReadOnly
+        | LibraryCommand::Relink
+        | LibraryCommand::Detach => {
+            let (library, _) = target.library.ok_or("select a library")?;
+            let referenced = model.library_manager.is_referenced(&library);
+            let intent = match command {
+                LibraryCommand::MoveToFolder if referenced => {
+                    return Err("the library is already in a folder of its own");
+                }
+                LibraryCommand::MoveToFolder => LibraryFileIntent::MoveToFolder(library),
+                _ if !referenced => return Err("the library is held in the project"),
+                LibraryCommand::Embed => LibraryFileIntent::Embed(library),
+                LibraryCommand::MakeEditable => {
+                    LibraryFileIntent::SetMode(library, LibraryMode::Editable)
+                }
+                LibraryCommand::MakeReadOnly => {
+                    LibraryFileIntent::SetMode(library, LibraryMode::ReadOnly)
+                }
+                LibraryCommand::Relink if cfg!(target_arch = "wasm32") => {
+                    LibraryFileIntent::ReadFromFolder(library)
+                }
+                LibraryCommand::Relink => LibraryFileIntent::Relink(library),
+                _ => LibraryFileIntent::Detach(library),
+            };
+            file_command(model, intent)
+        }
         LibraryCommand::CopyCell => {
             let (library, cell, _) = target.cell.ok_or("select a cell")?;
             if target.writable_library_available {

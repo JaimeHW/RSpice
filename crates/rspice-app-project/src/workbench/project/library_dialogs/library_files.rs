@@ -137,25 +137,57 @@ impl LibraryFilesDialogs {
     }
 }
 
-/// Why a library-file command cannot be taken here and now, if it cannot.
-pub fn library_file_blocker(model: &Model, intent: &LibraryFileIntent) -> Option<String> {
+/// Why a library-file command cannot be taken here and now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Blocker {
+    BrowserKeepsNoLink,
+    BrowserReachesNoPath,
+    ReadsItsFolder,
+    ReadOnlyProject,
+    Already(LibraryMode),
+}
+
+impl Blocker {
+    /// The reason as a menu's hover and a refusal state it.
+    const fn sentence(self) -> &'static str {
+        match self {
+            Self::BrowserKeepsNoLink => {
+                "A browser cannot keep a link to a folder; use Embed library from folder\u{2026}"
+            }
+            Self::BrowserReachesNoPath => "A browser cannot reach a folder by path.",
+            Self::ReadsItsFolder => "This computer reads the library from its folder.",
+            Self::ReadOnlyProject => "The project is open read-only.",
+            Self::Already(LibraryMode::Editable) => "The library is already editable.",
+            Self::Already(LibraryMode::ReadOnly) => "The library is already read-only.",
+        }
+    }
+
+    /// The reason as the clause a command's refusal is stated in.
+    const fn clause(self) -> &'static str {
+        match self {
+            Self::BrowserKeepsNoLink => "a browser cannot keep a link to a folder",
+            Self::BrowserReachesNoPath => "a browser cannot reach a folder by path",
+            Self::ReadsItsFolder => "this computer reads the library from its folder",
+            Self::ReadOnlyProject => "the project is open read-only",
+            Self::Already(LibraryMode::Editable) => "the library is already editable",
+            Self::Already(LibraryMode::ReadOnly) => "the library is already read-only",
+        }
+    }
+}
+
+fn blocker(model: &Model, intent: &LibraryFileIntent) -> Option<Blocker> {
     let browser = cfg!(target_arch = "wasm32");
     let read_only_project = model.safe_mode.project_read_only();
     match intent {
-        LibraryFileIntent::Attach if browser => Some(
-            "A browser cannot keep a link to a folder; use Embed library from folder\u{2026}"
-                .to_owned(),
-        ),
+        LibraryFileIntent::Attach if browser => Some(Blocker::BrowserKeepsNoLink),
         LibraryFileIntent::MoveToFolder(_)
         | LibraryFileIntent::ShowInFolder(_)
         | LibraryFileIntent::Relink(_)
             if browser =>
         {
-            Some("A browser cannot reach a folder by path.".to_owned())
+            Some(Blocker::BrowserReachesNoPath)
         }
-        LibraryFileIntent::ReadFromFolder(_) if !browser => {
-            Some("This computer reads the library from its folder.".to_owned())
-        }
+        LibraryFileIntent::ReadFromFolder(_) if !browser => Some(Blocker::ReadsItsFolder),
         LibraryFileIntent::Attach
         | LibraryFileIntent::MoveToFolder(_)
         | LibraryFileIntent::Embed(_)
@@ -165,15 +197,25 @@ pub fn library_file_blocker(model: &Model, intent: &LibraryFileIntent) -> Option
         | LibraryFileIntent::Detach(_)
             if read_only_project =>
         {
-            Some("The project is open read-only.".to_owned())
+            Some(Blocker::ReadOnlyProject)
         }
         LibraryFileIntent::SetMode(library, mode) => model
             .library_manager
             .reference(library)
             .filter(|reference| reference.mode == *mode)
-            .map(|_| format!("The library is already {}.", mode.label().to_lowercase())),
+            .map(|_| Blocker::Already(*mode)),
         _ => None,
     }
+}
+
+/// Why a library-file command cannot be taken here and now, if it cannot.
+pub fn library_file_blocker(model: &Model, intent: &LibraryFileIntent) -> Option<String> {
+    blocker(model, intent).map(|blocker| blocker.sentence().to_owned())
+}
+
+/// The same reason, as the clause a command's refusal is stated in.
+pub fn library_file_refusal(model: &Model, intent: &LibraryFileIntent) -> Option<&'static str> {
+    blocker(model, intent).map(Blocker::clause)
 }
 
 /// The label a library-file command goes by in a menu.
@@ -427,7 +469,7 @@ fn read_from_folder(cx: &mut Cx<'_, ProjectFeature>, library: &str) {
 
 /// Take the folder a browser finished reading for Embed library from
 /// folder… or Read from folder…, if one is waiting. Polled as the Library
-/// page draws.
+/// and Dependencies pages draw, where those commands are taken.
 pub fn take_browser_folder(cx: &mut Cx<'_, ProjectFeature>) {
     #[cfg(target_arch = "wasm32")]
     if let Some((purpose, picked)) = browser_folder::take() {

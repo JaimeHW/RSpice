@@ -80,10 +80,19 @@ pub enum LibraryCommand {
     Publish,
     Restore,
     AuditHistory,
+    Attach,
+    EmbedFromFolder,
+    MoveToFolder,
+    Embed,
+    MakeEditable,
+    MakeReadOnly,
+    Relink,
+    Refresh,
+    Detach,
 }
 
 impl LibraryCommand {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 21] = [
         Self::Rename,
         Self::CopyCell,
         Self::CopyLibrary,
@@ -96,6 +105,15 @@ impl LibraryCommand {
         Self::Publish,
         Self::Restore,
         Self::AuditHistory,
+        Self::Attach,
+        Self::EmbedFromFolder,
+        Self::MoveToFolder,
+        Self::Embed,
+        Self::MakeEditable,
+        Self::MakeReadOnly,
+        Self::Relink,
+        Self::Refresh,
+        Self::Detach,
     ];
 }
 
@@ -175,7 +193,7 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 44] = [
         Self::ProjectLauncher,
         Self::OpenProject,
         Self::NewProject,
@@ -211,6 +229,15 @@ impl ProjectCommand {
         Self::Library(LibraryCommand::Publish),
         Self::Library(LibraryCommand::Restore),
         Self::Library(LibraryCommand::AuditHistory),
+        Self::Library(LibraryCommand::Attach),
+        Self::Library(LibraryCommand::EmbedFromFolder),
+        Self::Library(LibraryCommand::MoveToFolder),
+        Self::Library(LibraryCommand::Embed),
+        Self::Library(LibraryCommand::MakeEditable),
+        Self::Library(LibraryCommand::MakeReadOnly),
+        Self::Library(LibraryCommand::Relink),
+        Self::Library(LibraryCommand::Refresh),
+        Self::Library(LibraryCommand::Detach),
     ];
 
     /// The key a shortcut profile names this command by.
@@ -258,6 +285,21 @@ impl ProjectCommand {
                 CommandKey::new("restore-project-from-publication")
             }
             Self::Library(LibraryCommand::AuditHistory) => CommandKey::new("library-audit-history"),
+            Self::Library(LibraryCommand::Attach) => CommandKey::new("library-attach"),
+            Self::Library(LibraryCommand::EmbedFromFolder) => {
+                CommandKey::new("library-embed-from-folder")
+            }
+            Self::Library(LibraryCommand::MoveToFolder) => {
+                CommandKey::new("library-move-to-folder")
+            }
+            Self::Library(LibraryCommand::Embed) => CommandKey::new("library-embed"),
+            Self::Library(LibraryCommand::MakeEditable) => CommandKey::new("library-make-editable"),
+            Self::Library(LibraryCommand::MakeReadOnly) => {
+                CommandKey::new("library-make-read-only")
+            }
+            Self::Library(LibraryCommand::Relink) => CommandKey::new("library-relink"),
+            Self::Library(LibraryCommand::Refresh) => CommandKey::new("library-refresh"),
+            Self::Library(LibraryCommand::Detach) => CommandKey::new("library-detach"),
         }
     }
 
@@ -357,6 +399,15 @@ impl ProjectCommand {
                     LibraryCommand::Publish => "Publish project\u{2026}",
                     LibraryCommand::Restore => "Restore project from publication\u{2026}",
                     LibraryCommand::AuditHistory => "Library audit history\u{2026}",
+                    LibraryCommand::Attach => "Attach library\u{2026}",
+                    LibraryCommand::EmbedFromFolder => "Embed library from folder\u{2026}",
+                    LibraryCommand::MoveToFolder => "Move library to its own folder\u{2026}",
+                    LibraryCommand::Embed => "Embed library in project",
+                    LibraryCommand::MakeEditable => "Make library editable",
+                    LibraryCommand::MakeReadOnly => "Make library read-only",
+                    LibraryCommand::Relink => "Relink library\u{2026}",
+                    LibraryCommand::Refresh => "Refresh cellviews\u{2026}",
+                    LibraryCommand::Detach => "Detach library\u{2026}",
                 },
                 "Library",
                 open,
