@@ -36,6 +36,64 @@ fn parts(app: &mut RSpiceApp) -> DesignManagementParts<'_> {
     }
 }
 
+/// A hierarchy that expands past a million instances audits through the
+/// dialog with every instance a subject: each lists the instances it places
+/// in one pass over the design, not one pass per instance.
+#[test]
+fn a_hierarchy_past_a_million_instances_audits_every_instance() {
+    let mut app = super::configuration_page::nested_app(4);
+    let expanded = 1 + 32 + 32 * 32 + 32 * 32 * 32 + 32 * 32 * 32 * 32;
+    let ctx = super::recovery_frames::offscreen();
+    open_design_management_dialog(
+        &mut app.state.project.design_management,
+        &mut app.state.model,
+        &app.state.platform,
+        &mut app.state.workbench,
+    );
+    app.state.project.design_management.reset_inputs_for_page(
+        DesignManagementPage::HierarchyAudit,
+        None,
+        None,
+    );
+    let frame = |app: &mut RSpiceApp, events| {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_100.0, 850.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| render_design_management_dialog(&mut parts(app), ctx),
+        )
+    };
+    frame(&mut app, Vec::new());
+    let shown = frame(&mut app, Vec::new());
+    frame(
+        &mut app,
+        super::recovery_frames::click_on(&shown, "Run audit"),
+    );
+
+    let dialog = &app.state.project.design_management;
+    assert_eq!(dialog.page, DesignManagementPage::Manager);
+    let receipt = dialog
+        .draft
+        .as_ref()
+        .and_then(|draft| draft.hierarchy_audits().last())
+        .expect("the audit is recorded");
+    assert_eq!(receipt.resolved_subjects(), expanded);
+    assert!(receipt.passed(), "{:?}", receipt.findings().first());
+    // The manager is laid out on the frame after the press and painted on
+    // the one after that.
+    frame(&mut app, Vec::new());
+    let text = super::recovery_frames::painted(&frame(&mut app, Vec::new()));
+    assert!(
+        text.contains(&format!("{expanded} subjects audited \u{b7} 0 findings")),
+        "{text}"
+    );
+}
+
 #[test]
 fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation() {
     for confirmed_before_edit in [false, true] {

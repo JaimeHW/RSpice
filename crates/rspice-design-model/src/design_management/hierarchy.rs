@@ -191,11 +191,6 @@ impl HierarchyAuditReceipt {
             "hierarchy audit receipt",
             self.id.to_string(),
         )?;
-        require_limit(
-            "hierarchy audit findings",
-            self.findings.len(),
-            MAX_HIERARCHY_AUDIT_FINDINGS,
-        )?;
         for finding in &self.findings {
             validate_path("hierarchy audit finding path", &finding.instance_path)?;
             validate_value("hierarchy audit finding detail", &finding.detail, false)?;

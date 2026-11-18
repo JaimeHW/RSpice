@@ -36,9 +36,10 @@ fn reference_app() -> RSpiceApp {
     app
 }
 
-/// Four cells under the project's top, each placing the next thirty-two
-/// times and the last a resistor: past a million instances once expanded.
-fn million_app() -> RSpiceApp {
+/// `levels` cells under the project's top, each placing the next thirty-two
+/// times and the last a resistor: four levels expand past a million
+/// instances.
+pub(super) fn nested_app(levels: usize) -> RSpiceApp {
     use rspice_app_state::state::{
         Cell, CellViewRef, ComponentType, LibraryCellInstance, PendingPortPlacement, Point,
         PortDirectionType, PortDiscipline, SchematicState, View, ViewType,
@@ -59,21 +60,23 @@ fn million_app() -> RSpiceApp {
     let mut state = crate::workbench::app_state::AppState::default();
     let project = &state.model.workspace.content.project;
     let (library, top) = (project.root_library.clone(), project.top_cell.clone());
-    let cells = ["l1", "l2", "l3", "l4"];
+    let cells = (1..=levels)
+        .map(|level| format!("l{level}"))
+        .collect::<Vec<_>>();
     {
         let mut user = state
             .model
             .library_manager
             .edit_library(&library)
             .expect("the project library");
-        for name in cells {
+        for name in &cells {
             let mut cell = Cell::new(name);
             cell.add_view(View::new("schematic", ViewType::Schematic));
             user.add_cell(cell);
         }
     }
     let mut below: Option<&str> = None;
-    for name in cells.into_iter().rev().chain([top.as_str()]) {
+    for name in cells.iter().map(String::as_str).rev().chain([top.as_str()]) {
         state.open_workspace_view(CellViewRef::new(&library, name, "schematic"));
         let ports = below.map(|child| {
             state
@@ -405,7 +408,7 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
 /// cells it is: each written once, however often it is placed.
 #[test]
 fn a_hierarchy_past_a_million_instances_opens_on_the_page_and_netlists() {
-    let mut app = million_app();
+    let mut app = nested_app(4);
     let expanded = 1 + 32 + 32 * 32 + 32 * 32 * 32 + 32 * 32 * 32 * 32;
     assert!(expanded > 1_000_000);
 

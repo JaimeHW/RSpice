@@ -613,13 +613,16 @@ pub(super) fn variant_connectivity_signature(
         .collect())
 }
 
-/// The occurrences a hierarchy audit reports on.
+/// The occurrences a hierarchy audit reports on, each listing the instances
+/// it places.
 ///
 /// `SelectedHierarchy` narrows the audit to the occurrence the session is in,
 /// which is the whole design while nothing has been descended into. Every
 /// resolved path is read through the path type, so a configuration's required
 /// path and the resolver's expanded path are compared as occurrences rather
 /// than as two spellings that happen to differ.
+///
+/// Each occurrence lists its children as [`list_children`] files them.
 pub(super) fn hierarchy_audit_subjects(
     resolution: &crate::state::workspace::HierarchyResolution,
     view_checks: HierarchyViewChecks,
@@ -654,21 +657,37 @@ pub(super) fn hierarchy_audit_subjects(
             })
         })
         .collect::<Vec<_>>();
-    let paths = subjects
-        .iter()
-        .map(|subject| subject.instance_path.clone())
-        .collect::<Vec<_>>();
-    for subject in &mut subjects {
-        let prefix = format!("{}/", subject.instance_path.trim_end_matches('/'));
-        subject.child_instance_paths = paths
-            .iter()
-            .filter(|path| {
-                path.starts_with(&prefix)
-                    && !path[prefix.len()..].contains('/')
-                    && **path != subject.instance_path
-            })
-            .cloned()
-            .collect();
-    }
+    list_children(&mut subjects);
     subjects
+}
+
+/// Lists under each subject the subjects whose paths extend it by one
+/// instance, in one pass: a design that expands to a million instances lists
+/// its children in the time it takes to name them.
+pub(super) fn list_children(subjects: &mut [HierarchyAuditSubject]) {
+    let index = subjects
+        .iter()
+        .enumerate()
+        .map(|(at, subject)| (subject.instance_path.as_str(), at))
+        .collect::<std::collections::HashMap<_, _>>();
+    let parents = subjects
+        .iter()
+        .map(|subject| {
+            enclosing_path(&subject.instance_path).and_then(|parent| index.get(parent).copied())
+        })
+        .collect::<Vec<_>>();
+    for (child, parent) in parents.into_iter().enumerate() {
+        if let Some(parent) = parent {
+            let path = subjects[child].instance_path.clone();
+            subjects[parent].child_instance_paths.push(path);
+        }
+    }
+}
+
+/// The path `path` extends by one instance: `/` for an instance the top
+/// places, and none for the top itself.
+fn enclosing_path(path: &str) -> Option<&str> {
+    let path = path.trim_end_matches('/');
+    let cut = path.rfind('/')?;
+    Some(if cut == 0 { "/" } else { &path[..cut] })
 }

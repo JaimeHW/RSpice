@@ -64,3 +64,49 @@ fn the_sheets_table_counts_ports_and_off_sheet_nets_apart() {
         (0, 0)
     );
 }
+
+/// Each audited occurrence lists the instances it places directly: not
+/// itself, not the instances they place, and not an instance under another
+/// whose name it begins.
+#[test]
+fn each_audited_occurrence_lists_the_instances_it_places() {
+    let subject = |path: &str| HierarchyAuditSubject {
+        instance_path: path.to_owned(),
+        cell_name: "amp".to_owned(),
+        design_view: "schematic".to_owned(),
+        declared_fallbacks: Vec::new(),
+        resolved_simulation_view: Some("schematic".to_owned()),
+        fallback_used: None,
+        child_instance_paths: Vec::new(),
+        protected_boundary_id: None,
+    };
+    let mut subjects = [
+        "/",
+        "/X1",
+        "/X1/X1",
+        "/X10",
+        "/X1/X2",
+        "/X10/X1",
+        "/X1/X1/R1",
+    ]
+    .map(subject)
+    .to_vec();
+    super::operations::list_children(&mut subjects);
+    let children = |path: &str| {
+        subjects
+            .iter()
+            .find(|subject| subject.instance_path == path)
+            .map(|subject| subject.child_instance_paths.clone())
+            .unwrap()
+    };
+    assert_eq!(children("/"), ["/X1", "/X10"]);
+    assert_eq!(children("/X1"), ["/X1/X1", "/X1/X2"]);
+    assert_eq!(children("/X10"), ["/X10/X1"]);
+    assert_eq!(children("/X1/X1"), ["/X1/X1/R1"]);
+    assert!(children("/X1/X2").is_empty());
+    assert!(children("/X1/X1/R1").is_empty());
+
+    let mut below = ["/X1/X1", "/X1/X1/R1"].map(subject).to_vec();
+    super::operations::list_children(&mut below);
+    assert_eq!(below[0].child_instance_paths, ["/X1/X1/R1"]);
+}

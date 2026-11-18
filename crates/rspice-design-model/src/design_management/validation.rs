@@ -510,11 +510,6 @@ pub(super) fn validate_hierarchy_audit_request(
         }
         require_nonzero_revision(*revision, "hierarchy audit configuration", id.to_string())?;
     }
-    require_limit(
-        "hierarchy audit subjects",
-        request.subjects.len(),
-        MAX_HIERARCHY_AUDIT_SUBJECTS,
-    )?;
     if request.subjects.is_empty() {
         return Err(DesignManagementError::EmptyHierarchyAudit);
     }
@@ -646,11 +641,6 @@ pub(super) fn evaluate_hierarchy_audit(
             .then_with(|| left.kind.cmp(&right.kind))
             .then_with(|| left.detail.cmp(&right.detail))
     });
-    require_limit(
-        "hierarchy audit findings",
-        findings.len(),
-        MAX_HIERARCHY_AUDIT_FINDINGS,
-    )?;
     Ok(findings)
 }
 
@@ -1011,11 +1001,26 @@ pub(super) fn digest<T: Serialize>(
         schema: &'static str,
         value: &'a T,
     }
-    let bytes = serde_json::to_vec(&Material { schema, value })
+    /// Hashes what is written to it, so a large value is digested as it
+    /// serializes rather than held whole first.
+    struct Hashing(Sha256);
+    impl std::io::Write for Hashing {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = std::io::BufWriter::with_capacity(64 * 1024, Hashing(Sha256::new()));
+    serde_json::to_writer(&mut writer, &Material { schema, value })
         .map_err(|error| DesignManagementError::Serialization(error.to_string()))?;
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    Ok(ContentDigest::from_bytes(hasher.finalize().into()))
+    let hasher = writer
+        .into_inner()
+        .map_err(|error| DesignManagementError::Serialization(error.to_string()))?;
+    Ok(ContentDigest::from_bytes(hasher.0.finalize().into()))
 }
 
 pub(super) fn digest_infallible<T: Serialize>(schema: &'static str, value: &T) -> ContentDigest {
