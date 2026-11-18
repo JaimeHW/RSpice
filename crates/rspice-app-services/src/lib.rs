@@ -36,6 +36,7 @@ pub mod workbench {
     pub mod app_state {
         pub mod session {
             pub mod autosave;
+            pub mod browser_session;
         }
     }
     pub mod browser {
@@ -52,6 +53,7 @@ pub mod workbench {
         pub mod qualification;
     }
     pub mod lifecycle {
+        pub mod durable_records;
         pub mod project_checkpoint;
         pub mod project_lifecycle;
         pub mod recovery;

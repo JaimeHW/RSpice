@@ -18,6 +18,7 @@ use crate::io::ProjectSnapshot;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::durable_file::ExpectedContent;
 use crate::product::ContentDigest;
+use crate::workbench::lifecycle::durable_records::{DurableRecords, Record, RecordError};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::LifecycleSourceMut;
 use crate::workbench::lifecycle::project_lifecycle::{LifecycleSource, Model};
@@ -32,7 +33,6 @@ const CHECKPOINT_DIRECTORY_SUFFIX: &str = ".rspice-recovery";
 #[cfg(not(target_arch = "wasm32"))]
 const MANIFEST_SUFFIX: &str = ".checkpoint.json";
 const SNAPSHOT_SUFFIX: &str = ".rspiceproj";
-#[cfg(target_arch = "wasm32")]
 const BROWSER_KEY_PREFIX: &str = "rspice.project-recovery.v1";
 const MIB: u64 = 1024 * 1024;
 
@@ -111,6 +111,10 @@ struct ProjectCheckpointManifest {
     snapshot_digest: ContentDigest,
     snapshot_byte_len: u64,
     snapshot_name: String,
+    /// The save of the project a browser autosave was written over: a later
+    /// save leaves it behind, and no start offers it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    saved_generation: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,12 +124,42 @@ enum ProjectCheckpointLocator {
         manifest: PathBuf,
         snapshot: PathBuf,
     },
-    #[cfg(target_arch = "wasm32")]
     Browser {
         manifest_key: String,
         snapshot_key: String,
     },
 }
+
+impl ProjectCheckpointLocator {
+    /// The manifest and snapshot keys of a checkpoint kept in the browser's
+    /// storage; none for one kept on disk.
+    fn record_keys(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::Browser {
+                manifest_key,
+                snapshot_key,
+            } => Some((manifest_key, snapshot_key)),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Native { .. } => None,
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ProjectCheckpointLocator {
+    /// The manifest and snapshot files of a checkpoint kept on disk; none for
+    /// one kept in the browser's storage.
+    fn files(&self) -> Option<(&PathBuf, &PathBuf)> {
+        match self {
+            Self::Native { manifest, snapshot } => Some((manifest, snapshot)),
+            Self::Browser { .. } => None,
+        }
+    }
+}
+
+/// What a desktop file operation says of a checkpoint kept in the browser.
+#[cfg(not(target_arch = "wasm32"))]
+const KEPT_IN_THE_BROWSER: &str = "the checkpoint is kept in the browser's storage, not on disk";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectCheckpointSummary {
@@ -139,6 +173,7 @@ pub struct ProjectCheckpointSummary {
     pinned: bool,
     snapshot_digest: ContentDigest,
     snapshot_byte_len: u64,
+    saved_generation: Option<u64>,
     locator: ProjectCheckpointLocator,
 }
 
@@ -208,6 +243,11 @@ impl ProjectCheckpointSummary {
         self.pinned
     }
 
+    /// The save of the project a browser autosave was written over.
+    pub const fn saved_generation(&self) -> Option<u64> {
+        self.saved_generation
+    }
+
     /// The checkpoint's name in a list: the reader's note when it has one,
     /// otherwise its reason.
     pub fn title(&self) -> &str {
@@ -246,6 +286,7 @@ pub fn fixture_summary(
         pinned: false,
         snapshot_digest: ContentDigest::from_bytes([0x5a; 32]),
         snapshot_byte_len,
+        saved_generation: None,
         locator: ProjectCheckpointLocator::Native {
             manifest: PathBuf::from("fixture.checkpoint.json"),
             snapshot: PathBuf::from("fixture.rspiceproj"),
@@ -508,6 +549,7 @@ fn seal_checkpoint(
         snapshot_digest: digest(bytes),
         snapshot_byte_len: bytes.len().try_into().unwrap_or(u64::MAX),
         snapshot_name,
+        saved_generation: None,
     };
 
     validate_manifest(&manifest)?;
@@ -684,7 +726,7 @@ pub fn list(model: &Model) -> Result<ProjectCheckpointCatalog, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load(summary: &ProjectCheckpointSummary) -> Result<ProjectSnapshot, String> {
-    let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
+    let (_, snapshot) = summary.locator.files().ok_or(KEPT_IN_THE_BROWSER)?;
     rspice_results::store_reader::keep_segments_in(&segment_folder(snapshot));
     let bytes = read_snapshot_bytes(summary)?;
     validate_snapshot_bytes(summary, &bytes)
@@ -753,7 +795,7 @@ fn recovery_copy(
 /// recovery folder sits in. None for a project that had no file.
 #[cfg(not(target_arch = "wasm32"))]
 fn checkpoint_project_folder(summary: &ProjectCheckpointSummary) -> Option<PathBuf> {
-    let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
+    let (_, snapshot) = summary.locator.files()?;
     let recovery = snapshot.parent()?;
     recovery
         .file_name()?
@@ -880,6 +922,7 @@ fn summary_from_manifest(
         pinned: manifest.pinned,
         snapshot_digest: manifest.snapshot_digest,
         snapshot_byte_len: manifest.snapshot_byte_len,
+        saved_generation: manifest.saved_generation,
         locator,
     })
 }
@@ -973,7 +1016,7 @@ fn edited_manifest(
 /// read from.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn edit(summary: &ProjectCheckpointSummary, edit: &CheckpointEdit) -> Result<(), String> {
-    let ProjectCheckpointLocator::Native { manifest: path, .. } = &summary.locator;
+    let (path, _) = summary.locator.files().ok_or(KEPT_IN_THE_BROWSER)?;
     let stored = std::fs::read(path)
         .map_err(|error| format!("checkpoint manifest could not be read: {error}"))?;
     let manifest = edited_manifest(summary, &stored, edit)?;
@@ -992,7 +1035,7 @@ pub fn edit(summary: &ProjectCheckpointSummary, edit: &CheckpointEdit) -> Result
 /// its snapshot and the results only it kept.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn delete(summary: &ProjectCheckpointSummary) -> Result<(), String> {
-    let ProjectCheckpointLocator::Native { manifest, snapshot } = &summary.locator;
+    let (manifest, snapshot) = summary.locator.files().ok_or(KEPT_IN_THE_BROWSER)?;
     let mut failures = Vec::new();
     remove_checkpoint(manifest, snapshot, &mut failures);
     joined(failures)
@@ -1066,9 +1109,9 @@ pub fn after_save(
                     .iter()
                     .filter(|checkpoint| checkpoint.reason == ProjectCheckpointReason::Autosave)
                 {
-                    let ProjectCheckpointLocator::Native { manifest, snapshot } =
-                        &checkpoint.locator;
-                    remove_checkpoint(manifest, snapshot, &mut failures);
+                    if let Some((manifest, snapshot)) = checkpoint.locator.files() {
+                        remove_checkpoint(manifest, snapshot, &mut failures);
+                    }
                 }
             }
             Err(error) => failures.push(error),
@@ -1094,7 +1137,9 @@ fn carry(from: &Path, to: &Path, project_id: &str, remove: bool) -> Result<(), S
     prepare_directory(to)?;
     let mut failures = Vec::new();
     for checkpoint in &catalog.checkpoints {
-        let ProjectCheckpointLocator::Native { manifest, snapshot } = &checkpoint.locator;
+        let Some((manifest, snapshot)) = checkpoint.locator.files() else {
+            continue;
+        };
         let copied = (|| {
             let bytes = read_snapshot_bytes(checkpoint)?;
             if bytes.len() as u64 != checkpoint.snapshot_byte_len
@@ -1467,11 +1512,14 @@ fn list_directory_for(
             Ok(summary) => match snapshot_present(&summary) {
                 Ok(()) => checkpoints.push(summary),
                 Err(error) => {
-                    let ProjectCheckpointLocator::Native { manifest, snapshot } = &summary.locator;
                     quarantined.push(ProjectCheckpointQuarantine {
                         label: summary.checkpoint_id.to_string(),
                         reason: error,
-                        artifacts: vec![manifest.clone(), snapshot.clone()],
+                        artifacts: summary
+                            .locator
+                            .files()
+                            .map(|(manifest, snapshot)| vec![manifest.clone(), snapshot.clone()])
+                            .unwrap_or_default(),
                     });
                 }
             },
@@ -1497,7 +1545,7 @@ fn list_directory_for(
 /// manifest records: what a listing can know without reading it.
 #[cfg(not(target_arch = "wasm32"))]
 fn snapshot_present(summary: &ProjectCheckpointSummary) -> Result<(), String> {
-    let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
+    let (_, snapshot) = summary.locator.files().ok_or(KEPT_IN_THE_BROWSER)?;
     super::recovery::disk_observation::file_stat();
     let metadata = std::fs::metadata(snapshot).map_err(|error| {
         format!(
@@ -1513,7 +1561,7 @@ fn snapshot_present(summary: &ProjectCheckpointSummary) -> Result<(), String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_snapshot_bytes(summary: &ProjectCheckpointSummary) -> Result<Vec<u8>, String> {
-    let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
+    let (_, snapshot) = summary.locator.files().ok_or(KEPT_IN_THE_BROWSER)?;
     super::recovery::disk_observation::project_file();
     std::fs::read(snapshot).map_err(|error| {
         format!(
@@ -1531,9 +1579,9 @@ fn prune_retention(directory: &Path, project_id: &str, budget_bytes: u64) -> Res
     let catalog = list_directory(directory, project_id)?;
     let mut failures = Vec::new();
     for index in retention_removals(&catalog.checkpoints, budget_bytes) {
-        let ProjectCheckpointLocator::Native { manifest, snapshot } =
-            &catalog.checkpoints[index].locator;
-        remove_checkpoint(manifest, snapshot, &mut failures);
+        if let Some((manifest, snapshot)) = catalog.checkpoints[index].locator.files() {
+            remove_checkpoint(manifest, snapshot, &mut failures);
+        }
     }
     joined(failures)
 }
@@ -1554,15 +1602,16 @@ fn remove_artifacts<'a>(paths: impl IntoIterator<Item = &'a Path>, failures: &mu
 /// checkpoints retention removes, every autosave first when `drop_autosaves`
 /// is set. A manifest that cannot be read is left where it is: the page lists
 /// it as set aside.
-#[cfg(target_arch = "wasm32")]
 fn browser_retention_removals(
     stored: Vec<(String, Option<String>)>,
     budget: u64,
     drop_autosaves: bool,
 ) -> Vec<String> {
     let manifest_key = |checkpoint: &ProjectCheckpointSummary| {
-        let ProjectCheckpointLocator::Browser { manifest_key, .. } = &checkpoint.locator;
-        manifest_key.clone()
+        checkpoint
+            .locator
+            .record_keys()
+            .map_or_else(String::new, |(manifest_key, _)| manifest_key.to_owned())
     };
     let mut checkpoints = stored
         .into_iter()
@@ -1600,7 +1649,6 @@ fn browser_retention_removals(
     removals
 }
 
-#[cfg(target_arch = "wasm32")]
 fn browser_keys(manifest: &ProjectCheckpointManifest) -> (String, String) {
     let stem = format!(
         "{}.{:020}.{}",
@@ -1611,9 +1659,272 @@ fn browser_keys(manifest: &ProjectCheckpointManifest) -> (String, String) {
     (format!("{stem}.manifest"), format!("{stem}.snapshot"))
 }
 
-#[cfg(target_arch = "wasm32")]
 fn browser_project_prefix(project_id: &str) -> String {
     format!("{BROWSER_KEY_PREFIX}.{project_id}")
+}
+
+/// A checkpoint of the open project read off the model, for the browser's
+/// records. Encoding and writing it is work for a browser task: nothing here
+/// encodes the project.
+#[derive(Debug)]
+pub struct RecordsCapture {
+    project: ProjectSnapshot,
+    reason: ProjectCheckpointReason,
+    created_unix_ms: u64,
+    budget_bytes: u64,
+    saved_generation: Option<u64>,
+    superseded: Vec<ProjectCheckpointSummary>,
+}
+
+/// Read the open project off the model for a checkpoint kept in the
+/// browser's records, written over the save `saved_generation` names.
+pub fn capture_for_records(
+    state: &dyn LifecycleSource,
+    reason: ProjectCheckpointReason,
+    saved_generation: Option<u64>,
+) -> Result<RecordsCapture, String> {
+    let (project, created_unix_ms) = snapshot_now(state)?;
+    Ok(RecordsCapture {
+        project,
+        reason,
+        created_unix_ms,
+        budget_bytes: budget_bytes(state.lifecycle_view().model),
+        saved_generation,
+        superseded: Vec::new(),
+    })
+}
+
+/// What writing a checkpoint to the browser's records left.
+#[derive(Debug)]
+pub struct RecordsCheckpointWritten {
+    pub summary: ProjectCheckpointSummary,
+    /// The store was full, and what is kept for less than the project gave
+    /// way to it.
+    pub gave_way: bool,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// The checkpoints encoded on this thread.
+    pub static CHECKPOINT_ENCODINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl RecordsCapture {
+    /// The checkpoints this one replaces: retention drops them once it is
+    /// written, and when the browser's storage is full they make room for it
+    /// first.
+    #[must_use]
+    pub fn superseding(mut self, superseded: Vec<ProjectCheckpointSummary>) -> Self {
+        self.superseded = superseded;
+        self
+    }
+
+    /// Encode the checkpoint and write it to `records`, its project before
+    /// its manifest, then drop what retention no longer keeps. When the
+    /// store is full, room is made and the write tried again: first by the
+    /// checkpoints it supersedes, which hold older work and go once it is
+    /// written anyway, then by the record `gives_way` names, kept for less
+    /// than the project is.
+    pub async fn publish(
+        self,
+        records: &dyn DurableRecords,
+        gives_way: Option<(&dyn DurableRecords, &str)>,
+    ) -> Result<RecordsCheckpointWritten, String> {
+        #[cfg(any(test, feature = "test-support"))]
+        CHECKPOINT_ENCODINGS.with(|count| count.set(count.get() + 1));
+        let (mut manifest, serialized) =
+            seal_checkpoint(&self.project, self.reason, self.created_unix_ms)?;
+        manifest.saved_generation = self.saved_generation;
+        let (manifest_key, snapshot_key) = browser_keys(&manifest);
+        let manifest_text = serde_json::to_string(&manifest).map_err(|error| {
+            format!("project checkpoint manifest serialization failed: {error}")
+        })?;
+        let snapshot = serialized.into_bytes();
+        let mut superseded = self.superseded;
+        let mut gives_way = gives_way;
+        let mut gave_way = false;
+        loop {
+            match write_checkpoint_records(
+                records,
+                &manifest_key,
+                &snapshot_key,
+                &snapshot,
+                &manifest_text,
+            )
+            .await
+            {
+                Ok(()) => break,
+                Err(RecordError::Full) if !superseded.is_empty() => {
+                    for older in std::mem::take(&mut superseded) {
+                        delete_records(records, &older).await?;
+                    }
+                }
+                Err(RecordError::Full) => {
+                    let Some((store, key)) = gives_way.take() else {
+                        return Err(RecordError::Full.into());
+                    };
+                    if store.get(key).await?.is_none() {
+                        return Err(RecordError::Full.into());
+                    }
+                    store.delete(key).await?;
+                    gave_way = true;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if let Err(error) = prune_records(records, &manifest.project_id, self.budget_bytes).await {
+            log::warn!("the browser's older checkpoints were not all removed: {error}");
+        }
+        let summary = summary_from_manifest(
+            manifest,
+            ProjectCheckpointLocator::Browser {
+                manifest_key,
+                snapshot_key,
+            },
+        )?;
+        Ok(RecordsCheckpointWritten { summary, gave_way })
+    }
+}
+
+/// Write a checkpoint's project, then its manifest, which makes it listed;
+/// a manifest refused takes its project with it.
+async fn write_checkpoint_records(
+    records: &dyn DurableRecords,
+    manifest_key: &str,
+    snapshot_key: &str,
+    snapshot: &[u8],
+    manifest: &str,
+) -> Result<(), RecordError> {
+    records
+        .put(snapshot_key, Record::Bytes(snapshot.to_vec()))
+        .await?;
+    if let Err(error) = records
+        .put(manifest_key, Record::Text(manifest.to_owned()))
+        .await
+    {
+        let _ = records.delete(snapshot_key).await;
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Remove the project's checkpoints retention no longer keeps.
+async fn prune_records(
+    records: &dyn DurableRecords,
+    project_id: &str,
+    budget: u64,
+) -> Result<(), RecordError> {
+    let prefix = browser_project_prefix(project_id);
+    let mut stored = Vec::new();
+    for key in records.keys().await? {
+        if key.starts_with(&prefix) && key.ends_with(".manifest") {
+            let text = records.get(&key).await?.and_then(Record::into_text);
+            stored.push((key, text));
+        }
+    }
+    for manifest_key in browser_retention_removals(stored, budget, false) {
+        records.delete(&manifest_key).await?;
+        if let Some(stem) = manifest_key.strip_suffix(".manifest") {
+            records.delete(&format!("{stem}.snapshot")).await?;
+        }
+    }
+    Ok(())
+}
+
+/// The project's checkpoints in the browser's records, newest first, each
+/// from its manifest. A manifest that does not read, or is not the one its
+/// key names, is left out.
+pub async fn list_records(
+    records: &dyn DurableRecords,
+    project_id: &str,
+) -> Result<Vec<ProjectCheckpointSummary>, String> {
+    let prefix = browser_project_prefix(project_id);
+    let mut checkpoints = Vec::new();
+    for manifest_key in records.keys().await? {
+        if !manifest_key.starts_with(&prefix) || !manifest_key.ends_with(".manifest") {
+            continue;
+        }
+        let Some(text) = records
+            .get(&manifest_key)
+            .await?
+            .and_then(Record::into_text)
+        else {
+            continue;
+        };
+        let Ok(manifest) = serde_json::from_str::<ProjectCheckpointManifest>(&text) else {
+            continue;
+        };
+        let (expected_key, snapshot_key) = browser_keys(&manifest);
+        if manifest.project_id != project_id || expected_key != manifest_key {
+            continue;
+        }
+        if let Ok(summary) = summary_from_manifest(
+            manifest,
+            ProjectCheckpointLocator::Browser {
+                manifest_key,
+                snapshot_key,
+            },
+        ) {
+            checkpoints.push(summary);
+        }
+    }
+    sort_newest_first(&mut checkpoints);
+    Ok(checkpoints)
+}
+
+/// A checkpoint's project, read back from the browser's records and
+/// verified against its manifest.
+pub async fn load_record(
+    records: &dyn DurableRecords,
+    summary: &ProjectCheckpointSummary,
+) -> Result<ProjectSnapshot, String> {
+    let (_, snapshot_key) = summary
+        .locator
+        .record_keys()
+        .ok_or("the checkpoint is kept on disk, not in the browser's storage")?;
+    let bytes = records
+        .get(snapshot_key)
+        .await?
+        .and_then(Record::into_bytes)
+        .ok_or("the checkpoint's project is missing from the browser's storage")?;
+    validate_snapshot_bytes(summary, &bytes)
+}
+
+/// Delete a checkpoint from the browser's records, its manifest first, so it
+/// is no longer listed.
+pub async fn delete_records(
+    records: &dyn DurableRecords,
+    summary: &ProjectCheckpointSummary,
+) -> Result<(), String> {
+    let (manifest_key, snapshot_key) = summary
+        .locator
+        .record_keys()
+        .ok_or("the checkpoint is kept on disk, not in the browser's storage")?;
+    records.delete(manifest_key).await?;
+    records.delete(snapshot_key).await?;
+    Ok(())
+}
+
+/// Make `edit` to a checkpoint's manifest in the browser's records.
+pub async fn edit_records(
+    records: &dyn DurableRecords,
+    summary: &ProjectCheckpointSummary,
+    edit: &CheckpointEdit,
+) -> Result<(), String> {
+    let (manifest_key, _) = summary
+        .locator
+        .record_keys()
+        .ok_or("the checkpoint is kept on disk, not in the browser's storage")?;
+    let stored = records
+        .get(manifest_key)
+        .await?
+        .and_then(Record::into_text)
+        .ok_or("the checkpoint's manifest is missing from the browser's storage")?;
+    let manifest = edited_manifest(summary, stored.as_bytes(), edit)?;
+    let text = serde_json::to_string(&manifest)
+        .map_err(|error| format!("project checkpoint manifest serialization failed: {error}"))?;
+    records.put(manifest_key, Record::Text(text)).await?;
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1971,6 +2282,7 @@ mod tests {
             snapshot_digest: ContentDigest::from_bytes([0x51; 32]),
             snapshot_byte_len: 128,
             snapshot_name: "wrong.rspiceproj".to_owned(),
+            saved_generation: None,
         };
         assert!(validate_manifest(&manifest).is_err());
     }
@@ -1994,6 +2306,7 @@ mod tests {
             pinned: false,
             snapshot_digest: digest(&bytes),
             snapshot_byte_len: bytes.len() as u64,
+            saved_generation: None,
             #[cfg(not(target_arch = "wasm32"))]
             locator: ProjectCheckpointLocator::Native {
                 manifest: PathBuf::from("manifest"),
@@ -2151,7 +2464,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
-            let ProjectCheckpointLocator::Native { manifest, snapshot } = &checkpoint.locator;
+            let (manifest, snapshot) = checkpoint.locator.files().expect("kept on disk");
             assert_eq!(
                 std::fs::metadata(manifest)
                     .expect("manifest metadata")
@@ -2209,7 +2522,7 @@ mod tests {
             .set_path(directory.join("source.rspiceproj"));
         let checkpoint = create(&mut state, ProjectCheckpointReason::TechnologyChange)
             .expect("checkpoint publishes");
-        let ProjectCheckpointLocator::Native { snapshot, .. } = &checkpoint.locator;
+        let (_, snapshot) = checkpoint.locator.files().expect("kept on disk");
         std::fs::write(snapshot, b"corrupt checkpoint").expect("corrupt owned snapshot");
 
         let catalog = list(&state.model).expect("catalog returns quarantine diagnostics");
@@ -2238,7 +2551,7 @@ mod tests {
             .set_path(directory.join("source.rspiceproj"));
         let checkpoint =
             create(&mut state, ProjectCheckpointReason::Manual).expect("checkpoint publishes");
-        let ProjectCheckpointLocator::Native { snapshot, .. } = &checkpoint.locator;
+        let (_, snapshot) = checkpoint.locator.files().expect("kept on disk");
         let mut bytes = std::fs::read(snapshot).expect("snapshot reads");
         let last = bytes.len() - 1;
         bytes[last] ^= 0x01;
@@ -2279,7 +2592,7 @@ mod tests {
     /// the reader's edit leaves it.
     #[cfg(not(target_arch = "wasm32"))]
     fn mark(summary: &ProjectCheckpointSummary, pinned: bool, note: Option<&str>) {
-        let ProjectCheckpointLocator::Native { manifest, .. } = &summary.locator;
+        let (manifest, _) = summary.locator.files().expect("kept on disk");
         let mut stored: ProjectCheckpointManifest =
             serde_json::from_slice(&std::fs::read(manifest).expect("manifest reads"))
                 .expect("manifest parses");
@@ -2365,8 +2678,7 @@ mod tests {
             ]
         );
         for removed in [1, 3, 4] {
-            let ProjectCheckpointLocator::Native { manifest, snapshot } =
-                &published[removed].locator;
+            let (manifest, snapshot) = published[removed].locator.files().expect("kept on disk");
             assert!(
                 !manifest.exists() && !snapshot.exists(),
                 "{removed} is on disk"

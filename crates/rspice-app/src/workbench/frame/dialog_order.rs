@@ -542,7 +542,6 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         is_open: Some(|state| state.platform.project_autosave.rescue.is_some()),
         render: |app, ctx| app.render_unopened_project_dialog(ctx),
     },
-    #[cfg(not(target_arch = "wasm32"))]
     DialogSpec {
         key: DialogKey("services.recovered_work"),
         modality: Modality::Dialog,

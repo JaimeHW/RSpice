@@ -1,5 +1,6 @@
 //! The project feature's behaviour, observed through a whole application.
 
+mod browser_autosave;
 mod builtin_models;
 mod cellview_manager;
 mod check_and_save;

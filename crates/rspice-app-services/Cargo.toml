@@ -37,6 +37,8 @@ log = "0.4"
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 egui = { version = "0.35.0", default-features = false }
 rfd = { version = "0.17", features = ["file-handle-inner"] }
+# The recovered-work question is asked in the browser as on the desktop.
+rspice-ui-kit = { workspace = true, features = ["plot"] }
 
 [dev-dependencies]
 rspice-app-state = { workspace = true, features = ["test-support"] }
@@ -50,7 +52,6 @@ rspice-design = { workspace = true, features = ["symbol-test-observation", "sche
 rspice-pack = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-output = { workspace = true, features = ["durable-file"] }
 dirs = "7.0"
 

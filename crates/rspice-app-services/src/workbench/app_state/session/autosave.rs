@@ -5,13 +5,17 @@
 //! with it, looks for an autosave another session left that is newer than the
 //! file and differs from it, and asks once what to do with it.
 //!
+//! The browser does the same with a project saved to a file or to the
+//! browser's own storage: its autosave is kept in the browser's durable
+//! records, encoded and written in a browser task of its own, and offered
+//! when it was written over the save the project's file still holds.
+//!
 //! A standalone schematic with a path is written the same way to a
 //! `.autosave` sibling. A clean save retires only a checkpoint demonstrably
 //! owned by this process. Opening a file offers an eligible bound checkpoint
 //! before loading either snapshot.
 
-#![cfg(not(target_arch = "wasm32"))]
-
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 use egui::Context;
@@ -20,9 +24,13 @@ use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{Dialog, DialogChoice, DialogSize};
 
 use crate::diagnostics::{LogSeverity, LogSource};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::state::SchematicState;
+use crate::time_compat::Instant;
+use crate::workbench::app_state::session::browser_session;
+use crate::workbench::lifecycle::durable_records::{self, BrowserRecords, DurableRecords};
 use crate::workbench::lifecycle::project_checkpoint::{
-    self, DocumentDifference, ProjectCheckpointReason, ProjectCheckpointSummary,
+    self, CheckpointEdit, DocumentDifference, ProjectCheckpointReason, ProjectCheckpointSummary,
 };
 use crate::workbench::lifecycle::project_lifecycle::{
     self, LifecycleParts, LifecycleSourceMut, PlatformState,
@@ -103,6 +111,7 @@ fn take_slot<T>(slot: &mut Option<Slot<T>>) -> Option<T> {
 }
 
 /// Work for a background thread whose answer the frame takes later.
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_into<T: Send + 'static>(
     ctx: Option<&Context>,
     work: impl FnOnce() -> T + Send + 'static,
@@ -122,6 +131,29 @@ fn spawn_into<T: Send + 'static>(
     slot
 }
 
+/// Work for a browser task whose answer the frame takes later.
+fn spawn_task_into<T: 'static>(
+    ctx: Option<&Context>,
+    work: impl std::future::Future<Output = T> + 'static,
+) -> Slot<T> {
+    let slot: Slot<T> = Slot::default();
+    let filled = std::sync::Arc::clone(&slot);
+    durable_records::spawn_task(ctx, async move {
+        let answer = work.await;
+        *filled
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(answer);
+    });
+    slot
+}
+
+/// An autosave written, and whether the session's runs gave way to it.
+#[derive(Debug, Clone)]
+pub struct AutosaveWritten {
+    pub summary: ProjectCheckpointSummary,
+    pub runs_given_up: bool,
+}
+
 /// The open project's autosave: the timer, the checkpoint being written off
 /// the frame, the autosaves this process wrote, and the recovered work an
 /// open or a start found.
@@ -129,9 +161,10 @@ fn spawn_into<T: Send + 'static>(
 pub struct ProjectAutosave {
     /// When the next autosave is due: an interval after the first frame
     /// with unsaved work, or after the last autosave started.
-    due: Option<std::time::Instant>,
-    /// The autosave being written on a background thread.
-    writing: Option<Slot<Result<ProjectCheckpointSummary, String>>>,
+    due: Option<Instant>,
+    /// The autosave being written on a background thread, or in a browser
+    /// task.
+    writing: Option<Slot<Result<AutosaveWritten, String>>>,
     /// The autosaves this process wrote. Never offered back to it as
     /// recovered work, and removed when it lets the project go.
     written: Vec<ProjectCheckpointSummary>,
@@ -148,15 +181,21 @@ pub struct ProjectAutosave {
     search: Option<Slot<Result<Option<RecoveredWork>, String>>>,
     /// Recovered work found for the open project, for the dialog to offer.
     pub offer: Option<RecoveredWork>,
+    /// The working project as a browser start reopened it, with the unsaved
+    /// work its session kept, while recovered work is looked for.
+    pub restart_stamp: Option<project_lifecycle::WorkingStamp>,
     /// The search, after an open failed, for a checkpoint of that file.
+    #[cfg(not(target_arch = "wasm32"))]
     rescue_search: Option<Slot<Option<UnopenedProject>>>,
     /// A project file that would not open and its newest checkpoint that
     /// reads intact, for the dialog to offer.
+    #[cfg(not(target_arch = "wasm32"))]
     pub rescue: Option<UnopenedProject>,
 }
 
 /// A project file that would not open, and the newest of the checkpoints
 /// beside it that reads back intact.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub struct UnopenedProject {
     pub path: PathBuf,
@@ -169,12 +208,16 @@ impl ProjectAutosave {
     /// Make the autosave due now, for a test that cannot wait an interval.
     #[cfg(any(test, feature = "test-support"))]
     pub fn arm_due(&mut self) {
-        self.due = Some(std::time::Instant::now());
+        self.due = Some(Instant::now());
     }
 
     /// Whether an autosave is being written or recovered work looked for.
     pub fn busy(&self) -> bool {
-        self.writing.is_some() || self.search.is_some() || self.rescue_search.is_some()
+        #[cfg(not(target_arch = "wasm32"))]
+        let rescuing = self.rescue_search.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let rescuing = false;
+        self.writing.is_some() || self.search.is_some() || rescuing
     }
 
     /// The autosaves this process wrote and still holds.
@@ -220,7 +263,7 @@ pub fn project_autosave_tick(state: &mut dyn LifecycleSourceMut, ctx: &Context) 
         autosave.due = None;
         return written;
     }
-    let now = std::time::Instant::now();
+    let now = Instant::now();
     let interval = std::time::Duration::from_secs(u64::from(minutes) * 60);
     let Some(due) = autosave.due else {
         autosave.due = Some(now + interval);
@@ -241,25 +284,98 @@ pub fn project_autosave_tick(state: &mut dyn LifecycleSourceMut, ctx: &Context) 
         return written;
     }
     autosave.due = Some(now + interval);
-    match project_checkpoint::capture(parts, ProjectCheckpointReason::Autosave) {
-        Ok(capture) => {
-            parts.platform.project_autosave.writing = Some(spawn_into(Some(ctx), move || {
-                capture.publish().map(|created| created.summary)
-            }));
-        }
+    match start_writing(parts, Some(ctx)) {
+        Ok(writing) => parts.platform.project_autosave.writing = Some(writing),
         Err(error) => note_autosave_result(parts, Err(error)),
     }
     written
 }
 
+/// Start writing an Autosave checkpoint of the open project: read off the
+/// model here, encoded and written on a background thread, or, in the
+/// browser, in a task of its own into the browser's records, where the
+/// session's runs give way to it when storage is full.
+fn start_writing(
+    parts: &LifecycleParts<'_>,
+    ctx: Option<&Context>,
+) -> Result<Slot<Result<AutosaveWritten, String>>, String> {
+    if let Some(records) = durable_records::browser_records() {
+        // The autosaves this session wrote hold older work, which this one
+        // replaces.
+        let capture = project_checkpoint::capture_for_records(
+            parts,
+            ProjectCheckpointReason::Autosave,
+            saved_generation(parts.platform),
+        )?
+        .superseding(parts.platform.project_autosave.written.clone());
+        return Ok(spawn_task_into(ctx, async move {
+            let gives_way: &dyn DurableRecords = &*records.session;
+            capture
+                .publish(
+                    &*records.checkpoints,
+                    Some((gives_way, browser_session::RUNS_KEY)),
+                )
+                .await
+                .map(|written| AutosaveWritten {
+                    summary: written.summary,
+                    runs_given_up: written.gave_way,
+                })
+        }));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let capture = project_checkpoint::capture(parts, ProjectCheckpointReason::Autosave)?;
+        Ok(spawn_into(ctx, move || {
+            capture.publish().map(|created| AutosaveWritten {
+                summary: created.summary,
+                runs_given_up: false,
+            })
+        }))
+    }
+    #[cfg(target_arch = "wasm32")]
+    Err("this browser keeps no records".to_owned())
+}
+
+/// The save of the open project its browser autosaves are written over: the
+/// generation its binding accepted. The desktop dates its autosaves against
+/// the file instead.
+fn saved_generation(platform: &PlatformState) -> Option<u64> {
+    platform
+        .browser_project_binding_receipt
+        .as_ref()
+        .map(|receipt| receipt.accepted_generation)
+}
+
 /// Whether the open project has unsaved work an autosave would keep: only a
-/// project with a file, which its checkpoints are kept beside, and one this
-/// session may write.
+/// project with a saved home, which its checkpoints are kept with (beside its
+/// file on the desktop; in the browser, its binding to a file or to the
+/// browser's own storage), and one this session may write.
 fn autosaved_work(parts: &mut LifecycleParts<'_>) -> bool {
+    let saved = if durable_records::browser_records().is_some() {
+        parts.platform.project_lifecycle.binding().is_some()
+    } else {
+        parts.model.workspace.content.project.path.is_some()
+    };
     parts.platform.project_lifecycle.is_open()
-        && parts.model.workspace.content.project.path.is_some()
+        && saved
         && !parts.model.safe_mode.project_read_only()
         && project_lifecycle::has_unsaved_changes(parts)
+}
+
+/// Write an autosave of the open project's unsaved work now, as the browser
+/// does when its page is left: a browser has no exit to write it at.
+pub fn write_now(state: &mut dyn LifecycleSourceMut, ctx: Option<&Context>) {
+    let parts = &mut state.lifecycle_parts();
+    if parts.platform.autosave_minutes == 0
+        || parts.platform.project_autosave.writing.is_some()
+        || !autosaved_work(parts)
+    {
+        return;
+    }
+    match start_writing(parts, ctx) {
+        Ok(writing) => parts.platform.project_autosave.writing = Some(writing),
+        Err(error) => note_autosave_result(parts, Err(error)),
+    }
 }
 
 /// Take an autosave the background thread finished writing.
@@ -273,15 +389,15 @@ fn take_written_autosave(parts: &mut LifecycleParts<'_>) -> bool {
 }
 
 /// Keep what an autosave wrote, and say a failure once, when it starts.
-fn note_autosave_result(
-    parts: &mut LifecycleParts<'_>,
-    result: Result<ProjectCheckpointSummary, String>,
-) {
+fn note_autosave_result(parts: &mut LifecycleParts<'_>, result: Result<AutosaveWritten, String>) {
     let saved = project_lifecycle::accepted_generation(parts.platform);
+    if result.as_ref().is_ok_and(|written| written.runs_given_up) {
+        browser_session::runs_gave_way(parts.model, parts.platform);
+    }
     let autosave = &mut parts.platform.project_autosave;
     let was_failing = autosave.failing;
     autosave.failing = result.is_err();
-    match result {
+    match result.map(|written| written.summary) {
         Ok(summary) => {
             // Retention keeps only the newest autosave.
             autosave.written.clear();
@@ -306,9 +422,31 @@ fn note_autosave_result(
 /// saved or given up: the autosaves this process wrote of it go before the
 /// next project is looked at, and nothing found for it is offered any more.
 pub fn project_left(platform: &mut PlatformState) {
-    for summary in std::mem::take(&mut platform.project_autosave).written {
+    remove_autosaves(std::mem::take(&mut platform.project_autosave).written);
+}
+
+/// Remove autosaves this process wrote, from the browser's records or from
+/// beside the project's file.
+fn remove_autosaves(written: Vec<ProjectCheckpointSummary>) {
+    if written.is_empty() {
+        return;
+    }
+    if let Some(records) = durable_records::browser_records() {
+        durable_records::spawn_task(None, async move {
+            for summary in written {
+                if let Err(error) =
+                    project_checkpoint::delete_records(&*records.checkpoints, &summary).await
+                {
+                    log::warn!("an autosave this session wrote was not removed: {error}");
+                }
+            }
+        });
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    for summary in written {
         if let Err(error) = project_checkpoint::delete(&summary) {
-            log::warn!("an autosave of a project no longer open was not removed: {error}");
+            log::warn!("an autosave this session wrote was not removed: {error}");
         }
     }
 }
@@ -323,6 +461,7 @@ pub fn note_reviewed_exit(platform: &mut PlatformState) {
 /// the session keeps none of it. Work saved or given up at File > Exit takes
 /// the autosaves this process wrote with it. Written here, on the way out,
 /// since no frame follows.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn at_exit(state: &mut dyn LifecycleSourceMut) {
     let parts = &mut state.lifecycle_parts();
     if parts.platform.project_autosave.exit_reviewed || !autosaved_work(parts) {
@@ -342,12 +481,9 @@ pub fn at_exit(state: &mut dyn LifecycleSourceMut) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn remove_own_autosaves(platform: &mut PlatformState) {
-    for summary in std::mem::take(&mut platform.project_autosave.written) {
-        if let Err(error) = project_checkpoint::delete(&summary) {
-            log::warn!("an autosave was not removed at exit: {error}");
-        }
-    }
+    remove_autosaves(std::mem::take(&mut platform.project_autosave.written));
 }
 
 /// Look for recovered work for the project just opened or reopened at start,
@@ -362,6 +498,111 @@ pub fn start_recovered_work_search(
     let autosave = &mut platform.project_autosave;
     autosave.offer = None;
     autosave.search = None;
+    autosave.restart_stamp = None;
+    if let Some(records) = durable_records::browser_records() {
+        start_browser_search(model, platform, records, ctx);
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    start_native_search(model, platform, ctx);
+}
+
+/// A browser start reopened the project its session kept, now bound again to
+/// its saved home, with the unsaved work the session kept: an autosave the
+/// last session left of it is looked for, and the working project as it is
+/// now remembered, to put the saved one back if the reader is asked.
+pub fn start_restart_search(parts: &mut LifecycleParts<'_>) {
+    start_recovered_work_search(parts.model, parts.platform, None);
+    let stamp = project_lifecycle::working_stamp(&*parts);
+    parts.platform.project_autosave.restart_stamp = Some(stamp);
+}
+
+/// Look for recovered work in the browser's records: the project's newest
+/// autosave another session wrote over the save its file still holds, when
+/// it differs from that save. Only a project with a saved home has one.
+fn start_browser_search(
+    model: &Model,
+    platform: &mut PlatformState,
+    records: BrowserRecords,
+    ctx: Option<&Context>,
+) {
+    if platform.project_lifecycle.binding().is_none() {
+        return;
+    }
+    let Ok(saved) = platform.project_lifecycle.accepted_snapshot() else {
+        return;
+    };
+    let generation = saved_generation(platform);
+    let own = platform
+        .project_autosave
+        .written
+        .iter()
+        .map(ProjectCheckpointSummary::checkpoint_id)
+        .collect::<Vec<_>>();
+    let project_id = model.workspace.content.project.id().to_string();
+    let project_name = model.workspace.content.project.name().to_owned();
+    platform.project_autosave.search = Some(spawn_task_into(ctx, async move {
+        find_recovered_work_in(&*records.checkpoints, &project_id, &own, &saved, generation)
+            .await
+            .map(|found| {
+                found.map(|(autosave, project, differences)| RecoveredWork {
+                    project_id,
+                    project_name,
+                    autosave,
+                    project: Box::new(project),
+                    differences,
+                })
+            })
+    }));
+}
+
+/// The project's newest autosave in `records` that this process did not
+/// write, when it was written over the save `generation` names and differs
+/// from `saved`: read back and verified, and pinned so the autosaves this
+/// session writes do not prune it before the reader saves.
+async fn find_recovered_work_in(
+    records: &dyn DurableRecords,
+    project_id: &str,
+    own: &[uuid::Uuid],
+    saved: &crate::io::ProjectSnapshot,
+    generation: Option<u64>,
+) -> Result<
+    Option<(
+        ProjectCheckpointSummary,
+        crate::io::ProjectSnapshot,
+        Vec<DocumentDifference>,
+    )>,
+    String,
+> {
+    let checkpoints = project_checkpoint::list_records(records, project_id).await?;
+    let Some(newest) = checkpoints.into_iter().find(|checkpoint| {
+        checkpoint.reason() == ProjectCheckpointReason::Autosave
+            && !own.contains(&checkpoint.checkpoint_id())
+    }) else {
+        return Ok(None);
+    };
+    if newest.saved_generation() != generation {
+        return Ok(None);
+    }
+    let recovered = project_checkpoint::load_record(records, &newest).await?;
+    let differences = project_checkpoint::differences_between(saved, &recovered)?;
+    if differences.is_empty() {
+        return Ok(None);
+    }
+    if !newest.pinned()
+        && let Err(error) =
+            project_checkpoint::edit_records(records, &newest, &CheckpointEdit::Pin(true)).await
+    {
+        log::warn!("the recovered autosave was not kept from retention: {error}");
+    }
+    Ok(Some((newest, recovered, differences)))
+}
+
+/// Look beside the project's file for recovered work, on a background
+/// thread.
+#[cfg(not(target_arch = "wasm32"))]
+fn start_native_search(model: &Model, platform: &mut PlatformState, ctx: Option<&Context>) {
+    let autosave = &mut platform.project_autosave;
     let Some(path) = model.workspace.content.project.path.clone() else {
         return;
     };
@@ -411,6 +652,7 @@ pub fn take_recovered_work(model: &mut Model, platform: &mut PlatformState) {
 /// The project's newest autosave that this process did not write, when it is
 /// newer than the project file at `path` and differs from it: read back and
 /// verified, with the documents the saved project differs in.
+#[cfg(not(target_arch = "wasm32"))]
 fn find_recovered_work(
     listing: &project_checkpoint::CheckpointListing,
     path: &std::path::Path,
@@ -460,6 +702,7 @@ fn find_recovered_work(
 
 /// An open of the project file at `path` failed: look beside it, on a
 /// background thread, for the newest checkpoint that reads back intact.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn start_unopened_project_search(platform: &mut PlatformState, path: &Path, error: String) {
     let path = path.to_path_buf();
     let autosave = &mut platform.project_autosave;
@@ -483,6 +726,7 @@ pub fn start_unopened_project_search(platform: &mut PlatformState, path: &Path, 
 }
 
 /// Take what the search after a failed open found.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn take_unopened_project(platform: &mut PlatformState) {
     if let Some(found) = take_slot(&mut platform.project_autosave.rescue_search) {
         platform.project_autosave.rescue = found;
@@ -492,6 +736,7 @@ pub fn take_unopened_project(platform: &mut PlatformState) {
 /// Offer the newest intact checkpoint of a project file that would not open,
 /// saved as a new project: the file itself is left as it is. Returns the
 /// checkpoint when the reader asked for it.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn unopened_project_dialog(
     platform: &mut PlatformState,
     ctx: &Context,
@@ -780,7 +1025,6 @@ fn checkpoint_time(created_unix_ms: u64) -> String {
 /// Coarse human age of an autosave ("3 min ago"), from the modification
 /// time read once when it was found and offered: the dialog asks the clock,
 /// never the file.
-#[cfg(not(target_arch = "wasm32"))]
 fn autosave_age(modified_unix_ms: u64) -> String {
     let elapsed = crate::time_compat::checked_unix_time_ms()
         .ok()

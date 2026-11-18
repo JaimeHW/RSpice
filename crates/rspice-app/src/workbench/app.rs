@@ -569,7 +569,6 @@ impl RSpiceApp {
         // A checkpoint the Recovery page read back goes into the project
         // before anything draws it.
         crate::workbench::app_state::services_access::apply_restored_checkpoint(&mut self.state);
-        #[cfg(not(target_arch = "wasm32"))]
         self.project_autosave(ctx);
         // Closing the window while a save copies its results asks, as File > Exit does.
         #[cfg(not(target_arch = "wasm32"))]
@@ -1021,36 +1020,42 @@ impl eframe::App for RSpiceApp {
             );
         }
         log::debug!("save: serialize app state");
-        self.state.store_session(storage);
+        if rspice_app_services::workbench::lifecycle::durable_records::browser_records().is_some() {
+            // The browser keeps its session in its durable records; the
+            // local-storage copy an earlier build wrote only takes space.
+            storage.remove_string(eframe::APP_KEY);
+            self.state.keep_browser_session(None);
+        } else {
+            self.state.store_session(storage);
+        }
         log::debug!("save: done");
     }
 
-    /// On the desktop the session is kept when the application closes, never
-    /// between frames while it runs: writing it out serialises the whole
-    /// application on the UI thread. The open project's unsaved work is kept
-    /// by its autosave checkpoint, written off the frame. The browser keeps
-    /// its session on the cadence selected in Preferences, as its device-local
-    /// recovery.
+    /// The session is kept when the application closes, or in the browser when
+    /// its page is left (eframe saves when the page loses focus), never
+    /// between frames while it runs: writing it out encodes the whole session.
+    /// The open project's unsaved work is kept by its autosave checkpoint,
+    /// written off the frame at the interval Preferences set.
     fn auto_save_interval(&self) -> std::time::Duration {
-        if cfg!(target_arch = "wasm32") {
-            configured_autosave_interval(self.state.platform.autosave_minutes)
-        } else {
-            std::time::Duration::MAX
-        }
+        std::time::Duration::MAX
     }
 }
 
 impl RSpiceApp {
     /// The open project's autosave, written off the frame at the autosave
-    /// interval, and the recovered work an open or a start looked for.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// interval, the recovered work an open or a start looked for, and what
+    /// the browser's last session write kept.
     fn project_autosave(&mut self, ctx: &Context) {
-        use rspice_app_services::workbench::app_state::session::autosave;
+        use rspice_app_services::workbench::app_state::session::{autosave, browser_session};
         if autosave::project_autosave_tick(&mut self.state, ctx) {
             self.state.project.project_checkpoint_recovery.invalidate();
         }
         autosave::take_recovered_work(&mut self.state.model, &mut self.state.platform);
+        crate::workbench::app_state::services_access::settle_restart_offer(&mut self.state);
+        browser_session::settle_finished(&mut self.state.model, &mut self.state.platform);
+        #[cfg(not(target_arch = "wasm32"))]
         autosave::take_unopened_project(&mut self.state.platform);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(checkpoint) = self
             .state
             .platform
@@ -1157,12 +1162,6 @@ fn should_warn_before_browser_unload(
 
 fn should_persist_application_state(state: &AppState) -> bool {
     !state.model.live_write_locks.mirror
-}
-
-fn configured_autosave_interval(minutes: u8) -> std::time::Duration {
-    // Keep this boundary defensive so a zero interval can never request an
-    // every-frame persistence loop.
-    std::time::Duration::from_secs(u64::from(minutes.max(1)) * 60)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1882,24 +1881,21 @@ mod tests {
         assert!(should_warn_before_browser_unload(false, false, true));
     }
 
+    /// eframe saves the session between frames at the interval the
+    /// application asks for, on the desktop and in the browser alike. No
+    /// interval is asked for, whatever the autosave interval: no frame
+    /// encodes the session, which is kept when the application closes or its
+    /// page is left.
     #[test]
-    fn preference_autosave_cadence_drives_platform_session_persistence() {
-        assert_eq!(
-            configured_autosave_interval(2),
-            std::time::Duration::from_secs(120)
-        );
-        assert_eq!(
-            configured_autosave_interval(5),
-            std::time::Duration::from_secs(300)
-        );
-        assert_eq!(
-            configured_autosave_interval(10),
-            std::time::Duration::from_secs(600)
-        );
-        assert_eq!(
-            configured_autosave_interval(0),
-            std::time::Duration::from_secs(60)
-        );
+    fn no_frame_is_followed_by_a_session_save() {
+        for minutes in [0, 2, 5, 10] {
+            let mut app = RSpiceApp::test_instance();
+            app.state.platform.autosave_minutes = minutes;
+            assert_eq!(
+                eframe::App::auto_save_interval(&app),
+                std::time::Duration::MAX
+            );
+        }
     }
 
     #[test]

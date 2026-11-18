@@ -24,9 +24,17 @@ impl AppState {
         storage: Option<&dyn eframe::Storage>,
         store: Option<PreferencesStore>,
     ) -> Self {
-        let mut state = storage
-            .and_then(Self::restore_eframe_session)
-            .unwrap_or_default();
+        // The browser read its session from its durable records before the
+        // application started; the desktop's is in eframe's store.
+        let restored =
+            if rspice_app_services::workbench::lifecycle::durable_records::browser_records()
+                .is_some()
+            {
+                super::session_store::take_browser_session().and_then(Self::restore_browser_session)
+            } else {
+                storage.and_then(Self::restore_eframe_session)
+            };
+        let mut state = restored.unwrap_or_default();
         match store {
             Some(store) => state.preferences_file_parts().bind_preferences_file(store),
             None => {

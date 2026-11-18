@@ -9,16 +9,15 @@ use rspice_design::drc::DrcResult;
 
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::serialization::WithoutRuns;
-use crate::workbench::app_state::session::session_store::{Offer, offer, settle};
 use rspice_app_design::workbench::app::actions::workspace::symbol_document::revert_active_symbol_with;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_project::workbench::workflows::file_workflow;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_services::io::FileWorkflowIo;
 use rspice_app_services::io::ProjectSnapshot;
-use rspice_app_services::services::session::SessionKept;
+use rspice_app_services::workbench::app_state::session::autosave;
 #[cfg(not(target_arch = "wasm32"))]
-use rspice_app_services::workbench::app_state::session::autosave::{self, AutosaveRestore};
+use rspice_app_services::workbench::app_state::session::autosave::AutosaveRestore;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     self, CellViewRevert, LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut,
     LifecycleView, PersistenceBinding, ProjectDocumentId, ProjectLifecycleError, RevertFollowUp,
@@ -85,6 +84,17 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
         return;
     }
     project_lifecycle::bind_restored_project(state);
+    // The browser has no exit to ask about unsaved work at: its session keeps
+    // that work, and the autosave the last session left is looked for once
+    // the project is bound again (in the browser, when its binding restore
+    // lands).
+    if rspice_app_services::workbench::lifecycle::durable_records::browser_records().is_some() {
+        #[cfg(not(target_arch = "wasm32"))]
+        if state.platform.project_lifecycle.binding().is_some() {
+            autosave::start_restart_search(&mut state.lifecycle_parts());
+        }
+        return;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     {
         // The session keeps no unsaved project work: a closed window left it
@@ -105,7 +115,6 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
 /// project's libraries, configurations and checkpoints.
 fn forget_project_presentation(state: &mut AppState) {
     // The project going away had its unsaved work saved or given up.
-    #[cfg(not(target_arch = "wasm32"))]
     autosave::project_left(&mut state.platform);
     state.project.on_project_changed();
     state
@@ -127,7 +136,6 @@ pub(crate) fn accept_loaded_project(
     forget_project_presentation(state);
     project_lifecycle::accept_loaded_project(state, baseline, binding);
     // An autosave another session left of the project just opened.
-    #[cfg(not(target_arch = "wasm32"))]
     autosave::start_recovered_work_search(&state.model, &mut state.platform, None);
 }
 
@@ -466,24 +474,12 @@ fn restore_project_structure_preserving_documents(state: &mut AppState, baseline
 }
 
 impl AppState {
-    /// Save the session under eframe's application key.
+    /// Save the session under eframe's application key, as the desktop keeps
+    /// it when the application closes.
     pub(crate) fn store_session(&mut self, storage: &mut dyn eframe::Storage) {
-        // Only the browser's store refuses without saying so. A desktop store
-        // holds what it is given until it writes its file.
-        self.store_session_checked(storage, cfg!(target_arch = "wasm32"));
-    }
-
-    pub(super) fn store_session_checked(
-        &mut self,
-        storage: &mut dyn eframe::Storage,
-        read_back: bool,
-    ) {
-        let history = self.model.simulation.retained.runs.revision();
         // A stored run's results are kept in the session's own folder first: the session names
         // them, and this process's store is gone by the next launch. Without them the session
         // is kept without its runs.
-        #[cfg(not(target_arch = "wasm32"))]
-        let documents = &self.model.workspace.content.visualization_documents;
         #[cfg(not(target_arch = "wasm32"))]
         let segments = rspice_app_services::io::result_segments::file_segments(
             &self
@@ -491,7 +487,7 @@ impl AppState {
                 .project_lifecycle
                 .result_cache
                 .capture(&self.model.simulation),
-            documents,
+            &self.model.workspace.content.visualization_documents,
         );
         #[cfg(not(target_arch = "wasm32"))]
         let results_kept =
@@ -500,41 +496,149 @@ impl AppState {
                 .is_ok();
         #[cfg(target_arch = "wasm32")]
         let results_kept = true;
-        if results_kept && self.platform.session_kept != SessionKept::WithoutRuns(history.clone()) {
-            match offer(storage, serde_json::to_string(&*self), read_back) {
-                Offer::Kept => {
-                    settle(&mut self.model, &mut self.platform, SessionKept::Whole);
-                    // Safe mode stores the session it replaced, whose runs are not these.
-                    #[cfg(not(target_arch = "wasm32"))]
-                    if self.state_safe_mode_session_snapshot().is_none() {
-                        rspice_app_services::io::result_segments::release_unread_session_segments(
-                            &segments,
-                        );
-                    }
-                    return;
-                }
-                Offer::Refused => {}
-                Offer::NotEncoded => return,
+        let encoded = if results_kept {
+            serde_json::to_string(&*self)
+        } else {
+            serde_json::to_string(&WithoutRuns(self))
+        };
+        match encoded {
+            Ok(text) => storage.set_string(eframe::APP_KEY, text),
+            Err(error) => {
+                // What eframe's own encoder does: the stored session stays.
+                log::error!("The session could not be encoded: {error}");
+                return;
             }
         }
-        let kept = match offer(
-            storage,
-            serde_json::to_string(&WithoutRuns(self)),
-            read_back,
-        ) {
-            Offer::Kept => SessionKept::WithoutRuns(history),
-            Offer::Refused => SessionKept::Nothing,
-            Offer::NotEncoded => return,
-        };
-        settle(&mut self.model, &mut self.platform, kept);
-        // A session kept without its runs reads only what its documents archived.
+        // Safe mode stores the session it replaced, whose runs are not these.
         #[cfg(not(target_arch = "wasm32"))]
         if self.state_safe_mode_session_snapshot().is_none() {
-            rspice_app_services::io::result_segments::release_unread_session_segments(
-                &rspice_app_services::io::result_segments::file_segments(
+            let read = if results_kept {
+                segments
+            } else {
+                // A session kept without its runs reads only what its documents archived.
+                rspice_app_services::io::result_segments::file_segments(
                     &Default::default(),
                     &self.model.workspace.content.visualization_documents,
-                ),
+                )
+            };
+            rspice_app_services::io::result_segments::release_unread_session_segments(&read);
+        }
+    }
+
+    /// Keep the session in the browser's durable records, as the browser does
+    /// when its page is left: the project's unsaved work first, as an
+    /// autosave, then the session itself, and its runs only when they
+    /// changed. Encoded here, when eframe saves, never on a frame; written in
+    /// a browser task, whose outcome a later frame settles.
+    pub(crate) fn keep_browser_session(&mut self, ctx: Option<&egui::Context>) {
+        use rspice_app_services::workbench::app_state::session::browser_session::{
+            self, FinishedWrite, RunsDecision, RunsToKeep,
+        };
+        use rspice_app_services::workbench::lifecycle::durable_records;
+        let Some(records) = durable_records::browser_records() else {
+            return;
+        };
+        autosave::write_now(self, ctx);
+        let history = self.model.simulation.retained.runs.revision();
+        let decision = browser_session::runs_decision(
+            &history,
+            !self.model.simulation.retained.runs.is_empty(),
+            &self.platform.session_kept,
+            self.platform.session_runs_stored.as_ref(),
+        );
+        let session = match serde_json::to_string(&WithoutRuns(self)) {
+            Ok(session) => session,
+            Err(error) => {
+                log::error!("The session could not be encoded: {error}");
+                return;
+            }
+        };
+        let runs = match decision {
+            RunsDecision::Unchanged => RunsToKeep::Unchanged,
+            RunsDecision::Removed => RunsToKeep::Removed,
+            RunsDecision::Encode => {
+                let results =
+                    rspice_app_services::io::capture_simulation_results(&self.model.simulation);
+                match serde_json::to_string(&results) {
+                    Ok(runs) => RunsToKeep::Write(runs),
+                    Err(error) => {
+                        log::warn!("the session's runs could not be encoded: {error}");
+                        RunsToKeep::Removed
+                    }
+                }
+            }
+        };
+        let decision = match runs {
+            RunsToKeep::Removed => RunsDecision::Removed,
+            RunsToKeep::Unchanged | RunsToKeep::Write(_) => decision,
+        };
+        durable_records::spawn_task(ctx, async move {
+            let written = browser_session::keep_session(&*records.session, session, runs).await;
+            browser_session::finished(FinishedWrite {
+                written,
+                history,
+                runs: decision,
+            });
+        });
+    }
+}
+
+/// A browser start reopened the project with the unsaved work its session
+/// kept, and recovered work was found for it. When the session brought back
+/// just what the autosave holds, the project is put back as saved and the
+/// autosave offered, as the desktop offers it at a start. When the reader has
+/// worked on since, or the session kept work the autosave does not hold, that
+/// work stays and nothing is asked: the autosave stays on the Recovery page.
+pub(crate) fn settle_restart_offer(state: &mut AppState) {
+    let autosave = &mut state.platform.project_autosave;
+    if autosave.offer.is_none() {
+        return;
+    }
+    let Some(stamp) = autosave.restart_stamp.take() else {
+        return;
+    };
+    if !project_lifecycle::has_unsaved_changes(state) {
+        return;
+    }
+    let Some(offer) = state.platform.project_autosave.offer.take() else {
+        return;
+    };
+    // Runs the session could not keep, when storage was full, are still in
+    // the autosave: their absence is not newer work.
+    let runs_left_out = state.model.simulation.retained.runs.is_empty();
+    let session_holds_the_autosave = stamp == project_lifecycle::working_stamp(state)
+        && project_lifecycle::snapshot(state)
+            .ok()
+            .and_then(|working| {
+                rspice_app_services::workbench::lifecycle::project_checkpoint::differences_between(
+                    &working,
+                    &offer.project,
+                )
+                .ok()
+            })
+            .is_some_and(|differences| {
+                differences.iter().all(|difference| {
+                    runs_left_out
+                        && difference.document
+                            == project_lifecycle::ProjectDocumentId::ResultHistory
+                })
+            });
+    let saved = state.platform.project_lifecycle.accepted_snapshot();
+    match saved {
+        Ok(saved) if session_holds_the_autosave => {
+            match restore_checkpoint_in_place(state, saved) {
+                Ok(()) => state.platform.project_autosave.offer = Some(offer),
+                Err(error) => {
+                    log::warn!("the saved project was not put back before the offer: {error}");
+                }
+            }
+        }
+        _ => {
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                "The unsaved changes this session brought back stay open. The autosave the last \
+                 session left is on the Recovery page.",
             );
         }
     }
@@ -544,7 +648,6 @@ impl AppState {
 /// autosave back in the open project as unsaved changes, Open the saved
 /// project leaves it on the Recovery page, Compare shows it there with what
 /// it changes listed.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Context) {
     use autosave::RecoveredWorkAnswer;
     let Some(answer) = autosave::recovered_work_dialog(&mut state.platform, ctx) else {

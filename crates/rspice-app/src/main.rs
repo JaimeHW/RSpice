@@ -161,6 +161,10 @@ fn main() {
             return;
         };
 
+        // The session is kept in the browser's durable records, which answer
+        // later: it is read before the application starts with it.
+        rspice_app::read_browser_session().await;
+
         let result = eframe::WebRunner::new()
             .start(
                 canvas,

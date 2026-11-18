@@ -675,6 +675,7 @@ pub fn poll_browser_binding_restore(state: &mut dyn LifecycleSourceMut) {
                 .accept_project(*baseline, Some(binding));
             state.platform.native_project_binding_receipt = None;
             let _ = refresh_registry(state);
+            crate::workbench::app_state::session::autosave::start_restart_search(state);
         }
         persistence::BrowserRestoreResult::ReconnectRequired { binding } => {
             state.platform.project_lifecycle.browser_reconnect_binding = Some(binding);

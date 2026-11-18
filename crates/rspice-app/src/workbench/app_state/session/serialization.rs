@@ -26,7 +26,13 @@ impl AppState {
         if let Some(folder) = rspice_app_services::io::result_segments::session_segment_folder() {
             rspice_results::store_reader::keep_segments_in(&folder);
         }
-        Some(serde_json::from_str(&text).unwrap_or_else(|error| {
+        Some(Self::restore_session_text(&text))
+    }
+
+    /// Restore a session from the text it was stored as. One that will not
+    /// decode is replaced by a new one whose Console says so.
+    pub(crate) fn restore_session_text(text: &str) -> Self {
+        serde_json::from_str(text).unwrap_or_else(|error| {
             log::warn!("the stored session did not decode: {error}");
             let mut state = Self::default();
             state.record(
@@ -36,7 +42,36 @@ impl AppState {
                  Saved projects are unchanged.",
             );
             state
-        }))
+        })
+    }
+
+    /// Put the runs a session kept back, checked against the simulation plan
+    /// they name. Returns what to say when they could not be.
+    pub(crate) fn restore_session_results(
+        &mut self,
+        simulation_results: ProjectSimulationResults,
+    ) -> Option<String> {
+        simulation_results
+            .validate()
+            .and_then(|()| {
+                rspice_project::ProjectFile::validate_result_plan_references_for(
+                    &simulation_results,
+                    Some(&self.model.sim_setup),
+                    self.model.workspace.content.project.revision(),
+                )
+            })
+            .and_then(|()| {
+                rspice_app_services::io::restore_simulation_results(
+                    simulation_results,
+                    &mut self.model.simulation,
+                )
+            })
+            .err()
+            .map(|error| {
+                format!(
+                    "Simulation results were not restored because their persisted session data is invalid: {error}"
+                )
+            })
     }
 }
 
@@ -337,23 +372,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 "Simulation plan and model libraries were not restored because their persisted session data is invalid: {error}; documented defaults were loaded instead"
             )],
         };
-        let simulation_results = *de.simulation_results;
-        let simulation_results_warning = simulation_results
-            .validate()
-            .and_then(|()| {
-                rspice_project::ProjectFile::validate_result_plan_references_for(
-                    &simulation_results,
-                    Some(&state.model.sim_setup),
-                    state.model.workspace.content.project.revision(),
-                )
-            })
-            .and_then(|()| rspice_app_services::io::restore_simulation_results(simulation_results, &mut state.model.simulation))
-            .err()
-            .map(|error| {
-                format!(
-                    "Simulation results were not restored because their persisted session data is invalid: {error}"
-                )
-            });
+        let simulation_results_warning = state.restore_session_results(*de.simulation_results);
         for warning in simulation_results_warning
             .into_iter()
             .chain(execution_warnings)
