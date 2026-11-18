@@ -5134,15 +5134,23 @@ endmodule
             q.windows(2).all(|pair| pair[0].time < pair[1].time),
             "one accepted value per instant: {q:?}"
         );
+        // real_gain holds its ic through the operating point and queues its
+        // own call one delay later, which posts the gain one delay after
+        // itself, as ngspice's does: 7 at 0.5 ns. The input's event at 1 ns
+        // posts one delay after itself.
         let delayed = result.real_trace_named("delayed").unwrap();
-        assert!(
-            delayed
-                .iter()
-                .any(|point| (point.time - 1.25e-9).abs() < 1e-15 && point.value == 11.0),
-            "{delayed:?}"
-        );
+        for (time, value) in [(0.5e-9, 7.0), (1.25e-9, 11.0)] {
+            assert!(
+                delayed
+                    .iter()
+                    .any(|point| (point.time - time).abs() < 1e-15 && point.value == value),
+                "{delayed:?}"
+            );
+        }
         for (&time, value) in result.time.iter().zip(waveform(&result, "out")) {
-            let expected = if time > 0.35e-9 && time < 1.2e-9 {
+            let expected = if time < 0.45e-9 {
+                0.0
+            } else if time > 0.6e-9 && time < 1.2e-9 {
                 3.5
             } else if time > 1.35e-9 {
                 5.5
