@@ -8,6 +8,7 @@ use crate::workbench::app::veriloga_interface_tests;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::render_new_veriloga_device_form;
 use rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_source_bundle;
 
+mod deck_dialects;
 mod generated_netlist_jumps;
 mod netlist_cross_probe;
 #[cfg(not(target_arch = "wasm32"))]

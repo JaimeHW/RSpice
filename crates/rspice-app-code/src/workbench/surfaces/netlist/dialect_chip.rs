@@ -440,11 +440,24 @@ mod tests {
         /// The deck `source` open on the page as its file `path`.
         fn deck(path: &str, source: &str) -> CodeHarness {
             let mut harness = harness();
-            harness.model.workspace.content.netlist_source = Some(source.to_owned());
-            harness.model.workspace.content.netlist_source_path = Some(PathBuf::from(path));
-            harness.model.simulation.source.netlist_content = source.to_owned();
-            harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-            harness.state.netlist.active_document_initialized = true;
+            let deck = crate::workbench::documents::deck_files::OpenDeck::in_memory(path, source);
+            harness.model.workspace.content.decks = vec![crate::state::ProjectDeck {
+                id: deck.id,
+                source: crate::state::DeckSource::File {
+                    path: PathBuf::from(path),
+                },
+            }];
+            crate::workbench::documents::deck_files::install_open_deck(
+                &mut harness.model,
+                &mut harness.state.netlist,
+                &mut harness.state.netlist_open_documents,
+                &mut harness.runs,
+                deck,
+            );
+            assert_eq!(
+                harness.state.netlist.active_document,
+                ActiveNetlistDocument::OwnedSource
+            );
             harness
         }
 
