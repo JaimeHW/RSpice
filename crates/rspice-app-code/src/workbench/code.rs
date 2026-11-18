@@ -101,15 +101,42 @@ impl Feature for CodeFeature {
     }
 }
 
-/// The workbench command the code feature takes a part in: Find on the
-/// Netlist workspace opens the deck's own find bar. The shell asks it before
-/// the design feature's search, which would take Find there too.
-const ROUTED: &[RoutedCommand<CodeFeature>] = &[RoutedCommand {
-    key: ids::FIND_IN_DESIGN,
-    takes: |reads| reads.wb.workspace == Workspace::Netlist,
-    enabled: |_| true,
-    execute: |cx| cx.state.netlist.find.open = true,
-}];
+/// The workbench commands the code feature takes a part in: Find on the
+/// Netlist workspace opens the deck's own find bar, and View > Zoom over a
+/// source editor sizes the editors' text, as the editor's own Ctrl+= and
+/// Ctrl+- do. The shell asks it before the design feature, which would take
+/// both there too.
+const ROUTED: &[RoutedCommand<CodeFeature>] = &[
+    RoutedCommand {
+        key: ids::FIND_IN_DESIGN,
+        takes: |reads| reads.wb.workspace == Workspace::Netlist,
+        enabled: |_| true,
+        execute: |cx| cx.state.netlist.find.open = true,
+    },
+    RoutedCommand {
+        key: ids::ZOOM_IN,
+        takes: source_editor_in_front,
+        enabled: |reads| reads.model.preferences.editor_font_size_can_step(1),
+        execute: |cx| cx.model.preferences.step_editor_font_size(1),
+    },
+    RoutedCommand {
+        key: ids::ZOOM_OUT,
+        takes: source_editor_in_front,
+        enabled: |reads| reads.model.preferences.editor_font_size_can_step(-1),
+        execute: |cx| cx.model.preferences.step_editor_font_size(-1),
+    },
+    RoutedCommand {
+        key: ids::ZOOM_ONE_TO_ONE,
+        takes: source_editor_in_front,
+        enabled: |reads| !reads.model.preferences.editor_font_size_is_actual(),
+        execute: |cx| cx.model.preferences.reset_editor_font_size(),
+    },
+];
+
+/// Whether a source editor is in front, so a view command is its text's.
+fn source_editor_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+    reads.wb.active_source_editor.is_some()
+}
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
 /// order lists them by: the source document dialogs, Find in source,

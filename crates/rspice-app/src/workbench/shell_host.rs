@@ -772,6 +772,23 @@ impl Host for RSpiceApp {
         platform: CommandPlatform,
         os: OperatingSystem,
     ) -> String {
+        // Over a source editor Zoom in and Zoom out are the editor's own
+        // keys: the canvas's bare + and - type there.
+        if self.state.workbench.active_source_editor.is_some() {
+            let editor_key = if key == ids::ZOOM_IN {
+                Some(egui::Key::Equals)
+            } else if key == ids::ZOOM_OUT {
+                Some(egui::Key::Minus)
+            } else {
+                None
+            };
+            if let Some(editor_key) = editor_key {
+                return rspice_app_state::state::shortcuts::ShortcutStroke::new(
+                    editor_key, true, false, false,
+                )
+                .display_label_for(os);
+            }
+        }
         self.state
             .model
             .preferences

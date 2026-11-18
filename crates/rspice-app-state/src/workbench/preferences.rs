@@ -1404,6 +1404,31 @@ impl UserPreferences {
             .expect("the list is the preference's whole domain");
     }
 
+    /// Whether the list has a size `step` sizes from the editors' text.
+    #[must_use]
+    pub fn editor_font_size_can_step(&self, step: i8) -> bool {
+        self.choice(ChoicePreference::EditorFontSize)
+            .checked_add_signed(isize::from(step))
+            .is_some_and(|stepped| stepped < EDITOR_FONT_SIZES.len())
+    }
+
+    /// Whether the editors' text is at the size a person who chose none
+    /// gets, the size View > Actual size returns it to.
+    #[must_use]
+    pub fn editor_font_size_is_actual(&self) -> bool {
+        self.choice(ChoicePreference::EditorFontSize)
+            == usize::from(ChoicePreference::EditorFontSize.default_value())
+    }
+
+    /// Put the editors' text back at the size a person who chose none gets.
+    pub fn reset_editor_font_size(&mut self) {
+        self.set_choice(
+            ChoicePreference::EditorFontSize,
+            usize::from(ChoicePreference::EditorFontSize.default_value()),
+        )
+        .expect("the default is in the list");
+    }
+
     /// The Han form the person prefers, which the open document's Language
     /// field overrides and which, left Automatic, the operating system's
     /// languages decide.

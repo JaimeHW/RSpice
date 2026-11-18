@@ -57,13 +57,13 @@ const COMMAND_ZOOM_FACTOR: f64 = 1.2;
 pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
     RoutedCommand {
         key: ids::ZOOM_IN,
-        takes: in_editor,
+        takes: canvas_zoom,
         enabled: |_| true,
         execute: zoom_in,
     },
     RoutedCommand {
         key: ids::ZOOM_OUT,
-        takes: in_editor,
+        takes: canvas_zoom,
         enabled: |_| true,
         execute: zoom_out,
     },
@@ -75,7 +75,7 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
     },
     RoutedCommand {
         key: ids::ZOOM_ONE_TO_ONE,
-        takes: in_editor,
+        takes: canvas_zoom,
         enabled: |_| true,
         execute: zoom_one_to_one,
     },
@@ -196,6 +196,12 @@ fn schematic_editor(workspace: Workspace, model: &Model) -> bool {
 
 fn in_editor(reads: &Reads<'_, DesignFeature>) -> bool {
     symbol_editor(reads.wb.workspace, reads.model) || in_schematic(reads)
+}
+
+/// Zoom in, out and 100% are the canvas's unless a source editor is in
+/// front, whose text they size instead.
+fn canvas_zoom(reads: &Reads<'_, DesignFeature>) -> bool {
+    in_editor(reads) && reads.wb.active_source_editor.is_none()
 }
 
 fn in_schematic(reads: &Reads<'_, DesignFeature>) -> bool {

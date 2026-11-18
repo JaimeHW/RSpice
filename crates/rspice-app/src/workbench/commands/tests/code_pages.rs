@@ -90,3 +90,42 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         &rspice_app_state::state::ProjectSourceOwner::cell_view(reference)
     );
 }
+
+/// View > Zoom over a source editor sizes the editors' text a step at a
+/// time, and Zoom 100% returns it to the size nobody chose.
+#[test]
+fn view_zoom_sizes_the_text_of_the_source_editor_in_front() {
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Netlist;
+    app.state.workbench.active_source_editor = Some(
+        rspice_app_code::workbench::documents::text_editor_commands::ActiveSourceEditor {
+            id: egui::Id::new("zoomed-source"),
+            editable: true,
+            navigable: true,
+            can_undo: false,
+            can_redo: false,
+            has_selection: false,
+        },
+    );
+    let actual = app.state.model.preferences.editor_font_size();
+    assert!(
+        !app.command_key_enabled(ids::ZOOM_ONE_TO_ONE),
+        "the text is at its actual size"
+    );
+    assert!(app.command_key_enabled(ids::ZOOM_IN));
+    app.execute_command_key(ids::ZOOM_IN);
+    assert!(app.state.model.preferences.editor_font_size() > actual);
+    assert!(app.command_key_enabled(ids::ZOOM_ONE_TO_ONE));
+    app.execute_command_key(ids::ZOOM_ONE_TO_ONE);
+    assert_eq!(app.state.model.preferences.editor_font_size(), actual);
+    app.execute_command_key(ids::ZOOM_OUT);
+    assert!(app.state.model.preferences.editor_font_size() < actual);
+    for _ in 0..16 {
+        app.execute_command_key(ids::ZOOM_OUT);
+    }
+    assert!(
+        !app.command_key_enabled(ids::ZOOM_OUT),
+        "the smallest size goes no smaller"
+    );
+}

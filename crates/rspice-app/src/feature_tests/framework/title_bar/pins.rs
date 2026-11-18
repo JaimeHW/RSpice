@@ -665,9 +665,9 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
     (
         ApplicationMenu::View,
         &[
-            "Zoom in | zoom-in | + | on",
-            "Zoom out | zoom-out | − | on",
-            "Zoom 100% | zoom-one-to-one | Ctrl+0 | on",
+            "Zoom in | zoom-in | Ctrl+= | on",
+            "Zoom out | zoom-out | Ctrl+− | on",
+            "Zoom 100% | zoom-one-to-one | Ctrl+0 | off: command is unavailable in this context",
             "Fit drawing sheet | canvas-fit-sheet | F | on",
             "Fit content | canvas-fit-content | Shift+F | on",
             "Zoom to selection | zoom-to-selection |  | off: nothing is selected",
