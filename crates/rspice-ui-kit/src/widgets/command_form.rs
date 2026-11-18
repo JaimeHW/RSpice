@@ -1668,6 +1668,7 @@ pub struct CommandForm<'a> {
     primary_on_enter: bool,
     cancel_enabled: bool,
     size: DialogSize,
+    first_field: Option<Id>,
 }
 
 impl<'a> CommandForm<'a> {
@@ -1686,7 +1687,18 @@ impl<'a> CommandForm<'a> {
             primary_on_enter: true,
             cancel_enabled: true,
             size: DialogSize::CommandForm,
+            first_field: None,
         }
+    }
+
+    /// The field that has the keyboard as the form opens, focused before it
+    /// reads the opening frame's input, so what the reader types straight
+    /// after the press that opened the form lands in it. The body returns
+    /// the same id. Without it the body's nominee takes the keyboard once the
+    /// body has drawn, and that frame's typing is lost.
+    pub fn first_field(mut self, id: Id) -> Self {
+        self.first_field = Some(id);
+        self
     }
 
     /// The 480-point card, for a form whose last row is a table of what the
@@ -1800,7 +1812,10 @@ impl<'a> CommandForm<'a> {
             .ghost_enabled(self.cancel_enabled)
             .primary_enabled(self.primary_enabled)
             .primary_on_enter(self.primary_on_enter)
-            .initial_focus(DialogInitialFocus::BodyControl);
+            .initial_focus(
+                self.first_field
+                    .map_or(DialogInitialFocus::BodyControl, DialogInitialFocus::Control),
+            );
         if let Some(secondary) = self.secondary {
             dialog = dialog
                 .secondary(secondary)

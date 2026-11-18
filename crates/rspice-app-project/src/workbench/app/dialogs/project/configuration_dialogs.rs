@@ -577,6 +577,7 @@ fn new_dialog(
         .primary_enabled(write_allowed && !name.trim().is_empty())
         .fields_enabled(write_allowed)
         .status(refusal.as_deref().map_or(Ok(None), Err))
+        .first_field(name_id())
         .show(ctx, |rows| {
             rows.text_sans("Name", name_id(), name, "Configuration name");
             let labels = StartFrom::ALL.map(|start| start.label().to_owned());
@@ -671,6 +672,7 @@ fn name_dialog(
         .primary_enabled(write_allowed && !name_empty)
         .fields_enabled(write_allowed)
         .status(refusal.as_deref().map_or(Ok(None), Err))
+        .first_field(name_id())
         .show(ctx, |rows| {
             rows.value("Configuration", &source_name);
             match dialog_state.open.as_mut() {
