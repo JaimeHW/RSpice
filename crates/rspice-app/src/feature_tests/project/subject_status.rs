@@ -270,3 +270,76 @@ fn a_netlist_first_inspector_states_the_deck_as_the_overview_does() {
         assert!(!has_line(&overview, line), "{line:?}:\n{overview}");
     }
 }
+
+/// Every string painted under the same clip as the rightmost `anchor`: the
+/// text of the panel that paints it.
+fn painted_beside(output: &egui::FullOutput, anchor: &str) -> Vec<String> {
+    fn texts(
+        shape: &egui::epaint::Shape,
+        clip: egui::Rect,
+        out: &mut Vec<(egui::Rect, egui::Pos2, String)>,
+    ) {
+        match shape {
+            egui::epaint::Shape::Text(text) => {
+                out.push((clip, text.pos, text.galley.text().to_owned()));
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    texts(shape, clip, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    for clipped in &output.shapes {
+        texts(&clipped.shape, clipped.clip_rect, &mut all);
+    }
+    let clip = all
+        .iter()
+        .filter(|(_, _, text)| text == anchor)
+        .max_by(|a, b| a.1.x.total_cmp(&b.1.x))
+        .map(|(clip, _, _)| *clip)
+        .unwrap_or_else(|| panic!("something paints {anchor}"));
+    all.into_iter()
+        .filter(|(painted, _, _)| *painted == clip)
+        .map(|(_, _, text)| text)
+        .collect()
+}
+
+/// The inspector lists every finding the checks made, each whole, not the
+/// first few of them.
+#[test]
+fn the_inspector_lists_every_finding_the_checks_made() {
+    let mut app = schematic_project();
+    let messages: Vec<String> = (1..=5)
+        .map(|net| format!("Net n{net} has no DC path to ground"))
+        .collect();
+    let mut result = DrcResult::new();
+    for (index, message) in messages.iter().enumerate() {
+        result.add_violation(DrcViolation::new(
+            index + 1,
+            DrcViolationType::MissingGround,
+            message.as_str(),
+            DrcLocation::Global,
+        ));
+    }
+    result.completed = true;
+    app.state
+        .publish_active_design_check_result(result)
+        .expect("the checks publish");
+
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Overview;
+    let ctx = offscreen();
+    for _ in 0..3 {
+        app_frame(&ctx, &mut app, Vec::new());
+    }
+    let inspector = painted_beside(&app_frame(&ctx, &mut app, Vec::new()), "Project file");
+    for message in &messages {
+        assert!(
+            inspector.iter().any(|text| text == message),
+            "the inspector lists {message:?}; it paints {inspector:#?}"
+        );
+    }
+}

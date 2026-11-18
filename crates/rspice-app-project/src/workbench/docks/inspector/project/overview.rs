@@ -69,14 +69,14 @@ pub(super) fn project_overview(
             .unwrap_or_else(|| "Not saved".to_owned()),
     );
 
-    // The findings themselves, each whole: the page's status row states the
-    // checks' counts and its strip the worst finding by code.
+    // The findings themselves, every one of them, each whole: the page's
+    // status row states the checks' counts, and the panel scrolls.
     if DesignSubject::of(model) == DesignSubject::SchematicChecks {
         let checks = health::schematic_checks(model, inspector.facts);
         section_header(ui, "Problems", Some(&checks.state));
         match model.simulation_root_design_check_status(inspector.facts) {
             DesignCheckStatus::Current(receipt) => {
-                for violation in receipt.result.violations().iter().take(3) {
+                for violation in receipt.result.violations() {
                     property_row_wrapped(ui, "Finding", &violation.message);
                 }
             }
