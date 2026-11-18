@@ -3749,6 +3749,97 @@ fn the_same_loop_with_a_delay_runs() {
     );
 }
 
+/// A counter of a sine clock's rising edges, read through the default A/D,
+/// that toggles `lsb` onto the default D/A at each, and an analog `cross()`
+/// on the clock's own node and the A/D's threshold.
+const COUNTER_BESIDE_A_CROSS: &str = "`include \"disciplines.vams\"
+`timescale 1ns/1ps
+module counter(clk, lsb, nd);
+  input clk; wire clk;
+  output lsb; reg lsb;
+  output nd; electrical nd;
+  integer cnt;
+  initial begin cnt = 0; lsb = 0; end
+  always @(posedge clk) begin cnt = cnt + 1; lsb = ~lsb; end
+  analog V(nd) <+ cnt;
+endmodule
+module clock_cross(x, na);
+  input x; electrical x; output na; electrical na; integer ca;
+  analog begin
+    @(initial_step) ca = 0;
+    @(cross(V(x) - 0.9, +1)) ca = ca + 1;
+    V(na) <+ ca;
+  end
+endmodule
+";
+
+/// **A converter the deck never placed decides only past its threshold.**
+/// `x` rises through the default A/D's 0.9 V every 100 ns from time zero, so
+/// the counter sees 101 rising edges by 10.02 us and `lsb`'s ideal default
+/// D/A drives a resistor, a diode and a capacitor. The analog `cross()` on
+/// `x` refines its root down to the point where `V(x)` reads 0.9 V exactly,
+/// 5.7999999999999995 us, and the cross has not fired there. The A/D used to
+/// decide the rise on that point, so `lsb`'s ideal edge drove the diode from
+/// there, the cross's own landing 1e-19 s later failed Newton, and the run
+/// was refused, asking for "a nonzero trise and tfall" on a converter the
+/// deck never wrote. On its threshold the input has not crossed it, so the
+/// A/D now decides where the cross does, and the run counts every edge once.
+#[test]
+fn a_counter_beside_an_analog_cross_on_its_clock_counts_every_edge_once() {
+    let model = ModelFile::hdl("counter_beside_a_cross", COUNTER_BESIDE_A_CROSS);
+    let deck = format!(
+        "* default converters only, an analog cross on the clock's node\n\
+         .hdl \"{}\"\n\
+         .param vcc=1.8\n\
+         vs s 0 sin(0.9 1.2 10meg)\n\
+         rs s x 10\n\
+         xr x lsb nd counter\n\
+         xa x na clock_cross\n\
+         r9 lsb m 1k\n\
+         d1 m 0 dmod\n\
+         c1 m 0 10p\n\
+         r1 m 0 50\n\
+         .model dmod d(is=1e-15 n=1 rs=0.1 cjo=5p tt=2n)\n\
+         .tran 1n 10.02u\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 10.02e-6, 1.0e-9);
+    let last = |node: &str| {
+        let index = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("{node} is published"));
+        *result.voltages[index].last().expect("the run has points")
+    };
+    assert_eq!(
+        last("nd"),
+        101.0,
+        "the counter counts each rising edge once"
+    );
+    assert_eq!(
+        last("na"),
+        100.0,
+        "the cross counts each rise after time zero"
+    );
+    let rises: Vec<f64> = digital_points(&result, "x")
+        .into_iter()
+        .filter(|(_, state)| state == "One")
+        .map(|(time, _)| time)
+        .collect();
+    assert_eq!(rises.len(), 101, "one rise per 100 ns: {rises:?}");
+    for (index, rise) in rises.iter().enumerate() {
+        let root = index as f64 * 100.0e-9;
+        assert!((rise - root).abs() < 1.0e-18, "rise {index} at {rise:e}");
+    }
+    let toggles: Vec<f64> = digital_points(&result, "lsb")
+        .into_iter()
+        .map(|(time, _)| time)
+        .collect();
+    assert_eq!(toggles, rises, "lsb toggles once at each rise");
+}
+
 //=============================================================================
 // Tick quantization
 //=============================================================================

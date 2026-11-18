@@ -430,6 +430,45 @@ fn an_uncoupled_connect_adc_dates_its_edge_at_the_crossing() {
     );
 }
 
+/// An accepted sample that reads its threshold exactly has not crossed it, as
+/// a `cross()` has not fired on its root (VAMS-LRM 2.4 5.10.3.1), and as the
+/// landing a root puts just past a crossing has. The A/D holds there, from
+/// either side, and the next sample past the threshold publishes the edge,
+/// dated at the sample that sat on it plus the edge's delay: where the edge
+/// was dated when the sample on the threshold published it.
+#[test]
+fn a_connect_adc_sample_on_its_threshold_holds_until_one_is_past_it() {
+    let delay = 1.0e-9;
+    let (on, past) = (10.0e-9, 10.5e-9);
+    let ours = ConnectAdc { tracking: false };
+    for (from, beyond, state) in [
+        (0.0, 1.3, DigitalState::One),
+        (3.3, 1.1, DigitalState::Zero),
+    ] {
+        let mut ctx = context(
+            &ours,
+            1,
+            &[
+                ("vtlo", 1.2),
+                ("vthi", 1.2),
+                ("tdrise", delay),
+                ("tdfall", delay),
+            ],
+        );
+        adc_step(&ours, &mut ctx, "in", 0.0, &[from], None);
+        let held = adc_step(&ours, &mut ctx, "in", on, &[1.2], None);
+        assert!(
+            held.is_empty(),
+            "{from} V to the threshold published {held:?}"
+        );
+        assert_times(
+            &adc_step(&ours, &mut ctx, "in", past, &[beyond], None),
+            &[(state, on + delay)],
+            4.0 * f64::EPSILON * on,
+        );
+    }
+}
+
 /// `txdel = 0` is `adc_bridge`, bit for bit, on a 50-point random trace.
 #[test]
 fn a_zero_timeout_is_adc_bridge() {

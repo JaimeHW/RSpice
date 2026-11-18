@@ -6,7 +6,8 @@ use crate::Value;
 /// The decision law associated with an analog input's two thresholds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalogThresholdBehavior {
-    /// Retain the previous decision between the thresholds.
+    /// Retain the previous decision between the thresholds, and on one once
+    /// the input has a sample before it.
     Hysteresis,
     /// Publish X between the thresholds, as the XSPICE ADC does.
     UnknownBand,
@@ -117,25 +118,32 @@ impl AnalogThresholdBehavior {
     ) -> Option<(DigitalState, Value)> {
         match self {
             Self::Hysteresis => {
-                if low == high && input == low {
-                    let high = if previous.is_some_and(|previous| previous < input) {
-                        true
-                    } else if previous.is_some_and(|previous| previous > input) {
-                        false
-                    } else {
-                        held == Some(DigitalState::One)
-                    };
+                if input < low {
+                    Some((DigitalState::Zero, low))
+                } else if input > high {
+                    Some((DigitalState::One, high))
+                } else if previous.is_some() {
+                    // An input that has come to rest on a threshold has not
+                    // crossed it: a crossing decides only strictly past its
+                    // threshold, as `cross()` fires only past its root
+                    // (VAMS-LRM 2.4 5.10.3.1) and as a located crossing
+                    // decides. On the threshold the decision holds, and the
+                    // next sample past it crosses from there.
+                    None
+                } else if low == high && input == low {
+                    // With no sample before it the input is read, not
+                    // crossed: a single threshold reads what is held.
                     Some((
-                        if high {
+                        if held == Some(DigitalState::One) {
                             DigitalState::One
                         } else {
                             DigitalState::Zero
                         },
                         low,
                     ))
-                } else if input <= low {
+                } else if input == low {
                     Some((DigitalState::Zero, low))
-                } else if input >= high {
+                } else if input == high {
                     Some((DigitalState::One, high))
                 } else {
                     None
@@ -249,6 +257,40 @@ mod tests {
         assert_eq!(
             law.decision(0.5, Some(1.5), held, 1.0, 2.0, true),
             Some((DigitalState::Zero, 1.0))
+        );
+    }
+
+    /// An input that comes to rest exactly on a threshold has not crossed
+    /// it, from either side and on either edge of a band: the decision
+    /// holds, and the next sample past the threshold crosses from there.
+    /// With no sample before it the input is read where it stands.
+    #[test]
+    fn a_hysteresis_input_on_its_threshold_holds_until_it_is_past_it() {
+        let law = AnalogThresholdBehavior::Hysteresis;
+        let (zero, one) = (Some(DigitalState::Zero), Some(DigitalState::One));
+        for (low, high) in [(0.9, 0.9), (0.6, 1.2)] {
+            assert_eq!(law.decision(high, Some(low - 0.1), zero, low, high), None);
+            assert_eq!(
+                law.decision(high.next_up(), Some(high), zero, low, high),
+                Some((DigitalState::One, high))
+            );
+            assert_eq!(law.decision(low, Some(high + 0.1), one, low, high), None);
+            assert_eq!(
+                law.decision(low.next_down(), Some(low), one, low, high),
+                Some((DigitalState::Zero, low))
+            );
+            assert_eq!(
+                law.decision(low, None, None, low, high),
+                Some((DigitalState::Zero, low))
+            );
+        }
+        assert_eq!(
+            law.decision(0.9, None, one, 0.9, 0.9),
+            Some((DigitalState::One, 0.9))
+        );
+        assert_eq!(
+            law.decision(1.2, None, None, 0.6, 1.2),
+            Some((DigitalState::One, 1.2))
         );
     }
 }

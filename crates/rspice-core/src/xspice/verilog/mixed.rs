@@ -7196,6 +7196,12 @@ endmodule
         host
     }
 
+    /// An input a rounding past the 0.6 V upper threshold the tests' A/D
+    /// bridges share. A sample exactly on a threshold has not crossed it; this
+    /// one has, as a landing a root put just past its crossing has, and its
+    /// crossing interpolates to within a rounding of the step's end.
+    const PAST_HIGH: f64 = 0.6f64.next_up();
+
     fn begin(host: &mut MixedSignalHost, tick: u64) {
         host.begin_trial(
             tick as f64 * 1.0e-9,
@@ -7385,10 +7391,10 @@ endmodule
         begin(&mut host, 0);
         settle_and_accept(&mut host, &[0.0, 0.0]);
         let stamp = |host: &mut MixedSignalHost| {
-            while host.settle_analog_bridges(&[0.0, 0.6]).unwrap() {}
+            while host.settle_analog_bridges(&[0.0, PAST_HIGH]).unwrap() {}
             let mut rhs = 0.0;
             host.stamp(
-                &[0.0, 0.6],
+                &[0.0, PAST_HIGH],
                 |_, _, _| {},
                 |row, value| {
                     if row == 0 {
@@ -7453,7 +7459,7 @@ endmodule
         host.restore(&checkpoint).unwrap();
         for tick in 1..=2 {
             begin(&mut host, tick);
-            settle_and_accept(&mut host, &[0.0, 0.6]);
+            settle_and_accept(&mut host, &[0.0, PAST_HIGH]);
         }
         begin(&mut host, 3);
         assert!((stamp(&mut host) + 5e-3).abs() < 1e-12);
@@ -7478,10 +7484,10 @@ endmodule
         begin(&mut host, 0);
         settle_and_accept(&mut host, &[0.0, 0.0]);
         let stamp = |host: &mut MixedSignalHost| {
-            while host.settle_analog_bridges(&[0.0, 0.6]).unwrap() {}
+            while host.settle_analog_bridges(&[0.0, PAST_HIGH]).unwrap() {}
             let mut rhs = 0.0;
             host.stamp(
-                &[0.0, 0.6],
+                &[0.0, PAST_HIGH],
                 |_, _, _| {},
                 |row, value| {
                     if row == 0 {
@@ -7607,7 +7613,7 @@ endmodule
             begin(&mut host, 0);
             settle_and_accept(&mut host, &[0.0, 0.0, 0.0]);
             let stamp = |host: &mut MixedSignalHost, adc: f64| {
-                let voltages = [0.0, 0.6, adc];
+                let voltages = [0.0, PAST_HIGH, adc];
                 while host.settle_analog_bridges(&voltages).unwrap() {}
                 let mut rhs = 0.0;
                 host.stamp(
@@ -7662,7 +7668,7 @@ endmodule
                         false,
                     )
                     .unwrap();
-                    assert!((stamp(&mut host, 0.6) + 1e-3).abs() < 1e-12);
+                    assert!((stamp(&mut host, PAST_HIGH) + 1e-3).abs() < 1e-12);
                     assert_eq!(
                         host.read_digital("independent").unwrap(),
                         "0",
@@ -7690,7 +7696,7 @@ endmodule
                     )
                     .unwrap();
                     assert!(
-                        (stamp(&mut host, 0.6) + 1.9e-3).abs() < 1e-12,
+                        (stamp(&mut host, PAST_HIGH) + 1.9e-3).abs() < 1e-12,
                         "both captures retain their original real RHS"
                     );
                     assert_eq!(host.read_digital("independent").unwrap(), "1");
@@ -7743,7 +7749,7 @@ endmodule
             begin(&mut host, 0);
             settle_and_accept(&mut host, &[0.0, 0.0, 0.0]);
             let stamp = |host: &mut MixedSignalHost, adc: f64| {
-                let voltages = [0.0, 0.6, adc];
+                let voltages = [0.0, PAST_HIGH, adc];
                 while host.settle_analog_bridges(&voltages).unwrap() {}
                 let mut rhs = 0.0;
                 host.stamp(
@@ -7783,7 +7789,7 @@ endmodule
                     false,
                 )
                 .unwrap();
-                assert!((stamp(&mut host, 0.6) + 1e-3).abs() < 1e-12);
+                assert!((stamp(&mut host, PAST_HIGH) + 1e-3).abs() < 1e-12);
                 assert_eq!(host.read_digital("done").unwrap(), "0");
                 if reject {
                     host.reject_trial().unwrap();
@@ -7821,7 +7827,7 @@ endmodule
                         false,
                     )
                     .unwrap();
-                    assert!((stamp(&mut host, 0.6) + 1e-3).abs() < 1e-12);
+                    assert!((stamp(&mut host, PAST_HIGH) + 1e-3).abs() < 1e-12);
                     assert_eq!(host.read_digital("done").unwrap(), "1");
                     assert_eq!(host.read_digital("independent").unwrap(), "0");
                     if reject {
@@ -7841,7 +7847,7 @@ endmodule
                         false,
                     )
                     .unwrap();
-                    assert!((stamp(&mut host, 0.6) + 2.55e-3).abs() < 1e-12);
+                    assert!((stamp(&mut host, PAST_HIGH) + 2.55e-3).abs() < 1e-12);
                     assert_eq!(host.read_digital("independent").unwrap(), "1");
                     if reject {
                         host.reject_trial().unwrap();
@@ -9127,13 +9133,13 @@ endmodule
     fn a_crossing_a_rolled_back_probe_fed_back_into_is_dated_where_its_cause_is() {
         let mut host = landing_host(LANDING_FEEDBACK);
 
-        // Newton probe *k* at 2 ns. `ca` reaches its threshold exactly at the
-        // endpoint — where the refinement puts a step it is resolving a root
-        // on — and the process it wakes writes `gain`. `cb` is still low: the
+        // Newton probe *k* at 2 ns. `ca` reaches a rounding past its threshold
+        // at the endpoint — where the refinement puts a step it is resolving a
+        // root on — and the process it wakes writes `gain`. `cb` is still low: the
         // solver has not yet re-solved with what that write moved. The probe
         // then rolls back, taking the write with it.
         begin_probe(&mut host, 2);
-        settle_and_reject(&mut host, &[0.0, 0.0, 0.6, 0.0]);
+        settle_and_reject(&mut host, &[0.0, 0.0, PAST_HIGH, 0.0]);
 
         // Probe *k+1* and the inspection, over the same interval: the candidate
         // carries what the write moved, so `cb` crosses on it, while the store
@@ -9141,7 +9147,7 @@ endmodule
         // step, `cb` would date a fifth of the way in and the refinement would
         // send the controller to a root *behind* the landing it just reached —
         // the bisection ladder.
-        let landed = [0.0, 0.0, 0.6, 3.0];
+        let landed = [0.0, 0.0, PAST_HIGH, 3.0];
         begin(&mut host, 2);
         assert_eq!(
             boundary_root_of_trial(&mut host, &landed),
