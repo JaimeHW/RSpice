@@ -11,7 +11,7 @@ use std::sync::Arc;
 use super::derived::derived;
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
-use crate::ui::widgets::{CommandForm, FieldLine, FormRows, TableColumn};
+use crate::ui::widgets::{CommandForm, FormRows, TableColumn};
 use crate::workbench::app::dialogs::project::{
     TechnologyAttachment, TechnologyChange, TechnologyChangeInFlight,
 };
@@ -560,25 +560,29 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
 
             rows.section("Technology mapping");
             if let Some(candidate) = selected_index.and_then(|index| candidates.get(index)) {
+                let models = candidate.binding.model_count();
                 rows.value(
                     "Devices",
-                    &format!("{} parsed models", candidate.binding.model_count()),
+                    &format!("{models} parsed model{}", plural_suffix(models)),
                 );
                 rows.value(
                     "Layers",
                     &selected_package
                         .map(|package| {
-                            format!("{} PDK technology layers", package.manifest().layers.len())
+                            let layers = package.manifest().layers.len();
+                            format!("{layers} PDK technology layer{}", plural_suffix(layers))
                         })
                         .unwrap_or_else(|| "No PDK layer catalog selected".to_owned()),
                 );
-                rows.value("Corners", &format!("{} process sections", candidate.corner_count));
+                let corners = candidate.corner_count;
+                rows.value(
+                    "Corners",
+                    &format!("{corners} process section{}", plural_suffix(corners)),
+                );
+                let files = candidate.binding.source_closure().len();
                 rows.value(
                     "Source closure",
-                    &format!(
-                        "{} SHA-256 pinned files",
-                        candidate.binding.source_closure().len()
-                    ),
+                    &format!("{files} SHA-256 pinned file{}", plural_suffix(files)),
                 );
                 if let Some(package) = selected_package {
                     rows.value(
@@ -678,21 +682,17 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
                         "Initial attachment changes the project execution contract only. Editable schematic and physical views are never migrated implicitly.",
                     );
                 }
-                Err(error) => rows.field_line(
-                    None,
-                    FieldLine::Error(&format!("Migration preview failed: {error}")),
-                ),
+                // Sentences, so they wrap whole: a field's error line is one
+                // line cut in the middle.
+                Err(error) => rows.derived(&format!("Migration preview failed: {error}")),
             }
             if !catalog.diagnostics.is_empty() {
                 rows.section("Library validation");
                 for diagnostic in &catalog.diagnostics {
-                    rows.field_line(
-                        None,
-                        FieldLine::Error(&format!(
-                            "Model library '{}' cannot be attached: {}",
-                            diagnostic.library_name, diagnostic.reason
-                        )),
-                    );
+                    rows.derived(&format!(
+                        "Model library '{}' cannot be attached: {}",
+                        diagnostic.library_name, diagnostic.reason
+                    ));
                 }
             }
             None
