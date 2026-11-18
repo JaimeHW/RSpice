@@ -992,8 +992,9 @@ impl XyceTestRunner {
             ExpressionDialect::Xyce,
             Some(execution_dir),
         ) {
-            Err(ParseError::Syntax { line, message })
-                if line == 3 && message.starts_with(&expected_message) => {}
+            Err(error @ ParseError::SourceNotFound { .. })
+                if error.source_location().map(|origin| origin.line) == Some(3)
+                    && error.to_string().starts_with(&expected_message) => {}
             Err(error) => {
                 return Err(format!(
                     "{label} produced the wrong typed missing-library failure: expected line 3 / {expected_message:?}, got {error:?}"

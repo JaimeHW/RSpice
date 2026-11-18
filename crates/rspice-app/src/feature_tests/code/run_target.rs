@@ -482,6 +482,53 @@ fn a_missing_library_reads_the_same_in_its_finding_and_its_refusals() {
     );
 }
 
+/// Every file the deck names and nothing holds is a problem of its own at
+/// the line that names it, and its include in the outline is marked
+/// missing; Run refuses on the first.
+#[test]
+fn every_missing_file_is_a_problem_at_its_own_line() {
+    let source = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.lib \"corners.lib\" tt\n\
+                  .include models/missing.inc\n.end\n";
+    let looked = "(looked in the deck's folder, lib/, models/, ../lib/, ../models/)";
+    let mut replay =
+        crate::feature_tests::replay::Replay::of(netlist_session_with_deck(source, "amp_tb.cir"));
+    replay.frames(Vec::new());
+    let painted = super::netlist_document::painted_text(&replay.frame(Vec::new()));
+
+    let listed = rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(
+        &replay.app.state,
+    );
+    let mut rows = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .map(|row| (row.location.clone(), row.message.to_owned()))
+        .collect::<Vec<_>>();
+    rows.sort();
+    assert_eq!(
+        rows,
+        [
+            (
+                "line 5".to_owned(),
+                format!("corners.lib not found {looked}")
+            ),
+            (
+                "line 6".to_owned(),
+                format!("models/missing.inc not found {looked}")
+            ),
+        ]
+    );
+    assert_eq!(
+        painted.lines().filter(|line| *line == "missing").count(),
+        2,
+        "both includes are marked missing in the outline: {painted}"
+    );
+
+    press_run(&mut replay.app);
+    assert_eq!(
+        replay.app.state.prompt_text().unwrap_or_default(),
+        format!("amp_tb.cir did not run: line 5: corners.lib not found {looked}")
+    );
+}
+
 /// With the generated netlist in front the plan is what runs, and Check and
 /// netlist is Simulate's check of it: the code feature leaves it alone.
 #[test]

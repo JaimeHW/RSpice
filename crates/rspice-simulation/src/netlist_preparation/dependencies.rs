@@ -315,22 +315,50 @@ fn unread_dependency(
     deck: &Path,
 ) -> PreparationError {
     use rspice_core::netlist::{ParseError, ParseWithAbortError};
-    if let ParseWithAbortError::Parse(ParseError::Syntax { line, message }) = &error
-        && *line > 0
+    let error = first_unread(error);
+    let placed = match &error {
+        ParseWithAbortError::Parse(ParseError::Syntax { line, message }) => {
+            Some((*line, message.clone()))
+        }
+        ParseWithAbortError::Parse(
+            missing @ ParseError::SourceNotFound {
+                origin: Some(origin),
+                ..
+            },
+        ) => Some((origin.line, missing.to_string())),
+        _ => None,
+    };
+    if let Some((line, message)) = placed
+        && line > 0
     {
         // The search names the deck as a diagnostic shows a path, without
         // the verbatim prefix a canonical Windows path carries.
         let shown = deck.display().to_string();
         let shown = shown.strip_prefix(r"\\?\").unwrap_or(&shown);
         if let Some(said) = message.strip_prefix(&format!("{shown}:{line}: ")) {
-            return PreparationError::new(PreparationStage::SourceChecks, said)
-                .at_line(Some(*line));
+            return PreparationError::new(PreparationStage::SourceChecks, said).at_line(Some(line));
         }
     }
     PreparationError::new(
         PreparationStage::SourceChecks,
         format!("Could not read the deck's includes: {error}"),
     )
+}
+
+/// The one file a run refuses on when a deck names several it cannot read:
+/// the first, as the run stops at it. The check names every one.
+fn first_unread(
+    error: rspice_core::netlist::ParseWithAbortError,
+) -> rspice_core::netlist::ParseWithAbortError {
+    use rspice_core::netlist::{ParseError, ParseWithAbortError};
+    match error {
+        ParseWithAbortError::Parse(ParseError::MissingSources(mut missing))
+            if !missing.is_empty() =>
+        {
+            ParseWithAbortError::Parse(missing.remove(0))
+        }
+        other => other,
+    }
 }
 
 /// Expand a deck the project keeps as text through the files kept with it,
@@ -357,7 +385,10 @@ fn expand_stored_deck(
             &rspice_core::abort_signal::NoAbort,
         )
         .map_err(|error| {
-            PreparationError::new(PreparationStage::SourceChecks, error.to_string())
+            PreparationError::new(
+                PreparationStage::SourceChecks,
+                first_unread(error).to_string(),
+            )
         })?;
     Ok(ExpandedManualDependencies {
         expanded,

@@ -311,6 +311,54 @@ fn add_file_keeps_a_missing_include_where_its_line_reads_it() {
     assert!(netlist.contains("E1 out vss inp vss 2"), "{netlist}");
 }
 
+/// Each line naming a file the deck kept as text does not keep offers Add
+/// file… for its own file, and the other line still does once one is added.
+#[test]
+fn every_include_the_deck_does_not_keep_offers_add_file_on_its_line() {
+    let mut app = RSpiceApp::test_instance();
+    let deck = "* amp\nV1 a 0 1\n.include \"models/opamp.inc\"\n.include \"models/load.inc\"\n\
+                XU1 a out a 0 opamp\nR1 out 0 1k\n.op\n.end\n";
+    assert!(
+        app.state
+            .import_deck_files(vec![("amp.cir".to_owned(), deck.as_bytes().to_vec())])
+    );
+    let lacking =
+        |name: &str| format!("{name} is not in this deck. Add the file to the deck to use it.");
+    let findings = ["models/opamp.inc", "models/load.inc"]
+        .map(|name| finding_saying(&mut app, &lacking(name)));
+    assert_eq!(
+        findings.each_ref().map(|finding| finding.line),
+        [Some(2), Some(3)]
+    );
+    let requests = findings.each_ref().map(|finding| {
+        netlist_document::language::add_file_request_for_finding(
+            &app.state.code.netlist,
+            finding.canonical.diagnostic_id,
+        )
+        .expect("each line asks for its file")
+    });
+    assert_eq!(
+        requests.each_ref().map(|request| request.keep_as.as_str()),
+        ["models/opamp.inc", "models/load.inc"]
+    );
+
+    app.state
+        .add_deck_file_bytes(&requests[0], "opamp.inc", OPAMP.as_bytes())
+        .expect("the file is kept");
+    checked_again(&mut app);
+
+    let load = finding_saying(&mut app, &lacking("models/load.inc"));
+    assert_eq!(load.line, Some(3));
+    assert!(
+        netlist_document::language::add_file_request_for_finding(
+            &app.state.code.netlist,
+            load.canonical.diagnostic_id,
+        )
+        .is_some(),
+        "the other line still asks for its file"
+    );
+}
+
 /// Files picked together come in as the decks among them, each a file no
 /// other includes, and each keeps the files that are no deck: a deck one of
 /// them includes is no deck of its own.

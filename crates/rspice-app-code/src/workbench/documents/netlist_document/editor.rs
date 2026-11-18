@@ -1439,24 +1439,24 @@ fn parse_stored(
     );
     let missing = match &parsed {
         Err(rspice_core::netlist::ParseWithAbortError::Parse(
-            rspice_core::netlist::ParseError::SourceNotInDeck {
-                origin: Some(origin),
-                requested,
-                outside,
-            },
-        )) => Some((origin.clone(), requested.clone(), *outside)),
-        _ => None,
+            rspice_core::netlist::ParseError::MissingSources(missing),
+        )) => missing.iter().filter_map(not_in_deck).collect(),
+        Err(rspice_core::netlist::ParseWithAbortError::Parse(missing)) => {
+            not_in_deck(missing).into_iter().collect()
+        }
+        Ok(_) | Err(rspice_core::netlist::ParseWithAbortError::Aborted) => Vec::new(),
     };
     let mut found = parse_findings(parsed, Some(at), buffer, spectre, None, messages);
-    // The line that names a file the deck does not keep says so in the
+    // Each line that names a file the deck does not keep says so in the
     // reader's words, and offers to add it.
-    if let Some((origin, requested, outside)) = missing
-        && let Some(diagnostic) = found.0.iter_mut().find(|diagnostic| {
+    for (origin, requested, outside) in missing {
+        let Some(diagnostic) = found.0.iter_mut().find(|diagnostic| {
             diagnostic.fix.is_none()
                 && diagnostic.source_path == origin.path
                 && diagnostic.source_line == origin.line.checked_sub(1)
-        })
-    {
+        }) else {
+            continue;
+        };
         let id = if outside {
             MessageId::NetlistFileOutsideDeck
         } else {
@@ -1467,6 +1467,21 @@ fn parse_stored(
         diagnostic.refresh_canonical_location();
     }
     found
+}
+
+/// Where a file a deck kept as text names and does not keep is named, the
+/// name, and whether it is outside the deck, when `error` says so.
+fn not_in_deck(
+    error: &rspice_core::netlist::ParseError,
+) -> Option<(rspice_core::netlist::NetlistSourceLocation, String, bool)> {
+    match error {
+        rspice_core::netlist::ParseError::SourceNotInDeck {
+            origin: Some(origin),
+            requested,
+            outside,
+        } => Some((origin.clone(), requested.clone(), *outside)),
+        _ => None,
+    }
 }
 
 /// Add file…, for the line at `origin` of a deck kept as text that names
@@ -1664,6 +1679,14 @@ fn parse_error_diagnostics_at(
     editor_source_path: Option<&Path>,
     messages: MessageCatalog,
 ) -> Vec<Diagnostic> {
+    // Every file the deck names that could not be read is a finding at the
+    // line that names it.
+    if let rspice_core::netlist::ParseError::MissingSources(missing) = error {
+        return missing
+            .into_iter()
+            .flat_map(|missing| parse_error_diagnostics_at(missing, editor_source_path, messages))
+            .collect();
+    }
     let rspice_core::netlist::ParseError::OutputSymbolValidation(validation) = error else {
         return vec![parse_error_diagnostic_at(
             error,
@@ -1712,6 +1735,39 @@ fn parse_error_diagnostics_at(
         .collect()
 }
 
+/// The code of a finding at a line that names a file nothing holds.
+const NOT_FOUND: &str = "SPICE-INCLUDE-NOT-FOUND";
+/// The code of a finding at a line of a deck kept as text that names a file
+/// the deck does not keep.
+const MISSING_FROM_DECK: &str = "SPICE-INCLUDE-NOT-IN-DECK";
+
+/// Whether `diagnostic` says the line it is at names a file the check could
+/// not read, so the outline can mark that include as missing.
+pub(crate) fn is_missing_file_finding(diagnostic: &Diagnostic) -> bool {
+    matches!(&*diagnostic.canonical.code, NOT_FOUND | MISSING_FROM_DECK)
+}
+
+/// The finding at `origin`, the line that names a file the check could not
+/// read, or at the top of the deck when no line is known.
+fn missing_file_finding(
+    code: &str,
+    message: String,
+    origin: Option<rspice_core::netlist::NetlistSourceLocation>,
+    editor_source_path: Option<&Path>,
+) -> Diagnostic {
+    let origin = origin.unwrap_or_else(|| match editor_source_path {
+        Some(path) => rspice_core::netlist::NetlistSourceLocation::in_file(path, 0),
+        None => rspice_core::netlist::NetlistSourceLocation::in_memory(0),
+    });
+    Diagnostic::current(
+        "rspice.netlist.parser",
+        code,
+        DiagnosticSeverity::Error,
+        message,
+    )
+    .with_source_location(&origin, editor_source_path)
+}
+
 #[cfg(test)]
 fn parse_error_diagnostic(error: rspice_core::netlist::ParseError) -> Diagnostic {
     parse_error_diagnostic_at(
@@ -1746,11 +1802,24 @@ fn parse_error_diagnostic_at(
                 outside,
             }
             .to_string();
-            let origin = origin.unwrap_or_else(|| match editor_source_path {
-                Some(path) => rspice_core::netlist::NetlistSourceLocation::in_file(path, 0),
-                None => rspice_core::netlist::NetlistSourceLocation::in_memory(0),
+            missing_file_finding(MISSING_FROM_DECK, message, origin, editor_source_path)
+        }
+        ParseError::SourceNotFound {
+            origin,
+            requested,
+            looked_in,
+        } => {
+            let message = ParseError::SourceNotFound {
+                origin: None,
+                requested,
+                looked_in,
+            }
+            .to_string();
+            let origin = origin.map(|origin| rspice_core::netlist::NetlistSourceLocation {
+                path: origin.path.map(canonical_diagnostic_source),
+                line: origin.line,
             });
-            Diagnostic::error(message).with_source_location(&origin, editor_source_path)
+            missing_file_finding(NOT_FOUND, message, origin, editor_source_path)
         }
         ParseError::MissingSubcircuitEnds(error) => Diagnostic::error(error.to_string())
             .with_source_location(&error.opened_at, editor_source_path),

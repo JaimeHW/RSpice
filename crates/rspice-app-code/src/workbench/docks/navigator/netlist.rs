@@ -1130,7 +1130,26 @@ pub(super) fn retained_include_facts(
     if netlist.front.shows_deck() {
         // A deck is a file: its includes are the files the check read for
         // its lines, one row a line, so a library two lines name for two
-        // sections is two rows and one tab.
+        // sections is two rows and one tab. A line naming a file the check
+        // could not read is marked missing, with what the check said.
+        let buffer = model.simulation.source.netlist_content.as_str();
+        let missing = netlist.diagnostics.iter().filter_map(|finding| {
+            let line = finding.line.filter(|_| {
+                crate::workbench::documents::netlist_document::is_missing_file_finding(finding)
+            })?;
+            let raw = buffer.lines().nth(line)?;
+            let named = rspice_core::netlist::parse_include_directive(raw)
+                .or_else(|| rspice_core::netlist::parse_lib_directive(raw).map(|(path, _)| path))?;
+            Some(IncludeRowFacts {
+                line: Some(line + 1),
+                state: Some(MessageId::NetlistNavigatorDependencyMissing),
+                via: None,
+                chain: Some(finding.message.clone()),
+                shadowed_by: None,
+                sections: Vec::new(),
+                locator: named.trim_matches(['\'', '"']).to_owned(),
+            })
+        });
         return netlist
             .diagnostics
             .includes()
@@ -1159,6 +1178,7 @@ pub(super) fn retained_include_facts(
                 sections: include.sections.to_vec(),
                 locator: include.requested.clone(),
             })
+            .chain(missing)
             .collect();
     }
     active_canonical_netlist_document(model, netlist).map_or_else(Vec::new, |document| {

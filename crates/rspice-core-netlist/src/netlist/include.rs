@@ -1429,6 +1429,7 @@ impl IncludeProcessor {
                 ));
             }
             return Err(ParseError::SourceNotFound {
+                origin: None,
                 requested: clean_name.to_owned(),
                 looked_in: vec![describe_folder(&self.base_dir, &self.base_dir)],
             }
@@ -1444,6 +1445,7 @@ impl IncludeProcessor {
                 ));
             }
             return Err(ParseError::SourceNotFound {
+                origin: None,
                 requested: clean_name.to_owned(),
                 looked_in: Vec::new(),
             }
@@ -1496,6 +1498,7 @@ impl IncludeProcessor {
 
         let Some((stage, resolved)) = winner else {
             return Err(ParseError::SourceNotFound {
+                origin: None,
                 requested: clean_name.to_owned(),
                 looked_in,
             }
@@ -1747,6 +1750,10 @@ impl IncludeProcessor {
         result
     }
 
+    /// Expand `source`, naming every file its lines name that could not be
+    /// read, each at its own line, as Spectre's and ADS's checkers do: a
+    /// missing file stops nothing after it being read. A failure met after
+    /// one is left for the next read, as it was when the first stopped it.
     fn expand_content_from_mapped_with_abort(
         &mut self,
         source: &PreparedSource,
@@ -1754,6 +1761,38 @@ impl IncludeProcessor {
         selected_section: Option<&str>,
         require_selected_section: bool,
         strip_end_cards: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<ExpandedSource, ParseWithAbortError> {
+        let mut missing = Vec::new();
+        let expanded = self.expand_lines_noting_missing(
+            source,
+            current_path,
+            selected_section,
+            require_selected_section,
+            strip_end_cards,
+            &mut missing,
+            abort,
+        );
+        if missing.is_empty() || matches!(expanded, Err(ParseWithAbortError::Aborted)) {
+            return expanded;
+        }
+        Err(if missing.len() == 1 {
+            missing.remove(0)
+        } else {
+            ParseError::MissingSources(missing)
+        }
+        .into())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn expand_lines_noting_missing(
+        &mut self,
+        source: &PreparedSource,
+        current_path: &Path,
+        selected_section: Option<&str>,
+        require_selected_section: bool,
+        strip_end_cards: bool,
+        missing: &mut Vec<ParseError>,
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
@@ -1843,8 +1882,11 @@ impl IncludeProcessor {
                         map_abort_parse_error(error, |error| {
                             include_error_at(error, current_path, line_number, ".lib")
                         })
-                    })?;
-                result.append_limited(included, self.resource_limits.max_expanded_source_bytes)?;
+                    });
+                if let Some(included) = note_missing(included, missing)? {
+                    result
+                        .append_limited(included, self.resource_limits.max_expanded_source_bytes)?;
+                }
                 continue;
             }
 
@@ -1916,8 +1958,16 @@ impl IncludeProcessor {
                         }
                         .into());
                     }
-                    let resolution =
-                        self.resolve_include_from_with_abort(current_path, &filename, abort)?;
+                    let resolution = self
+                        .resolve_include_from_with_abort(current_path, &filename, abort)
+                        .map_err(|error| {
+                            map_abort_parse_error(error, |error| {
+                                include_error_at(error, current_path, line_number, ".include")
+                            })
+                        });
+                    let Some(resolution) = note_missing(resolution, missing)? else {
+                        continue;
+                    };
                     let normalized = resolution
                         .resolved()
                         .display()
@@ -1944,8 +1994,11 @@ impl IncludeProcessor {
                         map_abort_parse_error(error, |error| {
                             include_error_at(error, current_path, line_number, ".include")
                         })
-                    })?;
-                result.append_limited(included, self.resource_limits.max_expanded_source_bytes)?;
+                    });
+                if let Some(included) = note_missing(included, missing)? {
+                    result
+                        .append_limited(included, self.resource_limits.max_expanded_source_bytes)?;
+                }
                 continue;
             }
 
@@ -2062,6 +2115,35 @@ pub fn normalize_source_path_literal(literal: &str) -> Result<String, ParseError
     Ok(normalized)
 }
 
+/// What an include read, or nothing when the file it names, or a file that
+/// file names in turn, could not be read: each such file is noted in
+/// `missing`, located at the line that names it, and the lines after it are
+/// still read. Any other failure stops the read.
+fn note_missing<T>(
+    read: Result<T, ParseWithAbortError>,
+    missing: &mut Vec<ParseError>,
+) -> Result<Option<T>, ParseWithAbortError> {
+    match read {
+        Ok(read) => Ok(Some(read)),
+        Err(ParseWithAbortError::Parse(ParseError::MissingSources(several))) => {
+            missing.extend(several);
+            Ok(None)
+        }
+        Err(ParseWithAbortError::Parse(
+            error @ (ParseError::SourceNotFound {
+                origin: Some(_), ..
+            }
+            | ParseError::SourceNotInDeck {
+                origin: Some(_), ..
+            }),
+        )) => {
+            missing.push(error);
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn include_error_at(
     error: ParseError,
     source_path: &Path,
@@ -2070,21 +2152,26 @@ fn include_error_at(
 ) -> ParseError {
     let error = match error {
         ParseError::ResourceLimit(_)
+        | ParseError::MissingSources(_)
         | ParseError::SourceNotInDeck {
+            origin: Some(_), ..
+        }
+        | ParseError::SourceNotFound {
             origin: Some(_), ..
         } => {
             return error;
         }
         // A file found in none of the folders looked in is said plainly,
-        // at the line that names it.
-        ParseError::SourceNotFound { .. } => {
-            return ParseError::Syntax {
-                line: source_line,
-                message: format!(
-                    "{}:{}: {error}",
-                    display_source_path(source_path),
-                    source_line
-                ),
+        // at the line that names it, however deep the include is.
+        ParseError::SourceNotFound {
+            origin: None,
+            requested,
+            looked_in,
+        } => {
+            return ParseError::SourceNotFound {
+                origin: Some(NetlistSourceLocation::in_file(source_path, source_line)),
+                requested,
+                looked_in,
             };
         }
         // The line that names a file a deck kept as text does not have is
@@ -3574,6 +3661,7 @@ R1 1 0 {selected}
         let ParseWithAbortError::Parse(ParseError::SourceNotFound {
             requested,
             looked_in,
+            ..
         }) = error
         else {
             panic!("a missing include is not found: {error:?}");
@@ -3628,18 +3716,68 @@ R1 1 0 {selected}
         let error = IncludeProcessor::new(&deck_path)
             .expand_content("* bench\n.lib \"corners.lib\" tt\n.end\n", &deck_path)
             .expect_err("nothing holds the library");
-        let ParseError::Syntax { line, message } = error else {
-            panic!("the refusal is located: {error:?}");
+        let ParseError::SourceNotFound { .. } = error else {
+            panic!("the library is not found: {error:?}");
         };
 
-        assert_eq!(line, 2);
         assert_eq!(
-            message,
+            error.source_location(),
+            Some(NetlistSourceLocation::in_file(&deck_path, 2))
+        );
+        assert_eq!(
+            error.to_string(),
             format!(
                 "{}:2: corners.lib not found (looked in the deck's folder, lib/, models/, \
                  ../lib/, ../models/)",
                 display_source_path(&deck_path)
             )
+        );
+    }
+
+    /// Every file a deck names and nothing holds is named at once, each at
+    /// its own line, and the deck is read on past each one.
+    #[test]
+    fn every_missing_file_is_named_at_its_own_line() {
+        let root = unique_include_temp_dir("missing-files");
+        let deck_dir = root.join("deck");
+        std::fs::create_dir_all(&deck_dir).expect("create the deck's folder");
+        std::fs::write(deck_dir.join("found.inc"), "Rfound 1 0 1\n").expect("write include");
+        let deck_path = deck_dir.join("deck.cir");
+        let deck = "* bench\nV1 1 0 1\n.include found.inc\n.op\n.lib \"corners.lib\" tt\n\
+                    .include models/missing.inc\nR2 1 0 1\n.end\n";
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        let error = processor
+            .expand_content(deck, &deck_path)
+            .expect_err("nothing holds two of the files");
+        let ParseError::MissingSources(missing) = &error else {
+            panic!("both missing files are named: {error:?}");
+        };
+
+        let folders = "(looked in the deck's folder, lib/, models/, ../lib/, ../models/)";
+        let named = missing
+            .iter()
+            .map(|missing| {
+                let origin = missing.source_location().expect("each is located");
+                (origin.line, missing.to_string())
+            })
+            .collect::<Vec<_>>();
+        let shown = display_source_path(&deck_path);
+        assert_eq!(
+            named,
+            [
+                (5, format!("{shown}:5: corners.lib not found {folders}")),
+                (
+                    6,
+                    format!("{shown}:6: models/missing.inc not found {folders}")
+                ),
+            ]
+        );
+        assert_eq!(error.source_location(), missing[0].source_location());
+        assert_eq!(
+            processor.resolved_dependencies().len(),
+            1,
+            "the file the deck does hold is still read"
         );
     }
 

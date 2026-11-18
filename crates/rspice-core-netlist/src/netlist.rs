@@ -705,12 +705,25 @@ pub enum ParseError {
     /// A file a source directive names is in none of the folders its search
     /// looked in. `looked_in` names each folder once, a folder in or beside
     /// the deck's by its path from it, and is empty for a file named by its
-    /// full path. The include that met it says at which line.
-    #[error("{requested} not found{}", folders_looked_in(.looked_in))]
+    /// full path. `origin` is the line that names the file, once the include
+    /// that met it says where it is.
+    #[error(
+        "{}{requested} not found{}",
+        located(.origin),
+        folders_looked_in(.looked_in)
+    )]
     SourceNotFound {
+        origin: Option<NetlistSourceLocation>,
         requested: String,
         looked_in: Vec<String>,
     },
+
+    /// Every file a deck's lines name that could not be read, when there is
+    /// more than one: each a located [`ParseError::SourceNotFound`] or
+    /// [`ParseError::SourceNotInDeck`], in the order the deck reads them. A
+    /// checker names them all at once, each at its own line.
+    #[error("{}", one_a_line(.0))]
+    MissingSources(Vec<ParseError>),
 
     #[error("Unknown device type: {0}")]
     UnknownDevice(String),
@@ -801,7 +814,10 @@ impl ParseError {
         match self {
             Self::Syntax { line, .. } => Some(NetlistSourceLocation::in_memory(*line)),
             Self::UnsupportedCapability { origin, .. } => Some(origin.clone()),
-            Self::SourceNotInDeck { origin, .. } => origin.clone(),
+            Self::SourceNotInDeck { origin, .. } | Self::SourceNotFound { origin, .. } => {
+                origin.clone()
+            }
+            Self::MissingSources(missing) => missing.first().and_then(Self::source_location),
             Self::DuplicateName { duplicate_line, .. } => {
                 Some(NetlistSourceLocation::in_memory(*duplicate_line))
             }
@@ -811,10 +827,7 @@ impl ParseError {
             Self::MissingDeviceModel(error) => Some(NetlistSourceLocation::in_memory(error.line)),
             Self::AnalysisCard(error) => Some(error.source_location()),
             Self::UndefinedMutualInductorReference(error) => Some(error.origin.clone()),
-            // The include that met a missing file locates it, as a syntax
-            // failure at the line that names the file.
-            Self::SourceNotFound { .. }
-            | Self::ResourceLimit(_)
+            Self::ResourceLimit(_)
             | Self::UnknownDevice(_)
             | Self::InvalidNode(_)
             | Self::DuplicateSubcircuitPortBinding(_)
@@ -839,6 +852,15 @@ fn located(origin: &Option<NetlistSourceLocation>) -> String {
     origin
         .as_ref()
         .map_or_else(String::new, |origin| format!("{origin}: "))
+}
+
+/// Several failures, each on its own line.
+fn one_a_line(errors: &[ParseError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The folders a search for a missing file looked in, as its refusal
