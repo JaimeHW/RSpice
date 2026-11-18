@@ -245,8 +245,8 @@ fn library_band(ui: &mut Ui, picker: &BindToCell) -> Option<usize> {
 /// to bind the row they activated.
 fn choices_table(ui: &mut Ui, state: &mut TableState, picker: &BindToCell) -> bool {
     let columns = [
-        Column::name("Cell", 140.0),
-        Column::name("View", 110.0),
+        Column::name("Cell", 110.0),
+        Column::name("View", 90.0),
         Column::words("Pins", 280.0),
     ];
     if picker.choices.is_empty() {
