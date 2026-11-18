@@ -572,7 +572,25 @@ fn collect(state: &impl RunHost) -> PreflightReport {
         .clone()
         .and_then(|projection| projection.into_execution());
 
+    // The design the plan names comes first: a configuration the project no
+    // longer holds is the plan's to repair, on its Analyses page, and the
+    // projection that fails for it says nothing more.
+    let plan_configuration = state
+        .model()
+        .workspace
+        .plan_configuration_sets(state.model().sim_setup.design_configuration)
+        .err();
+    if let Some(error) = &plan_configuration {
+        blockers.push(PreflightIssue {
+            check: "Plan configuration".to_owned(),
+            observed: error.to_string(),
+            required: "A configuration the project holds, or the one used for runs".to_owned(),
+            remediation: PreflightRemediation::SimulationPlan { analysis: None },
+        });
+    }
+
     match &execution_projection {
+        Err(_) if plan_configuration.is_some() => {}
         Err(error) => blockers.push(PreflightIssue {
             check: "Design topology".to_owned(),
             observed: error.to_string(),
