@@ -17,7 +17,7 @@ mod page_solver;
 mod page_variables;
 pub mod pages;
 pub mod participation;
-pub mod plan_configuration;
+mod plan_configuration;
 mod plan_issue_wording;
 pub mod plan_manager;
 pub mod transient_checkpoint_exchange;
