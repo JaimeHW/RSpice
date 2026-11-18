@@ -898,7 +898,7 @@ fn changed_on_disk_dialog(cx: &mut Cx<'_, ProjectFeature>, ctx: &Context) {
             .and_then(|session| session.files.get(&row.file))
             .is_some_and(|file| file.keep_mine)
     };
-    let selected_kept = selected.as_ref().is_some_and(|row| kept(row));
+    let selected_kept = selected.as_ref().is_some_and(&kept);
     let kept_rows = rows.iter().map(kept).collect::<Vec<_>>();
     let mut dialog = Dialog::new(
         rspice_design::library::folder::CHANGED_SINCE_EDITING,
