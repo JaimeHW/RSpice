@@ -163,7 +163,7 @@ pub fn run_generated_batches(mut state: RunTestHost, count: usize) -> RunTestHos
     let mut controller = SimulationController::new();
     for _ in 0..count {
         controller
-            .prepare_run_set_for_preflight(&state)
+            .preflight_run_set(&state)
             .expect("prepare the complete fixture plan");
         state.model.simulation.execution.trigger_simulation = true;
         controller.update(&mut state, &export_io);
@@ -192,7 +192,7 @@ pub fn run_generated_batch_within(
     assert!(!checks.has_errors(), "{checks:?}");
     let mut controller = SimulationController::new();
     controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("prepare the complete fixture plan");
     run_batch_session(&mut state, controller, expected_lifecycle, limit)
 }

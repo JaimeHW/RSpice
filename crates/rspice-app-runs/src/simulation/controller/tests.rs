@@ -395,7 +395,7 @@ fn a_schematic_run_retains_the_deck_it_executed() {
     let mut state = state_with_current_clean_drc();
     let mut controller = SimulationController::new();
     controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("clean plan preflight");
     state.model.simulation.execution.request_simulate_run_set();
     controller.start_simulation(&mut state);
@@ -446,7 +446,7 @@ fn controller_plan_run_is_sealed_with_exact_prepared_receipt_before_results() {
     let project_revision = state.model.workspace.content.project.revision();
     let mut controller = SimulationController::new();
     let metadata = controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("clean plan preflight");
 
     state.model.simulation.execution.request_simulate_run_set();
@@ -880,7 +880,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
     assert!(!state.run_active_design_checks().unwrap().has_errors());
     let mut preparer = SimulationController::new();
     preparer
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("prepare the authored dependency graph");
     let dispatch = preparer
         .consume_snapshot_for_dispatch(&state)

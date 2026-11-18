@@ -17,7 +17,7 @@ fn controller_plan_run_receipt_survives_production_project_round_trip() {
     let mut state = session_of(state_with_current_clean_drc());
     let mut controller = SimulationController::new();
     controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("clean plan preflight");
     state.model.simulation.execution.request_simulate_run_set();
     controller.start_simulation(&mut state);

@@ -1547,7 +1547,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
     assert!(!state.run_active_design_checks().unwrap().has_errors());
     let mut preparer = SimulationController::new();
     preparer
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("prepare the generated corner plan");
     let dispatch = preparer
         .consume_snapshot_for_dispatch(&state)

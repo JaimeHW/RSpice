@@ -314,4 +314,37 @@ impl SimulationController {
             .map(|stages| stages.clone())
             .unwrap_or_default()
     }
+
+    /// Start a pipeline on `state` and wait for its verdict, as the frames
+    /// after a Preflight press do: the run it prepares is retained for
+    /// dispatch. Returns what was prepared, or why it was not.
+    pub fn preflight_run_set(
+        &mut self,
+        state: &impl RunHost,
+    ) -> Result<PreparedRunMetadata, PreparationError> {
+        const STEP: std::time::Duration = std::time::Duration::from_millis(1);
+        self.start_preflight(state)?;
+        let mut waited = std::time::Duration::ZERO;
+        let outcome = loop {
+            if let Some(outcome) = self.poll_preflight() {
+                break outcome;
+            }
+            assert!(
+                waited < std::time::Duration::from_secs(300),
+                "the preflight pass did not finish"
+            );
+            std::thread::sleep(STEP);
+            waited += STEP;
+        };
+        match outcome.verdict {
+            PreflightVerdict::NotPrepared(error) => Err(error),
+            PreflightVerdict::Checked { metadata, .. } if outcome.current => Ok(*metadata),
+            PreflightVerdict::Checked { .. } | PreflightVerdict::NoVerdict => {
+                Err(PreparationError::new(
+                    crate::simulation::execution::PreparationStage::Netlist,
+                    "Preflight ended without retaining the run",
+                ))
+            }
+        }
+    }
 }

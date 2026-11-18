@@ -353,7 +353,7 @@ fn a_waiver_removed_on_the_page_drops_preflight_and_the_prepared_run() {
         .expect("a case collision may be waived");
     assert!(
         app.simulation_controller
-            .prepare_run_set_for_preflight(&app.state)
+            .preflight_run_set(&app.state)
             .is_ok(),
         "precondition: the waived error passes the run gate",
     );
@@ -377,7 +377,7 @@ fn a_waiver_removed_on_the_page_drops_preflight_and_the_prepared_run() {
     );
     assert!(
         app.simulation_controller
-            .prepare_run_set_for_preflight(&app.state)
+            .preflight_run_set(&app.state)
             .is_err(),
         "the error refuses the run again",
     );
@@ -390,7 +390,7 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
     let mut app = runnable_colliding_app();
     assert!(
         app.simulation_controller
-            .prepare_run_set_for_preflight(&app.state)
+            .preflight_run_set(&app.state)
             .is_err(),
         "precondition: the error refuses the run",
     );
@@ -427,7 +427,7 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
     );
     assert!(
         app.simulation_controller
-            .prepare_run_set_for_preflight(&app.state)
+            .preflight_run_set(&app.state)
             .is_ok(),
         "the next pass lets the waived error through",
     );

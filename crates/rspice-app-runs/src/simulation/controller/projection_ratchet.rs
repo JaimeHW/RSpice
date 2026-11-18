@@ -1215,7 +1215,7 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
             .set_run_at(id, run_at)
             .unwrap_or_else(|error| panic!("{label} commits: {error}"));
         let prepared = controller
-            .prepare_run_set_for_preflight(&state)
+            .preflight_run_set(&state)
             .unwrap_or_else(|error| panic!("{label} prepares: {error}"))
             .task_count;
         counts.push((label, prepared));

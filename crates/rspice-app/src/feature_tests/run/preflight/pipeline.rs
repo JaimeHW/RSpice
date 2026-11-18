@@ -4,7 +4,7 @@
 use super::engine::{add_operating_point, binned_library, enable_only, inverter_on_binned_pdk};
 use super::*;
 
-use rspice_app_runs::simulation::controller::PreflightStage;
+use rspice_app_runs::simulation::controller::{PreflightStage, SimulationController};
 use rspice_simulation::execution::PreparationProgress;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
@@ -336,25 +336,6 @@ impl RSpiceApp {
             .snapshot_digest
     }
 
-    /// Prepare and queue a run in this frame, from the live session, rather
-    /// than on the preflight worker. Returns the digest it prepared.
-    fn queued_from_this_frame(&mut self) -> rspice_app_state::product::ContentDigest {
-        use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
-
-        self.invalidate_simulation_preflight();
-        let prepared = self
-            .simulation_controller
-            .prepare_run_set_for_preflight(&self.state)
-            .expect("the design prepares");
-        self.state.request_run_set_simulation();
-        assert_eq!(
-            thread_preparations::take(),
-            [rspice_simulation::execution::SimulationRunIntent::SimulateRunSet],
-            "the run is prepared in this frame"
-        );
-        prepared.snapshot_digest
-    }
-
     /// Let the run a dispatch started finish, as the frames after it would.
     pub(super) fn finish_the_run(&mut self) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
@@ -568,44 +549,6 @@ fn selecting_a_device_refuses_a_run_with_an_operating_point() {
     assert_refused_for(&app, "the devices or results the operating point reports");
 }
 
-/// A run prepared in its own frame, from the live session, and queued is
-/// checked by the frame that dispatches it as a run a Run press prepared is.
-/// Unchanged, it is the run that starts, and nothing is prepared again;
-/// edited, it is refused.
-#[test]
-fn a_run_prepared_in_the_frame_is_checked_at_dispatch_as_a_run_press_is() {
-    let mut unchanged = inverter_over_a_run_set();
-    let authorized = unchanged.queued_from_this_frame();
-    assert!(unchanged.dispatch_frame().is_empty());
-    assert_eq!(
-        unchanged
-            .state
-            .model
-            .simulation
-            .retained
-            .runs
-            .first()
-            .and_then(|run| run.prepared_receipt())
-            .map(|receipt| receipt.prepared_snapshot_digest()),
-        Some(authorized),
-        "the run is the snapshot the frame prepared"
-    );
-    unchanged.stop_the_run();
-
-    let mut edited = inverter_over_a_run_set();
-    edited.queued_from_this_frame();
-    edited
-        .state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .components[0]
-        .value
-        .push('0');
-    assert!(edited.dispatch_frame().is_empty());
-    assert_refused_for(&edited, "the design");
-}
-
 /// The RC lowpass example, its transient alone at the reference point: a run
 /// that finishes in moments.
 fn rc_lowpass() -> RSpiceApp {
@@ -660,7 +603,7 @@ impl RSpiceApp {
                 },
             );
         });
-        self.queued_from_this_frame();
+        self.queued_by_its_check();
         assert!(self.dispatch_frame().is_empty());
         self.finish_the_run();
         let run = self
@@ -690,7 +633,7 @@ impl RSpiceApp {
                 checkpoint.resume = vec![image];
             }
         });
-        self.queued_from_this_frame()
+        self.queued_by_its_check()
     }
 }
 
@@ -723,7 +666,7 @@ fn a_run_resuming_from_a_checkpoint_joins_the_run_it_resumes_from() {
 }
 
 /// A run added to the history that holds nothing the transient resumes from
-/// changes nothing it reads: the dispatch starts the run the frame prepared.
+/// changes nothing it reads: the dispatch starts the run the pass prepared.
 #[test]
 fn an_unrelated_run_added_to_the_history_leaves_a_resuming_run_current() {
     let mut app = rc_lowpass();
@@ -741,7 +684,7 @@ fn an_unrelated_run_added_to_the_history_leaves_a_resuming_run_current() {
             .and_then(|run| run.prepared_receipt())
             .map(|receipt| receipt.prepared_snapshot_digest()),
         Some(authorized),
-        "the run is the snapshot the frame prepared"
+        "the run is the snapshot the pass prepared"
     );
     app.stop_the_run();
 }
@@ -799,11 +742,10 @@ fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_the_dispatch(
     }
 }
 
-/// A run prepared in the frame is refused at its dispatch for an edit to
-/// the design, the model library or the simulation setup, naming the input
-/// that moved, as a checked run is.
+/// A checked run is refused at its dispatch for an edit to the design, the
+/// model library or the simulation setup, naming the input that moved.
 #[test]
-fn an_edit_after_the_frame_prepared_the_run_refuses_its_dispatch() {
+fn each_input_edited_after_the_check_is_named_by_the_refused_dispatch() {
     /// An edit, beside the input a refusal names it by.
     type Edit = (&'static str, fn(&mut AppState));
     let edits: [Edit; 3] = [
@@ -831,7 +773,7 @@ fn an_edit_after_the_frame_prepared_the_run_refuses_its_dispatch() {
     ];
     for (moved, edit) in edits {
         let mut app = inverter_over_a_run_set();
-        app.queued_from_this_frame();
+        app.queued_by_its_check();
         edit(&mut app.state);
 
         assert!(app.dispatch_frame().is_empty(), "{moved}");
@@ -876,15 +818,12 @@ fn a_run_prepared_off_the_ui_thread_is_the_one_the_frame_would_have_prepared() {
             .unwrap_or_else(|| panic!("{label}: the run is retained"));
         assert_eq!(digest, prepared.snapshot_digest, "{label}");
 
-        let synchronous = app
-            .simulation_controller
-            .prepare_run_set_for_preflight(&app.state)
-            .unwrap_or_else(|error| panic!("{label}: {error}"));
-        assert_eq!(synchronous.snapshot_digest, digest, "{label}");
-        let (synchronous_deck, _) = app
-            .simulation_controller
-            .retained_run_deck()
-            .expect("the synchronous run is retained");
-        assert_eq!(synchronous_deck, deck, "{label}");
+        let synchronous = SimulationController::build_prepared_snapshot(
+            &app.state,
+            rspice_simulation::execution::SimulationRunIntent::SimulateRunSet,
+        )
+        .unwrap_or_else(|error| panic!("{label}: {error}"));
+        assert_eq!(synchronous.digest(), digest, "{label}");
+        assert_eq!(synchronous.executable_netlist(), deck, "{label}");
     }
 }

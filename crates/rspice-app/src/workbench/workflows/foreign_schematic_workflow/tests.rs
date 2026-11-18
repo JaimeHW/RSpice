@@ -631,7 +631,7 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         .expect("the imported schematic is checked");
     assert!(!checked.has_errors(), "{checked:#?}");
     let prepared = rspice_app_runs::simulation::controller::SimulationController::new()
-        .prepare_run_set_for_preflight(&app.state)
+        .preflight_run_set(&app.state)
         .expect("the imported schematic prepares a run with no further step");
     assert_eq!((prepared.pvt_point_count, prepared.task_count), (2, 2));
     std::fs::remove_dir_all(&folder).ok();
@@ -671,7 +671,7 @@ fn a_part_runs_the_model_its_drawing_defines_and_a_repeat_adds_no_provider() {
         .expect("the first schematic imports");
     assert_eq!(bound(&app), ["one"]);
     controller
-        .prepare_run_set_for_preflight(&app.state)
+        .preflight_run_set(&app.state)
         .expect("the diode finds the model its drawing defines");
 
     import_foreign_schematic_file(&mut app, &folder.join("two.asc"), ForeignTool::Ltspice)
@@ -686,7 +686,7 @@ fn a_part_runs_the_model_its_drawing_defines_and_a_repeat_adds_no_provider() {
         .run_reference_model_cards()
         .expect("the project's model names stay uncontested");
     controller
-        .prepare_run_set_for_preflight(&app.state)
+        .preflight_run_set(&app.state)
         .expect("the second drawing reads the library holding its card");
     std::fs::remove_dir_all(&folder).ok();
 }

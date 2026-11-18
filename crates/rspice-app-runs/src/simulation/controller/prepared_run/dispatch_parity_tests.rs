@@ -350,7 +350,7 @@ fn a_default_pss_plan_prepares_a_receipt_instead_of_being_refused_at_dispatch() 
     );
 
     let metadata = controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("preflight reports the plan runnable");
     assert_eq!(metadata.task_count, tags.len());
 }
@@ -447,7 +447,7 @@ fn an_hb_rooted_plan_prepares_a_whole_receipt() {
         );
 
         let metadata = controller
-            .prepare_run_set_for_preflight(&state)
+            .preflight_run_set(&state)
             .unwrap_or_else(|error| panic!("preflight reports a {kind:?} plan runnable: {error}"));
         assert_eq!(metadata.task_count, receipt.tasks().len());
     }

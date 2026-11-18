@@ -95,7 +95,7 @@ pub fn start_checkpoint_run(
 ) -> ((AnalysisSpec, SpecExecutionOptions), SimulationRunner) {
     let mut controller = SimulationController::new();
     controller
-        .prepare_run_set_for_preflight(state)
+        .preflight_run_set(state)
         .expect("prepare the complete fixture plan");
     let dispatch = controller
         .consume_snapshot_for_dispatch(state)

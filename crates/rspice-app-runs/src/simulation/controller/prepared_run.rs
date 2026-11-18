@@ -241,10 +241,11 @@ impl FrozenRunPreparation {
         })
     }
 
-    /// Prepare the run set from what was frozen: the work
-    /// [`SimulationController::prepare_run_set_for_preflight`] does, stopping
-    /// between stages once `abort` is raised. Returns, beside the run, what
-    /// the data-file host answered while it was prepared.
+    /// Prepare the run set from what was frozen, as
+    /// [`SimulationController::build_prepared_snapshot`] prepares it from the
+    /// live state, stopping between stages once `abort` is raised. Returns,
+    /// beside the run, what the data-file host answered while it was
+    /// prepared.
     pub(super) fn prepare(
         self,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
@@ -831,32 +832,6 @@ impl SimulationController {
             super::run_inputs::RetainedRunInputs {
                 identity,
                 source_files: Default::default(),
-            },
-        )?;
-        Ok(metadata)
-    }
-
-    /// Produce and retain the exact run-set tuple the preflight report
-    /// authorizes, in the caller's frame. The caller runs DRC immediately
-    /// before this method. Preflight itself prepares off the UI thread; see
-    /// [`Self::start_preflight`].
-    ///
-    /// The identity of the state the run is prepared from is retained with
-    /// it, and the frame that dispatches it checks that identity, as it checks
-    /// a Run press's.
-    pub fn prepare_run_set_for_preflight(
-        &mut self,
-        state: &impl RunHost,
-    ) -> Result<PreparedRunMetadata, PreparationError> {
-        let identity = super::run_inputs::RunInputIdentity::of_run_set(state);
-        let files = super::run_inputs::RecordingSourceFiles::default();
-        let snapshot = Self::build_prepared_run_set_reading(state, &files)?;
-        let metadata = snapshot.metadata();
-        self.retain_prepared_run(
-            snapshot,
-            super::run_inputs::RetainedRunInputs {
-                identity,
-                source_files: files.into_answers(),
             },
         )?;
         Ok(metadata)

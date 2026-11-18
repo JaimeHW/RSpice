@@ -57,7 +57,7 @@ fn run_gate(
     state: &AppState,
 ) -> Option<PreparationStage> {
     controller
-        .prepare_run_set_for_preflight(state)
+        .preflight_run_set(state)
         .err()
         .map(|error| error.stage())
 }

@@ -44,7 +44,7 @@ fn transient_checkpoint_authored_plan_prepares_captures_and_resumes_native_run()
     })
     .unwrap();
     let mut controller = SimulationController::new();
-    controller.prepare_run_set_for_preflight(&state).unwrap();
+    controller.preflight_run_set(&state).unwrap();
     let mut tasks = controller
         .consume_snapshot_for_dispatch(&state)
         .unwrap()
@@ -91,7 +91,7 @@ fn transient_checkpoint_authored_plan_prepares_captures_and_resumes_native_run()
             draft.checkpoint.as_mut().unwrap().resume = vec![image.digest()];
         })
         .unwrap();
-    controller.prepare_run_set_for_preflight(&state).unwrap();
+    controller.preflight_run_set(&state).unwrap();
     let mut tasks = controller
         .consume_snapshot_for_dispatch(&state)
         .unwrap()

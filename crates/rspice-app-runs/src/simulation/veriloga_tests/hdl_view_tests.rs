@@ -485,7 +485,7 @@ struct Twin {
 fn run_against_twin(state: RunTestHost, modules: &[(&str, &str, &str)], stop: f64) -> Twin {
     let mut controller = SimulationController::new();
     controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("the design prepares");
     let mut tasks = controller
         .consume_snapshot_for_dispatch(&state)
@@ -797,7 +797,7 @@ fn a_bus_of_another_width_than_its_pins_is_refused_with_both_widths() {
     let state = bus_design_declared("m[2:0]");
     let mut controller = SimulationController::new();
     let error = controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect_err("a three-bit bus on two-bit pins cannot be wired");
     let message = error.message();
     for pin in ["XC", "XM"] {

@@ -214,7 +214,7 @@ fn a_refused_composition_is_not_priced_at_all() {
     let frozen = app.state.clone();
     assert!(
         app.simulation_controller
-            .prepare_run_set_for_preflight(&frozen)
+            .preflight_run_set(&frozen)
             .is_err(),
         "the expansion refuses a plan with two point authorities"
     );

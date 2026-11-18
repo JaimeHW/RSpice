@@ -684,9 +684,7 @@ fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
 fn dispatch_rejects_mutation_after_explicit_preflight() {
     let mut state = runnable_state();
     let mut controller = SimulationController::new();
-    controller
-        .prepare_run_set_for_preflight(&state)
-        .expect("preflight");
+    controller.preflight_run_set(&state).expect("preflight");
     edit_frozen_transient_stop(&mut state, "3m");
     let error = controller
         .consume_snapshot_for_dispatch(&state)
@@ -743,9 +741,7 @@ fn an_unedited_rule_deck_and_waivers_never_refuse_the_dispatch() {
     }
 
     let mut controller = SimulationController::new();
-    controller
-        .prepare_run_set_for_preflight(&state)
-        .expect("preflight");
+    controller.preflight_run_set(&state).expect("preflight");
     controller
         .consume_snapshot_for_dispatch(&state)
         .expect("nothing was edited between the check and the dispatch");
@@ -759,9 +755,7 @@ fn an_equal_setup_rebuilt_before_dispatch_does_not_refuse_it() {
     let mut state = runnable_state();
     state.model.sim_setup.listed = (0..24).collect();
     let mut controller = SimulationController::new();
-    controller
-        .prepare_run_set_for_preflight(&state)
-        .expect("preflight");
+    controller.preflight_run_set(&state).expect("preflight");
     state.model.sim_setup.listed = (0..24).rev().collect();
     controller
         .consume_snapshot_for_dispatch(&state)
@@ -1504,7 +1498,7 @@ fn accepted_model_file_mutation_after_prepare_fails_closed() {
     );
     let mut controller = SimulationController::new();
     controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("prepare model-bound run");
 
     fs::write(
@@ -1612,7 +1606,7 @@ fn a_project_without_a_technology_prepares_its_run_set_against_the_plain_model_l
     let state = technology_free_runnable_state();
     let mut controller = SimulationController::new();
     let metadata = controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect("a project owing nothing to a technology prepares its run set");
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
@@ -1656,7 +1650,7 @@ fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
 
     let mut controller = SimulationController::new();
     let error = controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect_err("non-typical corner sections demand an attached technology");
     assert_eq!(error.stage(), PreparationStage::ModelBindings);
     assert!(
@@ -1699,7 +1693,7 @@ fn a_technology_binding_without_an_audit_receipt_blocks_preparation() {
 
     let mut controller = SimulationController::new();
     let error = controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect_err("a binding without receipts is an invalid technology, not an absent one");
     assert_eq!(error.stage(), PreparationStage::ModelBindings);
     assert!(
@@ -1767,7 +1761,7 @@ fn a_generated_run_set_names_its_unresolved_device_models() {
 
     let mut controller = SimulationController::new();
     let error = controller
-        .prepare_run_set_for_preflight(&state)
+        .preflight_run_set(&state)
         .expect_err("a generated deck naming an undefined model cannot be prepared");
     assert_eq!(error.stage(), PreparationStage::ModelBindings);
     let named = error.message().to_ascii_lowercase();
@@ -2179,9 +2173,7 @@ fn an_analysis_in_the_added_lines_refuses_the_run_on_its_line() {
 fn dispatch_refuses_a_run_whose_added_lines_changed_after_its_check() {
     let mut state = runnable_state();
     let mut controller = SimulationController::new();
-    controller
-        .prepare_run_set_for_preflight(&state)
-        .expect("preflight");
+    controller.preflight_run_set(&state).expect("preflight");
     add_lines(&mut state, ".param added_gain=2\n");
     let error = controller
         .consume_snapshot_for_dispatch(&state)

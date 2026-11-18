@@ -229,7 +229,7 @@ fn the_page_forecast_equals_the_prepared_task_count_over_a_declared_space() {
     let frozen = app.state.clone();
     let prepared = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&frozen)
+        .preflight_run_set(&frozen)
         .expect("the fixture plan prepares")
         .task_count;
 
@@ -267,7 +267,7 @@ fn the_save_page_engine_ceiling_counts_the_queue_preparation_mints() {
     let frozen = app.state.clone();
     let prepared = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&frozen)
+        .preflight_run_set(&frozen)
         .expect("the fixture plan prepares")
         .task_count;
 
@@ -307,7 +307,7 @@ fn the_page_forecast_equals_the_prepared_task_count_with_no_global_axes() {
     let frozen = app.state.clone();
     let prepared = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&frozen)
+        .preflight_run_set(&frozen)
         .expect("the fixture plan prepares")
         .task_count;
 
@@ -356,7 +356,7 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
     let frozen = app.state.clone();
     let error = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&frozen)
+        .preflight_run_set(&frozen)
         .expect_err("two point authorities cannot be crossed implicitly");
     assert!(
         error.message().contains("global multi-point Run Set"),
@@ -446,7 +446,7 @@ fn both_derivations(app: &mut RSpiceApp) -> (usize, usize) {
     let frozen = app.state.clone();
     let prepared = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&frozen)
+        .preflight_run_set(&frozen)
         .expect("the fixture plan prepares")
         .task_count;
     (forecast, prepared)
@@ -517,7 +517,7 @@ fn a_selection_that_names_no_declared_point_is_refused_rather_than_run() {
     let frozen = app.state.clone();
     let error = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&frozen)
+        .preflight_run_set(&frozen)
         .expect_err("a scope naming no declared point cannot be dispatched");
     assert!(
         error.message().contains("no longer contains"),
@@ -542,7 +542,7 @@ fn a_dependent_may_not_run_where_its_prerequisite_does_not() {
     let frozen = app.state.clone();
     let error = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&frozen)
+        .preflight_run_set(&frozen)
         .expect_err("a dependent cannot outrun its prerequisite");
     assert!(
         error.message().contains("prerequisite"),
@@ -564,7 +564,7 @@ fn a_space_with_no_reference_point_refuses_a_nominal_only_instance() {
     let frozen = app.state.clone();
     let error = app
         .simulation_controller
-        .prepare_run_set_for_preflight(&frozen)
+        .preflight_run_set(&frozen)
         .expect_err("a nominal scope over a space with no reference point cannot be dispatched");
     assert!(
         error.message().contains("reference condition"),
