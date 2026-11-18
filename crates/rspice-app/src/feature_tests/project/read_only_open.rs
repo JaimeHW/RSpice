@@ -5,6 +5,8 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::io::Write as _;
+
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
 use rspice_app_services::io::durable_file::open_lease::{OpenLeaseHolder, UnwritableFolder};
@@ -39,7 +41,8 @@ fn a_project_in_a_folder_that_cannot_be_written_opens_read_only_and_says_why() {
     let denied = UnwritableFolder::deny_new_files(&root).expect("the folder takes no new file");
     if denied.still_writable() {
         // An account the folder's permissions do not bind, as root.
-        eprintln!(
+        let _ = writeln!(
+            std::io::stderr(),
             "this account writes the folder despite its permissions; skipping the read-only open"
         );
         return;

@@ -4,6 +4,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -61,7 +62,12 @@ fn frames_until(ctx: &egui::Context, app: &mut RSpiceApp, done: impl Fn(&RSpiceA
 #[ignore = "played in a child process by the crash tests"]
 fn crashed_session_child() {
     let Some(folder) = std::env::var_os(CRASH_FOLDER) else {
-        eprintln!("{CRASH_FOLDER} is unset; the crashed session only runs under its parent test");
+        // The crate keeps `eprintln!` out of the app; a test writes to the
+        // runner's stderr directly.
+        let _ = writeln!(
+            std::io::stderr(),
+            "{CRASH_FOLDER} is unset; the crashed session only runs under its parent test"
+        );
         return;
     };
     let folder = PathBuf::from(folder);
