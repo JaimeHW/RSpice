@@ -125,10 +125,11 @@ pub(in crate::workbench) const fn application_menu_entries(
 /// File makes, opens, closes, keeps, brings in and sends out: the project,
 /// its cells and the documents open on them.
 ///
-/// Its 28 rows have 22 letters among their labels to give as access keys:
+/// Its 29 rows have 23 letters among their labels to give as access keys:
 /// New deck, Save a copy, Save deck as and Project properties (whose every
 /// letter an earlier row holds), Save all (which has its key) and Live
-/// session (shown only to a signed-in account) go without.
+/// session (shown only to a signed-in account) go without. Manage source
+/// document is there only while a source editor is in front.
 const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::NewProject).access('N'),
     project(ProjectCommand::NewCell).access('W'),
@@ -156,6 +157,10 @@ const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::SaveCopy),
     code(CodeCommand::SaveDeckAs),
     code(CodeCommand::SaveNetlistAsDeck).access('T'),
+    MenuEntry::Only(
+        MenuContext::SourceEditor,
+        &[code(CodeCommand::ManageSourceDocument).access('U')],
+    ),
     project(ProjectCommand::SaveAll),
     command(ShellCommand::RevertActiveDocument).access('D'),
     project(ProjectCommand::RevisionHistory).access('Y'),
@@ -581,7 +586,9 @@ const STANDARD_VALUES_MENU: &[MenuEntry] = &[
 ];
 
 /// Simulate: choose and fill the active plan, set it up, check and run it,
-/// then read the operating point back onto the schematic.
+/// then read the operating point back onto the schematic. Beside a source
+/// editor it also shows the deck Run runs and compares the generated
+/// netlist with an earlier build.
 const SIMULATE_MENU: &[MenuEntry] = &[
     // The manager owns which plan is active, and every row below it acts on
     // that plan. Filling the chosen plan reads directly under choosing it;
@@ -596,6 +603,17 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     MenuEntry::command_as(SimulateCommand::Run.key(), "Run").access('R'),
     MenuEntry::command_as(SimulateCommand::Stop.key(), "Stop").access('S'),
     code(CodeCommand::GenerateNetlist).access('G'),
+    MenuEntry::Only(
+        MenuContext::SourceEditor,
+        &[
+            code(CodeCommand::ShowRunDeck).access('W'),
+            MenuEntry::command_as(
+                CodeCommand::CompareGeneratedRevisions.key(),
+                "Compare netlist with earlier build\u{2026}",
+            )
+            .access('B'),
+        ],
+    ),
     simulate(SimulateCommand::JobsManager).access('H'),
     Separator,
     MenuEntry::command_as(DesignCommand::PlaceProbe.key(), "Probe").access('P'),
