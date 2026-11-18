@@ -480,15 +480,16 @@ fn show_code_document_impl(
         syntax,
         requested_line,
         &style,
-        |ui, row, font| {
-            let job = match highlighter.as_mut() {
-                Some(highlighter) => {
-                    let (spans, line) = highlighter.line(row.document, row.logical_line);
-                    veriloga_row_job(&spans, &line, row.text, row.first_column, font, &colors)
-                }
-                None => layout_job(row.text, language, font, &[], &colors),
-            };
-            ui.fonts_mut(|fonts| fonts.layout_job(job))
+        |_, row, font| match highlighter.as_mut() {
+            Some(highlighter) => {
+                let (spans, line) = highlighter.line(row.document, row.logical_line);
+                veriloga_row_job(&spans, &line, row.text, row.first_column, font, &colors)
+            }
+            // Coloured from the line's start, then cut to the part shown.
+            None => {
+                let line = row.line();
+                row.shown_part(&line, layout_job(&line, language, font, &[], &colors))
+            }
         },
         |logical_line| {
             held.worst_on_line(logical_line)

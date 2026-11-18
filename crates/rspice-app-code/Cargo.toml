@@ -37,6 +37,7 @@ similar = "2.7"
 web-time.workspace = true
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 ropey.workspace = true
+unicode-width = "0.2.2"
 rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "7.0"
 

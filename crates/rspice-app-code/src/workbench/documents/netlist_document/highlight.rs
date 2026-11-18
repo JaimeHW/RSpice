@@ -78,15 +78,15 @@ impl SourceReading {
 }
 
 impl SourceComments {
-    /// The comments on the stretch of a line `row` shows, as byte ranges of
-    /// `row.text`, for the document read from `source`. A reading of a newer
-    /// text is started here; `ctx` is woken when it is done.
-    pub(crate) fn on_row(
+    /// The whole line `row` shows part of, and the comments on it as byte
+    /// ranges of the line, for the document read from `source`. A reading of
+    /// a newer text is started here; `ctx` is woken when it is done.
+    pub(crate) fn on_line(
         &mut self,
         ctx: &egui::Context,
         row: &LayoutRow<'_>,
         source: &ShownSource,
-    ) -> Vec<Range<usize>> {
+    ) -> (String, Vec<Range<usize>>) {
         let document = row.document;
         let key = (document.revision(), source.clone());
         if self.reading.wants(|read| *read == key) {
@@ -107,10 +107,7 @@ impl SourceComments {
             .as_ref()
             .map_or_else(|| source.kind(""), |reading| reading.kind);
         let current = reading.filter(|reading| reading.key == key);
-        let line = document
-            .line_content_char_range(row.logical_line)
-            .map(|range| document.text_range(range))
-            .unwrap_or_default();
+        let line = row.line();
         let on_line = match current
             .as_ref()
             .and_then(|reading| reading.by_line.as_ref())
@@ -124,23 +121,7 @@ impl SourceComments {
                 .collect(),
             None => on_line_alone(row.logical_line, &line, kind),
         };
-        let start = line
-            .char_indices()
-            .nth(row.first_column)
-            .map_or(line.len(), |(index, _)| index);
-        if !line[start..].starts_with(row.text) {
-            // The row is not the line this frame read: read it alone rather
-            // than mark the wrong text.
-            return comment_start(row.text, kind)
-                .map(|at| std::iter::once(at..row.text.len()).collect())
-                .unwrap_or_default();
-        }
-        let end = start + row.text.len();
-        on_line
-            .into_iter()
-            .filter(|range| range.start < end && range.end > start)
-            .map(|range| range.start.max(start) - start..range.end.min(end) - start)
-            .collect()
+        (line, on_line)
     }
 
     /// Read the text `document` holds now, here, as the frame after the
@@ -591,12 +572,10 @@ mod tests {
         };
         let mut comments = SourceComments::default();
         comments.read_now(&document, &source);
-        let comments = comments.on_row(&egui::Context::default(), &row, &source);
-        let job = layout_job(
-            row.text,
-            &comments,
-            FontId::monospace(12.0),
-            &INSTRUMENT_DARK,
+        let (whole, comments) = comments.on_line(&egui::Context::default(), &row, &source);
+        let job = row.shown_part(
+            &whole,
+            layout_job(&whole, &comments, FontId::monospace(12.0), &INSTRUMENT_DARK),
         );
         tokens(&job)
             .into_iter()
@@ -642,6 +621,31 @@ mod tests {
         assert_eq!(faint(&row_tokens(deck, "amp.cir", true, 4, 0)), ["# hash"]);
         // An include has no title: its first line is a card.
         assert!(faint(&row_tokens(deck, "amp.cir", false, 0, 0)).is_empty());
+    }
+
+    /// Scrolled sideways, a row keeps the colours its whole line gives it: a
+    /// model name stays a model name and a node stays a node, rather than
+    /// being read as the first word of a card.
+    #[test]
+    fn a_row_scrolled_right_keeps_the_colours_its_line_gives_it() {
+        let deck = "title\n.model nch nmos level=1\nR1 a b 1k\n+ tc1=0.1\n";
+        for (line, from) in [(1, 7), (2, 3), (3, 2)] {
+            let whole = row_tokens(deck, "amp.cir", true, line, 0);
+            let mut at = 0;
+            let tail = whole
+                .into_iter()
+                .filter(|(token, _)| {
+                    let shown = at >= from;
+                    at += token.chars().count();
+                    shown
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                row_tokens(deck, "amp.cir", true, line, from),
+                tail,
+                "line {line} from column {from}"
+            );
+        }
     }
 
     #[test]
@@ -698,7 +702,7 @@ mod tests {
                 .expect("the line exists")
         };
         let inside = row(&document);
-        let marked = comments.on_row(
+        let (_, marked) = comments.on_line(
             &egui::Context::default(),
             &LayoutRow {
                 text: &inside,
@@ -717,7 +721,7 @@ mod tests {
         // The edit takes out the line that opened the block comment.
         assert!(document.synchronize_source("// tb\nbias\nr1 (a b) resistor r=1k\n*/\n"));
         let card = row(&document);
-        let marked = comments.on_row(
+        let (_, marked) = comments.on_line(
             &egui::Context::default(),
             &LayoutRow {
                 text: &card,

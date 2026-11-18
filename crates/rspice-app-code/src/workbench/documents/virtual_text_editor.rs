@@ -6,6 +6,7 @@
 //! callers retain application-level document identity and persistence.
 
 mod accessibility;
+mod cells;
 mod context_menu;
 mod keymap;
 mod touch;
@@ -74,8 +75,9 @@ struct ImeComposition {
 struct VirtualEditorSession {
     model: TextDocumentModel,
     bound_revision: u64,
-    maximum_columns: usize,
+    maximum_cells: usize,
     maximum_column_scan: Option<MaximumColumnScan>,
+    /// The display cell vertical moves keep the carets in.
     preferred_column: Option<usize>,
     drag_anchor: Option<(usize, usize)>,
     column_drag: bool,
@@ -128,7 +130,7 @@ struct KeyContext {
 struct MaximumColumnScan {
     model_revision: u64,
     next_line: usize,
-    maximum_columns: usize,
+    maximum_cells: usize,
 }
 
 impl Default for VirtualEditorSession {
@@ -136,7 +138,7 @@ impl Default for VirtualEditorSession {
         Self {
             model: TextDocumentModel::from_source(""),
             bound_revision: u64::MAX,
-            maximum_columns: 0,
+            maximum_cells: 0,
             maximum_column_scan: None,
             preferred_column: None,
             drag_anchor: None,
@@ -208,7 +210,9 @@ pub(crate) struct SourceSpan {
 const OUTDATED_MARK_OPACITY: f32 = 0.45;
 
 /// A row the viewport is about to paint, for the language service that lays
-/// it out.
+/// it out. Colour is read from the line's start, never from where the view
+/// starts: a service reads [`LayoutRow::line`] and lays out the part shown
+/// with [`LayoutRow::shown_part`].
 pub(crate) struct LayoutRow<'a> {
     /// The row's text from `first_column`, as wide as the viewport needs.
     pub text: &'a str,
@@ -217,6 +221,36 @@ pub(crate) struct LayoutRow<'a> {
     pub first_column: usize,
     /// The whole document, for a reading that carries from line to line.
     pub document: &'a TextDocumentModel,
+}
+
+impl LayoutRow<'_> {
+    /// The whole line the row shows part of.
+    pub fn line(&self) -> String {
+        self.document
+            .line_content_char_range(self.logical_line)
+            .map(|range| self.document.text_range(range))
+            .unwrap_or_default()
+    }
+
+    /// Where in `line`, the row's whole line, the part the row shows is, in
+    /// bytes; `None` when `line` is not the row's line.
+    pub fn shown_bytes(&self, line: &str) -> Option<Range<usize>> {
+        let start = line
+            .char_indices()
+            .nth(self.first_column)
+            .map_or(line.len(), |(index, _)| index);
+        let end = start + self.text.len();
+        (line.get(start..end) == Some(self.text)).then_some(start..end)
+    }
+
+    /// The part of `job`, laid out for the whole of `line`, that the row
+    /// shows, or `job` as it is when `line` is not the row's line.
+    pub fn shown_part(&self, line: &str, job: egui::text::LayoutJob) -> egui::text::LayoutJob {
+        match self.shown_bytes(line) {
+            Some(bytes) if job.text == line => cells::cut(&job, bytes),
+            _ => job,
+        }
+    }
 }
 
 pub(crate) struct VirtualEditorOutput {
@@ -392,7 +426,7 @@ pub(crate) fn show_virtual_text_editor(
     syntax: EditorSyntax,
     requested_line: Option<usize>,
     style: &VirtualEditorStyle<'_>,
-    mut layout_line: impl FnMut(&Ui, &LayoutRow<'_>, FontId) -> Arc<egui::Galley>,
+    mut layout_line: impl FnMut(&Ui, &LayoutRow<'_>, FontId) -> egui::text::LayoutJob,
     mut line_problem: impl FnMut(usize) -> Option<Problem>,
     mut line_diagnostic_context: impl FnMut(usize) -> Option<String>,
 ) -> VirtualEditorOutput {
@@ -428,9 +462,9 @@ pub(crate) fn show_virtual_text_editor(
         session
             .model
             .set_selections(vec![TextSelection::caret(index)]);
-        session.maximum_columns = session
-            .maximum_columns
-            .max(session.model.maximum_selected_line_columns());
+        session.maximum_cells = session
+            .maximum_cells
+            .max(session.model.maximum_selected_line_cells());
     }
 
     // After source synchronization, so a completion that just spliced text
@@ -603,10 +637,10 @@ pub(crate) fn show_virtual_text_editor(
                 .floor() as usize;
             let row_count = (viewport.height() / style.line_height).ceil() as usize + 1;
             let code_origin_x = origin.x + style.gutter_width + style.code_left_padding;
-            let first_column = ((viewport.left() + style.gutter_width - code_origin_x).max(0.0)
+            let first_cell = ((viewport.left() + style.gutter_width - code_origin_x).max(0.0)
                 / char_width)
                 .floor() as usize;
-            let column_count = (viewport.width() / char_width).ceil() as usize + 1;
+            let cell_count = (viewport.width() / char_width).ceil() as usize + 1;
 
             let pointer_position = response.interact_pointer_pos();
             let hit = |session: &VirtualEditorSession, pointer| {
@@ -685,9 +719,11 @@ pub(crate) fn show_virtual_text_editor(
                 let (line, column) =
                     hit_test(&session.model, pointer, origin, viewport, style, char_width);
                 if session.column_drag {
+                    let anchor_cell = session.model.cell_at(anchor_line, anchor_column) as f32;
+                    let cell = hit_cell(pointer, origin, viewport, style, char_width);
                     session
                         .model
-                        .set_column_selection(anchor_line, anchor_column, line, column);
+                        .set_column_selection(anchor_line, anchor_cell, line, cell);
                 } else {
                     session.model.set_selections(vec![TextSelection {
                         anchor: session
@@ -748,8 +784,8 @@ pub(crate) fn show_virtual_text_editor(
             let viewport_lines = session.model.viewport(
                 first_row,
                 row_count,
-                first_column,
-                column_count,
+                first_cell,
+                cell_count,
                 ROW_OVERSCAN,
                 COLUMN_OVERSCAN,
             );
@@ -821,13 +857,14 @@ pub(crate) fn show_virtual_text_editor(
                 );
                 paint_occurrences(
                     &code_painter,
+                    &session.model,
                     style,
                     line.logical_line,
                     row_rect,
                     code_origin_x,
                     char_width,
                 );
-                let galley = layout_line(
+                let job = layout_line(
                     ui,
                     &LayoutRow {
                         text: &line.text,
@@ -837,9 +874,15 @@ pub(crate) fn show_virtual_text_editor(
                     },
                     style.font.clone(),
                 );
+                let galley = ui.fonts_mut(|fonts| {
+                    let job = cells::fit(job, line.first_cell, char_width, |font, character| {
+                        fonts.glyph_width(font, character)
+                    });
+                    fonts.layout_job(job)
+                });
                 code_painter.galley(
                     egui::pos2(
-                        code_origin_x + line.first_column as f32 * char_width,
+                        code_origin_x + line.first_cell as f32 * char_width,
                         row_top + (style.line_height - galley.size().y) * 0.5,
                     ),
                     galley,
@@ -854,6 +897,7 @@ pub(crate) fn show_virtual_text_editor(
                 for mark in line_marks {
                     paint_source_mark(
                         &mark_painter,
+                        &session.model,
                         mark,
                         code_origin_x,
                         row_top + style.line_height - 2.5,
@@ -997,9 +1041,9 @@ pub(crate) fn show_virtual_text_editor(
     if changed {
         *source = session.model.snapshot();
         session.bound_revision = source.revision();
-        session.maximum_columns = session
-            .maximum_columns
-            .max(session.model.maximum_selected_line_columns());
+        session.maximum_cells = session
+            .maximum_cells
+            .max(session.model.maximum_selected_line_cells());
         restart_maximum_column_scan(&mut session);
     }
     let (cursor_line, cursor_column) = session
@@ -1076,10 +1120,10 @@ fn primary_caret_anchor(
     style: &VirtualEditorStyle<'_>,
 ) -> Option<egui::Pos2> {
     let cursor = session.model.selections().last()?.cursor;
-    let (line, column) = session.model.line_column_for_char(cursor);
+    let (line, cell) = session.model.line_cell_for_char(cursor);
     let visible_row = session.model.visible_row_for_logical_line(line)?;
     Some(egui::pos2(
-        code_origin_x + column as f32 * char_width,
+        code_origin_x + cell as f32 * char_width,
         origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height + 4.0,
     ))
 }
@@ -1098,7 +1142,7 @@ fn replace_text_range(
         anchor: range.start.min(length),
         cursor: range.end.min(length),
     }]);
-    grow_maximum_columns_for_insertion(session, text);
+    grow_maximum_cells_for_insertion(session, text);
     session.model.insert_at_selections(text);
     if syntax == EditorSyntax::VerilogA {
         dedent_closing_word_at_caret(&mut session.model);
@@ -1114,9 +1158,9 @@ fn place_caret(session: &mut VirtualEditorSession, char_index: usize) {
         .model
         .set_selections(vec![TextSelection::caret(char_index)]);
     session.preferred_column = None;
-    session.maximum_columns = session
-        .maximum_columns
-        .max(session.model.maximum_selected_line_columns());
+    session.maximum_cells = session
+        .maximum_cells
+        .max(session.model.maximum_selected_line_cells());
 }
 
 /// Select the word at `char_index`, or the single character there when it
@@ -1165,7 +1209,7 @@ fn content_size(
     Vec2::new(
         style.gutter_width
             + style.code_left_padding
-            + session.maximum_columns as f32 * char_width
+            + session.maximum_cells as f32 * char_width
             + RIGHT_PADDING,
         style.top_padding + visible_rows as f32 * style.line_height + BOTTOM_PADDING,
     )
@@ -1179,11 +1223,11 @@ fn caret_content_rect(
     char_width: f32,
 ) -> Option<egui::Rect> {
     let cursor = session.model.selections().last()?.cursor;
-    let (line, column) = session.model.line_column_for_char(cursor);
+    let (line, cell) = session.model.line_cell_for_char(cursor);
     let row = session.model.visible_row_for_logical_line(line)?;
     Some(egui::Rect::from_min_size(
         egui::pos2(
-            style.gutter_width + style.code_left_padding + column as f32 * char_width,
+            style.gutter_width + style.code_left_padding + cell as f32 * char_width,
             style.top_padding + row as f32 * style.line_height,
         ),
         Vec2::new(char_width, style.line_height),
@@ -1340,7 +1384,7 @@ fn restart_maximum_column_scan(session: &mut VirtualEditorSession) {
     session.maximum_column_scan = Some(MaximumColumnScan {
         model_revision: session.model.revision(),
         next_line: 0,
-        maximum_columns: 0,
+        maximum_cells: 0,
     });
 }
 
@@ -1356,15 +1400,15 @@ fn advance_maximum_column_scan(session: &mut VirtualEditorSession) {
     };
     let line_count = session.model.line_count();
     let scanned = (line_count - scan.next_line).min(MAXIMUM_COLUMN_SCAN_LINES_PER_FRAME);
-    scan.maximum_columns = scan.maximum_columns.max(
+    scan.maximum_cells = scan.maximum_cells.max(
         session
             .model
-            .maximum_line_columns_in_range(scan.next_line, scanned),
+            .maximum_line_cells_in_range(scan.next_line, scanned),
     );
     scan.next_line += scanned;
-    session.maximum_columns = session.maximum_columns.max(scan.maximum_columns);
+    session.maximum_cells = session.maximum_cells.max(scan.maximum_cells);
     if scan.next_line >= line_count {
-        session.maximum_columns = scan.maximum_columns;
+        session.maximum_cells = scan.maximum_cells;
         session.maximum_column_scan = None;
     }
 }
@@ -1395,6 +1439,7 @@ fn monospace_advance(ui: &Ui, font: &FontId) -> f32 {
     })
 }
 
+/// The line under `pointer` and the column whose start is nearest it.
 fn hit_test(
     model: &TextDocumentModel,
     pointer: egui::Pos2,
@@ -1409,11 +1454,21 @@ fn hit_test(
     let logical_line = model
         .logical_line_for_visible_row(visible_row)
         .unwrap_or_else(|| model.line_count().saturating_sub(1));
+    let cell = hit_cell(pointer, origin, viewport, style, char_width);
+    (logical_line, model.column_nearest_cell(logical_line, cell))
+}
+
+/// The display cell under `pointer`, with the fraction of it the pointer is
+/// across.
+fn hit_cell(
+    pointer: egui::Pos2,
+    origin: egui::Pos2,
+    viewport: egui::Rect,
+    style: &VirtualEditorStyle<'_>,
+    char_width: f32,
+) -> f32 {
     let code_origin_x = origin.x + style.gutter_width + style.code_left_padding;
-    let column = ((pointer.x - code_origin_x + viewport.left().min(0.0)) / char_width)
-        .round()
-        .max(0.0) as usize;
-    (logical_line, column)
+    ((pointer.x - code_origin_x + viewport.left().min(0.0)) / char_width).max(0.0)
 }
 
 fn handle_event(
@@ -1433,7 +1488,7 @@ fn handle_event(
         }
         egui::Event::Paste(text) if editable && !text.is_empty() => {
             let text = normalize_newlines(&text, session.model.preferred_newline());
-            grow_maximum_columns_for_insertion(session, &text);
+            grow_maximum_cells_for_insertion(session, &text);
             session.model.insert_at_selections(&text);
             session.preferred_column = None;
             outcome.caret_moved = true;
@@ -1441,7 +1496,7 @@ fn handle_event(
         egui::Event::Text(text)
             if editable && !text.is_empty() && !text.chars().any(char::is_control) =>
         {
-            grow_maximum_columns_for_insertion(session, &text);
+            grow_maximum_cells_for_insertion(session, &text);
             session.model.keystroke(Keystroke::Typing, &text, keys.now);
             if keys.syntax == EditorSyntax::VerilogA {
                 dedent_after_typing(&mut session.model, &text);
@@ -1468,15 +1523,19 @@ fn handle_event(
     }
 }
 
-fn grow_maximum_columns_for_insertion(session: &mut VirtualEditorSession, inserted: &str) {
+fn grow_maximum_cells_for_insertion(session: &mut VirtualEditorSession, inserted: &str) {
     let inserted_columns = inserted
         .split(['\r', '\n'])
-        .map(|line| line.chars().count())
+        .map(|line| {
+            line.chars().fold(0, |cell, character| {
+                cell + super::text_document_model::char_cells(character, cell)
+            })
+        })
         .max()
         .unwrap_or(0);
-    let existing_columns = session.model.maximum_selected_line_columns();
-    session.maximum_columns = session
-        .maximum_columns
+    let existing_columns = session.model.maximum_selected_line_cells();
+    session.maximum_cells = session
+        .maximum_cells
         .max(existing_columns.saturating_add(inserted_columns));
 }
 
@@ -2160,8 +2219,8 @@ fn move_vertical(session: &mut VirtualEditorSession, delta: isize, extend: bool)
     let mut moved = Vec::with_capacity(selections.len());
     let last_row = session.model.visible_line_count().saturating_sub(1);
     for selection in selections {
-        let (line, column) = session.model.line_column_for_char(selection.cursor);
-        let preferred = *session.preferred_column.get_or_insert(column);
+        let (line, cell) = session.model.line_cell_for_char(selection.cursor);
+        let preferred = *session.preferred_column.get_or_insert(cell);
         let target_line = session
             .model
             .visible_row_for_logical_line(line)
@@ -2174,7 +2233,10 @@ fn move_vertical(session: &mut VirtualEditorSession, delta: isize, extend: bool)
                 line.saturating_add_signed(delta)
                     .min(session.model.line_count().saturating_sub(1))
             });
-        let cursor = session.model.char_at_line_column(target_line, preferred);
+        let column = session
+            .model
+            .column_nearest_cell(target_line, preferred as f32);
+        let cursor = session.model.char_at_line_column(target_line, column);
         moved.push(TextSelection {
             anchor: if extend { selection.anchor } else { cursor },
             cursor,
@@ -2360,7 +2422,7 @@ fn handle_ime(session: &mut VirtualEditorSession, event: egui::ImeEvent) {
                 session.ime = None;
                 return;
             }
-            grow_maximum_columns_for_insertion(session, &text);
+            grow_maximum_cells_for_insertion(session, &text);
             let starts = session
                 .model
                 .selections()
@@ -2384,7 +2446,7 @@ fn handle_ime(session: &mut VirtualEditorSession, event: egui::ImeEvent) {
                 session.model = composition.before;
             }
             if !text.is_empty() {
-                grow_maximum_columns_for_insertion(session, &text);
+                grow_maximum_cells_for_insertion(session, &text);
                 session.model.insert_at_selections(&text);
             }
         }
@@ -2398,6 +2460,7 @@ fn handle_ime(session: &mut VirtualEditorSession, event: egui::ImeEvent) {
 /// one, so the shape says the severity as well as the ink does.
 fn paint_source_mark(
     painter: &egui::Painter,
+    model: &TextDocumentModel,
     mark: &SourceMark,
     code_origin_x: f32,
     underline: f32,
@@ -2408,8 +2471,10 @@ fn paint_source_mark(
 
     /// Half a zigzag's period and a dotted rule's pitch.
     const STEP: f32 = 2.0;
-    let start = mark.columns.start;
-    let end = mark.columns.end.max(start + 1);
+    let start = model.cell_at(mark.line, mark.columns.start);
+    let end = model
+        .cell_at(mark.line, mark.columns.end.max(mark.columns.start + 1))
+        .max(start + 1);
     let clip = painter.clip_rect();
     let left = (code_origin_x + start as f32 * char_width).max(clip.left() - STEP);
     let right = (code_origin_x + end as f32 * char_width).min(clip.right() + STEP);
@@ -2469,8 +2534,8 @@ fn paint_selections(
         if start >= end {
             continue;
         }
-        let x0 = code_origin_x + (start - line_range.start) as f32 * char_width;
-        let x1 = code_origin_x + (end - line_range.start) as f32 * char_width;
+        let x0 = code_origin_x + model.cell_at(line, start - line_range.start) as f32 * char_width;
+        let x1 = code_origin_x + model.cell_at(line, end - line_range.start) as f32 * char_width;
         painter.rect_filled(
             egui::Rect::from_min_max(
                 egui::pos2(x0, row_rect.top()),
@@ -2485,6 +2550,7 @@ fn paint_selections(
 /// Box each place on `line` the name the reader went to is written.
 fn paint_occurrences(
     painter: &egui::Painter,
+    model: &TextDocumentModel,
     style: &VirtualEditorStyle<'_>,
     line: usize,
     row_rect: egui::Rect,
@@ -2496,8 +2562,8 @@ fn paint_occurrences(
         .iter()
         .take_while(|span| span.line == line)
     {
-        let x0 = code_origin_x + span.columns.start as f32 * char_width;
-        let x1 = code_origin_x + span.columns.end as f32 * char_width;
+        let x0 = code_origin_x + model.cell_at(line, span.columns.start) as f32 * char_width;
+        let x1 = code_origin_x + model.cell_at(line, span.columns.end) as f32 * char_width;
         let rect = egui::Rect::from_min_max(
             egui::pos2(x0, row_rect.top() + 1.0),
             egui::pos2(x1.max(x0 + char_width), row_rect.bottom() - 1.0),
@@ -2536,11 +2602,11 @@ fn paint_carets_and_ime(
     let caret_visible = !blinking || (since_moved * 2.0).fract() < 0.62;
     let mut primary_caret_rect = None;
     for selection in session.model.selections() {
-        let (line, column) = session.model.line_column_for_char(selection.cursor);
+        let (line, cell) = session.model.line_cell_for_char(selection.cursor);
         let Some(visible_row) = session.model.visible_row_for_logical_line(line) else {
             continue;
         };
-        let x = code_origin_x + column as f32 * char_width;
+        let x = code_origin_x + cell as f32 * char_width;
         let y = origin.y + style.top_padding + visible_row as f32 * style.line_height;
         let rect = egui::Rect::from_min_size(
             egui::pos2(x, y + 1.0),
@@ -2560,21 +2626,19 @@ fn paint_carets_and_ime(
             };
             let y =
                 origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height - 1.0;
+            let x = |column: usize| {
+                code_origin_x + session.model.cell_at(line, column) as f32 * char_width
+            };
             ui.painter().hline(
-                (code_origin_x + start_column as f32 * char_width)
-                    ..=(code_origin_x + end_column as f32 * char_width),
+                x(start_column)..=x(end_column),
                 y,
                 Stroke::new(1.0, style.accent),
             );
             if let Some(active) = &composition.active_range {
                 let start = start_column + active.start.min(end_column - start_column);
                 let end = start_column + active.end.min(end_column - start_column);
-                ui.painter().hline(
-                    (code_origin_x + start as f32 * char_width)
-                        ..=(code_origin_x + end as f32 * char_width),
-                    y - 1.0,
-                    Stroke::new(2.0, style.accent),
-                );
+                ui.painter()
+                    .hline(x(start)..=x(end), y - 1.0, Stroke::new(2.0, style.accent));
             }
         }
     }

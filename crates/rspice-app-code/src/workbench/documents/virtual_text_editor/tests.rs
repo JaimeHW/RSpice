@@ -253,7 +253,7 @@ fn requested_line_unfolds_and_reveals_a_collapsed_target() {
     assert!(session.model.fold_lines(0, 3));
     let mut source = session.model.snapshot();
     session.bound_revision = source.revision();
-    session.maximum_columns = session.model.maximum_line_columns();
+    session.maximum_cells = session.model.maximum_line_cells();
     context.data_mut(|data| {
         data.insert_temp(editor_id.with("virtual-session"), session);
     });
@@ -268,10 +268,8 @@ fn requested_line_unfolds_and_reveals_a_collapsed_target() {
             EditorSyntax::Spice,
             Some(2),
             &style,
-            |ui, row, font| {
-                ui.fonts_mut(|fonts| {
-                    fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                })
+            |_, row, font| {
+                egui::text::LayoutJob::simple_singleline(row.text.to_owned(), font, Color32::WHITE)
             },
             |_| None,
             |_| None,
@@ -420,11 +418,9 @@ fn widget_lays_out_only_a_bounded_large_document_viewport() {
             EditorSyntax::Spice,
             None,
             &style,
-            |ui, row, font| {
+            |_, row, font| {
                 laid_out += 1;
-                ui.fonts_mut(|fonts| {
-                    fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                })
+                egui::text::LayoutJob::simple_singleline(row.text.to_owned(), font, Color32::WHITE)
             },
             |_| None,
             |_| None,
@@ -444,7 +440,7 @@ fn maximum_column_reconciliation_is_revision_bound_and_chunked() {
     source.push_str(&"z".repeat(1_000));
     let mut session = VirtualEditorSession {
         model: TextDocumentModel::from_source(&source),
-        maximum_columns: 0,
+        maximum_cells: 0,
         ..VirtualEditorSession::default()
     };
     restart_maximum_column_scan(&mut session);
@@ -453,25 +449,25 @@ fn maximum_column_reconciliation_is_revision_bound_and_chunked() {
         .maximum_column_scan
         .expect("large document scan remains pending");
     assert_eq!(first.next_line, MAXIMUM_COLUMN_SCAN_LINES_PER_FRAME);
-    assert_eq!(session.maximum_columns, 1);
+    assert_eq!(session.maximum_cells, 1);
     advance_maximum_column_scan(&mut session);
     assert!(session.maximum_column_scan.is_none());
-    assert_eq!(session.maximum_columns, 1_000);
+    assert_eq!(session.maximum_cells, 1_000);
 
     assert!(session.model.synchronize_source("a\n"));
     restart_maximum_column_scan(&mut session);
     assert_eq!(
-        session.maximum_columns, 1_000,
+        session.maximum_cells, 1_000,
         "the old extent remains usable until the bounded scan completes"
     );
     advance_maximum_column_scan(&mut session);
     assert!(session.maximum_column_scan.is_none());
-    assert_eq!(session.maximum_columns, 1);
+    assert_eq!(session.maximum_cells, 1);
 
     let inserted = format!("short\n{}\nend", "q".repeat(2_000));
-    grow_maximum_columns_for_insertion(&mut session, &inserted);
+    grow_maximum_cells_for_insertion(&mut session, &inserted);
     assert!(
-        session.maximum_columns >= 2_000,
+        session.maximum_cells >= 2_000,
         "a long intermediate pasted line must grow the canvas immediately"
     );
 }
@@ -504,10 +500,12 @@ fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
                 EditorSyntax::Spice,
                 Some(2),
                 &style,
-                |ui, row, font| {
-                    ui.fonts_mut(|fonts| {
-                        fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                    })
+                |_, row, font| {
+                    egui::text::LayoutJob::simple_singleline(
+                        row.text.to_owned(),
+                        font,
+                        Color32::WHITE,
+                    )
                 },
                 |_| None,
                 |line| {
@@ -586,10 +584,12 @@ fn accessible_text_is_the_caret_line_and_three_lines_either_side() {
                     EditorSyntax::Spice,
                     Some(10),
                     &style,
-                    |ui, row, font| {
-                        ui.fonts_mut(|fonts| {
-                            fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                        })
+                    |_, row, font| {
+                        egui::text::LayoutJob::simple_singleline(
+                            row.text.to_owned(),
+                            font,
+                            Color32::WHITE,
+                        )
                     },
                     |_| None,
                     |_| None,
@@ -653,10 +653,12 @@ fn accesskit_active_line_payload_is_bounded_for_extreme_source_lines() {
                     EditorSyntax::Spice,
                     None,
                     &style,
-                    |ui, row, font| {
-                        ui.fonts_mut(|fonts| {
-                            fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                        })
+                    |_, row, font| {
+                        egui::text::LayoutJob::simple_singleline(
+                            row.text.to_owned(),
+                            font,
+                            Color32::WHITE,
+                        )
                     },
                     |_| None,
                     |_| None,
@@ -695,7 +697,7 @@ fn accesskit_excerpt_geometry_tracks_the_real_horizontal_source_column() {
         .set_selections(vec![TextSelection::caret(1_500)]);
     let mut source = session.model.snapshot();
     session.bound_revision = source.revision();
-    session.maximum_columns = session.model.maximum_line_columns();
+    session.maximum_cells = session.model.maximum_line_cells();
     context.data_mut(|data| {
         data.insert_temp(editor_id.with("virtual-session"), session);
     });
@@ -719,10 +721,12 @@ fn accesskit_excerpt_geometry_tracks_the_real_horizontal_source_column() {
                     EditorSyntax::Spice,
                     None,
                     &style,
-                    |ui, row, font| {
-                        ui.fonts_mut(|fonts| {
-                            fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                        })
+                    |_, row, font| {
+                        egui::text::LayoutJob::simple_singleline(
+                            row.text.to_owned(),
+                            font,
+                            Color32::WHITE,
+                        )
                     },
                     |_| None,
                     |_| None,
@@ -810,10 +814,12 @@ impl ScriptedEditor {
                 EditorSyntax::Spice,
                 None,
                 &style,
-                |ui, row, font| {
-                    ui.fonts_mut(|fonts| {
-                        fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                    })
+                |_, row, font| {
+                    egui::text::LayoutJob::simple_singleline(
+                        row.text.to_owned(),
+                        font,
+                        Color32::WHITE,
+                    )
                 },
                 |_| None,
                 |_| None,

@@ -55,10 +55,10 @@ fn handle_roots(
         return None;
     }
     let root = |index: usize| {
-        let (line, column) = session.model.line_column_for_char(index);
+        let (line, cell) = session.model.line_cell_for_char(index);
         let row = session.model.visible_row_for_logical_line(line)?;
         Some(egui::pos2(
-            origin.x + style.gutter_width + style.code_left_padding + column as f32 * char_width,
+            origin.x + style.gutter_width + style.code_left_padding + cell as f32 * char_width,
             origin.y + style.top_padding + (row + 1) as f32 * style.line_height,
         ))
     };

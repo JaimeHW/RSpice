@@ -312,13 +312,14 @@ pub fn show(
             requested_line,
             &style,
             |ui, row, font| {
-                let job = if diff_document {
-                    highlight::diff_layout_job(row.text, font, &c)
+                // Coloured from the line's start, then cut to the part shown.
+                if diff_document {
+                    let line = row.line();
+                    row.shown_part(&line, highlight::diff_layout_job(&line, font, &c))
                 } else {
-                    let comments = source_comments.on_row(ui.ctx(), row, &shown_source);
-                    highlight::layout_job(row.text, &comments, font, &c)
-                };
-                ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    let (line, comments) = source_comments.on_line(ui.ctx(), row, &shown_source);
+                    row.shown_part(&line, highlight::layout_job(&line, &comments, font, &c))
+                }
             },
             |logical_line| {
                 diagnostics

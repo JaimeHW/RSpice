@@ -244,7 +244,7 @@ pub(super) fn update_accesskit_text_state(
                 + egui::vec2(
                     style.gutter_width
                         + style.code_left_padding
-                        + window.first_column as f32 * char_width,
+                        + model.cell_at(window.line, window.first_column) as f32 * char_width,
                     style.top_padding + visible_row as f32 * style.line_height,
                 ))
             .to_vec2(),

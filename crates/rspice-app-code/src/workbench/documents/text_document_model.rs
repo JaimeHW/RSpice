@@ -23,6 +23,36 @@ const STEP_OVERHEAD_BYTES: usize = 2 << 10;
 const TYPING_PAUSE_SECONDS: f64 = 1.0;
 /// Texts the owner's edits can leave behind and still come back to.
 const PARKED_HISTORY_LIMIT: usize = 64;
+/// Display cells from one tab stop to the next, as terminals, pagers and
+/// the vendor model files written for them assume.
+pub(crate) const TAB_STOP: usize = 8;
+
+/// The display cells `character` takes when it starts at cell `at`: a tab
+/// runs to the next tab stop, a wide glyph takes two cells and a combining
+/// mark none.
+pub(crate) fn char_cells(character: char, at: usize) -> usize {
+    if character == '\t' {
+        TAB_STOP - at % TAB_STOP
+    } else {
+        unicode_width::UnicodeWidthChar::width(character).unwrap_or(1)
+    }
+}
+
+/// Whether every character of `text` is one cell: no tab and nothing past
+/// ASCII, which is most source. The search for a tab is a byte search.
+fn one_cell_a_character(text: ropey::RopeSlice<'_>) -> bool {
+    text.len_bytes() == text.len_chars()
+        && !text.chunks().any(|chunk| chunk.as_bytes().contains(&b'\t'))
+}
+
+/// The display cells `text`, from a line's start, takes.
+fn line_cells(text: ropey::RopeSlice<'_>) -> usize {
+    if one_cell_a_character(text) {
+        return text.len_chars();
+    }
+    text.chars()
+        .fold(0, |cell, character| cell + char_cells(character, cell))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextEncoding {
@@ -74,6 +104,8 @@ pub(crate) struct ViewportLine {
     pub visible_row: usize,
     pub logical_line: usize,
     pub first_column: usize,
+    /// The display cell `first_column` starts at.
+    pub first_cell: usize,
     pub text: String,
     pub total_columns: usize,
     pub folded_line_count: usize,
@@ -232,11 +264,13 @@ impl TextDocumentModel {
     }
 
     #[cfg(test)]
-    pub fn maximum_line_columns(&self) -> usize {
-        self.maximum_line_columns_in_range(0, self.line_count())
+    pub fn maximum_line_cells(&self) -> usize {
+        self.maximum_line_cells_in_range(0, self.line_count())
     }
 
-    pub fn maximum_line_columns_in_range(&self, start_line: usize, line_count: usize) -> usize {
+    /// The display cells the widest of `line_count` lines from `start_line`
+    /// takes.
+    pub fn maximum_line_cells_in_range(&self, start_line: usize, line_count: usize) -> usize {
         if start_line >= self.line_count() || line_count == 0 {
             return 0;
         }
@@ -244,23 +278,82 @@ impl TextDocumentModel {
             .lines_at(start_line)
             .take(line_count.min(self.line_count() - start_line))
             .map(|line| {
-                line.len_chars()
-                    .saturating_sub(trailing_line_break_chars(line))
+                line_cells(line.slice(..line.len_chars() - trailing_line_break_chars(line)))
             })
             .max()
             .unwrap_or(0)
     }
 
-    pub fn maximum_selected_line_columns(&self) -> usize {
+    pub fn maximum_selected_line_cells(&self) -> usize {
         self.selections
             .iter()
             .map(|selection| {
                 let first = self.line_column_for_char(selection.range().start).0;
                 let last = self.line_column_for_char(selection.range().end).0;
-                self.maximum_line_columns_in_range(first, last.saturating_sub(first) + 1)
+                self.maximum_line_cells_in_range(first, last.saturating_sub(first) + 1)
             })
             .max()
             .unwrap_or(0)
+    }
+
+    /// The display cell column `column` of `line` starts at. A column past
+    /// the line's end is a cell a column past it.
+    pub fn cell_at(&self, line: usize, column: usize) -> usize {
+        let Some(content) = self.line_content_char_range(line) else {
+            return column;
+        };
+        let within = column.min(content.len());
+        line_cells(self.text.slice(content.start..content.start + within)) + (column - within)
+    }
+
+    /// The line `char_index` is on and the display cell it starts at.
+    pub fn line_cell_for_char(&self, char_index: usize) -> (usize, usize) {
+        let (line, column) = self.line_column_for_char(char_index);
+        (line, self.cell_at(line, column))
+    }
+
+    /// The column of `line` whose start is nearest `cell`, a fraction of a
+    /// cell being where in it a pointer is. Past the line's end it is the
+    /// line's end.
+    pub fn column_nearest_cell(&self, line: usize, cell: f32) -> usize {
+        let Some(content) = self.line_content_char_range(line) else {
+            return 0;
+        };
+        let text = self.text.slice(content.clone());
+        if one_cell_a_character(text) {
+            return (cell.round().max(0.0) as usize).min(content.len());
+        }
+        let mut at = 0;
+        for (column, character) in text.chars().enumerate() {
+            let cells = char_cells(character, at);
+            if cell < at as f32 + cells as f32 * 0.5 {
+                return column;
+            }
+            at += cells;
+        }
+        content.len()
+    }
+
+    /// The column of `line` whose character covers `cell`, and the cell it
+    /// starts at. Past the line's end it is the line's end and its cell.
+    fn column_covering_cell(&self, line: usize, cell: usize) -> (usize, usize) {
+        let Some(content) = self.line_content_char_range(line) else {
+            return (0, 0);
+        };
+        let text = self.text.slice(content.clone());
+        if one_cell_a_character(text) {
+            let column = cell.min(content.len());
+            return (column, column);
+        }
+        let mut at = 0;
+        for (column, character) in text.chars().enumerate() {
+            let next = at + char_cells(character, at);
+            if cell < next {
+                return (column, at);
+            }
+            at = next;
+        }
+        (content.len(), at)
     }
 
     pub fn selections(&self) -> &[TextSelection] {
@@ -416,23 +509,27 @@ impl TextDocumentModel {
         self.selections = normalize_selections(selections, self.text.len_chars());
     }
 
-    /// Create one selection per logical line between the two endpoints.
-    /// Columns are Unicode-scalar columns and clamp before the line ending.
+    /// Create one selection per logical line between the two endpoints, at
+    /// the same display cells on every line, each end at the character
+    /// boundary nearest its cell and before the line ending.
     pub fn set_column_selection(
         &mut self,
         anchor_line: usize,
-        anchor_column: usize,
+        anchor_cell: f32,
         cursor_line: usize,
-        cursor_column: usize,
+        cursor_cell: f32,
     ) {
         let last_line = self.line_count().saturating_sub(1);
         let first = anchor_line.min(cursor_line).min(last_line);
         let last = anchor_line.max(cursor_line).min(last_line);
-        let forward = (cursor_line, cursor_column) >= (anchor_line, anchor_column);
+        let forward =
+            cursor_line > anchor_line || (cursor_line == anchor_line && cursor_cell >= anchor_cell);
         let mut selections = Vec::with_capacity(last.saturating_sub(first) + 1);
         for line in first..=last {
-            let anchor = self.char_at_line_column(line, anchor_column);
-            let cursor = self.char_at_line_column(line, cursor_column);
+            let anchor =
+                self.char_at_line_column(line, self.column_nearest_cell(line, anchor_cell));
+            let cursor =
+                self.char_at_line_column(line, self.column_nearest_cell(line, cursor_cell));
             selections.push(if forward {
                 TextSelection { anchor, cursor }
             } else {
@@ -779,14 +876,15 @@ impl TextDocumentModel {
         })
     }
 
-    /// Materialize only a bounded vertical/horizontal viewport. Overscan is
-    /// caller-controlled and remains bounded independently of source size.
+    /// Materialize only a bounded vertical/horizontal viewport, its width in
+    /// display cells. Overscan is caller-controlled and remains bounded
+    /// independently of source size.
     pub fn viewport(
         &self,
         first_visible_row: usize,
         row_count: usize,
-        first_column: usize,
-        column_count: usize,
+        first_cell: usize,
+        cell_count: usize,
         row_overscan: usize,
         column_overscan: usize,
     ) -> Vec<ViewportLine> {
@@ -795,15 +893,17 @@ impl TextDocumentModel {
             .saturating_add(row_count)
             .saturating_add(row_overscan)
             .min(self.visible_line_count());
-        let first_column = first_column.saturating_sub(column_overscan);
-        let column_count = column_count.saturating_add(column_overscan.saturating_mul(2));
+        let first_cell = first_cell.saturating_sub(column_overscan);
+        let cell_count = cell_count.saturating_add(column_overscan.saturating_mul(2));
         (first_row..end_row)
             .filter_map(|visible_row| {
                 let logical_line = self.logical_line_for_visible_row(visible_row)?;
                 let content = self.line_content_char_range(logical_line)?;
                 let total_columns = content.len();
-                let start = first_column.min(total_columns);
-                let end = start.saturating_add(column_count).min(total_columns);
+                let (start, start_cell) = self.column_covering_cell(logical_line, first_cell);
+                // A character is at least a cell wide, so as many characters
+                // as cells cover the window.
+                let end = start.saturating_add(cell_count).min(total_columns);
                 let text = self
                     .text
                     .slice((content.start + start)..(content.start + end))
@@ -817,6 +917,7 @@ impl TextDocumentModel {
                     visible_row,
                     logical_line,
                     first_column: start,
+                    first_cell: start_cell,
                     text,
                     total_columns,
                     folded_line_count,
@@ -1332,9 +1433,46 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_runs_to_the_next_stop_and_a_wide_glyph_takes_two_cells() {
+        let model = TextDocumentModel::from_source("a\tb\n\u{4E2D}x\n\t\t.end\n");
+        assert_eq!(model.cell_at(0, 1), 1);
+        assert_eq!(model.cell_at(0, 2), TAB_STOP, "b starts at the tab stop");
+        assert_eq!(model.cell_at(1, 1), 2, "x after the wide glyph");
+        assert_eq!(model.cell_at(2, 2), 2 * TAB_STOP);
+        assert_eq!(model.cell_at(1, 5), 6, "past the end, a cell a column");
+        assert_eq!(model.maximum_line_cells(), 2 * TAB_STOP + 4);
+        // A pointer goes to the nearer edge of the character it is over.
+        assert_eq!(model.column_nearest_cell(0, 4.0), 1);
+        assert_eq!(model.column_nearest_cell(0, 5.0), 2);
+        assert_eq!(model.column_nearest_cell(1, 0.9), 0);
+        assert_eq!(model.column_nearest_cell(1, 1.1), 1);
+        assert_eq!(model.column_nearest_cell(1, 9.0), 2);
+    }
+
+    #[test]
+    fn a_column_selection_takes_the_same_cells_on_every_line() {
+        let mut model = TextDocumentModel::from_source("\tR1 a\n        R2 b\n");
+        model.set_column_selection(0, 8.0, 1, 10.0);
+        assert_eq!(
+            model.selections(),
+            &[
+                TextSelection {
+                    anchor: 1,
+                    cursor: 3
+                },
+                TextSelection {
+                    anchor: 14,
+                    cursor: 16
+                },
+            ],
+            "R1 after the tab and R2 after eight spaces"
+        );
+    }
+
+    #[test]
     fn column_selection_clamps_each_line_before_its_line_ending() {
         let mut model = TextDocumentModel::from_source("a\nlong\nxy\n");
-        model.set_column_selection(0, 1, 2, 3);
+        model.set_column_selection(0, 1.0, 2, 3.0);
         assert_eq!(
             model.selections(),
             &[
@@ -1399,8 +1537,8 @@ mod tests {
         assert_eq!(viewport.first().unwrap().logical_line, 9);
         assert_eq!(viewport.last().unwrap().logical_line, 14);
         assert!(viewport.iter().all(|line| line.text.chars().count() <= 9));
-        assert_eq!(model.maximum_line_columns_in_range(10, 4), 29);
-        assert_eq!(model.maximum_line_columns_in_range(99, 4), 0);
+        assert_eq!(model.maximum_line_cells_in_range(10, 4), 29);
+        assert_eq!(model.maximum_line_cells_in_range(99, 4), 0);
     }
 
     #[test]

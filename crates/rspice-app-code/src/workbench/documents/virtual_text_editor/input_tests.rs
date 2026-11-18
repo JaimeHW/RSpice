@@ -76,10 +76,12 @@ impl Bench {
                         EditorSyntax::VerilogA,
                         None,
                         &style,
-                        |ui, row, font| {
-                            ui.fonts_mut(|fonts| {
-                                fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
-                            })
+                        |_, row, font| {
+                            egui::text::LayoutJob::simple_singleline(
+                                row.text.to_owned(),
+                                font,
+                                Color32::WHITE,
+                            )
                         },
                         |_| None,
                         |_| None,
@@ -678,6 +680,36 @@ fn a_click_places_the_caret_and_a_drag_selects() {
     let _ = bench.frame(pointer(to, None, false));
     let dragged = bench.frame(pointer(to, Some(false), false));
     assert_eq!(dragged.selected, Some((0, 5)));
+}
+
+/// A tab runs to the next tab stop and a wide glyph takes two cells, for a
+/// click and for the caret drawn where it lands.
+#[test]
+fn a_tab_and_a_wide_glyph_take_their_cells_for_a_click_and_the_caret() {
+    let mut bench = Bench::new("a\tb\n\u{4E2D}x\n", true);
+    let _ = bench.frame(Vec::new());
+    let char_width = bench.context.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap("M".to_owned(), FontId::monospace(11.0), Color32::WHITE)
+            .size()
+            .x
+    });
+    for (row, cell_column, index) in [(0, 8, 2), (1, 2, 5)] {
+        let at = cell(&bench, row, cell_column);
+        let _ = bench.frame(pointer(at, Some(true), false));
+        let clicked = bench.frame(pointer(at, Some(false), false));
+        assert_eq!(
+            clicked.cursor_char_index, index,
+            "cell {cell_column} of row {row}"
+        );
+        let (caret, _) = clicked.caret.expect("the caret is drawn");
+        let expected = at.x - 0.3 * char_width;
+        assert!(
+            (caret.left() - expected).abs() < 0.5,
+            "the caret at {} for cell {cell_column}, not {expected}",
+            caret.left()
+        );
+    }
 }
 
 #[test]
