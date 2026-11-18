@@ -35,9 +35,11 @@ pub struct PreparationError {
     message: String,
     /// The 1-based deck line this failure named, where it named one.
     line: Option<usize>,
-    /// What the parser said was wrong on that line, in its own words and
-    /// without the line: the text a finding on that line shows.
-    finding: Option<String>,
+    /// Where in `message` the parser's own words begin, after the line it
+    /// names: what a finding on that line shows. Zero when the message is
+    /// all one finding. An offset rather than a copy, so a failure stays as
+    /// small as a `Result` should carry.
+    finding_from: u32,
     interruption: Option<PreparationInterruption>,
     refusal: Option<PreparationRefusal>,
 }
@@ -63,7 +65,7 @@ impl PreparationError {
             stage,
             message: message.into(),
             line: None,
-            finding: None,
+            finding_from: 0,
             interruption: None,
             refusal: None,
         }
@@ -88,7 +90,7 @@ impl PreparationError {
     /// The same failure, said as `message`.
     pub(crate) fn said_as(mut self, message: impl Into<String>) -> Self {
         self.message = message.into();
-        self.finding = None;
+        self.finding_from = 0;
         self
     }
 
@@ -114,7 +116,10 @@ impl PreparationError {
     /// words, which a caller that names the [`line`](Self::line) puts after
     /// it; else the whole message.
     pub fn finding(&self) -> &str {
-        self.finding.as_deref().unwrap_or(&self.message)
+        usize::try_from(self.finding_from)
+            .ok()
+            .and_then(|from| self.message.get(from..))
+            .unwrap_or(&self.message)
     }
 
     pub fn is_aborted(&self) -> bool {
@@ -163,8 +168,11 @@ impl PreparationError {
             ParseWithAbortError::Parse(error) => {
                 let mut failure = Self::new(stage, error.to_string());
                 failure.line = crate::execution::parse_error_line(&error);
-                if let ParseError::Syntax { message, .. } = error {
-                    failure.finding = Some(message);
+                if let ParseError::Syntax { message, .. } = &error
+                    && let Some(from) = failure.message.len().checked_sub(message.len())
+                    && failure.message.ends_with(message.as_str())
+                {
+                    failure.finding_from = u32::try_from(from).unwrap_or(0);
                 }
                 failure
             }
