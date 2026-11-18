@@ -116,7 +116,7 @@ impl DocumentRegistry {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
-        ids.sort_by_key(ProjectDocumentId::stable_key);
+        ids.sort_by_cached_key(ProjectDocumentId::stable_key);
         self.records = ids
             .into_iter()
             .map(|id| DocumentRecord {
@@ -137,13 +137,17 @@ pub struct DocumentFingerprints {
 
 impl DocumentFingerprints {
     pub fn from_documents(documents: HashMap<ProjectDocumentId, ContentDigest>) -> Self {
-        let mut ordered = documents.iter().collect::<Vec<_>>();
-        ordered.sort_by_key(|(id, _)| id.stable_key());
+        // Each key is built once: a comparison that built its own two keys
+        // cost a project of 5,000 cells about 50 ms per sort.
+        let mut ordered = documents
+            .iter()
+            .map(|(id, digest)| (id.stable_key(), digest))
+            .collect::<Vec<_>>();
+        ordered.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
         let mut hasher = Sha256::new();
         hasher.update(b"rspice-project-content-digest\0v1\0");
         hasher.update((ordered.len() as u64).to_be_bytes());
-        for (id, digest) in ordered {
-            let key = id.stable_key();
+        for (key, digest) in ordered {
             hasher.update((key.len() as u64).to_be_bytes());
             hasher.update(key.as_bytes());
             hasher.update(digest.as_bytes());
@@ -177,7 +181,7 @@ impl DocumentFingerprints {
                     .cloned(),
             )
             .collect::<Vec<_>>();
-        differing.sort_by_key(ProjectDocumentId::stable_key);
+        differing.sort_by_cached_key(ProjectDocumentId::stable_key);
         differing
     }
 }
