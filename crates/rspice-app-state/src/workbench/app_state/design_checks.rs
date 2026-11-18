@@ -399,12 +399,12 @@ impl Model {
         self.publish_design_check_result(subject, config, result, CheckScope::Hierarchy, facts)
     }
 
-    /// The configuration the design rules are checked under for the
-    /// configured simulation root — the profile the Check command uses for
-    /// that cell view, so a pass run by either is the same evidence, and the
-    /// one the run gate judges the root under.
+    /// The configuration the design rules are checked under for the root the
+    /// active plan runs — the profile the Check command uses for that cell
+    /// view, so a pass run by either is the same evidence, and the one the
+    /// run gate judges the root under.
     pub fn configured_root_design_check_config(&self) -> DrcConfig {
-        self.design_check_config(&self.workspace.content.simulation_root_reference())
+        self.design_check_config(&self.plan_root_reference())
     }
 
     /// Publish `result` as Check Design's findings about the configured

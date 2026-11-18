@@ -46,9 +46,14 @@ pub fn run_preflight_block_reason(
     if enabled.is_empty() {
         return Some("Enable at least one analysis instance in the simulation plan".to_owned());
     }
-    let configured_root = workspace.content.simulation_root_reference();
+    // The design the plan runs: a plan naming a configuration the project no
+    // longer holds is refused here, before anything is prepared or solved.
+    if let Err(error) = workspace.plan_configuration_sets(sim_setup.design_configuration) {
+        return Some(error.to_string());
+    }
+    let configured_root = workspace.plan_simulation_root(sim_setup.design_configuration);
     let Some(configured_schematic) =
-        workspace.simulation_root_schematic(&workspace.content.active_view, schematic)
+        workspace.schematic_of_root(&configured_root, &workspace.content.active_view, schematic)
     else {
         return Some(format!(
             "Resolve the configured simulation root '{}' before running",

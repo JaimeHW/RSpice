@@ -566,12 +566,8 @@ fn design_rule_blocker(
 fn collect(state: &impl RunHost) -> PreflightReport {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
-    let root_reference = state.model().workspace.content.simulation_root_reference();
-    let inspection = state.model().workspace.inspect_design_projection(
-        &state.model().library_manager,
-        &state.model().workspace.content.active_view,
-        &state.model().schematic,
-    );
+    let root_reference = state.model().plan_root_reference();
+    let inspection = state.model().plan_inspect_design_projection();
     let execution_projection = inspection
         .clone()
         .and_then(|projection| projection.into_execution());
@@ -662,12 +658,16 @@ fn collect(state: &impl RunHost) -> PreflightReport {
     if execution_projection.is_ok() {
         // Check Design's own receipt for the configured design: the
         // configuration and the waivers the page states its findings under.
+        // Check Design walks the design the project marks for runs; a plan on
+        // another configuration has its own root checked again by the run's
+        // source gate as it is prepared.
+        let checked_root = state.model().workspace.content.simulation_root_reference();
         if let Some(result) = state.model().current_design_check(
-            &root_reference,
+            &checked_root,
             CheckScope::Design,
             state.slot_facts(),
         ) {
-            blockers.extend(design_rule_blocker(&root_reference, result));
+            blockers.extend(design_rule_blocker(&checked_root, result));
         } else {
             blockers.push(PreflightIssue {
                 check: "Schematic validation".to_owned(),

@@ -25,6 +25,44 @@ use crate::state::ComponentType;
 use crate::workbench::app_state::model::Model;
 
 impl Model {
+    /// The root the active plan runs: its configuration's root.
+    pub fn plan_root_reference(&self) -> crate::state::CellViewRef {
+        self.workspace
+            .plan_simulation_root(self.sim_setup.design_configuration)
+    }
+
+    /// The executable projection of the design the active plan runs, under
+    /// the configuration it names.
+    pub fn plan_execution_projection(
+        &self,
+    ) -> Result<
+        crate::state::workspace::ConfigurationExecutionProjection,
+        crate::state::workspace::ConfigurationExecutionPlanError,
+    > {
+        self.workspace.plan_execution_projection(
+            self.sim_setup.design_configuration,
+            &self.library_manager,
+            &self.workspace.content.active_view,
+            &self.schematic,
+        )
+    }
+
+    /// [`Self::plan_execution_projection`], resolved or not, for a reader
+    /// that states what does not resolve.
+    pub fn plan_inspect_design_projection(
+        &self,
+    ) -> Result<
+        std::sync::Arc<crate::state::workspace::DesignProjection>,
+        crate::state::workspace::ConfigurationExecutionPlanError,
+    > {
+        self.workspace.plan_inspect_design_projection(
+            self.sim_setup.design_configuration,
+            &self.library_manager,
+            &self.workspace.content.active_view,
+            &self.schematic,
+        )
+    }
+
     /// Plan identity and revision of the active analysis plan, if one is
     /// configured. `None` means there is nothing to expire against.
     pub fn active_plan_revision(
@@ -42,7 +80,7 @@ impl Model {
     /// Stable identity and revision of the configured execution root, with the
     /// per-reference topology versions of everything it instantiates.
     pub fn configured_topology_revision(&self) -> (String, u64, Vec<(String, u64)>) {
-        let root = self.workspace.content.simulation_root_reference();
+        let root = self.plan_root_reference();
         let closure = self.configured_closure(|_, topology_version| topology_version);
         let root_key = root.key();
         let revision = closure
@@ -50,7 +88,7 @@ impl Model {
             .copied()
             .or_else(|| {
                 self.workspace
-                    .simulation_root_schematic(&self.workspace.content.active_view, &self.schematic)
+                    .schematic_of_root(&root, &self.workspace.content.active_view, &self.schematic)
                     .map(|source| source.design.topology_version())
             })
             .unwrap_or(0);
@@ -81,12 +119,8 @@ impl Model {
         &self,
         measure: impl Fn(&SchematicDocument, u64) -> T,
     ) -> BTreeMap<String, T> {
-        let root = self.workspace.content.simulation_root_reference();
-        let projection = self.workspace.configuration_execution_projection(
-            &self.library_manager,
-            &self.workspace.content.active_view,
-            &self.schematic,
-        );
+        let root = self.plan_root_reference();
+        let projection = self.plan_execution_projection();
         let mut closure = BTreeMap::new();
         if let Ok(projection) = &projection {
             // Two independent things put a cell view in this closure, and

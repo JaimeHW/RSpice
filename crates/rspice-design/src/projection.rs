@@ -539,6 +539,10 @@ pub enum ConfigurationExecutionPlanError {
     MissingRoot(String),
     #[error("design-management projection is invalid: {0}")]
     DesignManagement(String),
+    /// The simulation plan names a configuration that cannot be run, in
+    /// words that say which and what to do.
+    #[error("{0}")]
+    PlanConfiguration(String),
 }
 
 // Count of cell-view materializations performed since the last reset, so a

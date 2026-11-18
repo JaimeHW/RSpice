@@ -311,11 +311,7 @@ impl DrawnDesign {
     /// when the configuration no longer projects, in which case every name is
     /// located in the deck.
     fn configured(model: &Model) -> Self {
-        let Ok(projection) = model.workspace.configuration_execution_projection(
-            &model.library_manager,
-            &model.workspace.content.active_view,
-            &model.schematic,
-        ) else {
+        let Ok(projection) = model.plan_execution_projection() else {
             return Self {
                 occurrences: Vec::new(),
             };

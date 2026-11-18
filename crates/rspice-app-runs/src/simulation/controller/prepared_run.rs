@@ -66,6 +66,17 @@ fn project_netlist_source_data(
     }
 }
 
+/// The configuration catalog the active plan's runs elaborate under, or the
+/// refusal that a plan naming a deleted configuration is.
+fn plan_configuration_sets(
+    model: &Model,
+) -> Result<crate::state::workspace::PlanConfigurationSets<'_>, PreparationError> {
+    model
+        .workspace
+        .plan_configuration_sets(model.sim_setup.design_configuration)
+        .map_err(|error| PreparationError::new(PreparationStage::DesignChecks, error.to_string()))
+}
+
 type RunPreparationInputs<'a> = crate::simulation::execution::preparation::RunPreparationInputs<
     'a,
     crate::state::SimulationRun,
@@ -174,16 +185,9 @@ impl FrozenRunPreparation {
     /// does when the configured root cannot be projected.
     pub(crate) fn freeze(state: &impl RunHost) -> Result<Self, PreparationError> {
         let model = state.model();
-        let projection = model
-            .workspace
-            .configuration_execution_projection(
-                &model.library_manager,
-                &model.workspace.content.active_view,
-                &model.schematic,
-            )
-            .map_err(|error| {
-                PreparationError::new(PreparationStage::DesignChecks, error.to_string())
-            })?;
+        let projection = model.plan_execution_projection().map_err(|error| {
+            PreparationError::new(PreparationStage::DesignChecks, error.to_string())
+        })?;
         let schematic =
             rspice_design::projection::ProjectionSource::projection_source(&model.schematic);
         let runs = model.simulation.retained.runs.to_vec();
@@ -215,7 +219,7 @@ impl FrozenRunPreparation {
                 libraries: model.library_manager.catalog().clone(),
                 project_sources: model.workspace.content.project_sources.clone(),
                 design_management: (*model.workspace.content.design_management).clone(),
-                configuration_sets: (*model.workspace.content.configuration_sets).clone(),
+                configuration_sets: (**plan_configuration_sets(model)?).clone(),
                 stimulus_library: model.workspace.content.stimulus_library.clone(),
                 imported_checkpoints: model
                     .simulation
@@ -484,16 +488,9 @@ impl SimulationController {
         PreparationError,
     > {
         let selection_mode = model.sim_setup.save_policy.output_selection_mode;
-        let projection = model
-            .workspace
-            .configuration_execution_projection(
-                &model.library_manager,
-                &model.workspace.content.active_view,
-                &model.schematic,
-            )
-            .map_err(|error| {
-                PreparationError::new(PreparationStage::DesignChecks, error.to_string())
-            })?;
+        let projection = model.plan_execution_projection().map_err(|error| {
+            PreparationError::new(PreparationStage::DesignChecks, error.to_string())
+        })?;
         let root_schematic = projection.root_schematic().ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::DesignChecks,
@@ -636,16 +633,9 @@ impl SimulationController {
     /// configured hierarchy, plan-owned design variables, reference-process
     /// model cards, the model libraries' Verilog-A, and the solver options.
     fn design_run_deck(model: &Model) -> Result<DesignRunDeck, PreparationError> {
-        let projection = model
-            .workspace
-            .configuration_execution_projection(
-                &model.library_manager,
-                &model.workspace.content.active_view,
-                &model.schematic,
-            )
-            .map_err(|error| {
-                PreparationError::new(PreparationStage::DesignChecks, error.to_string())
-            })?;
+        let projection = model.plan_execution_projection().map_err(|error| {
+            PreparationError::new(PreparationStage::DesignChecks, error.to_string())
+        })?;
         let root_reference = projection.root().clone();
         let root_schematic = projection.root_schematic().ok_or_else(|| {
             PreparationError::new(
@@ -748,10 +738,11 @@ impl SimulationController {
         } else {
             Vec::new()
         };
-        let generated_source = model
-            .workspace
-            .content
-            .bind_generated_netlist_provenance(generated_netlist);
+        let generated_source = rspice_design::netlist_document::bind_generated_netlist_provenance(
+            &model.workspace.content.design_management,
+            &**plan_configuration_sets(model)?,
+            generated_netlist,
+        );
         let mut source =
             rspice_simulation::analysis_preparation::apply_reference_model_bindings_to_netlist(
                 &generated_source,
@@ -1239,18 +1230,15 @@ impl SimulationController {
         #[cfg(any(test, feature = "test-support"))]
         thread_preparations::record(SimulationRunIntent::SimulateRunSet);
         let model = state.model();
-        let execution_projection = model
-            .workspace
-            .configuration_execution_projection(
-                &model.library_manager,
-                &model.workspace.content.active_view,
-                &model.schematic,
-            )
-            .map_err(|error| {
-                PreparationError::new(PreparationStage::DesignChecks, error.to_string())
-            })?;
+        let execution_projection = model.plan_execution_projection().map_err(|error| {
+            PreparationError::new(PreparationStage::DesignChecks, error.to_string())
+        })?;
+        let configuration_sets = plan_configuration_sets(model)?;
         crate::simulation::execution::preparation::build_prepared_run_set(
-            &run_preparation_inputs_reading(state.model(), state.veriloga_compilation(), files),
+            &RunPreparationInputs {
+                configuration_sets: &configuration_sets,
+                ..run_preparation_inputs_reading(state.model(), state.veriloga_compilation(), files)
+            },
             execution_projection,
         )
     }
@@ -1345,7 +1333,7 @@ pub fn design_inspection_input_digest(model: &Model) -> crate::product::ContentD
         "{}\0{}\0{}\0{}\0{}\0{:?}\0{}\0{}\0{}",
         model.design_execution_epoch,
         model.workspace.content.project.revision().get(),
-        model.workspace.content.simulation_root_reference().key(),
+        model.plan_root_reference().key(),
         model.workspace.content.active_view.key(),
         plan_identity,
         model.sim_setup.reference_pvt.process,

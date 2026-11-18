@@ -243,3 +243,16 @@ pub enum HardcopySourceSetPersistenceError {
     #[error("hardcopy source-set name '{name}' is already owned by another retained set")]
     DuplicateName { name: String },
 }
+
+/// Why a simulation plan's configuration cannot be run.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PlanConfigurationError {
+    /// The plan names a configuration the project no longer holds.
+    #[error(
+        "The configuration this plan runs was deleted. Choose a configuration for the plan on its Analyses page."
+    )]
+    Missing(rspice_design_model::primitives::ConfigurationSetId),
+    /// The project's configuration catalog does not validate.
+    #[error("The project's configurations are invalid: {0}")]
+    Invalid(String),
+}

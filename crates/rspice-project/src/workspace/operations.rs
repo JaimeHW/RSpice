@@ -31,6 +31,40 @@ impl ProjectWorkspace {
         )
     }
 
+    /// The configuration catalog a plan naming `design` elaborates under:
+    /// `None` when that is the project's own as it stands, which is so for a
+    /// plan that follows "Used for runs" and for one naming the configuration
+    /// already used for runs; otherwise a copy of the catalog with the plan's
+    /// configuration marked for runs, so everything downstream of the mark
+    /// elaborates, netlists and records the plan's. A configuration the
+    /// catalog no longer holds is refused, never followed by another.
+    pub fn configuration_sets_for(
+        &self,
+        design: rspice_simulation_contract::design_configuration::DesignConfiguration,
+    ) -> Result<
+        Option<rspice_design::configuration_set::ConfigurationSetCatalog>,
+        PlanConfigurationError,
+    > {
+        use rspice_simulation_contract::design_configuration::DesignConfiguration;
+        let catalog = &*self.configuration_sets;
+        let marked = catalog.active_configuration_id();
+        let mut candidate = match design {
+            DesignConfiguration::UsedForRuns => return Ok(None),
+            DesignConfiguration::BuiltIn if marked.is_none() => return Ok(None),
+            DesignConfiguration::Named(id) if marked == Some(id) => return Ok(None),
+            DesignConfiguration::Named(id) if catalog.find(id).is_none() => {
+                return Err(PlanConfigurationError::Missing(id));
+            }
+            DesignConfiguration::BuiltIn | DesignConfiguration::Named(_) => catalog.clone(),
+        };
+        match design {
+            DesignConfiguration::Named(id) => candidate.activate(id),
+            _ => candidate.deactivate(),
+        }
+        .map_err(|error| PlanConfigurationError::Invalid(error.to_string()))?;
+        Ok(Some(candidate))
+    }
+
     /// Bind the exact active hierarchy configuration into generated source.
     /// The SPICE comment is part of the executable bytes and therefore flows
     /// into source, snapshot, and retained-run digests without relying on

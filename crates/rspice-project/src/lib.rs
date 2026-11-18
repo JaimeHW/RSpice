@@ -22,10 +22,11 @@ pub use open_view::OpenCellView;
 mod workspace;
 pub use workspace::{
     HardcopySourceSetPersistenceError, LibraryImage, MAX_PROJECT_HARDCOPY_SOURCE_SETS,
-    MAX_PROJECT_VISUALIZATION_DOCUMENTS, PreparedAnnotation, PreparedPhysicalLayoutCatalog,
-    PreparedReferences, ProjectConfigurationMutationError, ProjectHierarchy,
-    ProjectReferenceTransaction, ProjectWorkspace, ReferenceChanges, SimulationConfigurationError,
-    StagedSheetMembership, VisualizationDocumentPersistenceError, reference_from_key,
+    MAX_PROJECT_VISUALIZATION_DOCUMENTS, PlanConfigurationError, PreparedAnnotation,
+    PreparedPhysicalLayoutCatalog, PreparedReferences, ProjectConfigurationMutationError,
+    ProjectHierarchy, ProjectReferenceTransaction, ProjectWorkspace, ReferenceChanges,
+    SimulationConfigurationError, StagedSheetMembership, VisualizationDocumentPersistenceError,
+    reference_from_key,
 };
 
 mod file;

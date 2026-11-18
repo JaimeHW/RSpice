@@ -21,11 +21,25 @@ impl ProjectWorkspace {
         active_reference: &CellViewRef,
         active_schematic: &'a SchematicState,
     ) -> Option<SchematicEditorRef<'a>> {
-        let root = self.content.simulation_root_reference();
+        self.schematic_of_root(
+            &self.content.simulation_root_reference(),
+            active_reference,
+            active_schematic,
+        )
+    }
+
+    /// The schematic a run rooted at `root` starts from: the open editor's
+    /// when it shows that root, the workspace's buffer of it otherwise.
+    pub fn schematic_of_root<'a>(
+        &'a self,
+        root: &CellViewRef,
+        active_reference: &CellViewRef,
+        active_schematic: &'a SchematicState,
+    ) -> Option<SchematicEditorRef<'a>> {
         if root.key().eq_ignore_ascii_case(&active_reference.key()) {
             Some(active_schematic.editor_ref())
         } else {
-            find_schematic(self, &root)
+            find_schematic(self, root)
         }
     }
 

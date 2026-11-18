@@ -12,6 +12,8 @@ pub use hierarchy::WorkspaceSourceFiles;
 use rspice_design::hierarchy as hierarchy_resolver;
 mod materialize;
 mod open_documents;
+mod plan_configuration;
+pub use plan_configuration::{PlanConfigurationSets, recorded_configuration_words};
 mod reference_preparation;
 mod schematic_buffers;
 mod veriloga_cells;
@@ -134,6 +136,11 @@ pub struct WorkspaceSession {
     pub symbol_sessions:
         HashMap<String, rspice_schematic_editor::symbol_editor::session::SymbolEditorSession>,
     design_projection_cache: rspice_design::projection::DesignProjectionCache,
+    /// The active plan's view of the configuration catalog when it names a
+    /// configuration other than the one used for runs, and the projections
+    /// made under it, kept apart so neither displaces the project's own.
+    plan_configuration: plan_configuration::PlanConfigurationMemo,
+    plan_projection_cache: rspice_design::projection::DesignProjectionCache,
 }
 
 impl Serialize for ProjectWorkspace {
