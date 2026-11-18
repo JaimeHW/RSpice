@@ -526,7 +526,9 @@ fn owned_available_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocum
     owned_documents(state.workbench(), available_documents(state))
 }
 
-/// The `documents` the current window holds, in its order.
+/// The `documents` the current window holds, in its order, the pinned ones
+/// first: the generated netlist and the Added lines lead the strip however
+/// late they were built.
 fn owned_documents(
     workbench: &WorkbenchSession,
     documents: Vec<WorkspaceDocument>,
@@ -542,10 +544,13 @@ fn owned_documents(
         .filter(|document| workbench.window_session.belongs_to_current(&document.id))
         .collect::<Vec<_>>();
     documents.sort_by_key(|document| {
-        order
-            .iter()
-            .position(|candidate| candidate == &document.id)
-            .unwrap_or(usize::MAX)
+        (
+            !document.id.is_pinned(),
+            order
+                .iter()
+                .position(|candidate| candidate == &document.id)
+                .unwrap_or(usize::MAX),
+        )
     });
     documents
 }

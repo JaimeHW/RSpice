@@ -11,6 +11,7 @@ use rspice_app_state::state::SimulationRunIntent;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::document_bar::{
     WorkspaceDocumentDescriptor, activate_document, close_document, document_descriptors,
+    visible_documents,
 };
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
@@ -127,6 +128,24 @@ fn toolbar_verbs(drawn: &str) -> Vec<&'static str> {
         })
     })
     .collect()
+}
+
+/// The strip draws the generated netlist and the Added lines first even
+/// when the deck was open before the generated netlist was built.
+#[test]
+fn the_pinned_tabs_lead_the_strip_when_the_deck_opened_first() {
+    let mut app = RSpiceApp::test_instance();
+    app.state = hierarchy_reference::build().state;
+    app.state.seed_test_deck(DECK);
+    app.state.workbench.activate(Workspace::Netlist);
+    application_frame(&mut app);
+    application_frame(&mut app);
+
+    let strip = visible_documents(&app.state)
+        .into_iter()
+        .map(|tab| tab.label)
+        .collect::<Vec<_>>();
+    assert_eq!(strip, ["Generated netlist", "Added lines", "deck.cir"]);
 }
 
 /// Each tab's toolbar holds only the verbs that tab has: the deck is saved,
