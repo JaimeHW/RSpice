@@ -361,7 +361,7 @@ impl CheckpointChange {
             Self::Delete(checkpoint) => Some(format!(
                 "Deleted checkpoint \u{201c}{}\u{201d} from {}.",
                 checkpoint.title(),
-                crate::time_compat::utc_stamp(checkpoint.created_unix_ms())
+                crate::time_compat::local_stamp(checkpoint.created_unix_ms())
             )),
             Self::DeleteSetAside(artifact) => Some(format!(
                 "Deleted the damaged checkpoint {}.",
@@ -741,7 +741,7 @@ fn checkpoints_card(
                             &format!(
                                 "Delete \u{201c}{}\u{201d} from {}? It cannot be brought back.",
                                 checkpoint.title(),
-                                crate::time_compat::utc_stamp(checkpoint.created_unix_ms())
+                                crate::time_compat::local_stamp(checkpoint.created_unix_ms())
                             ),
                             &format!("Delete {}", checkpoint.title()),
                             snapshot.busy,
@@ -959,7 +959,7 @@ fn restore_prompt(
             "Restore \u{201c}{}\u{201d} from {}? Its project becomes unsaved changes; the \
              project as it is now is kept as \u{201c}{}\u{201d}.{technology}",
             checkpoint.title(),
-            crate::time_compat::utc_stamp(checkpoint.created_unix_ms()),
+            crate::time_compat::local_stamp(checkpoint.created_unix_ms()),
             crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Restore
                 .label()
         ),
@@ -1458,9 +1458,11 @@ fn checkpoint_row(
         )
     });
     theme::paint_focus_ring(ui, &response, rect);
+    // The exact instant, in UTC, for a record that must match another's.
     let response = response.on_hover_text(format!(
-        "{}\n{size}\nCheckpoint {}",
+        "{}\n{size}\nTaken {}\nCheckpoint {}",
         checkpoint.reason().label(),
+        crate::time_compat::utc_stamp(checkpoint.created_unix_ms()),
         checkpoint.checkpoint_id()
     ));
     if response.clicked() && intent.is_none() {
@@ -1574,7 +1576,7 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIn
                                 detail_font(),
                                 tokens.color.text_faint,
                             );
-                            format!("{title} from {}", crate::time_compat::utc_stamp(created))
+                            format!("{title} from {}", crate::time_compat::local_stamp(created))
                         }
                         _ => {
                             text_block(
@@ -1632,7 +1634,7 @@ fn checkpoint_created(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String 
     }
     format!(
         "{} \u{b7} {}",
-        crate::time_compat::utc_stamp(created_unix_ms),
+        crate::time_compat::local_stamp(created_unix_ms),
         checkpoint_age(created_unix_ms, now_unix_ms)
     )
 }

@@ -54,7 +54,8 @@ fn an_operation_says_how_long_ago_inside_a_day_and_its_date_past_one() {
     assert_eq!(unix_seconds_to_millis(1.25), Some(1_250));
 
     let at = 1_700_000_000_000;
-    let full = "2023-11-14 22:13 UTC";
+    let full = crate::time_compat::local_stamp(at);
+    let full = full.as_str();
     let operation = operation_at(Some(at));
     let when = |now: u64| {
         operation

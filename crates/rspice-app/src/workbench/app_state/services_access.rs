@@ -319,7 +319,7 @@ pub(crate) fn apply_restored_checkpoint(state: &mut AppState) {
         return;
     };
     state.project.project_checkpoint_recovery.invalidate();
-    let when = rspice_app_state::time_compat::utc_stamp(restored.checkpoint.created_unix_ms());
+    let when = rspice_app_state::time_compat::local_stamp(restored.checkpoint.created_unix_ms());
     let authority = RestoreAuthority {
         restored: &restored.checkpoint,
         before: &restored.before,
@@ -732,7 +732,7 @@ pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Co
     };
     match answer {
         RecoveredWorkAnswer::Keep(found) => {
-            let when = rspice_app_state::time_compat::utc_stamp(found.autosave.created_unix_ms());
+            let when = rspice_app_state::time_compat::local_stamp(found.autosave.created_unix_ms());
             match restore_checkpoint_in_place(state, *found.project, None) {
                 Ok(()) => {
                     state.project.project_checkpoint_recovery.invalidate();

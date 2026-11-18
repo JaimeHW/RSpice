@@ -187,7 +187,7 @@ impl OperationSnapshot {
     pub(super) fn dated(timestamp_ms: Option<u64>) -> (Option<u64>, String) {
         (
             timestamp_ms,
-            timestamp_ms.map_or_else(String::new, crate::time_compat::utc_stamp),
+            timestamp_ms.map_or_else(String::new, crate::time_compat::local_stamp),
         )
     }
 
@@ -636,7 +636,7 @@ fn cell_rows(model: &Model, netlist_first: bool) -> Arc<[CellRowSnapshot]> {
                     instances,
                     unsaved,
                     saved_ms,
-                    saved_stamp: saved_ms.map_or_else(String::new, crate::time_compat::utc_stamp),
+                    saved_stamp: saved_ms.map_or_else(String::new, crate::time_compat::local_stamp),
                     intent,
                 },
             ));

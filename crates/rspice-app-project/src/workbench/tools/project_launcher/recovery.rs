@@ -297,7 +297,7 @@ fn project_checkpoints(
             .show(ui, |row| {
                 let checkpoint = rows[row];
                 let created = checkpoint.created_unix_ms();
-                let taken = crate::time_compat::utc_stamp(created);
+                let taken = crate::time_compat::local_stamp(created);
                 let taken = match now_unix_ms.and_then(|now| now.checked_sub(created)) {
                     Some(age) => format!(
                         "{taken} \u{b7} {}",

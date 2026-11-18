@@ -79,7 +79,7 @@ impl OpenedReadOnly {
             } => format!(
                 "Opened read-only: {} has had this project open since {}.",
                 holder.display_name(),
-                crate::time_compat::utc_stamp(holder.since_unix_ms)
+                crate::time_compat::local_stamp(holder.since_unix_ms)
             ),
             Self::OpenElsewhere { holder: None } if cfg!(target_arch = "wasm32") => {
                 "Opened read-only: another tab of this browser has this project open.".to_owned()

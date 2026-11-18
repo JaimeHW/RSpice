@@ -1059,13 +1059,13 @@ fn autosave_time(modified_unix_ms: u64) -> String {
 }
 
 /// When a project checkpoint was taken, spelled as the Recovery page and the
-/// Console spell it: a checkpoint travels with its project, so its time is
-/// UTC, and a dialog must not name it at a second time.
+/// Console spell it, on the reader's clock: a dialog must not name it at a
+/// second time.
 fn checkpoint_time(created_unix_ms: u64) -> String {
     if created_unix_ms == 0 {
         "an earlier session".to_owned()
     } else {
-        crate::time_compat::utc_stamp(created_unix_ms)
+        crate::time_compat::local_stamp(created_unix_ms)
     }
 }
 
@@ -1108,13 +1108,13 @@ mod tests {
     }
 
     /// A project checkpoint is named at the time the Recovery page and the
-    /// Console give it, not at the reader's local time.
+    /// Console give it, on the reader's clock.
     #[test]
     fn a_project_checkpoint_is_named_at_its_recovery_page_time() {
         let taken = 1_760_000_000_000;
         let time = checkpoint_time(taken);
-        assert_eq!(time, crate::time_compat::utc_stamp(taken));
-        assert!(time.ends_with(" UTC"), "{time}");
+        assert_eq!(time, crate::time_compat::local_stamp(taken));
+        assert!(!time.ends_with(" UTC"), "{time}");
         let sentence = recovered_work_sentence("amp", &time, "3 min ago", 2);
         assert!(
             sentence.contains(&format!("autosave from {time} (3 min ago)")),

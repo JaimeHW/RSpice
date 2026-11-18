@@ -152,7 +152,7 @@ fn modified_width(ui: &Ui, snapshot: &OverviewSnapshot) -> f32 {
     let oldest = snapshot.cell_rows().filter_map(|row| row.saved_ms).min();
     let widest = match oldest {
         Some(at) if snapshot.now_ms.saturating_sub(at) >= DAY_MS => {
-            crate::time_compat::utc_stamp(at)
+            crate::time_compat::local_stamp(at)
         }
         Some(_) => "59 min ago".to_owned(),
         None => return MODIFIED_HEAD_WIDTH,

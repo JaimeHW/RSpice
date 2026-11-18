@@ -536,8 +536,8 @@ fn a_truncated_project_file_opens_from_its_checkpoint() {
         painted(&asked)
     );
     assert!(
-        painted(&asked).contains(" UTC ("),
-        "at the time the Recovery page gives it:\n{}",
+        !painted(&asked).contains(" UTC"),
+        "on the reader's clock, as the Recovery page gives it:\n{}",
         painted(&asked)
     );
     app_frame(

@@ -1850,7 +1850,7 @@ fn revision_label(record: &ValidatedSchematicRevision) -> String {
     format!(
         "{} ({})",
         short_digest(record),
-        crate::time_compat::utc_stamp(record.created_unix_ms())
+        crate::time_compat::local_stamp(record.created_unix_ms())
     )
 }
 
@@ -1860,7 +1860,7 @@ fn written_time(made_unix_ms: u64) -> String {
     if made_unix_ms == 0 {
         String::new()
     } else {
-        crate::time_compat::utc_stamp(made_unix_ms)
+        crate::time_compat::local_stamp(made_unix_ms)
     }
 }
 
@@ -2130,7 +2130,7 @@ mod tests {
             ..ProjectRevisionHistoryDialogState::default()
         };
         let texts = painted_body(1200.0, &rows, &harness.model, &mut dialog);
-        let made = crate::time_compat::utc_stamp(records[1].created_unix_ms());
+        let made = crate::time_compat::local_stamp(records[1].created_unix_ms());
         assert!(texts.contains(&made), "{made:?} is not listed: {texts:?}");
         assert!(
             !texts.iter().any(|text| text == "just now"),
@@ -2150,7 +2150,7 @@ mod tests {
         };
         assert!(with_current);
         assert_eq!(title, "Changes to the current design");
-        let baseline = crate::time_compat::utc_stamp(records[0].created_unix_ms());
+        let baseline = crate::time_compat::local_stamp(records[0].created_unix_ms());
         assert!(sides.contains(&baseline), "{sides:?}");
         let added = delta
             .changes

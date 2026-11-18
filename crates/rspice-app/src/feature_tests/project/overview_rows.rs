@@ -354,7 +354,7 @@ fn the_cells_table_lists_the_most_recently_saved_first_and_says_when() {
     assert_eq!(listed, ["cell02", "cell01", "cell00", "cell03"]);
 
     row_with(&settled, &["Cell: cell02", "Modified: 5 min ago"]);
-    let stamp = rspice_app_state::time_compat::utc_stamp(three_days_ago);
+    let stamp = rspice_app_state::time_compat::local_stamp(three_days_ago);
     row_with(&settled, &["Cell: cell01", &format!("Modified: {stamp}")]);
     row_with(&settled, &["Cell: cell00", "Modified: \u{2014}"]);
 }

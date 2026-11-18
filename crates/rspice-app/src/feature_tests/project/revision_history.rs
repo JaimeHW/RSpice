@@ -12,7 +12,7 @@ use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, Point, SchematicState, ValidatedSchematicRevisionId,
     View, ViewType,
 };
-use rspice_app_state::time_compat::utc_stamp;
+use rspice_app_state::time_compat::local_stamp;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_design::schematic::validated_revision::{
     ValidatedRevisionRequest, ValidationFindingCounts,
@@ -156,7 +156,7 @@ fn validate(schematic: &mut SchematicState, project: &str, view: &str, note: &st
             .chars()
             .take(10)
             .collect(),
-        stamp: utc_stamp(record.created_unix_ms()),
+        stamp: local_stamp(record.created_unix_ms()),
     }
 }
 

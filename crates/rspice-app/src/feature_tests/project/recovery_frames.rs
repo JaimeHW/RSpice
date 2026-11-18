@@ -423,7 +423,7 @@ fn a_damaged_checkpoint_is_named_by_its_name_and_time() {
     let text = painted(&listed);
     let damaged = &app.state.project.project_checkpoint_recovery.quarantined[0];
     assert_eq!(damaged.title(), Some("Manual checkpoint"));
-    let taken = rspice_app_state::time_compat::utc_stamp(
+    let taken = rspice_app_state::time_compat::local_stamp(
         damaged
             .created_unix_ms()
             .expect("its record says when it was taken"),

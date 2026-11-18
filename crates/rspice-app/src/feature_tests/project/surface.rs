@@ -678,7 +678,7 @@ fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
         let mut app = recovery_project_app(3, false, false);
         // Two checkpoints made minutes apart are told apart by the time in
         // the row; a tablet has no hover to read it from.
-        let made = rspice_app_state::time_compat::utc_stamp(
+        let made = rspice_app_state::time_compat::local_stamp(
             app.state.project.project_checkpoint_recovery.checkpoints[0].created_unix_ms(),
         );
         let text = painted_project_page(size, |ui| show(ui, &mut app));
@@ -757,7 +757,7 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
     // A damaged checkpoint whose record reads is named as its row was, by
     // its name and when it was taken; only one whose record is lost is named
     // by its file.
-    let taken = rspice_app_state::time_compat::utc_stamp(
+    let taken = rspice_app_state::time_compat::local_stamp(
         damaged
             .state
             .project

@@ -108,6 +108,33 @@ pub fn utc_stamp(unix_ms: u64) -> String {
     )
 }
 
+/// A durable record's time as the reader reads it, on their own clock:
+/// `2026-11-18 14:31`, as the recent list and the Console write a time, so
+/// every time on a page is on one clock. The exact UTC instant stays with
+/// the record ([`utc_stamp`]) for a hover or a receipt.
+///
+/// Zero and a timestamp the calendar cannot place say so, as [`utc_stamp`]
+/// does.
+pub fn local_stamp(unix_ms: u64) -> String {
+    const UNKNOWN: &str = "at an unknown time";
+    if unix_ms == 0 {
+        return UNKNOWN.to_owned();
+    }
+    local_date_time(unix_ms).map_or_else(
+        || UNKNOWN.to_owned(),
+        |stamp| {
+            format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}",
+                stamp.year(),
+                u8::from(stamp.month()),
+                stamp.day(),
+                stamp.hour(),
+                stamp.minute()
+            )
+        },
+    )
+}
+
 /// A millisecond timestamp on the reader's own clock.
 ///
 /// For what the reader saw happen in this session and wants to place against

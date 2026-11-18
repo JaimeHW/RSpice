@@ -108,7 +108,7 @@ def verify_checkpoint_time(browser, manifest, now_ms):
     """A checkpoint row states when the checkpoint was made, as a date and time
     no clock fault moves or hides, and then its age, which a fault makes
     unknown or moves the way the clock moved."""
-    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(manifest["created_unix_ms"] // 1000))
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(manifest["created_unix_ms"] // 1000))
     for value, age, suffix in ((now_ms - 86_400_000, "time unavailable", "rollback"),
                                (now_ms + 86_400_000, "yesterday", "forward"),
                                ("nonfinite", "time unavailable", "unavailable")):
@@ -122,7 +122,7 @@ def verify_checkpoint_time(browser, manifest, now_ms):
 def verify_revision_time(browser, record, note):
     """The history states when a revision was made as a date and time that no
     clock fault moves or hides, in the row that names the revision's note."""
-    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(record["created_unix_ms"] // 1000))
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(record["created_unix_ms"] // 1000))
     now_ms = time.time_ns() // 1_000_000
     for value, suffix in ((now_ms - 86_400_000, "rollback"),
                           (now_ms + 86_400_000, "forward"),
