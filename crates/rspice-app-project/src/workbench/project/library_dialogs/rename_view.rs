@@ -102,11 +102,11 @@ impl ProjectFeature {
         );
         let choice = Dialog::new("Rename view", "Rename")
             .description(
-                "Rename the selected view and remap its buffer, open tabs, owned source, and every instance bound to exactly this view.",
+                "Rename this view. Its open tabs, its source and every placement bound to it follow the new name.",
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .hint("Remaps the buffer, tabs, and instances bound to this view")
+            .hint("Tabs and placements follow the new name")
             .primary_enabled(catalog_current && !dialogs.rename_view_name.trim().is_empty())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;

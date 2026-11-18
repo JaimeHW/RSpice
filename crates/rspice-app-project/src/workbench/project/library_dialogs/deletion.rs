@@ -256,16 +256,16 @@ impl ProjectFeature {
         };
         let description = match (&target, several) {
             (LibraryDeletionTarget::Cell { .. }, false) => {
-                "Permanently remove this cell, all of its views, owned sources, open documents, and loaded workspace buffers."
+                "Remove this cell with all of its views and the sources they own, and close their tabs."
             }
             (LibraryDeletionTarget::View { .. }, false) => {
-                "Permanently remove this view, its owned source, open document, and loaded workspace buffer."
+                "Remove this view and the source it owns, and close its tab."
             }
             (LibraryDeletionTarget::Cell { .. }, true) => {
-                "Permanently remove these cells, all of their views, owned sources, open documents, and loaded workspace buffers."
+                "Remove these cells with all of their views and the sources they own, and close their tabs."
             }
             (LibraryDeletionTarget::View { .. }, true) => {
-                "Permanently remove these views, their owned sources, open documents, and loaded workspace buffers."
+                "Remove these views and the sources they own, and close their tabs."
             }
         };
         let these = if several { "these" } else { "this" };
@@ -293,8 +293,8 @@ impl ProjectFeature {
             "Open views",
             "Placements in this project",
             "Layout placements",
-            "Owned source bundles",
-            "Configuration roots",
+            "Source views",
+            "Configurations starting here",
         ];
         let refusal = super::refused(&object);
         let mut form = CommandForm::new(&title, keep_label)
@@ -328,8 +328,8 @@ impl ProjectFeature {
                 );
             }
             rows.value("Layout placements", &layout_count);
-            rows.value("Owned source bundles", &source_count);
-            rows.value("Configuration roots", &root_count);
+            rows.value("Source views", &source_count);
+            rows.value("Configurations starting here", &root_count);
             if let Some(error) = displayed_error.as_deref() {
                 rows.derived(error);
             }

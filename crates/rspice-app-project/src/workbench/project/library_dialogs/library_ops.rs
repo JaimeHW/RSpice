@@ -389,7 +389,7 @@ impl ProjectFeature {
             "Open views",
             "Placements outside this library",
             "Source views",
-            "Configuration roots",
+            "Configurations starting here",
         ];
         let refusal = super::refused("library");
         let choice = CommandForm::new("Delete library", "Delete")
@@ -410,7 +410,7 @@ impl ProjectFeature {
                 rows.value("Open views", &open_views);
                 rows.value("Placements outside this library", &references);
                 rows.value("Source views", &impact.source_views);
-                rows.value("Configuration roots", &roots);
+                rows.value("Configurations starting here", &roots);
                 if let Some(error) = displayed_error.as_deref() {
                     rows.derived(error);
                 }
