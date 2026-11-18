@@ -1,5 +1,4 @@
-//! The workspace surfaces: the search shortcut's hand-off keeps the source
-//! editor and the edits before it, a source write the bundle refuses leaves
+//! The workspace surfaces: a source write the bundle refuses leaves
 //! the editor as the bundle holds the source, and the Results split stage
 //! stays equal, bounded at narrow widths and named for assistive technology.
 
@@ -8,100 +7,6 @@ use egui::Context;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_state::state::ProjectSourceLanguage;
 use rspice_app_workbench::workbench::surfaces::register_results_split_region;
-
-#[test]
-fn search_shortcut_handoff_preserves_the_source_editor() {
-    source_editor_handoff(ProjectSourceLanguage::VerilogA, "");
-}
-
-#[test]
-fn search_shortcut_handoff_binds_preceding_source_edits() {
-    source_editor_handoff(ProjectSourceLanguage::VerilogA, "preceding_source_edit");
-}
-
-fn source_editor_handoff(language: ProjectSourceLanguage, preceding: &str) {
-    let (ctx, mut app, owner) = source_editor_page(language);
-    let bundle = app
-        .state
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .unwrap();
-    let editor_id =
-        code_workspace::source_editor_id(language, bundle.id(), bundle.root().logical_path());
-    let original = bundle.root().content().to_owned();
-    let sources = app.state.model.workspace.content.project_sources.clone();
-    let mut render = |events| render_page(&ctx, &mut app, events);
-    render(Vec::new());
-    render(Vec::new());
-    ctx.memory_mut(|memory| memory.request_focus(editor_id));
-    let key = |key, modifiers| egui::Event::Key {
-        key,
-        physical_key: Some(key),
-        pressed: true,
-        repeat: false,
-        modifiers,
-    };
-    render(vec![
-        egui::Event::Text(preceding.to_owned()),
-        key(
-            egui::Key::H,
-            egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-        ),
-        egui::Event::Text("wrong".to_owned()),
-        key(
-            egui::Key::A,
-            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
-        ),
-        egui::Event::Paste("import".to_owned()),
-    ]);
-    let bundle = app
-        .state
-        .model
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .unwrap();
-    if preceding.is_empty() {
-        assert!(
-            app.state.model.workspace.content.project_sources == sources,
-            "search text must not edit {language:?} source code"
-        );
-    } else {
-        assert!(
-            bundle.root().content().contains(preceding),
-            "preceding {language:?} source edit was lost"
-        );
-        assert_eq!(bundle.root().content().replacen(preceding, "", 1), original);
-    }
-    let search = app
-        .state
-        .code
-        .code_workspace
-        .source_search
-        .as_ref()
-        .expect("bundle search opened from the editor shortcut");
-    assert_eq!(search.query, "import", "{language:?} opening query");
-    assert_eq!(
-        search.bundle_id,
-        bundle.id(),
-        "{language:?} search binds the bundle the editor is showing"
-    );
-    assert_eq!(search.bundle_revision, bundle.revision().get());
-    assert!(
-        code_workspace::source_search_results_in(
-            &app.state.model,
-            &app.state.code.code_workspace,
-            &app.state.code.netlist,
-            &app.state.platform,
-            search
-        )
-        .is_ok()
-    );
-}
 
 /// An application on the page that edits a `language` source, and the owner
 /// of the bundle it edits.

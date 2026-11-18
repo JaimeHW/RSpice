@@ -584,6 +584,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CodeCommand::PlotNodeVoltage.key(),
     CodeCommand::PlotDeviceCurrent.key(),
     CodeCommand::FindCodeDocument.key(),
+    CodeCommand::ReplaceInCodeDocument.key(),
     CodeCommand::ValidateCodeDocument.key(),
     CodeCommand::ManageSourceDocument.key(),
     CodeCommand::ToggleLineComment.key(),

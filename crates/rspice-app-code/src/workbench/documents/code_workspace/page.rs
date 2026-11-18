@@ -51,44 +51,6 @@ pub struct CodeSourceHistoryState {
     pub error: Option<String>,
 }
 
-/// Revision-bound, bundle-wide source search/replace session. Search options
-/// are transient UI state; the captured identity prevents results or a
-/// replacement preview from being applied to a newer source closure.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeSourceSearchState {
-    pub project_id: ProjectId,
-    pub bundle_id: ProjectSourceId,
-    pub bundle_revision: u64,
-    pub closure_digest: ContentDigest,
-    pub generated_reference_revision: u64,
-    pub generated_reference_digest: ContentDigest,
-    pub language: ProjectSourceLanguage,
-    pub active_path: String,
-    /// Character range captured from the exact active editor revision when
-    /// the search opened. It remains immutable for this revision-bound search
-    /// and is discarded if the bundle changes.
-    pub selection_char_range: Option<(usize, usize)>,
-    pub scope: CodeSourceSearchScope,
-    pub query: String,
-    pub replacement: String,
-    pub match_case: bool,
-    pub whole_symbol: bool,
-    pub regular_expression: bool,
-    pub include_comments: bool,
-    pub include_generated_references: bool,
-    pub confirm_replace: bool,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum CodeSourceSearchScope {
-    Selection,
-    CurrentDocument,
-    OpenDocuments,
-    #[default]
-    ActiveLanguageProject,
-}
-
 #[derive(Debug)]
 pub struct PendingVerilogACompile {
     pub token: VerilogASourceOperationToken,
@@ -321,7 +283,6 @@ pub struct CodeWorkspaceRuntimeState {
     pub source_document_dialog: bool,
     pub source_file_dialog: Option<CodeSourceFileDialogState>,
     pub source_history: Option<CodeSourceHistoryState>,
-    pub source_search: Option<CodeSourceSearchState>,
     pub language_tools: Option<super::CodeLanguageToolsState>,
     /// Format, Rename and Replace, each one step of the bundle it changed.
     pub(crate) source_edit_history: super::source_edit_history::SourceEditHistory,

@@ -93,7 +93,7 @@ const APPLICATION_GATE: &[GateRow] = &[
     ("dialogs", |state| state.shell.about = true),
     ("ui.netlist, in the Netlist workspace", |state| {
         state.workbench.activate(Workspace::Netlist);
-        state.code.netlist.find.open = true;
+        state.code.netlist.comparison_dialog.open = true;
     }),
     ("sim_setup.session.palette_open", |state| {
         state.model.sim_setup.session.palette_open = true;
@@ -148,7 +148,7 @@ fn the_application_gate_alone_leaves_the_dialog_gate_shut() {
 /// than ruling on each row; changing one is a behaviour change.
 const OUTSIDE_THE_APPLICATION_GATE: &[GateRow] = &[
     ("ui.netlist, outside the Netlist workspace", |state| {
-        state.code.netlist.find.open = true;
+        state.code.netlist.comparison_dialog.open = true;
     }),
     ("ui.code_workspace.source_document_dialog", |state| {
         state.code.code_workspace.source_document_dialog = true;

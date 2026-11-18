@@ -102,7 +102,6 @@ const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 9] = [
             "app/dialogs/publish_web.rs",
             "app/dialogs/unpublish_web.rs",
             "app/dialogs/source_document.rs",
-            "app/dialogs/source_find.rs",
             "app/dialogs/source_language_tools.rs",
             "app/dialogs/design_management.rs",
             "app/dialogs/design_management/manager.rs",

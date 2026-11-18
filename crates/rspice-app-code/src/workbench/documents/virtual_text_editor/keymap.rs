@@ -289,7 +289,7 @@ mod tests {
 
     /// No key of a command the source editor answers is one the editor
     /// keeps for itself, on any desktop system: neither one of this map's
-    /// nor one its completion, find or zoom takes before a command could.
+    /// nor one its completion or zoom takes before a command could.
     #[test]
     fn no_editor_command_key_is_one_the_editor_keeps_for_itself() {
         use crate::workbench::code::commands::CodeCommand;
@@ -301,13 +301,12 @@ mod tests {
                 Modifiers::COMMAND
             }
         };
-        // Completion, signature help, find across the bundle and the text
-        // size, as the editor and its assist read them.
+        // Completion, signature help and the text size, as the editor and
+        // its assist read them.
         let kept = |os: OperatingSystem| {
             [
                 (Key::Space, Modifiers::CTRL),
                 (Key::Space, Modifiers::CTRL | Modifiers::SHIFT),
-                (Key::H, control(os) | Modifiers::SHIFT),
                 (Key::Equals, control(os)),
                 (Key::Plus, control(os)),
                 (Key::Minus, control(os)),

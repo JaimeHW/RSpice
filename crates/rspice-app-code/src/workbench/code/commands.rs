@@ -62,7 +62,10 @@ pub enum CodeCommand {
     PlotNodeVoltage,
     /// The current of the device under the caret, likewise.
     PlotDeviceCurrent,
+    /// Open the find bar of the source editor in front.
     FindCodeDocument,
+    /// Open the find bar with its replace row, where the text may change.
+    ReplaceInCodeDocument,
     ValidateCodeDocument,
     ManageSourceDocument,
     /// The source editor's line, navigation and folding commands. Each acts
@@ -137,7 +140,6 @@ pub enum CodeRequest {
     ExportDeckFiles,
     GenerateNetlist,
     ShowInNetlist,
-    FindCodeDocument,
     ValidateCodeDocument,
     ManageSourceDocument,
     GoToDefinition,
@@ -152,7 +154,6 @@ pub enum CodeRequest {
     SaveVerilogABuildSettings {
         compile: bool,
     },
-    ReplaceSourceSearchMatches,
     SourceDocument(SourceDocumentRequest),
     CommitSymbolRename,
     /// Commit the rewrite of a `.lib` card's section from `original` to
@@ -180,9 +181,6 @@ pub enum CodeRequest {
         schematic: CellViewRef,
         net: String,
     },
-    /// Carry out the press the netlist page's find window stored: going to a
-    /// match, replacing it, or replacing every match.
-    ApplyNetlistFind,
     /// Apply the preferred quick fix at the netlist editor's caret.
     ApplyNetlistQuickFix,
     /// Format the deck or the include the netlist editor shows.
@@ -424,6 +422,12 @@ const COMPILE_VERILOGA: &[ShortcutBinding] = &[
 // finds in the design. As with Ctrl+D the focused surface decides.
 const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
+// A browser keeps Ctrl+H for its history, so there the menu reaches it, as
+// the schematic's Find and replace does.
+const REPLACE_IN_CODE_DOCUMENT: &[ShortcutBinding] = &[primary(
+    chord(Key::H, true, false, false, "Ctrl+H"),
+    DESKTOP,
+)];
 
 /// New deck's name: on the desktop it asks where the new file goes; where
 /// there is no file system it makes the deck at once.
@@ -438,7 +442,7 @@ pub const fn new_deck_label(browser: bool) -> &'static str {
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 46] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::NewDeck,
@@ -457,6 +461,7 @@ impl CodeCommand {
         Self::PlotNodeVoltage,
         Self::PlotDeviceCurrent,
         Self::FindCodeDocument,
+        Self::ReplaceInCodeDocument,
         Self::ValidateCodeDocument,
         Self::ManageSourceDocument,
         Self::ToggleLineComment,
@@ -507,6 +512,7 @@ impl CodeCommand {
             Self::PlotNodeVoltage => CommandKey::new("plot-node-voltage"),
             Self::PlotDeviceCurrent => CommandKey::new("plot-device-current"),
             Self::FindCodeDocument => CommandKey::new("find-code"),
+            Self::ReplaceInCodeDocument => CommandKey::new("replace-code"),
             Self::ValidateCodeDocument => CommandKey::new("validate-code"),
             Self::ManageSourceDocument => CommandKey::new("manage-source-document"),
             Self::ToggleLineComment => CommandKey::new("toggle-line-comment"),
@@ -562,6 +568,8 @@ impl CodeCommand {
                 SourceEditorRequest::Structural(StructuralCommand::MatchBracket)
             }
             Self::GoToLine => SourceEditorRequest::GoToLine,
+            Self::FindCodeDocument => SourceEditorRequest::Find { replace: false },
+            Self::ReplaceInCodeDocument => SourceEditorRequest::Find { replace: true },
             Self::FormatDocument => SourceEditorRequest::FormatDocument,
             Self::FoldSelection => SourceEditorRequest::View(EditorViewCommand::FoldSelection),
             Self::UnfoldAtCaret => SourceEditorRequest::View(EditorViewCommand::UnfoldAtCaret),
@@ -619,7 +627,8 @@ impl CodeCommand {
             | Self::ShowInSchematic
             | Self::PlotNodeVoltage
             | Self::PlotDeviceCurrent
-            | Self::FindCodeDocument => ShortcutContext::SourceEditor,
+            | Self::FindCodeDocument
+            | Self::ReplaceInCodeDocument => ShortcutContext::SourceEditor,
             Self::ShowInNetlist => ShortcutContext::DesignWorkspace,
             _ => ShortcutContext::Global,
         }
@@ -648,6 +657,7 @@ impl CodeCommand {
             Self::RenameSymbol => RENAME_SYMBOL,
             Self::ShowInSchematic => SHOW_IN_SCHEMATIC,
             Self::FindCodeDocument => FIND_CODE_DOCUMENT,
+            Self::ReplaceInCodeDocument => REPLACE_IN_CODE_DOCUMENT,
             Self::CompileVerilogA => COMPILE_VERILOGA,
             _ => NONE,
         }
@@ -692,6 +702,7 @@ impl CodeCommand {
             Self::PlotNodeVoltage => ("Plot node voltage", "Code", open),
             Self::PlotDeviceCurrent => ("Plot device current", "Code", open),
             Self::FindCodeDocument => ("Find in source\u{2026}", "Code", palette),
+            Self::ReplaceInCodeDocument => ("Replace in source\u{2026}", "Code", palette),
             Self::ValidateCodeDocument => ("Validate netlist", "Code", palette),
             Self::ManageSourceDocument => ("Manage source document\u{2026}", "Code", palette),
             Self::ToggleLineComment => ("Toggle line comment", "Edit", palette),

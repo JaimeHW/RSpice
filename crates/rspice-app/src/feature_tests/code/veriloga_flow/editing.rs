@@ -97,44 +97,6 @@ fn rename_is_one_undo_across_the_module() {
 }
 
 #[test]
-fn replace_in_files_is_one_undo_across_the_module() {
-    let mut user = op_amp();
-    let original = source(&user);
-    let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
-    let path = selected.document().logical_path().to_owned();
-    code_workspace::open_source_search_in_bundle(
-        &mut user.app.code_workspace_parts(),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
-        selected.bundle().id(),
-        &path,
-    )
-    .expect("the search opens");
-    let search = user
-        .app
-        .state
-        .code
-        .code_workspace
-        .source_search
-        .as_mut()
-        .expect("the form is open");
-    search.query = "vslew".to_owned();
-    search.replacement = "limited".to_owned();
-    code_workspace::commit_source_search_replace(&mut user.app.code_workspace_parts())
-        .expect("the replace applies");
-    user.settle();
-    let replaced = source(&user);
-    assert!(!replaced.contains("vslew"));
-    assert!(replaced.matches("limited").count() > 2);
-
-    user.click(EDITOR);
-    undo(&mut user);
-    assert_eq!(source(&user), original, "one Undo takes back every match");
-    redo(&mut user);
-    assert_eq!(source(&user), replaced, "one Redo puts them all back");
-}
-
-#[test]
 fn replace_source_from_file_is_one_undo() {
     let mut user = op_amp();
     let original = source(&user);

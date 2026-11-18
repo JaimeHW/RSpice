@@ -349,7 +349,6 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "project"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
-    ("features::render_dialog", "code"),
     ("features::render_dialog", "design"),
     ("features::render_dialog", "design"),
     ("features::render_dialog", "project"),
@@ -1525,8 +1524,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
         .collect::<Vec<_>>();
     assert_eq!(
         recorded.len(),
-        83,
-        "the frame's 81 dialog steps, the route overlays' 3 owners in place of their host"
+        82,
+        "the frame's 80 dialog steps, the route overlays' 3 owners in place of their host"
     );
 
     let specs = dialog_specs(DIALOG_ORDER);
@@ -1582,8 +1581,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
     }
     assert_eq!(
         DIALOG_STEPS.len() - SYNTHETIC_DIALOG_STEPS.len() - SYNTHETIC_FEATURE_STEPS.len(),
-        76,
-        "the frame draws 76 dialog steps beside its synthetic ones"
+        75,
+        "the frame draws 75 dialog steps beside its synthetic ones"
     );
 }
 

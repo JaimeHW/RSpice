@@ -685,93 +685,11 @@ pub enum ActiveNetlistDocument {
     RunSnapshot,
 }
 
-/// User-selected reach of the Code workspace find surface. Replacement is
-/// intentionally limited to project-owned source documents; project-reference
-/// search is always find-only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum NetlistFindScope {
-    #[default]
-    CurrentDocument,
-    Selection,
-    OpenDocuments,
-    ActiveLanguageProject,
-    ProjectReferences,
-}
-
-/// Persistent, keyboard-reachable state for the mockup's Find and replace
-/// surface. Match rows are derived from the current exact source every frame,
-/// so they cannot become stale after an edit.
-#[derive(Debug, Clone)]
+/// Find asked for on the Netlist page, from its toolbar or the workbench's
+/// Find: the deck's editor opens its find bar the next time it draws.
+#[derive(Debug, Clone, Default)]
 pub struct NetlistFindState {
     pub open: bool,
-    pub find: String,
-    pub replacement: String,
-    pub match_case: bool,
-    pub whole_symbol: bool,
-    pub regular_expression: bool,
-    pub include_comments: bool,
-    pub include_generated_references: bool,
-    pub scope: NetlistFindScope,
-    pub selected_match: usize,
-    pub error: Option<String>,
-    /// A press the window made this frame, which the shell carries out once
-    /// the page has drawn. The session does not store it.
-    pub pending: Option<NetlistFindStep>,
-}
-
-impl Default for NetlistFindState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            find: String::new(),
-            replacement: String::new(),
-            match_case: false,
-            whole_symbol: false,
-            regular_expression: false,
-            include_comments: true,
-            include_generated_references: false,
-            scope: NetlistFindScope::CurrentDocument,
-            selected_match: 0,
-            error: None,
-            pending: None,
-        }
-    }
-}
-
-/// A press in the find window: going to a match, replacing it, or replacing
-/// every match. Going to a match opens its document and a replacement
-/// commits through a candidate copy of the whole state, so the shell carries
-/// it out once the page has drawn.
-#[derive(Debug, Clone)]
-pub struct NetlistFindStep {
-    pub(crate) action: Option<NetlistFindAction>,
-    /// The options the matches were found with.
-    pub(crate) options: crate::state::FindOptions,
-    /// The match the press names.
-    pub(crate) target: Option<NetlistFindTarget>,
-    /// What Replace all planned, against the scan the window drew.
-    pub(crate) replacements: Option<Vec<OwnedNetlistReplacement>>,
-}
-
-/// What a press in the find window asks for.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum NetlistFindAction {
-    Select(usize),
-    ReplaceNext,
-    ReplaceAll,
-}
-
-/// The match a find step names, held independently of the scan it came from.
-#[derive(Debug, Clone)]
-pub(crate) struct NetlistFindTarget {
-    pub(crate) index: usize,
-    pub(crate) active_document: ActiveNetlistDocument,
-    pub(crate) dependency_identity: Option<String>,
-    pub(crate) editable: bool,
-    /// The document's bytes, present only for a replacement.
-    pub(crate) source: Option<String>,
-    pub(crate) line: usize,
-    pub(crate) byte_range: std::ops::Range<usize>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -974,7 +892,7 @@ impl NetlistDocumentState {
     /// This is queried before painting, so keyboard shortcuts cannot mutate
     /// the document behind a modal during its opening frame.
     pub fn application_modal_open(&self) -> bool {
-        self.find.open || self.comparison_dialog.open || self.export_dialog.open
+        self.comparison_dialog.open || self.export_dialog.open
     }
 }
 

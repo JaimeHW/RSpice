@@ -10,12 +10,10 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 
-mod find;
 mod platform;
 #[cfg(test)]
 mod tests;
 
-pub use find::apply_netlist_find_step;
 #[cfg(not(target_arch = "wasm32"))]
 pub use platform::{
     show_deck_save_dialog, show_new_deck_dialog, show_open_deck_dialog, show_zip_save_dialog,

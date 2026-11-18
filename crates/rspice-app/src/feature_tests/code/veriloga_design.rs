@@ -81,10 +81,9 @@ fn a_veriloga_cell_view_opens_in_design_with_its_editor() {
     );
 }
 
-/// Find used to resolve the project's code-workspace bundle whatever was on
-/// screen, so Ctrl+F in a cell view searched a different module.
+/// Find in a cell view opens the find bar of that view's own editor.
 #[test]
-fn find_in_a_veriloga_cell_view_searches_that_views_bundle() {
+fn find_in_a_veriloga_cell_view_opens_that_views_find_bar() {
     let mut app = open_project_app();
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
@@ -100,22 +99,26 @@ fn find_in_a_veriloga_cell_view_searches_that_views_bundle() {
         "the view's bundle is the project's only Verilog-A source"
     );
 
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
     assert!(app.command_key_enabled(CodeCommand::FindCodeDocument.key()));
     app.execute_command_key(CodeCommand::FindCodeDocument.key());
-
-    let search = app
-        .state
-        .code
-        .code_workspace
-        .source_search
-        .as_ref()
-        .expect("the bundle search opened");
-    assert_eq!(search.bundle_id, bundle_id);
-    assert_eq!(search.language, ProjectSourceLanguage::VerilogA);
-    assert_eq!(search.active_path, "model.va");
+    for _ in 0..3 {
+        frame(&ctx, &mut app, DESKTOP);
+    }
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(
+            rspice_app_code::workbench::documents::virtual_text_editor::find_field_id(editor_id(
+                bundle_id, "model.va"
+            ))
+        ),
+        "the keyboard is in the find bar of the view's editor"
+    );
     assert!(
         !app.state.code.netlist.find.open,
-        "the deck's find window is not the cell view's"
+        "the deck's find is not the cell view's"
     );
 }
 

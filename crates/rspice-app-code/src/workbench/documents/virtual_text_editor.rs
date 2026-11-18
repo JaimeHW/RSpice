@@ -8,6 +8,7 @@
 mod accessibility;
 mod cells;
 mod context_menu;
+mod find_bar;
 mod keymap;
 mod touch;
 
@@ -17,6 +18,13 @@ pub use accessibility::speak_caret_lines;
 use accessibility::{consume_accesskit_text_selection, update_accesskit_text_state};
 use context_menu::{context_menu_id, take_menu_keys};
 pub use context_menu::{context_menu_may_show, context_menu_open};
+pub(crate) use find_bar::queue_open as queue_find_bar;
+
+/// The search field of the find bar over the editor `editor_id`, which has
+/// the keyboard while the reader types a search.
+pub fn find_field_id(editor_id: egui::Id) -> egui::Id {
+    editor_id.with("find-bar-query")
+}
 use keymap::{KeyAction, Motion, Reach};
 
 use std::ops::Range;
@@ -93,6 +101,7 @@ struct VirtualEditorSession {
     /// caret is drawn the moment it arrives.
     caret_moved_at: f64,
     touch: touch::TouchGesture,
+    find: find_bar::FindBar,
 }
 
 /// How a caret that moved is brought into view.
@@ -149,6 +158,7 @@ impl Default for VirtualEditorSession {
             viewport_size: None,
             caret_moved_at: 0.0,
             touch: touch::TouchGesture::default(),
+            find: find_bar::FindBar::default(),
         }
     }
 }
@@ -514,6 +524,7 @@ pub(crate) fn show_virtual_text_editor(
     if consume_accesskit_text_selection(ui, editor_id, &mut session.model, style) {
         reveal = reveal.or(Some(Reveal::Nearest));
     }
+    find_bar::take_open_request(ui.ctx(), editor_id, &mut session, editable);
 
     // Keys act before the view is laid out, so the frame that moves the
     // caret is the frame that shows it.
@@ -578,21 +589,27 @@ pub(crate) fn show_virtual_text_editor(
     if input.release_focus {
         ui.memory_mut(|memory| memory.surrender_focus(editor_id));
     }
-    let scroll_offset = planned_scroll_offset(
-        ui.ctx(),
-        &session,
-        style,
-        char_width,
-        reveal,
-        input.page_rows,
-    );
-
     let tab_moves_focus = tab_moves_focus_mode(ui.ctx());
     let mut caret_anchor = None;
     let mut hover_char_index = None;
     let mut requested_scroll = requested_line;
     let available = Vec2::new(ui.available_width(), ui.available_height().max(120.0));
-    let scroll_output = ui.allocate_ui(available, |ui| {
+    let layout = egui::Layout::top_down(egui::Align::Min);
+    let scroll_output = ui.allocate_ui_with_layout(available, layout, |ui| {
+        // The find bar stands over the text, in the space the editor takes;
+        // a match it goes to is brought into view in the same frame.
+        if session.find.open && find_bar::show(ui, editor_id, &mut session, editable, style) {
+            reveal = Some(Reveal::CenterIfOutside);
+            session.caret_moved_at = ui.input(|input| input.time);
+        }
+        let scroll_offset = planned_scroll_offset(
+            ui.ctx(),
+            &session,
+            style,
+            char_width,
+            reveal,
+            input.page_rows,
+        );
         let mut scroll_area = egui::ScrollArea::both()
             .id_salt(editor_id.with("scroll"))
             .auto_shrink([false, false]);
@@ -872,6 +889,16 @@ pub(crate) fn show_virtual_text_editor(
                     code_origin_x,
                     char_width,
                 );
+                find_bar::paint_matches(
+                    &code_painter,
+                    &session.model,
+                    &session.find,
+                    line.logical_line,
+                    row_rect,
+                    code_origin_x,
+                    char_width,
+                    style,
+                );
                 let job = layout_line(
                     ui,
                     &LayoutRow {
@@ -1058,6 +1085,12 @@ pub(crate) fn show_virtual_text_editor(
         })
     });
     session.scroll_id = Some(scroll_output.inner.id);
+    find_bar::paint_ticks(
+        ui.painter(),
+        &session.find,
+        scroll_output.inner.inner_rect,
+        style,
+    );
     let response = scroll_output.inner.inner;
     if response.has_focus() {
         claim_editing_keys(ui, editor_id, editable && !tab_moves_focus);

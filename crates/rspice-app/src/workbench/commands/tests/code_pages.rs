@@ -5,19 +5,19 @@
 use super::*;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 
-/// Find on the Netlist workspace opens the deck's own find window, not the
-/// bundle search a Verilog-A view opens.
+/// The workbench's Find on the Netlist workspace asks the deck's editor for
+/// its find bar.
 #[test]
-fn find_opens_the_window_the_visible_code_page_owns() {
+fn find_on_the_netlist_workspace_asks_for_the_deck_editors_find_bar() {
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Netlist;
 
-    assert!(app.command_key_enabled(CodeCommand::FindCodeDocument.key()));
-    app.execute_command_key(CodeCommand::FindCodeDocument.key());
-    assert!(app.state.code.netlist.find.open, "the deck find opened");
+    assert!(app.command_key_enabled(ids::FIND_IN_DESIGN));
+    app.execute_command_key(ids::FIND_IN_DESIGN);
     assert!(
-        app.state.code.code_workspace.source_search.is_none(),
-        "the deck is not a project source bundle"
+        app.state.code.netlist.find.open,
+        "the deck's find bar is asked for"
     );
 }
 

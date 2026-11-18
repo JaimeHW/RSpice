@@ -146,6 +146,12 @@ pub enum WorkbenchIcon {
     Export,
     Star,
     StarFilled,
+    /// Find: match case. A capital and a small letter.
+    MatchCase,
+    /// Find: whole words only. Two letters over a bracket underneath.
+    WholeWord,
+    /// Find: a regular expression. A dot and a star.
+    RegularExpression,
 }
 
 /// The kit's status marks, under the name every workbench surface already
@@ -761,6 +767,25 @@ impl WorkbenchIcon {
             // A five-pointed star on the 24-unit grid, stroked hollow and
             // filled when set. The bundled faces carry neither U+2605 nor
             // U+2606, so a starred row used to paint a missing-glyph box.
+            Self::MatchCase => {
+                line(&[(3.0, 18.0), (7.5, 6.0), (12.0, 18.0)]);
+                line(&[(4.7, 13.5), (10.3, 13.5)]);
+                painter.circle_stroke(p(17.0, 15.0), 3.0 * scale, stroke);
+                line(&[(20.0, 11.5), (20.0, 18.0)]);
+            }
+            Self::WholeWord => {
+                painter.circle_stroke(p(7.5, 11.0), 3.0 * scale, stroke);
+                line(&[(10.5, 7.5), (10.5, 14.0)]);
+                line(&[(13.5, 4.0), (13.5, 14.0)]);
+                painter.circle_stroke(p(16.5, 11.0), 3.0 * scale, stroke);
+                line(&[(3.0, 16.5), (3.0, 19.5), (21.0, 19.5), (21.0, 16.5)]);
+            }
+            Self::RegularExpression => {
+                line(&[(15.0, 4.0), (15.0, 13.0)]);
+                line(&[(11.1, 6.25), (18.9, 10.75)]);
+                line(&[(11.1, 10.75), (18.9, 6.25)]);
+                painter.circle_filled(p(7.0, 17.5), 2.0 * scale, color);
+            }
             Self::Star | Self::StarFilled => {
                 let points = STAR_POINTS.map(|(x, y)| p(x, y)).to_vec();
                 if matches!(self, Self::StarFilled) {

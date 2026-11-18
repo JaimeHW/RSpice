@@ -1937,10 +1937,6 @@ mod tests {
         state.models.model_browser_state.open = false;
 
         state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
-        state.code.netlist.find.open = true;
-        assert!(state.application_modal_open());
-        state.code.netlist.find.open = false;
-
         state.code.netlist.comparison_dialog.open = true;
         assert!(state.application_modal_open());
         state.code.netlist.comparison_dialog.open = false;

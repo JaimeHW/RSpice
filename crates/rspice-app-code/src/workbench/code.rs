@@ -22,7 +22,7 @@ use crate::workbench::app::dialogs::library::new_veriloga_device::{
 };
 use crate::workbench::app::dialogs::library::veriloga_import;
 use crate::workbench::app::dialogs::{
-    source_document, source_find, source_language_tools, veriloga_build_settings,
+    source_document, source_language_tools, veriloga_build_settings,
 };
 use crate::workbench::app::{
     source_document_dialog_is_available, veriloga_build_settings_available,
@@ -139,8 +139,7 @@ fn source_editor_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
 }
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
-/// order lists them by: the source document dialogs, Find in source,
-/// Rename symbol, New Verilog-A device, Import Verilog/Verilog-A/AMS, Replace
+/// order lists them by: the source document dialogs, Rename symbol, New Verilog-A device, Import Verilog/Verilog-A/AMS, Replace
 /// source from file and Build settings. Each is open while its form is.
 const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
     FeatureDialog {
@@ -150,11 +149,6 @@ const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
                 || code.code_workspace.source_file_dialog.is_some()
         },
         render: CodeFeature::render_source_document_dialog,
-    },
-    FeatureDialog {
-        key: DialogKey("code.source_find"),
-        is_open: |code| code.code_workspace.source_search.is_some(),
-        render: CodeFeature::render_source_find_dialog,
     },
     FeatureDialog {
         key: DialogKey("code.rename_symbol"),
@@ -312,7 +306,6 @@ impl CommandSet for CodeCommand {
                     Err(reason) => (false, reason),
                 }
             }
-            Self::FindCodeDocument => (code_document_on_screen(reads), UNAVAILABLE),
             Self::ValidateCodeDocument => (
                 netlist_page_on_screen(reads)
                     && reads.state.netlist.active_document != ActiveNetlistDocument::GeneratedDiff
@@ -386,6 +379,8 @@ impl CommandSet for CodeCommand {
             | Self::MoveLineDown
             | Self::GoToMatchingBracket
             | Self::GoToLine
+            | Self::FindCodeDocument
+            | Self::ReplaceInCodeDocument
             | Self::FormatDocument
             | Self::FoldSelection
             | Self::UnfoldAtCaret
@@ -433,6 +428,8 @@ impl CommandSet for CodeCommand {
             | Self::MoveLineDown
             | Self::GoToMatchingBracket
             | Self::GoToLine
+            | Self::FindCodeDocument
+            | Self::ReplaceInCodeDocument
             | Self::FormatDocument
             | Self::FoldSelection
             | Self::UnfoldAtCaret
@@ -471,7 +468,6 @@ impl CommandSet for CodeCommand {
                     plot_from_source(cx, quantity);
                 }
             }
-            Self::FindCodeDocument => cx.wb.outbox.push(CodeRequest::FindCodeDocument),
             Self::ValidateCodeDocument => cx.wb.outbox.push(CodeRequest::ValidateCodeDocument),
             Self::ManageSourceDocument => cx.wb.outbox.push(CodeRequest::ManageSourceDocument),
             Self::GoToDefinition => cx.wb.outbox.push(CodeRequest::GoToDefinition),
@@ -756,22 +752,6 @@ impl CodeFeature {
             ctx,
         ) {
             cx.wb.outbox.push(CodeRequest::SourceDocument(request));
-        }
-    }
-
-    /// Find in source.
-    fn render_source_find_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
-        let messages = cx.wb.messages();
-        let code = &mut *cx.state;
-        if source_find::render_source_find_dialog(
-            &mut code.code_workspace,
-            &code.netlist,
-            cx.model,
-            cx.platform,
-            messages,
-            ctx,
-        ) {
-            cx.wb.outbox.push(CodeRequest::ReplaceSourceSearchMatches);
         }
     }
 

@@ -292,7 +292,6 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
         code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
-    assert!(app.state.code.code_workspace.source_search.is_none());
     frame_with(
         &ctx,
         &mut app,
@@ -302,10 +301,13 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
             egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
         )],
     );
-    frame(&ctx, &mut app, DESKTOP);
-    assert!(
-        app.state.code.code_workspace.source_search.is_some(),
-        "Ctrl+F in the focused editor opened the source's find"
+    for _ in 0..3 {
+        frame(&ctx, &mut app, DESKTOP);
+    }
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(rspice_app_code::workbench::documents::virtual_text_editor::find_field_id(editor)),
+        "Ctrl+F in the focused editor put the keyboard in its find bar"
     );
 
     // On a drawing there is no source editor: the source commands are not

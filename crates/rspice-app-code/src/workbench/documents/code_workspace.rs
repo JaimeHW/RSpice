@@ -12,7 +12,6 @@ mod page;
 mod source_edit_history;
 mod source_files;
 mod source_navigation;
-mod source_search;
 mod veriloga;
 mod veriloga_assist;
 mod veriloga_catalog;
@@ -41,10 +40,9 @@ pub use language_services::{
 };
 pub(crate) use page::VerilogAHeaderView;
 pub use page::{
-    CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceSearchScope,
-    CodeSourceSearchState, CodeWorkspaceRuntimeState, PendingVerilogACompile,
-    VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
-    VerilogAReplaceTarget, VerilogAWorkbenchState,
+    CodeSourceFileDialogState, CodeSourceHistoryState, CodeWorkspaceRuntimeState,
+    PendingVerilogACompile, VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState,
+    VerilogAReplaceReview, VerilogAReplaceTarget, VerilogAWorkbenchState,
 };
 pub use source_files::{
     commit_source_file_dialog, commit_source_history_restore, open_source_file_dialog,
@@ -56,12 +54,6 @@ pub use source_files::{
 pub(crate) use source_navigation::{
     SourceIncludeTarget, SourceIndexCache, SourceNavigation, SourceOutlineGroup, builtin_header,
     document_navigation,
-};
-pub use source_search::{
-    CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
-    forget_source_search_results, kept_source_search_results_in, open_active_source_search,
-    open_source_search, open_source_search_in_bundle, source_search_query_id,
-    source_search_results_in,
 };
 pub use veriloga::{
     PickedSource, SelectedVerilogASource, active_veriloga_file_path, cancel_veriloga_compile,

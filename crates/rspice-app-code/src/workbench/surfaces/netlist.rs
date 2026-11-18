@@ -15,7 +15,6 @@ mod deck_bands;
 mod dialect_chip;
 pub mod generation;
 mod revision;
-pub mod search;
 pub mod source_menu;
 pub mod toolbar;
 pub mod transfer;
@@ -472,9 +471,20 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             }
         }
     });
+    // Find asked for on this page opens the find bar of the deck's editor,
+    // which takes it the next time it draws.
+    if std::mem::take(&mut cx.state.netlist.find.open) {
+        crate::workbench::documents::virtual_text_editor::queue_find_bar(
+            ui.ctx(),
+            crate::workbench::documents::netlist_document::editor_id_in(
+                cx.model,
+                &cx.state.netlist,
+            ),
+            false,
+        );
+    }
     // The dialogs draw in the code feature's context. What one raises is
     // answered once the page has drawn.
-    search::find_replace_window(ui.ctx(), cx);
     revision::comparison_dialog_window(ui.ctx(), cx);
     transfer::export_generated_dialog_window(ui.ctx(), cx);
 }

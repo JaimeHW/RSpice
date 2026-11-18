@@ -807,3 +807,175 @@ fn a_finger_scrolls_taps_the_caret_and_selects_a_word_with_handles() {
         .count();
     assert_eq!(knobs, 2, "the selection shows a handle at each end");
 }
+
+/// Ask the editor for its find bar, as Ctrl+F and Ctrl+H do, and draw it.
+fn open_find(bench: &mut Bench, replace: bool) {
+    queue_source_editor_request(
+        &bench.context,
+        bench.id,
+        crate::workbench::framework::requests::SourceEditorRequest::Find { replace },
+    );
+    for _ in 0..2 {
+        let _ = bench.frame(Vec::new());
+    }
+}
+
+/// Whether a frame showed `text` as a control's name or a label.
+fn says(shown: &Shown, text: &str) -> bool {
+    shown
+        .output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .is_some_and(|update| {
+            update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some(text) || node.value() == Some(text))
+        })
+}
+
+/// Press the control a frame named `name`.
+fn press(bench: &mut Bench, shown: &Shown, name: &str) {
+    let bounds = shown
+        .output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .and_then(|update| {
+            update
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(name))
+                .and_then(|(_, node)| node.bounds())
+        })
+        .unwrap_or_else(|| panic!("no control named {name}"));
+    let at = egui::pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    let _ = bench.frame(pointer(at, None, false));
+    let _ = bench.frame(pointer(at, Some(true), false));
+    let _ = bench.frame(pointer(at, Some(false), false));
+}
+
+fn selected_range(bench: &Bench) -> std::ops::Range<usize> {
+    bench
+        .session()
+        .model
+        .selections()
+        .last()
+        .expect("a selection")
+        .range()
+}
+
+#[test]
+fn find_counts_every_match_and_enter_steps_through_them() {
+    let mut bench = Bench::new(&numbered_lines(40), true);
+    bench.focus();
+    open_find(&mut bench, false);
+    assert_eq!(
+        bench.context.memory(|memory| memory.focused()),
+        Some(find_field_id(bench.id)),
+        "the keyboard is in the search"
+    );
+    let typed = bench.frame(vec![egui::Event::Text("x1".to_owned())]);
+    assert_eq!(bench.session().find.matches().len(), 11);
+    assert!(
+        says(&typed, "11 matches"),
+        "the bar counts them as they are typed"
+    );
+
+    // Each line before the tenth is 12 characters, the tenth on 14.
+    let _ = bench.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(
+        selected_range(&bench),
+        4..6,
+        "Enter selects the first match"
+    );
+    assert!(says(&bench.frame(Vec::new()), "1 of 11"));
+    let _ = bench.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(selected_range(&bench), 112..114, "and then the next");
+    assert_eq!(
+        bench.context.memory(|memory| memory.focused()),
+        Some(find_field_id(bench.id)),
+        "the keyboard stays in the search"
+    );
+    let _ = bench.key(Key::Enter, Modifiers::SHIFT);
+    let _ = bench.key(Key::Enter, Modifiers::SHIFT);
+    assert_eq!(
+        selected_range(&bench),
+        238..240,
+        "Shift+Enter goes back, from the first match to the last"
+    );
+    assert!(says(&bench.frame(Vec::new()), "11 of 11"));
+
+    let _ = bench.key(Key::Escape, Modifiers::NONE);
+    assert!(!bench.session().find.open, "Escape closes the bar");
+    assert!(bench.focused(), "and the keyboard goes back to the text");
+    assert_eq!(selected_range(&bench), 238..240, "on the match it found");
+}
+
+#[test]
+fn replace_all_replaces_every_match_in_one_step_of_the_history() {
+    let source = "a = foo;\nb = foo + foo;\n";
+    let mut bench = Bench::new(source, true);
+    bench.focus();
+    open_find(&mut bench, true);
+    let _ = bench.frame(vec![egui::Event::Text("foo".to_owned())]);
+    bench
+        .context
+        .memory_mut(|memory| memory.request_focus(bench.id.with("find-bar-replacement")));
+    let _ = bench.frame(Vec::new());
+    let shown = bench.frame(vec![egui::Event::Text("bar".to_owned())]);
+    press(&mut bench, &shown, "Replace all");
+    assert_eq!(bench.source.to_string(), "a = bar;\nb = bar + bar;\n");
+    assert!(
+        says(&bench.frame(Vec::new()), "No matches"),
+        "nothing is left to find"
+    );
+
+    bench.focus();
+    let _ = bench.key(Key::Z, Modifiers::COMMAND | Modifiers::CTRL);
+    assert_eq!(
+        bench.source.to_string(),
+        source,
+        "one undo takes every replacement back"
+    );
+}
+
+#[test]
+fn a_regular_expression_replaces_with_its_groups_and_a_broken_one_says_so() {
+    let mut bench = Bench::new("r1 = 10;\nr2 = 22;\n", true);
+    bench.focus();
+    open_find(&mut bench, true);
+    let shown = bench.frame(Vec::new());
+    press(&mut bench, &shown, "Regular expression");
+    bench
+        .context
+        .memory_mut(|memory| memory.request_focus(find_field_id(bench.id)));
+    let _ = bench.frame(Vec::new());
+    let shown = bench.frame(vec![egui::Event::Text("r([0-9]".to_owned())]);
+    assert!(says(&shown, "Not a regular expression"));
+    assert!(bench.session().find.matches().is_empty());
+    let _ = bench.frame(vec![egui::Event::Text(")".to_owned())]);
+    assert_eq!(bench.session().find.matches().len(), 2);
+    bench
+        .context
+        .memory_mut(|memory| memory.request_focus(bench.id.with("find-bar-replacement")));
+    let _ = bench.frame(Vec::new());
+    let shown = bench.frame(vec![egui::Event::Text("R$1".to_owned())]);
+    press(&mut bench, &shown, "Replace all");
+    assert_eq!(bench.source.to_string(), "R1 = 10;\nR2 = 22;\n");
+}
+
+#[test]
+fn a_read_only_text_is_searched_but_offers_no_replace() {
+    let mut bench = Bench::new(&numbered_lines(5), false);
+    bench.focus();
+    open_find(&mut bench, true);
+    let shown = bench.frame(vec![egui::Event::Text("x".to_owned())]);
+    assert_eq!(bench.session().find.matches().len(), 5);
+    assert!(!says(&shown, "Replace all"), "nothing to replace in");
+    assert!(!says(&shown, "Replace with"));
+}

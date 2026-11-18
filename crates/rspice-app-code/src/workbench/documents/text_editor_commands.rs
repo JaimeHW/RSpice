@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use egui::{Id, Key, KeyboardShortcut, Modifiers, Ui};
+use egui::{Id, Ui};
 
 // The workbench session records which source editor a page shows.
 pub use crate::workbench::state::ActiveSourceEditor;
@@ -200,6 +200,9 @@ pub(crate) fn queue_source_editor_request(
         SourceEditorRequest::GoToLine => queue_go_to_line(context, editor_id),
         SourceEditorRequest::FormatDocument => queue_format_document(context, editor_id),
         SourceEditorRequest::RevealLine(line) => queue_reveal_line(context, editor_id, line),
+        SourceEditorRequest::Find { replace } => {
+            super::virtual_text_editor::queue_find_bar(context, editor_id, replace);
+        }
     }
     context.request_repaint();
 }
@@ -293,23 +296,6 @@ pub(crate) fn take_format_document_request(ui: &Ui, editor_id: Id) -> bool {
     ui.ctx()
         .data_mut(|data| data.remove_temp::<bool>(editor_id.with("format-document")))
         .unwrap_or(false)
-}
-
-/// Consume the conventional desktop bundle-search shortcut while this editor
-/// owns focus.
-pub(crate) fn take_find_in_source_bundle_request(
-    ui: &Ui,
-    editor_id: Id,
-) -> Option<crate::ui::input::InputTransition> {
-    if !ui.ctx().memory(|memory| memory.has_focus(editor_id)) {
-        return None;
-    }
-    ui.ctx().input(|input| {
-        crate::ui::input::InputTransition::after_shortcut(
-            input,
-            KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::H),
-        )
-    })
 }
 
 pub(crate) fn queue_reveal_line(context: &egui::Context, editor_id: Id, line: usize) {
@@ -854,6 +840,7 @@ fn previous_char_boundary(source: &str, mut byte: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::{Key, Modifiers};
 
     fn caret(position: usize) -> ByteSelection {
         ByteSelection {

@@ -892,6 +892,11 @@ pub enum SourceEditorRequest {
     FormatDocument,
     /// Put the caret at the start of a one-based line and scroll it into view.
     RevealLine(usize),
+    /// Open the editor's find bar with the keyboard in its search field;
+    /// `replace` opens its replace row too, where the text may change.
+    Find {
+        replace: bool,
+    },
 }
 
 impl SourceEditorRequest {
@@ -900,6 +905,7 @@ impl SourceEditorRequest {
             Self::Standard(command) => command.mutates_source(),
             Self::Structural(command) => command.mutates_source(),
             Self::FormatDocument => true,
+            Self::Find { replace } => replace,
             Self::View(_) | Self::GoToLine | Self::RevealLine(_) => false,
         }
     }

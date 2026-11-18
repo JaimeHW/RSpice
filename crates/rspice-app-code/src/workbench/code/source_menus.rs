@@ -40,9 +40,11 @@ const DELETE: MenuEntry = MenuEntry::command(ids::DELETE).access('D');
 /// Selecting the whole document.
 const SELECT_ALL: MenuEntry = MenuEntry::command(ids::SELECT_ALL).access('A');
 
-/// Finding text, and going to a line or the bracket that matches.
+/// Finding and replacing text, and going to a line or the bracket that
+/// matches.
 const FIND: &[MenuEntry] = &[
     code(CodeCommand::FindCodeDocument).access('F'),
+    code(CodeCommand::ReplaceInCodeDocument).access('S'),
     code(CodeCommand::GoToLine).access('G'),
     code(CodeCommand::GoToMatchingBracket).access('B'),
 ];
@@ -66,7 +68,7 @@ const LANGUAGE: &[MenuEntry] = &[
         &[
             code(CodeCommand::GoToDefinition).access('E'),
             code(CodeCommand::FindReferences).access('I'),
-            code(CodeCommand::RenameSymbol).access('S'),
+            code(CodeCommand::RenameSymbol).access('Y'),
         ],
     ),
     code(CodeCommand::FormatDocument).access('O'),

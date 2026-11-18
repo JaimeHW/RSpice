@@ -59,13 +59,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             crate::workbench::surfaces::netlist::generation::refresh_generated_artifact(cx);
             return Some(CodeHandOff::ShowInNetlist);
         }
-        CodeRequest::FindCodeDocument => {
-            if let Err(error) =
-                code_workspace::open_active_source_search(&mut CodeFeature::workspace_parts(cx))
-            {
-                cx.wb.prompt(error);
-            }
-        }
         CodeRequest::ValidateCodeDocument => {
             crate::workbench::code::netlist_validation::request_validation(cx, false);
         }
@@ -140,17 +133,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
                 cx.model.record(LogSeverity::Error, LogSource::Studio, error);
             }
         }
-        CodeRequest::ReplaceSourceSearchMatches => {
-            if let Err(error) =
-                code_workspace::commit_source_search_replace(&mut CodeFeature::workspace_parts(cx))
-            {
-                if let Some(search) = cx.state.code_workspace.source_search.as_mut() {
-                    search.error = Some(error);
-                } else {
-                    cx.wb.prompt(error);
-                }
-            }
-        }
         CodeRequest::SourceDocument(request) => answer_source_document(cx, request),
         CodeRequest::CommitSymbolRename => {
             if let Err(error) =
@@ -206,18 +188,6 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         }
         CodeRequest::ShowNetInSchematic { schematic, net } => {
             return Some(CodeHandOff::ShowNetInSchematic { schematic, net });
-        }
-        CodeRequest::ApplyNetlistFind => {
-            if let Some(step) = cx.state.netlist.find.pending.take() {
-                crate::workbench::workflows::netlist_workflow::apply_netlist_find_step(
-                    cx.model,
-                    &mut cx.state.netlist,
-                    &mut cx.state.netlist_open_documents,
-                    cx.runs,
-                    cx.wb,
-                    step,
-                );
-            }
         }
         CodeRequest::ApplyNetlistQuickFix => {
             let answer = netlist_document::language::apply_preferred_quick_fix(

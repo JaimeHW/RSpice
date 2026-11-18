@@ -282,12 +282,6 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| features::render_dialog(app, ctx, DialogKey("code.source_document")),
     },
     DialogSpec {
-        key: DialogKey("code.source_find"),
-        modality: Modality::Modeless,
-        is_open: None,
-        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("code.source_find")),
-    },
-    DialogSpec {
         key: DialogKey("code.rename_symbol"),
         modality: Modality::Modeless,
         is_open: None,
