@@ -931,7 +931,10 @@ impl Jfet {
 
         if voltage < terms.depletion_transition_voltage {
             let root = (1.0 - voltage / terms.junction_potential).sqrt();
-            let charge = 2.0 * terms.junction_potential * zero_bias_capacitance * (1.0 - root);
+            // 2*PB*C0*(1 - root) as 2*C0*V/(1 + root): near zero bias root
+            // rounds to one, and 1 - root would quantize the charge at about
+            // PB*C0*EPSILON whatever the bias.
+            let charge = 2.0 * zero_bias_capacitance * voltage / (1.0 + root);
             let capacitance = zero_bias_capacitance / root;
             (charge, capacitance)
         } else {
@@ -1020,6 +1023,45 @@ mod tests {
                     let charge = device.classic_gate_charge_state(voltage, voltage, 300.15);
                     let expected = device.params.cgs * device.area * device.m * voltage;
                     assert!((charge.qgs - expected).abs() <= 8.0 * Value::EPSILON * expected.abs());
+                }
+            }
+        }
+    }
+
+    /// Near zero bias the Xyce LEVEL=1 gate-junction charge is
+    /// `c0*v*(1 + v/(4*PB))` to second order, and it keeps that relative
+    /// precision however small the bias: a companion divides the charge's
+    /// absolute error by dt, so a charge rounded to a quantum of
+    /// `PB*c0*EPSILON` left a 1e-19 s step unable to move it at all.
+    #[test]
+    fn xyce_jfet1_junction_charge_keeps_its_relative_precision_near_zero_bias() {
+        for (polarity, pb) in [(1.0, 1.0), (-1.0, 0.6)] {
+            let mut device = if polarity == 1.0 {
+                Jfet::njf("j1", 1, 2, 3)
+            } else {
+                Jfet::pjf("j1", 1, 2, 3)
+            }
+            .enable_xyce_jfet1_model();
+            device.params.cgs = 1e-12;
+            device.params.cgd = 2e-12;
+            device.params.pb = pb;
+            let temperature = 300.15;
+            let terms = device.xyce_jfet1_temperature_terms(temperature);
+            let phi = terms.junction_potential;
+            let at_zero = device.xyce_jfet1_charge_state(0.0, 0.0, temperature);
+            assert!(at_zero.cgs > 0.0 && at_zero.cgd > 0.0);
+            for v in [1e-18, -1e-18, 3.4e-18, -3.4e-18, 1e-12, -1e-9] {
+                let charge =
+                    device.xyce_jfet1_charge_state(polarity * v, polarity * v, temperature);
+                for (q, c0, side) in [
+                    (charge.qgs, at_zero.cgs, "qgs"),
+                    (charge.qgd, at_zero.cgd, "qgd"),
+                ] {
+                    let expected = polarity * c0 * v * (1.0 + 0.25 * v / phi);
+                    assert!(
+                        (q - expected).abs() <= expected.abs() * 1e-12,
+                        "{side}({v:e}) = {q:e}, expected {expected:e} (PB={phi})"
+                    );
                 }
             }
         }
