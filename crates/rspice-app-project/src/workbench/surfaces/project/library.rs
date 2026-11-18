@@ -1991,7 +1991,7 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
         .description(&description)
         .size(DialogSize::Manager)
         .show(ctx, |ui| {
-            property_card(ui, "Audit chain", |ui| {
+            property_card(ui, "This project", |ui| {
                 property_row(
                     ui,
                     "Project revision",
@@ -2002,8 +2002,8 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
                     "Library revision",
                     &model.library_manager.revision().to_string(),
                 );
-                property_row(ui, "Retained receipts", &receipts.len().to_string());
-                property_row(ui, "Retained publications", &publications.len().to_string());
+                property_row(ui, "Library changes", &receipts.len().to_string());
+                property_row(ui, "Publications", &publications.len().to_string());
             });
             ui.add_space(8.0);
             ScrollArea::vertical()
@@ -2012,11 +2012,11 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
                 .max_height(360.0)
                 .show(ui, |ui| {
                     if receipts.is_empty() && publications.is_empty() {
-                        property_card(ui, "No retained mutations", |ui| {
+                        property_card(ui, "Nothing recorded", |ui| {
                             crate::workbench::design_system::property_row_wrapped(
                                 ui,
                                 "Status",
-                                "The project has no audited library changes or publications.",
+                                "No library in this project has been changed or published yet.",
                             );
                         });
                     }
@@ -2029,12 +2029,16 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
                         property_card(ui, &title, |ui| {
                             property_row(
                                 ui,
-                                "Publication identity",
-                                &publication.publication_id().to_string(),
+                                "When",
+                                &crate::time_compat::utc_stamp(publication.created_unix_ms()),
                             );
-                            property_row(ui, "Actor", publication.actor_id());
-                            property_row(ui, "Authority", publication.authority_id());
-                            property_row(ui, "Reason", publication.reason());
+                            property_row(ui, "Published by", publication.actor_id());
+                            property_row(ui, "Approved by", publication.authority_id());
+                            crate::workbench::design_system::property_row_wrapped(
+                                ui,
+                                "Reason",
+                                publication.reason(),
+                            );
                             property_row(
                                 ui,
                                 "Project revision",
@@ -2051,17 +2055,10 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
                             );
                             property_row(
                                 ui,
-                                "Artifact",
-                                &format!(
-                                    "{} bytes \u{00b7} {}",
+                                "Snapshot",
+                                &rspice_simulation_contract::run_set::format_bytes(
                                     publication.snapshot_byte_len(),
-                                    publication.snapshot_digest()
                                 ),
-                            );
-                            property_row(
-                                ui,
-                                "Receipt digest",
-                                &publication.receipt_digest().to_string(),
                             );
                         });
                         ui.add_space(6.0);
@@ -2073,11 +2070,7 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
                             receipt.mutation().operation_label()
                         );
                         property_card(ui, &title, |ui| {
-                            property_row(
-                                ui,
-                                "Object",
-                                &library_mutation_summary(receipt.mutation()),
-                            );
+                            property_row(ui, "What", &library_mutation_summary(receipt.mutation()));
                             property_row(
                                 ui,
                                 "Project revision",
@@ -2095,11 +2088,6 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
                                     receipt.source_library_revision(),
                                     receipt.target_library_revision()
                                 ),
-                            );
-                            property_row(
-                                ui,
-                                "Receipt digest",
-                                &receipt.receipt_digest().to_string(),
                             );
                         });
                         ui.add_space(6.0);
