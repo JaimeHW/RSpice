@@ -6,8 +6,8 @@ use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::{
     Draft, Line, cell_line, draft_in, open_new_veriloga_device_form_in, port_lines, status_in,
 };
 use rspice_app_state::state::{
-    Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
-    ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
+    Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle, ProjectSourceOwner,
+    SymbolDocument, View,
 };
 use rspice_design::library::metadata::decode_source_view_ports;
 use rspice_design::symbol::generated::is_generated_symbol;
@@ -315,7 +315,6 @@ fn a_failure_after_the_cell_is_made_creates_nothing() {
         .insert_bundle(
             ProjectSourceBundle::try_new(
                 ProjectSourceOwner::cell_view(reference.clone()),
-                ProjectSourceLanguage::VerilogA,
                 "stale.va",
                 "module stale; endmodule\n",
                 [],

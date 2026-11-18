@@ -24,7 +24,6 @@ fn add_cell_veriloga_source(
         rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
             "work", cell, "behavior",
         )),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         "behavior.va",
         "module behavior(p, n); inout p, n; endmodule",
         std::iter::empty(),

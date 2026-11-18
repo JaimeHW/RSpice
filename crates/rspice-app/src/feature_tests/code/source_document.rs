@@ -68,7 +68,6 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
     apply_lifecycle_action(
         &mut app.code_workspace_parts(),
         LifecycleAction::Begin(CodeSourceFileAction::Rename),
-        facts.language,
         &facts.logical_path,
     );
     let draft = app
@@ -83,7 +82,6 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
     apply_lifecycle_action(
         &mut app.code_workspace_parts(),
         LifecycleAction::Commit,
-        facts.language,
         &facts.logical_path,
     );
     assert!(

@@ -5,14 +5,11 @@
 use crate::workbench::RSpiceApp;
 use egui::Context;
 use rspice_app_code::workbench::documents::code_workspace;
-use rspice_app_state::state::ProjectSourceLanguage;
 use rspice_app_workbench::workbench::surfaces::register_results_split_region;
 
-/// An application on the page that edits a `language` source, and the owner
+/// An application on the page that edits a Verilog-A source, and the owner
 /// of the bundle it edits.
-fn source_editor_page(
-    language: ProjectSourceLanguage,
-) -> (
+fn source_editor_page() -> (
     Context,
     RSpiceApp,
     rspice_app_state::state::ProjectSourceOwner,
@@ -43,7 +40,6 @@ fn source_editor_page(
             .insert_bundle(
                 rspice_app_state::state::ProjectSourceBundle::try_new(
                     owner.clone(),
-                    language,
                     "gain.va",
                     "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
                     [],
@@ -85,11 +81,11 @@ fn render_page(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) {
 /// was, and the next edit is stored without what was refused.
 #[test]
 fn a_refused_source_write_returns_the_editor_to_the_stored_source() {
-    refused_source_write(ProjectSourceLanguage::VerilogA);
+    refused_source_write();
 }
 
-fn refused_source_write(language: ProjectSourceLanguage) {
-    let (ctx, mut app, owner) = source_editor_page(language);
+fn refused_source_write() {
+    let (ctx, mut app, owner) = source_editor_page();
     let bundle = app
         .state
         .model
@@ -99,7 +95,7 @@ fn refused_source_write(language: ProjectSourceLanguage) {
         .bundle_for_owner(&owner)
         .unwrap();
     let key = (bundle.id(), bundle.root().logical_path().to_owned());
-    let editor_id = code_workspace::source_editor_id(language, key.0, &key.1);
+    let editor_id = code_workspace::source_editor_id(key.0, &key.1);
     let stored = |app: &RSpiceApp| {
         app.state
             .model
@@ -136,36 +132,36 @@ fn refused_source_write(language: ProjectSourceLanguage) {
     let at = caret(&app).expect("the page reports its caret");
     render_page(&ctx, &mut app, vec![egui::Event::Text("x".to_owned())]);
     let typed = insert(&original, at, "x");
-    assert_eq!(stored(&app), typed, "{language:?}: the typing is stored");
+    assert_eq!(stored(&app), typed, "Verilog-A: the typing is stored");
     assert_eq!(caret(&app), Some(at + 1));
 
     // The bundle refuses a pasted NUL.
     render_page(&ctx, &mut app, vec![egui::Event::Paste("\u{0}".to_owned())]);
-    assert_eq!(stored(&app), typed, "{language:?}: the paste is refused");
+    assert_eq!(stored(&app), typed, "Verilog-A: the paste is refused");
     assert!(
         app.state
             .prompt_text()
             .is_some_and(|prompt| prompt.starts_with("Could not update")),
-        "{language:?}: the frame of the refusal says so"
+        "Verilog-A: the frame of the refusal says so"
     );
 
     render_page(&ctx, &mut app, Vec::new());
     assert_eq!(
         rspice_app_code::workbench::documents::virtual_text_editor::shown_source(&ctx, editor_id),
         Some(typed.clone()),
-        "{language:?}: the next frame draws the stored source"
+        "Verilog-A: the next frame draws the stored source"
     );
     assert_eq!(
         caret(&app),
         Some(at + 1),
-        "{language:?}: the caret is where it was before the paste"
+        "Verilog-A: the caret is where it was before the paste"
     );
 
     render_page(&ctx, &mut app, vec![egui::Event::Text("y".to_owned())]);
     assert_eq!(
         stored(&app),
         insert(&typed, at + 1, "y"),
-        "{language:?}: the next edit is stored without the refused paste"
+        "Verilog-A: the next edit is stored without the refused paste"
     );
 }
 

@@ -15,7 +15,6 @@ use rspice_app_code::workbench::app::dialogs::veriloga_build_settings::{
 };
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace;
-use rspice_app_state::state::ProjectSourceRole;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_app_workbench::workbench::localization::{MessageId, UiTextLocale};
 use rspice_simulation::project_veriloga::build_profile::{
@@ -167,11 +166,10 @@ fn build_settings_round_trips_every_field_through_the_profile_document() {
         Some(".rspice/veriloga-build.toml"),
         "a source on the built-in defaults gains the profile document"
     );
-    assert_eq!(
+    assert!(
         selected
             .bundle()
-            .role_for_path(".rspice/veriloga-build.toml"),
-        Some(ProjectSourceRole::VerilogABuildProfile)
+            .is_build_profile(".rspice/veriloga-build.toml")
     );
     let profile = resolved.profile;
     assert_eq!(profile.entry_modules, ["gain_fast"]);

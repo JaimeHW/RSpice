@@ -6,8 +6,8 @@
 
 use super::*;
 use rspice_app_state::state::{
-    Cell, CellViewRef, Library, ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage,
-    ProjectSourceOwner, View, ViewType,
+    Cell, CellViewRef, Library, ProjectSourceBundle, ProjectSourceId, ProjectSourceOwner, View,
+    ViewType,
 };
 use rspice_app_state::workbench::workspace::Workspace;
 
@@ -42,7 +42,6 @@ pub(crate) fn add_veriloga_cell(
         .add_cell(library_cell);
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(reference.clone()),
-        ProjectSourceLanguage::VerilogA,
         root,
         module_source(module, ""),
         [],

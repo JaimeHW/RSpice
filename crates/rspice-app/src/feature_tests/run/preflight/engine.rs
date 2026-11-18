@@ -241,7 +241,7 @@ pub(super) fn moded_device_with(
 ) -> (RSpiceApp, rspice_app_state::state::CellViewRef, u64) {
     use rspice_app_state::state::{
         Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point, ProjectSourceBundle,
-        ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
+        ProjectSourceOwner, View, ViewType,
     };
 
     let mut app = RSpiceApp::test_instance();
@@ -302,7 +302,6 @@ pub(super) fn moded_device_with(
         .add_cell(cell);
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(device.clone()),
-        ProjectSourceLanguage::VerilogA,
         "moded.va".to_owned(),
         format!(
             "`include \"disciplines.vams\"\nmodule moded(p, n, mode);\n  inout p, n;\n  input mode;\n  \

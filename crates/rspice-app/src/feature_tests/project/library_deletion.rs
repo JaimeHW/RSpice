@@ -81,7 +81,6 @@ fn insert_cell_source(
         rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
             "work", cell, view,
         )),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         format!("{view}.va"),
         format!("module {view}(p, n); inout p, n; endmodule"),
         std::iter::empty(),

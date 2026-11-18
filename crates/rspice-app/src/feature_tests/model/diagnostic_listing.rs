@@ -462,16 +462,13 @@ fn an_unreadable_batch_counts_as_unavailable_rather_than_stale() {
 /// the page says there is nothing wrong rather than that nobody looked.
 #[test]
 fn a_clean_compile_reads_as_no_findings() {
-    use rspice_app_state::state::{
-        CellViewRef, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner,
-    };
+    use rspice_app_state::state::{CellViewRef, ProjectSourceBundle, ProjectSourceOwner};
 
     let mut state = open_state();
     assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
 
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(CellViewRef::new("behavioral", "gain", "veriloga")),
-        ProjectSourceLanguage::VerilogA,
         "gain.va",
         "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
         [],

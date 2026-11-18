@@ -15,8 +15,8 @@ use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_services::io::ProjectSnapshot;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
-    ProjectSourceDocument, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
-    SymbolDocument, View, ViewType,
+    ProjectSourceDocument, ProjectSourceOwner, ProjectSourceRegistry, SymbolDocument, View,
+    ViewType,
 };
 use rspice_app_state::workbench::workspace::Workspace;
 
@@ -27,7 +27,7 @@ const RETIRED_DEMO: &str = "`include \"constants.vams\"\nmodule sensor_bridge(ou
 const EDITED_MODULE: &str = "`include \"constants.vams\"\n`include \"disciplines.vams\"\nmodule sensor_bridge(out, inp, inn);\n  inout out, inp, inn;\n  electrical out, inp, inn;\n  parameter real gain = 50.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
 
 fn code_workspace_owner() -> ProjectSourceOwner {
-    ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA)
+    ProjectSourceOwner::CodeWorkspace
 }
 
 /// The text of a project whose project-wide Verilog-A bundle holds `source`
@@ -56,17 +56,14 @@ fn legacy_project_at(
         .workspace
         .content
         .project_sources
-        .insert(
-            ProjectSourceDocument::try_new(root, ProjectSourceLanguage::VerilogA, source)
-                .expect("a valid legacy source"),
-        )
+        .insert(ProjectSourceDocument::try_new(root, source).expect("a valid legacy source"))
         .expect("one project-wide Verilog-A source");
     state
         .model
         .workspace
         .content
         .project_sources
-        .mark_validated(ProjectSourceLanguage::VerilogA)
+        .mark_validated()
         .expect("the legacy source was compiled");
     let id = state
         .model
@@ -97,10 +94,7 @@ fn project_content(project: &ProjectSnapshot) -> serde_json::Value {
 }
 
 fn veriloga_bundles(sources: &ProjectSourceRegistry) -> Vec<&ProjectSourceBundle> {
-    sources
-        .iter_bundles()
-        .filter(|bundle| bundle.language() == ProjectSourceLanguage::VerilogA)
-        .collect()
+    sources.iter_bundles().collect()
 }
 
 /// An application over a loaded project, the way opening it installs one.
@@ -439,7 +433,6 @@ fn a_migrated_source_whose_name_is_taken_in_another_case_lands_at_the_suffixed_c
             .insert_bundle(
                 ProjectSourceBundle::try_new(
                     ProjectSourceOwner::cell_view(CellViewRef::new(&library, "ÉTAGE", "veriloga")),
-                    ProjectSourceLanguage::VerilogA,
                     "existing.va",
                     "module existing(p, n); inout p, n; electrical p, n; endmodule\n",
                     [],
@@ -561,7 +554,6 @@ fn a_migrated_source_whose_name_is_taken_lands_at_the_suffixed_cell() {
                         "sensor_bridge",
                         "veriloga",
                     )),
-                    ProjectSourceLanguage::VerilogA,
                     "existing.va",
                     "module existing(p, n); inout p, n; electrical p, n; endmodule\n",
                     [],

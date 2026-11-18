@@ -17,11 +17,11 @@ use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
 };
-use rspice_app_state::state::{CellViewRef, ProjectSourceId, ProjectSourceLanguage};
+use rspice_app_state::state::{CellViewRef, ProjectSourceId};
 use rspice_app_state::workbench::workspace::Workspace;
 
 fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
-    code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, logical_path)
+    code_workspace::source_editor_id(bundle_id, logical_path)
 }
 
 /// Whether the frame put an editable Verilog-A source editor in front of the
@@ -94,7 +94,6 @@ fn find_in_a_veriloga_cell_view_opens_that_views_find_bar() {
             .content
             .project_sources
             .iter_bundles()
-            .filter(|bundle| bundle.language() == ProjectSourceLanguage::VerilogA)
             .all(|bundle| bundle.id() == bundle_id),
         "the view's bundle is the project's only Verilog-A source"
     );
@@ -145,12 +144,8 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_source_bundle(
-        &mut app.code_workspace_parts(),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
-        CodeCommand::RenameSymbol,
-    )
-    .expect("the caret is on g");
+    super::navigate_source_bundle(&mut app.code_workspace_parts(), CodeCommand::RenameSymbol)
+        .expect("the caret is on g");
     let form = app
         .state
         .code
@@ -213,12 +208,8 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_source_bundle(
-        &mut app.code_workspace_parts(),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
-        CodeCommand::FindReferences,
-    )
-    .expect("the caret is on g");
+    super::navigate_source_bundle(&mut app.code_workspace_parts(), CodeCommand::FindReferences)
+        .expect("the caret is on g");
 
     assert!(app.state.code.code_workspace.language_tools.is_none());
     assert_eq!(

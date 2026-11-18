@@ -34,7 +34,6 @@ fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
         .insert_bundle(
             rspice_app_state::state::ProjectSourceBundle::try_new(
                 rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone()),
-                rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                 "gain.va",
                 "module gain(p, n); inout p, n; electrical p, n; endmodule\n",
                 [],
@@ -83,7 +82,6 @@ fn rename_form(replacement: &str) -> RSpiceApp {
         .count();
     code_workspace::open_language_tools_in_bundle(
         &mut app.code_workspace_parts(),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         bundle_id,
         "gain.va",
         caret,

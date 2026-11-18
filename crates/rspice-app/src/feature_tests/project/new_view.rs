@@ -16,8 +16,8 @@ use rspice_app_project::workbench::project::library_dialogs::new_view::{
 };
 use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, NetNamingPolicy, Point, PortDirection, PortSpec,
-    ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SchematicState, SymbolDocument,
-    SymbolPin, View, ViewType,
+    ProjectSourceBundle, ProjectSourceOwner, SchematicState, SymbolDocument, SymbolPin, View,
+    ViewType,
 };
 use rspice_app_state::workbench::preferences::ChoicePreference;
 
@@ -520,7 +520,6 @@ fn creating_veriloga_view_atomically_retains_contract_and_opens_exact_editor() {
         .project_sources
         .bundle_for_owner(&owner)
         .expect("created view owns a sealed source bundle");
-    assert_eq!(bundle.language(), ProjectSourceLanguage::VerilogA);
     assert_eq!(bundle.root().logical_path(), "precision_amp.va");
     assert!(
         bundle
@@ -632,7 +631,6 @@ fn duplicate_cell_view_source_owner_rolls_back_view_creation() {
         .insert_bundle(
             ProjectSourceBundle::try_new(
                 ProjectSourceOwner::cell_view(reference.clone()),
-                ProjectSourceLanguage::VerilogA,
                 "existing.va",
                 "module existing; endmodule\n",
                 [],

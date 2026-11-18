@@ -118,7 +118,7 @@ fn open_code_document(
     column: Option<usize>,
 ) {
     use rspice_app_code::workbench::documents::code_workspace;
-    use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
+    use rspice_app_state::state::ProjectSourceOwner;
 
     let owner = app
         .state
@@ -134,19 +134,18 @@ fn open_code_document(
         ));
         return;
     };
-    let language = match &owner {
+    match &owner {
         ProjectSourceOwner::CellView { reference } => {
             app.state.open_workspace_view(reference.clone());
             app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
-            ProjectSourceLanguage::VerilogA
         }
-        ProjectSourceOwner::CodeWorkspace { .. } => {
+        ProjectSourceOwner::CodeWorkspace => {
             app.state.prompt(format!(
                 "{logical_path} was not opened: no editor shows the source that reported it."
             ));
             return;
         }
-    };
+    }
     // Opening the owner can be refused — an inspector edit that will not
     // commit keeps the view it is editing — and the selection below is made
     // in whichever bundle is active, so it is made only once the bundle that
@@ -155,7 +154,7 @@ fn open_code_document(
         .state
         .model
         .workspace
-        .active_source_bundle(language)
+        .active_source_bundle()
         .map(rspice_app_state::state::ProjectSourceBundle::id);
     if active != Some(bundle) {
         app.state.prompt(format!(
@@ -166,7 +165,6 @@ fn open_code_document(
     if code_workspace::select_source_document(
         &app.state.model.workspace,
         &mut app.state.code.code_workspace,
-        language,
         logical_path,
     )
     .is_none()
@@ -179,7 +177,7 @@ fn open_code_document(
     if let Some(line) = line {
         code_workspace::reveal_source_location(
             ctx,
-            code_workspace::source_editor_id(language, bundle, logical_path),
+            code_workspace::source_editor_id(bundle, logical_path),
             line,
             column.unwrap_or(1),
         );

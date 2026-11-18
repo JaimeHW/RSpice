@@ -153,7 +153,6 @@ pub(crate) fn app_with_owned_veriloga_instance() -> (RSpiceApp, Component) {
         .add_view(symbol);
     let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
         rspice_app_state::state::ProjectSourceOwner::cell_view(reference),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         "amp.va",
         "module amp(p, n);\n  inout p, n;\n  electrical p, n;\n  parameter real gain = 10;\n  analog I(p, n) <+ gain * V(p, n);\nendmodule\n",
         [],

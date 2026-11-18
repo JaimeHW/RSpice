@@ -108,7 +108,6 @@ fn app_with_parts() -> RSpiceApp {
         rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
             "parts", "amp", "model",
         )),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         "model.va".to_owned(),
         "module model(p, n); inout p, n; endmodule".to_owned(),
         std::iter::empty(),
@@ -422,7 +421,6 @@ fn deleting_a_library_of_source_views_takes_their_sources_and_undoes_as_one_step
                 cell,
                 "behaviour",
             )),
-            rspice_app_state::state::ProjectSourceLanguage::VerilogA,
             root.to_owned(),
             format!("module {cell}(p, n); inout p, n; endmodule"),
             std::iter::empty(),

@@ -20,8 +20,7 @@ use rspice_app_code::workbench::documents::code_workspace::{
 use rspice_app_state::state::VerilogAInterfaceOutcome;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, LibraryCellInstance, Point, PortDirection, ProjectSourceBundle,
-    ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, SymbolElectricalType, View,
-    ViewType,
+    ProjectSourceOwner, SymbolDocument, SymbolElectricalType, View, ViewType,
 };
 use rspice_design::library::metadata::{PortCarrier, SourceViewPort, decode_source_view_ports};
 use rspice_design::symbol::generated::{
@@ -71,7 +70,6 @@ fn add_module_cell_in(
         .add_cell(library_cell);
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(reference.clone()),
-        ProjectSourceLanguage::VerilogA,
         format!("{cell}.va"),
         source,
         [],

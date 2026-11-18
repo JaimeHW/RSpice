@@ -53,7 +53,6 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         .insert_bundle(
             rspice_app_state::state::ProjectSourceBundle::try_new(
                 rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone()),
-                rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                 "gain.va",
                 "module gain(p, n); inout p, n; electrical p, n; endmodule\n",
                 [],

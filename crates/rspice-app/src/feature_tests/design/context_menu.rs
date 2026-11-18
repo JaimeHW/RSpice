@@ -148,7 +148,7 @@ pub(crate) fn select_a_veriloga_instance(
 ) -> (u64, rspice_app_state::state::CellViewRef) {
     use rspice_app_state::state::{
         Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
-        ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
+        ProjectSourceOwner, View, ViewType,
     };
 
     state
@@ -176,7 +176,6 @@ pub(crate) fn select_a_veriloga_instance(
         .insert_bundle(
             ProjectSourceBundle::try_new(
                 ProjectSourceOwner::cell_view(reference.clone()),
-                ProjectSourceLanguage::VerilogA,
                 "gain.va",
                 "module gain(p, n);\n  inout p, n;\n  electrical p, n;\nendmodule\n",
                 [],

@@ -104,8 +104,8 @@ mod every_surface {
     use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
     use rspice_app_results::workbench::documents::result_document::frame_work::WorkCounts;
     use rspice_app_state::state::{
-        Cell, Library, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner,
-        SimulationPage, SimulationRunLifecycle, VerificationPage, View,
+        Cell, Library, ProjectSourceBundle, ProjectSourceOwner, SimulationPage,
+        SimulationRunLifecycle, VerificationPage, View,
     };
     use rspice_app_state::workbench::examples::EXAMPLES;
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
@@ -150,7 +150,6 @@ mod every_surface {
             .insert_bundle(
                 ProjectSourceBundle::try_new(
                     ProjectSourceOwner::cell_view(module.clone()),
-                    ProjectSourceLanguage::VerilogA,
                     "gain.va",
                     "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
                     [],

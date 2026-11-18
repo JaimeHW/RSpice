@@ -111,18 +111,14 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
 /// Write `content` as the project-wide Verilog-A source, the code-workspace
 /// source a project-wide edit reaches, creating it the first time.
 fn edit_code_workspace_source(state: &mut AppState, content: &str) {
-    let language = rspice_app_state::state::ProjectSourceLanguage::VerilogA;
     let project = &mut state.model.workspace.content;
-    if project.project_sources.get(language).is_some() {
-        project
-            .replace_project_source(language, content.to_owned())
-            .unwrap();
+    if project.project_sources.get().is_some() {
+        project.replace_project_source(content.to_owned()).unwrap();
     } else {
         project
             .insert_project_source_bundle(
                 rspice_app_state::state::ProjectSourceBundle::try_new(
-                    rspice_app_state::state::ProjectSourceOwner::code_workspace(language),
-                    language,
+                    rspice_app_state::state::ProjectSourceOwner::CodeWorkspace,
                     "shared.va",
                     content,
                     [],
@@ -156,7 +152,6 @@ fn insert_cell_veriloga_source(
         ));
     let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
         rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone()),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         format!("{view_name}.va"),
         content,
         std::iter::empty(),
@@ -439,7 +434,6 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
         .add_cell(cell);
     let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
         rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone()),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         "behavior.va",
         "module behavior(p, n); inout p, n; endmodule",
         std::iter::empty(),
@@ -547,13 +541,8 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
             .is_none()
     );
     assert_eq!(
-        state
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get(rspice_app_state::state::ProjectSourceLanguage::VerilogA),
-        code_workspace.get(rspice_app_state::state::ProjectSourceLanguage::VerilogA)
+        state.model.workspace.content.project_sources.get(),
+        code_workspace.get()
     );
     assert!(
         state

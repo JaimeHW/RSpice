@@ -1715,7 +1715,6 @@ mod tests {
                         "unreferenced",
                         "veriloga",
                     )),
-                    rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                     "unreferenced.va",
                     "module unreferenced; endmodule\n",
                     [],
@@ -1724,16 +1723,7 @@ mod tests {
                 .expect("valid unreferenced source"),
             )
             .expect("unique cell-view source");
-        assert!(
-            state
-                .model
-                .workspace
-                .content
-                .project_sources
-                .iter_bundles()
-                .any(|bundle| bundle.language()
-                    == rspice_app_state::state::ProjectSourceLanguage::VerilogA)
-        );
+        assert!(!state.model.workspace.content.project_sources.is_empty());
         state.code.code_workspace.veriloga.receipt = None;
 
         assert!(

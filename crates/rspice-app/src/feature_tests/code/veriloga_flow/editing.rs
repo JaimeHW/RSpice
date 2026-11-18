@@ -9,7 +9,6 @@ use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, active_document_is_dirty, save_native,
 };
-use rspice_app_state::state::ProjectSourceRole;
 
 fn undo(user: &mut User) {
     user.key(Key::Z, CTRL);
@@ -68,7 +67,6 @@ fn rename_is_one_undo_across_the_module() {
     let caret = original.find("vslew").expect("the name");
     code_workspace::open_language_tools_in_bundle(
         &mut user.app.code_workspace_parts(),
-        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),
         &path,
         original[..caret].chars().count(),
@@ -194,11 +192,7 @@ fn compiling_a_saved_source_leaves_its_tab_clean_and_writes_no_profile() {
     let selected =
         code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     assert!(
-        selected
-            .bundle()
-            .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
-            .next()
-            .is_none(),
+        selected.bundle().build_profile_path().is_none(),
         "nothing changed a setting, so no build profile exists"
     );
     let _ = std::fs::remove_file(path);

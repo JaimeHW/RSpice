@@ -9,8 +9,7 @@ use crate::workbench::app::veriloga_design_tests::{DESKTOP, open_in_design, open
 use crate::workbench::app_state::AppState;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, LibraryCellInstance, Point, ProjectSourceDependency,
-    ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner,
-    ProjectSourceRole, ProjectSourceRoleBinding, View, ViewType,
+    ProjectSourceFile, ProjectSourceId, ProjectSourceOwner, View, ViewType,
 };
 use rspice_app_workbench::workbench::localization::{MessageCatalog, MessageId, UiTextLocale};
 
@@ -64,21 +63,15 @@ pub(super) fn placed_veriloga_cell(
         .iter()
         .map(|file| ProjectSourceDependency::try_new(root, file.logical_path()).unwrap())
         .collect::<Vec<_>>();
-    let bundle =
-        rspice_app_state::state::ProjectSourceBundle::try_new_with_roles(
-            ProjectSourceOwner::cell_view(reference.clone()),
-            ProjectSourceLanguage::VerilogA,
-            root,
-            source,
-            files,
-            dependencies,
-            [ProjectSourceRoleBinding::try_new(
-                &profile_path,
-                ProjectSourceRole::VerilogABuildProfile,
-            )
-            .unwrap()],
-        )
-        .expect("a valid cell-view bundle");
+    let bundle = rspice_app_state::state::ProjectSourceBundle::try_new_with_build_profile(
+        ProjectSourceOwner::cell_view(reference.clone()),
+        root,
+        source,
+        files,
+        dependencies,
+        Some(profile_path.clone()),
+    )
+    .expect("a valid cell-view bundle");
     let bundle_id = bundle.id();
     state
         .model

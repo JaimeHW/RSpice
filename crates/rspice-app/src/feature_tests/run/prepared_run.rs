@@ -19,7 +19,6 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         .insert_project_source_bundle(
             rspice_app_state::state::ProjectSourceBundle::try_new(
                 owner.clone(),
-                rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                 "model.va",
                 "module owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
                 [],

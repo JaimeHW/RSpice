@@ -9,7 +9,7 @@ use crate::workbench::app::veriloga_design_tests::{
 use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace;
-use rspice_app_state::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
+use rspice_app_state::state::{Point, ProjectSourceId, Wire};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
@@ -76,8 +76,7 @@ fn veriloga_with_selected_first_line() -> (egui::Context, RSpiceApp, ProjectSour
         .editor
         .selection
         .select_wire(7);
-    let editor =
-        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
+    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
     frame_with(
@@ -213,8 +212,7 @@ fn veriloga_with_focused_editor() -> (egui::Context, RSpiceApp, ProjectSourceId)
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
-    let editor =
-        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
+    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
     (ctx, app, bundle_id)
@@ -288,8 +286,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
         DESKTOP,
         vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
     );
-    let editor =
-        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
+    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
     frame_with(
@@ -368,8 +365,7 @@ fn the_palette_lists_toggle_line_comment_with_the_platform_shortcut() {
 fn veriloga_caret_on_g() -> (egui::Context, RSpiceApp) {
     let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
     ctx.set_os(egui::os::OperatingSystem::Windows);
-    let editor =
-        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
+    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
     let source = root_text(&app, bundle_id);
     let on_g = source[..source.find("g * V").expect("a use of g")]
         .chars()
