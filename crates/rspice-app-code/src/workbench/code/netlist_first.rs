@@ -15,7 +15,6 @@ use egui::{
     UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
-use crate::state::command_catalog::CommandKey;
 use crate::state::{NetlistSourceIndex, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -27,6 +26,7 @@ use crate::workbench::design_system::{
 use crate::workbench::documents::netlist_document::{NetlistDocumentState, root_deck_source_index};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Cx, Execute};
+use crate::workbench::framework::requests::ShowProjectDeck;
 use crate::workbench::state::WorkbenchSession;
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -55,20 +55,15 @@ pub enum NetlistFirstAction {
     CreateSchematic,
 }
 
-impl NetlistFirstAction {
-    /// The command the action runs.
-    fn command_key(self) -> CommandKey {
-        match self {
-            Self::OpenNetlistWorkspace => ids::NETLIST_WORKSPACE,
-            Self::CreateSchematic => ids::NEW_CELL,
-        }
-    }
-}
-
-/// Run the action's command. The shell runs it once the surface has drawn,
-/// and the surface draws nothing after the action.
+/// Run the action once the surface has drawn; the surface draws nothing
+/// after it. Opening the deck brings the project's deck to the front of the
+/// Netlist workspace whatever was in front there, as the project overview's
+/// Open SPICE deck does; creating a schematic runs its command.
 pub fn raise_netlist_first_action(wb: &mut WorkbenchSession, action: NetlistFirstAction) {
-    wb.outbox.push(Execute(action.command_key()));
+    match action {
+        NetlistFirstAction::OpenNetlistWorkspace => wb.outbox.push(ShowProjectDeck),
+        NetlistFirstAction::CreateSchematic => wb.outbox.push(Execute(ids::NEW_CELL)),
+    }
 }
 
 /// The surface the code feature registers: the landing, in its context.
@@ -84,7 +79,7 @@ pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
     );
     let mut action = None;
     let messages = cx.wb.messages();
-    // The row dispatches this exact command, so it reads the command's own
+    // The row goes to the Netlist workspace, so it reads that command's own
     // label rather than keeping a second copy of the workspace name.
     let open_label = cx.commands.label(ids::NETLIST_WORKSPACE);
     egui::Frame::new()

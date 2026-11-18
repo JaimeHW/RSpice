@@ -2,7 +2,8 @@
 //! application, for a project its deck drives: the generated netlist, with
 //! no schematic to generate one from, stands on a tab beside the deck's,
 //! which brings the deck back, and the project overview's Open SPICE deck
-//! brings the deck to the front whatever was there.
+//! and the landing's Open the deck bring the deck to the front whatever was
+//! there.
 
 use egui::accesskit::Role;
 
@@ -61,6 +62,22 @@ fn open_spice_deck_brings_the_deck_to_the_front() {
     replay.app.state.project.project_page = ProjectPage::Overview;
 
     replay.click("Open SPICE deck", Role::Button);
+
+    assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
+    assert!(
+        matches!(replay.app.state.code.netlist.front, NetlistTab::Deck(_)),
+        "the deck is in front"
+    );
+}
+
+/// The Design workspace's landing, for a project with no schematic, opens
+/// the deck in the Netlist workspace: the deck in front, whatever was there.
+#[test]
+fn the_landings_open_the_deck_brings_the_deck_to_the_front() {
+    let (mut replay, _) = deck_project_on_its_generated_netlist();
+    replay.app.state.workbench.activate(Workspace::Design);
+
+    replay.click("Open the deck in the Netlist workspace", Role::Button);
 
     assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
     assert!(
