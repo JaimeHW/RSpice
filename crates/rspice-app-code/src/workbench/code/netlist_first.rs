@@ -78,6 +78,15 @@ pub fn raise_netlist_first_action(wb: &mut WorkbenchSession, action: NetlistFirs
 
 /// The surface the code feature registers: the landing, in its context.
 pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
+    // The landing shows the project's deck, so it opens it as the Netlist
+    // page does: a restored session has the deck's entry, not its text.
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::workbench::documents::deck_files::open_project_deck(
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.netlist_open_documents,
+        cx.runs,
+    );
     let mut action = None;
     // The row dispatches this exact command, so it reads the command's own
     // label rather than keeping a second copy of the workspace name.
