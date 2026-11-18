@@ -85,6 +85,9 @@ pub struct OutlineEntry {
     /// What it is bound to or written with: a parameter's value, a model's
     /// type, the subcircuit or model a device is of, an analysis's arguments.
     detail: Option<String>,
+    /// The word the deck declares it with, lowercased: `.subckt` in SPICE,
+    /// `subckt` in Spectre, `.param`, `parameters`.
+    keyword: String,
     /// The entry of the `.subckt` card the declaration is written inside.
     scope: Option<usize>,
     line: usize,
@@ -111,6 +114,13 @@ impl OutlineEntry {
     #[must_use]
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()
+    }
+
+    /// The word the deck declares the entry with, lowercased: `.subckt` in
+    /// SPICE, `subckt` in Spectre.
+    #[must_use]
+    pub fn keyword(&self) -> &str {
+        &self.keyword
     }
 
     /// The position, among the outline's entries, of the `.subckt` card the
@@ -189,11 +199,53 @@ impl NetlistOutline {
         for symbol in deck.symbols() {
             defined_on.entry(symbol.card).or_default().push(symbol);
         }
+        // The entry of the subcircuit a scope belongs to.
+        let entry_of_scope =
+            |scope: usize, subcircuit_entries: &std::collections::HashMap<usize, usize>| {
+                deck.scopes()
+                    .get(scope)
+                    .and_then(|scope| scope.symbol)
+                    .and_then(|symbol| deck.symbols().get(symbol))
+                    .and_then(|symbol| subcircuit_entries.get(&symbol.card).copied())
+            };
         for (card_index, card) in deck.cards().iter().enumerate() {
             if card.location.file != 0 {
                 break;
             }
+            // `.end`, `.endl` and a `simulator lang=` switch declare nothing
+            // a reader goes to.
+            if matches!(
+                card.kind,
+                DeckCardKind::End | DeckCardKind::EndLibrarySection
+            ) || card.head.eq_ignore_ascii_case("simulator")
+            {
+                continue;
+            }
             let on_card = defined_on.get(&card_index).map_or(&[][..], Vec::as_slice);
+            let keyword = match card.head.to_ascii_lowercase() {
+                head if head == "inline" => "inline subckt".to_owned(),
+                head => head,
+            };
+            // A parameter card gives a row to every name it assigns, each
+            // with its value, as Spectre's `parameters` lists them.
+            if card.kind == DeckCardKind::Parameter
+                && on_card
+                    .iter()
+                    .any(|symbol| symbol.kind == DeckSymbolKind::Parameter)
+            {
+                for parameter in on_card
+                    .iter()
+                    .filter(|symbol| symbol.kind == DeckSymbolKind::Parameter)
+                {
+                    entries.push(parameter_entry(
+                        entries.len(),
+                        &keyword,
+                        parameter,
+                        entry_of_scope(parameter.scope, &subcircuit_entries),
+                    ));
+                }
+                continue;
+            }
             let defined = |kind: DeckSymbolKind| {
                 on_card
                     .iter()
@@ -228,28 +280,13 @@ impl NetlistOutline {
                     };
                     (kind, label, path.unwrap_or_default(), None)
                 }
-                DeckCardKind::Parameter => {
-                    let parameters = defined(DeckSymbolKind::Parameter).collect::<Vec<_>>();
-                    let (name, detail) = match parameters.as_slice() {
-                        [] => (directive_label.clone(), None),
-                        // One name is shown with what it is bound to; several
-                        // are listed without, or the row would give the first
-                        // value to all of them.
-                        [parameter] => (
-                            parameter.name.clone(),
-                            (!parameter.detail.is_empty()).then(|| parameter.detail.clone()),
-                        ),
-                        several => (
-                            several
-                                .iter()
-                                .map(|parameter| parameter.name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            None,
-                        ),
-                    };
-                    (OutlineEntryKind::Parameter, directive_label, name, detail)
-                }
+                // A parameter card that assigns nothing the index reads.
+                DeckCardKind::Parameter => (
+                    OutlineEntryKind::Parameter,
+                    directive_label.clone(),
+                    directive_label,
+                    None,
+                ),
                 DeckCardKind::Model | DeckCardKind::Subcircuit | DeckCardKind::Function => {
                     let (kind, symbol_kind) = match card.kind {
                         DeckCardKind::Model => (OutlineEntryKind::Model, DeckSymbolKind::Model),
@@ -303,7 +340,14 @@ impl NetlistOutline {
                         DeckCardKind::EndSubcircuit => OutlineEntryKind::EndSubcircuit,
                         _ => OutlineEntryKind::Control,
                     };
-                    (kind, directive_label.clone(), directive_label, None)
+                    // `.options reltol=1e-5`: the card's word, and what it
+                    // sets, saves or declares.
+                    (
+                        kind,
+                        directive_label,
+                        card.head.clone(),
+                        (words.len() > 1).then(|| words[1..].join(" ")),
+                    )
                 }
             };
             // A `.subckt` card is written in the scope around it, and so is
@@ -316,12 +360,7 @@ impl NetlistOutline {
                     .and_then(|scope| scope.parent)
                     .unwrap_or(0);
             }
-            let scope = deck
-                .scopes()
-                .get(scope)
-                .and_then(|scope| scope.symbol)
-                .and_then(|symbol| deck.symbols().get(symbol))
-                .and_then(|symbol| subcircuit_entries.get(&symbol.card).copied());
+            let scope = entry_of_scope(scope, &subcircuit_entries);
             if card.kind == DeckCardKind::Subcircuit {
                 subcircuit_entries.insert(card_index, entries.len());
             }
@@ -331,11 +370,25 @@ impl NetlistOutline {
                 label,
                 name,
                 detail,
+                keyword,
                 scope,
                 line: *card.lines.start(),
                 column: card.location.column,
                 end_line: *card.lines.end(),
             });
+            // A subcircuit's `params:` formals are its parameters, listed
+            // under it like a `parameters` statement written inside it.
+            if card.kind == DeckCardKind::Subcircuit {
+                let subcircuit = entries.len() - 1;
+                for formal in defined(DeckSymbolKind::Parameter).collect::<Vec<_>>() {
+                    entries.push(parameter_entry(
+                        entries.len(),
+                        "params:",
+                        formal,
+                        Some(subcircuit),
+                    ));
+                }
+            }
         }
 
         let canonical_order = [
@@ -405,6 +458,28 @@ impl NetlistOutline {
             .iter()
             .filter(|entry| entry.label.to_lowercase().contains(&query))
             .collect()
+    }
+}
+
+/// The row of one parameter: its name, what it is bound to, and where the
+/// name is written, which is the line of a `+` continuation it sits on.
+fn parameter_entry(
+    position: usize,
+    keyword: &str,
+    parameter: &DeckSymbol,
+    scope: Option<usize>,
+) -> OutlineEntry {
+    OutlineEntry {
+        id: position as u64 + 1,
+        kind: OutlineEntryKind::Parameter,
+        label: format!("{keyword} {}", parameter.name),
+        name: parameter.name.clone(),
+        detail: (!parameter.detail.is_empty()).then(|| parameter.detail.clone()),
+        keyword: keyword.to_owned(),
+        scope,
+        line: parameter.location.line,
+        column: parameter.location.column,
+        end_line: parameter.location.line,
     }
 }
 
@@ -762,7 +837,6 @@ mod tests {
                 OutlineSectionKind::Subcircuits,
                 OutlineSectionKind::Analyses,
                 OutlineSectionKind::Measurements,
-                OutlineSectionKind::Controls,
                 OutlineSectionKind::Devices,
             ]
         );
@@ -890,5 +964,55 @@ mod tests {
                 .filter(|entry| entry.kind() == OutlineEntryKind::EndSubcircuit)
                 .all(|entry| entry.scope().is_none())
         );
+    }
+
+    #[test]
+    fn a_parameter_card_gives_each_name_its_own_row_with_its_value() {
+        let outline = NetlistOutline::parse(
+            "amp test\n.param vdd=1.8 gain=2\n+ bias=0.6\n.subckt amp in out params: w=2u\n.ends amp\n.end\n",
+        );
+        let parameters = outline
+            .entries()
+            .iter()
+            .filter(|entry| entry.kind() == OutlineEntryKind::Parameter)
+            .map(|entry| (entry.name(), entry.detail(), entry.line(), entry.scope()))
+            .collect::<Vec<_>>();
+        let amp = outline
+            .entries()
+            .iter()
+            .position(|entry| entry.kind() == OutlineEntryKind::Subcircuit);
+        assert_eq!(
+            parameters,
+            [
+                ("vdd", Some("1.8"), 2, None),
+                ("gain", Some("2"), 2, None),
+                ("bias", Some("0.6"), 3, None),
+                ("w", Some("2u"), 4, amp),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_subcircuit_is_declared_with_the_decks_own_word() {
+        let spice = NetlistOutline::parse("deck\n.SUBCKT amp in out\n.ENDS amp\n.end\n");
+        let spectre = NetlistOutline::parse_as(
+            "subckt amp (in out)\nparameters gain=2\nends amp\n",
+            SourceKind::Spectre,
+        );
+        let keyword = |outline: &NetlistOutline| {
+            outline
+                .entries()
+                .iter()
+                .find(|entry| entry.kind() == OutlineEntryKind::Subcircuit)
+                .map(|entry| entry.keyword().to_owned())
+        };
+        assert_eq!(keyword(&spice).as_deref(), Some(".subckt"));
+        assert_eq!(keyword(&spectre).as_deref(), Some("subckt"));
+        let gain = spectre
+            .entries()
+            .iter()
+            .find(|entry| entry.name() == "gain")
+            .expect("the parameter is listed");
+        assert_eq!((gain.detail(), gain.scope()), (Some("2"), Some(0)));
     }
 }

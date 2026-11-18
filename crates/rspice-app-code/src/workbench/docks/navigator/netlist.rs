@@ -411,20 +411,24 @@ pub(in crate::workbench) fn netlist(
                     }
                 });
                 if symbol_count > 0 {
+                    // The count, and the files it spans when the deck reads
+                    // more than its own.
+                    let files = project_index.source_count();
+                    let symbols_meta = if files > 1 {
+                        messages.format(
+                            MessageId::NetlistNavigatorSymbolsInFiles,
+                            &[
+                                ("count", &symbol_count.to_string()),
+                                ("files", &files.to_string()),
+                            ],
+                        )
+                    } else {
+                        symbol_count.to_string()
+                    };
                     section_header(
                         ui,
                         &messages.text(MessageId::NetlistNavigatorProjectSymbols),
-                        Some(&messages.format(
-                            if symbol_count == 1 {
-                                MessageId::NetlistNavigatorSymbolSingular
-                            } else {
-                                MessageId::NetlistNavigatorSymbols
-                            },
-                            &[
-                                ("count", &symbol_count.to_string()),
-                                ("sources", &project_index.source_count().to_string()),
-                            ],
-                        )),
+                        Some(&symbols_meta),
                     );
                     uniform_rows(ui, height, symbol_count, |ui, position| {
                         let symbol_index = if symbol_query.is_empty() {
@@ -510,40 +514,6 @@ pub(in crate::workbench) fn netlist(
                             goto_project_location = Some(reference.location.clone());
                         }
                     });
-                }
-            }
-
-            if !projection.semantic_rows.is_empty() {
-                section_header(
-                    ui,
-                    &messages.text(MessageId::NetlistNavigatorSemanticIndex),
-                    Some(&messages.format(
-                        if projection.semantic_cards == 1 {
-                            MessageId::NetlistNavigatorDirectiveSingular
-                        } else {
-                            MessageId::NetlistNavigatorDirectives
-                        },
-                        &[("count", &projection.semantic_cards.to_string())],
-                    )),
-                );
-                for row in &projection.semantic_rows {
-                    if netlist_outline_row(
-                        ui,
-                        OutlineRowVisual {
-                            label: &row.label,
-                            meta: Some(&row.meta),
-                            meta_tone: None,
-                            icon: None,
-                            shape: NetlistOutlineRowShape::Index,
-                            selected: false,
-                            enabled: true,
-                            height,
-                        },
-                    )
-                    .clicked()
-                    {
-                        goto = Some(row.line);
-                    }
                 }
             }
 
@@ -1193,10 +1163,16 @@ pub(super) fn diff_totals(diff: &str) -> (usize, usize) {
 pub(super) enum NetlistNavigatorRowKind {
     Root,
     Parameters,
+    Subcircuits,
     Instances,
     Models,
     Analyses,
     Measurements,
+    Options,
+    Outputs,
+    Functions,
+    Globals,
+    OtherCards,
     Include,
 }
 
@@ -1324,7 +1300,7 @@ impl NetlistOutlineGroup {
                 let subcircuit = entries.get(entry)?;
                 Some(NetlistOutlineChild {
                     label: subcircuit.name().to_owned(),
-                    meta: Some(".subckt".to_owned()),
+                    meta: Some(subcircuit.keyword().to_owned()),
                     line: subcircuit.line(),
                     end_line: subcircuit.end_line(),
                     nested: false,
@@ -1359,25 +1335,25 @@ impl NetlistOutlineGroup {
     }
 }
 
-/// A parsed category the structure tree does not promote to a group.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct NetlistSemanticRow {
-    pub(super) label: String,
-    pub(super) meta: String,
-    pub(super) line: usize,
-}
-
 struct GroupSpec {
     kind: NetlistNavigatorRowKind,
     section: OutlineSectionKind,
     label: MessageId,
 }
 
-const STRUCTURE_GROUPS: [GroupSpec; 5] = [
+/// The outline's groups, in the order a designer reads a deck: what it is
+/// built from, then what it runs and reads out, then the rest. A deck's
+/// `.if` blocks are read in its text, not listed.
+const STRUCTURE_GROUPS: [GroupSpec; 11] = [
     GroupSpec {
         kind: NetlistNavigatorRowKind::Parameters,
         section: OutlineSectionKind::Parameters,
         label: MessageId::NetlistNavigatorParameters,
+    },
+    GroupSpec {
+        kind: NetlistNavigatorRowKind::Subcircuits,
+        section: OutlineSectionKind::Subcircuits,
+        label: MessageId::NetlistNavigatorSubcircuits,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Instances,
@@ -1399,57 +1375,30 @@ const STRUCTURE_GROUPS: [GroupSpec; 5] = [
         section: OutlineSectionKind::Measurements,
         label: MessageId::NetlistNavigatorMeasurements,
     },
-];
-
-struct IndexSpec {
-    section: OutlineSectionKind,
-    label: MessageId,
-    unit: MessageId,
-    units: MessageId,
-}
-
-const SEMANTIC_INDEX: [IndexSpec; 7] = [
-    IndexSpec {
-        section: OutlineSectionKind::Subcircuits,
-        label: MessageId::NetlistNavigatorHierarchy,
-        unit: MessageId::NetlistNavigatorUnitDefinition,
-        units: MessageId::NetlistNavigatorUnitDefinitions,
-    },
-    IndexSpec {
-        section: OutlineSectionKind::Globals,
-        label: MessageId::NetlistNavigatorGlobals,
-        unit: MessageId::NetlistNavigatorUnitDeclaration,
-        units: MessageId::NetlistNavigatorUnitDeclarations,
-    },
-    IndexSpec {
-        section: OutlineSectionKind::Functions,
-        label: MessageId::NetlistNavigatorFunctions,
-        unit: MessageId::NetlistNavigatorUnitDefinition,
-        units: MessageId::NetlistNavigatorUnitDefinitions,
-    },
-    IndexSpec {
+    GroupSpec {
+        kind: NetlistNavigatorRowKind::Options,
         section: OutlineSectionKind::Options,
         label: MessageId::NetlistNavigatorOptions,
-        unit: MessageId::NetlistNavigatorUnitCard,
-        units: MessageId::NetlistNavigatorUnitCards,
     },
-    IndexSpec {
+    GroupSpec {
+        kind: NetlistNavigatorRowKind::Outputs,
         section: OutlineSectionKind::Outputs,
         label: MessageId::NetlistNavigatorOutputs,
-        unit: MessageId::NetlistNavigatorUnitDirective,
-        units: MessageId::NetlistNavigatorUnitDirectives,
     },
-    IndexSpec {
-        section: OutlineSectionKind::Conditionals,
-        label: MessageId::NetlistNavigatorConditionals,
-        unit: MessageId::NetlistNavigatorUnitCard,
-        units: MessageId::NetlistNavigatorUnitCards,
+    GroupSpec {
+        kind: NetlistNavigatorRowKind::Functions,
+        section: OutlineSectionKind::Functions,
+        label: MessageId::NetlistNavigatorFunctions,
     },
-    IndexSpec {
+    GroupSpec {
+        kind: NetlistNavigatorRowKind::Globals,
+        section: OutlineSectionKind::Globals,
+        label: MessageId::NetlistNavigatorGlobals,
+    },
+    GroupSpec {
+        kind: NetlistNavigatorRowKind::OtherCards,
         section: OutlineSectionKind::Controls,
         label: MessageId::NetlistNavigatorControls,
-        unit: MessageId::NetlistNavigatorUnitDirective,
-        units: MessageId::NetlistNavigatorUnitDirectives,
     },
 ];
 
@@ -1459,10 +1408,6 @@ pub(super) struct NetlistNavigatorProjection {
     pub(super) root_row: Option<NetlistNavigatorRow>,
     pub(super) groups: Vec<NetlistOutlineGroup>,
     pub(super) include_rows: Vec<NetlistNavigatorRow>,
-    pub(super) semantic_rows: Vec<NetlistSemanticRow>,
-    /// Cards covered by the semantic index, stated in its header so the
-    /// section's own claim can be checked against the deck.
-    pub(super) semantic_cards: usize,
     pub(super) show_source_mapping: bool,
 }
 
@@ -1608,61 +1553,11 @@ impl NetlistNavigatorProjection {
             })
             .collect();
 
-        let mut semantic_cards = 0usize;
-        let semantic_rows = SEMANTIC_INDEX
-            .iter()
-            .filter_map(|spec| {
-                let section = section_of(spec.section);
-                let entry_of = |position: &usize| entries.get(*position);
-                let counted = if spec.section == OutlineSectionKind::Subcircuits {
-                    // The section holds both ends of every definition; only the
-                    // opening card is a definition.
-                    section
-                        .iter()
-                        .filter_map(entry_of)
-                        .filter(|entry| entry.kind() == OutlineEntryKind::Subcircuit)
-                        .count()
-                } else {
-                    section.len()
-                };
-                // The filter matches what the reader can see, so it is compared
-                // against the drawn label rather than the English one behind it.
-                let label = messages.text(spec.label);
-                if counted == 0 || !query.matches_group(&label, section.iter().filter_map(entry_of))
-                {
-                    return None;
-                }
-                // The header has to be the sum of the rows under it, or a
-                // reader who adds them up finds the section disagreeing
-                // with itself.
-                semantic_cards += counted;
-                Some(NetlistSemanticRow {
-                    label,
-                    meta: messages.format(
-                        MessageId::NetlistNavigatorCounted,
-                        &[
-                            ("count", &counted.to_string()),
-                            (
-                                "unit",
-                                &messages.text(if counted == 1 { spec.unit } else { spec.units }),
-                            ),
-                        ],
-                    ),
-                    line: section
-                        .first()
-                        .and_then(entry_of)
-                        .map_or(1, OutlineEntry::line),
-                })
-            })
-            .collect::<Vec<_>>();
-
         Self {
             line_count: index.line_count(),
             root_row,
             groups,
             include_rows,
-            semantic_rows,
-            semantic_cards,
             show_source_mapping: source_mapped
                 && (query.matches_text(&messages.text(MessageId::NetlistNavigatorSourceMapping))
                     || query.matches_text(&messages.text(MessageId::NetlistNavigatorProvenance))
@@ -1674,7 +1569,6 @@ impl NetlistNavigatorProjection {
         self.root_row.is_none()
             && self.groups.is_empty()
             && self.include_rows.is_empty()
-            && self.semantic_rows.is_empty()
             && !self.show_source_mapping
     }
 }
@@ -1695,6 +1589,18 @@ fn outline_group(
     // The filter is matched against the label the reader can see. Matching the
     // English behind it would leave a translated navigator unsearchable by the
     // names it displays.
+    // Both ends of a subcircuit share its section; the definition is the row.
+    let declared = section
+        .iter()
+        .copied()
+        .filter(|position| {
+            entry_of(position).is_some_and(|entry| entry.kind() != OutlineEntryKind::EndSubcircuit)
+        })
+        .collect::<Vec<_>>();
+    let section = declared.as_slice();
+    if section.is_empty() {
+        return None;
+    }
     let label = messages.text(spec.label);
     if !query.matches_group(&label, section.iter().filter_map(entry_of)) {
         return None;
@@ -1780,14 +1686,10 @@ fn scoped_rows(selected: &[usize], entries: &[OutlineEntry]) -> Option<Vec<Outli
 /// engine's index of the deck reads them.
 fn outline_child(section: OutlineSectionKind, entry: &OutlineEntry) -> NetlistOutlineChild {
     let (label, meta) = match section {
-        OutlineSectionKind::Parameters
-        | OutlineSectionKind::Devices
-        | OutlineSectionKind::Models
-        | OutlineSectionKind::Analyses
-        | OutlineSectionKind::Measurements => {
-            (entry.name().to_owned(), entry.detail().map(str::to_owned))
+        OutlineSectionKind::Source | OutlineSectionKind::Dependencies => {
+            (entry.label().to_owned(), None)
         }
-        _ => (entry.label().to_owned(), None),
+        _ => (entry.name().to_owned(), entry.detail().map(str::to_owned)),
     };
     NetlistOutlineChild {
         label,
@@ -2154,6 +2056,12 @@ pub(super) fn netlist_outline_icon(kind: NetlistNavigatorRowKind) -> WorkbenchIc
         NetlistNavigatorRowKind::Models => WorkbenchIcon::Models,
         NetlistNavigatorRowKind::Analyses => WorkbenchIcon::Simulate,
         NetlistNavigatorRowKind::Measurements => WorkbenchIcon::Target,
+        NetlistNavigatorRowKind::Subcircuits => WorkbenchIcon::Layers,
+        NetlistNavigatorRowKind::Options => WorkbenchIcon::Settings,
+        NetlistNavigatorRowKind::Outputs => WorkbenchIcon::Probe,
+        NetlistNavigatorRowKind::Functions => WorkbenchIcon::Format,
+        NetlistNavigatorRowKind::Globals => WorkbenchIcon::Supply,
+        NetlistNavigatorRowKind::OtherCards => WorkbenchIcon::More,
         NetlistNavigatorRowKind::Include => WorkbenchIcon::File,
     }
 }

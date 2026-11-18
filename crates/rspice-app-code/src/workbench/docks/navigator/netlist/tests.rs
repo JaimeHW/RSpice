@@ -75,7 +75,8 @@ fn netlist_navigator_projects_exact_live_counts_and_include_lines() {
             .and_then(|row| row.meta.as_deref()),
         None
     );
-    assert_eq!(count(NetlistNavigatorRowKind::Parameters), Some("1"));
+    // One row to a parameter: `.param gain=10 offset=1m` declares two.
+    assert_eq!(count(NetlistNavigatorRowKind::Parameters), Some("2"));
     assert_eq!(count(NetlistNavigatorRowKind::Instances), Some("2"));
     let instances = projection
         .groups
@@ -164,11 +165,11 @@ fn every_outline_group_discloses_the_declarations_it_counts() {
             .collect::<Vec<_>>()
     };
 
-    // A `.param` card that declares two names attributes no value to
-    // either, because the row would otherwise give both the first one's.
+    // A `.param` card that assigns two names gives each its own row and
+    // its own value, as Spectre's `parameters` lists them.
     assert_eq!(
         children(NetlistNavigatorRowKind::Parameters),
-        expected(&[("gain, offset", None, 4)])
+        expected(&[("gain", Some("10"), 4), ("offset", Some("1m"), 4)])
     );
     // A resistor's value is positional; a subcircuit call's master is the
     // last positional field. Both are exact from the element letter.
@@ -218,51 +219,70 @@ fn a_collapsed_group_keeps_its_count_and_stands_in_for_its_declarations() {
 }
 
 #[test]
-fn every_parsed_category_is_reachable_from_the_structure_tree_or_the_index() {
-    let source = "deck\n.global vdd\n.func square(x) {x*x}\n.options reltol=1e-5\n.subckt amp in out\nM1 out in 0 0 nch\n.ends amp\n.if corner\n.save v(out)\n.endif\n.end\n";
+fn every_category_the_deck_declares_is_a_group_of_its_declarations() {
+    let source = "deck\n.global vdd\n.func square(x) {x*x}\n.options reltol=1e-5\n.subckt amp in out\nM1 out in 0 0 nch\n.ends amp\n.if corner\n.save v(out)\n.endif\n.temp 85\n.end\n";
+    let index = netlist_index(source);
     let projection = netlist_projection(source, "");
 
-    let index = projection
-        .semantic_rows
+    let groups = projection
+        .groups
         .iter()
-        .map(|row| (row.label.as_str(), row.meta.as_str(), row.line))
+        .map(|group| {
+            (
+                group.row.label.as_str(),
+                group.row.meta.as_deref(),
+                disclosed(group, &index)
+                    .into_iter()
+                    .map(|child| (child.label, child.meta, child.line))
+                    .collect::<Vec<_>>(),
+            )
+        })
         .collect::<Vec<_>>();
+    let row = |label: &str, meta: Option<&str>, line: usize| {
+        (label.to_owned(), meta.map(str::to_owned), line)
+    };
     assert_eq!(
-        index,
+        groups,
         vec![
-            // `.ends` shares the section but is not a definition.
-            ("Hierarchy", "1 definition", 5),
-            ("Globals", "1 declaration", 2),
-            ("Functions", "1 definition", 3),
-            ("Solver options", "1 card", 4),
-            ("Save and probe", "1 directive", 9),
-            ("Conditionals", "2 cards", 8),
-            ("Control", "1 directive", 11),
+            // A subcircuit is its definition; its `.ends` is no row.
+            (
+                "Subcircuits",
+                Some("1"),
+                vec![row("amp", Some("2 ports"), 5)]
+            ),
+            (
+                "Instances",
+                Some("1"),
+                vec![row("amp", Some(".subckt"), 5), row("M1", Some("nch"), 6)]
+            ),
+            (
+                "Solver options",
+                Some("1"),
+                vec![row(".options", Some("reltol=1e-5"), 4)]
+            ),
+            (
+                "Save and probe",
+                Some("1"),
+                vec![row(".save", Some("v(out)"), 9)]
+            ),
+            ("Functions", Some("1"), vec![row("square", Some("(x)"), 3)]),
+            (
+                "Global nodes",
+                Some("1"),
+                vec![row(".global", Some("vdd"), 2)]
+            ),
+            // `.end` declares nothing, and an `.if` block is read in the text.
+            ("Other cards", Some("1"), vec![row(".temp", Some("85"), 11)]),
         ]
     );
-    // The header is the sum of the rows beneath it, so a reader who adds
-    // them up gets the number the section claims.
-    assert_eq!(
-        projection.semantic_cards,
-        index.len() + 1,
-        "seven categories, one of which counts two conditionals"
-    );
-    assert_eq!(projection.semantic_cards, 8);
 }
 
 #[test]
 fn a_category_the_deck_does_not_declare_is_left_out_of_the_index() {
     let projection = netlist_projection("deck\nR1 in out 1k\n.end\n", "");
 
-    assert!(
-        projection
-            .semantic_rows
-            .iter()
-            .all(|row| row.label != "Conditionals"),
-        "an absent category must not be listed as present with a zero"
-    );
-    // A structure group the deck declares nothing in is left out too: a row
-    // reading zero is a row spent on nothing.
+    // A group the deck declares nothing in is left out: a row reading zero
+    // is a row spent on nothing.
     assert!(
         projection
             .groups
@@ -328,6 +348,7 @@ R2 b 0 1k
         [
             row("vdd", Some("1.8"), 2, false),
             row("amp", Some(".subckt"), 3, false),
+            row("gain", Some("2"), 3, true),
             row("bias", Some("0.6"), 7, true),
         ]
     );
