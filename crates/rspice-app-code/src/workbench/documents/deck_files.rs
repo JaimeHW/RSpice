@@ -1,6 +1,7 @@
 //! The decks a session has open.
 //!
-//! A deck is a file. The project keeps where it is ([`ProjectDeck`]); the
+//! A deck is a file. The project keeps where it is
+//! ([`ProjectDeck`](crate::state::ProjectDeck)); the
 //! session keeps its text while it is open, read when it opens and written
 //! back, in its own encoding and with its own line separators, when it is
 //! saved. An include the deck reads is a file too, opened on its own tab
@@ -12,7 +13,7 @@ use std::path::{Path, PathBuf};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
-use crate::state::{DeckId, NetlistDocumentId, ProjectDeck, TextEncoding};
+use crate::state::{DeckId, NetlistDocumentId, TextEncoding};
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::state::WorkspaceDocumentId;
 
@@ -370,7 +371,7 @@ pub fn open_deck(
     {
         Some(deck) => deck.id,
         None => {
-            let deck = ProjectDeck::for_file(&path, folder.as_deref());
+            let deck = crate::state::ProjectDeck::for_file(&path, folder.as_deref());
             let id = deck.id;
             let content = &mut *model.workspace.content;
             content.decks.push(deck);
