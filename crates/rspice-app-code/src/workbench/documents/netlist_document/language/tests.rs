@@ -465,7 +465,7 @@ fn signature_help_shows_the_ports_and_parameters_of_a_subcircuit_an_include_defi
                 .end\n";
     let include = ".subckt cell in out params: gain=1\nR1 in out {gain}\n.ends cell\n";
     let mut harness = harness();
-    crate::workbench::documents::netlist_document::fixtures::seed_owned_deck(
+    crate::workbench::documents::netlist_document::fixtures::seed_deck(
         &mut harness.model,
         &mut harness.state.netlist,
         deck,
@@ -506,7 +506,7 @@ fn signature_help_shows_the_subcircuit_the_callers_scope_binds() {
                 .op\n\
                 .end\n";
     let mut harness = harness();
-    crate::workbench::documents::netlist_document::fixtures::seed_owned_deck(
+    crate::workbench::documents::netlist_document::fixtures::seed_deck(
         &mut harness.model,
         &mut harness.state.netlist,
         deck,
