@@ -232,6 +232,30 @@ pub fn depletion_charge_and_capacitance(
     }
 }
 
+/// Graded-junction depletion charge per unit zero-bias capacitance below the
+/// forward knee, `Phi*(1 - (1 - V/Phi)^(1-M))/(1-M)`, and its M = 1 limit
+/// `-Phi*ln(1 - V/Phi)`, from `log_one_minus = ln(1 - V/Phi)`.
+///
+/// SPICE forms it as `Phi*(1 - arg*sarg)/(1-M)` with `arg = 1 - V/Phi`. Near
+/// zero bias `arg` rounds to one, so that form quantizes the charge at about
+/// `Phi*EPSILON` whatever the bias; a charge companion divides the quantum by
+/// dt, and a sub-femtosecond step after an ideal edge cannot move the charge
+/// at all. With `log_one_minus` taken as `ln_1p(-V/Phi)`, the expm1 form keeps
+/// the charge's relative precision at any bias.
+#[inline]
+pub(crate) fn graded_depletion_charge(
+    potential: crate::Value,
+    grading: crate::Value,
+    log_one_minus: crate::Value,
+) -> crate::Value {
+    let exponent = 1.0 - grading;
+    if exponent.abs() < 1e-12 {
+        -potential * log_one_minus
+    } else {
+        -potential * (exponent * log_one_minus).exp_m1() / exponent
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::depletion_charge_and_capacitance;

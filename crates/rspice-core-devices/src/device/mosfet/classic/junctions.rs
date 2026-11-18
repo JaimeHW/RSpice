@@ -275,22 +275,19 @@ impl Mosfet {
         }
     }
 
+    /// `c0*PB*(1 - arg^(1-M))/(1-M)` from `log_arg = ln(arg)`; see
+    /// `graded_depletion_charge` for why the charge is not formed from `arg`.
     #[inline]
     pub(in crate::device::mosfet::classic) fn junction_depletion_charge_term(
         c0: Value,
         bulk_potential: Value,
         grading: Value,
-        arg: Value,
-        scaling: Value,
+        log_arg: Value,
     ) -> Value {
         if c0 <= 0.0 {
             return 0.0;
         }
-        if (1.0 - grading).abs() < 1e-12 {
-            -c0 * bulk_potential * arg.ln()
-        } else {
-            c0 * bulk_potential * (1.0 - arg * scaling) / (1.0 - grading)
-        }
+        c0 * crate::device::semiconductor::graded_depletion_charge(bulk_potential, grading, log_arg)
     }
 
     #[inline]
@@ -315,20 +312,24 @@ impl Mosfet {
 
         if junction_voltage < depletion_corner {
             let arg = (1.0 - junction_voltage / bulk_potential).max(1e-18);
+            // ln(arg) without rounding 1 - V/PB to one near zero bias.
+            let log_arg = if arg > 1e-18 {
+                (-junction_voltage / bulk_potential).ln_1p()
+            } else {
+                arg.ln()
+            };
             let bottom_scale = Self::junction_depletion_scaling(arg, bottom_grading);
             let sidewall_scale = Self::junction_depletion_scaling(arg, sidewall_grading);
             let charge = Self::junction_depletion_charge_term(
                 bottom_zero_bias_cap,
                 bulk_potential,
                 bottom_grading,
-                arg,
-                bottom_scale,
+                log_arg,
             ) + Self::junction_depletion_charge_term(
                 sidewall_zero_bias_cap,
                 bulk_potential,
                 sidewall_grading,
-                arg,
-                sidewall_scale,
+                log_arg,
             );
             let capacitance = (bottom_zero_bias_cap * bottom_scale
                 + sidewall_zero_bias_cap * sidewall_scale)
@@ -349,18 +350,17 @@ impl Mosfet {
                 / arg;
         let f3 = bottom_zero_bias_cap * bottom_grading * bottom_scale / arg / bulk_potential
             + sidewall_zero_bias_cap * sidewall_grading * sidewall_scale / arg / bulk_potential;
+        let log_arg = (-forward_cap_coeff).ln_1p();
         let edge_charge = Self::junction_depletion_charge_term(
             bottom_zero_bias_cap,
             bulk_potential,
             bottom_grading,
-            arg,
-            bottom_scale,
+            log_arg,
         ) + Self::junction_depletion_charge_term(
             sidewall_zero_bias_cap,
             bulk_potential,
             sidewall_grading,
-            arg,
-            sidewall_scale,
+            log_arg,
         );
         let f4 =
             edge_charge - 0.5 * f3 * depletion_corner * depletion_corner - depletion_corner * f2;
@@ -770,6 +770,29 @@ mod tests {
             (actual - expected).abs() <= tol,
             "{label}: actual={actual:.12e} expected={expected:.12e} tol={tol:.12e}"
         );
+    }
+
+    /// Near zero bias the level 1-3 bulk junction charge is
+    /// `c0*v*(1 + M*v/(2*PB))` per component to second order, and it keeps
+    /// that relative precision however small the bias: a companion divides
+    /// the charge's absolute error by dt, so a charge rounded to a quantum of
+    /// `PB*c0*EPSILON` left a 1e-19 s step unable to move it at all.
+    #[test]
+    fn bulk_junction_charge_keeps_its_relative_precision_near_zero_bias() {
+        let (bottom, sidewall, fc) = (5e-12, 2e-13, 0.5);
+        for (pb, mj, mjsw) in [(0.8, 0.5, 0.33), (0.3, 0.33, 1.0), (9.99, 1.2861, 0.5)] {
+            for v in [1e-18, -1e-18, 3.4e-18, -3.4e-18, 1e-12, -1e-9] {
+                let (charge, _) = Mosfet::junction_depletion_charge_and_capacitance(
+                    v, bottom, sidewall, pb, mj, mjsw, fc,
+                );
+                let expected = bottom * v * (1.0 + 0.5 * mj * v / pb)
+                    + sidewall * v * (1.0 + 0.5 * mjsw * v / pb);
+                assert!(
+                    (charge - expected).abs() <= expected.abs() * 1e-12,
+                    "Q({v:e}) = {charge:e}, expected {expected:e} (PB={pb}, MJ={mj}, MJSW={mjsw})"
+                );
+            }
+        }
     }
 
     #[test]

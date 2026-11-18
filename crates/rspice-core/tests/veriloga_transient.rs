@@ -670,6 +670,76 @@ endmodule
     let _ = std::fs::remove_file(model);
 }
 
+/// The MOSFET counterpart: an ideal edge drives a resistor into a capacitor
+/// and the drain of an off level-1 NMOS with a drain resistance, and a timer
+/// lands the next point 1e-19 s after the edge. The internal drain node then
+/// carries only the drain resistance and the bulk-drain junction, so the
+/// junction charge must carry the series current over a step that moves the
+/// node by about 4e-18 V, far below PB*EPSILON.
+#[test]
+fn a_mosfet_junction_charge_carries_its_current_over_a_tiny_step_after_an_ideal_edge() {
+    let model = write_model(
+        "mos_tiny_step_after_ideal_edge",
+        r#"
+`include "disciplines.vams"
+module va_ideal_edge(out);
+    output out;
+    electrical out;
+    real level;
+    analog begin
+        @(initial_step) level = 0.0;
+        @(timer(1.0e-6)) level = 1.8;
+        @(timer(1.0e-6 + 1.0e-19)) level = level;
+        V(out) <+ level;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* tiny step after an ideal edge into R-NMOS drain-C\n\
+         X1 drive va_ideal_edge\n\
+         R9 drive m 1k\n\
+         M1 m 0 0 0 nmod\n\
+         C1 m 0 10p\n\
+         R1 m 0 50\n\
+         .model nmod NMOS(LEVEL=1 VTO=1 KP=1e-4 RD=0.1 CBD=5p CBS=5p)\n\
+         .va \"{}\" va_ideal_edge\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse MOSFET tiny-step deck");
+    let result = Engine::default()
+        .run_tran(&netlist, 1.5e-6, 1.0e-9)
+        .expect("a tiny step after an ideal edge converges");
+    let edge = result
+        .time
+        .iter()
+        .rposition(|&time| time <= 1.0e-6)
+        .expect("a point at the edge");
+    let landing = edge + 1;
+    let dt = result.time[landing] - result.time[edge];
+    assert!(
+        dt > 0.0 && dt <= 1.0e-18,
+        "the timer lands just after the edge: {:?}",
+        &result.time[edge..=landing]
+    );
+    // Nearly all of the 1.8 mA charges C1, and the current through RD
+    // charges the bulk-drain junction capacitance.
+    let vm = node_series(&result.node_names, &result.voltages, "m")[landing];
+    let expected_vm = 1.8e-3 * dt / 10e-12;
+    assert!(
+        (vm - expected_vm).abs() <= 1e-3 * expected_vm,
+        "V(m) = {vm:e}, expected {expected_vm:e}"
+    );
+    let internal = node_series(&result.node_names, &result.voltages, "m1.__dint")[landing];
+    let expected_internal = vm / 0.1 * dt / 5e-12;
+    assert!(
+        (internal - expected_internal).abs() <= 1e-3 * expected_internal,
+        "V(M1 internal drain) = {internal:e}, expected {expected_internal:e}"
+    );
+    let _ = std::fs::remove_file(model);
+}
+
 #[test]
 fn veriloga_zi_commits_t0_and_lands_on_sample_lattice() {
     let model = write_model(
