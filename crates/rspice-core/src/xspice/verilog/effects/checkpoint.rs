@@ -2,10 +2,11 @@
 //!
 //! Randomness, `$timeformat`, the active `$monitor` and the severity counts
 //! are design state like any signal, and a resumed run must continue them
-//! exactly. The journal and the monitor region's queue are not saved: a
-//! checkpoint is taken at an accepted, settled boundary, where the journal
-//! has been released and the queue has drained, and capture refuses
-//! otherwise. A finished run cannot be checkpointed at all.
+//! exactly. The journal is not saved: a checkpoint is taken at an accepted,
+//! settled boundary, where the journal has been released, and capture refuses
+//! otherwise. The monitor region's queue is saved: a mixed run holds it until
+//! time leaves its tick, so an accepted point can carry one. A finished run
+//! cannot be checkpointed at all.
 //!
 //! # Files
 //!
@@ -18,7 +19,8 @@
 use super::dump::{Dump, DumpPhase};
 use super::files::HandleImage;
 use super::{
-    ActiveMonitor, FileMonitor, HdlEffects, SeverityCounts, format::TimeFormat, random::Pcg32,
+    ActiveMonitor, FileMonitor, HdlEffects, MonitorTask, SeverityCounts, format::TimeFormat,
+    random::Pcg32,
 };
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +34,10 @@ pub(crate) struct EffectsImage {
     pub time_format: TimeFormat,
     pub monitor: Option<ActiveMonitor>,
     pub severities: SeverityCounts,
+    /// The monitor region held at the checkpoint's tick, in scheduling order;
+    /// absent when none is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monitor_region: Vec<MonitorTask>,
     /// Open files, `$fmonitor`s and the dump; absent when there are none.
     #[serde(default, skip_serializing_if = "FilesImage::is_empty")]
     pub files: FilesImage,
@@ -67,8 +73,8 @@ impl EffectsImage {
                 "a run that executed `$finish`, `$stop` or `$fatal` cannot be checkpointed".into(),
             );
         }
-        if !effects.journal.is_empty() || !effects.queue.is_empty() {
-            return Err("HDL output or the monitor region is not drained".into());
+        if !effects.journal.is_empty() {
+            return Err("HDL output is not drained".into());
         }
         if !effects.traced.is_drained() {
             return Err("traced HDL variable publications are not drained".into());
@@ -82,6 +88,7 @@ impl EffectsImage {
             time_format: effects.time_format.clone(),
             monitor: effects.monitor.clone(),
             severities: effects.severities,
+            monitor_region: effects.queue.clone(),
             files: FilesImage {
                 handles: effects.files.capture()?,
                 monitors: effects.file_monitors.clone(),
@@ -120,6 +127,31 @@ impl EffectsImage {
         if !(-15..=0).contains(&self.time_format.units) {
             return Err("checkpoint `$timeformat` units are out of range".into());
         }
+        for task in &self.monitor_region {
+            let known = match task {
+                MonitorTask::Strobe(observer) => (*observer as usize) < plan.observers.len(),
+                MonitorTask::Monitor => self.monitor.is_some(),
+                MonitorTask::FileMonitor(serial) => self
+                    .files
+                    .monitors
+                    .iter()
+                    .any(|monitor| monitor.serial == *serial),
+            };
+            // A monitor joins the queue once a step; a `$strobe` each time
+            // it runs.
+            let repeated = !matches!(task, MonitorTask::Strobe(_))
+                && self
+                    .monitor_region
+                    .iter()
+                    .filter(|other| *other == task)
+                    .count()
+                    > 1;
+            if !known || repeated {
+                return Err(
+                    "the checkpointed monitor region names an undeclared or repeated task".into(),
+                );
+            }
+        }
         let options = effects.config.files.clone();
         let mut files = super::files::HdlFiles::default();
         files.restore(&options, &self.files.handles)?;
@@ -148,11 +180,16 @@ impl EffectsImage {
         effects.monitor = self.monitor.clone();
         effects.severities = self.severities;
         effects.journal.clear();
-        effects.queue.clear();
-        effects.monitor_queued = false;
+        effects.queue.clone_from(&self.monitor_region);
+        effects.monitor_queued = self.monitor_region.contains(&MonitorTask::Monitor);
         effects.finish = None;
         effects.files = files;
         effects.file_monitors = self.files.monitors.clone();
+        for monitor in &mut effects.file_monitors {
+            monitor.queued = self
+                .monitor_region
+                .contains(&MonitorTask::FileMonitor(monitor.serial));
+        }
         effects.next_monitor_serial = self.files.next_monitor;
         effects.evaluating = None;
         effects.dump = dump;

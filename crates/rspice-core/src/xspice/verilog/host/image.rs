@@ -55,6 +55,7 @@ impl Clone for DigitalHost {
             reverse_active,
             staged_start,
             deferred_start,
+            holds_monitor_region,
         } = self;
         Self {
             checkpoint_failed: *checkpoint_failed,
@@ -96,6 +97,7 @@ impl Clone for DigitalHost {
             reverse_active: *reverse_active,
             staged_start: *staged_start,
             deferred_start: deferred_start.clone(),
+            holds_monitor_region: *holds_monitor_region,
         }
     }
 
@@ -149,6 +151,7 @@ impl Clone for DigitalHost {
             reverse_active,
             staged_start,
             deferred_start,
+            holds_monitor_region,
         } = self;
         let Self {
             checkpoint_failed: source_checkpoint_failed,
@@ -190,6 +193,7 @@ impl Clone for DigitalHost {
             reverse_active: source_reverse_active,
             staged_start: source_staged_start,
             deferred_start: source_deferred_start,
+            holds_monitor_region: source_holds_monitor_region,
         } = source;
         *checkpoint_failed = *source_checkpoint_failed;
         plan.clone_from(source_plan);
@@ -229,5 +233,6 @@ impl Clone for DigitalHost {
         *reverse_active = *source_reverse_active;
         *staged_start = *source_staged_start;
         deferred_start.clone_from(source_deferred_start);
+        *holds_monitor_region = *source_holds_monitor_region;
     }
 }

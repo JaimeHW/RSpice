@@ -3417,6 +3417,144 @@ fn a_resumed_run_dates_an_xspice_event_by_its_dialect() {
     }
 }
 
+/// A `$monitor` on a module input the analog side converts.
+const MONITORED_INPUT: &str = "`timescale 1ns/1ps
+module mon(x);
+  input x; wire x;
+  initial $monitor(\"M %0.3f x=%b\", $realtime, x);
+endmodule
+";
+
+/// `$monitor` prints once at the end of a time step (IEEE 1364-2005 section
+/// 17.1.3), however often a mixed run settles it. Time zero is settled by the
+/// `initial` blocks, while `x` is still `z`, and again by the operating
+/// point, which converts it to 0: the step prints `x=0` once. Icarus Verilog
+/// 13, its `x` a register stepped where this pulse crosses 0.9 V, prints:
+///
+/// ```text
+/// M 0.000 x=0
+/// M 5.500 x=1
+/// M 11.500 x=0
+/// M 25.500 x=1
+/// M 31.500 x=0
+/// M 45.500 x=1
+/// ```
+#[test]
+fn a_monitor_prints_time_zero_once_as_icarus_prints_it() {
+    let model = ModelFile::hdl("monitored_input", MONITORED_INPUT);
+    let deck = format!(
+        "* a monitor on a converted input\n\
+         .hdl \"{}\"\n\
+         .param vcc=1.8\n\
+         vx x 0 pulse(0 1.8 5n 1n 1n 5n 20n)\n\
+         xm x mon\n\
+         .end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    let (outcome, printed) =
+        recorded(|engine, abort| engine.run_tran_with_abort(&netlist, 50e-9, 0.1e-9, abort));
+    completed(outcome);
+    assert_eq!(
+        printed_lines(&printed),
+        [
+            "M 0.000 x=0",
+            "M 5.500 x=1",
+            "M 11.500 x=0",
+            "M 25.500 x=1",
+            "M 31.500 x=0",
+            "M 45.500 x=1",
+        ]
+    );
+}
+
+/// A register stepped at 5 ns and back at 10 ns, monitored.
+const MONITORED_STEP: &str = "`timescale 1ns/1ns
+module step(q);
+  output q; reg q;
+  initial begin q = 0; #5 q = 1; #5 q = 0; end
+  initial $monitor(\"q=%b at %0t\", q, $time);
+endmodule
+";
+
+/// The result of a run that reached its stop time.
+fn completed<T>(outcome: Result<rspice_core::SimulationOutcome<T>, SimulationError>) -> T {
+    match outcome {
+        Ok(rspice_core::SimulationOutcome::Completed(result)) => result,
+        Ok(rspice_core::SimulationOutcome::Finished { finish, .. }) => {
+            panic!("the design finished the run: {finish:?}")
+        }
+        Err(error) => panic!("the run failed: {error}"),
+    }
+}
+
+/// The text of each record, its line end trimmed.
+fn printed_lines(records: &[rspice_core::config::HdlOutputRecord]) -> Vec<String> {
+    records
+        .iter()
+        .map(|record| record.text.trim_end().to_owned())
+        .collect()
+}
+
+/// A monitor waiting at an accepted point for time to leave its tick prints
+/// once across a checkpoint there: the step at 5 ns is settled at the point
+/// the checkpoint is taken at, and prints when the run moves past it, so the
+/// resumed run prints it. A checkpoint at the run's end is taken after that
+/// end has printed it, so a run resumed from there does not print it again.
+#[test]
+fn a_held_monitor_prints_once_across_a_checkpoint() {
+    let model = ModelFile::hdl("monitored_step", MONITORED_STEP);
+    let deck = format!(
+        "* a monitored step\n\
+         .hdl \"{}\"\n\
+         .param vcc=1.0\n\
+         xs q step\n\
+         rq q 0 1k\n\
+         .end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    let (stop, step) = (20e-9, 0.5e-9);
+    let (outcome, printed) = recorded(|engine, abort| {
+        engine.run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+            &netlist,
+            stop,
+            step,
+            TransientStartupMode::OperatingPoint,
+            &[5e-9],
+            abort,
+        )
+    });
+    let (_, scheduled) = completed(outcome);
+    assert_eq!(
+        printed_lines(&printed),
+        ["q=0 at 0", "q=1 at 5", "q=0 at 10"]
+    );
+    let saved = through_disk(&scheduled[0].checkpoint);
+    assert_eq!(saved.time, 5e-9);
+    let (outcome, resumed) = recorded(|engine, abort| {
+        engine.run_tran_resume_with_abort(&netlist, &saved, stop, step, abort)
+    });
+    completed(outcome);
+    assert_eq!(resumed, printed_after(&printed, saved.time));
+    assert_eq!(printed_lines(&resumed), ["q=1 at 5", "q=0 at 10"]);
+
+    let (outcome, ended) = recorded(|engine, abort| {
+        engine.run_tran_checkpointed_with_abort(&netlist, 5e-9, step, abort)
+    });
+    let (_, end) = completed(outcome);
+    let rspice_core::engine::TransientEnd::Checkpoint(checkpoint) = end else {
+        panic!("the run ended without a checkpoint");
+    };
+    assert_eq!(printed_lines(&ended), ["q=0 at 0", "q=1 at 5"]);
+    let saved = through_disk(&checkpoint);
+    let (outcome, continued) = recorded(|engine, abort| {
+        engine.run_tran_resume_with_abort(&netlist, &saved, stop, step, abort)
+    });
+    completed(outcome);
+    assert_eq!(printed_lines(&continued), ["q=0 at 10"]);
+}
+
 /// A register that steps from 0 to 1 at 10 ns, converted by the inserted
 /// D/A, whose default `trise`/`tfall` are zero: an ideal step.
 const IDEAL_STEP: &str = "`timescale 1ns/1ps

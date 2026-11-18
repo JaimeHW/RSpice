@@ -13860,6 +13860,10 @@ impl Engine {
                 scheduled_checkpoint_times[scheduled_checkpoint_cursor]
             )));
         }
+        // The last accepted point ends its HDL time step before the final
+        // checkpoint captures the design; see `end_mixed_digital_step`.
+        #[cfg(feature = "veriloga")]
+        circuit.end_mixed_digital_step(t)?;
         // A run a model ended with `$finish`, `$stop` or `$fatal` is complete
         // at the finish: nothing is left to resume, so it takes no checkpoint
         // after it, and the HDL host would refuse one.

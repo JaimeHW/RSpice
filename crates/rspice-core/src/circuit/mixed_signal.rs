@@ -2005,6 +2005,17 @@ impl CircuitData {
         }
     }
 
+    /// The transient's last accepted point, at `time`, ends its HDL time
+    /// step: a `$strobe` or `$monitor` held there prints before the final
+    /// checkpoint captures the design, so a run resumed from it does not
+    /// print the line again.
+    pub(crate) fn end_mixed_digital_step(&mut self, time: Value) -> Result<(), SimulationError> {
+        if let Some(digital) = &mut self.scheduler.mixed_digital_coordinator {
+            digital.end_hdl_step(time).map_err(shared_error)?;
+        }
+        Ok(())
+    }
+
     /// The traced HDL variables' publications since the last accepted
     /// point, then each one's value at `time`; a publication's `node` is its
     /// slot.

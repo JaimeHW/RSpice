@@ -759,7 +759,9 @@ impl Trial<'_> {
         }
         self.hosts_active = false;
         if let (Some(coordinator), Some(cursor)) = (self.coordinator.as_mut(), self.cursor.take()) {
-            coordinator.commit_equilibrium(cursor);
+            coordinator
+                .commit_equilibrium(cursor)
+                .map_err(shared_error)?;
         }
         if let Some(snapshot) = self.xspice.take() {
             snapshot.resources().commit();

@@ -650,6 +650,9 @@ pub struct DigitalHost {
     /// they start; see [`Self::prepare_start`]. Empty outside the first
     /// settle.
     deferred_start: Vec<usize>,
+    /// Hold the monitor region until time leaves its tick; see
+    /// [`Self::hold_monitor_region`].
+    holds_monitor_region: bool,
 }
 
 /// The interpreter's view of a running host: the signal store, plus the
@@ -830,8 +833,22 @@ impl DigitalHost {
             reverse_active: false,
             staged_start: false,
             deferred_start: Vec::new(),
+            holds_monitor_region: false,
             plan,
         }
+    }
+
+    /// Print `$strobe` and `$monitor` once per tick, when time leaves it,
+    /// rather than at the end of every settle.
+    ///
+    /// A mixed run settles one tick more than once: the operating point
+    /// settles time zero again after the `initial` blocks have, and several
+    /// analog points can share a tick. IEEE 1364-2005 sections 17.1.2 and
+    /// 17.1.3 print at the end of the time step, which is the last of those
+    /// settles, so the region waits for the next tick, the accepted
+    /// operating point, the run's end or the design's `$finish`.
+    pub(crate) fn hold_monitor_region(&mut self) {
+        self.holds_monitor_region = true;
     }
 
     /// Start time zero in Icarus Verilog's three steps (see
@@ -886,6 +903,37 @@ impl DigitalHost {
     /// Whether [`Self::end_hdl_run`] has a dump to close.
     pub(crate) fn hdl_dump_open(&self) -> bool {
         self.effects.dump_open_at_run_end()
+    }
+
+    /// Whether a monitor region waits for time to leave its tick; see
+    /// [`Self::hold_monitor_region`].
+    pub(crate) fn monitor_region_held(&self) -> bool {
+        self.effects.monitor_region_pending()
+    }
+
+    /// Print a held monitor region at the tick it belongs to: the accepted
+    /// operating point, or the run's end, closes that tick.
+    pub(crate) fn release_monitor_region(&mut self) -> Result<(), DigitalRunError> {
+        if self.effects.monitor_region_pending() {
+            self.run_monitor_region()?;
+        }
+        Ok(())
+    }
+
+    /// Time is moving to `tick`: a monitor region held at the tick it leaves
+    /// prints first, at that tick's clock and before anything at `tick`
+    /// writes a signal it reads.
+    fn leave_held_tick(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        if self.holds_monitor_region
+            && self.effects.monitor_region_pending()
+            && self
+                .store
+                .read_clock()
+                .is_some_and(|clock| clock.tick != tick)
+        {
+            self.run_monitor_region()?;
+        }
+        Ok(())
     }
 
     /// The `$finish`, `$stop` or `$fatal` the design executed, if any.
@@ -1031,6 +1079,7 @@ impl DigitalHost {
             fresh.drops = self.drops;
             fresh.apply_drops();
         }
+        fresh.holds_monitor_region = self.holds_monitor_region;
         fresh
     }
 
@@ -1573,6 +1622,7 @@ impl DigitalHost {
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
         mut resumed: Option<bool>,
     ) -> Result<(), DigitalRunError> {
+        self.leave_held_tick(tick)?;
         let bound = self.instant_of(tick);
         let resolution = self.resolution;
         let mut search = RepetitionSearch::default();
@@ -1762,7 +1812,12 @@ impl DigitalHost {
             // IEEE 1364-2005 sections 17.1.2 and 17.1.3: `$strobe` and
             // `$monitor` print here, after every other region of the step
             // has drained. They only read, so nothing they do wakes anything.
-            if region == DigitalSchedulingRegion::Monitor && self.effects.monitor_region_pending() {
+            // A held region waits for time to leave the tick, unless the
+            // design has finished at it.
+            if region == DigitalSchedulingRegion::Monitor
+                && self.effects.monitor_region_pending()
+                && !(self.holds_monitor_region && self.effects.finish().is_none())
+            {
                 self.run_monitor_region()?;
                 promoted = true;
             }
@@ -1873,6 +1928,7 @@ impl DigitalHost {
         tick: u64,
         physical_seconds: Option<f64>,
     ) -> Result<(), DigitalRunError> {
+        self.leave_held_tick(tick)?;
         let absolute_seconds = match physical_seconds.or(self.analog_activation_seconds) {
             Some(seconds) => seconds,
             None => self.instant_of(tick).seconds(),

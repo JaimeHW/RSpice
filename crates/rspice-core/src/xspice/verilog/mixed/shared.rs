@@ -735,6 +735,9 @@ impl MixedDigitalCoordinator {
             .flat_map(|((_, map), signals)| map.signals.iter().chain(signals).copied())
             .collect();
         digital.enable_driver_access(&connect_owned)?;
+        // The operating point and analog points that share a tick settle it
+        // again: `$strobe` and `$monitor` print once, when time leaves it.
+        digital.hold_monitor_region();
         for (host, view) in hosts.iter_mut().zip(views) {
             if !event_nodes.is_empty() {
                 host.strip_event_boundaries(event_nodes);
@@ -2241,19 +2244,46 @@ impl MixedDigitalCoordinator {
     /// no time is accepted: the next trial at time zero opens on this store,
     /// so it is the operating point again rather than a repeated timepoint.
     #[doc(hidden)]
-    pub fn commit_equilibrium(&mut self, mut cursor: SharedTrialCursor) {
+    pub fn commit_equilibrium(
+        &mut self,
+        mut cursor: SharedTrialCursor,
+    ) -> Result<(), MixedSignalError> {
         assert!(
             !cursor.probe,
             "a numerical probe cannot commit shared digital state"
         );
-        // Output is printed once per committed
-        // equilibrium. The store kept here has run its time-zero activations,
-        // so a transient that continues from it does not print them again.
+        // Output is printed once per committed equilibrium, which ends its
+        // time step: the `initial` blocks and the operating point settled
+        // time zero, and a held monitor region prints what they left. The
+        // store kept here has run its time-zero activations, so a transient
+        // that continues from it does not print them again.
+        let held = self.release_monitor_region();
         self.release_hdl_output(crate::config::HdlPoint::OperatingPoint);
         self.accepted_observers = std::mem::take(&mut cursor.observers);
         self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);
         self.trial_open = false;
         cursor.rollback = None;
+        held
+    }
+
+    /// Print the monitor region held at the accepted tick, which the
+    /// operating point or the run's end closes.
+    fn release_monitor_region(&mut self) -> Result<(), MixedSignalError> {
+        if !self.digital.monitor_region_held() {
+            return Ok(());
+        }
+        let released = self.digital.make_mut().release_monitor_region();
+        released.map_err(|error| self.execution_error(error))
+    }
+
+    /// The transient's last accepted point, at `time`, ends its time step: a
+    /// monitor region held there prints now, before the run's final
+    /// checkpoint captures the design, so a run resumed from that checkpoint
+    /// does not print it again.
+    pub(crate) fn end_hdl_step(&mut self, time: f64) -> Result<(), MixedSignalError> {
+        self.release_monitor_region()?;
+        self.release_hdl_output(crate::config::HdlPoint::Transient { time });
+        Ok(())
     }
 
     /// The transient ended at `time`, its stop time, without the design's
@@ -2261,6 +2291,7 @@ impl MixedDigitalCoordinator {
     /// that time reached, as a digital run's closes with its last event's,
     /// and the closing line is released with the run's output.
     pub(crate) fn end_hdl_run(&mut self, time: f64) -> Result<(), MixedSignalError> {
+        self.end_hdl_step(time)?;
         if !self.digital.hdl_dump_open() {
             return Ok(());
         }

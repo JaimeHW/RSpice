@@ -215,6 +215,7 @@ impl DigitalHost {
             reverse_active: _,
             staged_start: _,
             deferred_start: _,
+            holds_monitor_region: _,
         } = self;
         let quiet = |host: &Self| {
             host.charge.is_none()
