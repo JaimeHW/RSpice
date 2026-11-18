@@ -123,6 +123,8 @@ impl PersistenceError {
     pub fn cause(&self) -> Option<&str> {
         match self {
             Self::Project(error) => error.cause(),
+            // The browser build has no other kind of persistence error.
+            #[cfg(not(target_arch = "wasm32"))]
             _ => None,
         }
     }
