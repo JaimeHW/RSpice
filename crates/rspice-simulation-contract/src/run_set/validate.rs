@@ -471,16 +471,22 @@ pub fn validate_with_task_count(
         ));
     }
 
+    // A forecast, not a refusal: what a task stores is a model until the store
+    // has written it, and the store holds the run to its plan's storage budget
+    // as it writes, stopping it, with what it wrote kept, where it reaches it.
     let storage_bytes = (task_count as u64).saturating_mul(state.budgets.bytes_per_point);
     if storage_bytes > state.budgets.maximum_storage_bytes {
-        errors.push(RunSetError::global(
-            "RUNSET-STORAGE-BUDGET",
-            format!(
-                "{} exceed the declared {} storage budget.",
+        warnings.push(RunSetWarning {
+            id: "RUNSET-STORAGE-FORECAST",
+            message: format!(
+                "At the modelled {} a task, the run would store {}, more than the declared {} \
+                 storage budget. The store counts what the run writes and stops it, keeping \
+                 what it wrote, when it reaches the plan's storage budget.",
+                super::format_bytes(state.budgets.bytes_per_point),
                 super::format_bytes(storage_bytes),
                 super::format_bytes(state.budgets.maximum_storage_bytes)
             ),
-        ));
+        });
     }
 
     if state

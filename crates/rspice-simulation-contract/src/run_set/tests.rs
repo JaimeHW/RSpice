@@ -310,6 +310,44 @@ fn a_budget_refusal_names_the_budget_it_exceeded() {
     );
 }
 
+/// What a task stores is a model until the store writes it: a run set whose
+/// modelled storage passes its budget is forecast so, never refused.
+#[test]
+fn a_modelled_storage_over_the_budget_is_a_forecast_not_a_refusal() {
+    let mut state = RunSetState::default();
+    let transaction = dispatch(
+        &mut state,
+        RunSetAction::SetBudgets(RunSetBudgets {
+            maximum_storage_bytes: 1024,
+            ..RunSetBudgets::default()
+        }),
+        1,
+    );
+    assert!(transaction.was_adopted());
+
+    let validation = validate(&state, 1);
+    assert!(
+        validation
+            .errors
+            .iter()
+            .all(|error| !error.id.starts_with("RUNSET-STORAGE")),
+        "{:?}",
+        validation.errors
+    );
+    let forecast = validation
+        .warnings
+        .iter()
+        .find(|warning| warning.id == "RUNSET-STORAGE-FORECAST")
+        .expect("the forecast says the model passes the budget");
+    assert!(
+        forecast
+            .message
+            .contains("more than the declared 1.00 KiB storage budget"),
+        "{}",
+        forecast.message
+    );
+}
+
 #[test]
 fn the_engine_batch_limit_blocks_preview_even_when_the_authored_budget_is_larger() {
     let state = RunSetState::default();
