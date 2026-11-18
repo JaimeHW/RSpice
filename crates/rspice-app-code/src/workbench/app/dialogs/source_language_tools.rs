@@ -281,14 +281,30 @@ pub(in crate::workbench) fn render_rename_symbol_form(
 
 const DECK_NEW_NAME_FIELD: &str = "workbench.rename-symbol.deck-new-name";
 
-/// The characters of a changed line the rename preview shows: enough to
-/// read the name in its place on a long card.
+/// The most characters of a changed line the rename preview shows: enough
+/// to read the name in its place on a long card.
 const PREVIEW_ROOM: usize = 20;
+
+/// The width of a wide form's body, what its File and Line columns and the
+/// gaps between the columns take of it, and one character of the table's
+/// code, in points: what decides how much of a line fits a Before or After
+/// cell on a narrow screen.
+const WIDE_FORM_BODY: f32 = 455.0;
+const FILE_AND_LINE: f32 = 150.0;
+const CODE_CHARACTER: f32 = 7.0;
+
+/// How many characters of a changed line fit a Before or After cell of the
+/// preview on a screen `screen` points wide.
+fn preview_room(screen: f32) -> usize {
+    let body = (screen - 48.0).min(WIDE_FORM_BODY);
+    let room = ((body - FILE_AND_LINE) / 2.0 / CODE_CHARACTER).floor();
+    (room.max(8.0) as usize).min(PREVIEW_ROOM)
+}
 
 /// A changed line, before and after, cut to the same window about its first
 /// change, starting on a word, so a long card still shows the name the
 /// rename changes; `…` stands for what is cut.
-fn around_the_change(before: &str, after: &str) -> (String, String) {
+fn around_the_change(before: &str, after: &str, room: usize) -> (String, String) {
     let was = before.chars().collect::<Vec<_>>();
     let is = after.chars().collect::<Vec<_>>();
     let first = was
@@ -299,21 +315,21 @@ fn around_the_change(before: &str, after: &str) -> (String, String) {
     // A change near the start shows the line from its start; one further
     // in, the words just before it. Both lines read the same up to the
     // change, so one window start serves both.
-    let mut start = if first <= PREVIEW_ROOM / 2 {
+    let mut start = if first <= room / 2 {
         0
     } else {
-        (first - PREVIEW_ROOM / 3)
-            .min(was.len().saturating_sub(PREVIEW_ROOM))
-            .min(is.len().saturating_sub(PREVIEW_ROOM))
+        (first - room / 3)
+            .min(was.len().saturating_sub(room))
+            .min(is.len().saturating_sub(room))
     };
     while start > 0 && start < first && was[start - 1] != ' ' {
         start += 1;
     }
     let cut = |chars: &[char]| {
-        if chars.len() <= PREVIEW_ROOM {
+        if chars.len() <= room {
             return chars.iter().collect::<String>();
         }
-        let end = (start + PREVIEW_ROOM).min(chars.len());
+        let end = (start + room).min(chars.len());
         let mut shown = String::new();
         if start > 0 {
             shown.push('\u{2026}');
@@ -365,11 +381,12 @@ pub(in crate::workbench) fn render_deck_rename_form(
             code_workspace::extent_words(plan.places, plan.file_count())
         )
     });
+    let room = preview_room(ctx.content_rect().width());
     let table = plan.as_ref().map(|plan| {
         plan.rows
             .iter()
             .map(|row| {
-                let (before, after) = around_the_change(&row.before, &row.after);
+                let (before, after) = around_the_change(&row.before, &row.after, room);
                 vec![row.file.clone(), row.line.to_string(), before, after]
             })
             .collect::<Vec<_>>()
