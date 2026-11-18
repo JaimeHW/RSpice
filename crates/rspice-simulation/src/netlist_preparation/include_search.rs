@@ -149,18 +149,33 @@ impl IncludeSearchChain {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<rspice_core::Netlist, ParseWithAbortError> {
+        // A run reads a deck's includes from the deck's folder and never from
+        // the process's working directory, so the deck is checked from there
+        // too, and a missing file names the folders the run would look in.
+        let folder = |path: &Path| -> PathBuf {
+            if path.is_dir() {
+                path.to_path_buf()
+            } else {
+                path.parent().unwrap_or(Path::new(".")).to_path_buf()
+            }
+        };
         match source_path {
             Some(path) if !self.entries.is_empty() => {
-                rspice_core::Netlist::parse_with_search_paths_and_options_and_abort(
+                rspice_core::Netlist::parse_with_search_paths_and_execution_dir_and_abort(
                     input,
                     path,
                     &self.directories(),
+                    &folder(path),
                     options,
                     abort,
                 )
             }
-            Some(path) => rspice_core::Netlist::parse_with_path_and_options_and_abort(
-                input, path, options, abort,
+            Some(path) => rspice_core::Netlist::parse_with_path_and_execution_dir_and_abort(
+                input,
+                path,
+                &folder(path),
+                options,
+                abort,
             ),
             None => rspice_core::Netlist::parse_with_options_and_abort(input, options, abort),
         }

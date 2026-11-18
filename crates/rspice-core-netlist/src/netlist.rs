@@ -2604,6 +2604,29 @@ impl Netlist {
         )
     }
 
+    /// Parse source text with search paths and an explicit execution
+    /// directory, for a host that reads a deck's includes from somewhere other
+    /// than the process working directory.
+    pub fn parse_with_search_paths_and_execution_dir_and_abort(
+        input: &str,
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        execution_dir: &std::path::Path,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_with_search_paths_execution_dir_options_and_abort(
+            input,
+            path,
+            search_paths,
+            execution_dir,
+            options,
+            &[],
+            None,
+            abort,
+        )
+    }
+
     // The path parse's arguments plus its library search paths.
     #[allow(clippy::too_many_arguments)]
     fn parse_with_search_paths_execution_dir_options_and_abort(
