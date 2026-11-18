@@ -128,6 +128,9 @@ pub struct FileSession {
     pub edited: bool,
     /// The lock this session holds on the file, while it holds one.
     pub lock: Option<LibraryFileLock>,
+    /// Someone else's lock on the file, as the last check found it: the
+    /// row reads "Being edited by …" and Break lock… names the holder.
+    pub locked_by: Option<LibraryFileLock>,
     /// The user chose "Keep my version" for a file that changed on disk
     /// since they started editing: the next save writes over it.
     pub keep_mine: bool,
@@ -290,6 +293,31 @@ impl Model {
             .get(file)?
             .lock
             .as_ref()
+    }
+
+    /// Someone else's lock on one file of a referenced library, as the last
+    /// check found it.
+    pub fn library_lock_elsewhere(
+        &self,
+        library: &str,
+        file: &LibraryFile,
+    ) -> Option<&LibraryFileLock> {
+        self.library_files
+            .library(library)?
+            .files
+            .get(file)?
+            .locked_by
+            .as_ref()
+    }
+
+    /// Each file of a referenced library that has unsaved edits here and
+    /// changed on disk too: Save refuses each until the user chooses Keep
+    /// my version or Take the file's version.
+    pub fn library_files_changed_since_editing(&self) -> Vec<RefreshRow> {
+        self.refresh_rows()
+            .into_iter()
+            .filter(|row| row.edited)
+            .collect()
     }
 
     /// Every file of a referenced library with edits not yet saved, by

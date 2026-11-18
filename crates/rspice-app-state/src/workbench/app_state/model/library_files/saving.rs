@@ -55,6 +55,10 @@ impl Model {
                 continue;
             };
             for (file, state) in &mut session.files {
+                // Who else is editing the file is read on every check: a lock
+                // comes and goes without the file itself moving.
+                state.locked_by = rspice_project::library_folder::read_library_lock(&folder, file)
+                    .filter(|lock| state.lock.as_ref() != Some(lock));
                 if matches!(state.on_disk, OnDisk::TechnologyDiffers) || state.loaded.is_none() {
                     continue;
                 }
@@ -132,6 +136,90 @@ impl Model {
         }
     }
 
+    /// Write what the project holds of one file over its folder's newer
+    /// copy, as Restore project from publication offers for a file whose
+    /// library has moved on: the file's lock is taken for the write and let
+    /// go once it is written. Refused, leaving the file as it is, while the
+    /// library is read-only, the file is locked elsewhere, or it cannot be
+    /// written.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn restore_library_file_from_project(
+        &mut self,
+        library: &str,
+        file: &LibraryFile,
+    ) -> Result<(), String> {
+        let reference = self
+            .library_manager
+            .reference(library)
+            .ok_or_else(|| format!("Library '{library}' is not kept in a folder of its own."))?;
+        if !reference.mode.is_editable() {
+            return Err(format!(
+                "{library}/{file}: the library is read-only. Make it editable to restore it."
+            ));
+        }
+        let id = reference.id;
+        let state = self
+            .library_files
+            .library(library)
+            .and_then(|session| session.files.get(file))
+            .ok_or_else(|| format!("{library}/{file} is not a file this session read."))?;
+        let base = state.loaded.map_or(0, |loaded| loaded.revision);
+        let on_disk = match state.on_disk {
+            OnDisk::Changed(on_disk) => on_disk.revision,
+            _ => base,
+        };
+        let revision = base.max(on_disk) + 1;
+        let encoded = self
+            .workspace
+            .content
+            .library_image(&self.library_manager, library, id)
+            .and_then(|image| image.encode(file, revision))
+            .ok_or_else(|| format!("{library}/{file} is not in the project."))?
+            .map_err(|error| format!("{library}/{file}: {error}"))?;
+        let folder = self
+            .library_folder(library)
+            .map(Path::to_path_buf)
+            .ok_or_else(|| format!("Library '{library}' has no folder here."))?;
+        let lock = super::folders::own_lock(self.lock_project_name());
+        match rspice_project::library_folder::take_library_lock(
+            &folder,
+            file,
+            &lock,
+            &rspice_output::process_liveness,
+        )
+        .map_err(|error| format!("{library}/{file} cannot be written: {error}"))?
+        {
+            rspice_project::library_folder::LockOutcome::HeldBy(holder) => {
+                return Err(format!(
+                    "{library}/{file}: being edited by {}",
+                    holder.holder()
+                ));
+            }
+            _ => {
+                if let Some(session) = self.library_files.library_mut(library) {
+                    session.files.entry(file.clone()).or_default().lock = Some(lock);
+                }
+            }
+        }
+        let written =
+            rspice_project::library_folder::write_library_file(&folder, file, &encoded.bytes);
+        let planned = PlannedWrite {
+            library: library.to_owned(),
+            file: file.clone(),
+            write: Some((encoded, revision)),
+        };
+        match written {
+            Ok(stamp) => {
+                self.record_library_write(&planned, stamp);
+                Ok(())
+            }
+            Err(error) => {
+                self.release_library_lock(library, file);
+                Err(format!("{library}/{file} could not be written: {error}"))
+            }
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn plan_library_writes(&self, file: &ProjectFile) -> Result<Vec<PlannedWrite>, String> {
         let mut planned = Vec::new();
@@ -184,7 +272,7 @@ impl Model {
                 });
                 if on_disk.is_some() && !state.is_some_and(|state| state.keep_mine) {
                     refused.push(format!(
-                        "{shown}: {}; choose Keep mine or Take the file's",
+                        "{shown}: {}; choose Keep my version or Take the file's version",
                         rspice_design::library::folder::CHANGED_SINCE_EDITING
                     ));
                     continue;

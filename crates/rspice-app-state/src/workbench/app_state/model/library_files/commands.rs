@@ -110,28 +110,41 @@ impl Model {
         }
         self.require_no_library_edits(library, "detaching it")?;
         self.workspace.save_active_schematic(&self.schematic);
-        let prefix = format!("{library}/");
-        let drawings = self
-            .workspace
-            .content
-            .schematic_buffers
-            .iter()
-            .filter(|(key, _)| !key.starts_with(&prefix))
-            .filter(|(_, schematic)| {
-                schematic.document().components.iter().any(|component| {
-                    component
-                        .library_cell
-                        .as_ref()
-                        .is_some_and(|binding| binding.library == library)
-                })
-            })
-            .map(|(key, _)| key.clone())
-            .collect::<Vec<_>>();
+        let drawings = self.library_placements_outside(library);
         let before = self.capture_library_place(library);
         self.take_library_out(library);
         self.library_lifecycle_changed();
         self.record_library_reference_edit(format!("detach library {library}"), library, before);
         Ok(drawings)
+    }
+
+    /// The drawings outside `library` that place one of its cells, by key:
+    /// what Detach leaves unresolved, which its review names first.
+    pub fn library_placements_outside(&self, library: &str) -> Vec<String> {
+        let prefix = format!("{library}/");
+        let places = |document: &rspice_design::schematic::document::SchematicDocument| {
+            document.components.iter().any(|component| {
+                component
+                    .library_cell
+                    .as_ref()
+                    .is_some_and(|binding| binding.library == library)
+            })
+        };
+        let active = self.workspace.content.active_view.key();
+        let mut drawings = self
+            .workspace
+            .content
+            .schematic_buffers
+            .iter()
+            .filter(|(key, _)| !key.starts_with(&prefix) && **key != active)
+            .filter(|(_, schematic)| places(schematic.document()))
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        if !active.starts_with(&prefix) && places(self.schematic.document()) {
+            drawings.push(active);
+        }
+        drawings.sort();
+        drawings
     }
 
     /// Write the embedded `library` to a folder of its own at `folder`, take
@@ -699,7 +712,7 @@ impl Model {
         }
     }
 
-    fn release_library_lock(&mut self, library: &str, file: &LibraryFile) {
+    pub(super) fn release_library_lock(&mut self, library: &str, file: &LibraryFile) {
         let folder = self.library_folder(library).map(Path::to_path_buf);
         let Some(state) = self
             .library_files
