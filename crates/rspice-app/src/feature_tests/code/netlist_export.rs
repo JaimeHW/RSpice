@@ -108,9 +108,9 @@ fn a_spice_export_moved_whole_runs_as_the_application_runs_the_design() {
         rspice_results::run::SimulationRunLifecycle::Completed,
     );
     let _ = std::fs::remove_dir_all(&moved);
-    // The deck route names a node's voltage by the node and keeps every
-    // solver point; Run plan samples it on the transient's output grid. The
-    // same solve sampled on that grid is the same trace.
+    // The deck route names a node's voltage by the node; both it and Run
+    // plan on default outputs keep every point the transient accepted. The
+    // same solve is the same trace, point for point.
     let name = format!("V({out})");
     let waves = || {
         run.analyses
@@ -125,17 +125,12 @@ fn a_spice_export_moved_whole_runs_as_the_application_runs_the_design() {
                 waves().map(|wave| wave.name.as_str()).collect::<Vec<_>>()
             )
         });
-    let sampled = rspice_simulation::output_contract::materialization::resample_selected_and_final(
-        exported,
-        output_grid(&deck),
-    )
-    .expect("the exported trace samples on the output grid");
     assert_eq!(
-        sampled.y.len(),
+        exported.y.len(),
         outcome.out_volts.len(),
-        "{name} on the output grid"
+        "{name} on the accepted points"
     );
-    for (exported, ran) in sampled.y.iter().zip(&outcome.out_volts) {
+    for (exported, ran) in exported.y.iter().zip(&outcome.out_volts) {
         assert_eq!(
             exported.to_bits(),
             ran.to_bits(),
