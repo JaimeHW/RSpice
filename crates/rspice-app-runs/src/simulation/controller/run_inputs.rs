@@ -51,9 +51,9 @@ use rspice_simulation::netlist_gen::{NetlistSourceHost, TableRoute};
 pub(crate) const DESIGN_CHANGED_SINCE_CHECK: &str =
     "The design changed after it was checked; run again";
 
-/// The same, for a manual deck, whose check is its validation.
-pub(crate) const NETLIST_CHANGED_SINCE_VALIDATION: &str =
-    "The netlist changed after it was validated; validate it again";
+/// The same, for a deck, which Run checks before it runs it.
+pub(crate) const DECK_CHANGED_SINCE_CHECK: &str =
+    "The deck changed after it was checked; run again";
 
 /// State a refused dispatch: in full on the status bar, as the refusal of a
 /// gesture, and in the run status as the refusal for moved inputs it is, or
@@ -61,7 +61,7 @@ pub(crate) const NETLIST_CHANGED_SINCE_VALIDATION: &str =
 pub(super) fn state_refused_dispatch(state: &mut impl RunHost, error: &PreparationError) {
     state.prompt(error.to_string());
     state.model_mut().simulation.execution.status =
-        [DESIGN_CHANGED_SINCE_CHECK, NETLIST_CHANGED_SINCE_VALIDATION]
+        [DESIGN_CHANGED_SINCE_CHECK, DECK_CHANGED_SINCE_CHECK]
             .into_iter()
             .find(|status| error.message().starts_with(status))
             .unwrap_or("Run blocked")
@@ -344,7 +344,7 @@ impl RunInputIdentity {
     fn refusal(&self) -> &'static str {
         match self.0.reads {
             KindReads::RunSet(_) => DESIGN_CHANGED_SINCE_CHECK,
-            KindReads::ManualDeck(_) => NETLIST_CHANGED_SINCE_VALIDATION,
+            KindReads::ManualDeck(_) => DECK_CHANGED_SINCE_CHECK,
         }
     }
 

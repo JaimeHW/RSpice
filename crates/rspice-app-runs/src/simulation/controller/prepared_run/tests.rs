@@ -1441,8 +1441,13 @@ fn an_edit_to_a_validated_manual_deck_refuses_its_run() {
         error.message(),
         format!(
             "{} · the netlist changed",
-            crate::simulation::controller::run_inputs::NETLIST_CHANGED_SINCE_VALIDATION
+            crate::simulation::controller::run_inputs::DECK_CHANGED_SINCE_CHECK
         )
+    );
+    assert!(
+        !error.message().to_lowercase().contains("validat"),
+        "Run checks the deck itself; the refusal asks for no Validate: {}",
+        error.message()
     );
 }
 

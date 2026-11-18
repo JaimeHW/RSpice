@@ -771,6 +771,27 @@ fn a_quick_fix_pressed_twice_applies_once() {
     );
 }
 
+/// A refused fix says why in the page's own words. The text is checked as
+/// it is typed, so no refusal sends the reader to a Validate the page no
+/// longer has.
+#[test]
+fn a_refused_quick_fix_does_not_ask_for_a_validate_the_page_no_longer_has() {
+    let (mut harness, finding) = validated_fix_state();
+    let gone = apply_quick_fix_for_finding(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        uuid::Uuid::new_v4(),
+    )
+    .expect_err("no finding has that identity");
+    harness.state.netlist.revision += 1;
+    let moved =
+        apply_quick_fix_for_finding(&mut harness.model, &mut harness.state.netlist, finding)
+            .expect_err("the text moved on since the finding");
+    for refusal in [gone, moved] {
+        assert!(!refusal.to_lowercase().contains("validat"), "{refusal}");
+    }
+}
+
 /// Any edit between validation and the press refuses the fix: one that
 /// moves the revision, and one that replaces the bytes without moving it.
 #[test]

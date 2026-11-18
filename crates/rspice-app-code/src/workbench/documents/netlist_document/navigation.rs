@@ -34,10 +34,7 @@ pub fn open_diagnostic_location(
         .cloned()
         .ok_or_else(|| "The selected diagnostic is no longer available.".to_owned())?;
     if !diagnostic.is_current() {
-        return Err(
-            "The selected diagnostic belongs to stale source; validate the current document first."
-                .to_owned(),
-        );
+        return Err("That finding is from an earlier version of the text.".to_owned());
     }
 
     let included_source = diagnostic

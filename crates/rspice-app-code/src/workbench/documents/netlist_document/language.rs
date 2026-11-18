@@ -1383,9 +1383,7 @@ pub fn apply_quick_fix_for_finding(
         .iter()
         .find(|diagnostic| diagnostic.canonical.diagnostic_id == finding && diagnostic.is_current())
         .and_then(BoundQuickFix::of)
-        .ok_or_else(|| {
-            "That finding no longer offers a fix; validate the document again.".to_owned()
-        })?;
+        .ok_or_else(|| "That finding no longer offers a fix.".to_owned())?;
     apply_quick_fix(model, netlist, &fix)
 }
 
@@ -1429,10 +1427,7 @@ fn apply_quick_fix(
     if netlist.revision != bound.revision
         || crate::state::content_digest(&source).to_string() != *bound.validation_id
     {
-        return Err(
-            "The source has changed since this fix was offered; validate the document again."
-                .to_owned(),
-        );
+        return Err("The text has changed since this fix was offered.".to_owned());
     }
     let fix = &bound.fix;
     if fix.span.start > fix.span.end
@@ -1440,7 +1435,7 @@ fn apply_quick_fix(
         || !source.is_char_boundary(fix.span.start)
         || !source.is_char_boundary(fix.span.end)
     {
-        return Err("The quick fix became stale; validate the document again.".to_owned());
+        return Err("The fix no longer fits the text.".to_owned());
     }
     let mut replacement = source.clone();
     replacement.replace_range(fix.span.clone(), &fix.replacement);
