@@ -2,12 +2,19 @@
 
 use super::{
     DocumentFingerprints, ProjectDocumentId, ResultFingerprintCache, SchematicDocumentContent,
-    ViewDocumentContent, digest, project_configuration_value, reference_from_key,
-    result_fingerprint,
+    ViewDocumentContent, cell_view_digest, configuration_digest, digest, library_catalog_digest,
+    project_descriptor_digest, reference_from_key, result_fingerprint,
 };
-use crate::ProjectFile;
-use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceOwner};
+use crate::{ProjectExecutionContext, ProjectFile, ProjectWorkspace};
+use rspice_design::library::View;
+use rspice_design::physical_layout::PhysicalLayoutDocument;
+use rspice_design::project_sources::{
+    ProjectSourceBundle, ProjectSourceOwner, ProjectSourceRegistry,
+};
+use rspice_design::schematic::owned::Schematic;
 use rspice_design_model::cell_view::CellViewRef;
+use rspice_simulation_contract::plan_payload::SimulationPlanPayloadRecord;
+use rspice_simulation_contract::setup_state::SimulationSetup;
 use rspice_vocabulary::product::ContentDigest;
 use std::collections::{HashMap, HashSet};
 
@@ -18,6 +25,8 @@ thread_local! {
     /// Whole working-project captures: one per
     /// [`crate::ProjectWorkingSet::capture`].
     pub static PROJECT_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Project documents digested from their content, one by one.
+    pub static DOCUMENT_DIGESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Set while a check recomputes work that was already counted.
     static UNOBSERVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -81,92 +90,68 @@ fn document_digests_with_results_cache(
     #[cfg(any(test, feature = "document-fingerprint-observation"))]
     observe(&FINGERPRINT_PASSES);
     let mut documents = HashMap::new();
-    let mut plan_payloads = project
-        .workspace
-        .simulation_plan_payloads
-        .iter()
-        .map(|record| (record.plan_id, &record.payload))
-        .collect::<Vec<_>>();
-    plan_payloads
-        .sort_by(|(left, _), (right, _)| left.as_uuid().as_bytes().cmp(right.as_uuid().as_bytes()));
-
-    documents.insert(
+    let mut insert = |id: ProjectDocumentId, digest: ContentDigest| {
+        #[cfg(any(test, feature = "document-fingerprint-observation"))]
+        observe(&DOCUMENT_DIGESTS);
+        documents.insert(id, digest);
+    };
+    let workspace = &project.workspace;
+    insert(
         ProjectDocumentId::ProjectConfiguration,
-        digest(&project_configuration_value(
-            &project.workspace.project,
-            &project.libraries,
-            &project.workspace.configuration_sets,
-            &project.workspace.design_management,
-        )?)?,
+        configuration_digest(
+            project_descriptor_digest(&workspace.project)?,
+            library_catalog_digest(&project.libraries)?,
+            digest(&workspace.configuration_sets)?,
+            digest(&workspace.design_management)?,
+        ),
     );
-    documents.insert(
+    insert(
         ProjectDocumentId::SimulationPlan,
-        digest(&(
+        simulation_plan_digest(
             project
                 .execution_context
                 .as_ref()
                 .map(|context| &context.simulation_plan),
-            plan_payloads,
-        ))?,
+            &workspace.simulation_plan_payloads,
+        )?,
     );
-    documents.insert(
+    insert(
         ProjectDocumentId::ModelCatalog,
-        digest(&project.execution_context.as_ref().map(|context| {
-            (
-                &context.model_libraries,
-                &context.model_resolution_records,
-                &context.model_validation_receipt,
-            )
-        }))?,
+        model_catalog_digest(project.execution_context.as_ref())?,
     );
-    documents.insert(
+    insert(
         ProjectDocumentId::ResultHistory,
         match results_cache {
             Some(cache) => cache.digest(
                 &project.simulation_results,
-                &project.workspace.report_documents,
-                &project.workspace.visualization_documents,
+                &workspace.report_documents,
+                &workspace.visualization_documents,
                 &project.result_presentation,
             )?,
             None => result_fingerprint::digest(
                 &project.simulation_results,
-                &project.workspace.report_documents,
-                &project.workspace.visualization_documents,
+                &workspace.report_documents,
+                &workspace.visualization_documents,
                 &project.result_presentation,
             )?,
         },
     );
-    // The stimulus definitions ride the project document rather than a
-    // sidecar, so without an identity here an edited library would move the
-    // saved file while every document in this registry still read clean —
-    // "no unsaved changes" over a library that had just been republished.
-    documents.insert(
+    insert(
         ProjectDocumentId::StimulusLibrary,
-        digest(&project.workspace.stimulus_library)?,
+        stimulus_library_digest(workspace)?,
     );
-    let code_workspace_sources = project
-        .workspace
-        .project_sources
-        .iter_bundles()
-        .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace { .. }))
-        .map(ProjectSourceBundle::authored_content)
-        .collect::<Vec<_>>();
-    documents.insert(
+    insert(
         ProjectDocumentId::NetlistSource,
-        digest(&(
-            &project.workspace.decks,
-            code_workspace_sources,
-            &project.workspace.added_lines,
-        ))?,
+        netlist_source_digest(workspace)?,
     );
 
     let mut references = HashSet::new();
-    for key in project.workspace.schematic_buffers.keys() {
+    for key in workspace.schematic_buffers.keys() {
         if let Some(reference) = reference_from_key(key) {
             references.insert(reference);
         }
     }
-    for key in project.workspace.physical_layout_documents().keys() {
+    for key in workspace.physical_layout_documents().keys() {
         if let Some(reference) = reference_from_key(key) {
             references.insert(reference);
         }
@@ -178,29 +163,114 @@ fn document_digests_with_results_cache(
             }
         }
     }
+    let owns_sources = owns_cell_view_sources(&workspace.project_sources);
     for reference in references {
-        let schematic = project
-            .workspace
-            .schematic_buffers
-            .get(&reference.key())
-            .map(|schematic| SchematicDocumentContent::from(schematic.document()));
-        let physical_layout = project.workspace.physical_layout_document(&reference);
-        let view = project
-            .libraries
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .map(ViewDocumentContent::from);
-        let project_source = project
-            .workspace
-            .project_sources
-            .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
-            .map(ProjectSourceBundle::authored_content);
-        documents.insert(
+        let parts = [
+            drawing_digest(workspace.schematic_buffers.get(&reference.key()))?,
+            layout_digest(workspace.physical_layout_document(&reference))?,
+            view_digest(
+                project
+                    .libraries
+                    .get_library(&reference.library)
+                    .and_then(|library| library.get_cell(&reference.cell))
+                    .and_then(|cell| cell.get_view(&reference.view)),
+            )?,
+            source_digest(&workspace.project_sources, owns_sources, &reference)?,
+        ];
+        insert(
             ProjectDocumentId::CellView(reference),
-            digest(&(schematic, physical_layout, view, project_source))?,
+            cell_view_digest(&parts),
         );
     }
 
     Ok(documents)
+}
+
+/// The persisted simulation plan and every plan's payload, in plan order.
+pub(super) fn simulation_plan_digest(
+    plan: Option<&SimulationSetup>,
+    payloads: &[SimulationPlanPayloadRecord],
+) -> Result<ContentDigest, String> {
+    let mut payloads = payloads
+        .iter()
+        .map(|record| (record.plan_id, &record.payload))
+        .collect::<Vec<_>>();
+    payloads
+        .sort_by(|(left, _), (right, _)| left.as_uuid().as_bytes().cmp(right.as_uuid().as_bytes()));
+    digest(&(plan, payloads))
+}
+
+/// The model catalog, its resolution records and its validation receipt.
+pub(super) fn model_catalog_digest(
+    context: Option<&ProjectExecutionContext>,
+) -> Result<ContentDigest, String> {
+    digest(&context.map(|context| {
+        (
+            &context.model_libraries,
+            &context.model_resolution_records,
+            &context.model_validation_receipt,
+        )
+    }))
+}
+
+/// The stimulus definitions ride the project document rather than a
+/// sidecar, so without an identity of their own an edited library would move
+/// the saved file while every document in this registry still read clean:
+/// "no unsaved changes" over a library that had just been republished.
+pub(super) fn stimulus_library_digest(
+    workspace: &ProjectWorkspace,
+) -> Result<ContentDigest, String> {
+    digest(&workspace.stimulus_library)
+}
+
+/// The decks, the code workspace's own sources and the added lines.
+pub(super) fn netlist_source_digest(workspace: &ProjectWorkspace) -> Result<ContentDigest, String> {
+    let code_workspace_sources = workspace
+        .project_sources
+        .iter_bundles()
+        .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace { .. }))
+        .map(ProjectSourceBundle::authored_content)
+        .collect::<Vec<_>>();
+    digest(&(
+        &workspace.decks,
+        code_workspace_sources,
+        &workspace.added_lines,
+    ))
+}
+
+/// A cell view's drawing share: the document a save writes of it.
+pub(super) fn drawing_digest(schematic: Option<&Schematic>) -> Result<ContentDigest, String> {
+    digest(&schematic.map(|schematic| SchematicDocumentContent::from(schematic.document())))
+}
+
+/// A cell view's physical layout share.
+pub(super) fn layout_digest(
+    layout: Option<&PhysicalLayoutDocument>,
+) -> Result<ContentDigest, String> {
+    digest(&layout)
+}
+
+/// A cell view's entry in its library.
+pub(super) fn view_digest(view: Option<&View>) -> Result<ContentDigest, String> {
+    digest(&view.map(ViewDocumentContent::from))
+}
+
+/// Whether any project source is owned by a cell view: when none is, every
+/// cell view's source share is the empty one.
+pub(super) fn owns_cell_view_sources(sources: &ProjectSourceRegistry) -> bool {
+    sources
+        .iter_bundles()
+        .any(|bundle| matches!(bundle.owner(), ProjectSourceOwner::CellView { .. }))
+}
+
+/// A cell view's project source share: the source it owns, as authored.
+pub(super) fn source_digest(
+    sources: &ProjectSourceRegistry,
+    owns_sources: bool,
+    reference: &CellViewRef,
+) -> Result<ContentDigest, String> {
+    let bundle = owns_sources
+        .then(|| sources.bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone())))
+        .flatten();
+    digest(&bundle.map(ProjectSourceBundle::authored_content))
 }

@@ -1,10 +1,11 @@
 //! Project-document identities, dirty comparison and canonical fingerprints.
 
+mod canonical;
 mod fingerprints;
 #[cfg(any(test, feature = "document-fingerprint-observation"))]
 pub(crate) use fingerprints::observe;
 #[cfg(any(test, feature = "document-fingerprint-observation"))]
-pub use fingerprints::{FINGERPRINT_PASSES, PROJECT_CAPTURES};
+pub use fingerprints::{DOCUMENT_DIGESTS, FINGERPRINT_PASSES, PROJECT_CAPTURES};
 pub use fingerprints::{
     content_digest, document_digests, document_fingerprints,
     document_fingerprints_with_results_cache, unobserved,
@@ -18,7 +19,7 @@ use rspice_design_model::cell_view::CellViewRef;
 use rspice_vocabulary::product::ContentDigest;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Stable identity of every project-owned document that participates in
 /// Save, Save all, Revert, and dirty-state decisions.
@@ -70,7 +71,12 @@ pub struct DocumentRecord {
 
 #[derive(Debug, Clone, Default)]
 pub struct DocumentRegistry {
+    /// In stable-key order.
     records: Vec<DocumentRecord>,
+    /// Each record's place in `records`.
+    index: HashMap<ProjectDocumentId, usize>,
+    /// How many records are dirty.
+    dirty: usize,
     comparison_failed: bool,
 }
 
@@ -80,12 +86,12 @@ impl DocumentRegistry {
     }
 
     pub fn is_dirty(&self, id: &ProjectDocumentId) -> bool {
-        self.comparison_failed
-            || self
-                .records
-                .iter()
-                .find(|record| &record.id == id)
-                .is_some_and(|record| record.dirty)
+        self.comparison_failed || self.index.get(id).is_some_and(|&at| self.records[at].dirty)
+    }
+
+    /// Whether any document differs from the accepted one.
+    pub fn any_dirty(&self) -> bool {
+        self.dirty > 0
     }
 
     pub fn comparison_failed(&self) -> bool {
@@ -99,6 +105,7 @@ impl DocumentRegistry {
         for record in &mut self.records {
             record.dirty = true;
         }
+        self.dirty = self.records.len();
     }
 
     pub fn rebuild_from_fingerprints(
@@ -106,15 +113,23 @@ impl DocumentRegistry {
         current: &DocumentFingerprints,
         accepted: Option<&DocumentFingerprints>,
     ) {
-        let current = &current.documents;
         let empty = HashMap::new();
-        let accepted = accepted.map_or(&empty, |fingerprints| &fingerprints.documents);
+        self.rebuild(
+            &current.documents,
+            accepted.map_or(&empty, |fingerprints| &fingerprints.documents),
+        );
+    }
+
+    /// Every document of `current` and `accepted`, dirty where the two differ.
+    fn rebuild(
+        &mut self,
+        current: &HashMap<ProjectDocumentId, ContentDigest>,
+        accepted: &HashMap<ProjectDocumentId, ContentDigest>,
+    ) {
         let mut ids = current
             .keys()
-            .chain(accepted.keys())
+            .chain(accepted.keys().filter(|id| !current.contains_key(*id)))
             .cloned()
-            .collect::<HashSet<_>>()
-            .into_iter()
             .collect::<Vec<_>>();
         ids.sort_by_cached_key(ProjectDocumentId::stable_key);
         self.records = ids
@@ -124,8 +139,39 @@ impl DocumentRegistry {
                 id,
             })
             .collect();
+        self.reindex();
         self.comparison_failed = false;
     }
+
+    fn reindex(&mut self) {
+        self.index = self
+            .records
+            .iter()
+            .enumerate()
+            .map(|(at, record)| (record.id.clone(), at))
+            .collect();
+        self.dirty = self.records.iter().filter(|record| record.dirty).count();
+    }
+}
+
+/// The identity of a whole project from its documents' identities.
+fn project_content_digest(documents: &HashMap<ProjectDocumentId, ContentDigest>) -> ContentDigest {
+    // Each key is built once: a comparison that built its own two keys
+    // cost a project of 5,000 cells about 50 ms per sort.
+    let mut ordered = documents
+        .iter()
+        .map(|(id, digest)| (id.stable_key(), digest))
+        .collect::<Vec<_>>();
+    ordered.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+    let mut hasher = Sha256::new();
+    hasher.update(b"rspice-project-content-digest\0v1\0");
+    hasher.update((ordered.len() as u64).to_be_bytes());
+    for (key, digest) in ordered {
+        hasher.update((key.len() as u64).to_be_bytes());
+        hasher.update(key.as_bytes());
+        hasher.update(digest.as_bytes());
+    }
+    ContentDigest::from_bytes(hasher.finalize().into())
 }
 
 /// Cached identities of one complete, immutable project snapshot.
@@ -137,22 +183,7 @@ pub struct DocumentFingerprints {
 
 impl DocumentFingerprints {
     pub fn from_documents(documents: HashMap<ProjectDocumentId, ContentDigest>) -> Self {
-        // Each key is built once: a comparison that built its own two keys
-        // cost a project of 5,000 cells about 50 ms per sort.
-        let mut ordered = documents
-            .iter()
-            .map(|(id, digest)| (id.stable_key(), digest))
-            .collect::<Vec<_>>();
-        ordered.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        let mut hasher = Sha256::new();
-        hasher.update(b"rspice-project-content-digest\0v1\0");
-        hasher.update((ordered.len() as u64).to_be_bytes());
-        for (key, digest) in ordered {
-            hasher.update((key.len() as u64).to_be_bytes());
-            hasher.update(key.as_bytes());
-            hasher.update(digest.as_bytes());
-        }
-        let content = ContentDigest::from_bytes(hasher.finalize().into());
+        let content = project_content_digest(&documents);
         Self { documents, content }
     }
 
@@ -165,25 +196,32 @@ impl DocumentFingerprints {
         self.documents.contains_key(id)
     }
 
+    /// The identity of one document, when the snapshot holds it.
+    pub fn get(&self, id: &ProjectDocumentId) -> Option<&ContentDigest> {
+        self.documents.get(id)
+    }
+
     /// The documents whose identity differs between `self` and `other`,
     /// including any present in only one, in stable-key order.
     pub fn differing_documents(&self, other: &Self) -> Vec<ProjectDocumentId> {
-        let mut differing = self
-            .documents
-            .iter()
-            .filter(|(id, digest)| other.documents.get(*id) != Some(*digest))
-            .map(|(id, _)| id.clone())
-            .chain(
-                other
-                    .documents
-                    .keys()
-                    .filter(|id| !self.documents.contains_key(*id))
-                    .cloned(),
-            )
-            .collect::<Vec<_>>();
-        differing.sort_by_cached_key(ProjectDocumentId::stable_key);
-        differing
+        differing_documents(&self.documents, &other.documents)
     }
+}
+
+/// The documents whose identity differs between two projects, including any
+/// present in only one, in stable-key order.
+fn differing_documents(
+    left: &HashMap<ProjectDocumentId, ContentDigest>,
+    right: &HashMap<ProjectDocumentId, ContentDigest>,
+) -> Vec<ProjectDocumentId> {
+    let mut differing = left
+        .iter()
+        .filter(|(id, digest)| right.get(*id) != Some(*digest))
+        .map(|(id, _)| id.clone())
+        .chain(right.keys().filter(|id| !left.contains_key(*id)).cloned())
+        .collect::<Vec<_>>();
+    differing.sort_by_cached_key(ProjectDocumentId::stable_key);
+    differing
 }
 
 /// Explicit lifecycle projection of a schematic document. Runtime interaction
@@ -247,30 +285,42 @@ impl<'a> From<&'a rspice_design::library::View> for ViewDocumentContent<'a> {
     }
 }
 
-pub fn project_configuration_value(
+/// The project descriptor's share of the configuration document. Its path
+/// is a persistence binding and its revision a concurrency coordinate:
+/// neither is engineering content.
+pub(crate) fn project_descriptor_digest(
     project: &crate::ProjectDescriptor,
-    libraries: &impl Serialize,
-    configuration_sets: &rspice_design::configuration_set::ConfigurationSetCatalog,
-    design_management: &rspice_design_model::design_management::DesignManagementCatalog,
-) -> Result<serde_json::Value, String> {
-    let mut value =
-        serde_json::to_value((project, libraries, configuration_sets, design_management))
-            .map_err(|error| error.to_string())?;
-    // Paths are persistence bindings and browser/tree expansion is
-    // presentation state.  Neither makes engineering content dirty.
-    if let Some(project) = value.pointer_mut("/0/path") {
-        *project = serde_json::Value::Null;
+) -> Result<ContentDigest, String> {
+    let mut value = serde_json::to_value(project).map_err(|error| error.to_string())?;
+    if let Some(path) = value.pointer_mut("/path") {
+        *path = serde_json::Value::Null;
     }
-    if let Some(project) = value.get_mut(0).and_then(serde_json::Value::as_object_mut) {
+    if let Some(project) = value.as_object_mut() {
         project.remove("revision");
     }
-    scrub_library_presentation(&mut value);
-    // Every view entry, including its existence and metadata, is owned by the
-    // corresponding CellView document. Project configuration owns the
-    // library/cell catalog only; otherwise saving configuration could silently
-    // accept an unrelated unsaved view or reverting it could discard one.
+    digest(&value)
+}
+
+/// The library catalog's share of the configuration document: libraries
+/// and cells. Every view entry, including its existence and metadata, is
+/// owned by its cell view's document; otherwise saving the configuration
+/// could silently accept an unrelated unsaved view, or reverting it discard
+/// one. Folder paths are persistence bindings, and the browser's selection
+/// and the catalog revision are presentation and coordination.
+pub(crate) fn library_catalog_digest(libraries: &impl Serialize) -> Result<ContentDigest, String> {
+    let mut value = serde_json::to_value(libraries).map_err(|error| error.to_string())?;
+    if let Some(manager) = value.as_object_mut() {
+        for key in [
+            "selected_library",
+            "selected_cell",
+            "selected_view",
+            "revision",
+        ] {
+            manager.remove(key);
+        }
+    }
     if let Some(libraries) = value
-        .pointer_mut("/1/libraries")
+        .pointer_mut("/libraries")
         .and_then(|v| v.as_object_mut())
     {
         for library in libraries.values_mut() {
@@ -286,24 +336,41 @@ pub fn project_configuration_value(
             }
         }
     }
-    Ok(value)
+    digest(&value)
 }
 
-fn scrub_library_presentation(value: &mut serde_json::Value) {
-    let Some(manager) = value.get_mut(1).and_then(serde_json::Value::as_object_mut) else {
-        return;
-    };
-    for key in [
-        "selected_library",
-        "selected_cell",
-        "selected_view",
-        // The revision is a concurrency/audit coordinate, not independent
-        // engineering configuration. The catalog structure is the content
-        // authority, while each view document owns its view payload.
-        "revision",
-    ] {
-        manager.remove(key);
+/// The configuration document from its four shares: the project
+/// descriptor, the library catalog, the configuration sets and design
+/// management. Each share is digested on its own, so a change to one leaves
+/// the others' digests standing.
+pub(crate) fn configuration_digest(
+    descriptor: ContentDigest,
+    catalog: ContentDigest,
+    configuration_sets: ContentDigest,
+    design_management: ContentDigest,
+) -> ContentDigest {
+    composed(
+        b"rspice-project-configuration\0v2\0",
+        &[descriptor, catalog, configuration_sets, design_management],
+    )
+}
+
+/// A cell view document from its four shares: the drawing, the physical
+/// layout, the view entry and the project source it owns, each digested as
+/// the value or `null`. An edit to the drawing leaves the other three
+/// standing, and an edit to the library leaves the drawing's.
+pub(crate) fn cell_view_digest(parts: &[ContentDigest; 4]) -> ContentDigest {
+    composed(b"rspice-cell-view-document\0v2\0", parts)
+}
+
+fn composed(tag: &[u8], parts: &[ContentDigest]) -> ContentDigest {
+    let mut hasher = Sha256::new();
+    hasher.update(tag);
+    hasher.update((parts.len() as u64).to_be_bytes());
+    for part in parts {
+        hasher.update(part.as_bytes());
     }
+    ContentDigest::from_bytes(hasher.finalize().into())
 }
 
 pub fn reference_from_key(key: &str) -> Option<CellViewRef> {
@@ -312,15 +379,27 @@ pub fn reference_from_key(key: &str) -> Option<CellViewRef> {
     segments.next().is_none().then_some(reference)
 }
 
+thread_local! {
+    /// The buffer the last digest on this thread encoded into, kept so a
+    /// drawing of thousands of parts is not grown from nothing every time.
+    static ENCODING: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The identity of `value`'s canonical JSON encoding: its keys in byte
+/// order, no whitespace, numbers and strings as `serde_json` writes them.
 pub fn digest(value: &impl Serialize) -> Result<ContentDigest, String> {
-    let value = serde_json::to_value(value).map_err(|error| error.to_string())?;
-    let mut canonical = Vec::new();
-    write_canonical_json(&value, &mut canonical)?;
-    let mut hasher = Sha256::new();
-    hasher.update(b"rspice-canonical-json-digest\0v1\0");
-    hasher.update((canonical.len() as u64).to_be_bytes());
-    hasher.update(canonical);
-    Ok(ContentDigest::from_bytes(hasher.finalize().into()))
+    let mut canonical = ENCODING.with(|buffer| std::mem::take(&mut *buffer.borrow_mut()));
+    canonical.clear();
+    let written = canonical::write(value, &mut canonical).map_err(|error| error.to_string());
+    let digest = written.map(|()| {
+        let mut hasher = Sha256::new();
+        hasher.update(b"rspice-canonical-json-digest\0v1\0");
+        hasher.update((canonical.len() as u64).to_be_bytes());
+        hasher.update(&canonical);
+        ContentDigest::from_bytes(hasher.finalize().into())
+    });
+    ENCODING.with(|buffer| *buffer.borrow_mut() = canonical);
+    digest
 }
 
 fn write_canonical_json(value: &serde_json::Value, out: &mut Vec<u8>) -> Result<(), String> {
@@ -375,5 +454,152 @@ mod tests {
         second.insert("alpha", 1_u32);
 
         assert_eq!(digest(&first).unwrap(), digest(&second).unwrap());
+    }
+
+    /// The encoding written straight from a value is byte for byte the one
+    /// its JSON value tree writes, so no saved file's digest moves.
+    #[test]
+    fn canonical_encoding_matches_the_json_value_tree() {
+        use serde::ser::{SerializeMap as _, Serializer};
+        use std::collections::BTreeMap;
+
+        #[derive(Serialize)]
+        struct Unit;
+        #[derive(Serialize)]
+        struct Wrapped(u8);
+        #[derive(Serialize)]
+        struct Pair(i32, &'static str);
+        #[derive(Serialize)]
+        enum Shape {
+            Point,
+            Circle(f64),
+            Line(i64, i64),
+            Box { width: f32, height: f32 },
+        }
+        #[derive(Serialize)]
+        struct Inner {
+            zeta: Option<u32>,
+            alpha: Vec<Shape>,
+        }
+        #[derive(Serialize)]
+        struct Outer {
+            name: String,
+            #[serde(flatten)]
+            inner: Inner,
+            by_number: BTreeMap<i64, char>,
+            by_flag: BTreeMap<bool, Unit>,
+            wrapped: Wrapped,
+            pair: Pair,
+            wide: (i128, u128),
+            nothing: (),
+            floats: Vec<f64>,
+            narrow: f32,
+        }
+        struct Bytes;
+        impl Serialize for Bytes {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_bytes(&[0, 7, 255])
+            }
+        }
+        /// A map that names one key twice and keys others by floats.
+        struct Repeated;
+        impl Serialize for Repeated {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("b", &1)?;
+                map.serialize_entry("a", &2)?;
+                map.serialize_entry("b", &3)?;
+                map.serialize_entry(&1.5_f64, &4)?;
+                map.serialize_entry(&0.1_f32, &5)?;
+                map.end()
+            }
+        }
+
+        let outer = Outer {
+            name: "quote \" slash \\ line\n tab\t bell\u{7} \u{e9} \u{1f600}".to_owned(),
+            inner: Inner {
+                zeta: None,
+                alpha: vec![
+                    Shape::Point,
+                    Shape::Circle(0.1),
+                    Shape::Line(-3, i64::MAX),
+                    Shape::Box {
+                        width: 0.1,
+                        height: 2.0,
+                    },
+                ],
+            },
+            by_number: BTreeMap::from([(-1, 'x'), (10, '"'), (2, '\u{0}')]),
+            by_flag: BTreeMap::from([(true, Unit), (false, Unit)]),
+            wrapped: Wrapped(9),
+            pair: Pair(-7, ""),
+            wide: (i128::from(i64::MIN), u128::from(u64::MAX)),
+            nothing: (),
+            floats: vec![
+                1.0,
+                -0.0,
+                1e300,
+                1e-7,
+                123456789.125,
+                f64::NAN,
+                f64::INFINITY,
+            ],
+            narrow: 16_777_217.0,
+        };
+        let oracle = |value: &dyn erased::Value| {
+            let tree = value.tree()?;
+            let mut bytes = Vec::new();
+            write_canonical_json(&tree, &mut bytes)?;
+            Ok::<_, String>(bytes)
+        };
+        let streamed = |value: &dyn erased::Value| value.stream();
+        let values: [&dyn erased::Value; 6] = [
+            &outer,
+            &Bytes,
+            &Repeated,
+            &Shape::Point,
+            &vec![BTreeMap::<String, u8>::new()],
+            &Some(Wrapped(1)),
+        ];
+        for value in values {
+            let expected = oracle(value).unwrap();
+            assert_eq!(
+                String::from_utf8(streamed(value).unwrap()).unwrap(),
+                String::from_utf8(expected).unwrap(),
+            );
+        }
+
+        // What JSON cannot hold, neither can encode.
+        let failing: [&dyn erased::Value; 3] = [
+            &BTreeMap::from([(vec![1_u8], 1_u8)]),
+            &(u128::from(u64::MAX) + 1),
+            &BTreeMap::from([(Some(1_u8), 1_u8)]),
+        ];
+        for value in failing {
+            assert!(oracle(value).is_err());
+            assert!(streamed(value).is_err());
+        }
+    }
+
+    mod erased {
+        use serde::Serialize;
+
+        pub(super) trait Value {
+            fn tree(&self) -> Result<serde_json::Value, String>;
+            fn stream(&self) -> Result<Vec<u8>, String>;
+        }
+
+        impl<T: Serialize> Value for T {
+            fn tree(&self) -> Result<serde_json::Value, String> {
+                serde_json::to_value(self).map_err(|error| error.to_string())
+            }
+
+            fn stream(&self) -> Result<Vec<u8>, String> {
+                let mut bytes = Vec::new();
+                super::super::canonical::write(self, &mut bytes)
+                    .map_err(|error| error.to_string())?;
+                Ok(bytes)
+            }
+        }
     }
 }
