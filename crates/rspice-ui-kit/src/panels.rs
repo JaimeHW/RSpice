@@ -1027,22 +1027,96 @@ pub fn labeled_icon_button_named(
 
 /// A read-only property row. Its value reads at the size a field beside it
 /// holds a typed value, so a fact and an edit in one inspector read as one
-/// column; the label keeps the caption size.
+/// column; the label keeps the caption size. The value's face follows what
+/// it says: see [`value_face`].
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    property_row_with_tone(ui, label, value, t.color.text, None, elide_text)
+    let face = value_face(value);
+    property_row_with_tone(ui, label, value, t.color.text, None, elide_text, face)
 }
 
 /// Property row whose value is a file-system path. A long path is shortened
-/// from the middle, so the folder it names stays in view.
+/// from the middle, so the folder it names stays in view. A path is set in
+/// mono whatever it spells.
 pub fn property_row_path(ui: &mut Ui, label: &str, path: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    property_row_with_tone(ui, label, path, t.color.text, None, elide_path)
+    let face = theme::field_mono();
+    property_row_with_tone(ui, label, path, t.color.text, None, elide_path, face)
 }
 
 /// Property row whose value communicates an explicit semantic tone.
 pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
-    property_row_with_tone(ui, label, value, value_tone, None, elide_text)
+    let face = value_face(value);
+    property_row_with_tone(ui, label, value, value_tone, None, elide_text, face)
+}
+
+/// The face a read-only value is set in, from what it says, as a
+/// professional tool's property sheet sets it: a value of words (a state
+/// such as "Found" or "Read-only", a name written as prose such as "Vendor
+/// filter", a sentence) reads in the interface face like the label beside
+/// it; a token (an instance or net name, a number, a quantity with its
+/// unit, a digest, a deck statement) reads in mono, where 0 and O, 1 and l
+/// differ and a column of them aligns.
+pub fn value_face(value: &str) -> egui::FontId {
+    if reads_as_words(value) {
+        theme::field_sans()
+    } else {
+        theme::field_mono()
+    }
+}
+
+/// Whether `value` is words: one capitalised word, or several of which one
+/// at least is a word of prose.
+fn reads_as_words(value: &str) -> bool {
+    let mut tokens = value.split_whitespace();
+    match (tokens.next(), tokens.next()) {
+        (None, _) => false,
+        (Some(only), None) => {
+            let word = without_sentence_marks(only);
+            is_prose_word(word)
+                && word.chars().skip(1).all(|c| !c.is_uppercase())
+                && word.chars().next().is_some_and(char::is_uppercase)
+        }
+        (Some(_), Some(_)) => value
+            .split_whitespace()
+            .any(|token| is_prose_word(without_sentence_marks(token))),
+    }
+}
+
+/// `token` without the marks a sentence puts around a word: an opening
+/// bracket or quote before it, a closing one or a stop after it. A mark
+/// inside a token (".tran", "V(out)", "amp_core") is the token's own.
+fn without_sentence_marks(token: &str) -> &str {
+    token
+        .trim_start_matches(['(', '"', '\u{201c}', '\u{2018}'])
+        .trim_end_matches([
+            ',', '.', ';', ':', '!', '?', ')', '"', '\u{201d}', '\u{2019}',
+        ])
+}
+
+/// A word of prose: letters, with a hyphen or apostrophe inside, two at
+/// least, some lower case (an all-capital token such as VDD names a net);
+/// not a unit, so "1.2 V" and "100 MHz" stay quantities.
+fn is_prose_word(word: &str) -> bool {
+    word.chars().filter(|c| c.is_alphabetic()).count() >= 2
+        && word.chars().any(char::is_lowercase)
+        && word
+            .chars()
+            .all(|c| c.is_alphabetic() || matches!(c, '-' | '\'' | '\u{2019}'))
+        && !is_unit(word)
+}
+
+/// Whether `word` is a unit, with an SI prefix or without.
+fn is_unit(word: &str) -> bool {
+    const UNITS: [&str; 16] = [
+        "Hz", "dB", "dBm", "dBV", "Ohm", "ohm", "V", "A", "W", "F", "H", "s", "S", "K", "m", "g",
+    ];
+    let bare = word
+        .strip_prefix([
+            'f', 'p', 'n', 'u', '\u{b5}', '\u{3bc}', 'm', 'k', 'M', 'G', 'T',
+        ])
+        .unwrap_or(word);
+    UNITS.contains(&word) || UNITS.contains(&bare)
 }
 
 /// Property row whose value may carry a problem.
@@ -1074,6 +1148,7 @@ fn property_row_with_problem(
         problem.map(|problem| (problem.mark(), problem.color(&palette))),
         // A status is words: cut after a whole one, never inside it.
         elide_at_words,
+        value_face(value),
     );
     if let Some(problem) = problem {
         // The mark is the row's only statement of severity, and a screen
@@ -2299,10 +2374,10 @@ fn property_row_with_tone(
     value_tone: Color32,
     mark: Option<(StatusMark, Color32)>,
     elide_value: fn(&Ui, &str, &egui::FontId, f32) -> String,
+    value_font: egui::FontId,
 ) -> Response {
     let full_label = label;
     let full_value = value;
-    let value_font = theme::field_mono();
     // Read-only property cells share the editable row's invariant geometry.
     // Both columns are one line and ellipsized so changing the selected object
     // can never move the rows below it.
