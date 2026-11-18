@@ -552,6 +552,24 @@ fn hash_serialized<T: serde::Serialize>(hasher: &mut sha2::Sha256, value: &T) ->
 /// fields the materialized clone carries into execution: the document's
 /// native origin, which relative `.include` paths resolve against, and its
 /// read-only marker.
+/// What one cell view's source is known by in a projection key: where its
+/// drawing stands in its history, when the history named it, else the digest
+/// of its content. Equal names are equal drawings, so a drawing an edit or an
+/// undo moved is keyed without being digested; content the history cannot
+/// name is digested.
+fn cell_view_identity(source: &SchematicSource<'_>) -> Option<ContentDigest> {
+    let Some(state) = source.schematic.history_state() else {
+        return cell_view_digest(source);
+    };
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(b"rspice.projection.history-position");
+    hasher.update(state.to_le_bytes());
+    hasher.update([0xff]);
+    hash_serialized(&mut hasher, &source.current_file)?;
+    hasher.update([u8::from(source.read_only)]);
+    Some(ContentDigest::from_bytes(hasher.finalize().into()))
+}
+
 fn cell_view_digest(schematic: &impl ProjectionSource) -> Option<ContentDigest> {
     #[cfg(any(test, feature = "schematic-test-fixtures"))]
     CELL_VIEW_DIGESTS.with(|count| count.set(count.get().wrapping_add(1)));
@@ -991,7 +1009,7 @@ impl<M: ProjectionSources, F: HierarchySourceFiles> ProjectionContext<'_, M, F> 
             let digest = match remembered.get(cell_view_key) {
                 Some((stamp, digest)) if stamp.matches(&source) => *digest,
                 _ => {
-                    let digest = cell_view_digest(&source)?;
+                    let digest = cell_view_identity(&source)?;
                     remembered.insert(
                         cell_view_key.to_owned(),
                         (CellViewStamp::of(&source), digest),

@@ -26,7 +26,10 @@ use rspice_app_state::state::{
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 use rspice_app_state::workbench::app_state::model::FRAME_SYNCS;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_design::projection::{materialization_count, reset_materialization_count};
+use rspice_design::projection::{
+    document_digest_counts, materialization_count, reset_document_digest_counts,
+    reset_materialization_count,
+};
 use rspice_project::registry::{DOCUMENT_DIGESTS, DRAWING_DIGESTS, PROJECT_CAPTURES};
 
 /// Frames a surface is given to lay itself out before counting starts.
@@ -47,6 +50,9 @@ struct EditWork {
     /// Drawings digested from their content, rather than read from where
     /// they stand in their history.
     drawings_digested: usize,
+    /// Drawings digested to key the design projection, rather than keyed by
+    /// where they stand in their history.
+    projection_sources_digested: u64,
     /// Whole working-project captures.
     captures: usize,
     /// Frames that wrote the editor's drawing back to the project.
@@ -58,6 +64,11 @@ fn take() -> EditWork {
         comparisons: DIRTY_RECOMPUTES.with(|count| count.replace(0)),
         documents_digested: DOCUMENT_DIGESTS.with(|count| count.replace(0)),
         drawings_digested: DRAWING_DIGESTS.with(|count| count.replace(0)),
+        projection_sources_digested: {
+            let (sources, _) = document_digest_counts();
+            reset_document_digest_counts();
+            sources
+        },
         captures: PROJECT_CAPTURES.with(|count| count.replace(0)),
         drawing_syncs: FRAME_SYNCS.with(|count| count.replace(0)),
     }
@@ -114,7 +125,8 @@ fn place(app: &mut RSpiceApp) {
 /// Idle frames compare nothing and write nothing back, on the canvas and on
 /// the Project pages; a part placed on the drawing is compared once, from
 /// that one drawing, read unsaved from where it stands in its history with
-/// no digest of its content, and written back once.
+/// no digest of its content, and written back once. The design projection
+/// is keyed by that same position, so it digests no drawing either.
 #[test]
 fn an_edit_is_compared_once_from_its_own_document_and_idle_frames_do_nothing() {
     let (mut replay, folder) = saved_project("edit-work-idle");
@@ -145,6 +157,7 @@ fn an_edit_is_compared_once_from_its_own_document_and_idle_frames_do_nothing() {
                 comparisons: 1,
                 documents_digested: 1,
                 drawings_digested: 0,
+                projection_sources_digested: 0,
                 captures: 0,
                 drawing_syncs: 1,
             },
@@ -224,6 +237,27 @@ fn an_edit_and_its_undo_are_read_from_the_history_without_a_digest() {
         );
         read(&replay, step, unsaved);
     }
+    drop(replay);
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// A project closed while an edit waits for its live check lands without
+/// checking it: the first frame of the landing projects no design.
+#[test]
+fn a_project_closed_mid_edit_lands_without_checking_the_edit() {
+    let (mut replay, folder) = saved_project("edit-work-close");
+    replay.app.state.workbench.activate(Workspace::Design);
+    idle(&mut replay, WARM_UP_FRAMES);
+    place(&mut replay.app);
+    replay.frame(Vec::new());
+    replay.app.state.close_project_session();
+    reset_materialization_count();
+    replay.frame(Vec::new());
+    assert_eq!(
+        materialization_count(),
+        0,
+        "the landing's first frame projects no design for the edit left behind"
+    );
     drop(replay);
     let _ = std::fs::remove_dir_all(folder);
 }

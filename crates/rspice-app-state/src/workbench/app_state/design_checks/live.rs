@@ -46,7 +46,8 @@ impl Model {
     /// stamps; an edit is checked once the drawing has stood still for
     /// [`SETTLE`], and while it waits this says how long until it should be
     /// asked again. Opening a cellview is not an edit and checks nothing.
-    /// Leaving one with an edit still settling checks it on the way out.
+    /// Leaving one with an edit still settling checks it on the way out;
+    /// closing the project drops it, since nothing is left to check it in.
     pub fn refresh_live_checks(&mut self, now: Instant, facts: SlotFacts) -> Option<Duration> {
         if !self
             .preferences
@@ -55,7 +56,8 @@ impl Model {
             self.withdraw_live_checks(facts);
             return None;
         }
-        let drawing = (self.project_open.is_open()
+        let open = self.project_open.is_open();
+        let drawing = (open
             && matches!(
                 self.workspace.content.active_view_type(),
                 Some(ViewType::Schematic | ViewType::Testbench)
@@ -77,6 +79,10 @@ impl Model {
             state.pending = Some((subject.clone(), now));
         }
         let (subject, since) = state.pending.clone()?;
+        if !open {
+            state.pending = None;
+            return None;
+        }
         let still_in_front = drawing
             .as_ref()
             .is_some_and(|(key, _, _)| *key == owner_key(&subject));
