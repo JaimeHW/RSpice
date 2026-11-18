@@ -2239,7 +2239,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
     "rspice-app-design/src/workbench/design/navigator.rs::tabs",
     "rspice-app-design/src/workbench/design/surface/layout_editor.rs::show_canvas",
-    "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_recent_header",
     "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_section_header",
     "rspice-app-design/src/workbench/surfaces/stimulus/pwl.rs::table_header",
     "rspice-results-ui/src/noise_contrib.rs::contributor_header",
