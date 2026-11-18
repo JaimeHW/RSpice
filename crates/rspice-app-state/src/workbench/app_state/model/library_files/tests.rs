@@ -391,7 +391,12 @@ fn a_project_whose_library_folder_is_gone_opens_with_the_library_not_found() {
     std::fs::remove_dir_all(&folder).unwrap();
     let reader = project(&scratch.0.join("first").join("design.rspiceproj"));
     let session = reader.read_referenced_libraries(&mut file);
-    assert!(file.libraries.get_library(LIBRARY).is_none());
+    assert!(
+        file.libraries
+            .get_library(LIBRARY)
+            .is_some_and(|library| library.cells.is_empty() && library.read_only),
+        "a folder that cannot be read is listed with no cells"
+    );
     assert!(matches!(
         session.library(LIBRARY).map(|session| &session.load),
         Some(ReferenceLoad::NotFound(Missing::NoFolder(_)))

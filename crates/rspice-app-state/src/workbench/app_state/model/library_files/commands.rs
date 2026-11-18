@@ -895,13 +895,19 @@ impl Model {
             self.library_manager.remove_library(library);
         }
         self.release_library_locks_of(library);
-        if let Some(image) = &reading.image {
-            self.workspace.content.insert_library_image(
-                &mut self.library_manager,
-                image,
-                read_only,
-                &|_| true,
-            )?;
+        match &reading.image {
+            Some(image) => {
+                self.workspace.content.insert_library_image(
+                    &mut self.library_manager,
+                    image,
+                    read_only,
+                    &|_| true,
+                )?;
+            }
+            None => {
+                self.library_manager
+                    .add_library(folders::unread_library(library));
+            }
         }
         self.library_files.insert(library, reading.session);
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);

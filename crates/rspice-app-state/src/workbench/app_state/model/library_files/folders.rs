@@ -48,6 +48,16 @@ impl FolderReading {
     }
 }
 
+/// The catalog's record of a library whose folder this session did not
+/// read: listed by its name with no cells, read-only, so every page lists
+/// it with its status. The project file never holds it: a referenced
+/// library is saved as its reference alone.
+pub(super) fn unread_library(name: &str) -> rspice_design::library::Library {
+    let mut library = rspice_design::library::Library::new(name);
+    library.read_only = true;
+    library
+}
+
 /// The folder `reference` names on this computer, or why it names none.
 pub(super) fn resolve_folder(
     reference: &LibraryReference,
@@ -176,6 +186,7 @@ impl Model {
             let folder = Err(Missing::NoFolder(
                 reference.path.shown(HostPlatform::current()),
             ));
+            file.libraries.add_library(unread_library(&reference.name));
             session.insert(
                 reference.name,
                 FolderReading::not_read(folder, ReferenceLoad::NotLoaded).session,
@@ -211,6 +222,9 @@ impl Model {
                 {
                     reading.session.load = ReferenceLoad::Unreadable(reason);
                     reading.session.files.clear();
+                }
+                if file.libraries.get_library(&reference.name).is_none() {
+                    file.libraries.add_library(unread_library(&reference.name));
                 }
                 session.insert(reference.name, reading.session);
             }
