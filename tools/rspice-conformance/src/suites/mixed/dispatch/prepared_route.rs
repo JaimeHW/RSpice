@@ -92,6 +92,7 @@ fn prepared_manual_run(source: &str, origin: &Path) -> Vec<Observation> {
         library_folders: &[],
         compilation: None,
         design_checks: Default::default(),
+        added_lines: &[],
     };
     let snapshot = build_prepared_manual_deck(
         &inputs,
