@@ -742,7 +742,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             listed: Vec::new(),
         };
         graph.seal();
-        let mut reported = Vec::new();
+        let mut reported = ReportedPaths::default();
         for (text, purpose) in required_paths {
             let Some((occurrence, diagnostic)) =
                 unmet_requirement(&graph, &mut reported, &text, &purpose)
@@ -1583,11 +1583,23 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         &self,
         instance_path: &InstancePath,
     ) -> Option<&ConfigurationSetOverride> {
+        self.most_specific_override(instance_path, |scoped| !scoped.executable_views.is_empty())
+    }
+
+    /// The most specific of the overrides `admits` that matches one
+    /// instance, over the patterns parsed once for the whole resolution: a
+    /// lookup runs for every row, so it must not parse the catalog again.
+    fn most_specific_override(
+        &self,
+        instance_path: &InstancePath,
+        admits: impl Fn(&ConfigurationSetOverride) -> bool,
+    ) -> Option<&ConfigurationSetOverride> {
         self.overrides
             .iter()
-            .filter(|scoped| !scoped.executable_views.is_empty())
-            .filter_map(|scoped| {
-                let pattern = InstancePathPattern::parse(&scoped.instance_path).ok()?;
+            .zip(&self.patterns)
+            .filter(|(scoped, _)| admits(scoped))
+            .filter_map(|(scoped, pattern)| {
+                let pattern = pattern.as_ref()?;
                 pattern
                     .matches(instance_path)
                     .then(|| (scoped, pattern.specificity()))
@@ -1780,7 +1792,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         &self,
         instance_path: &InstancePath,
     ) -> Option<&ConfigurationSetOverride> {
-        selected_configuration_override(&self.overrides, &instance_path.to_string())
+        self.most_specific_override(instance_path, |_| true)
     }
 
     /// Retain what one node runs for the plan this resolution seals.
@@ -2140,6 +2152,15 @@ fn segment_matches(segment: &PatternSegment, name: &str) -> bool {
     }
 }
 
+/// The paths reported missing from the expanded hierarchy: by their folded
+/// key, so a path is reported once however it is spelled, and whole, for a
+/// pattern to be matched against.
+#[derive(Default)]
+struct ReportedPaths {
+    paths: Vec<InstancePath>,
+    keys: HashSet<String>,
+}
+
 /// The instance to attribute an unmet configuration requirement to, and why
 /// it is unmet — or `None` when the expanded hierarchy satisfies it.
 ///
@@ -2150,20 +2171,16 @@ fn segment_matches(segment: &PatternSegment, name: &str) -> bool {
 /// reported missing, so one is reported once.
 fn unmet_requirement(
     graph: &HierarchyOccurrences,
-    reported: &mut Vec<InstancePath>,
+    reported: &mut ReportedPaths,
     text: &str,
     purpose: &str,
 ) -> Option<(InstancePath, String)> {
     match InstancePath::parse(text) {
         Ok(path) => {
-            if graph.node_at(&path).is_some()
-                || reported
-                    .iter()
-                    .any(|seen| seen.fold_key() == path.fold_key())
-            {
+            if graph.node_at(&path).is_some() || !reported.keys.insert(path.fold_key()) {
                 return None;
             }
-            reported.push(path.clone());
+            reported.paths.push(path.clone());
             Some((
                 path.clone(),
                 format!("{purpose} {path} does not exist in the expanded hierarchy"),
@@ -2173,7 +2190,7 @@ fn unmet_requirement(
             let diagnostic = match InstancePathPattern::parse(text) {
                 Ok(pattern) => {
                     if places_a_match(graph, &pattern)
-                        || reported.iter().any(|seen| pattern.matches(seen))
+                        || reported.paths.iter().any(|seen| pattern.matches(seen))
                     {
                         return None;
                     }
