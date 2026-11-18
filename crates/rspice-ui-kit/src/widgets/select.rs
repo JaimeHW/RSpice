@@ -94,7 +94,7 @@ pub fn select_with_disabled_response(
         selected,
         options,
         width,
-        false,
+        theme::field_sans(),
         false,
         disabled,
         &[],
@@ -118,7 +118,7 @@ pub fn select_with_response(
         selected,
         options,
         width,
-        false,
+        theme::field_sans(),
         false,
         &[],
         &[],
@@ -145,7 +145,34 @@ pub fn compact_select_with_response(
         selected,
         options,
         width,
-        false,
+        theme::field_sans(),
+        true,
+        &[],
+        &[],
+        None,
+    )
+    .0
+}
+
+/// [`compact_select_with_response`] printing its choices in the chips' mono
+/// face: the select for a line of chips and compact controls, where every
+/// control is one height and prints in one size of type.
+pub fn compact_select_mono_with_response(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    width: f32,
+) -> SelectOutput {
+    select_with_font(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        width,
+        theme::chip_mono(),
         true,
         &[],
         &[],
@@ -176,7 +203,7 @@ pub fn select_with_details(
         selected,
         options,
         width,
-        false,
+        theme::field_sans(),
         false,
         &[],
         details,
@@ -185,12 +212,12 @@ pub fn select_with_details(
     .0
 }
 
-/// The width a [`select_mono_with_response`] needs to say each of `options`
-/// whole: the widest in the face it prints them in, with the room before it
-/// and the chevron's after.
+/// The width a [`compact_select_mono_with_response`] needs to say each of
+/// `options` whole: the widest in the face it prints them in, with the room
+/// before it and the chevron's after.
 #[must_use]
-pub fn select_mono_width(ui: &Ui, options: &[String]) -> f32 {
-    let font = theme::field_mono();
+pub fn compact_select_mono_width(ui: &Ui, options: &[String]) -> f32 {
+    let font = theme::chip_mono();
     let widest = options
         .iter()
         .map(|option| {
@@ -221,7 +248,7 @@ pub fn select_mono_with_response(
         selected,
         options,
         width,
-        true,
+        theme::field_mono(),
         false,
         &[],
         &[],
@@ -371,7 +398,7 @@ pub fn select_with_switch(
         selected,
         options,
         width,
-        false,
+        theme::field_sans(),
         false,
         &[],
         &[],
@@ -391,7 +418,7 @@ fn select_with_font(
     selected: &str,
     options: &[String],
     width: f32,
-    mono: bool,
+    value_font: egui::FontId,
     compact: bool,
     disabled: &[(usize, &'static str)],
     details: &[String],
@@ -399,11 +426,6 @@ fn select_with_font(
 ) -> (SelectOutput, bool) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let value_font = if mono {
-        theme::field_mono()
-    } else {
-        theme::field_sans()
-    };
 
     let width = width.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 });
     let height = if compact {
@@ -850,10 +872,10 @@ mod tests {
             .collect()
     }
 
-    /// A mono select as wide as [`select_mono_width`] measures prints its
-    /// longest choice whole, in the larger face it prints choices in.
+    /// A compact mono select as wide as [`compact_select_mono_width`]
+    /// measures prints its longest choice whole.
     #[test]
-    fn a_mono_select_at_its_measured_width_prints_its_longest_choice_whole() {
+    fn a_compact_mono_select_at_its_measured_width_prints_its_longest_choice_whole() {
         let ctx = egui::Context::default();
         crate::Theme::default().apply(&ctx);
         let options = ["All producers", "Verilog-A compiler 12", "Netlist 3"]
@@ -863,8 +885,10 @@ mod tests {
         let mut printed = Vec::new();
         for _ in 0..3 {
             let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                let width = select_mono_width(ui, &options);
-                let _ = select_mono_with_response(ui, "mono", "Mono", &longest, &options, width);
+                let width = compact_select_mono_width(ui, &options);
+                let _ = compact_select_mono_with_response(
+                    ui, "mono", "Mono", &longest, &options, width,
+                );
             });
             printed = output
                 .shapes

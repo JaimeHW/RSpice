@@ -3,8 +3,8 @@
 
 use egui::{Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::theme::{self, FontWeight, mix};
-use crate::tokens::{self, Tokens};
+use crate::theme::{self, mix};
+use crate::tokens::Tokens;
 
 /// The width [`chip`] takes for `label`, so a row can make room for one
 /// before it draws it.
@@ -12,11 +12,7 @@ pub fn chip_width(ui: &Ui, label: &str) -> f32 {
     let t = Tokens::get(ui.ctx());
     let text = ui
         .painter()
-        .layout_no_wrap(
-            label.to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            t.color.text,
-        )
+        .layout_no_wrap(label.to_owned(), theme::chip_mono(), t.color.text)
         .size()
         .x;
     padded_width(&t, text)
@@ -34,30 +30,30 @@ fn padded_width(t: &Tokens, text: f32) -> f32 {
 /// A 22 px toggle chip with a mono label. Returns the response; the caller
 /// owns the toggle state (`on`).
 pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
-    chip_at_width(ui, label, on, 0.0)
+    let t = Tokens::get(ui.ctx());
+    let height = if t.metrics.is_touch() {
+        t.metrics.touch_target()
+    } else {
+        22.0
+    };
+    chip_sized(ui, label, on, 0.0, height)
 }
 
-/// [`chip`] at least `width` wide, its label centred: chips that are
-/// siblings in a row stand at one width, the widest one's.
-pub fn chip_at_width(ui: &mut Ui, label: &str, on: bool, width: f32) -> Response {
+/// [`chip`] at the kit's compact control height, at least `width` wide, its
+/// label centred: the chip for a line of compact controls, where it stands
+/// as tall as the selects and fields beside it, and where sibling chips
+/// stand at one width, the widest one's.
+pub fn compact_chip(ui: &mut Ui, label: &str, on: bool, width: f32) -> Response {
+    let height = super::compact_height(&Tokens::get(ui.ctx()).metrics);
+    chip_sized(ui, label, on, width, height)
+}
+
+fn chip_sized(ui: &mut Ui, label: &str, on: bool, width: f32, height: f32) -> Response {
     let t = Tokens::get(ui.ctx());
     let c = &t.color;
 
-    let galley = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            label.to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.text,
-        )
-    });
-    let size = vec2(
-        padded_width(&t, galley.size().x).max(width),
-        if t.metrics.is_touch() {
-            t.metrics.touch_target()
-        } else {
-            22.0
-        },
-    );
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), theme::chip_mono(), c.text));
+    let size = vec2(padded_width(&t, galley.size().x).max(width), height);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| {
         WidgetInfo::selected(WidgetType::SelectableLabel, ui.is_enabled(), on, label)

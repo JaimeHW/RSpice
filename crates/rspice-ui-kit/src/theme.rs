@@ -518,6 +518,13 @@ pub fn field_mono() -> FontId {
     mono(tokens::FS_2, FontWeight::Regular)
 }
 
+/// The face a chip prints in, and every control standing on a line of
+/// chips: a compact select's choice, a field's text and its hint, a menu
+/// button's label. One line, one size of type.
+pub fn chip_mono() -> FontId {
+    mono(tokens::FS_0, FontWeight::Regular)
+}
+
 /// [`field_mono`] for prose, and for a choice named in words.
 pub fn field_sans() -> FontId {
     sans(tokens::FS_2, FontWeight::Regular)

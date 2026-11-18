@@ -49,7 +49,7 @@ mod view_switch;
 
 pub use button::{Button, IconButton, compact_height};
 pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
-pub use chip::{chip, chip_at_width, chip_width};
+pub use chip::{chip, chip_width, compact_chip};
 pub use combo::Combo;
 pub(crate) use command_form::middle_elided;
 pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords, TableColumn};
@@ -76,9 +76,10 @@ pub use pane::{
 pub use searchable_select::{SelectGroup, searchable_select};
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{
-    EditableSelectOutput, SelectSwitch, compact_select_with_response, editable_select_mono,
-    select_mono_width, select_mono_with_response, select_with_details, select_with_disabled,
-    select_with_response, select_with_switch,
+    EditableSelectOutput, SelectSwitch, compact_select_mono_width,
+    compact_select_mono_with_response, compact_select_with_response, editable_select_mono,
+    select_mono_with_response, select_with_details, select_with_disabled, select_with_response,
+    select_with_switch,
 };
 pub use select::{SelectOutput, select};
 pub use status_mark::{

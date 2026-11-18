@@ -1,15 +1,20 @@
 //! The Console page's controls, on the page's toolbar band: the three
 //! severity toggles, the channel and the find field — the controls the
-//! Problems page sets for its own list, in the same order and the same kit.
+//! Problems page sets for its own list, in the same order and the same kit:
+//! one line, every control at the kit's compact control height and printing
+//! in the chips' face.
 
 use egui::{Key, Modifiers, Ui};
 
 use super::lines::Rows;
 use super::{body_id, find_id, source};
 use crate::state::SimulationRun;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, select_mono_width, select_mono_with_response};
+use crate::ui::theme;
+use crate::ui::tokens::Tokens;
+use crate::ui::widgets::{
+    chip_width, compact_chip, compact_height, compact_select_mono_width,
+    compact_select_mono_with_response,
+};
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
 use crate::workbench::framework::workbench_host::ConsoleHost;
 use crate::workbench::state::{ConsoleChannel, ConsoleSeverity, ConsoleView};
@@ -39,9 +44,15 @@ pub fn toolbar(ui: &mut Ui, state: &mut impl ConsoleHost) {
     };
     let advance = character_width(ui);
     ui.spacing_mut().item_spacing.x = 6.0;
-    for severity in ConsoleSeverity::ALL {
-        let label = format!("{} {}", severity.label(), counts[severity.index()]);
-        if chip(ui, &label, view.shows(severity)).clicked() {
+    let labels = ConsoleSeverity::ALL
+        .map(|severity| format!("{} {}", severity.label(), counts[severity.index()]));
+    // The toggles stand at one width, the widest one's.
+    let toggle_width = labels
+        .iter()
+        .map(|label| chip_width(ui, label))
+        .fold(0.0, f32::max);
+    for (severity, label) in ConsoleSeverity::ALL.into_iter().zip(&labels) {
+        if compact_chip(ui, label, view.shows(severity), toggle_width).clicked() {
             view.toggle(severity);
         }
     }
@@ -65,8 +76,8 @@ fn channel(ui: &mut Ui, runs: &[SimulationRun], view: &mut ConsoleView) {
     };
     // Sized to the longest choice in the face it prints in, so every choice
     // prints whole and picking one never moves the controls beside it.
-    let width = select_mono_width(ui, &options);
-    let picked = select_mono_with_response(
+    let width = compact_select_mono_width(ui, &options);
+    let picked = compact_select_mono_with_response(
         ui,
         "workbench.console.channel",
         "Console channel",
@@ -91,14 +102,15 @@ fn find(ui: &mut Ui, view: &mut ConsoleView, advance: f32) {
     let width = ui
         .available_width()
         .clamp(advance * FIND_MIN_CHARACTERS, advance * FIND_CHARACTERS);
+    let height = compact_height(&Tokens::get(ui.ctx()).metrics);
     let response = ui.add_sized(
-        [width, Tokens::get(ui.ctx()).metrics.ctl_h],
+        [width, height],
         egui::TextEdit::singleline(&mut view.find)
             .id(find_id())
-            .hint_text("Find")
+            .hint_text(egui::RichText::new("Find").font(theme::chip_mono()))
             // Centred in its well, as the selector's text beside it is.
             .vertical_align(egui::Align::Center)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+            .font(theme::chip_mono()),
     );
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label("Find in the log");
@@ -121,7 +133,7 @@ fn character_width(ui: &Ui) -> f32 {
         fonts
             .layout_no_wrap(
                 "M".to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
+                theme::chip_mono(),
                 egui::Color32::PLACEHOLDER,
             )
             .size()

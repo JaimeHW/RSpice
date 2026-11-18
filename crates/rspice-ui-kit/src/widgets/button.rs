@@ -33,6 +33,7 @@ pub struct Button<'a> {
     max_width: Option<f32>,
     square: bool,
     menu: bool,
+    mono: bool,
     accessible_label: Option<&'a str>,
 }
 
@@ -76,6 +77,7 @@ impl<'a> Button<'a> {
             max_width: None,
             square: false,
             menu: false,
+            mono: false,
             accessible_label: None,
         }
     }
@@ -84,6 +86,13 @@ impl<'a> Button<'a> {
     /// (IBM Plex has no glyph for one).
     pub fn menu(mut self) -> Self {
         self.menu = true;
+        self
+    }
+
+    /// Print the label in the chips' mono face, for a button standing on a
+    /// line of chips and compact selects, which print in it.
+    pub fn mono(mut self) -> Self {
+        self.mono = true;
         self
     }
 
@@ -199,14 +208,18 @@ impl<'a> Button<'a> {
     /// space this one leaves.
     fn measure(&self, ui: &mut Ui, fg: egui::Color32) -> (std::sync::Arc<egui::Galley>, f32) {
         let t = Tokens::get(ui.ctx());
-        let font_id = theme::sans(
-            tokens::FS_1,
-            if self.accent {
-                FontWeight::SemiBold
-            } else {
-                FontWeight::Regular
-            },
-        );
+        let font_id = if self.mono {
+            theme::chip_mono()
+        } else {
+            theme::sans(
+                tokens::FS_1,
+                if self.accent {
+                    FontWeight::SemiBold
+                } else {
+                    FontWeight::Regular
+                },
+            )
+        };
         let mut job = egui::text::LayoutJob::default();
         if let Some(max_width) = self.max_width {
             job.wrap.max_width = (max_width - 20.0).max(1.0);

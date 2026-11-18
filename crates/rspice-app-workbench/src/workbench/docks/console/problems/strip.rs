@@ -15,16 +15,21 @@
 //! the width it needs to say its longest choice whole, the controls stand
 //! there. Where they do not, the toggles and both choices fold into one
 //! Filters menu beside the text filter, so no control prints a cut word.
+//!
+//! The line is one height and one size of type: every control stands at the
+//! kit's compact control height, centred on the line, and prints in the
+//! chips' face, so a choice, the filter's hint and a toggle read alike.
 
-use egui::containers::menu::{MenuButton, MenuConfig};
-use egui::{Align, Layout, PopupCloseBehavior, Ui};
+use egui::containers::menu::MenuConfig;
+use egui::{Align, Layout, Popup, PopupCloseBehavior, Ui, UiKind, UiStackInfo};
 
 use super::super::CONSOLE_COLUMN_GAP;
 use super::arrange::Tally;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    chip_at_width, chip_width, menu_button, select_mono_width, select_mono_with_response,
+    Button, chip_width, compact_chip, compact_height, compact_select_mono_width,
+    compact_select_mono_with_response, menu_button,
 };
 use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
 use crate::workbench::state::problems_view::{ProblemGrouping, ProblemsView};
@@ -144,15 +149,18 @@ impl Controls {
             .iter()
             .map(|grouping| grouping.label().to_owned())
             .collect();
-        let choice_width = select_mono_width(ui, &producers)
-            .max(select_mono_width(ui, &groupings))
-            .max(select_mono_width(ui, std::slice::from_ref(&producer)));
+        let choice_width = compact_select_mono_width(ui, &producers)
+            .max(compact_select_mono_width(ui, &groupings))
+            .max(compact_select_mono_width(
+                ui,
+                std::slice::from_ref(&producer),
+            ));
 
         let hint = ui
             .painter()
             .layout_no_wrap(
                 format!("{FILTER_HINT}M"),
-                theme::field_mono(),
+                theme::chip_mono(),
                 egui::Color32::PLACEHOLDER,
             )
             .size()
@@ -201,14 +209,14 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
 
 fn toggles(ui: &mut Ui, view: &mut ProblemsView, controls: &Controls) {
     for toggle in &controls.toggles {
-        if chip_at_width(ui, &toggle.label, toggle.on, controls.toggle_width).clicked() {
+        if compact_chip(ui, &toggle.label, toggle.on, controls.toggle_width).clicked() {
             toggle.switches.flip(view);
         }
     }
 }
 
 fn producer_select(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally, controls: &Controls) {
-    let picked = select_mono_with_response(
+    let picked = compact_select_mono_with_response(
         ui,
         "workbench.problems.producer",
         "Producer",
@@ -223,7 +231,7 @@ fn producer_select(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally, controls
 }
 
 fn grouping_select(ui: &mut Ui, view: &mut ProblemsView, controls: &Controls) {
-    let picked = select_mono_with_response(
+    let picked = compact_select_mono_with_response(
         ui,
         "workbench.problems.grouping",
         "Grouping",
@@ -247,16 +255,18 @@ fn producer_at(tally: &Tally, picked: usize) -> Option<String> {
         .map(|(producer, _)| producer.clone())
 }
 
-/// The text filter, in the face and well of the Console's find field.
+/// The text filter, in the face and well of the Console's find field: as
+/// tall as the line's other controls, its text and its hint in their face.
 fn text_filter(ui: &mut Ui, view: &mut ProblemsView, width: f32) {
+    let height = compact_height(&Tokens::get(ui.ctx()).metrics);
     let response = ui.add_sized(
-        [width, Tokens::get(ui.ctx()).metrics.ctl_h],
+        [width, height],
         egui::TextEdit::singleline(&mut view.text)
             .id(egui::Id::new("workbench.problems.text"))
-            .hint_text(FILTER_HINT)
+            .hint_text(egui::RichText::new(FILTER_HINT).font(theme::chip_mono()))
             .margin(FILTER_MARGIN)
             .vertical_align(egui::Align::Center)
-            .font(theme::field_mono()),
+            .font(theme::chip_mono()),
     );
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label("Filter findings by text");
@@ -267,12 +277,17 @@ fn text_filter(ui: &mut Ui, view: &mut ProblemsView, width: f32) {
 /// the producer and the grouping, each a submenu of its choices. It stays
 /// open while the reader works through it, as the line does, and closes on a
 /// press outside it.
+///
+/// Its button is the kit's compact menu button, printing in the chips' face,
+/// so the folded line is as tall and as set as the whole one.
 fn filters_menu(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally, controls: &Controls) {
-    let height = Tokens::get(ui.ctx()).metrics.ctl_h;
+    let button = Button::new(FILTERS).compact().menu().mono().show(ui);
     let config = MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside);
-    let _ = MenuButton::from_button(egui::Button::new(FILTERS).min_size(egui::vec2(0.0, height)))
-        .config(config)
-        .ui(ui, |ui| {
+    let _ = Popup::menu(&button)
+        .close_behavior(config.close_behavior)
+        .style(config.style.clone())
+        .info(UiStackInfo::new(UiKind::Menu).with_tag_value(MenuConfig::MENU_CONFIG_TAG, config))
+        .show(|ui| {
             if !controls.toggles.is_empty() {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = CONTROL_GAP;
@@ -284,7 +299,7 @@ fn filters_menu(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally, controls: &
                 for (index, choice) in controls.producers.iter().enumerate() {
                     let row = ui.add(egui::Button::selectable(
                         *choice == controls.producer,
-                        choice.as_str(),
+                        egui::RichText::new(choice).font(theme::chip_mono()),
                     ));
                     if row.clicked() {
                         view.producer = producer_at(tally, index);
@@ -295,7 +310,7 @@ fn filters_menu(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally, controls: &
                 for (grouping, choice) in ProblemGrouping::ALL.iter().zip(&controls.groupings) {
                     let row = ui.add(egui::Button::selectable(
                         view.grouping == *grouping,
-                        choice.as_str(),
+                        egui::RichText::new(choice).font(theme::chip_mono()),
                     ));
                     if row.clicked() {
                         view.grouping = *grouping;
@@ -363,6 +378,8 @@ mod tests {
     struct Drawn {
         texts: Vec<String>,
         nodes: Vec<(accesskit::NodeId, accesskit::Node)>,
+        /// The kit's compact control height, in the theme the strip drew in.
+        compact: f64,
     }
 
     impl Drawn {
@@ -370,14 +387,18 @@ mod tests {
             self.texts.iter().any(|printed| printed == text)
         }
 
-        /// The width of the control assistive technology knows as `label`.
-        fn width(&self, label: &str) -> f64 {
-            let bounds = self
-                .nodes
+        /// Where the control assistive technology knows as `label` stands.
+        fn bounds(&self, label: &str) -> accesskit::Rect {
+            self.nodes
                 .iter()
                 .find(|(_, node)| node.label() == Some(label))
                 .and_then(|(_, node)| node.bounds())
-                .unwrap_or_else(|| panic!("no control is called {label}"));
+                .unwrap_or_else(|| panic!("no control is called {label}"))
+        }
+
+        /// The width of the control assistive technology knows as `label`.
+        fn width(&self, label: &str) -> f64 {
+            let bounds = self.bounds(label);
             bounds.x1 - bounds.x0
         }
     }
@@ -410,7 +431,12 @@ mod tests {
             .accesskit_update
             .expect("an AccessKit update")
             .nodes;
-        Drawn { texts, nodes }
+        let compact = f64::from(compact_height(&Tokens::get(&ctx).metrics));
+        Drawn {
+            texts,
+            nodes,
+            compact,
+        }
     }
 
     fn texts_of(shape: &egui::Shape, texts: &mut Vec<String>) {
@@ -479,5 +505,39 @@ mod tests {
             "{toggles:?}"
         );
         assert!((drawn.width("Producer") - drawn.width("Grouping")).abs() < 0.5);
+    }
+
+    /// The line is one height: every control on it, whole or folded, stands
+    /// at the kit's compact control height, centred on one line.
+    #[test]
+    fn every_control_on_the_line_shares_one_height_and_one_centre_line() {
+        let whole = [
+            "Critical 1",
+            "Error 12",
+            "Warning 30",
+            "Info 4",
+            "Hint 2",
+            "Waived 3",
+            "Producer",
+            "Filter findings by text",
+            "Grouping",
+        ];
+        let folded = [FILTERS, "Filter findings by text"];
+        for (width, controls) in [(1400.0, &whole[..]), (560.0, &folded[..])] {
+            let drawn = drawn(width);
+            let line = drawn.bounds(controls[0]);
+            let centre = f64::midpoint(line.y0, line.y1);
+            for control in controls {
+                let bounds = drawn.bounds(control);
+                assert!(
+                    (bounds.y1 - bounds.y0 - drawn.compact).abs() < 0.5
+                        && (f64::midpoint(bounds.y0, bounds.y1) - centre).abs() < 0.5,
+                    "at {width}: {control} stands {} to {}; the line is {} tall about {centre}",
+                    bounds.y0,
+                    bounds.y1,
+                    drawn.compact,
+                );
+            }
+        }
     }
 }
