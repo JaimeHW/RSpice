@@ -14,6 +14,7 @@
 mod deck_bands;
 mod dialect_chip;
 pub mod generation;
+mod read_only;
 mod revision;
 pub mod source_menu;
 pub mod toolbar;

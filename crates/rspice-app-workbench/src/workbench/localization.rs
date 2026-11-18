@@ -234,6 +234,7 @@ define_messages! {
     NetlistDialectHint => "Written by {program}? {marker} on line {line}.",
     NetlistDialectHintRead => "Read as {program}",
     NetlistDialectHintDismiss => "Dismiss",
+    NetlistReadOnly => "Read-only",
     NetlistNavigatorStructure => "Structure",
     NetlistNavigatorIncludes => "Includes",
     NetlistNavigatorDecks => "Decks",

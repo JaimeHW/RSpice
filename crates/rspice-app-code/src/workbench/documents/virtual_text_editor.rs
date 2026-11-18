@@ -462,11 +462,16 @@ pub(crate) fn show_virtual_text_editor(
         session.ime = None;
     }
     session.bound_revision = source.revision();
-    let fitted = gutter_fitting(
+    let mut fitted = gutter_fitting(
         style,
         session.model.line_count(),
         monospace_advance(ui, &style.font).max(1.0),
     );
+    // A document that cannot be edited sits back on the page's ground
+    // rather than in an input's well.
+    if !editable {
+        fitted.to_mut().background = crate::ui::tokens::Tokens::get(ui.ctx()).color.bg_app;
+    }
     let style: &VirtualEditorStyle<'_> = &fitted;
     // Wrapped, the rows are laid out for the width the view had when last
     // drawn, and again for its own width once it knows it.
@@ -2967,7 +2972,9 @@ fn paint_carets_and_ime(
     char_width: f32,
     style: &VirtualEditorStyle<'_>,
 ) {
-    if !focused {
+    // A document that cannot be edited shows no caret: its selection is
+    // what a reader works with.
+    if !focused || !editable {
         return;
     }
     // Reduced motion holds the caret steady; otherwise it blinks from the

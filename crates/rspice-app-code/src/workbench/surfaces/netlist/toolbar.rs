@@ -527,6 +527,8 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         );
         chip.show(&mut language_ui, cx.model, &cx.state.netlist, messages);
     }
+    let chip_width = dialect.filter(|_| language_rect.width() >= language_width);
+    super::read_only::show_word(ui, language_rect, chip_width.map(|_| language_width), cx);
     if status_width > 0.0 {
         let mut status_ui = ui.new_child(
             egui::UiBuilder::new()

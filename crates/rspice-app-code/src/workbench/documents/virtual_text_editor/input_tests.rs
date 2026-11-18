@@ -1025,3 +1025,17 @@ fn a_wrapped_line_takes_the_rows_it_needs_and_the_caret_steps_along_them() {
         "unwrapped, a row a line"
     );
 }
+
+#[test]
+fn a_read_only_text_shows_no_caret() {
+    let mut read_only = Bench::new(&numbered_lines(5), false);
+    read_only.focus();
+    assert!(read_only.focused(), "a read-only text still takes focus");
+    assert!(
+        read_only.frame(Vec::new()).caret.is_none(),
+        "a read-only text has no caret"
+    );
+    let mut editable = Bench::new(&numbered_lines(5), true);
+    editable.focus();
+    assert!(editable.frame(Vec::new()).caret.is_some());
+}
