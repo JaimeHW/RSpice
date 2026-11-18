@@ -465,15 +465,40 @@ impl RSpiceApp {
                     }
                     opened
                 }
-                // A recent project the browser reads later, through the
+                // A dropped project opens from the bytes the drop handed
+                // over. A recent one the browser reads later, through the
                 // handle it kept, and it opens when the read comes back.
                 #[cfg(target_arch = "wasm32")]
-                {
-                    self.state.open_browser_recent(&path);
-                    false
+                match crate::workbench::shell_host::project::dropped::take_dropped(&path) {
+                    Some(bytes) => {
+                        let opened = self.state.open_dropped_project(&path, &bytes);
+                        if opened {
+                            self.restore_workspace_after_project_load();
+                        }
+                        opened
+                    }
+                    None => {
+                        self.state.open_browser_recent(&path);
+                        false
+                    }
                 }
             }
             RecentKind::Schematic => {
+                #[cfg(target_arch = "wasm32")]
+                if let Some(bytes) =
+                    crate::workbench::shell_host::project::dropped::take_dropped(&path)
+                {
+                    let name = path.file_name().map_or_else(
+                        || path.display().to_string(),
+                        |name| name.to_string_lossy().into_owned(),
+                    );
+                    if self.state.open_dropped_schematic(&name, &bytes) {
+                        self.state
+                            .workbench
+                            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
+                    }
+                    return;
+                }
                 let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
                 state.load_schematic_from_path_with_io(&path, io)
             }

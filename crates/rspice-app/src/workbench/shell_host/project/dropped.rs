@@ -96,29 +96,29 @@ pub(crate) fn open_dropped_file(ctx: &Context, app: &mut RSpiceApp) {
 }
 
 /// A project opens as File > Open recent opens one: its unsaved work
-/// reviewed first.
+/// reviewed first. In the browser it opens from the bytes the drop handed
+/// over, and its first save asks where.
 fn open_project(app: &mut RSpiceApp, file: &DroppedFile) {
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        let Some(path) = file.path.clone() else {
-            app.state
-                .prompt("The dropped project has no file on this computer to open.");
-            return;
-        };
-        if app.found_recent_file(&path) {
-            dismiss_launcher(app);
-            app.open_recent_file(recent(
-                rspice_app_services::services::recent_files::RecentKind::Project,
-                path,
-            ));
-        }
-    }
+    let (path, unread) = (
+        file.path.clone(),
+        "The dropped project has no file on this computer to open.",
+    );
     #[cfg(target_arch = "wasm32")]
-    {
-        let _ = file;
-        app.state.prompt(
-            "In the browser a project opens through Open project, which keeps its file's permission.",
-        );
+    let (path, unread) = (
+        keep_dropped(file),
+        "The browser did not hand over the dropped project's contents.",
+    );
+    let Some(path) = path else {
+        app.state.prompt(unread);
+        return;
+    };
+    if app.found_recent_file(&path) {
+        dismiss_launcher(app);
+        app.open_recent_file(recent(
+            rspice_app_services::services::recent_files::RecentKind::Project,
+            path,
+        ));
     }
 }
 
@@ -148,10 +148,57 @@ fn open_schematic(app: &mut RSpiceApp, file: &DroppedFile) {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = file;
-        app.state
-            .prompt("In the browser a schematic opens through Open schematic.");
+        let Some(path) = keep_dropped(file) else {
+            app.state
+                .prompt("The browser did not hand over the dropped schematic's contents.");
+            return;
+        };
+        if app.state.platform.project_lifecycle.is_open() {
+            if let Some(bytes) = take_dropped(&path)
+                && app.state.open_dropped_schematic(&name_of(file), &bytes)
+            {
+                app.state.workbench.activate(Workspace::Design);
+            }
+        } else {
+            dismiss_launcher(app);
+            app.open_recent_file(recent(
+                rspice_app_services::services::recent_files::RecentKind::Schematic,
+                path,
+            ));
+        }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// The project or schematic last dropped on the browser window, under
+    /// the path its open is asked for by, until that open takes it.
+    static DROPPED: std::cell::RefCell<Option<(std::path::PathBuf, std::sync::Arc<[u8]>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Keep what the browser handed over for `file` until its open takes it,
+/// under a path that names no file: the open reviews unsaved work first, as
+/// a recent file's does. `None` when the drop carried no contents.
+#[cfg(target_arch = "wasm32")]
+fn keep_dropped(file: &DroppedFile) -> Option<std::path::PathBuf> {
+    let bytes = file.bytes.clone()?;
+    let path = Path::new("dropped").join(name_of(file));
+    DROPPED.with(|kept| *kept.borrow_mut() = Some((path.clone(), bytes)));
+    Some(path)
+}
+
+/// The contents of the file dropped under `path`, once.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn take_dropped(path: &Path) -> Option<std::sync::Arc<[u8]>> {
+    DROPPED.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if kept.as_ref().is_some_and(|(dropped, _)| dropped == path) {
+            kept.take().map(|(_, bytes)| bytes)
+        } else {
+            None
+        }
+    })
 }
 
 /// A deck comes into the open project as the Netlist page brings one in, or
@@ -196,7 +243,6 @@ fn open_deck(app: &mut RSpiceApp, file: &DroppedFile) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn recent(
     kind: rspice_app_services::services::recent_files::RecentKind,
     path: std::path::PathBuf,

@@ -223,6 +223,32 @@ impl AppState {
         )
     }
 
+    /// Open a schematic dropped on the browser window, from the bytes the
+    /// drop handed over: it comes into the open project, or opens on its own.
+    /// Returns whether it was applied.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn open_dropped_schematic(&mut self, name: &str, bytes: &[u8]) -> bool {
+        let schematic = std::str::from_utf8(bytes)
+            .map_err(|error| error.to_string())
+            .and_then(|text| {
+                rspice_app_services::io::schematic_io::load_schematic_text(text, None)
+                    .map_err(|error| error.to_string())
+            });
+        match schematic {
+            Ok(schematic) => self.open_browser_schematic(BrowserSchematic {
+                schematic,
+                name: name.to_owned(),
+            }),
+            Err(error) => {
+                self.report_failure(
+                    "Schematic open failed",
+                    format!("{name} could not be read: {error}"),
+                );
+                false
+            }
+        }
+    }
+
     /// Reset the current schematic to a new empty document.
     #[cfg(test)]
     pub(crate) fn create_new_schematic(&mut self) {
@@ -791,6 +817,49 @@ impl AppState {
                     &mut self.platform,
                 );
                 self.report_failure("Project open failed", error);
+                false
+            }
+        }
+    }
+
+    /// Open a project dropped on the browser window, from the bytes the drop
+    /// handed over, in place of the open project. The browser gives a drop no
+    /// file to save back to, so its first save asks where, offering the
+    /// dropped file's name. Returns whether it opened.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn open_dropped_project(&mut self, path: &std::path::Path, bytes: &[u8]) -> bool {
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let transaction =
+            match rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+                Ok(transaction) => transaction,
+                Err(error) => {
+                    lifecycle_error(self, error, "Project open blocked");
+                    return false;
+                }
+            };
+        let project = std::str::from_utf8(bytes)
+            .map_err(|error| error.to_string())
+            .and_then(|text| {
+                rspice_app_services::io::project_io::load_project_text(text, None)
+                    .map_err(|error| error.to_string())
+            });
+        match project {
+            Ok(project) => self.open_browser_project(BrowserProjectOpen::Import {
+                project,
+                name,
+                transaction,
+            }),
+            Err(error) => {
+                rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                    &mut self.platform,
+                );
+                self.report_failure(
+                    "Project open failed",
+                    format!("{name} could not be read: {error}"),
+                );
                 false
             }
         }
