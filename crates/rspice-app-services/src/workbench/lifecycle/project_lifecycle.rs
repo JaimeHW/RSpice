@@ -1079,6 +1079,30 @@ fn write_library_files(
         .map_err(ProjectLifecycleError::LibraryFiles)
 }
 
+/// Rewrite, in a copy of the project saved at `path`, each relative library path so it still
+/// names the folder it named. The library files themselves are not the copy's to write: it names
+/// each folder as it stands on disk, and the open project keeps its unsaved edits.
+#[cfg(not(target_arch = "wasm32"))]
+fn rebase_copied_library_references(
+    model: &Model,
+    file: &mut rspice_project::ProjectFile,
+    path: &Path,
+) -> Result<(), ProjectLifecycleError> {
+    let from = model
+        .workspace
+        .content
+        .project
+        .path
+        .as_deref()
+        .and_then(Path::parent);
+    match (from, path.parent()) {
+        (Some(from), Some(to)) if from != to => file
+            .rebase_library_references(from, to)
+            .map_err(ProjectLifecycleError::LibraryFiles),
+        _ => Ok(()),
+    }
+}
+
 /// Each segment `file` reads: its runs', and those its result documents archived.
 #[cfg(not(target_arch = "wasm32"))]
 fn file_segments(
@@ -1288,7 +1312,8 @@ pub fn save_project_copy_native(
     )?;
     state.platform.project_lifecycle.authority.begin_save()?;
     let result = (|| {
-        let copy = snapshot(state)?;
+        let mut copy = snapshot(state)?;
+        rebase_copied_library_references(state.model, &mut copy.file, path)?;
         keep_result_segments(&copy.file, path)?;
         destination.publish(&persistence::NativeStorage, copy.file)
     })();

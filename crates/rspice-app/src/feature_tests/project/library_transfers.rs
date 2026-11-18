@@ -19,7 +19,7 @@ use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, OpenCellView, Point,
     SchematicState, View, ViewType,
 };
-use rspice_app_state::workbench::app_state::model::HierarchyCopy;
+use rspice_app_state::workbench::app_state::model::{HierarchyCopy, ReferenceStatus};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
@@ -480,4 +480,57 @@ fn open_read_only_opens_a_reference_that_refuses_edits() {
         !app.state.model.active_view_read_only(),
         "Open from the project opens to edit"
     );
+}
+
+/// A copy of the project saved into another folder names the folder each
+/// library is kept in, so the copy opens with the library read, and the open
+/// project keeps the path it had.
+#[test]
+fn a_copy_saved_in_another_folder_finds_a_library_kept_in_its_own_folder() {
+    let mut app = hierarchy();
+    let root = unique_temp_dir("library-folder-copy");
+    let design = root.join("design");
+    let project = design.join("transfers.rspiceproj");
+    let elsewhere = root.join("elsewhere");
+    for folder in [&design, &elsewhere] {
+        std::fs::create_dir_all(folder).expect("a folder for the project");
+    }
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project is saved"
+    );
+    app.state
+        .model
+        .move_library_to_folder("work", &design.join("work"))
+        .expect("work moves to a folder of its own beside the project");
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project is saved"
+    );
+    let path = |app: &RSpiceApp| {
+        app.state
+            .model
+            .library_manager
+            .reference("work")
+            .map(|reference| reference.path.clone())
+    };
+    let before = path(&app);
+
+    let copy = elsewhere.join("copy.rspiceproj");
+    assert!(
+        app.state.save_project_copy_to_path(&copy),
+        "the copy is saved"
+    );
+    assert_eq!(path(&app), before, "the open project keeps its path");
+    let mut reopened = RSpiceApp::test_instance();
+    assert!(
+        reopened.state.load_project_from_path(&copy),
+        "the copy opens"
+    );
+    let status = reopened.state.model.reference_status("work");
+    assert!(
+        matches!(status, Some(ReferenceStatus::Found { .. })),
+        "the copy reads the library from its folder: {status:?}"
+    );
+    std::fs::remove_dir_all(root).ok();
 }
