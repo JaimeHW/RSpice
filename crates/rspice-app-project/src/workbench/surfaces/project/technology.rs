@@ -1126,6 +1126,7 @@ pub(super) fn poll_browser_recovery_completions(_: &Context, cx: &mut Cx<'_, Pro
         }
         let recovery = &mut cx.state.project_checkpoint_recovery;
         let damaged_before = super::recovery::damaged_labels(recovery);
+        let error_before = recovery.error.clone();
         recovery.loading = false;
         recovery.initialized = true;
         match completion.result {
@@ -1137,6 +1138,7 @@ pub(super) fn poll_browser_recovery_completions(_: &Context, cx: &mut Cx<'_, Pro
             Err(error) => recovery.error = Some(error),
         }
         super::recovery::record_found_damage(cx, &damaged_before);
+        super::recovery::record_catalog_failure(cx, error_before.as_deref());
     }
 
     let copies = BROWSER_RECOVERY_COPY_COMPLETIONS

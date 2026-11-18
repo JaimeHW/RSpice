@@ -744,11 +744,19 @@ fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSp
     recovery.initialized = true;
     recovery.checkpoints = catalog;
     if set_aside {
-        recovery.quarantined = vec![fixture_quarantine(
-            "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
-            CheckpointDamage::ChangedCopy,
-            "project checkpoint bytes do not match their integrity manifest",
-        )];
+        recovery.quarantined = vec![
+            fixture_quarantine(
+                "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
+                CheckpointDamage::ChangedCopy,
+                "project checkpoint bytes do not match their integrity manifest",
+            )
+            .named_fixture("Manual checkpoint", now - 26 * 3_600_000),
+            fixture_quarantine(
+                "2b9d3e61-0c7a-4f58-8e1d-5a6c9f0b4e27.checkpoint.json",
+                CheckpointDamage::Record,
+                "checkpoint manifest is invalid: expected value at line 1 column 1",
+            ),
+        ];
     }
     if error {
         recovery.error = Some(
@@ -850,28 +858,56 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
 
     let mut damaged = recovery_project_app(2, true, false);
     let text = painted_project_page(size, |ui| show(ui, &mut damaged));
+    // A damaged checkpoint whose record reads is named as its row was, by
+    // its name and when it was taken; only one whose record is lost is named
+    // by its file.
+    let taken = rspice_app_state::time_compat::utc_stamp(
+        damaged
+            .state
+            .project
+            .project_checkpoint_recovery
+            .quarantined[0]
+            .created_unix_ms()
+            .expect("its record says when it was taken"),
+    );
     for expected in [
-        "1 damaged",
+        "2 damaged",
         "Damaged",
-        "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
+        "Manual checkpoint",
+        &format!("{taken} \u{b7} yesterday"),
         "The copy of the project it keeps has changed since it was taken, so it cannot be \
          trusted. Delete it.",
+        "2b9d3e61-0c7a-4f58-8e1d-5a6c9f0b4e27.checkpoint.json",
+        "Its record is damaged, so what it holds is unknown. Delete it.",
         "These checkpoints are damaged, so they cannot be restored.",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
+    assert!(
+        !text.contains("7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10"),
+        "a checkpoint with a name is not named by its identity:\n{text}"
+    );
     assert!(!text.contains("set aside"), "{text}");
     assert!(!text.contains("integrity manifest"), "{text}");
 
+    // An unreadable store says what is wrong and what to do in plain
+    // words; what the system said is the Console's.
     let mut unreadable = recovery_project_app(0, false, true);
     let text = painted_project_page(size, |ui| show(ui, &mut unreadable));
     for expected in [
         "unreadable",
         "Checkpoints could not be read",
-        "Access is denied",
+        "RSpice could not open the folder that keeps this project's checkpoints. Check that \
+         you are allowed to open it, then try again.",
         "Try again",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+    }
+    for system in ["Access is denied", "os error", "rspice-recovery"] {
+        assert!(
+            !text.contains(system),
+            "{system:?} is the Console's:\n{text}"
+        );
     }
     assert!(!text.contains("No checkpoints yet"), "{text}");
 }

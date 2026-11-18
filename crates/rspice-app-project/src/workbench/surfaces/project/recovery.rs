@@ -626,8 +626,8 @@ fn checkpoints_card(
     // The count is the page's state beside its title; the card does not
     // repeat it.
     page::card(ui, "Checkpoints", "", None, |ui| {
-        if let Some(error) = &snapshot.error {
-            return catalog_error(ui, error);
+        if snapshot.error.is_some() {
+            return catalog_error(ui);
         }
         if snapshot.loading {
             card_message(ui, "Listing checkpoints\u{2026}", None);
@@ -1148,19 +1148,25 @@ fn text_block(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
 }
 
-fn catalog_error(ui: &mut Ui, error: &str) -> Option<RecoveryIntent> {
+/// What is wrong when the store that keeps the project's checkpoints cannot
+/// be read, and what to do. What the system said goes to the Console.
+#[cfg(not(target_arch = "wasm32"))]
+const CATALOG_UNREADABLE: &str = "RSpice could not open the folder that keeps this project's \
+     checkpoints. Check that you are allowed to open it, then try again. The Console has what \
+     the system said.";
+#[cfg(target_arch = "wasm32")]
+const CATALOG_UNREADABLE: &str = "The browser did not let RSpice read the checkpoints it keeps \
+     for this project. Check that this site may store data, then try again. The Console has \
+     what the browser said.";
+
+fn catalog_error(ui: &mut Ui) -> Option<RecoveryIntent> {
     let tokens = Tokens::get(ui.ctx());
     ui.add_space(14.0);
     let width = ui.available_width() - 2.0 * (ROW_INSET + 2.0);
     let reload = page::inset_column(ui, ROW_INSET + 2.0, width, |ui| {
         marked_title(ui, Problem::Failure, "Checkpoints could not be read");
         ui.add_space(4.0);
-        text_block(
-            ui,
-            &sentence_case(error),
-            body_font(),
-            tokens.color.text_dim,
-        );
+        text_block(ui, CATALOG_UNREADABLE, body_font(), tokens.color.text_dim);
         ui.add_space(10.0);
         Button::new("Try again")
             .icon(crate::ui::icons::Icon::Refresh)
@@ -1546,14 +1552,6 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIn
     )
 }
 
-fn sentence_case(text: &str) -> String {
-    let mut characters = text.chars();
-    match characters.next() {
-        Some(first) => first.to_uppercase().chain(characters).collect(),
-        None => String::new(),
-    }
-}
-
 /// When a checkpoint was made, written in the row itself: two checkpoints
 /// made minutes apart are told apart by their time, and a tablet has no hover
 /// to read it from. The time is UTC, the spelling every stored timestamp in
@@ -1625,8 +1623,10 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, cx: &mut Cx<'_, Pro
             }
             Err(error) => {
                 let recovery = &mut cx.state.project_checkpoint_recovery;
+                let error_before = recovery.error.take();
                 recovery.initialized = true;
                 recovery.error = Some(error);
+                record_catalog_failure(cx, error_before.as_deref());
             }
         }
     }
@@ -1968,6 +1968,7 @@ pub(super) fn take_checkpoint_job_answer(cx: &mut Cx<'_, ProjectFeature>) {
         return;
     };
     let damaged_before = damaged_labels(recovery);
+    let error_before = recovery.error.clone();
     match answer {
         CheckpointJobAnswer::Listed(listed) => install_catalog(recovery, listed),
         CheckpointJobAnswer::Created(created) => match *created {
@@ -2015,6 +2016,7 @@ pub(super) fn take_checkpoint_job_answer(cx: &mut Cx<'_, ProjectFeature>) {
         }
     }
     record_found_damage(cx, &damaged_before);
+    record_catalog_failure(cx, error_before.as_deref());
 }
 
 /// The damaged checkpoints the page lists, by label.
@@ -2051,6 +2053,21 @@ pub(super) fn record_found_damage(cx: &mut Cx<'_, ProjectFeature>, before: &[Str
         cx.model
             .record(LogSeverity::Warning, LogSource::Studio, line);
     }
+}
+
+/// Writes what the system said when the project's checkpoints could not be
+/// listed to the Console, once for each failure the listing before it did
+/// not have: the page says what is wrong in the reader's words.
+pub(super) fn record_catalog_failure(cx: &mut Cx<'_, ProjectFeature>, before: Option<&str>) {
+    let Some(error) = cx.state.project_checkpoint_recovery.error.as_deref() else {
+        return;
+    };
+    if before == Some(error) {
+        return;
+    }
+    let line = format!("Checkpoints could not be read: {error}");
+    cx.model
+        .record(LogSeverity::Warning, LogSource::Studio, line);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
