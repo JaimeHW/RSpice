@@ -76,6 +76,26 @@ pub const PROJECT_BINDINGS: Schema = Schema {
     refusal: "too many browser storage operations are still pending",
 };
 
+/// The session: its layout and selections, and the runs it holds, each its
+/// own record, so the runs never ride inside the session's text.
+pub const SESSION: Schema = Schema {
+    database: "rspice-session",
+    version: 1,
+    store: "session-records",
+    timeout_ms: 15_000,
+    blocked: "another RSpice tab is upgrading session storage",
+    pending: 16,
+    refusal: "too many session storage operations are still pending",
+};
+
+/// What every refusal for want of space reads as.
+pub const STORAGE_FULL: &str = "this browser's storage for RSpice is full";
+
+/// Whether `error` is the browser refusing a write for want of space.
+pub fn is_storage_full(error: &str) -> bool {
+    error.starts_with(STORAGE_FULL)
+}
+
 #[cfg(target_arch = "wasm32")]
 pub use browser::*;
 
@@ -635,8 +655,20 @@ mod browser {
         function.apply(receiver, &args).map_err(js_error)
     }
 
-    /// The sentence a browser error carries.
+    /// The sentence a browser error carries. A refusal for want of space is
+    /// [`STORAGE_FULL`](super::STORAGE_FULL), whatever the browser words it as,
+    /// so a caller can tell it from a failure.
     pub fn js_error(value: JsValue) -> String {
+        let name = js_sys::Reflect::get(&value, &JsValue::from_str("name"))
+            .ok()
+            .and_then(|name| name.as_string());
+        // Firefox before 72 named it its own way.
+        if matches!(
+            name.as_deref(),
+            Some("QuotaExceededError" | "NS_ERROR_DOM_QUOTA_REACHED")
+        ) {
+            return super::STORAGE_FULL.to_owned();
+        }
         js_sys::Reflect::get(&value, &JsValue::from_str("message"))
             .ok()
             .and_then(|message| message.as_string())
@@ -666,5 +698,6 @@ mod tests {
             identity(PROJECT_BINDINGS),
             ("rspice-project-bindings", 2, "canonical-file-handles")
         );
+        assert_eq!(identity(SESSION), ("rspice-session", 1, "session-records"));
     }
 }
