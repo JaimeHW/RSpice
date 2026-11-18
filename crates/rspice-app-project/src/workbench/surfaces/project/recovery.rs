@@ -23,6 +23,9 @@ use rspice_simulation_contract::run_set::format_bytes;
 const RECOVERY_NOTE: &str = "A checkpoint is a complete, verified copy of the project. \
      Restoring one puts it back as unsaved changes, after keeping the project as it is now \
      as a checkpoint.";
+/// The one word for a checkpoint store that cannot be read, wherever its
+/// state is a value: the Storage card and the inspector.
+pub const STORE_UNREADABLE: &str = "Unreadable";
 /// The room over and under a checkpoint row's two lines, and between them.
 const ROW_PAD: f32 = 9.0;
 const LINE_GAP: f32 = 3.0;
@@ -631,6 +634,9 @@ fn recovery_header(
         let mut intent = None;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            // A store that cannot be read cannot be written to either: the
+            // action says why instead of failing once pressed.
+            let unreadable = snapshot.error.is_some();
             let create = Button::new(if snapshot.creating {
                 "Creating checkpoint\u{2026}"
             } else {
@@ -638,8 +644,15 @@ fn recovery_header(
             })
             .icon(crate::ui::icons::Icon::Add)
             .accent()
-            .enabled(!snapshot.busy)
+            .enabled(!snapshot.busy && !unreadable)
             .show(ui);
+            let create = if unreadable {
+                create.on_disabled_hover_text(
+                    "The checkpoint folder cannot be read, so no checkpoint can be written to it.",
+                )
+            } else {
+                create
+            };
             if create.clicked() {
                 intent = Some(RecoveryIntent::Create);
             }
@@ -1548,7 +1561,7 @@ fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
         // verified" and "Nothing to check" were the card reporting that
         // nothing had gone wrong, which is what the absence of the row says.
         if snapshot.error.is_some() {
-            property_row_problem(ui, "Integrity", "Not checked", Some(Problem::Failure));
+            property_row_problem(ui, "Integrity", STORE_UNREADABLE, Some(Problem::Failure));
         } else if !snapshot.set_aside.is_empty() {
             property_row_problem(
                 ui,

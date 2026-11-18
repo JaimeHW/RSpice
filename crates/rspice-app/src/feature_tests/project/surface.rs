@@ -807,3 +807,41 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
     }
     assert!(!text.contains("No checkpoints yet"), "{text}");
 }
+
+/// A store that cannot be read is "Unreadable" with the one failure mark in
+/// the Storage card, and offers no Create checkpoint: the action is disabled
+/// rather than failing once pressed.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn an_unreadable_store_is_one_word_and_cannot_take_a_checkpoint() {
+    let mut app = recovery_project_app(0, false, true);
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 900.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+        },
+    );
+    let text = painted_text(&output);
+    assert!(text.contains("Unreadable"), "{text}");
+    assert!(!text.contains("Not checked"), "{text}");
+    let create = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame announces its tree")
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label().as_deref() == Some("Create checkpoint"))
+        .map(|(_, node)| node.is_disabled())
+        .expect("the page offers Create checkpoint");
+    assert!(create, "Create checkpoint is disabled over an unreadable store");
+}

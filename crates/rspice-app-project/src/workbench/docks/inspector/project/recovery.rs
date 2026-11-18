@@ -15,7 +15,6 @@ pub(super) fn project_recovery(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
         .checkpoints
         .iter()
         .find(|item| selected.is_some_and(|id| id == item.checkpoint_id().to_string()));
-    let integrity = recovery.error.is_none() && recovery.quarantined.is_empty();
 
     // Only a selected checkpoint has anything to say. The revision counter,
     // the payload's byte count and the checkpoint's internal id are not
@@ -31,22 +30,27 @@ pub(super) fn project_recovery(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
         property_row(ui, "Kept", checkpoint.retention().label());
     }
 
-    let quarantined = recovery.quarantined.len();
     // The store is in order or it is not: "verified" is success, and the
     // restore mode and what it leaves alone are constants that belong on the
-    // Restore control. Damaged checkpoints are the one thing to report.
-    if !integrity || quarantined > 0 {
+    // Restore control. A store that cannot be read, or damaged checkpoints,
+    // is the one thing to report, in the word and mark the Storage card
+    // gives it.
+    let quarantined = recovery.quarantined.len();
+    if recovery.error.is_some() {
         section_header(ui, "Recovery store", None);
-        if !integrity {
-            property_row_problem(ui, "Integrity", "Review required", Some(Problem::Warning));
-        }
-        if quarantined > 0 {
-            property_row_problem(
-                ui,
-                "Quarantined",
-                &quarantined.to_string(),
-                Some(Problem::Warning),
-            );
-        }
+        property_row_problem(
+            ui,
+            "Integrity",
+            crate::workbench::surfaces::project::recovery::STORE_UNREADABLE,
+            Some(Problem::Failure),
+        );
+    } else if quarantined > 0 {
+        section_header(ui, "Recovery store", None);
+        property_row_problem(
+            ui,
+            "Integrity",
+            &format!("{quarantined} damaged"),
+            Some(Problem::Warning),
+        );
     }
 }
