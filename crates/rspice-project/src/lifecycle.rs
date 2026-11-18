@@ -60,7 +60,7 @@ pub enum ProjectLifecycleError {
     )]
     BrowserBindingRestorePending,
     #[error(
-        "the project saved in this browser changed outside RSpice; keep the work here with Save as, or reopen the file to take its changes"
+        "the project's file changed since it was opened here; keep the work here with Save as, or reopen the file to take its changes"
     )]
     BrowserExternalChange,
     #[error(

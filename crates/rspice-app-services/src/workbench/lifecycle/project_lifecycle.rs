@@ -778,6 +778,7 @@ pub fn accept_loaded_project(
             .project_lifecycle
             .authority
             .clear_browser_pending();
+        browser_open_lock::reopened();
     }
     state
         .platform

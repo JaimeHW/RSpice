@@ -72,6 +72,17 @@ pub fn follow(state: &mut dyn LifecycleSourceMut) {
     }
 }
 
+/// A project opened again in this tab is asked for again, as a desktop
+/// window asks on every open; a lock this tab holds is kept.
+pub(super) fn reopened() {
+    OPEN_LOCK.with(|lock| {
+        let mut lock = lock.borrow_mut();
+        if !matches!(lock.as_ref(), Some((_, OpenLock::Held { .. }))) {
+            *lock = None;
+        }
+    });
+}
+
 /// "Open anyway": take for writing the project another tab holds. The lock
 /// is taken too if that tab has let it go since; whoever saves second is
 /// told the file changed and writes nothing.

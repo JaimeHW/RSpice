@@ -1131,8 +1131,9 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
             );
             parts.lifecycle.model.report_failure(
                 "Project save failed",
-                "its file changed outside RSpice, so nothing was written. Keep the work here \
-                 with Save as, or reopen the file from the recent list to take its changes.",
+                "its file changed since it was opened here, so nothing was written. Keep the \
+                 work here with Save as, or reopen the file from the recent list to take its \
+                 changes.",
             );
             if !project_copy {
                 continuation = Some(SaveContinuationEvent::Conflict(transaction));
