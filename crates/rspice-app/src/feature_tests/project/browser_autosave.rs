@@ -422,6 +422,30 @@ fn in_the_browser_keep_then_save_leaves_nothing_unsaved() {
         );
         let _ = std::fs::remove_dir_all(root);
     }
+
+/// A cell made before the page was left is only in the autosave: the
+/// reload's question lists it as new in the autosave, not as removed.
+#[test]
+fn in_the_browser_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
+    let mut browser = Browser::open();
+    let (mut app, root) = saved_project("browser-autosave-cell");
+    super::project_autosave::add_cell(&mut app, "crashcell");
+    let ctx = offscreen();
+    browser.leave_the_page(&ctx, &mut app, true);
+    drop(app);
+
+    let mut app = browser.reload();
+    let asked = paint_until(&ctx, &mut app, |text| {
+        text.contains("Recover unsaved changes?")
+    });
+    let text = painted(&asked);
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("New in the autosave") && line.contains("crashcell")),
+        "{text}"
+    );
+    assert!(!text.contains("Removed since"), "{text}");
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// A page left before its autosave was written still brings the work back:

@@ -33,7 +33,8 @@ use crate::time_compat::Instant;
 use crate::workbench::app_state::session::browser_session;
 use crate::workbench::lifecycle::durable_records::{self, BrowserRecords, DurableRecords};
 use crate::workbench::lifecycle::project_checkpoint::{
-    self, CheckpointEdit, DocumentDifference, ProjectCheckpointReason, ProjectCheckpointSummary,
+    self, CheckpointEdit, DifferenceKind, DocumentDifference, ProjectCheckpointReason,
+    ProjectCheckpointSummary,
 };
 use crate::workbench::lifecycle::project_lifecycle::{
     self, LifecycleParts, LifecycleSourceMut, PlatformState,
@@ -855,7 +856,7 @@ pub fn recovered_work_dialog(
                 ui.label(
                     egui::RichText::new(format!(
                         "{}  {}",
-                        difference.kind.label(),
+                        as_the_autosave_has_it(difference.kind),
                         difference.document.label()
                     ))
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
@@ -870,6 +871,18 @@ pub fn recovered_work_dialog(
         DialogChoice::Secondary | DialogChoice::Cancelled => RecoveredWorkAnswer::OpenSaved,
     };
     platform.project_autosave.offer.take().map(answer)
+}
+
+/// How a document stands in the autosave against the saved project: the
+/// recovered-work dialog speaks of what the autosave holds. Its differences
+/// are the saved project's against the autosave, so a document only the
+/// autosave holds is new in it.
+fn as_the_autosave_has_it(kind: DifferenceKind) -> &'static str {
+    match kind {
+        DifferenceKind::Changed => "Changed",
+        DifferenceKind::Removed => "New in the autosave",
+        DifferenceKind::Added => "Deleted in the autosave",
+    }
 }
 
 /// What the recovered-work dialog says was found: whose changes, from when,

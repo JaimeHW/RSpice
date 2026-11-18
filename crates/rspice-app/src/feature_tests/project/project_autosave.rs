@@ -38,6 +38,24 @@ fn edit(app: &mut RSpiceApp, index: i32) {
     });
 }
 
+/// A cell named `name` with a schematic, created in the project's library as
+/// New cell creates one.
+pub(super) fn add_cell(app: &mut RSpiceApp, name: &str) {
+    app.state.project.new_cell_library = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .root_library
+        .clone();
+    app.state.project.new_cell_name = name.to_owned();
+    app.state.project.new_cell_create_schematic = true;
+    app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
+    assert!(super::with_cx(app, create_new_cell), "the cell is created");
+    app.after_contribution();
+}
+
 fn parts(app: &RSpiceApp) -> usize {
     app.state
         .model
@@ -79,20 +97,7 @@ fn crashed_session_child() {
     let mut app = RSpiceApp::test_instance();
     assert!(app.state.save_project_to_path(&folder.join(PROJECT)));
     if std::env::var_os(CRASH_NEW_CELL).is_some() {
-        let project = &mut app.state.project;
-        project.new_cell_library = app
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .root_library
-            .clone();
-        project.new_cell_name = "crashcell".to_owned();
-        project.new_cell_create_schematic = true;
-        project.new_cell_library_revision = app.state.model.library_manager.revision();
-        assert!(with_cx(&mut app, create_new_cell), "the cell is created");
-        app.after_contribution();
+        add_cell(&mut app, "crashcell");
     } else {
         edit(&mut app, 7);
     }
@@ -273,6 +278,21 @@ fn after_a_crash_keep_then_save_leaves_nothing_unsaved() {
         );
         let _ = std::fs::remove_dir_all(folder);
     }
+
+/// A cell the crashed session created is only in the autosave: the question
+/// lists it as new in the autosave, as the autosave holds it, not as removed.
+#[test]
+fn after_a_crash_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
+    let (folder, _) = crashed_session_with("autosave-crash-cell", true);
+    let (_app, _ctx, asked) = open_after_crash(&folder);
+    let text = painted(&asked);
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("New in the autosave") && line.contains("crashcell")),
+        "{text}"
+    );
+    assert!(!text.contains("Removed since"), "{text}");
+    let _ = std::fs::remove_dir_all(folder);
 }
 
 /// "Open the saved project" leaves the saved project open, clean, and the
