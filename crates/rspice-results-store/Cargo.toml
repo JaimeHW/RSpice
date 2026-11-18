@@ -14,7 +14,7 @@ workspace = true
 # already in Cargo.lock: the store's bytes are part of its identity, and LZ4's
 # output is only deterministic for one encoder version.
 lz4_flex = { version = "=0.13.1", default-features = false, features = ["std", "checked-decode"] }
-crc32fast = "=1.5.0"
+crc32fast = "=1.5.5"
 # The logical digest. sha2 0.11 (in Cargo.lock already, through lopdf) runs the
 # ARMv8 SHA-2 instructions when the CPU has them; 0.10 runs them only with its
 # `asm` feature, whose sha2-asm package the lock does not have, and its software
