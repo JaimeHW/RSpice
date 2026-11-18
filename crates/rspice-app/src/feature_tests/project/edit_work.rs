@@ -9,14 +9,19 @@
 
 use std::time::Duration;
 
+use egui::{Event, Modifiers, PointerButton, Pos2};
+
 use crate::feature_tests::replay::Replay;
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
-use rspice_app_services::workbench::lifecycle::project_lifecycle::DIRTY_RECOMPUTES;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    DIRTY_RECOMPUTES, has_unsaved_changes,
+};
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{Cell, ComponentType, Library, Point, View, ViewType};
 use rspice_app_state::workbench::app_state::model::FRAME_SYNCS;
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_design::projection::{materialization_count, reset_materialization_count};
 use rspice_project::registry::{DOCUMENT_DIGESTS, PROJECT_CAPTURES};
 
 /// Frames a surface is given to lay itself out before counting starts.
@@ -174,4 +179,137 @@ fn a_library_change_is_compared_once() {
         drop(replay);
         let _ = std::fs::remove_dir_all(folder);
     }
+}
+
+fn button(pos: Pos2, pressed: bool) -> Event {
+    Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+/// What one frame of a drag did.
+#[derive(Debug)]
+struct DragFrame {
+    name: String,
+    work: EditWork,
+    /// Cell views projected whole.
+    projections: u64,
+    /// Whether the project reads as holding unsaved work after the frame,
+    /// as the window title and the toolbar read it.
+    unsaved: bool,
+}
+
+/// A part dragged across the canvas: no frame of the drag compares the
+/// project or projects the design again until the drop, the project reads
+/// as edited from the first move, and the drop compares it once.
+#[test]
+fn a_drag_is_compared_and_projected_at_the_drop_not_on_each_move() {
+    let (mut replay, folder) = saved_project("edit-work-drag");
+    replay.app.state.workbench.activate(Workspace::Design);
+    let editor = &mut replay.app.state.model.schematic.session.editor;
+    editor.needs_fit = false;
+    editor.zoom = 1.0;
+    idle(&mut replay, WARM_UP_FRAMES);
+    let canvas = replay
+        .ctx()
+        .read_response(egui::Id::new("rspice-schematic-canvas-interaction"))
+        .expect("the canvas was drawn")
+        .rect;
+    let document = replay.app.state.model.schematic.document();
+    let (part, at, grid) = (
+        document.components[1].id,
+        document.components[1].pos,
+        document.grid_size,
+    );
+    replay.app.state.model.schematic.session.editor.pan = (
+        f64::from(canvas.width()) * 0.5 - f64::from(at.x),
+        f64::from(canvas.height()) * 0.5 - f64::from(at.y),
+    );
+    let mut pointer = canvas.center();
+    let mut script = vec![
+        ("hover".to_owned(), vec![Event::PointerMoved(pointer)]),
+        ("hover".to_owned(), vec![Event::PointerMoved(pointer)]),
+        ("press".to_owned(), vec![button(pointer, true)]),
+    ];
+    for index in 1..=4 {
+        pointer.x += grid as f32;
+        script.push((format!("move {index}"), vec![Event::PointerMoved(pointer)]));
+    }
+    script.push(("drop".to_owned(), vec![button(pointer, false)]));
+    for index in 1..=3 {
+        script.push((format!("after {index}"), Vec::new()));
+    }
+    let frames = script
+        .into_iter()
+        .map(|(name, events)| {
+            let _ = take();
+            reset_materialization_count();
+            replay.frame(events);
+            let projections = materialization_count();
+            let unsaved = has_unsaved_changes(&replay.app.state);
+            DragFrame {
+                name,
+                work: take(),
+                projections,
+                unsaved,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let dropped = replay
+        .app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == part)
+        .map(|component| component.pos);
+    assert_eq!(
+        dropped,
+        Some(Point::new(at.x + 4 * grid, at.y)),
+        "the part follows the pointer: {frames:#?}"
+    );
+    let (gesture, settled) = frames.split_at(frames.len() - 4);
+    for frame in gesture {
+        assert_eq!(
+            (frame.work.comparisons, frame.projections),
+            (0, 0),
+            "{}: no frame of the drag compares the project or projects the design: {frames:#?}",
+            frame.name
+        );
+        assert_eq!(
+            frame.unsaved,
+            frame.name.starts_with("move"),
+            "{}: the project reads as edited from the first move on: {frames:#?}",
+            frame.name
+        );
+    }
+    assert_eq!(
+        settled
+            .iter()
+            .map(|frame| frame.work.comparisons)
+            .sum::<usize>(),
+        1,
+        "the drop is compared once: {frames:#?}"
+    );
+    assert!(
+        settled.iter().any(|frame| frame.projections > 0),
+        "the drop projects the design again: {frames:#?}"
+    );
+    assert!(
+        settled.iter().all(|frame| frame.unsaved),
+        "the project still reads as edited after the drop: {frames:#?}"
+    );
+    assert!(
+        replay.app.last_window_title.contains('*'),
+        "the title marks the edit: {}",
+        replay.app.last_window_title
+    );
+    drop(replay);
+    let _ = std::fs::remove_dir_all(folder);
 }

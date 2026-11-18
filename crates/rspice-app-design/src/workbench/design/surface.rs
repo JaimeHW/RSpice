@@ -489,11 +489,7 @@ pub fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
 /// The document's occurrence ends at its own reference by construction, so
 /// the master asked about is `active_view`.
 pub fn master_occurrence_paths(model: &Model) -> Vec<String> {
-    let Ok(projection) = model.workspace.design_projection(
-        &model.library_manager,
-        &model.workspace.content.active_view,
-        &model.schematic,
-    ) else {
+    let Ok(projection) = model.design_projection_through_gesture() else {
         return Vec::new();
     };
     let master = model.workspace.content.active_view.key();

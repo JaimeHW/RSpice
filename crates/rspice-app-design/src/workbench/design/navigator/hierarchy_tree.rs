@@ -1044,11 +1044,7 @@ fn resolved_projection(
     model: &Model,
     section: DesignNavigatorSection,
 ) -> Option<Arc<DesignProjection>> {
-    match model.workspace.design_projection(
-        &model.library_manager,
-        &model.workspace.content.active_view,
-        &model.schematic,
-    ) {
+    match model.design_projection_through_gesture() {
         Ok(projection) => Some(projection),
         Err(error) => {
             if navigator_section_header(ui, section, "\u{2014}") {

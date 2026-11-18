@@ -450,11 +450,7 @@ pub struct SheetConnectivity {
 /// depends on instance values and port parameters, which do not advance the
 /// schematic topology version.
 pub fn sheet_connectivity(model: &Model) -> SheetConnectivity {
-    let projection = match model.workspace.design_projection(
-        &model.library_manager,
-        &model.workspace.content.active_view,
-        &model.schematic,
-    ) {
+    let projection = match model.design_projection_through_gesture() {
         Ok(projection) => projection,
         Err(error) => {
             return SheetConnectivity {

@@ -68,6 +68,7 @@ impl Model {
             live_write_locks: crate::state::write_policy::LiveWriteLocks::default(),
             recorded_sync_failures: Default::default(),
             frame_sync: Default::default(),
+            held_projection: Default::default(),
             unsaved_pin_renames: Default::default(),
             symbol_rewired_sheets: Default::default(),
             symbol_in_place_layout: None,

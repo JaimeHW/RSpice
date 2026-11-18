@@ -610,11 +610,7 @@ pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     // The rail lists the nets the configured design has. When that design
     // does not resolve, the reason takes the list's place: a rail populated
     // from the editor buffer would offer conductors the run has no name for.
-    let projection = match cx.model.workspace.design_projection(
-        &cx.model.library_manager,
-        &cx.model.workspace.content.active_view,
-        &cx.model.schematic,
-    ) {
+    let projection = match cx.model.design_projection_through_gesture() {
         Ok(projection) => projection,
         Err(error) => {
             if navigator_section_header(ui, DesignNavigatorSection::Nets, "\u{2014}") {
@@ -1008,14 +1004,7 @@ fn whole_design_rf_ports(model: &Model) -> Vec<crate::simulation::placed_sources
 fn design_projection(
     model: &Model,
 ) -> Option<std::sync::Arc<crate::state::workspace::DesignProjection>> {
-    model
-        .workspace
-        .design_projection(
-            &model.library_manager,
-            &model.workspace.content.active_view,
-            &model.schematic,
-        )
-        .ok()
+    model.design_projection_through_gesture().ok()
 }
 
 /// Whether a derived row is one the sheet scope can speak about.

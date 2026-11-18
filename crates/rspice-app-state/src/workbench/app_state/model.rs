@@ -16,6 +16,7 @@ mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
 mod export_name;
 mod generated_instance;
+mod gesture_hold;
 mod in_place_layout;
 mod library_catalog;
 mod library_files;
@@ -138,6 +139,9 @@ pub struct Model {
     pub recorded_sync_failures: schematic_sync::SyncFailures,
     /// What the frame's drawing sync last left. Runtime only.
     pub frame_sync: schematic_sync::FrameSync,
+    /// The design projection the Design rails last read, which they read
+    /// again through a canvas gesture. Runtime only.
+    pub held_projection: gesture_hold::HeldProjection,
     /// The pin renames each symbol's placed instances have taken since the
     /// symbol was last saved, which Revert to saved on the symbol takes back.
     /// Runtime only: a save of the symbol, or another project replacing this
