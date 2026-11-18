@@ -175,7 +175,7 @@ fn a_schematic_masters_parameter_contract_is_its_instances_allowlist() {
 /// had just written could run without a hand-made configuration.
 #[test]
 fn an_unconfigured_veriloga_instance_runs_the_bundle_its_view_owns() {
-    use crate::project_sources::{ProjectSourceBundle, ProjectSourceLanguage};
+    use crate::project_sources::ProjectSourceBundle;
     use rspice_design_model::port::{PortDirection, PortSpec};
 
     let root = CellViewRef::new("work", "top", "schematic");
@@ -199,7 +199,6 @@ fn an_unconfigured_veriloga_instance_runs_the_bundle_its_view_owns() {
         .insert_bundle(
             ProjectSourceBundle::try_new(
                 ProjectSourceOwner::cell_view(module.clone()),
-                ProjectSourceLanguage::VerilogA,
                 "gain.va",
                 "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n) / 1k;\nendmodule\n",
                 [],

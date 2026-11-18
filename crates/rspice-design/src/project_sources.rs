@@ -44,7 +44,7 @@ const LEGACY_PROJECT_SOURCE_ID_NAMESPACE: Uuid =
     Uuid::from_u128(0xb50a_3aed_047f_54f8_971b_a2aa_e1e8_4f5b);
 const PROJECT_SOURCE_DOCUMENT_ID_NAMESPACE: Uuid =
     Uuid::from_u128(0x9f22_95dc_feb3_55a0_99c4_276e_7015_a08f);
-const CLOSURE_DIGEST_DOMAIN: &[u8] = b"rspice.project-source-closure/v2";
+const CLOSURE_DIGEST_DOMAIN: &[u8] = b"rspice.project-source-closure/v3";
 
 /// Stable identity of one project-owned source bundle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -71,7 +71,6 @@ impl ProjectSourceId {
     fn migrated(document: &ProjectSourceDocument) -> Self {
         let mut material = Vec::new();
         append_frame(&mut material, b"rspice.project-source-legacy-id/v1");
-        append_frame(&mut material, document.language.stable_name().as_bytes());
         append_frame(&mut material, document.file_name.as_bytes());
         append_frame(&mut material, document.content.as_bytes());
         append_frame(&mut material, &document.revision.get().to_be_bytes());
@@ -182,66 +181,21 @@ pub enum ProjectSourceIdParseError {
     Invalid(#[from] ProjectSourceIdError),
 }
 
-/// Stable language identity for a project-owned executable source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProjectSourceLanguage {
-    VerilogA,
-}
+/// Every extension a Verilog-A root file may carry: Verilog-AMS sources are
+/// `.vams` as often as `.va`, and a Verilog view's module is `.v`. One
+/// compiler reads all three (Verilog-AMS LRM 2.4 over IEEE 1364-2005).
+const ACCEPTED_ROOT_EXTENSIONS: &[&str] = &[".va", ".vams", ".v"];
 
-impl ProjectSourceLanguage {
-    pub const ALL: [Self; 1] = [Self::VerilogA];
+/// [`ACCEPTED_ROOT_EXTENSIONS`] as the sentence that names them.
+const ACCEPTED_ROOT_EXTENSION_TEXT: &str = "'.va', '.vams' or '.v'";
 
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::VerilogA => "Verilog-A",
-        }
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    pub const fn required_extension(self) -> &'static str {
-        match self {
-            Self::VerilogA => ".va",
-        }
-    }
-
-    /// Every extension a root file of this language may carry: Verilog-AMS
-    /// sources are `.vams` as often as `.va`, and a Verilog view's module is
-    /// `.v`. One compiler reads all three (Verilog-AMS LRM 2.4 over IEEE
-    /// 1364-2005).
-    const fn accepted_extensions(self) -> &'static [&'static str] {
-        match self {
-            Self::VerilogA => &[".va", ".vams", ".v"],
-        }
-    }
-
-    /// [`Self::accepted_extensions`] as the sentence that names them.
-    const fn accepted_extension_text(self) -> &'static str {
-        match self {
-            Self::VerilogA => "'.va', '.vams' or '.v'",
-        }
-    }
-
-    const fn stable_name(self) -> &'static str {
-        match self {
-            Self::VerilogA => "verilog-a",
-        }
-    }
-}
-
-impl fmt::Display for ProjectSourceLanguage {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.label())
-    }
-}
-
-/// Product owner of a source bundle. Code Workspace owners preserve the
+/// Product owner of a source bundle. The Code Workspace owner preserves the
 /// singleton editor contract; cell-view owners make hierarchy-bound behavioral
 /// sources first-class project artifacts.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ProjectSourceOwner {
-    CodeWorkspace { language: ProjectSourceLanguage },
+    CodeWorkspace,
     CellView { reference: CellViewRef },
 }
 
@@ -293,16 +247,14 @@ fn canonical_owner_segment(value: &str) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum CanonicalProjectSourceOwnerKey {
-    CodeWorkspace(ProjectSourceLanguage),
+    CodeWorkspace,
     CellView(CanonicalCellViewOwnerKey),
 }
 
 impl fmt::Display for CanonicalProjectSourceOwnerKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CodeWorkspace(language) => {
-                write!(formatter, "code-workspace:{}", language.stable_name())
-            }
+            Self::CodeWorkspace => formatter.write_str("code-workspace"),
             Self::CellView(reference) => write!(formatter, "cell-view:{reference}"),
         }
     }
@@ -310,47 +262,28 @@ impl fmt::Display for CanonicalProjectSourceOwnerKey {
 
 impl ProjectSourceOwner {
     #[must_use]
-    pub const fn code_workspace(language: ProjectSourceLanguage) -> Self {
-        Self::CodeWorkspace { language }
-    }
-
-    #[must_use]
     pub fn cell_view(reference: CellViewRef) -> Self {
         Self::CellView { reference }
     }
 
     fn canonical_key(&self) -> CanonicalProjectSourceOwnerKey {
         match self {
-            Self::CodeWorkspace { language } => {
-                CanonicalProjectSourceOwnerKey::CodeWorkspace(*language)
-            }
+            Self::CodeWorkspace => CanonicalProjectSourceOwnerKey::CodeWorkspace,
             Self::CellView { reference } => CanonicalProjectSourceOwnerKey::CellView(
                 canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view),
             ),
         }
     }
 
-    fn validate(&self, language: ProjectSourceLanguage) -> Result<(), ProjectSourceError> {
+    fn validate(&self) -> Result<(), ProjectSourceError> {
         match self {
-            Self::CodeWorkspace {
-                language: owner_language,
-            } if *owner_language != language => Err(ProjectSourceError::OwnerLanguageMismatch {
-                owner: *owner_language,
-                bundle: language,
-            }),
-            Self::CodeWorkspace { .. } => Ok(()),
-            Self::CellView { reference } => {
-                reference.validate_name_segments().map_err(|error| {
-                    ProjectSourceError::InvalidCellViewOwner {
-                        reference: reference.display_path(),
-                        message: error.to_string(),
-                    }
-                })?;
-                if language != ProjectSourceLanguage::VerilogA {
-                    return Err(ProjectSourceError::UnsupportedCellViewLanguage { language });
+            Self::CodeWorkspace => Ok(()),
+            Self::CellView { reference } => reference.validate_name_segments().map_err(|error| {
+                ProjectSourceError::InvalidCellViewOwner {
+                    reference: reference.display_path(),
+                    message: error.to_string(),
                 }
-                Ok(())
-            }
+            }),
         }
     }
 }
@@ -391,7 +324,6 @@ impl ProjectSourceValidationIdentity {
 pub struct ProjectSourceDocument {
     id: ProjectSourceDocumentId,
     file_name: String,
-    language: ProjectSourceLanguage,
     content: String,
     revision: ObjectRevision,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -401,22 +333,19 @@ pub struct ProjectSourceDocument {
 impl ProjectSourceDocument {
     pub fn try_new(
         file_name: impl Into<String>,
-        language: ProjectSourceLanguage,
         content: impl Into<String>,
     ) -> Result<Self, ProjectSourceError> {
-        Self::try_new_with_id(ProjectSourceDocumentId::new(), file_name, language, content)
+        Self::try_new_with_id(ProjectSourceDocumentId::new(), file_name, content)
     }
 
     fn try_new_with_id(
         id: ProjectSourceDocumentId,
         file_name: impl Into<String>,
-        language: ProjectSourceLanguage,
         content: impl Into<String>,
     ) -> Result<Self, ProjectSourceError> {
         let document = Self {
             id,
             file_name: file_name.into(),
-            language,
             content: content.into(),
             revision: ObjectRevision::INITIAL,
             validated_identity: None,
@@ -438,11 +367,6 @@ impl ProjectSourceDocument {
     #[must_use]
     pub fn logical_path(&self) -> &str {
         &self.file_name
-    }
-
-    #[must_use]
-    pub const fn language(&self) -> ProjectSourceLanguage {
-        self.language
     }
 
     #[must_use]
@@ -501,7 +425,6 @@ impl ProjectSourceDocument {
         let replacement = Self {
             id: self.id,
             file_name,
-            language: self.language,
             content,
             revision: next_revision(self.revision, &self.file_name)?,
             validated_identity: None,
@@ -530,7 +453,7 @@ impl ProjectSourceDocument {
                 logical_path: self.file_name.clone(),
             });
         }
-        validate_project_source_file_name(&self.file_name, self.language)?;
+        validate_project_source_file_name(&self.file_name)?;
         validate_source_content(&self.file_name, &self.content)?;
         if self.validated_identity.is_some() && !self.validation_is_current() {
             return Err(ProjectSourceError::StaleValidationIdentity {
@@ -619,62 +542,6 @@ pub struct ProjectSourceDependency {
     imported: String,
 }
 
-/// Semantic role of one document in a project source closure.
-///
-/// A role is persisted project configuration. It is never inferred from a
-/// filename at compile time, and each role is bound to exactly one portable
-/// logical path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProjectSourceRole {
-    VerilogABuildProfile,
-}
-
-impl ProjectSourceRole {
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::VerilogABuildProfile => "Verilog-A build profile",
-        }
-    }
-}
-
-/// Persisted binding between a portable logical path and its semantic role.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectSourceRoleBinding {
-    logical_path: String,
-    role: ProjectSourceRole,
-}
-
-impl ProjectSourceRoleBinding {
-    pub fn try_new(
-        logical_path: impl Into<String>,
-        role: ProjectSourceRole,
-    ) -> Result<Self, ProjectSourceError> {
-        let binding = Self {
-            logical_path: logical_path.into(),
-            role,
-        };
-        validate_logical_path(&binding.logical_path)?;
-        Ok(binding)
-    }
-
-    #[must_use]
-    pub fn logical_path(&self) -> &str {
-        &self.logical_path
-    }
-
-    #[must_use]
-    pub const fn role(&self) -> ProjectSourceRole {
-        self.role
-    }
-
-    fn canonical_key(&self) -> (ProjectSourceRole, String) {
-        (self.role, path_key(&self.logical_path))
-    }
-}
-
 impl ProjectSourceDependency {
     pub fn try_new(
         importer: impl Into<String>,
@@ -715,14 +582,16 @@ pub struct ProjectSourceBundle {
     /// byte, so it is outside the closure digest and the revision history.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     shared_with: Vec<CellViewRef>,
-    language: ProjectSourceLanguage,
     root: ProjectSourceDocument,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     files: Vec<ProjectSourceFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     dependencies: Vec<ProjectSourceDependency>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    roles: Vec<ProjectSourceRoleBinding>,
+    /// The logical path of the file holding the source's build profile. It
+    /// is persisted project configuration, never inferred from a filename at
+    /// compile time, and always names a file of the bundle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    build_profile: Option<String>,
     revision: ObjectRevision,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     validated_identity: Option<ProjectSourceValidationIdentity>,
@@ -873,8 +742,8 @@ pub struct ProjectSourceRevisionSnapshot {
     files: Vec<ProjectSourceFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     dependencies: Vec<ProjectSourceDependency>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    roles: Vec<ProjectSourceRoleBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    build_profile: Option<String>,
 }
 
 impl ProjectSourceRevisionSnapshot {
@@ -952,9 +821,8 @@ impl ProjectSourceRegistry {
 
     /// Insert a compatibility Code Workspace singleton.
     pub fn insert(&mut self, document: ProjectSourceDocument) -> Result<(), ProjectSourceError> {
-        let language = document.language;
-        if self.get(language).is_some() {
-            return Err(ProjectSourceError::DuplicateLanguage { language });
+        if self.get().is_some() {
+            return Err(ProjectSourceError::DuplicateLanguage);
         }
         self.insert_bundle(ProjectSourceBundle::migrated(document)?)
     }
@@ -972,8 +840,8 @@ impl ProjectSourceRegistry {
             .served_keys()
             .find(|key| self.bundles.iter().any(|current| current.serves(key)))
         {
-            if let ProjectSourceOwner::CodeWorkspace { language } = bundle.owner {
-                return Err(ProjectSourceError::DuplicateLanguage { language });
+            if bundle.owner == ProjectSourceOwner::CodeWorkspace {
+                return Err(ProjectSourceError::DuplicateLanguage);
             }
             return Err(ProjectSourceError::DuplicateOwner {
                 owner: owner_key.to_string(),
@@ -985,9 +853,8 @@ impl ProjectSourceRegistry {
     }
 
     #[must_use]
-    pub fn get(&self, language: ProjectSourceLanguage) -> Option<&ProjectSourceDocument> {
-        self.code_workspace_bundle(language)
-            .map(ProjectSourceBundle::root)
+    pub fn get(&self) -> Option<&ProjectSourceDocument> {
+        self.code_workspace_bundle().map(ProjectSourceBundle::root)
     }
 
     #[must_use]
@@ -1017,20 +884,18 @@ impl ProjectSourceRegistry {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &ProjectSourceDocument> {
-        ProjectSourceLanguage::ALL
-            .into_iter()
-            .filter_map(|language| self.get(language))
+        self.get().into_iter()
     }
 
     pub fn iter_bundles(&self) -> impl Iterator<Item = &ProjectSourceBundle> {
         self.bundles.iter()
     }
 
-    pub fn remove(&mut self, language: ProjectSourceLanguage) -> Option<ProjectSourceDocument> {
+    pub fn remove(&mut self) -> Option<ProjectSourceDocument> {
         let index = self
             .bundles
             .iter()
-            .position(|bundle| bundle.owner == ProjectSourceOwner::code_workspace(language))?;
+            .position(|bundle| bundle.owner == ProjectSourceOwner::CodeWorkspace)?;
         Some(self.bundles.remove(index).root)
     }
 
@@ -1177,14 +1042,13 @@ impl ProjectSourceRegistry {
                     ProjectSourceFile::try_new(file.logical_path.clone(), file.content.clone())
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let clone = ProjectSourceBundle::try_new_with_roles(
+            let clone = ProjectSourceBundle::try_new_with_build_profile(
                 ProjectSourceOwner::cell_view(CellViewRef::new(target_library, target_cell, view)),
-                bundle.language,
                 bundle.root.file_name.clone(),
                 bundle.root.content.clone(),
                 cloned_files,
                 bundle.dependencies.clone(),
-                bundle.roles.clone(),
+                bundle.build_profile.clone(),
             )?;
             inserted.push(clone.id());
             candidate.insert_bundle(clone)?;
@@ -1292,7 +1156,7 @@ impl ProjectSourceRegistry {
             }
             let matched = match &bundle.owner {
                 ProjectSourceOwner::CellView { reference } => matches(reference),
-                ProjectSourceOwner::CodeWorkspace { .. } => false,
+                ProjectSourceOwner::CodeWorkspace => false,
             };
             if !matched {
                 continue;
@@ -1314,22 +1178,23 @@ impl ProjectSourceRegistry {
         Ok(changed)
     }
 
-    /// Give the Code Workspace bundle of `language` to the cell view
-    /// `reference`, returning its identity, or `None` when there is no such
-    /// bundle.
+    /// Give the Code Workspace bundle to the cell view `reference`, returning
+    /// its identity, or `None` when there is no such bundle.
     ///
-    /// The bundle keeps its identity, files, edges and roles; the move is a
-    /// revision like a rename, so the previous owner's graph stays retained
-    /// in the history. Unlike a rename it keeps its validation: the move
-    /// changes no byte, and the closure under its new owner is the closure
-    /// that was compiled.
+    /// The bundle keeps its identity, files, edges and build profile; the
+    /// move is a revision like a rename, so the previous owner's graph stays
+    /// retained in the history. Unlike a rename it keeps its validation: the
+    /// move changes no byte, and the closure under its new owner is the
+    /// closure that was compiled.
     pub fn move_code_workspace_bundle_to_cell_view(
         &mut self,
-        language: ProjectSourceLanguage,
         reference: CellViewRef,
     ) -> Result<Option<ProjectSourceId>, ProjectSourceError> {
-        let owner = ProjectSourceOwner::code_workspace(language);
-        let Some(index) = self.bundles.iter().position(|bundle| bundle.owner == owner) else {
+        let Some(index) = self
+            .bundles
+            .iter()
+            .position(|bundle| bundle.owner == ProjectSourceOwner::CodeWorkspace)
+        else {
             return Ok(None);
         };
         let mut candidate = self.clone();
@@ -1361,10 +1226,8 @@ impl ProjectSourceRegistry {
         key: &str,
     ) -> Option<&ProjectSourceBundle> {
         let parts = VerilogASourceKeyParts::parse(project_id, key)?;
-        self.get_bundle(parts.bundle_id).filter(|bundle| {
-            bundle.language == ProjectSourceLanguage::VerilogA
-                && bundle.root.logical_path() == parts.root
-        })
+        self.get_bundle(parts.bundle_id)
+            .filter(|bundle| bundle.root.logical_path() == parts.root)
     }
 
     /// `key` against its bundle's current identity, when it names exactly the
@@ -1437,11 +1300,11 @@ impl ProjectSourceRegistry {
         let mut candidate = self.clone();
         candidate
             .bundles
-            .retain(|bundle| !matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace { .. }));
+            .retain(|bundle| !matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace));
         for bundle in source
             .bundles
             .iter()
-            .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace { .. }))
+            .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace))
         {
             candidate.insert_bundle(bundle.clone())?;
         }
@@ -1458,14 +1321,10 @@ impl ProjectSourceRegistry {
         self.bundles.is_empty()
     }
 
-    pub fn replace_content(
-        &mut self,
-        language: ProjectSourceLanguage,
-        content: String,
-    ) -> Result<bool, ProjectSourceError> {
+    pub fn replace_content(&mut self, content: String) -> Result<bool, ProjectSourceError> {
         let bundle = self
-            .code_workspace_bundle_mut(language)
-            .ok_or(ProjectSourceError::MissingLanguage { language })?;
+            .code_workspace_bundle_mut()
+            .ok_or(ProjectSourceError::MissingLanguage)?;
         let path = bundle.root.file_name.clone();
         bundle.replace_file_content(&path, content)
     }
@@ -1520,18 +1379,17 @@ impl ProjectSourceRegistry {
             .add_file(importer, file)
     }
 
-    pub fn add_bundle_file_with_role(
+    pub fn add_bundle_build_profile_file(
         &mut self,
         id: ProjectSourceId,
         importer: &str,
         file: ProjectSourceFile,
-        role: ProjectSourceRole,
     ) -> Result<bool, ProjectSourceError> {
         self.bundles
             .iter_mut()
             .find(|bundle| bundle.id == id)
             .ok_or(ProjectSourceError::MissingIdentity { id })?
-            .add_file_with_role(importer, file, role)
+            .add_build_profile_file(importer, file)
     }
 
     pub fn append_bundle_qualification(
@@ -1573,16 +1431,13 @@ impl ProjectSourceRegistry {
 
     pub fn replace_imported(
         &mut self,
-        language: ProjectSourceLanguage,
         file_name: String,
         content: String,
     ) -> Result<bool, ProjectSourceError> {
-        match self.code_workspace_bundle_mut(language) {
+        match self.code_workspace_bundle_mut() {
             Some(bundle) => bundle.replace_root_imported(file_name, content),
             None => {
-                self.insert(ProjectSourceDocument::try_new(
-                    file_name, language, content,
-                )?)?;
+                self.insert(ProjectSourceDocument::try_new(file_name, content)?)?;
                 Ok(true)
             }
         }
@@ -1590,11 +1445,10 @@ impl ProjectSourceRegistry {
 
     pub fn mark_validated(
         &mut self,
-        language: ProjectSourceLanguage,
     ) -> Result<ProjectSourceValidationIdentity, ProjectSourceError> {
         let bundle = self
-            .code_workspace_bundle_mut(language)
-            .ok_or(ProjectSourceError::MissingLanguage { language })?;
+            .code_workspace_bundle_mut()
+            .ok_or(ProjectSourceError::MissingLanguage)?;
         bundle.mark_validated()?;
         Ok(bundle
             .root
@@ -1636,8 +1490,8 @@ impl ProjectSourceRegistry {
             }
             for owner in bundle.served_keys() {
                 if !owners.insert(owner.clone()) {
-                    if let ProjectSourceOwner::CodeWorkspace { language } = bundle.owner {
-                        return Err(ProjectSourceError::DuplicateLanguage { language });
+                    if bundle.owner == ProjectSourceOwner::CodeWorkspace {
+                        return Err(ProjectSourceError::DuplicateLanguage);
                     }
                     return Err(ProjectSourceError::DuplicateOwner {
                         owner: owner.to_string(),
@@ -1648,22 +1502,16 @@ impl ProjectSourceRegistry {
         Ok(())
     }
 
-    fn code_workspace_bundle(
-        &self,
-        language: ProjectSourceLanguage,
-    ) -> Option<&ProjectSourceBundle> {
+    fn code_workspace_bundle(&self) -> Option<&ProjectSourceBundle> {
         self.bundles
             .iter()
-            .find(|bundle| bundle.owner == ProjectSourceOwner::code_workspace(language))
+            .find(|bundle| bundle.owner == ProjectSourceOwner::CodeWorkspace)
     }
 
-    fn code_workspace_bundle_mut(
-        &mut self,
-        language: ProjectSourceLanguage,
-    ) -> Option<&mut ProjectSourceBundle> {
+    fn code_workspace_bundle_mut(&mut self) -> Option<&mut ProjectSourceBundle> {
         self.bundles
             .iter_mut()
-            .find(|bundle| bundle.owner == ProjectSourceOwner::code_workspace(language))
+            .find(|bundle| bundle.owner == ProjectSourceOwner::CodeWorkspace)
     }
 
     fn canonicalize(&mut self) {
@@ -1750,11 +1598,6 @@ fn validate_veriloga_runtime_selection(
     module_name: &str,
 ) -> Result<(), ProjectSourceError> {
     bundle.validate()?;
-    if bundle.language() != ProjectSourceLanguage::VerilogA {
-        return Err(ProjectSourceError::UnsupportedRuntimeLanguage {
-            language: bundle.language(),
-        });
-    }
     let mut characters = module_name.chars();
     let valid = characters
         .next()
@@ -1835,19 +1678,16 @@ pub enum ProjectSourceError {
         id: ProjectSourceDocumentId,
         logical_path: String,
     },
-    #[error("{language} source file name is empty or not trimmed")]
-    InvalidFileNameWhitespace { language: ProjectSourceLanguage },
-    #[error("{language} source logical path is absolute, traversing, or not normalized")]
-    InvalidFileNamePath { language: ProjectSourceLanguage },
-    #[error("{language} source file name contains a reserved or non-portable character")]
-    InvalidFileNameCharacters { language: ProjectSourceLanguage },
-    #[error("{language} source file name is reserved by a supported desktop platform")]
-    ReservedFileName { language: ProjectSourceLanguage },
-    #[error("{language} source file name must end in {accepted}")]
-    InvalidFileNameExtension {
-        language: ProjectSourceLanguage,
-        accepted: &'static str,
-    },
+    #[error("Verilog-A source file name is empty or not trimmed")]
+    InvalidFileNameWhitespace,
+    #[error("Verilog-A source logical path is absolute, traversing, or not normalized")]
+    InvalidFileNamePath,
+    #[error("Verilog-A source file name contains a reserved or non-portable character")]
+    InvalidFileNameCharacters,
+    #[error("Verilog-A source file name is reserved by a supported desktop platform")]
+    ReservedFileName,
+    #[error("Verilog-A source file name must end in {accepted}")]
+    InvalidFileNameExtension { accepted: &'static str },
     #[error("logical source path '{logical_path}' is absolute, traversing, or not normalized")]
     InvalidLogicalPath { logical_path: String },
     #[error("logical source path '{logical_path}' contains a non-portable character")]
@@ -1897,26 +1737,12 @@ pub enum ProjectSourceError {
         logical_path: String,
         dependency: String,
     },
-    #[error("{role:?} role references missing source file '{logical_path}'")]
-    MissingRoleEndpoint {
-        logical_path: String,
-        role: ProjectSourceRole,
-    },
-    #[error("source file '{logical_path}' has more than one semantic role")]
-    FileHasMultipleRoles { logical_path: String },
-    #[error("source role bindings must be strictly sorted and unique")]
-    UnsortedRoles,
-    #[error("{role:?} is already bound to '{first}' and cannot also bind '{second}'")]
-    DuplicateSingletonRole {
-        role: ProjectSourceRole,
-        first: String,
-        second: String,
-    },
-    #[error("source file '{logical_path}' is bound as {role:?}; unbind it before deletion")]
-    RoleBoundFile {
-        logical_path: String,
-        role: ProjectSourceRole,
-    },
+    #[error("the build profile references missing source file '{logical_path}'")]
+    MissingRoleEndpoint { logical_path: String },
+    #[error("the build profile is already '{first}' and cannot also be '{second}'")]
+    DuplicateSingletonRole { first: String, second: String },
+    #[error("source file '{logical_path}' is the build profile; unbind it before deletion")]
+    RoleBoundFile { logical_path: String },
     #[error("source file '{file_name}' has stale validation evidence")]
     StaleValidationIdentity { file_name: String },
     #[error("source bundle {id} has stale validation evidence")]
@@ -1937,37 +1763,18 @@ pub enum ProjectSourceError {
     QualificationIdentityMismatch,
     #[error("source file '{file_name}' exhausted its revision space")]
     RevisionExhausted { file_name: String },
-    #[error("the project already owns a {language} Code Workspace source")]
-    DuplicateLanguage { language: ProjectSourceLanguage },
-    #[error("the project has no {language} Code Workspace source")]
-    MissingLanguage { language: ProjectSourceLanguage },
+    #[error("the project already owns a Verilog-A Code Workspace source")]
+    DuplicateLanguage,
+    #[error("the project has no Verilog-A Code Workspace source")]
+    MissingLanguage,
     #[error("project source identity {id} is duplicated")]
     DuplicateIdentity { id: ProjectSourceId },
     #[error("the project has no source bundle with identity {id}")]
     MissingIdentity { id: ProjectSourceId },
     #[error("project source owner '{owner}' is duplicated")]
     DuplicateOwner { owner: String },
-    #[error("the {slot} registry slot contains a {document} document")]
-    RegistryLanguageMismatch {
-        slot: ProjectSourceLanguage,
-        document: ProjectSourceLanguage,
-    },
-    #[error("source owner declares {owner}, but its bundle declares {bundle}")]
-    OwnerLanguageMismatch {
-        owner: ProjectSourceLanguage,
-        bundle: ProjectSourceLanguage,
-    },
-    #[error("source bundle declares {bundle}, but its root declares {root}")]
-    BundleLanguageMismatch {
-        bundle: ProjectSourceLanguage,
-        root: ProjectSourceLanguage,
-    },
     #[error("cell-view source owner '{reference}' is invalid: {message}")]
     InvalidCellViewOwner { reference: String, message: String },
-    #[error("cell-view source bundles do not support {language}")]
-    UnsupportedCellViewLanguage { language: ProjectSourceLanguage },
-    #[error("{language} source bundles cannot produce a Verilog-A runtime identity")]
-    UnsupportedRuntimeLanguage { language: ProjectSourceLanguage },
     #[error("Verilog-A selected module {module_name:?} is not a valid ASCII module identifier")]
     InvalidModuleName { module_name: String },
     #[error("project source registry schema {found} is unsupported; expected {supported}")]
@@ -2001,45 +1808,30 @@ fn validate_source_content(file_name: &str, content: &str) -> Result<(), Project
     Ok(())
 }
 
-const fn source_role_stable_name(role: ProjectSourceRole) -> &'static str {
-    match role {
-        ProjectSourceRole::VerilogABuildProfile => "veriloga-build-profile",
-    }
-}
-
-fn validate_project_source_file_name(
-    file_name: &str,
-    language: ProjectSourceLanguage,
-) -> Result<(), ProjectSourceError> {
+fn validate_project_source_file_name(file_name: &str) -> Result<(), ProjectSourceError> {
     if file_name.is_empty()
         || file_name != file_name.trim()
         || file_name.chars().any(char::is_control)
     {
-        return Err(ProjectSourceError::InvalidFileNameWhitespace { language });
+        return Err(ProjectSourceError::InvalidFileNameWhitespace);
     }
     validate_logical_path(file_name).map_err(|error| match error {
         ProjectSourceError::InvalidLogicalPath { .. }
-        | ProjectSourceError::LogicalPathTooLong { .. } => {
-            ProjectSourceError::InvalidFileNamePath { language }
-        }
+        | ProjectSourceError::LogicalPathTooLong { .. } => ProjectSourceError::InvalidFileNamePath,
         ProjectSourceError::InvalidLogicalPathCharacter { .. } => {
-            ProjectSourceError::InvalidFileNameCharacters { language }
+            ProjectSourceError::InvalidFileNameCharacters
         }
-        ProjectSourceError::ReservedLogicalPath { .. } => {
-            ProjectSourceError::ReservedFileName { language }
-        }
+        ProjectSourceError::ReservedLogicalPath { .. } => ProjectSourceError::ReservedFileName,
         other => other,
     })?;
     let leaf = file_name.rsplit('/').next().unwrap_or_default();
     let lowercase = leaf.to_ascii_lowercase();
-    let accepted = language
-        .accepted_extensions()
+    let accepted = ACCEPTED_ROOT_EXTENSIONS
         .iter()
         .any(|extension| lowercase.ends_with(extension) && leaf.len() > extension.len());
     if !accepted {
         return Err(ProjectSourceError::InvalidFileNameExtension {
-            language,
-            accepted: language.accepted_extension_text(),
+            accepted: ACCEPTED_ROOT_EXTENSION_TEXT,
         });
     }
     Ok(())

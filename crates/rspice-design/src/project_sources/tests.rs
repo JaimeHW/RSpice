@@ -18,7 +18,6 @@ fn bundle_fixture() -> ProjectSourceBundle {
     ProjectSourceBundle::try_new_with_id(
         "6d3c50a8-dd02-46da-beca-160517eea8a9".parse().unwrap(),
         ProjectSourceOwner::cell_view(CellViewRef::new("user", "ota", "veriloga")),
-        ProjectSourceLanguage::VerilogA,
         "models/ota.va",
         "`include \"shared/constants.vams\"\nmodule ota; endmodule\r\n",
         [
@@ -36,7 +35,6 @@ fn bundle_fixture() -> ProjectSourceBundle {
 fn owned_bundle(library: &str, cell: &str, view: &str) -> ProjectSourceBundle {
     ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(CellViewRef::new(library, cell, view)),
-        ProjectSourceLanguage::VerilogA,
         format!("{cell}.va"),
         "module device; endmodule\n",
         [],
@@ -74,7 +72,6 @@ fn closure_digest_is_order_independent_after_canonical_construction_and_length_f
     let second = ProjectSourceBundle::try_new_with_id(
         first.id(),
         first.owner().clone(),
-        first.language(),
         first.root().logical_path(),
         first.root().content(),
         first.files().iter().cloned().rev(),
@@ -83,24 +80,12 @@ fn closure_digest_is_order_independent_after_canonical_construction_and_length_f
     .unwrap();
     assert_eq!(first.closure_digest(), second.closure_digest());
 
-    let split_a = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
-        "a.va",
-        "bc",
-        [],
-        [],
-    )
-    .unwrap();
-    let split_b = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
-        "ab.va",
-        "c",
-        [],
-        [],
-    )
-    .unwrap();
+    let split_a =
+        ProjectSourceBundle::try_new(ProjectSourceOwner::CodeWorkspace, "a.va", "bc", [], [])
+            .unwrap();
+    let split_b =
+        ProjectSourceBundle::try_new(ProjectSourceOwner::CodeWorkspace, "ab.va", "c", [], [])
+            .unwrap();
     assert_ne!(split_a.closure_digest(), split_b.closure_digest());
 }
 
@@ -133,8 +118,7 @@ fn edits_advance_bundle_revision_and_invalidate_root_and_closure_evidence() {
 #[test]
 fn revision_history_round_trips_and_restores_as_a_new_monotonic_revision() {
     let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "models/root.va",
         "module root; endmodule\n",
         [],
@@ -189,8 +173,7 @@ fn revision_history_round_trips_and_restores_as_a_new_monotonic_revision() {
 #[test]
 fn authoring_add_rename_and_delete_keep_source_and_dependency_graph_atomic() {
     let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "models/root.va",
         "module root; endmodule\n",
         [],
@@ -256,8 +239,7 @@ fn authoring_add_rename_and_delete_keep_source_and_dependency_graph_atomic() {
 #[test]
 fn authoring_rejects_invalid_or_cascading_edits_without_partial_mutation() {
     let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "root.va",
         "`include \"a.vams\"\nmodule root; endmodule\n",
         [
@@ -289,8 +271,7 @@ fn authoring_rejects_invalid_or_cascading_edits_without_partial_mutation() {
 #[test]
 fn multi_file_replacement_is_atomic_and_rejects_duplicate_paths() {
     let bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "root.va",
         "`include \"defs.vams\"\nmodule root; endmodule\n",
         [dependency_file("defs.vams", "// old definitions\n")],
@@ -383,8 +364,7 @@ fn multi_file_replacement_is_atomic_and_rejects_duplicate_paths() {
 #[test]
 fn root_rename_preserves_explicit_root_ownership_and_outgoing_edges() {
     let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "models/root.va",
         "`include \"shared/defs.vams\"\nmodule root; endmodule\n",
         [dependency_file("shared/defs.vams", "// definitions\n")],
@@ -422,8 +402,7 @@ fn paths_reject_absolute_traversal_backslashes_nul_and_case_duplicates() {
         Err(ProjectSourceError::NulInContent { .. })
     ));
     let result = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "models/root.va",
         "root",
         [dependency_file("MODELS/ROOT.VA", "duplicate")],
@@ -438,8 +417,7 @@ fn paths_reject_absolute_traversal_backslashes_nul_and_case_duplicates() {
 #[test]
 fn dependency_graph_rejects_missing_cycles_and_unreachable_files() {
     let missing = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "root.va",
         "root",
         [],
@@ -451,8 +429,7 @@ fn dependency_graph_rejects_missing_cycles_and_unreachable_files() {
     ));
 
     let cyclic = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "root.va",
         "root",
         [dependency_file("a.vams", "a")],
@@ -467,8 +444,7 @@ fn dependency_graph_rejects_missing_cycles_and_unreachable_files() {
     ));
 
     let unreachable = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "root.va",
         "root",
         [dependency_file("orphan.vams", "orphan")],
@@ -487,8 +463,7 @@ fn closure_bounds_are_enforced() {
         .collect::<Vec<_>>();
     assert!(matches!(
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
+            ProjectSourceOwner::CodeWorkspace,
             "root.va",
             "root",
             files,
@@ -513,8 +488,7 @@ fn closure_accepts_the_exact_ten_thousand_file_contract_limit() {
         .map(|index| dependency("root.va", &format!("deps/{index:04}.vams")))
         .collect::<Vec<_>>();
     let bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+        ProjectSourceOwner::CodeWorkspace,
         "root.va",
         "root",
         files,
@@ -754,7 +728,6 @@ fn veriloga_runtime_identities_separate_project_bundle_and_selected_module() {
 fn veriloga_registry() -> ProjectSourceRegistry {
     let source = ProjectSourceDocument::try_new(
         "sensor.va",
-        ProjectSourceLanguage::VerilogA,
         "module sensor(p, n); inout p, n; electrical p, n; endmodule\n",
     )
     .unwrap();
@@ -767,14 +740,14 @@ fn veriloga_registry() -> ProjectSourceRegistry {
 #[test]
 fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validation() {
     let mut registry = veriloga_registry();
-    let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
+    let owner = ProjectSourceOwner::CodeWorkspace;
     let before = registry.bundle_for_owner(&owner).unwrap().id();
     registry.mark_bundle_validated(before).unwrap();
     let original = registry.get_bundle(before).unwrap().clone();
     let reference = CellViewRef::new("work", "sensor", "veriloga");
 
     let moved = registry
-        .move_code_workspace_bundle_to_cell_view(ProjectSourceLanguage::VerilogA, reference.clone())
+        .move_code_workspace_bundle_to_cell_view(reference.clone())
         .unwrap();
 
     assert_eq!(moved, Some(before));
@@ -797,7 +770,7 @@ fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validat
     );
     assert_eq!(
         registry
-            .move_code_workspace_bundle_to_cell_view(ProjectSourceLanguage::VerilogA, reference)
+            .move_code_workspace_bundle_to_cell_view(reference)
             .unwrap(),
         None
     );
@@ -810,7 +783,7 @@ fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validat
 fn a_key_written_before_a_move_reads_back_as_the_current_key_until_the_bytes_change() {
     let project = ProjectId::new();
     let mut registry = veriloga_registry();
-    let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
+    let owner = ProjectSourceOwner::CodeWorkspace;
     let id = registry.bundle_for_owner(&owner).unwrap().id();
     let legacy_key =
         project_veriloga_bundle_source_key(project, registry.get_bundle(id).unwrap(), "sensor")
@@ -823,7 +796,7 @@ fn a_key_written_before_a_move_reads_back_as_the_current_key_until_the_bytes_cha
 
     let reference = CellViewRef::new("work", "sensor", "veriloga");
     registry
-        .move_code_workspace_bundle_to_cell_view(ProjectSourceLanguage::VerilogA, reference)
+        .move_code_workspace_bundle_to_cell_view(reference)
         .unwrap();
     let current_key =
         project_veriloga_bundle_source_key(project, registry.get_bundle(id).unwrap(), "sensor")
@@ -874,7 +847,6 @@ fn a_veriloga_root_may_be_a_va_a_vams_or_a_v_file() {
     for root in ["amp.va", "models/amp.VAMS", "amp.v"] {
         let bundle = ProjectSourceBundle::try_new(
             owner(),
-            ProjectSourceLanguage::VerilogA,
             root,
             "module amp; endmodule
 ",
@@ -886,7 +858,6 @@ fn a_veriloga_root_may_be_a_va_a_vams_or_a_v_file() {
     for root in ["amp.sv", ".vams", "amp.vams.txt"] {
         let refused = ProjectSourceBundle::try_new(
             owner(),
-            ProjectSourceLanguage::VerilogA,
             root,
             "module amp; endmodule
 ",
@@ -1011,7 +982,6 @@ fn compile_attempt(bundle: &ProjectSourceBundle) -> ProjectSourceQualificationAt
 fn veriloga_bundle() -> ProjectSourceBundle {
     ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(CellViewRef::new("lib", "cell", "veriloga")),
-        ProjectSourceLanguage::VerilogA,
         "m.va",
         "module m; endmodule\n",
         [],

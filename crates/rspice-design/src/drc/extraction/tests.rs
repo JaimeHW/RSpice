@@ -11,9 +11,7 @@ use crate::hierarchy::{
     HierarchySourceFiles, resolve_hierarchy,
 };
 use crate::library::{Cell, Library, LibraryCatalog, View, ViewType};
-use crate::project_sources::{
-    ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
-};
+use crate::project_sources::{ProjectSourceBundle, ProjectSourceOwner, ProjectSourceRegistry};
 use crate::schematic::component::LibraryCellInstance;
 use crate::schematic::net_label::NetLabel;
 use crate::schematic::wire::Wire;
@@ -650,7 +648,6 @@ impl Rebindable {
             .insert_bundle(
                 ProjectSourceBundle::try_new(
                     ProjectSourceOwner::cell_view(CellViewRef::new("work", "amp", "veriloga")),
-                    ProjectSourceLanguage::VerilogA,
                     "amp.va",
                     "module amp(p);\n  inout p;\n  electrical p;\n  analog I(p) <+ V(p) / 1k;\nendmodule\n",
                     [],

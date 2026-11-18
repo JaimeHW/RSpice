@@ -1,6 +1,6 @@
 //! What one project-owned source closure can be asked to do.
 //!
-//! A bundle is a graph, not a file list: files, their roles, and the
+//! A bundle is a graph, not a file list: files, the build profile, and the
 //! dependency edges between them move together or not at all. Every mutation
 //! here re-derives the closure digest and invalidates validation, so a bundle
 //! can never advertise a receipt for bytes it no longer holds.
@@ -10,73 +10,66 @@ use super::*;
 impl ProjectSourceBundle {
     pub fn try_new(
         owner: ProjectSourceOwner,
-        language: ProjectSourceLanguage,
         root_path: impl Into<String>,
         root_content: impl Into<String>,
         files: impl IntoIterator<Item = ProjectSourceFile>,
         dependencies: impl IntoIterator<Item = ProjectSourceDependency>,
     ) -> Result<Self, ProjectSourceError> {
-        Self::try_new_with_id_and_roles(
+        Self::try_new_with_id_and_build_profile(
             ProjectSourceId::new(),
             owner,
-            language,
             (root_path, root_content),
             files,
             dependencies,
-            [],
+            None,
         )
     }
 
-    /// Construct a source bundle with explicit persisted semantic roles, so a
-    /// build profile never depends on path or content heuristics.
-    pub fn try_new_with_roles(
+    /// Construct a source bundle with an explicit persisted build profile, so
+    /// a build profile never depends on path or content heuristics.
+    pub fn try_new_with_build_profile(
         owner: ProjectSourceOwner,
-        language: ProjectSourceLanguage,
         root_path: impl Into<String>,
         root_content: impl Into<String>,
         files: impl IntoIterator<Item = ProjectSourceFile>,
         dependencies: impl IntoIterator<Item = ProjectSourceDependency>,
-        roles: impl IntoIterator<Item = ProjectSourceRoleBinding>,
+        build_profile: Option<String>,
     ) -> Result<Self, ProjectSourceError> {
-        Self::try_new_with_id_and_roles(
+        Self::try_new_with_id_and_build_profile(
             ProjectSourceId::new(),
             owner,
-            language,
             (root_path, root_content),
             files,
             dependencies,
-            roles,
+            build_profile,
         )
     }
 
     pub fn try_new_with_id(
         id: ProjectSourceId,
         owner: ProjectSourceOwner,
-        language: ProjectSourceLanguage,
         root_path: impl Into<String>,
         root_content: impl Into<String>,
         files: impl IntoIterator<Item = ProjectSourceFile>,
         dependencies: impl IntoIterator<Item = ProjectSourceDependency>,
     ) -> Result<Self, ProjectSourceError> {
-        Self::try_new_with_id_and_roles(
+        Self::try_new_with_id_and_build_profile(
             id,
             owner,
-            language,
             (root_path, root_content),
             files,
             dependencies,
-            [],
+            None,
         )
     }
 
-    fn try_new_with_id_and_roles(
+    fn try_new_with_id_and_build_profile(
         id: ProjectSourceId,
         owner: ProjectSourceOwner,
-        language: ProjectSourceLanguage,
         root: (impl Into<String>, impl Into<String>),
         files: impl IntoIterator<Item = ProjectSourceFile>,
         dependencies: impl IntoIterator<Item = ProjectSourceDependency>,
-        roles: impl IntoIterator<Item = ProjectSourceRoleBinding>,
+        build_profile: Option<String>,
     ) -> Result<Self, ProjectSourceError> {
         let (root_path, root_content) = root;
         let root_path = root_path.into();
@@ -84,16 +77,14 @@ impl ProjectSourceBundle {
             id,
             owner,
             shared_with: Vec::new(),
-            language,
             root: ProjectSourceDocument::try_new_with_id(
                 ProjectSourceDocumentId::migrated(id, &root_path),
                 root_path,
-                language,
                 root_content,
             )?,
             files: files.into_iter().collect(),
             dependencies: dependencies.into_iter().collect(),
-            roles: roles.into_iter().collect(),
+            build_profile,
             revision: ObjectRevision::INITIAL,
             validated_identity: None,
             history: Vec::new(),
@@ -111,10 +102,9 @@ impl ProjectSourceBundle {
         let was_validated = document.validation_is_current();
         let mut bundle = Self {
             id,
-            owner: ProjectSourceOwner::code_workspace(document.language),
+            owner: ProjectSourceOwner::CodeWorkspace,
             shared_with: Vec::new(),
-            language: document.language,
-            roles: Vec::new(),
+            build_profile: None,
             root: document,
             files: Vec::new(),
             dependencies: Vec::new(),
@@ -155,7 +145,7 @@ impl ProjectSourceBundle {
     pub fn cell_views(&self) -> impl Iterator<Item = &CellViewRef> {
         let owner = match &self.owner {
             ProjectSourceOwner::CellView { reference } => Some(reference),
-            ProjectSourceOwner::CodeWorkspace { .. } => None,
+            ProjectSourceOwner::CodeWorkspace => None,
         };
         owner.into_iter().chain(&self.shared_with)
     }
@@ -216,11 +206,6 @@ impl ProjectSourceBundle {
     }
 
     #[must_use]
-    pub const fn language(&self) -> ProjectSourceLanguage {
-        self.language
-    }
-
-    #[must_use]
     pub fn root(&self) -> &ProjectSourceDocument {
         &self.root
     }
@@ -233,11 +218,6 @@ impl ProjectSourceBundle {
     #[must_use]
     pub fn dependencies(&self) -> &[ProjectSourceDependency] {
         &self.dependencies
-    }
-
-    #[must_use]
-    pub fn roles(&self) -> &[ProjectSourceRoleBinding] {
-        &self.roles
     }
 
     #[must_use]
@@ -298,20 +278,18 @@ impl ProjectSourceBundle {
         authored
     }
 
-    pub fn paths_for_role(&self, role: ProjectSourceRole) -> impl Iterator<Item = &str> {
-        self.roles
-            .iter()
-            .filter(move |binding| binding.role == role)
-            .map(ProjectSourceRoleBinding::logical_path)
+    /// The logical path of the file holding the build profile, if any.
+    #[must_use]
+    pub fn build_profile_path(&self) -> Option<&str> {
+        self.build_profile.as_deref()
     }
 
+    /// Whether `logical_path` names the build profile file.
     #[must_use]
-    pub fn role_for_path(&self, logical_path: &str) -> Option<ProjectSourceRole> {
-        let key = path_key(logical_path);
-        self.roles
-            .iter()
-            .find(|binding| path_key(binding.logical_path()) == key)
-            .map(ProjectSourceRoleBinding::role)
+    pub fn is_build_profile(&self, logical_path: &str) -> bool {
+        self.build_profile
+            .as_deref()
+            .is_some_and(|path| path_key(path) == path_key(logical_path))
     }
 
     /// Return the exact retained UTF-8 source for one portable logical path.
@@ -400,7 +378,7 @@ impl ProjectSourceBundle {
         if self.root == snapshot.root
             && self.files == snapshot.files
             && self.dependencies == snapshot.dependencies
-            && self.roles == snapshot.roles
+            && self.build_profile == snapshot.build_profile
         {
             return Ok(false);
         }
@@ -409,7 +387,7 @@ impl ProjectSourceBundle {
         candidate.root = snapshot.root;
         candidate.files = snapshot.files;
         candidate.dependencies = snapshot.dependencies;
-        candidate.roles = snapshot.roles;
+        candidate.build_profile = snapshot.build_profile;
         candidate.advance_revision()?;
         candidate.root.revision = candidate.revision;
         for file in &mut candidate.files {
@@ -435,7 +413,7 @@ impl ProjectSourceBundle {
     }
 
     /// SHA-256 over an explicitly versioned sequence of length-framed owner,
-    /// language, path, edge, and exact UTF-8 content fields. Framing prevents
+    /// path, edge, build profile, and exact UTF-8 content fields. Framing prevents
     /// concatenation ambiguity; canonical ordering makes the result independent
     /// of insertion order.
     #[must_use]
@@ -445,7 +423,7 @@ impl ProjectSourceBundle {
 
     /// Whether `digest` names this bundle's current source graph: its own
     /// closure digest, or the digest a retained revision recorded for exactly
-    /// the bytes, edges and roles the bundle holds now.
+    /// the bytes, edges and build profile the bundle holds now.
     ///
     /// A source moved to another owner keeps its graph and gains a new digest,
     /// because the owner is framed into it. A reference written against the
@@ -464,10 +442,7 @@ impl ProjectSourceBundle {
         let mut hasher = Sha256::new();
         hash_frame(&mut hasher, CLOSURE_DIGEST_DOMAIN);
         match owner {
-            ProjectSourceOwner::CodeWorkspace { language } => {
-                hash_frame(&mut hasher, b"code-workspace");
-                hash_frame(&mut hasher, language.stable_name().as_bytes());
-            }
+            ProjectSourceOwner::CodeWorkspace => hash_frame(&mut hasher, b"code-workspace"),
             ProjectSourceOwner::CellView { reference } => {
                 hash_frame(&mut hasher, b"cell-view");
                 hash_frame(&mut hasher, reference.library.as_bytes());
@@ -475,7 +450,6 @@ impl ProjectSourceBundle {
                 hash_frame(&mut hasher, reference.view.as_bytes());
             }
         }
-        hash_frame(&mut hasher, self.language.stable_name().as_bytes());
         hash_frame(&mut hasher, self.root.id.as_uuid().as_bytes());
         hash_frame(&mut hasher, self.root.file_name.as_bytes());
         hash_frame(&mut hasher, self.root.content.as_bytes());
@@ -490,13 +464,9 @@ impl ProjectSourceBundle {
             hash_frame(&mut hasher, dependency.importer.as_bytes());
             hash_frame(&mut hasher, dependency.imported.as_bytes());
         }
-        hash_u64(&mut hasher, self.roles.len() as u64);
-        for binding in &self.roles {
-            hash_frame(
-                &mut hasher,
-                source_role_stable_name(binding.role).as_bytes(),
-            );
-            hash_frame(&mut hasher, binding.logical_path.as_bytes());
+        hash_u64(&mut hasher, u64::from(self.build_profile.is_some()));
+        if let Some(path) = &self.build_profile {
+            hash_frame(&mut hasher, path.as_bytes());
         }
         ContentDigest::from_bytes(hasher.finalize().into())
     }
@@ -627,9 +597,7 @@ impl ProjectSourceBundle {
                 importer.to_owned(),
                 imported.clone(),
             )?);
-        if candidate.language == ProjectSourceLanguage::VerilogA {
-            candidate.prepend_include(importer, &imported)?;
-        }
+        candidate.prepend_include(importer, &imported)?;
         candidate.advance_revision()?;
         candidate.invalidate_validation();
         candidate.canonicalize();
@@ -638,15 +606,14 @@ impl ProjectSourceBundle {
         Ok(true)
     }
 
-    /// Add one project document, dependency edge, and semantic role as one
-    /// source-graph revision. Unlike ordinary Verilog-A dependencies, a build
-    /// profile is configuration and is therefore never injected as an
-    /// `` `include `` directive into source text.
-    pub fn add_file_with_role(
+    /// Add one project document as the build profile, with its dependency
+    /// edge, as one source-graph revision. Unlike ordinary Verilog-A
+    /// dependencies, a build profile is configuration and is therefore never
+    /// injected as an `` `include `` directive into source text.
+    pub fn add_build_profile_file(
         &mut self,
         importer: &str,
         file: ProjectSourceFile,
-        role: ProjectSourceRole,
     ) -> Result<bool, ProjectSourceError> {
         validate_logical_path(importer)?;
         file.validate()?;
@@ -660,10 +627,9 @@ impl ProjectSourceBundle {
                 logical_path: importer.to_owned(),
             });
         }
-        if let Some(binding) = self.roles.iter().find(|binding| binding.role == role) {
+        if let Some(first) = &self.build_profile {
             return Err(ProjectSourceError::DuplicateSingletonRole {
-                role,
-                first: binding.logical_path.clone(),
+                first: first.clone(),
                 second: file.logical_path().to_owned(),
             });
         }
@@ -675,9 +641,7 @@ impl ProjectSourceBundle {
         candidate
             .dependencies
             .push(ProjectSourceDependency::try_new(importer, &imported)?);
-        candidate
-            .roles
-            .push(ProjectSourceRoleBinding::try_new(&imported, role)?);
+        candidate.build_profile = Some(imported);
         candidate.advance_revision()?;
         candidate.invalidate_validation();
         candidate.canonicalize();
@@ -721,16 +685,14 @@ impl ProjectSourceBundle {
                 logical_path: current_path.to_owned(),
             })?
             .to_owned();
-        if candidate.language == ProjectSourceLanguage::VerilogA {
-            let incoming = candidate
-                .dependencies
-                .iter()
-                .filter(|edge| path_key(edge.imported()) == current_key)
-                .map(|edge| edge.importer().to_owned())
-                .collect::<Vec<_>>();
-            for importer in incoming {
-                candidate.rewrite_include(&importer, &canonical_current, Some(new_path))?;
-            }
+        let incoming = candidate
+            .dependencies
+            .iter()
+            .filter(|edge| path_key(edge.imported()) == current_key)
+            .map(|edge| edge.importer().to_owned())
+            .collect::<Vec<_>>();
+        for importer in incoming {
+            candidate.rewrite_include(&importer, &canonical_current, Some(new_path))?;
         }
 
         if path_key(candidate.root.logical_path()) == current_key {
@@ -758,10 +720,10 @@ impl ProjectSourceBundle {
                 edge.imported = new_path.to_owned();
             }
         }
-        for binding in &mut candidate.roles {
-            if path_key(binding.logical_path()) == current_key {
-                binding.logical_path = new_path.to_owned();
-            }
+        if let Some(path) = &mut candidate.build_profile
+            && path_key(path) == current_key
+        {
+            new_path.clone_into(path);
         }
         candidate.advance_revision()?;
         candidate.invalidate_validation();
@@ -789,14 +751,9 @@ impl ProjectSourceBundle {
                 logical_path: logical_path.to_owned(),
             })?
             .to_owned();
-        if let Some(binding) = self
-            .roles
-            .iter()
-            .find(|binding| path_key(binding.logical_path()) == key)
-        {
+        if self.is_build_profile(logical_path) {
             return Err(ProjectSourceError::RoleBoundFile {
                 logical_path: canonical_path,
-                role: binding.role,
             });
         }
         if let Some(edge) = self
@@ -812,16 +769,14 @@ impl ProjectSourceBundle {
 
         let mut candidate = self.clone();
         candidate.record_revision_snapshot(self);
-        if candidate.language == ProjectSourceLanguage::VerilogA {
-            let importers = candidate
-                .dependencies
-                .iter()
-                .filter(|edge| path_key(edge.imported()) == key)
-                .map(|edge| edge.importer().to_owned())
-                .collect::<Vec<_>>();
-            for importer in importers {
-                candidate.rewrite_include(&importer, &canonical_path, None)?;
-            }
+        let importers = candidate
+            .dependencies
+            .iter()
+            .filter(|edge| path_key(edge.imported()) == key)
+            .map(|edge| edge.importer().to_owned())
+            .collect::<Vec<_>>();
+        for importer in importers {
+            candidate.rewrite_include(&importer, &canonical_path, None)?;
         }
         candidate
             .files
@@ -914,13 +869,7 @@ impl ProjectSourceBundle {
         root_path: String,
         content: String,
     ) -> Result<bool, ProjectSourceError> {
-        let retained_profile_path = (self.language == ProjectSourceLanguage::VerilogA)
-            .then(|| {
-                self.paths_for_role(ProjectSourceRole::VerilogABuildProfile)
-                    .next()
-                    .map(str::to_owned)
-            })
-            .flatten();
+        let retained_profile_path = self.build_profile.clone();
         let discarded_closure = self.files.iter().any(|file| {
             retained_profile_path
                 .as_deref()
@@ -950,14 +899,9 @@ impl ProjectSourceBundle {
                     candidate.root.logical_path(),
                     &profile_path,
                 )?);
-            candidate.roles.retain(|binding| {
-                binding.role == ProjectSourceRole::VerilogABuildProfile
-                    && binding.logical_path().eq_ignore_ascii_case(&profile_path)
-            });
         } else {
             candidate.files.clear();
             candidate.dependencies.clear();
-            candidate.roles.clear();
         }
         candidate.advance_revision()?;
         candidate.invalidate_validation();
@@ -980,14 +924,8 @@ impl ProjectSourceBundle {
     }
 
     pub fn validate(&self) -> Result<(), ProjectSourceError> {
-        self.owner.validate(self.language)?;
+        self.owner.validate()?;
         self.validate_shared_views()?;
-        if self.root.language != self.language {
-            return Err(ProjectSourceError::BundleLanguageMismatch {
-                bundle: self.language,
-                root: self.root.language,
-            });
-        }
         self.root.validate()?;
         if self.files.len().saturating_add(1) > MAX_PROJECT_SOURCE_FILES {
             return Err(ProjectSourceError::TooManyFiles {
@@ -1079,38 +1017,13 @@ impl ProjectSourceBundle {
             graph.entry(key.0).or_default().push(key.1);
         }
 
-        let mut previous_role_key: Option<(ProjectSourceRole, String)> = None;
-        let mut role_paths = BTreeSet::new();
-        let mut singleton_roles = BTreeMap::new();
-        for binding in &self.roles {
-            validate_logical_path(binding.logical_path())?;
-            let path = path_key(binding.logical_path());
-            if !paths.contains_key(&path) {
+        if let Some(profile) = &self.build_profile {
+            validate_logical_path(profile)?;
+            if !paths.contains_key(&path_key(profile)) {
                 return Err(ProjectSourceError::MissingRoleEndpoint {
-                    logical_path: binding.logical_path.clone(),
-                    role: binding.role,
+                    logical_path: profile.clone(),
                 });
             }
-            if !role_paths.insert(path) {
-                return Err(ProjectSourceError::FileHasMultipleRoles {
-                    logical_path: binding.logical_path.clone(),
-                });
-            }
-            if let Some(first) = singleton_roles.insert(binding.role, binding.logical_path()) {
-                return Err(ProjectSourceError::DuplicateSingletonRole {
-                    role: binding.role,
-                    first: first.to_owned(),
-                    second: binding.logical_path.clone(),
-                });
-            }
-            let key = binding.canonical_key();
-            if previous_role_key
-                .as_ref()
-                .is_some_and(|previous| previous >= &key)
-            {
-                return Err(ProjectSourceError::UnsortedRoles);
-            }
-            previous_role_key = Some(key);
         }
         validate_dependency_graph(&root_key, &graph)?;
         let mut previous_qualification_sequence = 0_u64;
@@ -1147,11 +1060,10 @@ impl ProjectSourceBundle {
                 id: self.id,
                 owner: snapshot.owner.clone(),
                 shared_with: Vec::new(),
-                language: self.language,
                 root: snapshot.root.clone(),
                 files: snapshot.files.clone(),
                 dependencies: snapshot.dependencies.clone(),
-                roles: snapshot.roles.clone(),
+                build_profile: snapshot.build_profile.clone(),
                 revision: snapshot.revision,
                 validated_identity: None,
                 history: Vec::new(),
@@ -1189,7 +1101,7 @@ impl ProjectSourceBundle {
             &reference.view,
         )]);
         for shared in &self.shared_with {
-            ProjectSourceOwner::cell_view(shared.clone()).validate(self.language)?;
+            ProjectSourceOwner::cell_view(shared.clone()).validate()?;
             if !served.insert(canonical_cell_view_owner_key(
                 &shared.library,
                 &shared.cell,
@@ -1217,11 +1129,6 @@ impl ProjectSourceBundle {
                 .cmp(&right.canonical_key())
                 .then_with(|| left.cmp(right))
         });
-        self.roles.sort_by(|left, right| {
-            left.canonical_key()
-                .cmp(&right.canonical_key())
-                .then_with(|| left.cmp(right))
-        });
     }
 
     pub(super) fn advance_revision(&mut self) -> Result<(), ProjectSourceError> {
@@ -1243,7 +1150,7 @@ impl ProjectSourceBundle {
             root: source.root.clone(),
             files: source.files.clone(),
             dependencies: source.dependencies.clone(),
-            roles: source.roles.clone(),
+            build_profile: source.build_profile.clone(),
         });
         let mut retained_bytes = self
             .history
