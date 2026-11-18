@@ -469,7 +469,7 @@ impl RSpiceApp {
                 // over. A recent one the browser reads later, through the
                 // handle it kept, and it opens when the read comes back.
                 #[cfg(target_arch = "wasm32")]
-                match crate::workbench::shell_host::project::dropped::take_dropped(&path) {
+                match take_dropped(&path) {
                     Some(bytes) => {
                         let opened = self.state.open_dropped_project(&path, &bytes);
                         if opened {
@@ -485,9 +485,7 @@ impl RSpiceApp {
             }
             RecentKind::Schematic => {
                 #[cfg(target_arch = "wasm32")]
-                if let Some(bytes) =
-                    crate::workbench::shell_host::project::dropped::take_dropped(&path)
-                {
+                if let Some(bytes) = take_dropped(&path) {
                     let name = path.file_name().map_or_else(
                         || path.display().to_string(),
                         |name| name.to_string_lossy().into_owned(),
@@ -531,6 +529,34 @@ impl RSpiceApp {
             .analysis
             .clear_transient_specialized_viewer_data();
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// The project or schematic last dropped on the browser window, under
+    /// the path its open is asked for by, until that open takes it.
+    static DROPPED: std::cell::RefCell<Option<(std::path::PathBuf, std::sync::Arc<[u8]>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Keep the contents the browser handed over for a dropped file under
+/// `path`, until the open asked for by that path takes them.
+#[cfg(target_arch = "wasm32")]
+pub(in crate::workbench) fn keep_dropped(path: std::path::PathBuf, bytes: std::sync::Arc<[u8]>) {
+    DROPPED.with(|kept| *kept.borrow_mut() = Some((path, bytes)));
+}
+
+/// The contents of the file dropped under `path`, once.
+#[cfg(target_arch = "wasm32")]
+pub(in crate::workbench) fn take_dropped(path: &std::path::Path) -> Option<std::sync::Arc<[u8]>> {
+    DROPPED.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if kept.as_ref().is_some_and(|(dropped, _)| dropped == path) {
+            kept.take().map(|(_, bytes)| bytes)
+        } else {
+            None
+        }
+    })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
