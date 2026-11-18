@@ -410,7 +410,8 @@ fn a_hover_names_the_definition_a_name_is_bound_to_and_its_references() {
     let file = index.file_name(0).to_owned();
     let at = |needle: &str| deck.find(needle).expect("the deck writes it") + 1;
 
-    let hover = |char_index| index.hover_at(None, deck, char_index);
+    let messages = harness.wb.messages();
+    let hover = |char_index| index.hover_at(None, deck, char_index, messages);
     assert_eq!(
         hover(at("{w*2}")),
         Some(ProjectSymbolHover {
@@ -433,7 +434,7 @@ fn a_hover_names_the_definition_a_name_is_bound_to_and_its_references() {
         })
     );
     // Text the index was not built from has no hover.
-    assert_eq!(index.hover_at(None, "other text", 1), None);
+    assert_eq!(index.hover_at(None, "other text", 1, messages), None);
 }
 
 /// The signature help shown with the caret at the first `needle` of `deck`,

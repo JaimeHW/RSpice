@@ -482,7 +482,8 @@ pub fn show(
     {
         show_value_hover(&editor_response, hover);
     } else if let Some(index) = hover_char_index
-        && let Some(hover) = super::language::name_hover(ui.ctx(), model, netlist, index)
+        && let Some(hover) =
+            super::language::name_hover(ui.ctx(), model, netlist, index, workbench.messages())
     {
         editor_response.clone().on_hover_ui_at_pointer(|ui| {
             ui.set_max_width(360.0);

@@ -278,10 +278,11 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                 &mut cx.state.netlist,
                 cx.runs,
             ) {
-                cx.wb.prompt(format!(
-                    "The deck this run used cannot be opened: {}.",
-                    crate::state::absent_deck_reason()
-                ));
+                let text = cx.wb.messages().format(
+                    crate::workbench::MessageId::NetlistRunDeckUnavailable,
+                    &[("reason", &crate::state::absent_deck_reason())],
+                );
+                cx.wb.prompt(text);
             }
         }
         Some(RunStripAction::Compare) => {
@@ -303,10 +304,14 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                 run_id,
                 point,
             ) {
-                cx.wb.prompt(format!(
-                    "The source Run {run_id} executed cannot be opened: {}.",
-                    crate::state::absent_deck_reason()
-                ));
+                let text = cx.wb.messages().format(
+                    crate::workbench::MessageId::NetlistRunSourceUnavailable,
+                    &[
+                        ("id", &run_id.to_string()),
+                        ("reason", &crate::state::absent_deck_reason()),
+                    ],
+                );
+                cx.wb.prompt(text);
             }
         }
         Some(RunStripAction::OpenInResults(run_id)) => {
@@ -319,10 +324,11 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             if cx.model.simulation.select_run_by_sequence(run_id) {
                 cx.execute(crate::workbench::framework::command_registry::ids::RESULTS_WORKSPACE);
             } else {
-                cx.wb.prompt(format!(
-                    "Run {run_id} is no longer kept in this session, so Results was not opened \
-                     on it."
-                ));
+                let text = cx.wb.messages().format(
+                    crate::workbench::MessageId::NetlistRunNotKept,
+                    &[("id", &run_id.to_string())],
+                );
+                cx.wb.prompt(text);
             }
         }
         None => {}

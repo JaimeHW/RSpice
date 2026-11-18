@@ -39,7 +39,7 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
     if let Some(generated) = model.netlist_artifacts.generated_document.as_ref() {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistGenerated(generated.id()),
-            label: "Generated netlist".to_owned(),
+            label: messages.text(crate::workbench::MessageId::CodeGeneratedNetlist),
             icon: WorkbenchIcon::Netlist,
             dirty: false,
         });
@@ -54,7 +54,10 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
             }
             Some(WorkspaceDocument {
                 id,
-                label: format!("{} · generated", dependency.locator().display_name()),
+                label: messages.format(
+                    crate::workbench::MessageId::NetlistGeneratedInclude,
+                    &[("name", dependency.locator().display_name())],
+                ),
                 icon: WorkbenchIcon::Code,
                 dirty: false,
             })
@@ -86,7 +89,7 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
     if !netlist.generated_diff_source.is_empty() {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistComparison,
-            label: "Netlist comparison".to_owned(),
+            label: messages.text(crate::workbench::MessageId::NetlistComparisonDocument),
             icon: WorkbenchIcon::Code,
             dirty: false,
         });

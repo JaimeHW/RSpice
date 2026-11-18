@@ -585,7 +585,7 @@ fn collect_candidates(
                 state.active_dependency_identity.as_deref(),
                 state.cursor_line + 1,
             );
-            index.completion_symbols_in(scope)
+            index.completion_symbols_in(messages, scope)
         })
         .unwrap_or_default();
     let harvested = if project.is_some() {

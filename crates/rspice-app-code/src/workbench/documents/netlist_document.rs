@@ -433,7 +433,7 @@ pub fn manual_deck_run_block_reason_in(
     messages: crate::workbench::MessageCatalog,
 ) -> Option<String> {
     if model.simulation.execution.has_active_execution() {
-        return Some("A simulation execution is already active".to_string());
+        return Some(messages.text(crate::workbench::MessageId::NetlistRunAlreadyActive));
     }
     let active_document = effective_active_document_in(netlist);
     if netlist.active_dependency_identity.is_some() {
@@ -441,16 +441,13 @@ pub fn manual_deck_run_block_reason_in(
     }
     let source = working_deck_source_in(model, netlist);
     if source.trim().is_empty() {
-        return Some("Enter a netlist before running".to_string());
+        return Some(messages.text(crate::workbench::MessageId::NetlistRunNeedsText));
     }
     if active_document == ActiveNetlistDocument::GeneratedDiff {
-        return Some("Generated comparison documents cannot be executed".to_owned());
+        return Some(messages.text(crate::workbench::MessageId::NetlistRunComparison));
     }
     if active_document == ActiveNetlistDocument::RunSnapshot {
-        return Some(
-            "The deck a completed run used is sealed with that run; return to the working deck to run it again."
-                .to_owned(),
-        );
+        return Some(messages.text(crate::workbench::MessageId::NetlistRunUsedDeck));
     }
     let current_digest = crate::state::content_digest(source);
     if active_document == ActiveNetlistDocument::Generated
@@ -463,7 +460,7 @@ pub fn manual_deck_run_block_reason_in(
                 .netlist_artifacts
                 .generation_error
                 .clone()
-                .unwrap_or_else(|| "Regenerate the stale netlist before running".to_owned()),
+                .unwrap_or_else(|| messages.text(crate::workbench::MessageId::NetlistRunStale)),
         );
     }
     let validated = model
@@ -475,7 +472,7 @@ pub fn manual_deck_run_block_reason_in(
                 && receipt.project_revision == model.workspace.content.project.revision().get()
         });
     if !validated {
-        return Some("Validate the current source and project revision before running".to_owned());
+        return Some(messages.text(crate::workbench::MessageId::NetlistRunUnvalidated));
     }
     None
 }
@@ -996,7 +993,10 @@ pub fn prepare(
             model.record(
                 crate::diagnostics::LogSeverity::Warning,
                 crate::diagnostics::LogSource::Run,
-                format!("Queued netlist re-run cancelled: {reason}"),
+                workbench.messages().format(
+                    crate::workbench::MessageId::NetlistRerunCancelled,
+                    &[("reason", &reason)],
+                ),
             );
         } else {
             request_netlist_manual_deck_run_in(model, runs, workbench);

@@ -481,6 +481,7 @@ impl NetlistProjectIndex {
         dependency_identity: Option<&str>,
         text: &str,
         char_index: usize,
+        messages: MessageCatalog,
     ) -> Option<ProjectSymbolHover> {
         let file = self.file_holding(dependency_identity, text)?;
         let byte = text
@@ -494,7 +495,10 @@ impl NetlistProjectIndex {
                 let Some(symbol) = read.target else {
                     return Some(ProjectSymbolHover {
                         title: read.name.clone(),
-                        detail: format!("Nothing in scope defines {}.", read.name),
+                        detail: messages.format(
+                            MessageId::NetlistNothingInScopeDefines,
+                            &[("name", &read.name)],
+                        ),
                     });
                 };
                 symbol
@@ -504,32 +508,50 @@ impl NetlistProjectIndex {
         let (kind, what) = match definition.kind {
             DeckSymbolKind::Instance => return None,
             DeckSymbolKind::Parameter if definition.detail.is_empty() => {
-                ("Parameter", String::new())
+                (MessageId::NetlistSymbolParameter, String::new())
             }
-            DeckSymbolKind::Parameter => ("Parameter", format!("= {}", definition.detail)),
+            DeckSymbolKind::Parameter => (
+                MessageId::NetlistSymbolParameter,
+                format!("= {}", definition.detail),
+            ),
             DeckSymbolKind::Subcircuit => (
-                "Subcircuit",
+                MessageId::NetlistSymbolSubcircuit,
                 definition
                     .opens
                     .and_then(|scope| self.deck.scopes().get(scope))
-                    .map(|scope| format!("Ports {}", scope.ports.join(" ")))
+                    .map(|scope| {
+                        messages.format(
+                            MessageId::NetlistSymbolPorts,
+                            &[("ports", &scope.ports.join(" "))],
+                        )
+                    })
                     .unwrap_or_default(),
             ),
-            DeckSymbolKind::Model => ("Model", definition.detail.clone()),
-            DeckSymbolKind::Function => ("Function", definition.detail.clone()),
+            DeckSymbolKind::Model => (MessageId::NetlistSymbolModel, definition.detail.clone()),
+            DeckSymbolKind::Function => {
+                (MessageId::NetlistSymbolFunction, definition.detail.clone())
+            }
         };
         let read = match self.deck.references_to(symbol).count() {
-            0 => "no references".to_owned(),
-            1 => "1 reference".to_owned(),
-            reads => format!("{reads} references"),
+            0 => messages.text(MessageId::NetlistNoReferences),
+            reads => messages.counted(
+                reads,
+                MessageId::CountOneReference,
+                MessageId::CountReferences,
+            ),
         };
         let place = format!(
-            "{} line {} · {read}",
-            self.file_name(definition.location.file),
-            definition.location.line
+            "{} · {read}",
+            messages.format(
+                MessageId::NetlistSymbolPlace,
+                &[
+                    ("file", self.file_name(definition.location.file)),
+                    ("line", &definition.location.line.to_string()),
+                ],
+            )
         );
         Some(ProjectSymbolHover {
-            title: format!("{kind} {}", definition.name),
+            title: messages.format(kind, &[("name", &definition.name)]),
             detail: if what.is_empty() {
                 place
             } else {
@@ -741,6 +763,7 @@ impl NetlistProjectIndex {
     /// completion, each name once.
     pub(crate) fn completion_symbols_in(
         &self,
+        messages: MessageCatalog,
         scope: usize,
     ) -> Vec<super::completion::SymbolEntry> {
         let mut seen = HashSet::new();
@@ -761,11 +784,13 @@ impl NetlistProjectIndex {
                 name: symbol.name.clone(),
                 kind: kind.label(),
                 detail: symbol.detail.clone(),
-                doc: format!(
-                    "{} defined in {}:{}",
-                    kind.label(),
-                    definition.display_name,
-                    definition.line
+                doc: messages.format(
+                    MessageId::NetlistDefinedIn,
+                    &[
+                        ("kind", kind.label()),
+                        ("file", &definition.display_name),
+                        ("line", &definition.line.to_string()),
+                    ],
                 ),
             })
         })
@@ -1131,6 +1156,7 @@ pub(crate) fn name_hover(
     model: &Model,
     netlist: &mut NetlistDocumentState,
     char_index: usize,
+    messages: MessageCatalog,
 ) -> Option<ProjectSymbolHover> {
     type Held = (
         std::sync::Weak<NetlistProjectIndex>,
@@ -1154,6 +1180,7 @@ pub(crate) fn name_hover(
         netlist.active_dependency_identity.as_deref(),
         &model.simulation.source.netlist_content,
         char_index,
+        messages,
     );
     let held: Held = (
         Arc::downgrade(&index),
@@ -1223,15 +1250,14 @@ pub fn go_to_definition_at_cursor_in(
     runs: &mut RunsState,
     workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
 ) -> Result<String, String> {
+    let messages = workbench.messages();
     let symbol = symbol_at_cursor(
         &model.simulation.source.netlist_content,
         netlist.cursor_char_index,
     )
-    .ok_or_else(|| {
-        "Place the caret on a model, subcircuit, parameter, or function name.".to_owned()
-    })?;
+    .ok_or_else(|| messages.text(MessageId::NetlistPlaceCaretOnName))?;
     let index = project_index_now(model, netlist)
-        .ok_or_else(|| "The active source has no project index.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistSignatureNoIndex))?;
     // The read under the caret binds the definition its scope sees: a
     // subcircuit's own parameter inside it, the deck's outside.
     let bound = index.definition_at(
@@ -1249,19 +1275,17 @@ pub fn go_to_definition_at_cursor_in(
             .collect::<Vec<_>>(),
     };
     match definitions.as_slice() {
-        [] => Err(format!(
-            "No definition for '{symbol}' exists in the project's sources."
-        )),
+        [] => Err(messages.format(MessageId::NetlistNoDefinition, &[("name", &symbol)])),
         [definition] => {
             open_project_location_in(model, netlist, open_documents, runs, definition)?;
-            Ok(format!("Opened definition of {symbol}"))
+            Ok(messages.format(MessageId::NetlistOpenedDefinition, &[("name", &symbol)]))
         }
         _ => {
             workbench.navigator_visible = true;
             workbench.set_navigator_filter(symbol.clone());
-            Ok(format!(
-                "Found {} definitions of {symbol}; the navigator lists where each one is.",
-                definitions.len()
+            Ok(messages.format(
+                MessageId::NetlistFoundDefinitions,
+                &[("count", &definitions.len().to_string()), ("name", &symbol)],
             ))
         }
     }
@@ -1323,12 +1347,16 @@ pub(crate) fn open_workspace_symbols(
     netlist: &mut NetlistDocumentState,
     workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
 ) -> Result<String, String> {
+    let messages = workbench.messages();
     let index = project_index_now(model, netlist)
-        .ok_or_else(|| "The active source has no project index.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistSignatureNoIndex))?;
     let count = index.symbols().len();
     workbench.navigator_visible = true;
     workbench.clear_navigator_filter();
-    Ok(format!("Showing {count} project symbol(s)."))
+    Ok(messages.format(
+        MessageId::NetlistShowingSymbols,
+        &[("count", &count.to_string())],
+    ))
 }
 
 pub(crate) fn preferred_quick_fix_available(netlist: &NetlistDocumentState) -> bool {

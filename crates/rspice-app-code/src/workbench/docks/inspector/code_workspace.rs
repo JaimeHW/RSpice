@@ -5,10 +5,10 @@ use rspice_ui_kit::panels::{Problem, code_inspector_section, panel_inset, sectio
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::MessageCatalog;
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, active_deck_file_in, active_dependency_in,
 };
+use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_state::workbench::app_state::model::Model;
 
 use super::super::super::design_system::{WorkbenchIcon, property_row, property_row_problem};
@@ -52,7 +52,7 @@ pub(in crate::workbench) fn code_workspace_inspector(
                     })
                     .take(DIAGNOSTIC_PREVIEW_LIMIT)
                 {
-                    if diagnostic_row(ui, diagnostic) {
+                    if diagnostic_row(ui, diagnostic, messages) {
                         pressed = Some(diagnostic.canonical.diagnostic_id);
                     }
                 }
@@ -90,7 +90,7 @@ pub(in crate::workbench) fn code_workspace_inspector(
                     })
                     .take(DIAGNOSTIC_PREVIEW_LIMIT)
                 {
-                    if diagnostic_row(ui, diagnostic) {
+                    if diagnostic_row(ui, diagnostic, messages) {
                         pressed = Some(diagnostic.canonical.diagnostic_id);
                     }
                 }
@@ -116,7 +116,7 @@ pub(in crate::workbench) fn code_workspace_inspector(
         match reads.netlist.active_document {
             ActiveNetlistDocument::OwnedSource => deck_file_provenance(ui, reads),
             ActiveNetlistDocument::RunSnapshot => {} // its run's, stated by the strip over the deck
-            _ => generated_provenance(ui, reads.model),
+            _ => generated_provenance(ui, reads.model, messages),
         }
     }
     pressed
@@ -124,7 +124,11 @@ pub(in crate::workbench) fn code_workspace_inspector(
 
 /// One finding: its message, and the file and line it is on. Pressing it goes
 /// there; returns whether it was pressed.
-fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> bool {
+fn diagnostic_row(
+    ui: &mut Ui,
+    diagnostic: &crate::state::netlist_diagnostics::Diagnostic,
+    messages: MessageCatalog,
+) -> bool {
     const ICON_COLUMN_W: f32 = 14.0;
     const COLUMN_GAP: f32 = 7.0;
     const PADDING_Y: f32 = 8.0;
@@ -140,7 +144,7 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::D
         t.color.text,
         text_width,
     );
-    let location = diagnostic_location(diagnostic);
+    let location = diagnostic_location(diagnostic, messages);
     let location_galley = ui.painter().layout(
         location.clone(),
         theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -156,7 +160,7 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::D
             ui.is_enabled(),
             format!(
                 "{}: {}. {location}",
-                diagnostic_severity_name(diagnostic.severity),
+                diagnostic_severity_name(diagnostic.severity, messages),
                 diagnostic.message
             ),
         )
@@ -216,7 +220,7 @@ fn empty_diagnostic_row(ui: &mut Ui, message: &str) {
 /// counters and hashes a designer cannot act on; the generator's healthy
 /// states reported success. What is left is the cellview that produced the
 /// deck, and a marked line when the deck is not the one the schematic implies.
-fn generated_provenance(ui: &mut Ui, model: &Model) {
+fn generated_provenance(ui: &mut Ui, model: &Model, messages: MessageCatalog) {
     let source = model
         .netlist_artifacts
         .generated_document
@@ -225,10 +229,15 @@ fn generated_provenance(ui: &mut Ui, model: &Model) {
         .and_then(|artifact| artifact.source_map().first())
         .map(|entry| entry.view_identity().to_owned());
     if let Some(source) = source {
-        property_row(ui, "Generated from", &source);
+        property_row(ui, &messages.text(MessageId::NetlistGeneratedFrom), &source);
     }
     if let Some((label, problem)) = generated_state(model) {
-        property_row_problem(ui, "State", label, Some(problem));
+        property_row_problem(
+            ui,
+            &messages.text(MessageId::NetlistState),
+            &messages.text(label),
+            Some(problem),
+        );
     }
 }
 
@@ -238,9 +247,22 @@ fn deck_file_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
     let Some(file) = active_deck_file_in(reads.netlist) else {
         return;
     };
-    property_row(ui, "File", &file.path.display().to_string());
-    property_row(ui, "Encoding", file.encoding.label());
-    property_row(ui, "Line endings", file.line_ending.label());
+    let messages = reads.messages;
+    property_row(
+        ui,
+        &messages.text(MessageId::CodeSourceFileFile),
+        &file.path.display().to_string(),
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::NetlistEncoding),
+        file.encoding.label(),
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::CodeSourceLineEndings),
+        file.line_ending.label(),
+    );
 }
 
 fn dependency_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
@@ -307,30 +329,39 @@ fn dependency_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
 
 /// What is wrong with the generated deck, or nothing when it matches the
 /// schematic. A deck that is current — validated or not — says nothing.
-fn generated_state(model: &Model) -> Option<(&'static str, Problem)> {
+fn generated_state(model: &Model) -> Option<(MessageId, Problem)> {
     let netlist = &model.netlist_artifacts;
     if netlist.generated_source.is_empty() {
-        Some(("Not generated yet", Problem::Warning))
+        Some((MessageId::NetlistNotGeneratedYet, Problem::Warning))
     } else if netlist.generation_error.is_some() {
-        Some((
-            "Could not generate; showing the last deck",
-            Problem::Failure,
-        ))
+        Some((MessageId::NetlistCouldNotGenerate, Problem::Failure))
     } else if netlist.generated_input_digest != netlist.current_generation_input_digest {
-        Some(("Older than the schematic", Problem::Warning))
+        Some((MessageId::NetlistOlderThanSchematic, Problem::Warning))
     } else {
         None
     }
 }
 
-fn diagnostic_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> String {
+fn diagnostic_location(
+    diagnostic: &crate::state::netlist_diagnostics::Diagnostic,
+    messages: MessageCatalog,
+) -> String {
     let location = match (
         diagnostic.source_line.or(diagnostic.line),
         diagnostic.column,
     ) {
-        (Some(line), Some(column)) => format!("line {} · column {}", line + 1, column + 1),
-        (Some(line), None) => format!("line {}", line + 1),
-        (None, _) => "document scope".to_owned(),
+        (Some(line), Some(column)) => messages.format(
+            MessageId::NetlistLineColumn,
+            &[
+                ("line", &(line + 1).to_string()),
+                ("column", &(column + 1).to_string()),
+            ],
+        ),
+        (Some(line), None) => messages.format(
+            MessageId::NetlistNavigatorLine,
+            &[("line", &(line + 1).to_string())],
+        ),
+        (None, _) => messages.text(MessageId::NetlistDocumentScope),
     };
     // The file is named the way its tab names it.
     let file = |path: &std::path::Path| {
@@ -371,13 +402,15 @@ fn diagnostic_tone(
 
 fn diagnostic_severity_name(
     severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
-) -> &'static str {
-    match severity {
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint => "Hint",
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => "Information",
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => "Warning",
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => "Error",
-    }
+    messages: MessageCatalog,
+) -> String {
+    use crate::workbench::documents::netlist_document::DiagnosticSeverity;
+    messages.text(match severity {
+        DiagnosticSeverity::Hint => MessageId::SourceDiagnosticSeverityHint,
+        DiagnosticSeverity::Info => MessageId::SourceDiagnosticSeverityInformation,
+        DiagnosticSeverity::Warning => MessageId::SourceDiagnosticSeverityWarning,
+        DiagnosticSeverity::Error => MessageId::SourceDiagnosticSeverityError,
+    })
 }
 
 #[cfg(test)]

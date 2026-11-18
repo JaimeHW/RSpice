@@ -2108,8 +2108,11 @@ fn every_submenu_row_draws_the_workbench_chevron() {
 /// capitalised word, or two words) is a sentence the catalogue does not
 /// hold. Identifiers, test code and panic messages are not read.
 #[test]
-fn the_source_editor_writes_its_words_from_the_catalogue() {
+fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue() {
     const FILES: &[&str] = &[
+        "rspice-app-code/src/workbench/chrome/document_bar/code.rs",
+        "rspice-app-code/src/workbench/docks/inspector/code_workspace.rs",
+        "rspice-app-code/src/workbench/surfaces/netlist.rs",
         "rspice-app-code/src/workbench/documents/text_editor_commands.rs",
         "rspice-app-code/src/workbench/documents/virtual_text_editor.rs",
         "rspice-app-code/src/workbench/documents/virtual_text_editor/accessibility.rs",
