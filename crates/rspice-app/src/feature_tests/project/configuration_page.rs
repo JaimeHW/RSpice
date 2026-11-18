@@ -36,6 +36,87 @@ fn reference_app() -> RSpiceApp {
     app
 }
 
+/// Four cells under the project's top, each placing the next thirty-two
+/// times and the last a resistor: past a million instances once expanded.
+fn million_app() -> RSpiceApp {
+    use rspice_app_state::state::{
+        Cell, CellViewRef, ComponentType, LibraryCellInstance, PendingPortPlacement, Point,
+        PortDirectionType, PortDiscipline, SchematicState, View, ViewType,
+    };
+    fn port(schematic: &mut SchematicState, x: i32, name: &str, direction: PortDirectionType) {
+        let pending = PendingPortPlacement::new(
+            name,
+            direction,
+            PortDiscipline::Electrical,
+            schematic.topology_version(),
+            schematic.next_interface_order(),
+        );
+        schematic
+            .place_pending_port(Point::new(x, 0), pending)
+            .expect("the port places");
+    }
+
+    let mut state = crate::workbench::app_state::AppState::default();
+    let project = &state.model.workspace.content.project;
+    let (library, top) = (project.root_library.clone(), project.top_cell.clone());
+    let cells = ["l1", "l2", "l3", "l4"];
+    {
+        let mut user = state
+            .model
+            .library_manager
+            .edit_library(&library)
+            .expect("the project library");
+        for name in cells {
+            let mut cell = Cell::new(name);
+            cell.add_view(View::new("schematic", ViewType::Schematic));
+            user.add_cell(cell);
+        }
+    }
+    let mut below: Option<&str> = None;
+    for name in cells.into_iter().rev().chain([top.as_str()]) {
+        state.open_workspace_view(CellViewRef::new(&library, name, "schematic"));
+        let ports = below.map(|child| {
+            state
+                .model
+                .workspace
+                .content
+                .schematic_buffers
+                .get(&CellViewRef::new(&library, child, "schematic").key())
+                .expect("the cell below is saved")
+                .document()
+                .interface_ports()
+        });
+        let schematic = &mut state.model.schematic;
+        if name != top {
+            port(schematic, 10, "a", PortDirectionType::InputAnalog);
+            port(schematic, 130, "b", PortDirectionType::OutputAnalog);
+        }
+        match (below, ports) {
+            (Some(child), Some(ports)) => {
+                for at in 0..32 {
+                    let mut binding = LibraryCellInstance::new(&library, child, "schematic");
+                    binding.bind_interface(&ports);
+                    schematic.add_library_cell_component(Point::new(300 + 200 * at, 200), binding);
+                }
+            }
+            _ => {
+                schematic
+                    .add_wire(vec![Point::new(0, 0), Point::new(40, 0)])
+                    .expect("a wire commits");
+                schematic.add_component(ComponentType::Resistor, Point::new(60, 0));
+                schematic
+                    .add_wire(vec![Point::new(80, 0), Point::new(120, 0)])
+                    .expect("a wire commits");
+            }
+        }
+        state.sync_active_schematic_to_workspace();
+        below = Some(name);
+    }
+    let mut app = RSpiceApp::test_instance();
+    app.state = state;
+    app
+}
+
 /// One frame of the page: every accessible name and value, and every string
 /// it painted with the colour it was painted in.
 struct Frame {
@@ -317,6 +398,78 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
     app.state.project.configuration.toggle_collapsed("/");
     assert_eq!(app.state.project.configuration.visible_instances().len(), 1);
     assert!(collapsed > 1);
+}
+
+/// A hierarchy that expands past a million instances opens on the page,
+/// which lists an instance's children when it is opened, and netlists as the
+/// cells it is: each written once, however often it is placed.
+#[test]
+fn a_hierarchy_past_a_million_instances_opens_on_the_page_and_netlists() {
+    let mut app = million_app();
+    let expanded = 1 + 32 + 32 * 32 + 32 * 32 * 32 + 32 * 32 * 32 * 32;
+    assert!(expanded > 1_000_000);
+
+    let shown = frame(&mut app, 1440.0);
+    for fact in [
+        format!("{expanded} of {expanded} instances bound"),
+        format!("{expanded} instances"),
+    ] {
+        assert!(
+            shown.says(&fact),
+            "the page must state {fact:?}: {:#?}",
+            shown.every_word().collect::<Vec<_>>()
+        );
+    }
+    let page = &mut app.state.project.configuration;
+    assert_eq!(page.visible_instances().len(), 1 + 32);
+    let mut open = String::new();
+    for depth in 1..=3 {
+        open.push_str("/X1");
+        page.toggle_collapsed(&open);
+        assert_eq!(page.visible_instances().len(), 1 + 32 * (depth + 1));
+    }
+    assert!(
+        page.visible_instances()
+            .iter()
+            .any(|row| row.path() == "/X1/X1/X1/X32"),
+        "the opened instance shows what it places"
+    );
+    frame(&mut app, 1440.0);
+
+    let state = &app.state;
+    let projection = state
+        .model
+        .workspace
+        .configuration_execution_projection(
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
+        )
+        .expect("the design resolves for a run");
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
+        state.model.library_manager.catalog(),
+        &projection,
+    );
+    let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
+        projection.root_schematic().expect("a materialized root"),
+        &[],
+        &hierarchy,
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &rspice_app_state::simulation::table_route::SourceFiles,
+        ),
+    );
+    assert!(generated.errors.is_empty(), "{:?}", generated.errors);
+    let bodies = generated
+        .netlist
+        .lines()
+        .filter(|line| {
+            line.trim_start()
+                .to_ascii_lowercase()
+                .starts_with(".subckt")
+        })
+        .count();
+    assert_eq!(bodies, 4, "one body per cell");
+    assert_eq!(generated.emission_map.len(), expanded - 1);
 }
 
 /// The Cells tab lists each library/cell once, and keeps a cell binding the
