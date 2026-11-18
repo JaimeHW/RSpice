@@ -23,10 +23,47 @@ pub(super) fn split_surface(
     let extent = 10_000.0;
 
     if stacked {
-        ui.columns(2, |columns| {
-            let (left, right) = columns.split_at_mut(1);
-            content(&mut left[0], &mut right[0]);
-        });
+        // Too narrow for two panes, as on a phone: one pane at a time, the
+        // list and its actions over what the tab sets, each the body's
+        // width, and the reader scrolls from one to the other. The second
+        // starts under the first's height as the last frame measured it; a
+        // frame in which that height changed is laid out again before it is
+        // shown.
+        let width = (available - padding.x * 2.0).max(1.0);
+        let memory = ui.id().with("stacked-first-pane");
+        let first_height = ui.data(|data| data.get_temp::<f32>(memory)).unwrap_or(0.0);
+        let divider_y = origin.y + padding.y * 2.0 + first_height;
+        let mut left_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(
+                    origin + padding,
+                    vec2(width, extent),
+                ))
+                .layout(Layout::top_down(Align::Min)),
+        );
+        let mut right_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(
+                    egui::pos2(origin.x + padding.x, divider_y + padding.y),
+                    vec2(width, extent),
+                ))
+                .layout(Layout::top_down(Align::Min)),
+        );
+        content(&mut left_ui, &mut right_ui);
+        let measured = left_ui.min_rect().height();
+        if (measured - first_height).abs() > 0.5 {
+            ui.data_mut(|data| data.insert_temp(memory, measured));
+            ui.ctx()
+                .request_discard("a stacked design pane changed height");
+        }
+        ui.painter().hline(
+            origin.x..=origin.x + available,
+            divider_y,
+            Stroke::new(1.0, t.color.border),
+        );
+        let bottom = right_ui.min_rect().bottom() + padding.y;
+        let surface = egui::Rect::from_min_max(origin, egui::pos2(origin.x + available, bottom));
+        ui.advance_cursor_after_rect(surface);
         return;
     }
 
