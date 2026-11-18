@@ -372,6 +372,34 @@ mod tests {
         );
     }
 
+    /// A workspace's chord is its place on the rail, Alt+1 down to Alt+7
+    /// for the seven that came first, the Netlist workspace last of them;
+    /// the Stimulus Library, added fourth, kept Alt+8 so the chords under it
+    /// did not move.
+    #[test]
+    fn each_workspace_chord_is_its_place_on_the_rail() {
+        for platform in CommandPlatform::ALL {
+            let mut place = 0;
+            for workspace in Workspace::ALL {
+                let expected = if workspace == Workspace::Stimulus {
+                    "Alt+8".to_owned()
+                } else {
+                    place += 1;
+                    format!("Alt+{place}")
+                };
+                assert_eq!(
+                    ShellCommand::OpenWorkspace(workspace).default_shortcut_label(platform),
+                    expected,
+                    "{workspace:?} on {platform:?}"
+                );
+            }
+            assert_eq!(
+                binding_owners(NETLIST_WORKSPACE[0].chord, platform),
+                vec![ShellCommand::OpenWorkspace(Workspace::Netlist)]
+            );
+        }
+    }
+
     #[test]
     fn exit_shortcut_is_unambiguous_and_desktop_only() {
         assert_eq!(
