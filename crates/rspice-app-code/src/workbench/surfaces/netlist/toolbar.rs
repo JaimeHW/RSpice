@@ -20,7 +20,7 @@ use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint
 use crate::workbench::documents::netlist_document::NetlistRoot;
 use crate::workbench::framework::feature::Cx;
 
-use super::{active_document_available, document_syntax_status};
+use super::{active_document_available, document_error_status};
 
 pub const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 pub(super) const CODE_TOOLBAR_PADDING_X: f32 = 8.0;
@@ -139,7 +139,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         full_action_extent(control_h),
     );
     let dialect = super::dialect_chip::DeckChip::shown(cx.model, &cx.state.netlist);
-    let status = document_syntax_status(cx.model, &cx.state.netlist, messages)
+    let status = document_error_status(cx.model, &cx.state.netlist, messages)
         .filter(|(_, problem)| toolbar_status_visible(phone, *problem));
     // Nothing is said when there are no warnings, and "0 warnings" is not
     // news: the count appears only once there is something in it.

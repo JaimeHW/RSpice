@@ -1100,8 +1100,9 @@ fn active_document_available(
 /// A deck that parses, a comparison that is ready and a sealed run snapshot
 /// are the ordinary cases. The toolbar used to announce each of them in green;
 /// the tab already names the document, so the status now speaks only when the
-/// deck cannot be generated or will not parse.
-fn document_syntax_status(
+/// deck cannot be generated or the check found errors in it: how many, of
+/// every kind. Warnings stay in the Problems list and out of the count.
+fn document_error_status(
     model: &crate::workbench::app_state::Model,
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
     messages: crate::workbench::MessageCatalog,
@@ -1142,9 +1143,9 @@ fn document_syntax_status(
         return Some((
             messages.format(
                 if errors == 1 {
-                    MessageId::NetlistSyntaxErrorSingular
+                    MessageId::NetlistErrorCountSingular
                 } else {
-                    MessageId::NetlistSyntaxErrors
+                    MessageId::NetlistErrorCount
                 },
                 &[("count", &count)],
             ),
@@ -1353,7 +1354,7 @@ mod tests {
         ));
         assert!(!generated_primary_ready_in(&harness.model));
         assert_eq!(
-            document_syntax_status(
+            document_error_status(
                 &harness.model,
                 &harness.state.netlist,
                 harness.wb.messages()
@@ -1379,7 +1380,7 @@ mod tests {
         ));
         assert!(generated_primary_ready_in(&harness.model));
         assert_eq!(
-            document_syntax_status(
+            document_error_status(
                 &harness.model,
                 &harness.state.netlist,
                 harness.wb.messages()
@@ -1412,12 +1413,46 @@ mod tests {
             &harness.runs
         ));
         assert_eq!(
-            document_syntax_status(
+            document_error_status(
                 &harness.model,
                 &harness.state.netlist,
                 harness.wb.messages()
             ),
             Some(("generation blocked".to_owned(), Problem::Warning))
+        );
+    }
+
+    /// The header counts the errors the check found, of every kind: an
+    /// unknown model or subcircuit is an error, not a syntax error, and a
+    /// warning is not one of them.
+    #[test]
+    fn the_header_counts_errors_of_every_kind_and_leaves_warnings_out() {
+        use crate::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
+        let deck = "* amp\nQ1 c b 0 nosuch\nX1 a b nosub\nR1 a 0 1k\n.op\n.end\n";
+        let mut harness = harness();
+        open_test_deck(&mut harness, deck);
+        let mut warning = Diagnostic::error("R1 has one connection.").with_line(Some(3));
+        warning.severity =
+            crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning;
+        harness.state.netlist.diagnostics = std::sync::Arc::new(
+            NetlistDiagnosticCollection::try_new(
+                vec![
+                    Diagnostic::error("Unknown model `nosuch` in this deck.").with_line(Some(1)),
+                    Diagnostic::error("Unknown subcircuit `nosub`.").with_line(Some(2)),
+                    warning,
+                ],
+                deck,
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(
+            document_error_status(
+                &harness.model,
+                &harness.state.netlist,
+                harness.wb.messages()
+            ),
+            Some(("2 errors".to_owned(), Problem::Failure))
         );
     }
 

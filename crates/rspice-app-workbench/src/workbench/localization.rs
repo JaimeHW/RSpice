@@ -122,8 +122,8 @@ define_messages! {
     NetlistGenerateBeforeAction => "Generate a primary netlist before using this action.",
     NetlistGenerationBlocked => "generation blocked",
     NetlistGenerationStaleBlocked => "stale · generation blocked",
-    NetlistSyntaxErrorSingular => "{count} syntax error",
-    NetlistSyntaxErrors => "{count} syntax errors",
+    NetlistErrorCountSingular => "{count} error",
+    NetlistErrorCount => "{count} errors",
     NetlistWarningSingular => "{count} warning",
     NetlistWarnings => "{count} warnings",
     NetlistErrors => "Errors",
@@ -1006,11 +1006,11 @@ mod tests {
     #[test]
     fn pseudolocalization_expands_literals_but_preserves_engineering_arguments() {
         let message = MessageCatalog::new(UiTextLocale::PseudoExpanded)
-            .format(MessageId::NetlistSyntaxErrors, &[("count", "12345")]);
+            .format(MessageId::NetlistErrorCount, &[("count", "12345")]);
         assert!(message.starts_with("[!! "));
         assert!(message.ends_with(" !!]"));
         assert!(message.contains("12345"));
-        assert!(message.len() > "12345 syntax errors".len() * 3 / 2);
+        assert!(message.len() > "12345 errors".len() * 3 / 2);
     }
 
     #[test]
