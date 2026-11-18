@@ -181,7 +181,7 @@ impl CheckpointRetention {
         match self {
             Self::UntilDeleted => "Until you delete it",
             Self::UntilNextSave => "Until the next save",
-            Self::ForRecovery => "Kept for recovery until you save",
+            Self::ForRecovery => "For recovery, until you save",
             Self::WithinBudget => "While it fits the automatic space",
         }
     }
