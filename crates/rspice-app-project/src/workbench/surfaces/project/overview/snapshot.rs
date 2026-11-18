@@ -569,10 +569,10 @@ fn cell_rows(model: &Model, netlist_first: bool) -> Arc<[CellRowSnapshot]> {
     let mut rows = Vec::new();
     for library in model.library_manager.libraries_sorted() {
         for cell in library.cells_sorted() {
-            let top = library.name == project.root_library && cell.name == project.top_cell;
-            if top && netlist_first {
+            if health::is_starter_cell(model, netlist_first, &library.name, &cell.name) {
                 continue;
             }
+            let top = library.name == project.root_library && cell.name == project.top_cell;
             let named = (library.name.as_str(), cell.name.as_str());
             let testbench = testbenches.contains(&named);
             let unsaved = unsaved.contains(&named);

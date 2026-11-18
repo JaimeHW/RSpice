@@ -1,9 +1,12 @@
 //! The navigator's library rail, on the Overview and Library pages: the
 //! libraries the Library page's column lists, the project's and then the
-//! built-in one, those the filter matches by library, cell or view name. The
-//! project's rows are built when the catalogue or the filter changes, not on
-//! every frame. Each row prints only its exception, the words the Library
-//! page's column prints for it.
+//! built-in one, those the filter matches by library, cell or view name. A
+//! netlist-first project's starter library, which holds nothing but the
+//! pristine top cell its deck stands in for, is left out, as the Overview
+//! leaves that cell out. The project's rows are built when the catalogue,
+//! the filter or the project's top changes, not on every frame. Each row
+//! prints only its exception, the words the Library page's column prints
+//! for it.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -14,6 +17,7 @@ use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERIL
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{WorkbenchIcon, section_header};
 use crate::workbench::project::dependency_status::library_exceptions;
+use crate::workbench::project::health::is_starter_cell;
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::library::LibraryIntent;
 use crate::workbench::surfaces::project::library::builtin_models::BuiltinModelsIntent;
@@ -29,10 +33,17 @@ pub(super) fn project_library_navigator(
     nav: &mut ProjectNavigator<'_>,
 ) -> Option<LibraryIntent> {
     let query = nav.filter.trim().to_ascii_lowercase();
-    let key = (nav.model.library_manager.catalog().stamp(), query.clone());
     let model: &Model = nav.model;
+    let netlist_first = model.is_netlist_first_without_schematic();
+    let project = &model.workspace.content.project;
+    let key = (
+        model.library_manager.catalog().stamp(),
+        query.clone(),
+        netlist_first,
+        (project.root_library.clone(), project.top_cell.clone()),
+    );
     let libraries = derived(ui.ctx(), "navigator.libraries", key, || {
-        library_rail_rows(model, &query)
+        library_rail_rows(model, &query, netlist_first)
     });
     let exceptions = library_exceptions(ui.ctx(), model);
     let builtin_matches = query.is_empty()
@@ -127,12 +138,22 @@ pub(super) fn project_library_navigator(
 
 /// Each library by name and the name it is shown by, whether it is
 /// read-only, and whether the filter matches it by either name or a cell's or
-/// a view's.
-fn library_rail_rows(model: &Model, query: &str) -> Arc<[(String, String, bool, bool)]> {
+/// a view's; but not a netlist-first project's starter library.
+fn library_rail_rows(
+    model: &Model,
+    query: &str,
+    netlist_first: bool,
+) -> Arc<[(String, String, bool, bool)]> {
     model
         .library_manager
         .libraries_sorted()
         .into_iter()
+        .filter(|library| {
+            let starter = |name: &str| is_starter_cell(model, netlist_first, &library.name, name);
+            let cells = library.cells_sorted();
+            !(cells.iter().any(|cell| starter(&cell.name))
+                && cells.iter().all(|cell| starter(&cell.name)))
+        })
         .map(|library| {
             let matches_query = query.is_empty()
                 || library.name.to_ascii_lowercase().contains(query)

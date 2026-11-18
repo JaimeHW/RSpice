@@ -131,6 +131,15 @@ pub fn schematic_checks(model: &Model, facts: SlotFacts) -> SubjectStatus {
     }
 }
 
+/// Whether `library`/`cell` is the starter cell a netlist-first project
+/// keeps pristine: its top, which its deck stands in for. It is no part of
+/// the design the reader made, so neither the Overview's Cells table nor
+/// the library rail lists it.
+pub fn is_starter_cell(model: &Model, netlist_first: bool, library: &str, cell: &str) -> bool {
+    let project = &model.workspace.content.project;
+    netlist_first && library == project.root_library && cell == project.top_cell
+}
+
 /// The name a netlist-first project's deck goes by: its file's name.
 pub fn deck_name(model: &Model) -> Option<String> {
     model
