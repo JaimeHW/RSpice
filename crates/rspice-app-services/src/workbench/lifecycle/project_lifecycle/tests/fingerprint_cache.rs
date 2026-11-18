@@ -83,7 +83,7 @@ fn the_working_project_is_fingerprinted_once_per_change_across_dirty_queries() {
         assert_eq!(
             (fingerprint_passes(), recomputes()),
             (1, 1),
-            "{samples} samples: one pass of the accepted content and one comparison of the              working project"
+            "{samples} samples: one pass of the accepted content and one comparison of the working project"
         );
 
         assert!(

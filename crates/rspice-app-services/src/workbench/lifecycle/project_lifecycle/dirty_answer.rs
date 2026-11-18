@@ -405,7 +405,7 @@ fn validity(state: &LifecycleView<'_>, stamp: &WorkingStamp) -> Result<(), Strin
             .validate()
             .map_err(|error| {
                 format!(
-                    "workspace schematic buffer '{}' has invalid validated revision history:                      {error}",
+                    "workspace schematic buffer '{}' has invalid validated revision history: {error}",
                     workspace.active_key()
                 )
             });
