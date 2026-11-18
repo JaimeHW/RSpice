@@ -165,7 +165,7 @@ fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
         for _ in 0..2 {
             let (_, text) = dialog_frame(&ctx, &mut app, Vec::new());
-            assert!(text.iter().any(|text| *text == title), "the form is open");
+            assert!(text.contains(&title), "the form is open");
         }
         let (immediate, _) = dialog_frame(&ctx, &mut app, vec![enter.clone()]);
         assert!(
@@ -173,7 +173,7 @@ fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
             "the frame that confirmed the rename asks for the next one"
         );
         let (_, text) = dialog_frame(&ctx, &mut app, Vec::new());
-        let open = text.iter().any(|text| *text == title);
+        let open = text.contains(&title);
         if refused {
             assert!(open, "a refused rename leaves the form open");
             assert!(
