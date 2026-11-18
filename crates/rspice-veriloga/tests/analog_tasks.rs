@@ -500,11 +500,11 @@ fn kinds_and_arguments(
         .collect()
 }
 
-/// `$debug`, `$fdisplay` and `$fwrite` write on every evaluation of an
-/// accepted point, ahead of the accepted evaluation's own calls; a point
-/// abandoned for another time writes nothing.
+/// `$debug` writes at every evaluation, a point abandoned for another time
+/// included; `$fdisplay`, like `$display`, writes once, from the accepted
+/// point's last evaluation.
 #[test]
-fn every_evaluation_tasks_keep_each_evaluation_of_the_accepted_point() {
+fn debug_keeps_every_evaluation_and_fdisplay_only_the_accepted_one() {
     let fixture = fixture(
         "$debug(\"v=%g\", V(p,n)); $fdisplay(32'h8000_0001, \"f=%g\", V(p,n)); \
          $strobe(\"s=%g\", V(p,n));",
@@ -529,11 +529,9 @@ fn every_evaluation_tasks_keep_each_evaluation_of_the_accepted_point() {
     assert_eq!(
         kinds_and_arguments(&calls),
         vec![
+            (AnalogTaskKind::Debug, vec![text("v=%g"), real(0.25)]),
+            (AnalogTaskKind::Debug, vec![text("v=%g"), real(0.5)]),
             (AnalogTaskKind::Debug, vec![text("v=%g"), real(0.125)]),
-            (
-                AnalogTaskKind::FileDisplay,
-                vec![descriptor.clone(), text("f=%g"), real(0.125)]
-            ),
             (AnalogTaskKind::Debug, vec![text("v=%g"), real(0.375)]),
             (
                 AnalogTaskKind::FileDisplay,
