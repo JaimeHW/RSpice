@@ -747,3 +747,74 @@ fn a_clocked_pwm_drives_twenty_four_volts_every_cycle() {
     }
     let _ = std::fs::remove_file(model);
 }
+
+/// `cross(V(x) - 0.9, +1)` on 0.9 + 1.2 sin(2 pi 10 MHz t) fires once at each
+/// rising root, every 100 ns, past the root (to the ulp the computed sine
+/// crosses its analytic root within) and inside its time tolerance. With no `expr_tol` that is the default window, 64 ulps of
+/// the root's scale. Under a 1e-30 s `time_tol` it is the first instant past
+/// the root the solver can take: the next float, or one solver floor (9.8e-20
+/// s in this run) past a landing that stopped a float short of the root.
+///
+/// With no `expr_tol`, the chase never resolved at the landing it aimed for,
+/// ran on to the float grid and stepped back one float per trial to a point
+/// on the threshold or a float short of it; each event then fired one solver
+/// floor past that point, up to 4400 ulps past its root. With the 1e-30 s
+/// `time_tol` and a 1 mV `expr_tol`, a point within 1 mV of the root was taken
+/// for the root, and the chase crept up to the real one a solver floor per
+/// accepted point until the run was refused at the second root with its
+/// timestep pinned at the minimum.
+#[test]
+fn a_cross_on_a_sine_fires_inside_its_time_tolerance_past_every_root() {
+    let window = |root: f64| 64.0 * f64::EPSILON * root;
+    let solver_floor = |_: f64| 2.0e-19;
+    let variants: [(&str, &dyn Fn(f64) -> f64); 2] =
+        [("", &window), (", 1e-30, 1e-3", &solver_floor)];
+    for (index, (arguments, latest)) in variants.into_iter().enumerate() {
+        let model = write_model(
+            &format!("sine_cross_{index}_{}.va", std::process::id()),
+            &format!(
+                "`include \"disciplines.vams\"\n\
+                 module sine_cross(x, n); input x; output n; electrical x, n;\n\
+                 integer count;\n\
+                 analog begin\n\
+                 @(initial_step) count = 0;\n\
+                 @(cross(V(x) - 0.9, +1{arguments})) count = count + 1;\n\
+                 V(n) <+ count;\n\
+                 end\n\
+                 endmodule\n"
+            ),
+        );
+        let deck = Netlist::parse(&format!(
+            "sine cross\nvs x 0 sin(0.9 1.2 10meg)\nX1 x n sine_cross\n\
+             .va \"{model}\" sine_cross\n.end\n"
+        ))
+        .expect("the deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_tran(&deck, 10.02e-6, 1e-9)
+            .unwrap_or_else(|error| panic!("cross{arguments}: the run must complete: {error}"));
+        let n = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("n"))
+            .expect("node n");
+        let count = &result.voltages[n];
+        // The event's own point solves the left limit; the count is first
+        // solved at the edge completion after it.
+        let events: Vec<f64> = (1..count.len())
+            .filter(|&point| count[point] != count[point - 1])
+            .map(|point| result.time[point - 1])
+            .collect();
+        assert_eq!(events.len(), 100, "cross{arguments}: {events:?}");
+        assert_eq!(count.last(), Some(&100.0), "cross{arguments}");
+        for (index, event) in events.iter().enumerate() {
+            let root = (index + 1) as f64 * 100.0e-9;
+            assert!(
+                event - root >= -f64::EPSILON * root && event - root <= latest(root),
+                "cross{arguments}: event {} fired at {event:e}, {:.1} ulps of its root past it",
+                index + 1,
+                (event - root) / (f64::EPSILON * root)
+            );
+        }
+        let _ = std::fs::remove_file(model);
+    }
+}

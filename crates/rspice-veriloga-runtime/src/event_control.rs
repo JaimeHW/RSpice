@@ -328,15 +328,15 @@ pub struct CrossingDecision {
 /// and resolves the crossing whatever the tolerances ask
 /// ([`generated_refinement_time`]).
 ///
-/// Where the accepted point itself already reads the crossing to within
-/// `expr_tol` — the previous landing came to rest on the threshold, one
-/// representable instant short of the flip — the root is located there, and
-/// the expression criterion, whose default scales with the two values and so
-/// collapses with the accepted one, says nothing more. The candidate resolves
-/// the crossing within `time_tol` of that point, and the retry lands half the
-/// default window past it, where any expression that changes faster than its
-/// own rounding over that interval has flipped. A sweep point at the same time
-/// has no root to refine and keeps the closed comparison.
+/// An accepted point that reads the threshold itself — the previous landing
+/// came to rest on it, one representable instant short of the flip — is its
+/// own root estimate, and the retry lands half the window past it, where any
+/// expression that changes faster than its own rounding over that interval has
+/// flipped. A point that only reads within `expr_tol` of zero is not one: taken
+/// for the root under a `time_tol` finer than its distance from the real one,
+/// it had the chase creep up to that root one solver floor per accepted point.
+/// A sweep point at the same time has no root to refine and keeps the closed
+/// comparison.
 pub fn decide_crossing(
     accepted: CrossingAccepted,
     value: Value,
@@ -371,10 +371,6 @@ pub fn decide_crossing(
     let refinement_time = if fired && !rule.same_time_static {
         let time_scale = accepted.time.abs().max(time.abs());
         let effective_time_tol = generated_event_effective_tolerance(rule.time_tol, time_scale);
-        let effective_expr_tol = generated_event_effective_tolerance(
-            rule.expr_tol,
-            accepted.value.abs().max(value.abs()),
-        );
         // Half the window at the root's own scale, inside any tighter
         // `time_tol`: the landing's tolerance, taken at a scale no smaller,
         // holds the margin together with the landing's rounding, so the
@@ -386,36 +382,22 @@ pub fn decide_crossing(
                 .min(generated_event_effective_tolerance(0.0, root.abs()))
                 / 2.0
         };
-        if accepted.value.abs() <= effective_expr_tol {
-            let expression_resolved = rule.expr_tol == 0.0 || value.abs() <= effective_expr_tol;
-            if time - accepted.time <= effective_time_tol && expression_resolved {
-                None
-            } else {
-                generated_refinement_time_past(
-                    accepted.time,
-                    accepted.time,
-                    time,
-                    margin(accepted.time),
-                )
-            }
+        let time_error = (time - crossing_time).max(0.0);
+        let resolved = if rule.expr_tol > 0.0 {
+            time_error <= effective_time_tol && value.abs() <= rule.expr_tol
         } else {
-            let time_error = (time - crossing_time).max(0.0);
-            let resolved = if rule.expr_tol > 0.0 {
-                time_error <= effective_time_tol && value.abs() <= effective_expr_tol
-            } else {
-                let default_window = generated_event_effective_tolerance(0.0, time_scale);
-                time_error <= effective_time_tol.min(default_window)
-            };
-            if resolved {
-                None
-            } else {
-                generated_refinement_time_past(
-                    accepted.time,
-                    crossing_time,
-                    time,
-                    margin(crossing_time),
-                )
-            }
+            let default_window = generated_event_effective_tolerance(0.0, time_scale);
+            time_error <= effective_time_tol.min(default_window)
+        };
+        if resolved {
+            None
+        } else {
+            generated_refinement_time_past(
+                accepted.time,
+                crossing_time,
+                time,
+                margin(crossing_time),
+            )
         }
     } else {
         None
@@ -730,30 +712,40 @@ mod tests {
 
     /// A `time_tol` finer than the spacing of time at the root cannot be met
     /// by any landing; the first instant past the root that time can write
-    /// resolves the crossing, with no point accepted on the way. Bracketing
-    /// that instant by the float before it stepped the chase back one float
-    /// per trial while the samples read past the threshold, and here accepted
-    /// the root itself, where the expression reads zero.
+    /// resolves the crossing, with no point accepted on the way.
+    ///
+    /// Under a tight `expr_tol`, bracketing that instant by the float before
+    /// it stepped the chase back one float per trial while the samples read
+    /// past the threshold, and here accepted the root itself, where the
+    /// expression reads zero. Under a 1 mV one, the accepted point 173 fs
+    /// short of the root already read within `expr_tol` of zero and was taken
+    /// for the root, so each landing went one float past the last accepted
+    /// point and the chase crept up to the root one float per accepted point.
     #[test]
     fn a_time_tol_finer_than_time_fires_at_the_first_instant_past_the_root() {
         let root = 5.8e-6;
         let expression = |time: Value| 75.0e6 * (time - root);
-        let rule = CrossingRule {
-            direction: 1,
-            time_tol: 1.0e-30,
-            expr_tol: 1.0e-12,
-            enabled: true,
-            same_time_static: false,
-        };
-        let (tried, landed, fired_at) = chase(
-            expression,
-            5.799_999_827_027_085_4e-6,
-            5.800_000_000_002_369_5e-6,
-            rule,
-        );
-        assert_eq!(tried.len(), 2, "tried {tried:?}");
-        assert!(landed.is_empty(), "accepted {landed:?}");
-        assert_eq!(fired_at, Value::from_bits(root.to_bits() + 1));
+        for expr_tol in [1.0e-12, 1.0e-3] {
+            let rule = CrossingRule {
+                direction: 1,
+                time_tol: 1.0e-30,
+                expr_tol,
+                enabled: true,
+                same_time_static: false,
+            };
+            let (tried, landed, fired_at) = chase(
+                expression,
+                5.799_999_827_027_085_4e-6,
+                5.800_000_000_002_369_5e-6,
+                rule,
+            );
+            assert_eq!(tried.len(), 2, "expr_tol {expr_tol:e}: tried {tried:?}");
+            assert!(
+                landed.is_empty(),
+                "expr_tol {expr_tol:e}: accepted {landed:?}"
+            );
+            assert_eq!(fired_at, Value::from_bits(root.to_bits() + 1));
+        }
     }
 
     /// The crossing rule every route shares (VAMS-LRM 2.4 5.10.3.1: the
