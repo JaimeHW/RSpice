@@ -44,6 +44,8 @@ fn gaps() -> String {
 #[test]
 fn the_readme_lists_what_the_capabilities_command_says_the_cli_does_not_offer() {
     let readme = std::fs::read_to_string(README).expect("the CLI README is readable");
+    // A Windows checkout materializes the README with CRLF; the gaps are compared as text.
+    let readme = readme.replace("\r\n", "\n");
     let begin = readme
         .find(BEGIN)
         .expect("the README marks where the capability gaps begin")
