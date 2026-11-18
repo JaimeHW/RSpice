@@ -51,7 +51,7 @@ pub(super) const DAY_MS: u64 = 86_400_000;
 
 /// A time as a table says it, and in full for the pointer: how long ago
 /// inside a day, the date and time past one. `None` where there is no time.
-fn told<'a>(at: Option<u64>, stamp: &'a str, now_ms: u64) -> Option<(String, &'a str)> {
+fn told(at: Option<u64>, stamp: &str, now_ms: u64) -> Option<(String, &str)> {
     let at = at?;
     let short = match now_ms.checked_sub(at) {
         Some(ago) if ago < DAY_MS => {
