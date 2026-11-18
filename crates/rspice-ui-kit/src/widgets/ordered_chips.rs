@@ -133,7 +133,9 @@ fn chip_list(ui: &mut Ui, list: ChipList<'_>) -> Option<OrderedChipsEdit> {
     let id = ui.id().with(("ordered-chips", id_salt));
     let mut edit = None;
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        // The chips and the add dropdown stand apart by the kit's control
+        // gap, as any controls on a row do.
+        ui.spacing_mut().item_spacing = vec2(tokens::SP_3, 4.0);
         for (index, value) in values.iter().enumerate() {
             if let Some(chosen) = chip(
                 ui,

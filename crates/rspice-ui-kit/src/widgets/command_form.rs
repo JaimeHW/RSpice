@@ -76,8 +76,9 @@ const POINT_GAP: f32 = 8.0;
 const LIST_VISIBLE_ENTRIES: usize = 5;
 /// Air between a list's last entry and the field that adds the next.
 const LIST_ADD_GAP: f32 = 4.0;
-/// Air between a list's add field and its add button.
-const LIST_BUTTON_GAP: f32 = 4.0;
+/// Air between a list's add field and its add button: the kit's control
+/// gap, as between any two controls on a row.
+const LIST_BUTTON_GAP: f32 = tokens::SP_3;
 /// Air between two columns of a table.
 const TABLE_COLUMN_GAP: f32 = 16.0;
 
