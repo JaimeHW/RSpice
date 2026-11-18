@@ -330,7 +330,10 @@ fn a_history_with_no_revision_says_what_it_lists_and_where_saves_are() {
     ctx.enable_accesskit();
     let shown = settle(&ctx, &mut app, egui::vec2(1600.0, 900.0));
     let text = said(&shown);
-    assert!(text.contains("No design revision is recorded yet"), "{text}");
+    assert!(
+        text.contains("No design revision is recorded yet"),
+        "{text}"
+    );
     assert!(text.contains("checkpoint on the Recovery page"), "{text}");
     assert!(!text.contains("Select a revision"), "{text}");
 }

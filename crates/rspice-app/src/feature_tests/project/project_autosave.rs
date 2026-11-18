@@ -311,7 +311,11 @@ fn after_a_crash_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
 fn a_kept_cell_never_saved_reads_unsaved_on_the_overview() {
     let (folder, _) = crashed_session_making("autosave-crash-cell-overview", &[CRASH_NEW_CELL]);
     let (mut app, ctx, asked) = open_after_crash(&folder);
-    app_frame(&ctx, &mut app, click_on(&asked, "Keep the recovered changes"));
+    app_frame(
+        &ctx,
+        &mut app,
+        click_on(&asked, "Keep the recovered changes"),
+    );
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Overview;
     let row = |output: &egui::FullOutput| {
@@ -372,8 +376,7 @@ fn after_a_crash_a_technology_not_installed_here_is_said_in_the_question() {
             .any(|entry| entry.message == notice),
         "the Console says it in the same words"
     );
-    let dependencies =
-        rspice_app_project::workbench::project::health::dependencies(&ctx, model);
+    let dependencies = rspice_app_project::workbench::project::health::dependencies(&ctx, model);
     assert_eq!(dependencies.state, "Technology: not installed");
     assert_eq!(dependencies.detail, notice);
     let _ = std::fs::remove_dir_all(folder);

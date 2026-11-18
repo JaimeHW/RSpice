@@ -843,5 +843,8 @@ fn an_unreadable_store_is_one_word_and_cannot_take_a_checkpoint() {
         .find(|(_, node)| node.label().as_deref() == Some("Create checkpoint"))
         .map(|(_, node)| node.is_disabled())
         .expect("the page offers Create checkpoint");
-    assert!(create, "Create checkpoint is disabled over an unreadable store");
+    assert!(
+        create,
+        "Create checkpoint is disabled over an unreadable store"
+    );
 }

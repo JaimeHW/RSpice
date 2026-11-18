@@ -580,7 +580,10 @@ fn after_a_save_as_the_overview_and_the_recovery_page_state_one_revision() {
             .rename(name)
             .expect("the project is renamed");
     }
-    assert!(app.state.save_project_to_path(&root.join("idle.rspiceproj")));
+    assert!(
+        app.state
+            .save_project_to_path(&root.join("idle.rspiceproj"))
+    );
     let revision = |app: &RSpiceApp| {
         format!(
             "Revision {}",
@@ -608,7 +611,9 @@ fn after_a_save_as_the_overview_and_the_recovery_page_state_one_revision() {
         painted(&overview)
     );
     app.state.project.project_page = ProjectPage::Recovery;
-    paint_until(&ctx, &mut app, |text| text.lines().any(|line| line == after));
+    paint_until(&ctx, &mut app, |text| {
+        text.lines().any(|line| line == after)
+    });
     app.state.project.project_page = ProjectPage::Overview;
     let overview = paint_until(&ctx, &mut app, |text| text.contains("Amplifier.rspiceproj"));
     assert!(painted(&overview).contains(&format!("{after} \u{b7} ")));
@@ -639,6 +644,9 @@ fn the_empty_launcher_recovery_page_offers_only_safe_mode() {
         "Open recovery comparison",
         "Save as new project",
     ] {
-        assert!(!text.contains(dead), "{dead:?} offered over nothing:\n{text}");
+        assert!(
+            !text.contains(dead),
+            "{dead:?} offered over nothing:\n{text}"
+        );
     }
 }
