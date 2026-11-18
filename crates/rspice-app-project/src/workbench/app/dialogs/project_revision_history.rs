@@ -62,7 +62,7 @@ pub(crate) enum ProjectRevisionArtifactFilter {
     Schematic,
     SimulationPlans,
     ModelsAndPdk,
-    GovernedRecords,
+    AnnotationAndChecks,
 }
 
 impl ProjectRevisionArtifactFilter {
@@ -71,16 +71,16 @@ impl ProjectRevisionArtifactFilter {
         Self::Schematic,
         Self::SimulationPlans,
         Self::ModelsAndPdk,
-        Self::GovernedRecords,
+        Self::AnnotationAndChecks,
     ];
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
-            Self::All => "All project artifacts",
+            Self::All => "All changes",
             Self::Schematic => "Schematic",
             Self::SimulationPlans => "Simulation plans",
             Self::ModelsAndPdk => "Models and PDK",
-            Self::GovernedRecords => "Governed records",
+            Self::AnnotationAndChecks => "Annotation and hierarchy checks",
         }
     }
 
@@ -92,7 +92,10 @@ impl ProjectRevisionArtifactFilter {
                 matches!(kind, ProjectAuditArtifactKind::SimulationPlan)
             }
             Self::ModelsAndPdk => matches!(kind, ProjectAuditArtifactKind::ModelOrPdk),
-            Self::GovernedRecords => matches!(kind, ProjectAuditArtifactKind::GovernedRecord),
+            Self::AnnotationAndChecks => matches!(
+                kind,
+                ProjectAuditArtifactKind::Annotation | ProjectAuditArtifactKind::HierarchyCheck
+            ),
         }
     }
 }
@@ -102,7 +105,8 @@ pub(crate) enum ProjectAuditArtifactKind {
     Schematic,
     SimulationPlan,
     ModelOrPdk,
-    GovernedRecord,
+    Annotation,
+    HierarchyCheck,
 }
 
 impl ProjectAuditArtifactKind {
@@ -111,7 +115,8 @@ impl ProjectAuditArtifactKind {
             Self::Schematic => "Schematic",
             Self::SimulationPlan => "Simulation plan",
             Self::ModelOrPdk => "Model or PDK",
-            Self::GovernedRecord => "Governed record",
+            Self::Annotation => "Annotation",
+            Self::HierarchyCheck => "Hierarchy check",
         }
     }
 }

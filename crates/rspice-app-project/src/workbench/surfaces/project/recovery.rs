@@ -161,7 +161,7 @@ impl RecoverySnapshot {
             ("listing".to_owned(), None)
         } else if !self.set_aside.is_empty() {
             (
-                format!("{} set aside", self.set_aside.len()),
+                format!("{} damaged", self.set_aside.len()),
                 Some(Problem::Warning),
             )
         } else if self.checkpoints.is_empty() {
@@ -1434,7 +1434,7 @@ fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
             property_row_problem(
                 ui,
                 "Integrity",
-                &format!("{} damaged, set aside", snapshot.set_aside.len()),
+                &format!("{} damaged", snapshot.set_aside.len()),
                 Some(Problem::Warning),
             );
         }
@@ -1466,7 +1466,7 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIn
     ui.add_space(CARD_GAP);
     page::card(
         ui,
-        "Set aside",
+        "Damaged",
         &snapshot.set_aside.len().to_string(),
         Some(Problem::Warning),
         |ui| {
@@ -1476,7 +1476,7 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIn
             page::inset_column(ui, ROW_INSET, width, |ui| {
                 text_block(
                     ui,
-                    "These files failed verification, so they are never offered for restore.",
+                    "These checkpoints are damaged, so they cannot be restored. RSpice keeps them until you delete them.",
                     body_font(),
                     tokens.color.text_dim,
                 );

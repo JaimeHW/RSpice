@@ -1481,7 +1481,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
             time: String::new(),
             made_unix_ms: None,
             age: String::new(),
-            actor: "Project metadata transaction".to_owned(),
+            actor: String::new(),
             change: format!("Attached technology {}", binding.display_label()),
             affected_evidence: [
                 counted(binding.model_count(), "model", "models"),
@@ -1595,25 +1595,14 @@ fn append_governed_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
     for entry in management.annotation().journal().iter().rev() {
         rows.push(ProjectAuditRow {
             key: format!("annotation-journal:{}", entry.id()),
-            kind: ProjectAuditArtifactKind::GovernedRecord,
+            kind: ProjectAuditArtifactKind::Annotation,
             revision: entry.sequence().to_string(),
             time: String::new(),
             made_unix_ms: None,
             age: String::new(),
-            actor: "Annotation policy transaction".to_owned(),
-            change: format!(
-                "Committed annotation policy revision {}",
-                entry.policy_revision()
-            ),
-            affected_evidence: [
-                counted(entry.mappings().len(), "mapping", "mappings"),
-                format!("policy {}", short_text(&entry.policy_digest().to_string())),
-                format!(
-                    "receipt {}",
-                    short_text(&entry.semantic_digest().to_string())
-                ),
-            ]
-            .join(SEPARATOR),
+            actor: String::new(),
+            change: format!("Annotation rules revision {}", entry.policy_revision()),
+            affected_evidence: counted(entry.mappings().len(), "reference", "references"),
             status: "Committed".to_owned(),
             schematic_revision: None,
             view: None,
@@ -1623,24 +1612,16 @@ fn append_governed_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
     for receipt in management.hierarchy_audits().iter().rev() {
         rows.push(ProjectAuditRow {
             key: format!("hierarchy-audit:{}", receipt.id()),
-            kind: ProjectAuditArtifactKind::GovernedRecord,
+            kind: ProjectAuditArtifactKind::HierarchyCheck,
             revision: receipt.sequence().to_string(),
             time: String::new(),
             made_unix_ms: None,
             age: String::new(),
-            actor: "Hierarchy audit transaction".to_owned(),
-            change: "Hierarchy audit receipt".to_owned(),
+            actor: String::new(),
+            change: "Checked the hierarchy".to_owned(),
             affected_evidence: [
-                counted(
-                    receipt.resolved_subjects(),
-                    "resolved subject",
-                    "resolved subjects",
-                ),
+                counted(receipt.resolved_subjects(), "instance", "instances"),
                 counted(receipt.findings().len(), "finding", "findings"),
-                format!(
-                    "receipt {}",
-                    short_text(&receipt.semantic_digest().to_string())
-                ),
             ]
             .join(SEPARATOR),
             status: if receipt.passed() {

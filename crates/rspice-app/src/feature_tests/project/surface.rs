@@ -846,14 +846,15 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
     let mut damaged = recovery_project_app(2, true, false);
     let text = painted_project_page(size, |ui| show(ui, &mut damaged));
     for expected in [
-        "1 set aside",
-        "Set aside",
+        "1 damaged",
+        "Damaged",
         "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
         "Project checkpoint bytes do not match their integrity manifest",
-        "1 damaged, set aside",
+        "These checkpoints are damaged, so they cannot be restored.",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
+    assert!(!text.contains("set aside"), "{text}");
 
     let mut unreadable = recovery_project_app(0, false, true);
     let text = painted_project_page(size, |ui| show(ui, &mut unreadable));
