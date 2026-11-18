@@ -7,6 +7,7 @@
 //! has opened, so a file that cannot be read changes nothing.
 
 use crate::workbench::app_state::AppState;
+#[cfg(not(target_arch = "wasm32"))]
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 /// Opening a deck file, over the whole application state.
