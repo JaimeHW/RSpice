@@ -708,7 +708,11 @@ mod tests {
             },
             &source,
         );
-        assert_eq!(marked, [0..inside.len()], "inside the block comment");
+        assert_eq!(
+            marked,
+            std::iter::once(0..inside.len()).collect::<Vec<_>>(),
+            "inside the block comment"
+        );
 
         // The edit takes out the line that opened the block comment.
         assert!(document.synchronize_source("// tb\nbias\nr1 (a b) resistor r=1k\n*/\n"));
