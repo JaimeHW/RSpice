@@ -182,6 +182,11 @@ pub struct ProjectFile {
     /// is never written back.
     #[serde(skip)]
     pub workspace_migration_warning: Option<String>,
+    /// Edits to libraries kept in folders of their own not yet saved to
+    /// their folders: held by a recovery checkpoint and a copy made of one,
+    /// and by a project saved while such a library could not be read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsaved_library_files: Vec<crate::UnsavedLibraryFile>,
 }
 
 const MAX_PROJECT_RESULT_EXPRESSION_GROUPS: usize = 4_096;
@@ -200,6 +205,7 @@ impl ProjectFile {
             execution_context: None,
             simulation_results_warning: None,
             workspace_migration_warning: None,
+            unsaved_library_files: Vec::new(),
         }
     }
 
@@ -218,6 +224,7 @@ impl ProjectFile {
             execution_context: None,
             simulation_results_warning: None,
             workspace_migration_warning: None,
+            unsaved_library_files: Vec::new(),
         }
     }
 
@@ -242,6 +249,7 @@ impl ProjectFile {
             execution_context: Some(execution_context),
             simulation_results_warning: None,
             workspace_migration_warning: None,
+            unsaved_library_files: Vec::new(),
         }
     }
 

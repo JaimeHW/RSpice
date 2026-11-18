@@ -1057,10 +1057,10 @@ fn write_library_files(
     file: &mut rspice_project::ProjectFile,
     path: &Path,
 ) -> Result<(), ProjectLifecycleError> {
-    if file.libraries.references().next().is_none() {
+    let model = state.lifecycle_parts().model;
+    if file.libraries.references().next().is_none() && model.library_files.pending().is_empty() {
         return Ok(());
     }
-    let model = state.lifecycle_parts().model;
     let from = model
         .workspace
         .content

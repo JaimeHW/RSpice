@@ -379,6 +379,15 @@ pub(crate) fn restore_checkpoint_in_place(
         .set_include_search_paths(restored.include_search_paths().to_vec())
         .map_err(|error| format!("The checkpoint's include search paths are not valid: {error}"))?;
     checkpoint.file.workspace.project = project;
+    // Libraries kept in folders of their own are read as they are now, and
+    // the checkpoint's unsaved edits to them go back over them, unsaved.
+    let unsaved_library_files = std::mem::take(&mut checkpoint.file.unsaved_library_files);
+    let mut library_files = state.model.read_referenced_libraries(&mut checkpoint.file);
+    state.model.restore_unsaved_library_files(
+        &mut checkpoint.file,
+        &mut library_files,
+        unsaved_library_files,
+    );
 
     let mut candidate = state.clone();
     candidate.cancel_schematic_drag();
@@ -391,6 +400,7 @@ pub(crate) fn restore_checkpoint_in_place(
         checkpoint.file.workspace,
         checkpoint.workspace_session,
     );
+    candidate.model.library_files = library_files;
     candidate.model.sim_setup = simulation_plan;
     candidate.model.model_library_manager = model_library_manager;
     candidate.restore_active_schematic_from_workspace();
@@ -415,6 +425,7 @@ pub(crate) fn restore_checkpoint_in_place(
     candidate.code.on_project_changed();
     candidate.model.clear_project_design_history();
     project_lifecycle::refresh_registry(&mut candidate).map_err(|error| error.to_string())?;
+    state.model.release_library_locks();
     state.commit_candidate(candidate);
     for warning in warnings {
         state.record(LogSeverity::Warning, LogSource::Studio, warning);

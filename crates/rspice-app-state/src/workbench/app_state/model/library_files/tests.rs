@@ -458,3 +458,63 @@ fn a_publication_freezes_each_file_once_and_restores_the_library_as_published() 
     );
     drop(folder);
 }
+
+/// An edit a checkpoint holds for a library whose folder cannot be read is
+/// never dropped: restoring keeps it aside, every save and checkpoint
+/// carries it, and the restore after the folder is back puts it over the
+/// folder, marked edited.
+#[test]
+fn an_edit_held_for_a_library_that_cannot_be_read_is_kept_until_it_can_be() {
+    let scratch = Scratch::new("pending");
+    let folder = scratch.0.join("shared");
+    let mut owner = project(&scratch.0.join("design.rspiceproj"));
+    with_library(&mut owner);
+    owner.move_library_to_folder(LIBRARY, &folder).unwrap();
+    annotate(&mut owner, "mine");
+    let mut checkpoint = working_file(&owner);
+    owner.hold_unsaved_library_files(&mut checkpoint);
+    let held = checkpoint
+        .unsaved_library_files
+        .iter()
+        .map(|edit| edit.file.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        held,
+        vec![schematic_file()],
+        "the checkpoint holds the edit"
+    );
+
+    let away = scratch.0.join("away");
+    std::fs::rename(&folder, &away).unwrap();
+    let restore = |model: &Model, file: &ProjectFile| {
+        let mut file = file.clone();
+        let unsaved = std::mem::take(&mut file.unsaved_library_files);
+        let mut session = model.read_referenced_libraries(&mut file);
+        model.restore_unsaved_library_files(&mut file, &mut session, unsaved);
+        (file, session)
+    };
+    let (_, session) = restore(&owner, &checkpoint);
+    assert_eq!(session.pending().len(), 1, "kept aside, not dropped");
+
+    owner.library_files = session;
+    let mut saved = working_file(&owner);
+    owner.write_library_files(&mut saved).unwrap();
+    assert_eq!(saved.unsaved_library_files.len(), 1, "a save carries it");
+    let mut again = working_file(&owner);
+    owner.hold_unsaved_library_files(&mut again);
+    assert_eq!(again.unsaved_library_files.len(), 1, "so does a checkpoint");
+
+    std::fs::rename(&away, &folder).unwrap();
+    let (file, session) = restore(&owner, &saved);
+    assert!(session.pending().is_empty(), "the reading takes it");
+    let state = &session.library(LIBRARY).unwrap().files[&schematic_file()];
+    assert!(state.edited, "marked edited");
+    assert_eq!(state.on_disk, OnDisk::AsLoaded, "over the folder as it was");
+    assert_eq!(
+        file.libraries.get_library(LIBRARY).unwrap().cells["amp"].views["schematic"]
+            .metadata
+            .get("note")
+            .map(String::as_str),
+        Some("mine")
+    );
+}

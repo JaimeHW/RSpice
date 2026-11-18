@@ -35,6 +35,8 @@ pub use file::{
 };
 
 pub mod library_folder;
+mod unsaved_library_files;
+pub use unsaved_library_files::{LibraryRecord, UnsavedLibraryFile};
 pub mod lifecycle;
 pub mod persistence;
 

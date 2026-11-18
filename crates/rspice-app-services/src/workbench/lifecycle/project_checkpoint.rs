@@ -295,9 +295,24 @@ pub struct CurrentProjectState {
 }
 
 pub fn capture_current_state(state: &dyn LifecycleSource) -> Result<CurrentProjectState, String> {
-    crate::workbench::lifecycle::project_lifecycle::snapshot(state)
+    checkpoint_snapshot(state)
         .map(|project| CurrentProjectState { project })
         .map_err(|error| format!("project checkpoint comparison failed: {error}"))
+}
+
+/// The open project as a checkpoint holds it: each library kept in a folder
+/// of its own by its reference, with every edit to its files not yet saved
+/// there.
+fn checkpoint_snapshot(
+    state: &dyn LifecycleSource,
+) -> Result<ProjectSnapshot, crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleError>
+{
+    let mut project = crate::workbench::lifecycle::project_lifecycle::snapshot(state)?;
+    state
+        .lifecycle_view()
+        .model
+        .hold_unsaved_library_files(&mut project.file);
+    Ok(project)
 }
 
 impl CurrentProjectState {
@@ -366,16 +381,19 @@ pub struct DocumentDifference {
 }
 
 /// The documents in which `current` differs from `other`, by the
-/// fingerprints the unsaved-work answer is made of, in document order.
+/// fingerprints the unsaved-work answer is made of, in document order, then
+/// those whose unsaved edits to a library kept in a folder of its own
+/// differ.
 pub fn differences_between(
     current: &ProjectSnapshot,
     other: &ProjectSnapshot,
 ) -> Result<Vec<DocumentDifference>, String> {
+    let edited = library_edit_differences(&current.file, &other.file);
     let current = rspice_project::registry::document_fingerprints(&current.file)
         .map_err(|error| format!("the open project could not be compared: {error}"))?;
     let other = rspice_project::registry::document_fingerprints(&other.file)
         .map_err(|error| format!("the checkpoint could not be compared: {error}"))?;
-    Ok(current
+    let mut differences = current
         .differing_documents(&other)
         .into_iter()
         .map(|document| {
@@ -386,7 +404,60 @@ pub fn differences_between(
             };
             DocumentDifference { document, kind }
         })
-        .collect())
+        .collect::<Vec<_>>();
+    for document in edited {
+        if !differences
+            .iter()
+            .any(|difference| difference.document == document)
+        {
+            differences.push(DocumentDifference {
+                document,
+                kind: DifferenceKind::Changed,
+            });
+        }
+    }
+    Ok(differences)
+}
+
+/// The documents whose unsaved edits to a library kept in a folder of its
+/// own differ between two projects as checkpoints hold them: a file edited
+/// on one side only, or edited otherwise on each. Its folder holds the
+/// other side's, so each is Changed. A cellview is a document of its own; a
+/// library's or a cell's own file belongs to the project's configuration.
+fn library_edit_differences(
+    current: &rspice_project::ProjectFile,
+    other: &rspice_project::ProjectFile,
+) -> Vec<crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId> {
+    use crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId;
+    let edits = |file: &rspice_project::ProjectFile| {
+        file.unsaved_library_files
+            .iter()
+            .map(|edit| {
+                (
+                    (edit.library.clone(), edit.file.clone()),
+                    edit.edited_digest(),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let (current, other) = (edits(current), edits(other));
+    let mut documents = Vec::new();
+    for key in current.keys().chain(other.keys()) {
+        if current.get(key) == other.get(key) {
+            continue;
+        }
+        let (library, file) = key;
+        let document = match (file.cell_name(), file.view_name()) {
+            (Some(cell), Some(view)) => {
+                ProjectDocumentId::CellView(crate::state::CellViewRef::new(library, cell, view))
+            }
+            _ => ProjectDocumentId::ProjectConfiguration,
+        };
+        if !documents.contains(&document) {
+            documents.push(document);
+        }
+    }
+    documents
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -403,7 +474,7 @@ fn prepare_checkpoint(
 fn snapshot_now(state: &dyn LifecycleSource) -> Result<(ProjectSnapshot, u64), String> {
     let created_unix_ms = crate::time_compat::checked_unix_time_ms()
         .map_err(|error| format!("Project checkpoint could not be timestamped: {error}"))?;
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
+    let project = checkpoint_snapshot(state)
         .map_err(|error| format!("project checkpoint snapshot failed: {error}"))?;
     Ok((project, created_unix_ms))
 }
@@ -654,19 +725,42 @@ pub fn recovery_copy_bytes(
     recovery_copy_text(&recovery_copy(summary, destination)?)
 }
 
-/// The checkpoint's project as a new project at `destination`.
+/// The checkpoint's project as a new project at `destination`. Each library
+/// path written relative to the project's folder is rewritten to name the
+/// same folder from the copy's, and the unsaved edits to those libraries
+/// come along, to be put back when the copy opens.
 #[cfg(not(target_arch = "wasm32"))]
 fn recovery_copy(
     summary: &ProjectCheckpointSummary,
     destination: &Path,
 ) -> Result<ProjectSnapshot, String> {
     let mut project = load(summary)?;
+    if let (Some(from), Some(to)) = (checkpoint_project_folder(summary), destination.parent()) {
+        project
+            .file
+            .rebase_library_references(&from, to)
+            .map_err(|error| format!("the recovery copy's library paths: {error}"))?;
+    }
     project.file.workspace.project = project
         .file
         .workspace
         .project
         .fork_copy_at(destination.to_path_buf());
     Ok(project)
+}
+
+/// The folder of the project file a checkpoint was taken of: the one its
+/// recovery folder sits in. None for a project that had no file.
+#[cfg(not(target_arch = "wasm32"))]
+fn checkpoint_project_folder(summary: &ProjectCheckpointSummary) -> Option<PathBuf> {
+    let ProjectCheckpointLocator::Native { snapshot, .. } = &summary.locator;
+    let recovery = snapshot.parent()?;
+    recovery
+        .file_name()?
+        .to_str()?
+        .ends_with(CHECKPOINT_DIRECTORY_SUFFIX)
+        .then(|| recovery.parent().map(Path::to_path_buf))
+        .flatten()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

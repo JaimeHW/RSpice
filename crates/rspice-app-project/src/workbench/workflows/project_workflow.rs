@@ -1497,9 +1497,16 @@ pub fn prepare_loaded_project(
     }
     // Libraries kept in folders of their own are read before anything is
     // installed, so the open project and its saved baseline both hold them.
-    let library_files = model.read_referenced_libraries(&mut project.file);
+    // Edits a recovered copy holds go over them afterwards, as unsaved work.
+    let unsaved_library_files = std::mem::take(&mut project.file.unsaved_library_files);
+    let mut library_files = model.read_referenced_libraries(&mut project.file);
     let mut accepted_baseline = project.clone();
     accepted_baseline.file.execution_context = accepted_execution_context;
+    model.restore_unsaved_library_files(
+        &mut project.file,
+        &mut library_files,
+        unsaved_library_files,
+    );
     let announcement = format!(
         "{} {} ({}).",
         origin.success_prefix(),

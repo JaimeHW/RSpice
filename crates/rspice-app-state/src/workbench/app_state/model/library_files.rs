@@ -27,6 +27,7 @@ use rspice_vocabulary::product::ContentDigest;
 mod commands;
 mod folders;
 mod publication;
+mod recovery;
 mod saving;
 
 pub use publication::{PUBLICATION_STORE_FOLDER, publication_store};
@@ -39,6 +40,10 @@ use super::Model;
 #[derive(Debug, Clone, Default)]
 pub struct LibraryFileSession {
     libraries: BTreeMap<String, ReferenceSession>,
+    /// Unsaved edits a checkpoint or a project file held for a library
+    /// whose folder could not be read when they were put back: every save
+    /// and every checkpoint carries them until a reading takes them.
+    pending: Vec<rspice_project::UnsavedLibraryFile>,
     stamp: u64,
 }
 
@@ -71,6 +76,11 @@ impl LibraryFileSession {
         self.libraries
             .iter()
             .map(|(name, session)| (name.as_str(), session))
+    }
+
+    /// The unsaved edits held for libraries whose folder could not be read.
+    pub fn pending(&self) -> &[rspice_project::UnsavedLibraryFile] {
+        &self.pending
     }
 }
 
