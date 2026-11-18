@@ -951,6 +951,9 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
                     project_copy,
                     &display_name,
                 );
+                if !project_copy {
+                    remember_browser_project(parts.lifecycle.model, parts.lifecycle.platform);
+                }
                 parts.lifecycle.model.record(
                     LogSeverity::Info,
                     LogSource::Studio,
@@ -1587,6 +1590,11 @@ enum BrowserProjectImportPayload {
     Failed(String),
     Canonical(crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult),
     Loaded(crate::workbench::browser::file_import::PickedTextFile),
+    /// A recent project the browser keeps, read through its stored handle.
+    Reopened {
+        recent: std::path::PathBuf,
+        result: crate::workbench::lifecycle::project_lifecycle::BrowserReopenResult,
+    },
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1658,6 +1666,78 @@ pub fn start_browser_project_import(
     Ok(())
 }
 
+/// Reopen a recent project the browser keeps, through the file handle it
+/// kept: the browser asks the reader's permission to read the file where it
+/// must, and the project opens as the file is now.
+#[cfg(target_arch = "wasm32")]
+pub fn start_browser_recent_open(
+    transaction: crate::product::TransactionId,
+    context: crate::workbench::lifecycle::project_lifecycle::BrowserOperationContext,
+    recent: &crate::services::recent_files::BrowserRecent,
+) -> Result<(), String> {
+    let import_token = crate::workbench::browser::file_import::try_begin_text_import(
+        crate::workbench::browser::file_import::BrowserTextImportKind::Project,
+    )?;
+    let path = recent.path();
+    crate::workbench::lifecycle::project_lifecycle::start_browser_binding_reopen(
+        recent.binding_id,
+        move |result| {
+            BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| {
+                queue
+                    .borrow_mut()
+                    .push_back(BrowserProjectImportResult::Transaction(
+                        BrowserProjectImportCompletion {
+                            transaction,
+                            context,
+                            import_token,
+                            payload: BrowserProjectImportPayload::Reopened {
+                                recent: path,
+                                result,
+                            },
+                        },
+                    ));
+            });
+            crate::workbench::browser::file_import::request_browser_import_repaint();
+        },
+    );
+    Ok(())
+}
+
+/// The recent entry the open project is listed under in the browser, once
+/// the browser keeps its binding.
+#[cfg(target_arch = "wasm32")]
+pub fn browser_recent_of_open_project(
+    platform: &PlatformState,
+) -> Option<crate::services::recent_files::BrowserRecent> {
+    use crate::services::recent_files::{BrowserRecent, BrowserStore};
+    use crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend;
+
+    let PersistenceBinding::Browser { binding, .. } = platform.project_lifecycle.binding()?;
+    let receipt = binding.durable_receipt()?;
+    Some(BrowserRecent {
+        store: match receipt.backend {
+            BrowserBindingBackend::ExternalFile => BrowserStore::File,
+            BrowserBindingBackend::Opfs => BrowserStore::Storage,
+        },
+        binding_id: receipt.binding_id,
+        file_name: binding.display_name.clone(),
+    })
+}
+
+/// Remember the open project as a recent project once the browser keeps its
+/// binding, so the list can reopen it through the handle it kept.
+#[cfg(target_arch = "wasm32")]
+fn remember_browser_project(model: &Model, platform: &mut PlatformState) {
+    if let Some(recent) = browser_recent_of_open_project(platform) {
+        remember_recent_file(
+            model,
+            platform,
+            crate::services::recent_files::RecentKind::Project,
+            &recent.path(),
+        );
+    }
+}
+
 /// A project the browser read for opening, for the shell to apply.
 #[cfg(target_arch = "wasm32")]
 pub enum BrowserProjectOpen {
@@ -1702,6 +1782,7 @@ pub(crate) fn poll_browser_project_import(
             ) {
                 match result {
                     Ok(()) => {
+                        remember_browser_project(model, platform);
                         model.record(
                             LogSeverity::Info,
                             LogSource::Studio,
@@ -1731,7 +1812,15 @@ pub(crate) fn poll_browser_project_import(
                         handle_id,
                         ..
                     },
-                ) = &completion.payload
+                )
+                | BrowserProjectImportPayload::Reopened {
+                    result:
+                        crate::workbench::lifecycle::project_lifecycle::BrowserReopenResult::Opened {
+                            handle_id,
+                            ..
+                        },
+                    ..
+                } = &completion.payload
                 {
                     crate::workbench::lifecycle::project_lifecycle::release_browser_handle(
                         *handle_id,
@@ -1783,6 +1872,11 @@ pub(crate) fn poll_browser_project_import(
                 BrowserProjectImportPayload::Canonical(result) => {
                     finish_browser_project_import(completion.import_token);
                     prepare_browser_canonical_open(model, platform, transaction, result)
+                        .map(BrowserProjectOpen::Canonical)
+                }
+                BrowserProjectImportPayload::Reopened { recent, result } => {
+                    finish_browser_project_import(completion.import_token);
+                    prepare_browser_recent_open(model, platform, transaction, &recent, result)
                         .map(BrowserProjectOpen::Canonical)
                 }
             }
@@ -1855,6 +1949,78 @@ fn prepare_browser_canonical_open(
     })
 }
 
+/// Open the recent project the browser read through its stored handle. One
+/// it no longer keeps, or whose file is gone, marks its row missing and says
+/// how to go on; one the reader would not let it read opens nothing.
+#[cfg(target_arch = "wasm32")]
+fn prepare_browser_recent_open(
+    model: &mut Model,
+    platform: &mut PlatformState,
+    transaction: crate::product::TransactionId,
+    recent: &Path,
+    result: crate::workbench::lifecycle::project_lifecycle::BrowserReopenResult,
+) -> Option<BrowserCanonicalOpen> {
+    use crate::workbench::lifecycle::project_lifecycle::BrowserReopenResult;
+
+    let name = recent.file_stem().map_or_else(
+        || recent.display().to_string(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    let refused = match result {
+        BrowserReopenResult::Opened {
+            handle_id,
+            binding,
+            bytes,
+        } => {
+            let refused = match rspice_project::persistence::browser::BrowserBinding::open(
+                bytes,
+                binding.display_name.clone(),
+                crate::state::workspace::WorkspaceSourceFiles,
+            ) {
+                Ok((project, _))
+                    if project.file.workspace.project.id().to_string()
+                        == binding.receipt.project_id =>
+                {
+                    crate::services::recent_files::mark_missing(
+                        &mut platform.recent_files,
+                        recent,
+                        false,
+                    );
+                    return Some(BrowserCanonicalOpen {
+                        project: ProjectSnapshot::from_decoded(project),
+                        display_name: binding.display_name.clone(),
+                        handle_id,
+                        binding: PersistenceBinding::Browser { handle_id, binding },
+                        transaction,
+                    });
+                }
+                Ok(_) => format!(
+                    "{} now holds another project. Open it with Open project.",
+                    binding.display_name
+                ),
+                Err(error) => format!("{} could not be read: {error}", binding.display_name),
+            };
+            crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
+            refused
+        }
+        BrowserReopenResult::Missing(reason) => {
+            crate::services::recent_files::mark_missing(&mut platform.recent_files, recent, true);
+            format!(
+                "{}: {reason}. Open the file again with Open project, or remove it from the \
+                 recent list.",
+                recent
+                    .file_name()
+                    .map_or_else(|| name.clone(), |file| file.to_string_lossy().into_owned())
+            )
+        }
+        BrowserReopenResult::Denied(reason) => reason,
+        BrowserReopenResult::Failed(reason) => reason,
+    };
+    crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(platform, transaction);
+    model.report_failure(format!("Could not open {name}"), refused);
+    None
+}
+
 /// Settle a browser binding's open once the shell has applied it: an open
 /// that failed lets the browser's handle go, and an accepted one promotes
 /// its binding record so it reopens when the browser restarts. Returns
@@ -1871,6 +2037,14 @@ pub fn settle_browser_canonical_open(
     if !opened {
         crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
         return false;
+    }
+    // A recent project reopened as the browser kept it has its record
+    // already; writing it again would make another tab's save of the same
+    // file meet a change that is not there.
+    let PersistenceBinding::Browser { binding: kept, .. } = &binding;
+    if kept.durable_receipt().is_some() {
+        remember_browser_project(model, platform);
+        return true;
     }
     // The project replacement is accepted before its binding record is
     // promoted. Promotion is separately context/CAS guarded, so IndexedDB can

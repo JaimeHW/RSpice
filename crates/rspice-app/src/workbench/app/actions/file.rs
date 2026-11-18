@@ -338,7 +338,8 @@ impl RSpiceApp {
     pub(crate) fn found_recent_file(&mut self, path: &std::path::Path) -> bool {
         use rspice_app_services::services::recent_files::mark_missing;
 
-        // A browser recent is reopened through the file picker, not a path.
+        // A browser recent is read through the handle the browser kept, and
+        // the read says when its file is gone.
         if cfg!(target_arch = "wasm32") || path.exists() {
             mark_missing(&mut self.state.platform.recent_files, path, false);
             return true;
@@ -464,11 +465,11 @@ impl RSpiceApp {
                     }
                     opened
                 }
+                // A recent project the browser reads later, through the
+                // handle it kept, and it opens when the read comes back.
                 #[cfg(target_arch = "wasm32")]
                 {
-                    self.state.prompt(
-                        "Browser projects must be reopened through Open project so file permission can be verified.",
-                    );
+                    self.state.open_browser_recent(&path);
                     false
                 }
             }

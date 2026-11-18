@@ -129,6 +129,23 @@ pub(crate) enum BrowserRestoreResult {
     Unsupported(String),
 }
 
+/// What reopening a project the browser keeps found: its file read under
+/// the binding it was kept with, or why it could not be.
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+pub enum BrowserReopenResult {
+    Opened {
+        handle_id: u64,
+        binding: BrowserBinding,
+        bytes: ProjectBytes,
+    },
+    /// The browser no longer keeps the project, or its file is gone.
+    Missing(String),
+    /// The reader did not let the browser read the file.
+    Denied(String),
+    Failed(String),
+}
+
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     static BROWSER_FILE_HANDLES: std::cell::RefCell<std::collections::HashMap<u64, wasm_bindgen::JsValue>> =

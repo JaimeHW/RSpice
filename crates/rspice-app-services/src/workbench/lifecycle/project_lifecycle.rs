@@ -1446,6 +1446,18 @@ pub fn start_browser_open(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub use persistence::BrowserReopenResult;
+
+/// Reopen the project the browser keeps under `binding_id`.
+#[cfg(target_arch = "wasm32")]
+pub fn start_browser_binding_reopen(
+    binding_id: uuid::Uuid,
+    complete: impl FnOnce(persistence::BrowserReopenResult) + 'static,
+) {
+    persistence::start_browser_binding_reopen(binding_id, complete);
+}
+
+#[cfg(target_arch = "wasm32")]
 pub fn start_browser_binding_persist(
     binding: PersistenceBinding,
     complete: impl FnOnce(Result<(), String>) + 'static,

@@ -1203,7 +1203,7 @@ impl ProjectEntries {
         self.query == cx.state.project_launcher_query
             && self.filter == cx.state.project_launcher_filter
             && self.sort == cx.state.project_launcher_sort
-            && self.current_path.as_deref() == project.path.as_deref()
+            && self.current_path == current_project_path(cx)
             && self.current_name == project.display_name()
             && self.recent_files == cx.platform.recent_files
     }
@@ -1224,7 +1224,7 @@ fn project_entries(ctx: &Context, cx: &Cx<'_, ProjectFeature>) -> Arc<[ProjectEn
         query: cx.state.project_launcher_query.clone(),
         filter: cx.state.project_launcher_filter,
         sort: cx.state.project_launcher_sort,
-        current_path: project.path.clone(),
+        current_path: current_project_path(cx),
         current_name: project.display_name().to_owned(),
         entries: build_project_entries(cx).into(),
     };
@@ -1237,7 +1237,8 @@ fn build_project_entries(cx: &Cx<'_, ProjectFeature>) -> Vec<ProjectEntry> {
     #[cfg(any(test, feature = "test-support"))]
     PROJECT_LIST_BUILDS.with(|builds| builds.set(builds.get() + 1));
     let query = cx.state.project_launcher_query.trim().to_lowercase();
-    let current_path = cx.model.workspace.content.project.path.as_deref();
+    let current_path = current_project_path(cx);
+    let current_path = current_path.as_deref();
     let current_name = cx.model.workspace.content.project.display_name();
     let filter = cx.state.project_launcher_filter;
     let mut entries = cx
@@ -1252,7 +1253,7 @@ fn build_project_entries(cx: &Cx<'_, ProjectFeature>) -> Vec<ProjectEntry> {
             } else {
                 project_name_from_path(&recent.path)
             };
-            let path_text = recent.path.display().to_string();
+            let path_text = crate::services::recent_files::location(recent);
             let matches_filter = project_matches_filter(filter, recent.pinned);
             let matches = query.is_empty()
                 || name.to_lowercase().contains(&query)
@@ -1762,9 +1763,24 @@ fn project_path_available(_path: &Path) -> bool {
     true
 }
 
+/// A browser reopens only the projects it keeps a binding for.
 #[cfg(target_arch = "wasm32")]
-fn project_path_available(_path: &Path) -> bool {
-    false
+fn project_path_available(path: &Path) -> bool {
+    crate::services::recent_files::BrowserRecent::of(path).is_some()
+}
+
+/// The path the open project is listed under: its file, or in the browser
+/// the entry its kept binding is listed under.
+fn current_project_path(cx: &Cx<'_, ProjectFeature>) -> Option<PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::workbench::workflows::project_workflow::browser_recent_of_open_project(cx.platform)
+            .map(|recent| recent.path())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        cx.model.workspace.content.project.path.clone()
+    }
 }
 
 #[cfg(test)]

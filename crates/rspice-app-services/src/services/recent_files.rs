@@ -30,6 +30,90 @@ pub struct RecentFile {
     pub missing: bool,
 }
 
+/// Where a browser keeps a project it can open again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserStore {
+    /// A file the reader picked: the browser keeps a handle to it.
+    File,
+    /// The browser's own storage for this site.
+    Storage,
+}
+
+impl BrowserStore {
+    const fn segment(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Storage => "storage",
+        }
+    }
+
+    /// What the list's Location column says of a project kept here: the
+    /// browser does not say which folder a picked file is in.
+    pub const fn location(self) -> &'static str {
+        match self {
+            Self::File => "File on this device",
+            Self::Storage => "This browser's storage",
+        }
+    }
+}
+
+/// A project a browser keeps has no path: the browser keeps its file handle
+/// under a binding id. Its recent entry is listed under a path of its own,
+/// `browser/<store>/<binding>/<file name>`, which names no file on a desktop,
+/// so the list keys, pins and removes it as it does any other entry, and
+/// names it by its file name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserRecent {
+    pub store: BrowserStore,
+    pub binding_id: uuid::Uuid,
+    pub file_name: String,
+}
+
+impl BrowserRecent {
+    const ROOT: &'static str = "browser";
+
+    /// The path the entry is listed under.
+    pub fn path(&self) -> std::path::PathBuf {
+        [
+            Self::ROOT,
+            self.store.segment(),
+            &self.binding_id.to_string(),
+            &self.file_name,
+        ]
+        .iter()
+        .collect()
+    }
+
+    /// The browser project `path` lists, if it lists one.
+    pub fn of(path: &Path) -> Option<Self> {
+        let mut parts = path.components().map(|part| part.as_os_str().to_str());
+        if parts.next()? != Some(Self::ROOT) {
+            return None;
+        }
+        let store = match parts.next()?? {
+            "file" => BrowserStore::File,
+            "storage" => BrowserStore::Storage,
+            _ => return None,
+        };
+        let binding_id = parts.next()??.parse().ok()?;
+        let file_name = parts.next()??.to_owned();
+        parts.next().is_none().then_some(Self {
+            store,
+            binding_id,
+            file_name,
+        })
+    }
+}
+
+/// Where a recent entry's file is, as its row says it: its path, or, for a
+/// project a browser keeps, where the browser keeps it.
+pub fn location(recent: &RecentFile) -> String {
+    BrowserRecent::of(&recent.path).map_or_else(
+        || recent.path.display().to_string(),
+        |browser| browser.store.location().to_owned(),
+    )
+}
+
 /// Pin `path`'s entry, or unpin it when it is pinned. Returns whether an
 /// entry was found.
 pub fn toggle_pin(recent_files: &mut [RecentFile], path: &Path) -> bool {
@@ -96,6 +180,44 @@ mod tests {
         assert!(restored.pinned);
         assert!(!restored.missing);
         assert!(!stored.contains("missing"), "{stored}");
+    }
+
+    /// A browser project's entry names its file and where the browser keeps
+    /// it, and reads back to the binding it reopens through.
+    #[test]
+    fn a_browser_project_is_listed_by_its_file_name_and_where_the_browser_keeps_it() {
+        let binding_id = uuid::Uuid::from_u128(0x5eed);
+        for (store, location) in [
+            (BrowserStore::File, "File on this device"),
+            (BrowserStore::Storage, "This browser's storage"),
+        ] {
+            let browser = BrowserRecent {
+                store,
+                binding_id,
+                file_name: "amp v2.rspiceproj".to_owned(),
+            };
+            let recent = project(&browser.path().display().to_string());
+            assert_eq!(BrowserRecent::of(&recent.path), Some(browser));
+            assert_eq!(super::location(&recent), location);
+            assert_eq!(
+                recent.path.file_stem().and_then(|stem| stem.to_str()),
+                Some("amp v2")
+            );
+        }
+        assert_eq!(
+            BrowserRecent::of(Path::new("C:/browser/amp.rspiceproj")),
+            None
+        );
+        assert_eq!(
+            BrowserRecent::of(Path::new("browser/file/not-an-id/amp.rspiceproj")),
+            None
+        );
+        assert_eq!(
+            super::location(&project("C:/Engineering/afe.rspiceproj")),
+            Path::new("C:/Engineering/afe.rspiceproj")
+                .display()
+                .to_string()
+        );
     }
 
     #[test]

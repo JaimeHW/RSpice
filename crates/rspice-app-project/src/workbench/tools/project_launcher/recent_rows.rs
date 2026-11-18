@@ -47,7 +47,10 @@ pub(crate) fn last_opened(opened_at_unix_ms: u64) -> String {
 /// Everything a row shortens: its full path, when it was last opened and how
 /// long ago, and that the file was not found when it was.
 pub(crate) fn full_text(recent: &RecentFile) -> String {
-    let mut text = recent.path.display().to_string();
+    let mut text = crate::services::recent_files::BrowserRecent::of(&recent.path).map_or_else(
+        || recent.path.display().to_string(),
+        |browser| format!("{}\n{}", browser.file_name, browser.store.location()),
+    );
     if recent.opened_at_unix_ms != 0 {
         let now: u64 = crate::time_compat::unix_epoch()
             .as_millis()
@@ -154,7 +157,9 @@ pub(crate) fn missing_strip(
     if Button::new("Remove").show(&mut strip).clicked() {
         action = Some(RecentRowAction::Remove(recent.path.clone()));
     }
-    if Button::new("Locate\u{2026}").show(&mut strip).clicked() {
+    // A browser has no path to point the row at: its file is picked again
+    // through Open project, which lists it anew.
+    if !cfg!(target_arch = "wasm32") && Button::new("Locate\u{2026}").show(&mut strip).clicked() {
         action = Some(RecentRowAction::Locate(recent.clone()));
     }
     action

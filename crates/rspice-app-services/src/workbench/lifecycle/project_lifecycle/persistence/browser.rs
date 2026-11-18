@@ -531,6 +531,127 @@ fn browser_restore_issue(
     }
 }
 
+/// Reopen the project the browser keeps under `binding_id`, as a recent
+/// project row asks: the file's handle is taken from the binding store, the
+/// browser asks the reader for permission to read it where it must, and the
+/// file is read as it is now. The binding is carried on one generation past
+/// the stored one, so the open's promotion records what was read.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_binding_reopen(
+    binding_id: uuid::Uuid,
+    complete: impl FnOnce(BrowserReopenResult) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        complete(reopen_browser_binding(binding_id).await);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn reopen_browser_binding(binding_id: uuid::Uuid) -> BrowserReopenResult {
+    if !browser_binding_store_supported() {
+        return BrowserReopenResult::Failed(
+            "this browser keeps no project files between sessions".to_owned(),
+        );
+    }
+    let record = match indexed_db_get(&binding_id.to_string()).await {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            return BrowserReopenResult::Missing(
+                "the browser no longer keeps this project".to_owned(),
+            );
+        }
+        Err(error) => return BrowserReopenResult::Failed(error),
+    };
+    let metadata = match metadata_from_record(&record) {
+        Ok(metadata) if metadata.binding_id == binding_id.to_string() => metadata,
+        Ok(_) => {
+            return BrowserReopenResult::Missing(
+                "the browser keeps another project under this entry".to_owned(),
+            );
+        }
+        Err(error) => return BrowserReopenResult::Missing(error),
+    };
+    let external = metadata.backend == BrowserBindingBackend::ExternalFile;
+    let handle = if external {
+        match js_sys::Reflect::get(&record, &wasm_bindgen::JsValue::from_str("handle")) {
+            Ok(handle) if !handle.is_null() && !handle.is_undefined() => handle,
+            _ => {
+                return BrowserReopenResult::Missing(
+                    "the browser no longer keeps this project's file".to_owned(),
+                );
+            }
+        }
+    } else {
+        match open_opfs_binding_handle(binding_id, false).await {
+            Ok(handle) => handle,
+            Err(error) => return BrowserReopenResult::Missing(error),
+        }
+    };
+    if let Err(error) = validate_browser_read_handle(&handle, external) {
+        return BrowserReopenResult::Missing(error);
+    }
+    if external {
+        let permission = match call_promise_method(
+            &handle,
+            "requestPermission",
+            &[permission_options(BrowserPermissionMode::Read)],
+        ) {
+            Ok(permission) => permission,
+            Err(error) => return BrowserReopenResult::Failed(error),
+        };
+        if let Err(error) = ensure_browser_permission(permission, BrowserPermissionMode::Read).await
+        {
+            return BrowserReopenResult::Denied(error);
+        }
+    }
+    let bytes = match read_browser_handle_bytes(&handle).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return BrowserReopenResult::Missing(format!("its file could not be read: {error}"));
+        }
+    };
+    let Ok(bytes) = ProjectBytes::from_bytes(bytes) else {
+        return BrowserReopenResult::Failed(
+            "browser project exceeds the supported project-size limit".to_owned(),
+        );
+    };
+    // A file as the browser last kept it reopens on the record as it stands,
+    // so a tab that has it open still saves to it. One changed outside RSpice
+    // since is accepted as it is now, one generation on, which the open
+    // records once it is applied.
+    let stored = metadata.accepted_generation;
+    let unchanged = metadata
+        .accepted_digest
+        .parse::<ContentDigest>()
+        .is_ok_and(|kept| kept == bytes.digest());
+    let accepted = if unchanged {
+        stored
+    } else {
+        stored.saturating_add(1)
+    };
+    if !browser_generation_is_exact(accepted) {
+        return BrowserReopenResult::Failed(
+            "browser binding generation is exhausted; open the file with Open project".to_owned(),
+        );
+    }
+    let binding = BrowserBinding {
+        receipt: BrowserBindingReceipt {
+            binding_id,
+            backend: metadata.backend,
+            project_id: metadata.project_id,
+            accepted_generation: accepted,
+            accepted_digest: bytes.digest(),
+        },
+        display_name: metadata.display_name,
+        persisted_generation: Some(stored),
+    };
+    BrowserReopenResult::Opened {
+        handle_id: register_browser_handle(handle),
+        binding,
+        bytes,
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(super) struct BrowserBindingPersistRequest<'a> {
     binding_id: uuid::Uuid,

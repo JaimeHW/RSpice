@@ -870,7 +870,7 @@ fn recent_project_rows(project: &ProjectState, platform: &PlatformState) -> Vec<
                 ProjectLauncherFilter::Pinned => recent.pinned,
             };
             let name = recent_project_name(recent);
-            let location = recent.path.display().to_string();
+            let location = crate::services::recent_files::location(recent);
             let matches = query.is_empty()
                 || name.to_lowercase().contains(&query)
                 || location.to_lowercase().contains(&query);
@@ -910,7 +910,7 @@ fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
         (
             "Open project…",
             if cfg!(target_arch = "wasm32") {
-                "Choose a .rspiceproj file to import"
+                "A .rspiceproj file on this device"
             } else {
                 "Local or shared .rspiceproj"
             },

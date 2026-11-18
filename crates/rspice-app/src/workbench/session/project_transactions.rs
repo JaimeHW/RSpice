@@ -796,6 +796,50 @@ impl AppState {
         }
     }
 
+    /// Reopen the recent project the browser keeps under `path`, through the
+    /// file handle it kept, in place of the open project. Returns whether the
+    /// read started.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn open_browser_recent(&mut self, path: &std::path::Path) -> bool {
+        let Some(recent) = rspice_app_services::services::recent_files::BrowserRecent::of(path)
+        else {
+            self.report_failure(
+                "Project open failed",
+                format!(
+                    "{} is not a project this browser keeps. Open it with Open project.",
+                    path.display()
+                ),
+            );
+            return false;
+        };
+        let transaction =
+            match rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+                Ok(transaction) => transaction,
+                Err(error) => {
+                    lifecycle_error(self, error, "Project open blocked");
+                    return false;
+                }
+            };
+        let context =
+            rspice_app_services::workbench::lifecycle::project_lifecycle::browser_operation_context(
+                &self.model,
+                &self.platform,
+            );
+        match project_workflow::start_browser_recent_open(transaction, context, &recent) {
+            Ok(()) => {
+                self.prompt(format!("Opening {}\u{2026}", recent.file_name));
+                true
+            }
+            Err(error) => {
+                rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                    &mut self.platform,
+                );
+                self.report_failure("Project open failed", error);
+                false
+            }
+        }
+    }
+
     /// Open the project at `path` in place of the open project. Returns
     /// whether it opened.
     #[cfg(not(target_arch = "wasm32"))]
