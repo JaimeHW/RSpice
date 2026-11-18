@@ -343,8 +343,10 @@ impl Model {
     }
 
     /// Each cellview of a library kept in a folder of its own with edits
-    /// here not yet saved, by library: those open with unsaved changes and
-    /// those the last check found edited. The project file does not hold
+    /// here not yet saved, by library: those open with unsaved changes,
+    /// those the last check found edited, a restore's among them, and those
+    /// a restore holds for a library that could not be read. The project
+    /// file does not hold
     /// them, so its comparison never counts them; each is one unsaved
     /// document all the same, which the Overview counts and the close
     /// review names.
@@ -368,6 +370,11 @@ impl Model {
                 if !found.contains(&reference) {
                     found.push(reference);
                 }
+            }
+        }
+        for edit in self.library_files.pending() {
+            if let (Some(cell), Some(view)) = (edit.file.cell_name(), edit.file.view_name()) {
+                found.push(crate::state::CellViewRef::new(&edit.library, cell, view));
             }
         }
         found.sort_by_key(crate::state::CellViewRef::key);

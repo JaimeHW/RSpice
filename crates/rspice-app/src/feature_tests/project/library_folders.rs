@@ -3,7 +3,8 @@
 //! nothing, Refresh… reads again only the cellviews picked, Save refuses a
 //! cellview edited here that changed on disk until the reader chooses, a
 //! cellview with edits here holds its lock and one locked elsewhere is
-//! never written, every
+//! never written, an edit a crash recovery puts back counts as unsaved and
+//! takes its lock once edited again, every
 //! status reads alike on the Dependencies page's rail, table and inspector
 //! and in the Overview, and a reference this session cannot read is saved
 //! back as it was.
@@ -11,6 +12,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::DependencyLibrary;
@@ -19,6 +21,9 @@ use rspice_app_project::workbench::project::library_dialogs::library_files::{
 };
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::overview::{OverviewSnapshot, Tone};
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    ProjectCloseDestination, has_unsaved_changes_fresh,
+};
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{Cell, CellViewRef, Library, SchematicState, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
@@ -27,7 +32,7 @@ use rspice_design::library::folder::{
 };
 
 use super::dependencies::said_about;
-use super::recovery_frames::{app_frame, click_on, offscreen};
+use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted};
 use super::with_cx;
 
 const LIBRARY: &str = "work";
@@ -449,6 +454,178 @@ fn an_edited_cellview_holds_its_lock_and_one_locked_elsewhere_is_never_written()
         note(&app, "stage").as_deref(),
         Some("mine"),
         "the edit stays"
+    );
+}
+
+/// Let the autosave write `app`'s unsaved edits, then end the session as a
+/// crash would, saving nothing.
+fn autosave_and_crash(mut app: RSpiceApp) {
+    assert!(
+        has_unsaved_changes_fresh(&app.state),
+        "there is unsaved work"
+    );
+    // A one-minute interval, armed a minute back, so the next frame writes
+    // the autosave.
+    app.state.platform.autosave_minutes = 1;
+    let armed = Instant::now()
+        .checked_sub(Duration::from_secs(60))
+        .expect("the clock has run for a minute");
+    app.state.platform.project_autosave.arm_at(armed);
+    let ctx = offscreen();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while app.state.platform.project_autosave.written().is_empty() {
+        assert!(Instant::now() < deadline, "the autosave was never written");
+        app_frame(&ctx, &mut app, Vec::new());
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    drop(app);
+}
+
+/// The project opened again after a crash, keeping the recovered changes.
+fn recovered(folders: &Folders) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state.load_project_from_path(&folders.project),
+        "the project opens"
+    );
+    let ctx = offscreen();
+    let asked = paint_until(&ctx, &mut app, |text| {
+        text.contains("Recover unsaved changes?")
+    });
+    app_frame(
+        &ctx,
+        &mut app,
+        click_on(&asked, "Keep the recovered changes"),
+    );
+    app_frame(&ctx, &mut app, Vec::new());
+    app.state.workbench.activate(Workspace::Project);
+    app
+}
+
+/// The Overview's Unsaved work, and what the close review names.
+fn unsaved(app: &mut RSpiceApp) -> (String, String) {
+    let snapshot = OverviewSnapshot::capture(
+        &egui::Context::default(),
+        &features::cx_with_foreign_answers(app, |_| true),
+    );
+    let row = snapshot
+        .statuses
+        .iter()
+        .find(|status| status.area == "Unsaved work")
+        .expect("the Overview has an Unsaved work row")
+        .state()
+        .to_owned();
+    app.state
+        .workbench
+        .project_review_dialog
+        .show_close_project(ProjectCloseDestination::EmptyWorkbench);
+    let ctx = offscreen();
+    let review = paint_until(&ctx, app, |text| text.contains("Save changes to"));
+    app.state.workbench.project_review_dialog = Default::default();
+    (row, painted(&review))
+}
+
+fn named(cell: &str) -> String {
+    format!("{LIBRARY} \u{b7} {cell} \u{b7} schematic")
+}
+
+/// An edit a crash recovery puts back counts as unsaved work, one document
+/// per cellview, and the close review names each; it takes no lock until
+/// the user edits that cellview again, when it does. One another project
+/// holds by then reads "Being edited by …", and Save refuses it.
+#[test]
+fn a_recovered_edit_counts_as_unsaved_and_takes_its_lock_once_edited_again() {
+    let (mut app, folders) = kept_in_a_folder("library-recovered-edit");
+    let lock = |cell: &str| folders.folder.join(file(cell).lock_path());
+    for cell in CELLS {
+        annotate(&mut app, cell, "mine");
+    }
+    autosave_and_crash(app);
+
+    let mut app = recovered(&folders);
+    assert_eq!(
+        note(&app, "amp").as_deref(),
+        Some("mine"),
+        "amp's edit is back"
+    );
+    assert_eq!(
+        note(&app, "stage").as_deref(),
+        Some("mine"),
+        "so is the stage's"
+    );
+    let (row, review) = unsaved(&mut app);
+    assert_eq!(row, "2 unsaved documents");
+    for cell in CELLS {
+        assert!(
+            review.contains(&named(cell)),
+            "the review names {cell}:\n{review}"
+        );
+    }
+    focus(&mut app);
+    assert!(
+        !lock("amp").exists() && !lock("stage").exists(),
+        "a recovered edit takes no lock of itself"
+    );
+
+    rspice_project::library_folder::take_library_lock(
+        &folders.folder,
+        &file("stage"),
+        &LibraryFileLock {
+            user: "jsmith".to_owned(),
+            computer: "LAB-PC3".to_owned(),
+            process: 4242,
+            project: "elsewhere.rspiceproj".to_owned(),
+            since_unix_ms: 0,
+        },
+        &|_| None,
+    )
+    .expect("another project locks the stage");
+    annotate(&mut app, "amp", "mine, again");
+    focus(&mut app);
+    assert!(lock("amp").exists(), "editing amp again takes its lock");
+    assert_eq!(
+        app.state
+            .model
+            .library_lock_elsewhere(LIBRARY, &file("stage"))
+            .map(LibraryFileLock::holder)
+            .as_deref(),
+        Some("jsmith on LAB-PC3"),
+        "the stage reads as the other project's"
+    );
+    let theirs = CELLS.map(|cell| folders.bytes(cell));
+    assert!(
+        !app.state.save_project_to_path(&folders.project),
+        "Save refuses the stage"
+    );
+    assert_eq!(
+        CELLS.map(|cell| folders.bytes(cell)),
+        theirs,
+        "nothing is written over"
+    );
+}
+
+/// An edit a recovery holds for a library whose folder cannot be read now
+/// is unsaved work all the same: the Overview counts it and the close
+/// review names it.
+#[test]
+fn a_recovered_edit_to_a_library_out_of_reach_counts_as_unsaved() {
+    let (mut app, folders) = kept_in_a_folder("library-recovered-unread");
+    annotate(&mut app, "amp", "mine");
+    autosave_and_crash(app);
+    std::fs::rename(&folders.folder, folders.root.join("away"))
+        .expect("the folder is out of reach");
+
+    let mut app = recovered(&folders);
+    assert_eq!(
+        app.state.model.library_files.pending().len(),
+        1,
+        "the edit is held"
+    );
+    let (row, review) = unsaved(&mut app);
+    assert_eq!(row, "1 unsaved document");
+    assert!(
+        review.contains(&named("amp")),
+        "the review names amp:\n{review}"
     );
 }
 

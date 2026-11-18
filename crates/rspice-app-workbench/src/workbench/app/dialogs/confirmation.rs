@@ -207,26 +207,31 @@ fn render_close_project_review(
     // it is unsaved: the summary says that once, rather than listing the
     // configuration record that stands in for the whole project.
     let never_saved = app.platform().project_lifecycle.accepted().is_none();
+    let library_files = app.model().unsaved_library_cellviews();
+    // A cellview of a library kept in a folder of its own is written to its
+    // folder, not the project file, so it is named by its library wherever
+    // the review finds it.
+    let label = |document: &ProjectDocumentId| match document {
+        ProjectDocumentId::CellView(reference) if library_files.contains(reference) => format!(
+            "{} \u{b7} {} \u{b7} {}",
+            reference.library, reference.cell, reference.view
+        ),
+        document => document.label(),
+    };
     let mut unsaved: Vec<(WorkbenchIcon, String)> = if never_saved {
         Vec::new()
     } else {
         documents
             .iter()
-            .map(|document| (document_icon(document), document.label()))
+            .map(|document| (document_icon(document), label(document)))
             .collect()
     };
-    // A cellview of a library kept in a folder of its own is written to its
-    // folder, not the project file, so the comparison above never names it:
-    // each with edits here is named by its library.
-    for reference in app.model().unsaved_library_cellviews() {
-        if !documents.contains(&ProjectDocumentId::CellView(reference.clone())) {
-            unsaved.push((
-                WorkbenchIcon::Design,
-                format!(
-                    "{} \u{b7} {} \u{b7} {}",
-                    reference.library, reference.cell, reference.view
-                ),
-            ));
+    // The comparison above sees only what the project file holds, so it
+    // misses most of them: each with edits here is named all the same.
+    for reference in &library_files {
+        let document = ProjectDocumentId::CellView(reference.clone());
+        if !documents.contains(&document) {
+            unsaved.push((WorkbenchIcon::Design, label(&document)));
         }
     }
     if app.model_draft_unsaved() {
