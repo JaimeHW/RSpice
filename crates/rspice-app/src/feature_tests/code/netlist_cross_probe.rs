@@ -43,10 +43,13 @@ fn lab_amp() -> CellViewRef {
 /// The ports each `amp` draws, and so the interface its instances bind.
 const AMP_PORTS: [&str; 2] = ["in", "out"];
 
+/// The design's Added line: an instance's card, written by hand.
+const ADDED: &str = "R77 spare 0 10k";
+
 /// A design placing cell `amp` from two libraries, `work` and `lab`, whose
 /// schematics each hold a resistor named `R1` (the lab's far from the
-/// origin), beside a resistor `R9` of its own; generated, with its netlist on
-/// the Netlist page.
+/// origin), beside a resistor `R9` of its own and the Added line [`ADDED`];
+/// generated, with its netlist on the Netlist page.
 fn two_amps() -> Replay {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -64,6 +67,12 @@ fn two_amps() -> Replay {
         top.components.push(instance);
     }
     app.state.sync_active_schematic_to_workspace();
+    let design = app.state.model.workspace.content.active_view.clone();
+    rspice_design::added_lines::set_added_lines(
+        &mut app.state.model.workspace.content.added_lines,
+        &design,
+        ADDED.to_owned(),
+    );
     for (library, id, at) in [
         ("work", WORK_R1, Point::new(60, 60)),
         ("lab", LAB_R1, Point::new(4000, 3000)),
@@ -259,8 +268,9 @@ fn a_net_under_the_caret_is_lit_on_the_schematic() {
     assert_eq!(selected_component(&replay), Some(R9));
 }
 
-/// A line the schematic did not write, such as the deck's `.end`, offers
-/// Show in schematic greyed, saying why, and the key does nothing.
+/// A line the schematic did not write offers Show in schematic greyed,
+/// saying why, and the key does nothing: the deck's `.end`, and an Added
+/// line even with the caret on the name of the instance its card writes.
 #[test]
 fn a_line_no_schematic_wrote_offers_nothing_and_says_why() {
     let mut replay = two_amps();
@@ -273,23 +283,31 @@ fn a_line_no_schematic_wrote_offers_nothing_and_says_why() {
         .netlist_content
         .split('\n')
         .count();
-    let end = (1..=lines)
-        .rev()
-        .find(|line| shown_line(&replay, *line).trim() == ".end")
-        .expect("the deck ends");
-    caret_at(&mut replay, end, 0);
+    let find = |replay: &Replay, text: &str| {
+        (1..=lines)
+            .rev()
+            .find(|line| shown_line(replay, *line).trim() == text)
+            .unwrap_or_else(|| panic!("the deck writes {text:?}"))
+    };
+    let added = find(&replay, ADDED);
+    let end = find(&replay, ".end");
+    assert!(added < end, "the Added line comes before .end");
+    for line in [added, end] {
+        caret_at(&mut replay, line, 1);
 
-    let menu = open_menu(&mut replay);
-    only(&menu, "Show in schematic", Role::MenuItem);
-    assert_eq!(
-        replay
-            .app
-            .command_availability(CodeCommand::ShowInSchematic.key()),
-        CommandAvailability::Disabled("this line has no schematic source")
-    );
-    replay.key(Key::Escape, Modifiers::NONE);
-    replay.key(Key::F12, Modifiers::ALT);
-    assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
+        let menu = open_menu(&mut replay);
+        only(&menu, "Show in schematic", Role::MenuItem);
+        assert_eq!(
+            replay
+                .app
+                .command_availability(CodeCommand::ShowInSchematic.key()),
+            CommandAvailability::Disabled("this line has no schematic source"),
+            "line {line}"
+        );
+        replay.key(Key::Escape, Modifiers::NONE);
+        replay.key(Key::F12, Modifiers::ALT);
+        assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
+    }
 }
 
 /// The middle of the one-based `line`, as the editor publishes it: the
