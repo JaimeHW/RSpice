@@ -13,7 +13,9 @@ use crate::workbench::documents::netlist_document::{
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_state::workbench::app_state::model::Model;
 
-use super::super::super::design_system::{WorkbenchIcon, property_row, property_row_problem};
+use super::super::super::design_system::{
+    WorkbenchIcon, paint_problem_mark, property_row, property_row_problem,
+};
 
 /// What the Netlist workspace's inspector reads: the model, the netlist
 /// editor's state and the message catalogue.
@@ -189,24 +191,22 @@ fn diagnostic_row(
     rspice_ui_kit::theme::paint_focus_ring(ui, &response, rect);
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
 
-    let icon = match diagnostic.severity {
+    let mark = Rect::from_min_size(
+        Pos2::new(rect.left() + padding_x, rect.top() + PADDING_Y),
+        Vec2::splat(ICON_COLUMN_W),
+    );
+    match diagnostic.severity {
         crate::workbench::documents::netlist_document::DiagnosticSeverity::Hint
         | crate::workbench::documents::netlist_document::DiagnosticSeverity::Info => {
-            WorkbenchIcon::Info
+            WorkbenchIcon::Info.paint(ui.painter(), mark, diagnostic_tone(&t, diagnostic.severity));
         }
-        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning
-        | crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
-            WorkbenchIcon::Warning
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning => {
+            paint_problem_mark(ui.painter(), mark, Problem::Warning);
         }
-    };
-    icon.paint(
-        ui.painter(),
-        Rect::from_min_size(
-            Pos2::new(rect.left() + padding_x, rect.top() + PADDING_Y),
-            Vec2::splat(ICON_COLUMN_W),
-        ),
-        diagnostic_tone(&t, diagnostic.severity),
-    );
+        crate::workbench::documents::netlist_document::DiagnosticSeverity::Error => {
+            paint_problem_mark(ui.painter(), mark, Problem::Failure);
+        }
+    }
 
     let text_x = rect.left() + padding_x + ICON_COLUMN_W + COLUMN_GAP;
     ui.painter().galley(
