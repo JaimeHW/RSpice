@@ -218,7 +218,8 @@ fn told(output: &egui::FullOutput) -> Vec<(String, bool, bool, egui::Rect)> {
 /// The deck the launch reopens is missing: the workspace stands on its tab,
 /// in its missing state alone. The deck's verbs are there and unavailable,
 /// Run names the deck and cannot run it, nothing of the generated netlist's
-/// view is shown, and the outline holds just the missing file.
+/// view is shown, the outline holds just the missing file, and the two ways
+/// out are offered once, in the page's body, where Remove asks first.
 #[test]
 fn a_deck_whose_file_went_between_launches_stands_on_its_tab_in_its_missing_state() {
     let (deck, include) = deck_on_disk();
@@ -258,6 +259,55 @@ fn a_deck_whose_file_went_between_launches_stands_on_its_tab_in_its_missing_stat
     for gone in ["Save as deck", "Export netlist", "New deck…", "Open deck…"] {
         assert_eq!(disabled(gone), None, "{gone} belongs to another view");
     }
+    for way_out in ["Locate…", "Remove from project"] {
+        let offered = nodes.iter().filter(|(label, ..)| label == way_out).count();
+        assert_eq!(offered, 1, "{way_out} is offered once: {nodes:?}");
+    }
+    // Remove from project asks first, in the body: its row turns into the
+    // question.
+    let at = nodes
+        .iter()
+        .find(|(label, ..)| label == "Remove from project")
+        .map(|(.., rect)| rect.center())
+        .expect("Remove from project is offered");
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame_with(
+        &ctx,
+        &mut reopened,
+        DESKTOP,
+        vec![egui::Event::PointerMoved(at), button(true)],
+    );
+    frame_with(&ctx, &mut reopened, DESKTOP, vec![button(false)]);
+    let output = frame(&ctx, &mut reopened, DESKTOP);
+    let asking = told(&output);
+    let offered = |wanted: &str| asking.iter().filter(|(label, ..)| label == wanted).count();
+    // Words are published as a label node's value, controls by their label.
+    let question = output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .filter(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value() == Some("Remove long.cir from the project? The file stays on disk.")
+        })
+        .count();
+    assert_eq!(
+        [
+            question,
+            offered("Remove"),
+            offered("Cancel"),
+            offered("Locate…"),
+            offered("Remove from project"),
+        ],
+        [1, 1, 1, 0, 0],
+        "the body asks before it removes: {asking:?}"
+    );
     // The outline is the left dock's column of rows, right of the rail.
     let outline = nodes
         .iter()
