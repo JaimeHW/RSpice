@@ -36,6 +36,7 @@ fn operation_at(timestamp_ms: Option<u64>) -> OperationSnapshot {
         timestamp_ms,
         stamp,
         event: String::new(),
+        configuration: String::new(),
         elapsed: None,
         detail: String::new(),
         tone: Tone::Neutral,

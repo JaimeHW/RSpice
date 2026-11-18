@@ -62,26 +62,36 @@ fn activity_table(
         return None;
     }
     let operations = &snapshot.operations;
-    // The detail column ends with a run's engine, so a narrow table gives the
-    // engine up first; the elapsed time has a column of its own. A time and a
-    // duration are never cut: their columns are as wide as the widest one.
-    // A card too narrow for every column's least width gives up whole
-    // columns from its right, the detail and then the elapsed time, rather
-    // than scrolling sideways with its edge through a word; a detail given
-    // up is its operation's hint.
+    // An ADE run history reads each run by when it ran, what it was, the
+    // design it elaborated and how long it took; so does this card. A time,
+    // a configuration and a duration are never cut: their columns are as
+    // wide as the widest one, and the configuration's is there whenever a
+    // run recorded one. The detail column ends with a run's engine, so a
+    // narrow table gives the engine up first. A card too narrow for every
+    // column's least width gives up whole columns from its right, the detail
+    // and then the elapsed time, never the configuration, rather than
+    // scrolling sideways with its edge through a word; a detail given up is
+    // its operation's hint.
     let (when, elapsed) = fitted_widths(ui, operations, snapshot.now_ms);
-    let columns = [
+    let configuration = configuration_width(ui, operations);
+    let mut columns = vec![
         Column::words("When", when),
         Column::name("Operation", OPERATION_LEAST_WIDTH),
-        Column::number("Elapsed", elapsed),
-        Column::name("Detail", DETAIL_LEAST_WIDTH),
     ];
-    let least = [when, OPERATION_LEAST_WIDTH, elapsed, DETAIL_LEAST_WIDTH];
+    let mut least = vec![when, OPERATION_LEAST_WIDTH];
+    if let Some(width) = configuration {
+        columns.push(Column::words(CONFIGURATION_HEAD, width));
+        least.push(width);
+    }
+    let kept = columns.len();
+    columns.push(Column::number("Elapsed", elapsed));
+    columns.push(Column::name("Detail", DETAIL_LEAST_WIDTH));
+    least.extend([elapsed, DETAIL_LEAST_WIDTH]);
     let room_wide = ui.available_width();
-    let shown = (2..=least.len())
+    let shown = (kept..=least.len())
         .rev()
         .find(|&count| least[..count].iter().sum::<f32>() <= room_wide)
-        .unwrap_or(2);
+        .unwrap_or(kept);
     let response = DataTable::new(
         "workbench.project.overview.activity",
         &columns[..shown],
@@ -92,7 +102,7 @@ fn activity_table(
     .pin_when_narrow(1)
     .max_height(room)
     .show(ui, |index| {
-        let mut cells = row_cells(&operations[index], snapshot.now_ms);
+        let mut cells = row_cells(&operations[index], snapshot.now_ms, configuration.is_some());
         let detail = &operations[index].detail;
         if shown < cells.len() {
             cells.truncate(shown);
@@ -110,7 +120,7 @@ fn activity_table(
         .and_then(|operation| operation.intent.clone())
 }
 
-fn row_cells(operation: &OperationSnapshot, now_ms: u64) -> Vec<Cell> {
+fn row_cells(operation: &OperationSnapshot, now_ms: u64, configuration: bool) -> Vec<Cell> {
     let when = operation.when(now_ms).map_or_else(
         || Cell::absent().sort_by(SortKey::Missing),
         |(short, full)| {
@@ -128,7 +138,39 @@ fn row_cells(operation: &OperationSnapshot, now_ms: u64) -> Vec<Cell> {
     let elapsed = operation.elapsed.map_or_else(Cell::empty, |seconds| {
         Cell::number(crate::quantity::format_elapsed(seconds)).sort_by(SortKey::Number(seconds))
     });
-    vec![when, event, elapsed, Cell::text(&operation.detail)]
+    let mut cells = vec![when, event];
+    if configuration {
+        cells.push(Cell::text(&operation.configuration));
+    }
+    cells.extend([elapsed, Cell::text(&operation.detail)]);
+    cells
+}
+
+const CONFIGURATION_HEAD: &str = "Configuration";
+/// The room a head leaves beside its words for the sort mark.
+const HEAD_SORT_ROOM: f32 = 11.0;
+
+/// How wide the Configuration column is made, or `None` when no row ran a
+/// recorded configuration: as wide as the widest configuration a run used,
+/// and no narrower than its head and the sort mark beside it.
+fn configuration_width(ui: &Ui, operations: &[OperationSnapshot]) -> Option<f32> {
+    let measure = |text: &str, font: egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font, Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    let cell_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let widest = operations
+        .iter()
+        .filter(|operation| !operation.configuration.is_empty())
+        .map(|operation| measure(&operation.configuration, cell_font.clone()))
+        .reduce(f32::max)?;
+    let head = measure(
+        CONFIGURATION_HEAD,
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+    ) + HEAD_SORT_ROOM;
+    Some(widest.max(head) + 2.0 * CELL_PAD + 2.0)
 }
 
 /// The least a fitted column is made: room for its head and the sort mark

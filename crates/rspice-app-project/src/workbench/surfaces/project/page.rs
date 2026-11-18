@@ -16,10 +16,6 @@ use crate::workbench::design_system::centered_content_rect;
 
 use super::visible_workspace_width;
 
-/// Shared page measure of the workbench landing surfaces, so the project
-/// pages, the no-project landing, and the netlist-first landing read as one
-/// product.
-pub(super) const CONTENT_MAX_WIDTH: f32 = 1240.0;
 pub(super) const DESKTOP_GUTTER: f32 = 30.0;
 pub(super) const HEADER_TOP: f32 = 15.0;
 pub(super) const HEADER_BOTTOM: f32 = 14.0;
@@ -52,10 +48,13 @@ pub(super) fn show_measured(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut U
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_min_width(workspace_width);
+                // The page uses the width the window gives it: its cards are
+                // tables and rows of facts, which a wider window shows more
+                // of, as an ADE window does. Only the gutter is kept.
                 let content = centered_content_rect(
                     Rect::from_min_size(pos2(0.0, 0.0), vec2(workspace_width, 1.0)),
                     DESKTOP_GUTTER,
-                    CONTENT_MAX_WIDTH,
+                    f32::INFINITY,
                 );
                 body(ui, content.left(), content.width(), viewport_height);
                 ui.add_space(BODY_BOTTOM);
@@ -123,10 +122,11 @@ pub(super) fn header_rule(ui: &mut Ui) {
     );
 }
 
-/// The reference dashboard columns: `minmax(300px, 1.3fr) minmax(260px, 1fr)`.
+/// The reference dashboard columns: `minmax(300px, 1.3fr) minmax(260px, 1fr)`,
+/// each taking its share of every width the page is given.
 pub(super) fn column_widths(content_width: f32) -> (f32, f32) {
     let usable = (content_width - COLUMN_GAP).max(2.0);
-    let right = (usable * 0.435).clamp(260.0_f32.min(usable * 0.5), 500.0);
+    let right = (usable * 0.435).max(260.0_f32.min(usable * 0.5));
     ((usable - right).max(1.0), right)
 }
 

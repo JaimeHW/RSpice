@@ -367,9 +367,9 @@ fn recorded(
         .clone()
 }
 
-/// The detail of each run row on the Overview's Activity card, as the page
-/// keeps it: its Detail column where the card has room for one, the run's
-/// hover where the card gives that column up.
+/// The configuration each run row on the Overview's Activity card names, as
+/// the page keeps it: its Configuration column, which the card keeps at
+/// every width.
 fn activity(ctx: &Context, app: &mut RSpiceApp) -> Vec<String> {
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Overview;
@@ -378,16 +378,15 @@ fn activity(ctx: &Context, app: &mut RSpiceApp) -> Vec<String> {
         .operations
         .iter()
         .filter(|operation| matches!(operation.intent, Some(OverviewIntent::OpenRun(_))))
-        .map(|operation| operation.detail.clone())
+        .map(|operation| operation.configuration.clone())
         .collect()
 }
 
-/// That a run row's detail leads with `words`.
+/// That a run row names `words` as its configuration.
 fn row_naming(rows: &[String], words: &str) {
     assert!(
-        rows.iter()
-            .any(|detail| detail.starts_with(&format!("{words} \u{b7} "))),
-        "no run row leads with {words:?}: {rows:#?}"
+        rows.iter().any(|configuration| configuration == words),
+        "no run row names {words:?}: {rows:#?}"
     );
 }
 

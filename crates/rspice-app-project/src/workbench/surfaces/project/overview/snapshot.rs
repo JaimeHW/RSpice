@@ -168,6 +168,10 @@ pub struct OperationSnapshot {
     /// When it happened, as a date and a time.
     pub(super) stamp: String,
     pub event: String,
+    /// The configuration a run elaborated, as an ADE run history names the
+    /// design its test ran; empty for any other row, and for a run that
+    /// recorded none.
+    pub configuration: String,
     /// How long a run took, in seconds.
     pub elapsed: Option<f64>,
     /// The rest, least needed last: a run's engine ends it, so a narrow
@@ -731,18 +735,15 @@ fn retained_operations(
                 .sum();
             let (timestamp_ms, stamp) =
                 OperationSnapshot::dated(unix_seconds_to_millis(run.timestamp));
-            // The design the run elaborated leads, as an ADE result names
+            // The design the run elaborated, as an ADE run history names
             // its test's design; a run that recorded none says nothing.
             let configuration = run
                 .prepared_receipt()
                 .and_then(|receipt| receipt.configuration())
                 .map(|recorded| {
-                    format!(
-                        "{} \u{b7} ",
-                        crate::state::workspace::recorded_configuration_words(
-                            &model.workspace.content.configuration_sets,
-                            recorded,
-                        )
+                    crate::state::workspace::recorded_configuration_words(
+                        &model.workspace.content.configuration_sets,
+                        recorded,
                     )
                 })
                 .unwrap_or_default();
@@ -754,9 +755,10 @@ fn retained_operations(
                     run_title(run.id, &run.label),
                     lifecycle_label(run.lifecycle, run.success)
                 ),
+                configuration,
                 elapsed: Some(run.elapsed_time),
                 detail: format!(
-                    "{configuration}{} {} \u{b7} {measurement_count} {} \u{b7} {}",
+                    "{} {} \u{b7} {measurement_count} {} \u{b7} {}",
                     run.analyses.len(),
                     singular_or_plural(run.analyses.len(), "analysis", "analyses"),
                     singular_or_plural(measurement_count, "measurement", "measurements"),
@@ -789,6 +791,7 @@ fn retained_operations(
                 timestamp_ms,
                 stamp,
                 event: format!("{} validated", revision.view_identity()),
+                configuration: String::new(),
                 elapsed: None,
                 detail: format!(
                     "{} \u{b7} project revision {} \u{b7} {}",
@@ -813,6 +816,7 @@ fn retained_operations(
             timestamp_ms,
             stamp,
             event: format!("Library published \u{b7} {}", publication.label()),
+            configuration: String::new(),
             elapsed: None,
             detail: format!(
                 "#{:04} \u{b7} library revision {} \u{b7} {} \u{b7} {}",
@@ -833,6 +837,7 @@ fn retained_operations(
             timestamp_ms,
             stamp,
             event: checkpoint.reason().label().to_owned(),
+            configuration: String::new(),
             elapsed: None,
             detail: format!("Revision {}", checkpoint.project_revision()),
             tone: Tone::Neutral,
