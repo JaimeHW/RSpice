@@ -991,6 +991,9 @@ fn hir_summary(hir: &HirModel) -> String {
         )
         .expect("write to string");
     }
+    if let Some(discipline) = &hir.default_discipline {
+        writeln!(out, "default_discipline={}", enc_str(discipline)).expect("write to string");
+    }
     for alias in &hir.node_aliases {
         writeln!(
             out,

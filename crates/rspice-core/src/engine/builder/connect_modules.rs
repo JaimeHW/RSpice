@@ -228,15 +228,25 @@ impl PlannedConnectModule {
 
 /// The discrete discipline a boundary port converts as. A digital port
 /// declared with no discipline carries the analog default in its module's
-/// port list; on the event side it has the default discrete discipline.
-fn event_side_discipline<'a>(db: &DisciplineDb, discipline: &'a str) -> &'a str {
-    if db
-        .get_discipline(discipline)
-        .is_some_and(|declared| declared.domain == rspice_veriloga::disciplines::Domain::Discrete)
-    {
+/// port list; on the event side it has `default`, the `default_discipline`
+/// its module was declared under (Verilog-AMS LRM 2.4 section 3.8), or else
+/// the default discrete discipline.
+fn event_side_discipline<'a>(
+    db: &DisciplineDb,
+    discipline: &'a str,
+    default: Option<&'a str>,
+) -> &'a str {
+    let discrete = |name: &str| {
+        db.get_discipline(name).is_some_and(|declared| {
+            declared.domain == rspice_veriloga::disciplines::Domain::Discrete
+        })
+    };
+    if discrete(discipline) {
         discipline
     } else {
-        EVENT_DISCIPLINE
+        default
+            .filter(|default| discrete(default))
+            .unwrap_or(EVENT_DISCIPLINE)
     }
 }
 
@@ -282,7 +292,7 @@ pub(super) fn select_for_boundary(
     port_name: &str,
     discipline: &str,
 ) -> Result<Option<PlannedConnectModule>, SimulationError> {
-    let discipline = event_side_discipline(db, discipline);
+    let discipline = event_side_discipline(db, discipline, None);
     let (port_direction, expected) = boundary_direction(kind);
     let value_kind = boundary_value_kind(kind);
     // A logic-only configuration leaves existing real conversion policy alone.
@@ -1041,6 +1051,21 @@ impl DesignConnectRules {
             .map(|_| (&self.table, &self.disciplines))
     }
 
+    /// The discrete discipline a mixed module's port converts as: `declared`
+    /// when it is discrete, else its module's `default`, else the default
+    /// discrete discipline. A design with no connect rules selects nothing by
+    /// discipline, and the port keeps what it declares.
+    pub(super) fn port_discipline<'a>(
+        &self,
+        declared: &'a str,
+        default: Option<&'a str>,
+    ) -> &'a str {
+        match self.selected() {
+            Some((_, db)) => event_side_discipline(db, declared, default),
+            None => declared,
+        }
+    }
+
     /// Select a connect module for one boundary named directly rather than
     /// found by the XSPICE bridge planner.
     ///
@@ -1065,7 +1090,7 @@ impl DesignConnectRules {
         let Some((table, db)) = self.selected() else {
             return Ok(None);
         };
-        let discipline = event_side_discipline(db, discipline);
+        let discipline = event_side_discipline(db, discipline, None);
         let Some(mut selected) = select_for_boundary(
             table,
             db,

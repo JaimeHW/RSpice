@@ -83,14 +83,15 @@ pub(super) fn plan_conversions(
                 Some(segment) => segment.kind(),
                 None => converter_kind(port.bit.is_some(), port.direction.into()),
             };
-            // A port that declares no discipline has the default discrete
-            // one, as an XSPICE event port does.
+            // A port that declares no discipline has its module's
+            // `default_discipline`, or else the default discrete one, as an
+            // XSPICE event port does.
             let discipline = circuit
                 .port_disciplines
                 .get(&(host.instance_name().to_owned(), signal.to_owned()))
-                .map(String::as_str)
-                .filter(|discipline| !discipline.is_empty())
-                .unwrap_or(connect_modules::EVENT_DISCIPLINE);
+                .map_or(connect_modules::EVENT_DISCIPLINE, |port| {
+                    rules.port_discipline(&port.declared, port.default.as_deref())
+                });
             let selected = rules.select_for_boundary_node(
                 kind,
                 &node_label,

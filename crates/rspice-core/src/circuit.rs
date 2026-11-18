@@ -40,12 +40,12 @@ mod construction;
 mod converter_insertion;
 #[cfg(feature = "veriloga")]
 pub(crate) use converter_insertion::BUILTIN_RULE_SET;
-#[cfg(feature = "veriloga")]
-pub(crate) use converter_insertion::PortSensitivity;
 pub(crate) use converter_insertion::record_text;
 pub use converter_insertion::{
     ConverterInsertion, ConverterKind, ConverterParameter, ConverterSource, ConverterSupply,
 };
+#[cfg(feature = "veriloga")]
+pub(crate) use converter_insertion::{PortDiscipline, PortSensitivity};
 mod model_safety;
 pub use model_safety::{
     BjtModelSafetyFamily, DeviceModelSafety, ModelSafetyValue, MosModelSafety, MosModelSafetyFamily,
@@ -914,10 +914,11 @@ pub struct CircuitData {
     /// modules' ports, for the converters the build inserts on those ports.
     #[cfg(feature = "veriloga")]
     pub(crate) port_sensitivities: Vec<PortSensitivity>,
-    /// The discipline each mixed module's port declares, by instance and
-    /// port: a connect statement applies only to the disciplines it names.
+    /// The discipline each mixed module's port declares, and its module's
+    /// default, by instance and port: a connect statement applies only to
+    /// the disciplines it names.
     #[cfg(feature = "veriloga")]
-    pub(crate) port_disciplines: HashMap<(String, String), String>,
+    pub(crate) port_disciplines: HashMap<(String, String), PortDiscipline>,
     /// Device evaluation time summed while a transient's phase timings arm
     /// it around one Newton assembly; `None`, reading no clock, otherwise.
     pub(crate) device_evaluation_clock: Option<std::time::Duration>,

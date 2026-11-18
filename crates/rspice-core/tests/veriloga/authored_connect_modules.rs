@@ -531,6 +531,101 @@ endmodule
     }
 }
 
+/// Verilog-AMS LRM 2.4 sections 3.8 and 10.2: a discrete port that declares
+/// no discipline has the `` `default_discipline `` in force where its module
+/// is declared, and the connect statement naming that discipline converts it.
+/// The driver declares nothing; under `` `default_discipline cmos2 `` the
+/// `cmos2` statement's 2.2 V level drives the node, and with no directive, or
+/// after a bare one that clears it, the port is `logic` and takes 3.3 V. So
+/// for a deck-level port, a port that meets a continuous net inside the
+/// design, and a `reg` a deck cell's port reads. A continuous discipline is
+/// no default: section 3.8 makes the default a discrete one, and the
+/// directive naming `electrical` is refused.
+#[test]
+fn a_port_with_no_discipline_converts_as_its_default_discipline() {
+    const FAMILIES: &str = r#"
+`timescale 1ns/1ps
+discipline cmos2; domain discrete; enddiscipline
+connectmodule c2e(d, a); input d; cmos2 d; output a; electrical a;
+  analog V(a) <+ transition(d == 1'b1 ? 2.2 : 0.0, 0, 10p); endmodule
+connectmodule l2e(d, a); input d; logic d; output a; electrical a;
+  analog V(a) <+ transition(d == 1'b1 ? 3.3 : 0.0, 0, 10p); endmodule
+connectrules fam;
+  connect c2e input cmos2, output electrical;
+  connect l2e input logic, output electrical;
+endconnectrules
+"#;
+    const DRIVER: &str =
+        "module drv(o); output o; reg o; initial begin o = 0; #10 o = 1; end endmodule
+";
+    let run = |form: &str, directive: &str| {
+        let (modules, deck) = match form {
+            "deck" => (
+                format!("{directive}\n{DRIVER}`default_discipline\n"),
+                "XT y drv\nRY y 0 1k\n.va \"{}\" drv module=drv\n",
+            ),
+            "design" => (
+                format!(
+                    "{directive}\n{DRIVER}`default_discipline\n\
+                     module ld(a, y); inout a; electrical a; output y; electrical y;\n\
+                     analog begin I(a) <+ V(a) / 1e6; V(y) <+ V(a); end endmodule\n\
+                     module top(y); output y; electrical y; electrical n; drv d(n); ld l(n, y);\n\
+                     endmodule\n"
+                ),
+                "XT y top\nRY y 0 1k\n.va \"{}\" top module=top\n",
+            ),
+            _ => (
+                format!(
+                    "{directive}\nmodule top(y); output y; electrical y;\n\
+                     reg q; initial begin q = 0; #10 q = 1; end sense u(q, y); endmodule\n\
+                     `default_discipline\n"
+                ),
+                ".subckt sense a y\nR1 a 0 1meg\nE1 y 0 a 0 1\n.ends\nXT y top\nRY y 0 1k\n\
+                 .hdl \"{}\" module=top\n",
+            ),
+        };
+        let source = Source::new(&format!("{FAMILIES}{modules}"));
+        let deck = Netlist::parse(&format!(
+            "* default discipline\n{}.end\n",
+            deck.replace("{}", &source.path())
+        ))
+        .unwrap();
+        let converters = Engine::default().build_circuit(&deck).map(|circuit| {
+            circuit
+                .converter_insertions()
+                .iter()
+                .map(|record| record.module.clone())
+                .collect::<Vec<_>>()
+        });
+        let level = Engine::default()
+            .run_tran(&deck, 20e-9, 100e-12)
+            .map(|result| voltage(&result, "y", 15e-9));
+        (converters, level)
+    };
+    for form in ["deck", "design", "leaf"] {
+        for (directive, module, level) in [
+            ("`default_discipline cmos2", "c2e", 2.2),
+            ("", "l2e", 3.3),
+            ("`default_discipline cmos2\n`default_discipline", "l2e", 3.3),
+        ] {
+            let (converters, high) = run(form, directive);
+            // The deck-level port's converter is on the build's record; the
+            // other two are the design's, which the level shows.
+            if form == "deck" {
+                assert_eq!(converters.unwrap(), [module], "{form} {directive:?}");
+            }
+            let high = high.unwrap();
+            assert!((high - level).abs() < 1e-9, "{form} {directive:?}: {high}");
+        }
+    }
+    let (refused, _) = run("deck", "`default_discipline electrical");
+    let refused = refused.expect_err("a continuous default").to_string();
+    assert!(
+        refused.contains("`default_discipline electrical` names a continuous discipline"),
+        "{refused}"
+    );
+}
+
 /// Section 7.8.4 insertion rule 3: the ports on one net that select one
 /// connect module in `merged` mode (section 7.8.3's default) share one
 /// instance, which reads their resolved drive; in `split` mode each has its

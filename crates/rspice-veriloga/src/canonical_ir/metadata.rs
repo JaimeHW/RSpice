@@ -291,7 +291,12 @@ use smol_str::SmolStr;
 /// Version 197 carries a connect module's driver access (Verilog-AMS LRM 2.4
 /// section 9.22): [`CfgValueKind::DigitalDriverQuery`](super::cfg::CfgValueKind::DigitalDriverQuery)
 /// and the plan's `driver_updates`. An earlier artifact refused both.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 197;
+/// Version 198 carries the module's `` `default_discipline ``
+/// (`HirModel::default_discipline`), which a deck-level discrete port that
+/// declares no discipline converts as, and gives a hoisted port with no
+/// declared discipline its module's default. An earlier artifact converted
+/// every such port as `logic`.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 198;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

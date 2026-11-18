@@ -525,7 +525,8 @@ struct HierarchyFrame {
 impl DigitalElaborator<'_> {
     /// The discrete discipline of port `port` of `child` where it meets a
     /// continuous net: the one it declares, or the one its interconnect
-    /// resolves to (Annex F.2.1); `None` for the default.
+    /// resolves to (Annex F.2.1), else the `default_discipline` in force where
+    /// `child` was declared (section 3.8); `None` for `logic`.
     fn hoisted_discipline(&self, child: &AnalyzedModule, port: &str) -> Option<SmolStr> {
         let source = self.source_modules.get(&child.name).copied()?;
         super::hierarchy_connections::resolved_interconnect(
@@ -536,6 +537,7 @@ impl DigitalElaborator<'_> {
             port,
             0,
         )
+        .or_else(|| child.default_discipline.clone())
         .filter(|discipline| {
             self.analyzed
                 .disciplines

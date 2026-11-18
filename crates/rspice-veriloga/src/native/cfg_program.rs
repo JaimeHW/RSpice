@@ -2243,6 +2243,7 @@ mod tests {
             ground_nodes: Vec::new(),
             external_leaves: Vec::new(),
             hoisted_ports: Vec::new(),
+            default_discipline: None,
             node_aliases: Vec::new(),
             noise_branches: Default::default(),
         };

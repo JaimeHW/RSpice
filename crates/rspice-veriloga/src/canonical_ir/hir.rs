@@ -1159,6 +1159,12 @@ pub struct HirModel {
     /// deck-level discrete port, so the deck's converters convert it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hoisted_ports: Vec<HirHoistedPort>,
+    /// The `` `default_discipline `` in force where the module was declared
+    /// (Verilog-AMS LRM 2.4 sections 3.8 and 10.2), always a discrete one. A
+    /// deck-level discrete port that declares no discipline converts as it;
+    /// `None` leaves such a port the default discrete discipline, `logic`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_discipline: Option<SmolStr>,
     /// Local nets `$analog_node_alias` and `$analog_port_alias` bind to deck
     /// nodes, in call order; see [`HirNodeAlias`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1201,9 +1207,10 @@ pub struct HirHoistedPort {
     /// The way the port faces, from the design's side.
     pub direction: crate::ast::PortDirection,
     pub net: HirExternalNet,
-    /// The port's discrete discipline, declared or resolved from the ports
-    /// it joins below (Annex F.2.1); `None` for the default. The connect
-    /// statement that converts the port is the one that names it.
+    /// The port's discrete discipline, declared, resolved from the ports it
+    /// joins below (Annex F.2.1), or its module's `` `default_discipline ``
+    /// (section 3.8); `None` for `logic`. The connect statement that converts
+    /// the port is the one that names it.
     #[serde(default)]
     pub discipline: Option<SmolStr>,
 }
@@ -1542,6 +1549,7 @@ impl HirModel {
             ground_nodes: module.ground_nodes.clone(),
             external_leaves: module.external_leaves.clone(),
             hoisted_ports: module.hoisted_ports.clone(),
+            default_discipline: module.default_discipline.clone(),
             node_aliases: module.node_aliases.clone(),
             noise_branches: module.noise_branches.clone(),
             digital_observations: Vec::new(),

@@ -195,13 +195,16 @@ impl HierarchyElaborator<'_> {
             // A port of the root is already linked on the deck's node.
             return Ok(HirExternalNet::Port(PortId::from(index)));
         }
-        // The variable's own discrete discipline selects its converter.
+        // The variable's own discrete discipline selects its converter: the
+        // one it declares, else the `default_discipline` in force where its
+        // module was declared (Verilog-AMS LRM 2.4 section 3.8).
         let discipline = self
             .analyzed
             .modules
             .get(&source.name)
             .and_then(|module| {
                 crate::semantic::hierarchy_connections::declared_discipline(source, module, name)
+                    .or_else(|| module.default_discipline.clone())
             })
             .filter(|discipline| {
                 self.analyzed

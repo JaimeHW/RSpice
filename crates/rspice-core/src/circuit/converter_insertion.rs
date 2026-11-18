@@ -29,6 +29,19 @@ pub(crate) struct PortSensitivity {
     pub(crate) ground: Option<String>,
 }
 
+/// The discipline a mixed module's port declares, and the
+/// `` `default_discipline `` in force where its module was declared
+/// (Verilog-AMS LRM 2.4 section 3.8): a discrete port that declares none
+/// converts as the default, else as `logic`.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PortDiscipline {
+    /// As the module's port list records it: a discrete port that declares
+    /// no discipline carries the analog default there.
+    pub(crate) declared: String,
+    pub(crate) default: Option<String>,
+}
+
 /// One converter the build inserted on a mixed boundary, and where each of
 /// its values came from.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
