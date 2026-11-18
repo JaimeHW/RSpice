@@ -10,8 +10,8 @@ pub use super::*;
 use crate::workbench::app::dialogs::project::{CheckpointComparison, CheckpointDeletion};
 use crate::workbench::design_system::{property_row_path, property_row_problem};
 use crate::workbench::lifecycle::project_checkpoint::{
-    CheckpointEdit, ProjectCheckpointQuarantine, ProjectCheckpointSummary, budget_label,
-    budget_use, normalized_note,
+    CheckpointEdit, ProjectCheckpointQuarantine, ProjectCheckpointSummary, TechnologyRestore,
+    budget_label, budget_use, normalized_note, technology_restore,
 };
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::lifecycle_view;
@@ -72,6 +72,8 @@ struct RecoverySnapshot {
     restoring: Option<uuid::Uuid>,
     /// The checkpoint the reader asked to restore, waiting for the answer.
     restore_review: Option<uuid::Uuid>,
+    /// What restoring it does to the project's technology.
+    restore_technology: TechnologyRestore,
     /// A checkpoint saved as a new project, and where.
     saved_copy: Option<(uuid::Uuid, std::path::PathBuf)>,
     /// What the last comparison found, for the checkpoint it compared.
@@ -134,6 +136,17 @@ impl RecoverySnapshot {
             comparing,
             restoring,
             restore_review: recovery.restore_review,
+            restore_technology: recovery
+                .restore_review
+                .and_then(|id| {
+                    recovery
+                        .checkpoints
+                        .iter()
+                        .find(|checkpoint| checkpoint.checkpoint_id() == id)
+                })
+                .map_or(TechnologyRestore::Same, |checkpoint| {
+                    technology_restore(cx.model, checkpoint.technology())
+                }),
             saved_copy: recovery.saved_copy.clone(),
             comparison: recovery.comparison.clone(),
             busy,
@@ -197,6 +210,9 @@ enum RecoveryIntent {
     AskRestore(ProjectCheckpointSummary),
     CancelRestore,
     Restore(ProjectCheckpointSummary),
+    /// Show the Dependencies page, where a technology is installed and
+    /// changed.
+    OpenDependencies,
     /// Write it as a new project file, asking where.
     SaveAsNewProject(ProjectCheckpointSummary),
     /// Open the project a checkpoint was saved as.
@@ -239,7 +255,21 @@ impl RecoveryIntent {
             Self::CancelRestore => cx.state.project_checkpoint_recovery.restore_review = None,
             Self::Restore(checkpoint) => {
                 cx.state.project_checkpoint_recovery.restore_review = None;
+                if let Some(refusal) = technology_restore(cx.model, checkpoint.technology())
+                    .refusal(checkpoint.title())
+                {
+                    cx.model.report_failure(
+                        crate::workbench::app::dialogs::project::CHECKPOINT_NOT_RESTORED,
+                        refusal,
+                    );
+                    return;
+                }
                 restore_project_checkpoint(ctx, cx, checkpoint);
+            }
+            Self::OpenDependencies => {
+                cx.state.project_checkpoint_recovery.restore_review = None;
+                cx.state.project_page =
+                    crate::workbench::project::workspace_state::ProjectPage::Dependencies;
             }
             Self::SaveAsNewProject(checkpoint) => {
                 cx.state.project_checkpoint_selection =
@@ -687,7 +717,7 @@ fn checkpoints_card(
                 keep_first(
                     &mut intent,
                     row_prompt(ui, selected, separated, |ui| {
-                        restore_prompt(ui, checkpoint, snapshot.busy)
+                        restore_prompt(ui, checkpoint, &snapshot.restore_technology, snapshot.busy)
                     }),
                 );
             } else if let Some(path) = saved_copy {
@@ -874,20 +904,60 @@ fn delete_prompt(ui: &mut Ui, question: &str, delete_label: &str, busy: bool) ->
     answer
 }
 
-/// A restore asked about in place: what it puts back and what it keeps, then
-/// Restore and Cancel.
+/// A restore asked about in place: what it puts back, its technology among
+/// it, and what it keeps, then Restore and Cancel. A restore that cannot go
+/// ahead here, for a technology not installed or a PDK change reviewed on
+/// Dependencies, says so before anything is confirmed and offers what can be
+/// done instead.
 fn restore_prompt(
     ui: &mut Ui,
     checkpoint: &ProjectCheckpointSummary,
+    technology: &TechnologyRestore,
     busy: bool,
 ) -> Option<RecoveryIntent> {
     let tokens = Tokens::get(ui.ctx());
     let height = prompt_control_height(ui);
+    if let Some(refusal) = technology.refusal(checkpoint.title()) {
+        text_block(ui, &refusal, body_font(), tokens.color.text);
+        ui.add_space(8.0);
+        let mut intent = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if Button::new("Open Dependencies")
+                .min_height(height)
+                .show(ui)
+                .clicked()
+            {
+                intent = Some(RecoveryIntent::OpenDependencies);
+            }
+            if Button::new("Save as new project\u{2026}")
+                .enabled(!busy)
+                .min_height(height)
+                .show(ui)
+                .clicked()
+            {
+                intent = Some(RecoveryIntent::SaveAsNewProject(checkpoint.clone()));
+            }
+            if Button::new("Cancel").min_height(height).show(ui).clicked() {
+                intent = Some(RecoveryIntent::CancelRestore);
+            }
+        });
+        return intent;
+    }
+    let technology = match technology {
+        TechnologyRestore::Restores(name) => {
+            format!(" Its technology, {name}, comes back with it.")
+        }
+        TechnologyRestore::Detaches(name) => {
+            format!(" The project had no technology then, so {name} is detached.")
+        }
+        _ => String::new(),
+    };
     text_block(
         ui,
         &format!(
             "Restore \u{201c}{}\u{201d} from {}? Its project becomes unsaved changes; the \
-             project as it is now is kept as \u{201c}{}\u{201d}.",
+             project as it is now is kept as \u{201c}{}\u{201d}.{technology}",
             checkpoint.title(),
             crate::time_compat::utc_stamp(checkpoint.created_unix_ms()),
             crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Restore
@@ -1902,10 +1972,14 @@ fn hand_over_restore(
         (Ok(_), None) => {}
         (Ok(_), Some(Err(error))) => cx.model.report_failure(CHECKPOINT_NOT_RESTORED, error),
         (Ok(before), Some(Ok(project))) => {
-            recovery.restored = Some(RestoredCheckpoint {
+            // The person at this application, whom a technology the
+            // checkpoint brings back is recorded under.
+            let actor = cx.peers.cloud_session().review_actor(cx.peers.cloud());
+            cx.state.project_checkpoint_recovery.restored = Some(RestoredCheckpoint {
                 checkpoint,
                 project: *project,
                 before,
+                actor,
             });
         }
     }

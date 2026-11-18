@@ -144,6 +144,9 @@ pub struct RestoredCheckpoint {
     pub checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
     pub project: crate::io::ProjectSnapshot,
     pub before: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
+    /// The person restoring it, whom a technology it brings back is
+    /// recorded under.
+    pub actor: String,
 }
 
 /// What a comparison of the open project with a checkpoint found, by

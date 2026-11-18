@@ -70,6 +70,96 @@ impl ProjectCheckpointReason {
     }
 }
 
+/// What restoring a checkpoint does to the open project's technology, known
+/// before the reader is asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TechnologyRestore {
+    /// The checkpoint was taken under the technology the project has now.
+    Same,
+    /// The technology it was taken under, installed here, comes back.
+    Restores(String),
+    /// It was taken with no technology: the one the project has is detached.
+    Detaches(String),
+    /// The technology it was taken under is not installed here.
+    NotInstalled(String),
+    /// It was taken under another revision of the project's PDK, a change
+    /// whose differences are reviewed on Dependencies.
+    NeedsReview { from: String, to: String },
+}
+
+impl TechnologyRestore {
+    /// Whether the restore can go ahead here.
+    pub const fn allowed(&self) -> bool {
+        matches!(self, Self::Same | Self::Restores(_) | Self::Detaches(_))
+    }
+
+    /// Why the restore cannot go ahead, for a checkpoint named `title`; none
+    /// when it can.
+    pub fn refusal(&self, title: &str) -> Option<String> {
+        match self {
+            Self::Same | Self::Restores(_) | Self::Detaches(_) => None,
+            Self::NotInstalled(label) => Some(format!(
+                "\u{201c}{title}\u{201d} was taken under technology {label}, which is not \
+                 installed on this computer, so it cannot be restored here. Install it on \
+                 Dependencies, or save the checkpoint as a new project."
+            )),
+            Self::NeedsReview { from, to } => Some(format!(
+                "Restoring \u{201c}{title}\u{201d} changes the PDK from {from} to {to}, and a \
+                 PDK change has its differences reviewed on Dependencies. Change the \
+                 technology there first, or save the checkpoint as a new project."
+            )),
+        }
+    }
+}
+
+/// The name a person knows a technology by: its PDK and revision, or its
+/// model package and version when it has no PDK.
+pub fn technology_name(binding: &crate::state::ProjectTechnologyBinding) -> String {
+    binding.pdk_package().map_or_else(
+        || {
+            binding.package_version().map_or_else(
+                || binding.package_name().to_owned(),
+                |version| format!("{} {version}", binding.package_name()),
+            )
+        },
+        |pin| pin.display_label(),
+    )
+}
+
+/// What restoring a checkpoint taken under `restored` does to the technology
+/// of the project `model` holds.
+pub fn technology_restore(
+    model: &Model,
+    restored: Option<&crate::state::ProjectTechnologyBinding>,
+) -> TechnologyRestore {
+    let current = model.workspace.content.project.technology_binding();
+    if restored == current {
+        return TechnologyRestore::Same;
+    }
+    let Some(restored) = restored else {
+        return TechnologyRestore::Detaches(current.map(technology_name).unwrap_or_default());
+    };
+    if let Some(pin) = restored.pdk_package()
+        && model
+            .pdk_config
+            .technology_registry
+            .validate_project_binding(restored)
+            .is_err()
+    {
+        return TechnologyRestore::NotInstalled(pin.display_label());
+    }
+    match (
+        current.and_then(|binding| binding.pdk_package()),
+        restored.pdk_package(),
+    ) {
+        (Some(now), Some(then)) if now != then => TechnologyRestore::NeedsReview {
+            from: now.display_label(),
+            to: then.display_label(),
+        },
+        _ => TechnologyRestore::Restores(technology_name(restored)),
+    }
+}
+
 /// How long retention keeps a checkpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckpointRetention {
@@ -115,6 +205,10 @@ struct ProjectCheckpointManifest {
     /// save leaves it behind, and no start offers it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     saved_generation: Option<u64>,
+    /// The technology the project was bound to when the checkpoint was
+    /// taken: what a restore brings back, known before it is asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    technology: Option<crate::state::ProjectTechnologyBinding>,
 }
 
 impl ProjectCheckpointManifest {
@@ -183,6 +277,7 @@ pub struct ProjectCheckpointSummary {
     snapshot_digest: ContentDigest,
     snapshot_byte_len: u64,
     saved_generation: Option<u64>,
+    technology: Option<crate::state::ProjectTechnologyBinding>,
     locator: ProjectCheckpointLocator,
 }
 
@@ -313,6 +408,11 @@ impl ProjectCheckpointSummary {
         self.checkpoint_id
     }
 
+    /// The technology the project was bound to when it was taken.
+    pub fn technology(&self) -> Option<&crate::state::ProjectTechnologyBinding> {
+        self.technology.as_ref()
+    }
+
     pub fn project_name(&self) -> &str {
         &self.project_name
     }
@@ -395,6 +495,7 @@ pub fn fixture_summary(
         snapshot_digest: ContentDigest::from_bytes([0x5a; 32]),
         snapshot_byte_len,
         saved_generation: None,
+        technology: None,
         locator: ProjectCheckpointLocator::Native {
             manifest: PathBuf::from("fixture.checkpoint.json"),
             snapshot: PathBuf::from("fixture.rspiceproj"),
@@ -675,6 +776,7 @@ fn seal_checkpoint(
         snapshot_byte_len: bytes.len().try_into().unwrap_or(u64::MAX),
         snapshot_name,
         saved_generation: None,
+        technology: project.file.workspace.project.technology_binding().cloned(),
     };
 
     validate_manifest(&manifest)?;
@@ -1043,6 +1145,7 @@ fn summary_from_manifest(
         snapshot_digest: manifest.snapshot_digest,
         snapshot_byte_len: manifest.snapshot_byte_len,
         saved_generation: manifest.saved_generation,
+        technology: manifest.technology,
         locator,
     })
 }
@@ -2568,6 +2671,7 @@ mod tests {
             snapshot_byte_len: 128,
             snapshot_name: "wrong.rspiceproj".to_owned(),
             saved_generation: None,
+            technology: None,
         };
         assert!(validate_manifest(&manifest).is_err());
     }
@@ -2631,6 +2735,7 @@ mod tests {
             snapshot_digest: digest(&bytes),
             snapshot_byte_len: bytes.len() as u64,
             saved_generation: None,
+            technology: None,
             #[cfg(not(target_arch = "wasm32"))]
             locator: ProjectCheckpointLocator::Native {
                 manifest: PathBuf::from("manifest"),

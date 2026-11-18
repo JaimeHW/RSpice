@@ -14,7 +14,7 @@ use crate::workbench::app_state::services_access::restore_checkpoint_in_place;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, ProjectCheckpointSummary, capture_current_state, create,
-    keep_unsaved_checkpoints_in, list, load, publish_recovery_copy,
+    keep_unsaved_checkpoints_in, list, load, publish_recovery_copy, technology_name,
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     canonical_native_path, has_unsaved_changes_fresh,
@@ -155,6 +155,158 @@ fn restore_puts_the_checkpoint_back_in_the_open_project_as_unsaved_changes() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The checkpoint taken before a technology was attached restores what it
+/// recorded, the technology included: asked in place, the question says the
+/// technology is detached, and the restore takes the project back to no
+/// technology, recorded in its technology history over the "Before restore"
+/// checkpoint.
+#[test]
+fn restoring_before_technology_change_takes_the_project_back_to_its_technology() {
+    let (mut app, root) = saved_project("restore-technology");
+    create(&mut app.state, ProjectCheckpointReason::TechnologyChange)
+        .expect("the checkpoint is written");
+    app.state.provision_test_project_technology_contract();
+    let attached = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .map(technology_name)
+        .expect("the technology is attached");
+
+    let ctx = offscreen();
+    let shown = recovery_page(&ctx, &mut app, "1 checkpoint");
+    let asked = app_frame(
+        &ctx,
+        &mut app,
+        click_on(&shown, "Restore Before technology change into the project"),
+    );
+    let asked = next_with(
+        &ctx,
+        &mut app,
+        asked,
+        "Restore \u{201c}Before technology change\u{201d} from ",
+    );
+    assert!(
+        painted(&asked).contains(&format!(
+            "The project had no technology then, so {attached} is detached."
+        )),
+        "the question says what happens to the technology:\n{}",
+        painted(&asked)
+    );
+    app_frame(
+        &ctx,
+        &mut app,
+        click_on(&asked, "Restore Before technology change"),
+    );
+    paint_until(&ctx, &mut app, |text| {
+        text.lines().any(|line| line == "2 checkpoints")
+    });
+
+    let project = &app.state.model.workspace.content.project;
+    assert!(
+        project.technology_binding().is_none(),
+        "the project is back to the technology it had: none"
+    );
+    let before = listed(&app)
+        .into_iter()
+        .find(|checkpoint| checkpoint.reason() == ProjectCheckpointReason::Restore)
+        .expect("the project as it was is a checkpoint");
+    let receipt = project
+        .technology_change_audit()
+        .last()
+        .expect("the change is in the technology history");
+    assert!(
+        receipt.after_binding_label().is_none() && receipt.reason().starts_with("Restored "),
+        "the restore detached it: {}",
+        receipt.reason()
+    );
+    assert_eq!(
+        receipt.checkpoint_id(),
+        before.checkpoint_id(),
+        "its receipt names the checkpoint that keeps the technology"
+    );
+    assert!(
+        before.technology().is_some(),
+        "and that checkpoint was taken under the technology"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A checkpoint taken under a technology this computer does not have is
+/// refused in its question, before anything is confirmed, naming the
+/// technology; nothing is written and the project is unchanged.
+#[test]
+fn a_checkpoint_whose_technology_is_not_installed_is_refused_before_it_is_confirmed() {
+    let (mut app, root) = saved_project("restore-technology-missing");
+    let file = root.join("idle.rspiceproj");
+    app.state.provision_test_project_technology_contract();
+    let name = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .map(technology_name)
+        .expect("the technology is attached");
+    create(&mut app.state, ProjectCheckpointReason::Manual).expect("the checkpoint is written");
+    drop(app);
+
+    // Another computer: the saved project, with no technology installed.
+    let mut app = RSpiceApp::test_instance();
+    assert!(app.state.load_project_from_path(&file));
+    let ctx = offscreen();
+    let shown = recovery_page(&ctx, &mut app, "1 checkpoint");
+    let asked = app_frame(
+        &ctx,
+        &mut app,
+        click_on(&shown, "Restore Manual checkpoint into the project"),
+    );
+    let asked = next_with(
+        &ctx,
+        &mut app,
+        asked,
+        "which is not installed on this computer",
+    );
+    let text = painted(&asked);
+    assert!(
+        text.contains(&format!(
+            "\u{201c}Manual checkpoint\u{201d} was taken under technology {name}, which is \
+             not installed on this computer"
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains("Save as new project\u{2026}") && text.contains("Open Dependencies"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("Its project becomes unsaved changes"),
+        "nothing is offered to confirm:\n{text}"
+    );
+    for _ in 0..5 {
+        app_frame(&ctx, &mut app, Vec::new());
+    }
+    assert_eq!(
+        listed(&app).len(),
+        1,
+        "no Before restore checkpoint is written"
+    );
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .is_none()
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Compare lists each document the open project differs in, with how; a
 /// checkpoint of the project as it is answers on one line.
 #[test]
@@ -248,7 +400,7 @@ C1 out 0 10n
     drop(std::mem::take(&mut state.model.simulation));
     assert_eq!(state.model.simulation.retained.runs.len(), 0);
 
-    restore_checkpoint_in_place(&mut state, load(&checkpoint).expect("read back"))
+    restore_checkpoint_in_place(&mut state, load(&checkpoint).expect("read back"), None)
         .expect("the checkpoint is restored");
     assert_eq!(
         state.model.simulation.retained.runs.len(),

@@ -18,6 +18,7 @@ use rspice_app_services::io::ProjectSnapshot;
 use rspice_app_services::workbench::app_state::session::autosave;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_services::workbench::app_state::session::autosave::AutosaveRestore;
+use rspice_app_services::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     self, CellViewRevert, LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut,
     LifecycleView, PersistenceBinding, ProjectDocumentId, ProjectLifecycleError, RevertFollowUp,
@@ -319,7 +320,12 @@ pub(crate) fn apply_restored_checkpoint(state: &mut AppState) {
     };
     state.project.project_checkpoint_recovery.invalidate();
     let when = rspice_app_state::time_compat::utc_stamp(restored.checkpoint.created_unix_ms());
-    match restore_checkpoint_in_place(state, restored.project) {
+    let authority = RestoreAuthority {
+        restored: &restored.checkpoint,
+        before: &restored.before,
+        actor: &restored.actor,
+    };
+    match restore_checkpoint_in_place(state, restored.project, Some(authority)) {
         Ok(()) => {
             state.record(
                 LogSeverity::Info,
@@ -340,15 +346,27 @@ pub(crate) fn apply_restored_checkpoint(state: &mut AppState) {
     }
 }
 
+/// Who restores a checkpoint, and the checkpoint that keeps the project as
+/// it was before: what a restore that brings back another technology records
+/// that change under.
+pub(crate) struct RestoreAuthority<'a> {
+    pub restored: &'a ProjectCheckpointSummary,
+    pub before: &'a ProjectCheckpointSummary,
+    pub actor: &'a str,
+}
+
 /// Put a checkpoint's project back in the open project as unsaved changes:
 /// its libraries, documents, simulation plan, models and results, its top
-/// cell and its description. The project keeps who it is: its file, its
-/// revision, its technology and every audit and publication record. A
-/// checkpoint taken under another technology is refused: a technology is
-/// changed on Dependencies, where the change is recorded.
+/// cell, its description and its technology. The project keeps who it is:
+/// its file, its revision history and every audit and publication record. A
+/// technology the checkpoint brings back, or one it detaches, is recorded in
+/// the project's technology history under `authority`, the "Before restore"
+/// checkpoint its receipt names; without one, a checkpoint taken under
+/// another technology is refused.
 pub(crate) fn restore_checkpoint_in_place(
     state: &mut AppState,
     mut checkpoint: ProjectSnapshot,
+    authority: Option<RestoreAuthority<'_>>,
 ) -> Result<(), String> {
     if state.model.safe_mode.project_read_only() {
         return Err("The project is open read-only.".to_owned());
@@ -360,7 +378,14 @@ pub(crate) fn restore_checkpoint_in_place(
     if checkpoint.file.workspace.project.id() != current.id() {
         return Err("The checkpoint belongs to another project.".to_owned());
     }
-    if checkpoint.file.workspace.project.technology_binding() != current.technology_binding() {
+    let restored_technology = checkpoint
+        .file
+        .workspace
+        .project
+        .technology_binding()
+        .cloned();
+    let technology_changes = restored_technology.as_ref() != current.technology_binding();
+    if technology_changes && authority.is_none() {
         return Err(
             "The checkpoint has another technology. Change the technology on Dependencies first, or save the checkpoint as a new project."
                 .to_owned(),
@@ -379,6 +404,9 @@ pub(crate) fn restore_checkpoint_in_place(
             ),
         };
     let mut project = current.clone();
+    if technology_changes && let Some(authority) = &authority {
+        restore_technology(&state.model, &mut project, restored_technology, authority)?;
+    }
     let restored = &checkpoint.file.workspace.project;
     project.root_library = restored.root_library.clone();
     project.top_cell = restored.top_cell.clone();
@@ -426,6 +454,22 @@ pub(crate) fn restore_checkpoint_in_place(
         .project
         .validate()
         .map_err(|error| format!("The restored project is not valid: {error}"))?;
+    if technology_changes
+        && candidate
+            .model
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .is_some()
+    {
+        candidate
+            .model
+            .validate_project_technology_contract()
+            .map_err(|error| {
+                format!("The checkpoint's technology does not resolve here: {error}")
+            })?;
+    }
     // What the features kept of the project before, and its edit history,
     // describe documents the restore replaced.
     candidate.models.on_project_changed();
@@ -439,6 +483,60 @@ pub(crate) fn restore_checkpoint_in_place(
         state.record(LogSeverity::Warning, LogSource::Studio, warning);
     }
     Ok(())
+}
+
+/// Bring `project`'s technology back to `restored`, the one the checkpoint
+/// was taken under, as one audited change whose receipt names the "Before
+/// restore" checkpoint and the person restoring it. A technology that is not
+/// installed here, or a PDK revision change, which is reviewed on
+/// Dependencies, is refused.
+fn restore_technology(
+    model: &rspice_app_state::workbench::app_state::model::Model,
+    project: &mut rspice_app_state::state::ProjectDescriptor,
+    restored: Option<rspice_app_state::state::ProjectTechnologyBinding>,
+    authority: &RestoreAuthority<'_>,
+) -> Result<(), String> {
+    use rspice_app_services::workbench::lifecycle::project_checkpoint::technology_restore;
+    let verdict = technology_restore(model, restored.as_ref());
+    if let Some(refusal) = verdict.refusal(authority.restored.title()) {
+        return Err(refusal);
+    }
+    let before = authority.before;
+    let context = rspice_app_state::state::ProjectTechnologyChangeContext::new(
+        rspice_app_state::state::ProjectTechnologyChangeAuthority::new(
+            authority.actor.trim(),
+            format!(
+                "Restore of checkpoint {}",
+                authority.restored.checkpoint_id()
+            ),
+            format!(
+                "Restored \u{201c}{}\u{201d} from {}",
+                authority.restored.title(),
+                rspice_app_state::time_compat::utc_stamp(authority.restored.created_unix_ms())
+            ),
+        )
+        .map_err(|error| format!("Who restored it cannot be recorded: {error}"))?,
+        before.checkpoint_id(),
+        rspice_app_state::product::ObjectRevision::new(before.project_revision()).map_err(
+            |error| format!("The \u{201c}Before restore\u{201d} checkpoint is not valid: {error}"),
+        )?,
+        before.created_unix_ms(),
+        before.snapshot_digest(),
+        before.snapshot_byte_len(),
+    )
+    .map_err(|error| {
+        format!("The \u{201c}Before restore\u{201d} checkpoint is not valid: {error}")
+    })?;
+    match restored {
+        Some(binding) => project
+            .attach_technology_audited(binding, context)
+            .map(|_| ())
+            .map_err(|error| format!("The checkpoint's technology was not brought back: {error}")),
+        None => project
+            .detach_technology_audited(context)
+            .map(|_| ())
+            .map_err(|error| format!("The technology was not detached: {error}")),
+    }
 }
 
 fn restore_project_structure_preserving_documents(state: &mut AppState, baseline: LibraryManager) {
@@ -605,7 +703,7 @@ pub(crate) fn settle_restart_offer(state: &mut AppState) {
     let saved = state.platform.project_lifecycle.accepted_snapshot();
     match saved {
         Ok(saved) if session_holds_the_autosave => {
-            match restore_checkpoint_in_place(state, saved) {
+            match restore_checkpoint_in_place(state, saved, None) {
                 Ok(()) => state.platform.project_autosave.offer = Some(offer),
                 Err(error) => {
                     log::warn!("the saved project was not put back before the offer: {error}");
@@ -635,7 +733,7 @@ pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Co
     match answer {
         RecoveredWorkAnswer::Keep(found) => {
             let when = rspice_app_state::time_compat::utc_stamp(found.autosave.created_unix_ms());
-            match restore_checkpoint_in_place(state, *found.project) {
+            match restore_checkpoint_in_place(state, *found.project, None) {
                 Ok(()) => {
                     state.project.project_checkpoint_recovery.invalidate();
                     state.prompt(format!(
