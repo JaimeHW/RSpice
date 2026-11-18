@@ -3,6 +3,8 @@
 pub mod layout_editor;
 mod tool_options;
 
+use std::sync::Arc;
+
 use egui::{Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 use super::DesignFeature;
@@ -470,7 +472,9 @@ pub fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
             model.workspace.content.active_view.cell
         ),
     )
-    .on_hover_text(occurrences.join("\n"));
+    .on_hover_ui(|ui| {
+        ui.label(occurrences.join("\n"));
+    });
 }
 
 /// Every occurrence the open document's master is instantiated at, in path
@@ -487,23 +491,13 @@ pub fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
 /// announced as landing anywhere in particular.
 ///
 /// The document's occurrence ends at its own reference by construction, so
-/// the master asked about is `active_view`.
-pub fn master_occurrence_paths(model: &Model) -> Vec<String> {
+/// the master asked about is `active_view`. The projection derives the list
+/// once and holds it, so the banner over an unchanged design walks nothing.
+pub fn master_occurrence_paths(model: &Model) -> Arc<[String]> {
     let Ok(projection) = model.design_projection_through_gesture() else {
-        return Vec::new();
+        return Arc::from([]);
     };
-    let master = model.workspace.content.active_view.key();
-    projection
-        .plan()
-        .bindings()
-        .filter(|binding| {
-            binding
-                .resolved_reference()
-                .key()
-                .eq_ignore_ascii_case(&master)
-        })
-        .map(|binding| binding.instance_path().to_string())
-        .collect()
+    projection.occurrences_of(&model.workspace.content.active_view)
 }
 
 /// Say that the open document cannot be edited, and how to get one that can.

@@ -263,6 +263,9 @@ pub struct DesignProjection {
     /// `Mutex` rather than a `RefCell` keeps a frozen projection `Send +
     /// Sync`, so handing one to a worker never forces a rebuild.
     nets: Mutex<HashMap<String, Arc<dyn Any + Send + Sync>>>,
+    /// Every occurrence path of each master asked about, keyed by folded
+    /// cell-view key.
+    occurrences: Mutex<HashMap<String, Arc<[String]>>>,
 }
 
 /// The projection under the name the execution paths have always used for it.
@@ -316,6 +319,36 @@ impl DesignProjection {
     /// plan, and no surface has to state what it would show without one.
     pub const fn plan(&self) -> &ConfigurationExecutionPlan {
         &self.plan
+    }
+
+    /// Every occurrence `master` is instantiated at, in path order: the
+    /// instance path of each binding the plan resolves to it. Derived on
+    /// first demand and retained for the life of the projection, so a
+    /// surface that states it every frame walks the bindings once per
+    /// design change.
+    pub fn occurrences_of(&self, master: &CellViewRef) -> Arc<[String]> {
+        let folded = master.key().to_ascii_lowercase();
+        let memo = || {
+            self.occurrences
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        };
+        if let Some(paths) = memo().get(&folded) {
+            return Arc::clone(paths);
+        }
+        let paths: Arc<[String]> = self
+            .plan
+            .bindings()
+            .filter(|binding| {
+                binding
+                    .resolved_reference()
+                    .key()
+                    .eq_ignore_ascii_case(&folded)
+            })
+            .map(|binding| binding.instance_path().to_string())
+            .collect();
+        memo().insert(folded, Arc::clone(&paths));
+        paths
     }
 
     /// Diagnostics from the same materialized hierarchy that owns the plan.
@@ -715,6 +748,7 @@ impl<M: ProjectionSources, F: HierarchySourceFiles> ProjectionContext<'_, M, F> 
             connectivity: (**self.connectivity).clone(),
             key,
             nets: Mutex::new(HashMap::new()),
+            occurrences: Mutex::new(HashMap::new()),
         };
         if projection.root_schematic().is_none() {
             return Err(ConfigurationExecutionPlanError::MissingRoot(

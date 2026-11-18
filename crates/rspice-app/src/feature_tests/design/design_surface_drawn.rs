@@ -7,7 +7,7 @@ use rspice_app_design::workbench::design::surface::tests::descended;
 use rspice_app_design::workbench::design::surface::{
     breadcrumb, hierarchy_breadcrumb_segments, master_occurrence_paths, occurrence_scope_banner,
 };
-use rspice_app_state::state::ViewType;
+use rspice_app_state::state::{ComponentType, Point, ViewType};
 
 /// The canvas every render in this module uses. Wide enough that the crumb
 /// row is measured rather than elided.
@@ -118,7 +118,7 @@ fn breadcrumb_segments_render_instance_and_master() {
 /// two occurrences in front.
 fn app_with_a_twice_instantiated_cell() -> (RSpiceApp, rspice_app_state::state::CellViewRef) {
     use rspice_app_state::state::{
-        CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
+        CellViewRef, Library, LibraryCellInstance, SchematicState, View,
     };
 
     let mut app = RSpiceApp::test_instance();
@@ -213,5 +213,44 @@ fn occurrence_watermark_appears_only_above_one_instance() {
     assert!(
         render(&app).content_height() > 0,
         "a master placed twice must say so before the edit"
+    );
+}
+
+/// The banner states a master's scope on every frame it is open: the scope
+/// is derived once per design change, and a frame over an unchanged design
+/// walks no occurrence. An edit derives it again.
+#[test]
+fn the_occurrence_scope_is_derived_once_per_design_change() {
+    let (mut app, shared) = app_with_a_twice_instantiated_cell();
+    let master = app
+        .state
+        .model
+        .workspace
+        .clone_schematic_editor(&shared.key())
+        .expect("the shared master buffer");
+    app.state
+        .model
+        .workspace
+        .descend_into("X1".to_owned(), shared, ViewType::Schematic);
+    app.state.model.schematic = master;
+
+    let first = master_occurrence_paths(&app.state.model);
+    let again = master_occurrence_paths(&app.state.model);
+    assert_eq!(first.len(), 2, "the shared master is instantiated twice");
+    assert_eq!(
+        first.as_ptr(),
+        again.as_ptr(),
+        "an unchanged design hands back the scope it derived"
+    );
+
+    app.state.model.schematic.with_undo("Place", |schematic| {
+        schematic.add_component(ComponentType::Resistor, Point::new(90, 0));
+    });
+    let edited = master_occurrence_paths(&app.state.model);
+    assert_eq!(edited.len(), 2, "the edit leaves both occurrences");
+    assert_ne!(
+        edited.as_ptr(),
+        first.as_ptr(),
+        "an edit derives the scope again"
     );
 }
