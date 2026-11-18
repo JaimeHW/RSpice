@@ -21,21 +21,19 @@ use crate::workbench::project::commands::ProjectRequest;
 /// What attaching does, beside the buttons once nothing is left to choose.
 const TECHNOLOGY_CONSEQUENCE: &str = "Attaching a technology changes how this project simulates. A recovery checkpoint is saved first.";
 /// The rows of the attach form, which set its label column.
-const TECHNOLOGY_ATTACH_LABELS: [&str; 14] = [
+const TECHNOLOGY_ATTACH_LABELS: [&str; 12] = [
     "Model library",
-    "PDK package",
+    "PDK",
     "Changed by",
     "Approved by",
     "Reason (optional)",
     "Devices",
     "Layers",
     "Corners",
-    "Source closure",
-    "Package identity",
+    "Model files",
     "Publisher",
-    "Revision diff",
-    "Reviewed diff",
-    "Migration copy",
+    "Differences",
+    "Copy",
 ];
 /// The rows of the detach form, which set its label column.
 const TECHNOLOGY_DETACH_LABELS: [&str; 4] = [
@@ -399,7 +397,7 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     let selected_package_label = selected_package_index
         .and_then(|index| package_options.get(index))
         .map(String::as_str)
-        .unwrap_or("No validated PDK package");
+        .unwrap_or("No PDK installed");
     let package_runtime_error = selected_package_index
         .and_then(|index| packages.get(index))
         .and_then(|package| package.runtime_compatibility().err());
@@ -465,15 +463,11 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
                 .and_then(Option::as_ref)
                 .and_then(|diff| {
                     if !diff.same_package_lineage {
-                        Some(
-                            "Cross-technology replacement requires a dedicated design-migration branch; direct project attachment is prohibited."
-                                .to_owned(),
-                        )
+                        Some(CROSS_TECHNOLOGY.to_owned())
                     } else if diff.has_breaking_changes() {
-                        Some(format!(
-                            "This revision changes {} breaking PDK contract(s). Create and validate a dedicated migration branch before replacing the project pin.",
-                            diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking)
-                        ))
+                        Some(breaking_changes(diff.count(
+                            crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking,
+                        )))
                     } else {
                         None
                     }
@@ -507,7 +501,6 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     let missing = technology_missing_inputs(
         selected_index.is_some(),
         selected_package_index.is_some(),
-        selected_binding.is_some(),
         authority_ready,
     );
     let still_to_choose =
@@ -515,7 +508,7 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     let refusal = validation_error.clone().or_else(|| {
         selected_binding_error
             .as_deref()
-            .map(|error| format!("Selected PDK cannot be attached: {error}"))
+            .map(|error| format!("This PDK cannot be attached: {error}"))
     });
     // One line beside the buttons: the checkpoint being written, else why
     // the attachment is refused, else what is still to choose, else what
@@ -531,7 +524,7 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     };
     let choice = CommandForm::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
         .describe(
-            "Choose a model library and one validated PDK revision. Attaching verifies both, writes a whole-project checkpoint and reads it back, then records the binding as a new project revision.",
+            "Choose the model library and the PDK this project simulates with.",
         )
         .reading_column()
         .fit_labels(ctx, &TECHNOLOGY_ATTACH_LABELS)
@@ -549,7 +542,7 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
                 cx.state.technology_attachment.validation_error = None;
             }
             if let Some(index) =
-                rows.select("PDK package", "project-pdk-package", selected_package_label, &package_options)
+                rows.select("PDK", "project-pdk-package", selected_package_label, &package_options)
             {
                 cx.state.technology_attachment.selected_pdk_package =
                     Some(pdk_package_key(&packages[index]));
@@ -558,62 +551,48 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
             }
             technology_change_rows(rows, &mut cx.state.technology_attachment);
 
-            rows.section("Technology mapping");
+            rows.section("Contents");
             if let Some(candidate) = selected_index.and_then(|index| candidates.get(index)) {
                 let models = candidate.binding.model_count();
                 rows.value(
                     "Devices",
-                    &format!("{models} parsed model{}", plural_suffix(models)),
+                    &format!("{models} device model{}", plural_suffix(models)),
                 );
                 rows.value(
                     "Layers",
                     &selected_package
                         .map(|package| {
                             let layers = package.manifest().layers.len();
-                            format!("{layers} PDK technology layer{}", plural_suffix(layers))
+                            format!("{layers} layer{}", plural_suffix(layers))
                         })
-                        .unwrap_or_else(|| "No PDK layer catalog selected".to_owned()),
+                        .unwrap_or_else(|| "Choose a PDK".to_owned()),
                 );
                 let corners = candidate.corner_count;
                 rows.value(
                     "Corners",
-                    &format!("{corners} process section{}", plural_suffix(corners)),
+                    &format!("{corners} process corner{}", plural_suffix(corners)),
                 );
                 let files = candidate.binding.source_closure().len();
-                rows.value(
-                    "Source closure",
-                    &format!("{files} SHA-256 pinned file{}", plural_suffix(files)),
-                );
+                rows.value("Model files", &format!("{files} file{}", plural_suffix(files)));
                 if let Some(package) = selected_package {
-                    rows.value(
-                        "Package identity",
-                        &format!(
-                            "{} {} \u{b7} manifest {} \u{b7} archive {}",
-                            package.manifest().package_id,
-                            package.manifest().revision,
-                            short_identity(&package.manifest_digest().to_string()),
-                            short_identity(&package.archive_digest().to_string())
-                        ),
-                    );
                     rows.value("Publisher", &package.manifest().publisher_id);
                 }
             } else {
                 rows.derived(
-                    "No model library can be attached. Configure and parse at least one external model library with a root source file and one device model.",
+                    "No model library can be attached. Add one under PDK and model paths\u{2026}: a model file that defines at least one device.",
                 );
             }
 
-            rows.section("Migration");
+            rows.section("What changes");
             match migration_preview.as_ref() {
                 Ok(Some(diff)) => {
-                    rows.value(
-                        "Mode",
-                        "Revision replacement \u{b7} checkpointed \u{b7} editable views unchanged",
+                    rows.derived(
+                        "This PDK replaces the attached revision. Schematics and layouts are not changed.",
                     );
                     rows.value(
-                        "Revision diff",
+                        "Differences",
                         &format!(
-                            "{} breaking \u{b7} {} review \u{b7} {} informational",
+                            "{} breaking \u{b7} {} to review \u{b7} {} for information",
                             diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking),
                             diff.count(
                                 crate::state::pdk_config::PdkTechnologyDiffImpact::ReviewRequired,
@@ -623,16 +602,6 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
                             ),
                         ),
                     );
-                    if let Ok(Some(evidence)) = migration_evidence.as_ref() {
-                        rows.value(
-                            "Reviewed diff",
-                            &format!(
-                                "diff {} \u{b7} {} entries",
-                                short_identity(&evidence.diff_digest().to_string()),
-                                evidence.entry_count()
-                            ),
-                        );
-                    }
                     let entries = diff
                         .entries
                         .iter()
@@ -648,49 +617,50 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
                         &[
                             TableColumn { header: "Impact", mono: false },
                             TableColumn { header: "Area", mono: false },
-                            TableColumn { header: "Identity", mono: true },
+                            TableColumn { header: "Item", mono: true },
                         ],
                         &entries,
                     );
                     if migration_gate_error.is_some() {
                         if rows.value_action(
-                            "Migration copy",
-                            "Keeps the current PDK pin",
+                            "Copy",
+                            "On the attached PDK",
                             "Save copy\u{2026}",
                         ) {
                             create_migration_copy = true;
                         }
                         rows.derived(
-                            "The copy keeps the current PDK pin and starts a new project audit history. Open that copy, remap affected objects explicitly, validate it, then review the replacement again. The current project remains unchanged.",
+                            "The copy keeps the attached PDK and starts its own history. Open the copy, update what the new revision changes, check it, then attach the new revision there. This project stays as it is.",
                         );
                     } else {
                         rows.checks(
                             "Review",
                             &mut [(
-                                "I reviewed the PDK revision diff and approve this non-breaking replacement",
+                                "I reviewed the differences and approve the new revision",
                                 &mut cx.state.technology_attachment.migration_reviewed,
                             )],
                         );
                         rows.derived(
-                            "The project's audit record keeps the baseline and candidate revisions, archive identities, diff digest, impact counts, and recovery checkpoint.",
+                            "The project's history keeps both revisions, what differs, and the recovery checkpoint.",
                         );
                     }
                 }
                 Ok(None) => {
-                    rows.value("Mode", "Attach only \u{b7} editable views unchanged");
                     rows.derived(
-                        "Initial attachment changes the project execution contract only. Editable schematic and physical views are never migrated implicitly.",
+                        "Runs use this PDK's models and corners. Schematics and layouts are not changed.",
                     );
                 }
                 // Sentences, so they wrap whole: a field's error line is one
                 // line cut in the middle.
-                Err(error) => rows.derived(&format!("Migration preview failed: {error}")),
+                Err(error) => rows.derived(&format!(
+                    "The two PDK revisions could not be compared: {error}"
+                )),
             }
             if !catalog.diagnostics.is_empty() {
-                rows.section("Library validation");
+                rows.section("Model libraries that cannot be attached");
                 for diagnostic in &catalog.diagnostics {
                     rows.derived(&format!(
-                        "Model library '{}' cannot be attached: {}",
+                        "{}: {}",
                         diagnostic.library_name, diagnostic.reason
                     ));
                 }
@@ -708,10 +678,7 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
         DialogChoice::Primary => {
             let result = selected_binding
                 .clone()
-                .ok_or_else(|| {
-                    "Select a model library that can be attached and a validated PDK package"
-                        .to_owned()
-                })
+                .ok_or_else(|| "Choose a model library that can be attached and a PDK".to_owned())
                 .and_then(|binding| {
                     technology_change_authority(&cx.state.technology_attachment).and_then(
                         |authority| {
@@ -839,7 +806,7 @@ pub(super) fn attach_technology_binding(
         && cx.model.workspace.content.project.technology.as_deref() == Some(label.as_str())
     {
         return Ok(Some(format!(
-            "{} is already attached at project revision {}; nothing was changed.",
+            "{} is already attached at revision {}; nothing was changed.",
             label,
             cx.model.workspace.content.project.revision().get()
         )));
@@ -1037,7 +1004,7 @@ fn commit_detach_after_checkpoint(
         .technology
         .clone()
         .unwrap_or_default();
-    let (revision, audit_receipt) = cx
+    let (revision, _) = cx
         .model
         .workspace
         .content
@@ -1045,10 +1012,8 @@ fn commit_detach_after_checkpoint(
         .map_err(|error| format!("The technology was not detached: {error}"))?;
     cx.state.project_checkpoint_recovery.invalidate();
     Ok(format!(
-        "Detached {label} at project revision {} (technology receipt #{}); checkpoint {} keeps revision {}.",
+        "Detached {label} at revision {}; the recovery checkpoint keeps revision {}.",
         revision.get(),
-        audit_receipt.sequence(),
-        short_identity(&checkpoint.checkpoint_id().to_string()),
         checkpoint.project_revision(),
     ))
 }
@@ -1086,7 +1051,7 @@ fn technology_change_context(
         checkpoint.snapshot_digest(),
         checkpoint.snapshot_byte_len(),
     )
-    .map_err(|error| format!("Technology change authority is invalid: {error}"))
+    .map_err(|error| format!("Who changed or approved it is not valid: {error}"))
 }
 
 fn commit_technology_after_checkpoint(
@@ -1102,26 +1067,24 @@ fn commit_technology_after_checkpoint(
     if let Some(evidence) = migration_evidence {
         change_context = change_context
             .with_migration_evidence(evidence)
-            .map_err(|error| format!("The reviewed technology migration is invalid: {error}"))?;
+            .map_err(|error| format!("The reviewed differences are not valid: {error}"))?;
     }
-    let (revision, audit_receipt) = cx
+    let (revision, _) = cx
         .model
         .workspace
         .content
         .attach_technology_audited(binding.clone(), change_context)
-        .map_err(|error| format!("Technology attachment was not committed: {error}"))?;
+        .map_err(|error| format!("The technology was not attached: {error}"))?;
     if revision == previous_revision {
-        return Err("Technology attachment unexpectedly produced no project revision".to_owned());
+        return Err("The technology was not attached: the project did not change".to_owned());
     }
     cx.state.project_checkpoint_recovery.invalidate();
     Ok(format!(
-        "Attached {} at project revision {} (technology receipt #{}, {} source file{}); checkpoint {} keeps revision {}.",
+        "Attached {} ({} model file{}) at revision {}; the recovery checkpoint keeps revision {}.",
         binding.display_label(),
-        revision.get(),
-        audit_receipt.sequence(),
         binding.source_closure().len(),
         plural_suffix(binding.source_closure().len()),
-        short_identity(&checkpoint.checkpoint_id().to_string()),
+        revision.get(),
         checkpoint.project_revision(),
     ))
 }
@@ -1195,7 +1158,7 @@ pub(super) fn verify_pinned_model_sources(
 ) -> Result<(), String> {
     binding
         .validate()
-        .map_err(|error| format!("Technology contract is invalid: {error}"))?;
+        .map_err(|error| format!("The model library is not valid: {error}"))?;
     manager
         .catalog()
         .validate_attached_technology(Some(binding))?;
@@ -1213,7 +1176,7 @@ pub(super) fn verify_pinned_model_sources(
             let observed = ModelLibraryManager::calculate_source_digest(&source.path)?;
             if observed != source.digest {
                 return Err(format!(
-                    "Model source '{}' changed after it was parsed. Refresh the model library before attaching it.",
+                    "The model file '{}' changed after it was read. Rescan the model libraries before attaching it.",
                     source.path.display()
                 ));
             }
@@ -1231,7 +1194,7 @@ pub(super) fn verify_pinned_technology_contract(
         .pdk_config
         .technology_registry
         .validate_project_binding(binding)
-        .map_err(|error| format!("PDK contract is unavailable: {error}"))
+        .map_err(|error| format!("The PDK is not installed: {error}"))
 }
 
 fn validate_migration_evidence_for_binding(
@@ -1242,7 +1205,7 @@ fn validate_migration_evidence_for_binding(
     let baseline = model.project_pdk_package()?;
     let candidate_pin = binding
         .pdk_package()
-        .ok_or_else(|| "The candidate binding has no PDK package pin.".to_owned())?;
+        .ok_or_else(|| "Choose a PDK.".to_owned())?;
     let candidate = model
         .pdk_config
         .technology_registry
@@ -1257,11 +1220,12 @@ fn validate_migration_evidence_for_binding(
                 && package.manifest_digest() == candidate_pin.manifest_digest()
                 && package.archive_digest() == candidate_pin.archive_digest()
         })
-        .ok_or_else(|| "Candidate PDK no longer matches the validated archive.".to_owned())?;
+        .ok_or_else(|| "The PDK changed after it was installed. Install it again.".to_owned())?;
     let Some(baseline) = baseline else {
         if evidence.is_some() {
             return Err(
-                "A first technology attachment cannot include a migration review.".to_owned(),
+                "The project has no technology yet, so there are no differences to review."
+                    .to_owned(),
             );
         }
         return Ok(());
@@ -1271,8 +1235,7 @@ fn validate_migration_evidence_for_binding(
     {
         if evidence.is_some() {
             return Err(
-                "The project already uses this PDK package; there is no migration to review."
-                    .to_owned(),
+                "The project already uses this PDK; there are no differences to review.".to_owned(),
             );
         }
         return Ok(());
@@ -1281,43 +1244,32 @@ fn validate_migration_evidence_for_binding(
         baseline.metadata(),
         candidate.metadata(),
     )
-    .map_err(|error| format!("Revision comparison failed: {error}"))?;
+    .map_err(|error| format!("The two PDK revisions could not be compared: {error}"))?;
     if !diff.same_package_lineage {
-        return Err(
-            "Cross-technology replacement requires an independent migration copy; direct replacement is prohibited."
-                .to_owned(),
-        );
+        return Err(CROSS_TECHNOLOGY.to_owned());
     }
     if diff.has_breaking_changes() {
-        return Err(format!(
-            "The PDK revision changes {} breaking contract(s); direct replacement is prohibited until those objects are explicitly remapped in an independent migration copy.",
-            diff.count(crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking)
-        ));
+        return Err(breaking_changes(diff.count(
+            crate::state::pdk_config::PdkTechnologyDiffImpact::Breaking,
+        )));
     }
     let evidence = evidence
-        .ok_or_else(|| "Replacing a PDK revision requires a reviewed comparison.".to_owned())?;
+        .ok_or_else(|| "Review the differences before replacing the PDK revision.".to_owned())?;
     if !evidence.matches_diff(&diff) {
         return Err(
-            "The reviewed comparison no longer matches the validated baseline and candidate packages."
-                .to_owned(),
+            "The PDK changed after its differences were reviewed. Review them again.".to_owned(),
         );
     }
     Ok(())
 }
 
-/// What the reader still has to supply before this attachment can commit.
-///
-/// Seven dotted rows stood here: five internal checks the dialog reported
-/// green the moment its own fields were filled in, and two disclaimers about
-/// capabilities the product never claimed. None of the seven was something a
-/// reader could act on, and the ones that were — a library, a package, a
-/// mapping, an authority — are the dialog's own four controls. So this states
-/// only the conditions that are unmet, in the order their controls appear, and
-/// nothing at all once they are met.
+/// What the reader still has to supply before this attachment can commit:
+/// only the conditions that are unmet, in the order their controls appear,
+/// and nothing at all once they are met. A library and a PDK that do not
+/// fit each other are a refusal, not something still to choose.
 pub(super) fn technology_missing_inputs(
     has_model_candidate: bool,
     has_pdk_package: bool,
-    contract_ready: bool,
     authority_ready: bool,
 ) -> Vec<&'static str> {
     let mut missing = Vec::new();
@@ -1325,15 +1277,24 @@ pub(super) fn technology_missing_inputs(
         missing.push("a model library");
     }
     if !has_pdk_package {
-        missing.push("a validated PDK revision");
+        missing.push("a PDK");
     }
     if !authority_ready {
         missing.push("who changes it and who approves it");
     }
-    if !contract_ready {
-        missing.push("a technology mapping");
-    }
     missing
+}
+
+/// Why a PDK of another technology cannot replace the attached one.
+const CROSS_TECHNOLOGY: &str = "This PDK is a different technology from the attached one. Save a copy of the project and move the design to it there.";
+
+/// Why a revision that breaks what the design uses cannot replace the
+/// attached one in place.
+fn breaking_changes(count: usize) -> String {
+    format!(
+        "This revision changes {count} thing{} the design uses. Save a copy of the project, update the design there, then attach the new revision.",
+        plural_suffix(count)
+    )
 }
 
 /// Who makes a technology change, who approves it and why, each a row of
@@ -1390,5 +1351,5 @@ fn technology_change_authority(
         dialog.authority_id.trim(),
         dialog.reason.trim(),
     )
-    .map_err(|error| format!("Technology change authority is invalid: {error}"))
+    .map_err(|error| format!("Who changed or approved it is not valid: {error}"))
 }

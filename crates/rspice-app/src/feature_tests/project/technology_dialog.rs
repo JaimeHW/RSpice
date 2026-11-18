@@ -53,7 +53,7 @@ fn project_with_pdk(label: &str) -> (RSpiceApp, PathBuf) {
 /// The attach dialog opened from the page, as its first settled frame.
 fn open_attach_dialog(ctx: &egui::Context, app: &mut RSpiceApp) -> egui::FullOutput {
     let page = app_frame(ctx, app, Vec::new());
-    app_frame(ctx, app, click_on(&page, "Attach model technology\u{2026}"));
+    app_frame(ctx, app, click_on(&page, "Attach technology\u{2026}"));
     app_frame(ctx, app, Vec::new());
     app_frame(ctx, app, Vec::new())
 }
@@ -123,7 +123,7 @@ fn the_attach_dialog_starts_on_the_user_and_needs_no_reason() {
     assert_eq!(announced_value(&dialog, "Approved by"), Some(user.clone()));
     assert!(!text.contains("Still to choose"), "{text}");
 
-    app_frame(&ctx, &mut app, click_on(&dialog, "Attach binding"));
+    app_frame(&ctx, &mut app, click_on(&dialog, "Attach"));
     paint_until_attached(&ctx, &mut app);
     let project = &app.state.model.workspace.content.project;
     let receipt = project
@@ -148,14 +148,14 @@ fn an_attach_writes_its_checkpoint_while_the_application_paints() {
     app.state.project.project_checkpoint_recovery.job_hold = Some(hold.clone());
     let ctx = offscreen();
     let dialog = open_attach_dialog(&ctx, &mut app);
-    assert_eq!(enabled(&dialog, "Attach binding"), Some(true));
+    assert_eq!(enabled(&dialog, "Attach"), Some(true));
 
-    app_frame(&ctx, &mut app, click_on(&dialog, "Attach binding"));
+    app_frame(&ctx, &mut app, click_on(&dialog, "Attach"));
     for _ in 0..IDLE_FRAMES {
         let waiting = app_frame(&ctx, &mut app, Vec::new());
         let text = painted(&waiting);
         assert_eq!(text.matches(PENDING).count(), 1, "{text}");
-        assert_eq!(enabled(&waiting, "Attach binding"), Some(false), "{text}");
+        assert_eq!(enabled(&waiting, "Attach"), Some(false), "{text}");
         assert!(
             app.state
                 .model
@@ -209,7 +209,7 @@ fn a_retained_model_library_attaches_without_its_original_files() {
     assert!(!original.exists(), "{}", original.display());
     let ctx = offscreen();
     let dialog = open_attach_dialog(&ctx, &mut app);
-    app_frame(&ctx, &mut app, click_on(&dialog, "Attach binding"));
+    app_frame(&ctx, &mut app, click_on(&dialog, "Attach"));
     paint_until_attached(&ctx, &mut app);
     assert_eq!(
         app.state
@@ -234,7 +234,7 @@ fn the_technology_detaches_from_the_page_through_a_checkpoint() {
     let user = app.cloud.review_actor(&*app.state.cloud);
     let ctx = offscreen();
     let dialog = open_attach_dialog(&ctx, &mut app);
-    app_frame(&ctx, &mut app, click_on(&dialog, "Attach binding"));
+    app_frame(&ctx, &mut app, click_on(&dialog, "Attach"));
     paint_until_attached(&ctx, &mut app);
     let page = app_frame(&ctx, &mut app, Vec::new());
     assert_eq!(enabled(&page, "Detach\u{2026}"), Some(true));

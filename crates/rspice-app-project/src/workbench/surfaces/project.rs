@@ -94,10 +94,10 @@ fn visible_workspace_height(ui: &Ui) -> f32 {
         .max(1.0)
 }
 
-const TECHNOLOGY_SURFACE_ACTION: &str = "Attach model technology\u{2026}";
-const TECHNOLOGY_DIALOG_TITLE: &str = "Attach model-library technology";
-const TECHNOLOGY_DIALOG_PRIMARY: &str = "Attach binding";
-const TECHNOLOGY_DIALOG_CURRENT: &str = "Binding already attached";
+const TECHNOLOGY_SURFACE_ACTION: &str = "Attach technology\u{2026}";
+const TECHNOLOGY_DIALOG_TITLE: &str = "Attach technology";
+const TECHNOLOGY_DIALOG_PRIMARY: &str = "Attach";
+const TECHNOLOGY_DIALOG_CURRENT: &str = "Already attached";
 const TECHNOLOGY_DETACH_ACTION: &str = "Detach\u{2026}";
 const TECHNOLOGY_DETACH_TITLE: &str = "Detach technology";
 const TECHNOLOGY_DETACH_PRIMARY: &str = "Detach";
