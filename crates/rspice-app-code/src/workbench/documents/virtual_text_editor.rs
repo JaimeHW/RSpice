@@ -2224,14 +2224,13 @@ pub(crate) fn paste_refused_text(
     ctx: &egui::Context,
     messages: crate::workbench::MessageCatalog,
 ) -> String {
-    let key = if ctx.os() == egui::os::OperatingSystem::Mac {
-        "Cmd+V"
-    } else {
-        "Ctrl+V"
-    };
+    // Written as the menus write a key, as the Paste row beside it does.
+    let key =
+        rspice_app_state::state::shortcuts::ShortcutStroke::new(egui::Key::V, true, false, false)
+            .display_label_for(ctx.os());
     messages.format(
         crate::workbench::MessageId::EditorPasteRefused,
-        &[("key", key)],
+        &[("key", &key)],
     )
 }
 
