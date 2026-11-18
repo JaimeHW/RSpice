@@ -559,6 +559,7 @@ fn worker_spec_request_preserves_monte_carlo() {
         environment: None,
         stream_transient_samples: false,
                 execution_limits: rspice_core::ResourceLimits::default(),
+                hdl_deck_directory: None,
     };
 
     let worker =
@@ -619,6 +620,7 @@ fn worker_spec_request_preserves_structured_tf_contract() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
+        hdl_deck_directory: None,
     };
 
     let worker = WorkerRequest::from_runner_parts(51, &request, &input).expect("request converts");
@@ -707,6 +709,7 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
+        hdl_deck_directory: None,
     };
 
     let pac_worker =
@@ -796,6 +799,7 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
+        hdl_deck_directory: None,
     };
 
     let pnoise_worker =
@@ -859,6 +863,7 @@ fn worker_spec_request_preserves_parametric_temp_execution_options() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
+        hdl_deck_directory: None,
     };
 
     let worker =
@@ -942,6 +947,7 @@ fn worker_spec_request_preserves_corner_execution_options() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
+        hdl_deck_directory: None,
     };
 
     let worker = WorkerRequest::from_runner_parts(91, &request, &input).expect("Corner converts");
@@ -974,6 +980,7 @@ fn worker_request_from_runner_parts_preserves_payload() {
         environment: None,
         stream_transient_samples: true,
         execution_limits: rspice_core::ResourceLimits::default(),
+        hdl_deck_directory: None,
     };
 
     let worker = WorkerRequest::from_runner_parts(41, &request, &input).expect("request converts");
@@ -1069,6 +1076,7 @@ fn worker_request_runs_structured_tf_spec() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
+        hdl_deck_directory: None,
     };
     let worker = WorkerRequest::from_runner_parts(13, &request, &input).expect("request converts");
     let encoded_request = serde_json::to_vec(&worker).expect("TF request serializes");
@@ -1469,6 +1477,7 @@ fn worker_resource_policy_round_trip_is_required_and_enforced() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: limits,
+        hdl_deck_directory: None,
     };
     let request = WorkerRequest::from_runner_parts(
         99,

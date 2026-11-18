@@ -357,6 +357,7 @@ pub fn prepare_headless_run(
             corner_veriloga_runtimes: Default::default(),
             measurement_references: input.measurement_references,
             data_files,
+            hdl_deck_directory: super::preparation::source_directory(Some(input.origin)),
             target: ExecutionTargetCapabilities::current(),
             receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
             advisories: parsed

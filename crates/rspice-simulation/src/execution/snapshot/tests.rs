@@ -295,6 +295,7 @@ fn parts() -> SnapshotParts {
         cross_probe: None,
         touchstone_export: TouchstoneExportPolicy::disabled(),
         sealed_source_dependencies: Vec::new(),
+        hdl_deck_directory: None,
     }
 }
 

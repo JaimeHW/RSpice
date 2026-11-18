@@ -99,21 +99,26 @@ impl EngineBridge {
         self
     }
 
-    /// The run's record of the files its analyses wrote, when the run gave
-    /// one: what every engine the bridge's analyses build shares.
-    pub(crate) fn hdl_run_files(&self) -> Option<&rspice_core::config::HdlRunFiles> {
-        self.engine.config().hdl.run_files.as_ref()
+    /// The HDL settings of the run: its record of the files its analyses
+    /// wrote and the directory their relative paths resolve against, which
+    /// every engine the bridge's analyses build takes.
+    pub(crate) fn hdl_config(&self) -> &rspice_core::config::HdlRunConfig {
+        &self.engine.config().hdl
     }
 
     /// Share `files`, the run's record of the files its analyses wrote, with
-    /// every engine this bridge builds; `None` keeps one per engine.
-    pub(crate) fn with_hdl_run_files(
+    /// every engine this bridge builds, and resolve their relative HDL file
+    /// paths against `deck_directory`, the run source's directory; `None`
+    /// keeps one record per engine and the working directory.
+    pub(crate) fn with_hdl_run(
         mut self,
         files: Option<rspice_core::config::HdlRunFiles>,
+        deck_directory: Option<std::path::PathBuf>,
     ) -> Self {
-        if files.is_some() {
+        if files.is_some() || deck_directory.is_some() {
             let mut config = self.engine.config().clone();
             config.hdl.run_files = files;
+            config.hdl.deck_directory = deck_directory;
             self.engine = rspice_core::Engine::new(config);
         }
         self

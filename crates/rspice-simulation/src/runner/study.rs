@@ -51,7 +51,7 @@ fn service_context<'a>(
         source_path: None,
         limits: engine.config().resource_limits,
         abort,
-        hdl_run_files: engine.config().hdl.run_files.as_ref(),
+        hdl: Some(&engine.config().hdl),
     }
 }
 

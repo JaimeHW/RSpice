@@ -435,7 +435,7 @@ mod policy_tests {
                     source_path: None,
                     limits,
                     abort: &rspice_core::NoAbort,
-                    hdl_run_files: None,
+                    hdl: None,
                 },
             )
         };

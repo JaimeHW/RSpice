@@ -88,6 +88,9 @@ pub(crate) enum SimulationRequest {
 pub(crate) struct NetlistInput {
     netlist: String,
     source_path: Option<PathBuf>,
+    /// The directory the run's relative HDL file paths resolve against: its
+    /// source's own, as `rspice run` resolves them beside its deck.
+    hdl_deck_directory: Option<PathBuf>,
     project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: crate::measurement_references::PreparedMeasurementReferences,
     data_files: crate::data_files::PreparedDataFiles,
@@ -519,6 +522,7 @@ impl SimulationRunner {
                 environment: None,
                 stream_transient_samples: false,
                 execution_limits: rspice_core::ResourceLimits::default(),
+                hdl_deck_directory: None,
             },
             crate::engine_services::TransientStateRole::default(),
         )
@@ -628,6 +632,7 @@ pub(crate) fn prepared_request(
         project_veriloga_runtimes,
         measurement_references,
         data_files,
+        hdl_deck_directory,
         dependencies,
         environment,
         execution_limits,
@@ -651,6 +656,7 @@ pub(crate) fn prepared_request(
     let input = NetlistInput {
         netlist: executable_netlist.to_string(),
         source_path: None,
+        hdl_deck_directory,
         project_veriloga_runtimes,
         measurement_references,
         data_files,
@@ -1152,7 +1158,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     limits.max_netlist_bytes = limits.max_expanded_source_bytes;
     let bridge = EngineBridge::new()
         .with_resource_limits(limits)
-        .with_hdl_run_files(hdl_run_files)
+        .with_hdl_run(hdl_run_files, input.hdl_deck_directory.clone())
         .with_run_log()
         .with_measurement_references(input.measurement_references.clone());
 
@@ -1365,6 +1371,7 @@ mod tests {
                 environment: None,
                 stream_transient_samples: false,
                 execution_limits: rspice_core::ResourceLimits::default(),
+                hdl_deck_directory: None,
             },
             Arc::new(Mutex::new(SimulationProgress::default())),
             Arc::new(AtomicBool::new(false)),

@@ -555,6 +555,7 @@ where
             execution_limits: inputs.execution_limits(),
             measurement_references,
             data_files,
+            hdl_deck_directory: source_directory(root_schematic.current_file()),
             intent: SimulationRunIntent::SimulateRunSet,
             simulation_plan_id: Some(plan.plan_id()),
             project_revision: inputs.technology.project.revision().get(),
@@ -1002,6 +1003,7 @@ pub fn build_prepared_manual_deck<R, A>(
         execution_limits: inputs.execution_limits(),
         measurement_references,
         data_files,
+        hdl_deck_directory: source_directory(origin),
         intent: SimulationRunIntent::ManualDeck,
         simulation_plan_id: None,
         project_revision: inputs.technology.project.revision().get(),
@@ -1105,6 +1107,21 @@ fn attach_family_members(
         }
     }
     Ok(())
+}
+
+/// The directory of a run's source, where its relative HDL file paths
+/// resolve, as `rspice run` resolves them beside its deck and as the run's
+/// Touchstone export is written: `None` for a source not saved to a file,
+/// whose paths resolve against the working directory.
+pub(crate) fn source_directory(source: Option<&Path>) -> Option<std::path::PathBuf> {
+    let directory = source?
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())?;
+    Some(
+        directory
+            .canonicalize()
+            .unwrap_or_else(|_| directory.to_path_buf()),
+    )
 }
 
 pub fn touchstone_export_policy<'a>(

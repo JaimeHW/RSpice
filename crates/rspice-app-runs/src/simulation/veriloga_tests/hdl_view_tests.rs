@@ -1193,7 +1193,8 @@ const LOGGER: &str = "`include \"disciplines.vams\"\nmodule logger(p);\n    inou
                       I(p) <+ V(p) / 1k;\n    end\nendmodule\n";
 
 /// `logger` on a 1 V supply, run as a 1 ns transient at each of
-/// `temperatures`, its run directory `directory`.
+/// `temperatures`, its schematic saved in `directory`, where its relative
+/// HDL file paths resolve.
 fn logged(directory: &std::path::Path, temperatures: &[&str]) -> RunTestHost {
     use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind};
 
@@ -1229,27 +1230,12 @@ fn logged(directory: &std::path::Path, temperatures: &[&str]) -> RunTestHost {
         temperatures,
         1,
     )];
+    state.model.schematic.session.current_file = Some(directory.join("logged.rsch"));
     state.sync_active_schematic_to_workspace();
-    let design = state
-        .model
-        .workspace
-        .configuration_execution_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
-        )
-        .expect("the design projects")
-        .root()
-        .clone();
-    rspice_design::added_lines::set_added_lines(
-        &mut state.model.workspace.content.added_lines,
-        &design,
-        format!(".options hdl_rundir=\"{}\"\n", directory.display()),
-    );
     state
 }
 
-/// A scratch run directory.
+/// A scratch directory a design is saved in.
 fn run_directory() -> std::path::PathBuf {
     let directory = rspice_app_state::fixture_root::canonical_temp_dir()
         .join(format!("rspice-hdl-run-files-{}", uuid::Uuid::new_v4()));
@@ -1260,7 +1246,8 @@ fn run_directory() -> std::path::PathBuf {
 /// LRM 2.4 section 9.5.1.1: a file one analysis of a run opened in a write
 /// mode, a later analysis that opens it in that mode appends to. Each point
 /// of a Run Set is an analysis of the one run, so a three-point Run Set
-/// leaves all three points' lines, in point order, not the last point's.
+/// leaves all three points' lines, in point order, not the last point's,
+/// beside the saved schematic, as its Touchstone export is written.
 #[test]
 fn a_run_set_leaves_every_points_line_in_a_file_each_point_opens() {
     let directory = run_directory();
@@ -1290,5 +1277,24 @@ fn a_second_run_starts_the_file_over() {
     assert_eq!(
         std::fs::read_to_string(directory.join("log.txt")).expect("the runs wrote log.txt"),
         "-40\n27\n"
+    );
+}
+
+/// A relative HDL file path in a manual deck's run resolves beside the deck,
+/// where `rspice run` of the same deck writes it, not in the application's
+/// working directory: its `.op` and `.tran` each leave their line there.
+#[test]
+fn a_manual_decks_relative_file_is_written_beside_the_deck() {
+    let directory = run_directory();
+    std::fs::write(directory.join("logger.va"), LOGGER).expect("write the module");
+    let source = "* a deck that writes beside itself\n.hdl \"logger.va\"\nv1 s 0 1\n\
+                  xl s logger\n.op\n.tran 0.1n 1n\n.end\n";
+    let deck = directory.join("deck.cir");
+    std::fs::write(&deck, source).expect("write the deck");
+    let run = run_manual_batch_at(source, &deck, SimulationRunLifecycle::Completed);
+    assert_eq!(run.analyses.len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(directory.join("log.txt")).expect("the run wrote log.txt"),
+        "27\n27\n"
     );
 }

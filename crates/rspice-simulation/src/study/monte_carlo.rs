@@ -50,7 +50,7 @@ pub(crate) fn prepare_study_with_context(
         source_path,
         limits,
         abort,
-        hdl_run_files,
+        hdl,
     } = context;
     ensure_not_aborted(abort).map_err(SimulationError::from)?;
     if !base.objective_terms.is_empty() || !base.constraints.is_empty() {
@@ -71,8 +71,11 @@ pub(crate) fn prepare_study_with_context(
         ..Default::default()
     };
     // Every trial is an analysis of the run: a file one trial writes, a
-    // later trial appends to.
-    config.hdl.run_files = hdl_run_files.cloned();
+    // later trial appends to, in the run's directory.
+    if let Some(hdl) = hdl {
+        config.hdl.run_files = hdl.run_files.clone();
+        config.hdl.deck_directory = hdl.deck_directory.clone();
+    }
     let engine = rspice_core::Engine::new(config);
     let circuit = crate::netlist_preparation::parse_analysis_netlist_with_abort(
         &source,

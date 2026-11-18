@@ -129,6 +129,7 @@ fn sealed_code_model_data_files_travel_with_the_worker_request() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: limits,
+        hdl_deck_directory: None,
     };
     let request = SimulationRequest::Config(Box::new(AnalysisConfig::Transient(
         TransientAnalysisConfig {

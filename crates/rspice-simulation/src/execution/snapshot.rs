@@ -659,6 +659,7 @@ pub struct AuthorizedTaskDispatch {
     project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: crate::measurement_references::PreparedMeasurementReferences,
     data_files: crate::data_files::PreparedDataFiles,
+    hdl_deck_directory: Option<std::path::PathBuf>,
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<rspice_results::provenance::AnalysisResultPvtPoint>,
     family_member: Option<rspice_results::provenance::AnalysisResultFamilyMember>,
@@ -870,6 +871,7 @@ impl ResolvedTaskDispatch {
             project_veriloga_runtimes: self.dispatch.project_veriloga_runtimes,
             measurement_references: self.dispatch.measurement_references,
             data_files: self.dispatch.data_files,
+            hdl_deck_directory: self.dispatch.hdl_deck_directory,
             dependencies: self.dependencies,
             environment: self.dispatch.execution_environment,
             execution_limits: self.dispatch.execution_limits,
@@ -890,6 +892,8 @@ pub(crate) struct RunnerParts {
     pub(crate) project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     pub(crate) measurement_references: crate::measurement_references::PreparedMeasurementReferences,
     pub(crate) data_files: crate::data_files::PreparedDataFiles,
+    /// The directory the task's relative HDL file paths resolve against.
+    pub(crate) hdl_deck_directory: Option<std::path::PathBuf>,
     pub(crate) dependencies: ResolvedExecutionDependencies,
     pub(crate) environment: Option<crate::runner::AnalysisExecutionEnvironment>,
     pub(crate) execution_limits: rspice_core::ResourceLimits,
@@ -924,6 +928,11 @@ pub(crate) struct SnapshotParts {
     pub(crate) measurement_references: crate::measurement_references::PreparedMeasurementReferences,
     /// The data files the run's code models read, captured from its deck.
     pub(crate) data_files: crate::data_files::PreparedDataFiles,
+    /// The directory a relative HDL file path resolves against: the run
+    /// source's own, as `rspice run` resolves one beside its deck. `None` for
+    /// a source not saved to a file, whose paths resolve against the working
+    /// directory, as its Touchstone export does.
+    pub(crate) hdl_deck_directory: Option<std::path::PathBuf>,
     pub(crate) target: ExecutionTargetCapabilities,
     pub(crate) receipt: RunSourceReceipt,
     pub(crate) advisories: Vec<String>,
@@ -988,6 +997,7 @@ pub struct PreparedRunSnapshot {
     project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: crate::measurement_references::PreparedMeasurementReferences,
     data_files: crate::data_files::PreparedDataFiles,
+    hdl_deck_directory: Option<std::path::PathBuf>,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
     advisories: Vec<String>,
@@ -1362,7 +1372,7 @@ impl PreparedRunSnapshot {
                 source_path: None,
                 limits: execution_limits,
                 abort,
-                hdl_run_files: None,
+                hdl: None,
             },
         )?;
         transient_checkpoint::route_resumes(&mut parts, execution_limits, abort)?;
@@ -1714,6 +1724,7 @@ impl PreparedRunSnapshot {
             project_veriloga_runtimes: parts.project_veriloga_runtimes,
             measurement_references: parts.measurement_references,
             data_files: parts.data_files,
+            hdl_deck_directory: parts.hdl_deck_directory,
             target: parts.target,
             receipt: parts.receipt,
             advisories: parts.advisories,
@@ -1824,6 +1835,7 @@ impl PreparedRunSnapshot {
         let project_veriloga_runtimes = self.project_veriloga_runtimes.clone();
         let measurement_references = self.measurement_references.clone();
         let data_files = self.data_files.clone();
+        let hdl_deck_directory = self.hdl_deck_directory.clone();
         let tasks = self
             .tasks
             .into_iter()
@@ -1869,6 +1881,7 @@ impl PreparedRunSnapshot {
                         .unwrap_or_else(|| project_veriloga_runtimes.clone()),
                     measurement_references: measurement_references.clone(),
                     data_files: data_files.clone(),
+                    hdl_deck_directory: hdl_deck_directory.clone(),
                     touchstone_export,
                     pvt_point: prepared.pvt_point,
                     family_member: prepared.family_member,

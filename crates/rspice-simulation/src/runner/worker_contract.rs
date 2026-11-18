@@ -439,6 +439,9 @@ impl WorkerRequest {
             NetlistInput {
                 netlist: self.netlist,
                 source_path: self.source_path.map(PathBuf::from),
+                // The browser has no deck directory: a relative path is the
+                // worker's virtual root's.
+                hdl_deck_directory: None,
                 project_veriloga_runtimes: self.project_veriloga_runtimes,
                 measurement_references: self.measurement_references,
                 data_files: self.data_files,

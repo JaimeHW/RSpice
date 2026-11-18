@@ -81,6 +81,7 @@ fn fixture() -> (SimulationRequest, NetlistInput) {
             environment: None,
             stream_transient_samples: false,
             execution_limits: ResourceLimits::default(),
+            hdl_deck_directory: None,
         },
     )
 }

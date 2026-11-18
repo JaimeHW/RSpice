@@ -267,6 +267,7 @@ fn prepare_declaration(
         cross_probe: None,
         touchstone_export: TouchstoneExportPolicy::disabled(),
         sealed_source_dependencies: Vec::new(),
+        hdl_deck_directory: None,
     };
     PreparedRunSnapshot::new(parts).map_err(|error| error.to_string())
 }
@@ -330,12 +331,14 @@ pub(crate) fn run_prepared_declaration(
             project_veriloga_runtimes: runtimes,
             measurement_references: references,
             data_files,
+            hdl_deck_directory,
             dependencies,
             environment,
             execution_limits: limits,
         } = resolved.into_runner_parts();
         let bridge = crate::engine_bridge::EngineBridge::new()
             .with_resource_limits(limits)
+            .with_hdl_run(None, hdl_deck_directory)
             .with_measurement_references(references);
 
         // The task's deck names the Verilog-A and the data files it installs,

@@ -420,7 +420,8 @@ const EVERY_ANALYSIS: &str = "`include \"disciplines.vams\"\nmodule log(x); inou
 /// LRM 2.4 section 9.5.1.1: a file one analysis of a run opened in a write
 /// mode, a later analysis that opens it in that mode appends to. `rspice
 /// run` solves a deck's `.op` and `.tran` on one engine; the prepared route
-/// runs each card as its own task. Both leave the same bytes: both lines.
+/// runs each card as its own task. Both write the relative `log.txt` beside
+/// the deck, and leave the same bytes there: both lines.
 #[test]
 fn a_decks_analyses_write_one_file_the_same_on_the_cli_and_the_prepared_route() {
     let dir = test_dir("prepared_route_hdl_run_files");
@@ -428,11 +429,8 @@ fn a_decks_analyses_write_one_file_the_same_on_the_cli_and_the_prepared_route() 
     write(
         dir.path(),
         "deck.cir",
-        &format!(
-            "* a deck's analyses write one file\n.options hdl_rundir=\"{}\"\n.hdl \"log.va\"\n\
-             v1 s 0 1\nxa s log\n.op\n.tran 1n 10n\n.end\n",
-            dir.path().display()
-        ),
+        "* a deck's analyses write one file\n.hdl \"log.va\"\n\
+         v1 s 0 1\nxa s log\n.op\n.tran 1n 10n\n.end\n",
     );
     let deck = dir.path().join("deck.cir");
     let log = dir.path().join("log.txt");
