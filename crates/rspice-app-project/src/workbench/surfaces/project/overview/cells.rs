@@ -111,14 +111,17 @@ fn cells_table(
 
 fn row_cells(row: &CellRowSnapshot, now_ms: u64) -> Vec<Cell> {
     let name = Cell::text(&row.name);
-    let modified = row.modified(now_ms).map_or_else(
-        || Cell::absent().sort_by(SortKey::Missing),
-        |(short, full)| {
+    let modified = match row.modified(now_ms) {
+        Some((short, full)) => {
             let cell = Cell::number(&short);
             let cell = if short == full { cell } else { cell.hint(full) };
             cell.sort_by(SortKey::Number(row.saved_ms.unwrap_or_default() as f64))
-        },
-    );
+        }
+        // A cell made here and never saved: its edits are the newest there
+        // are.
+        None if row.unsaved => Cell::number("Unsaved").sort_by(SortKey::Number(now_ms as f64)),
+        None => Cell::absent().sort_by(SortKey::Missing),
+    };
     vec![
         // Unsaved is the editor tab's neutral dot, not a warning: nothing is
         // wrong with a cell being edited.

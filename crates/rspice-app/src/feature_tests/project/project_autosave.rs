@@ -305,6 +305,44 @@ fn after_a_crash_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
     let _ = std::fs::remove_dir_all(folder);
 }
 
+/// A cell only the kept autosave holds has never been saved: the Overview's
+/// Cells table says "Unsaved" for when it was modified, not a dash.
+#[test]
+fn a_kept_cell_never_saved_reads_unsaved_on_the_overview() {
+    let (folder, _) = crashed_session_making("autosave-crash-cell-overview", &[CRASH_NEW_CELL]);
+    let (mut app, ctx, asked) = open_after_crash(&folder);
+    app_frame(&ctx, &mut app, click_on(&asked, "Keep the recovered changes"));
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Overview;
+    let row = |output: &egui::FullOutput| {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .and_then(|update| {
+                update.nodes.iter().find_map(|(_, node)| {
+                    node.label()
+                        .filter(|label| label.starts_with("Cell: crashcell"))
+                        .map(str::to_owned)
+                })
+            })
+    };
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let label = loop {
+        let shown = app_frame(&ctx, &mut app, Vec::new());
+        if let Some(label) = row(&shown) {
+            break label;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no crashcell row:\n{}",
+            painted(&shown)
+        );
+    };
+    assert!(label.contains("Modified: Unsaved"), "{label}");
+    let _ = std::fs::remove_dir_all(folder);
+}
+
 /// A crashed session whose technology this computer does not have: the
 /// question says so before anything is kept, and the Console and the
 /// Overview's Dependencies row say it in the same words.
