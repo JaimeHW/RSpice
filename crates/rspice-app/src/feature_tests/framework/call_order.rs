@@ -1774,6 +1774,12 @@ const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
         "the Configuration page",
         CONFIGURATION_PAGE,
         "pub fn configuration(",
+        &["page(ui, cx);"],
+    ),
+    (
+        "the Configuration page's body, inside its scroll",
+        CONFIGURATION_PAGE,
+        "fn page(",
         &[
             "if let Some(refusal) = cx.state.configuration.refusal.as_deref() {\
              refusal_strip(ui, refusal);",
