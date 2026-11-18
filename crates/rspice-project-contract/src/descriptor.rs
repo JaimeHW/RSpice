@@ -67,8 +67,8 @@ impl ProjectTechnologyChangeAuthority {
     }
 
     fn validate(&self) -> Result<(), ProjectDescriptorError> {
-        validate_project_audit_text("technology_change.actor_id", &self.actor_id, 240)?;
-        validate_project_audit_text("technology_change.authority_id", &self.authority_id, 240)?;
+        validate_project_audit_text("technology_change.actor_id", &self.actor_id)?;
+        validate_project_audit_text("technology_change.authority_id", &self.authority_id)?;
         validate_technology_change_reason(&self.reason)
     }
 }
@@ -79,7 +79,7 @@ fn validate_technology_change_reason(reason: &str) -> Result<(), ProjectDescript
     if reason.is_empty() {
         return Ok(());
     }
-    validate_project_audit_text("technology_change.reason", reason, 1_024)
+    validate_project_audit_text("technology_change.reason", reason)
 }
 
 /// Exact checkpoint proof required to authorize one project technology
@@ -427,10 +427,11 @@ fn migration_endpoint_matches_project_pin(
         && archive_digest == pin.archive_digest()
 }
 
+/// Audit text is present, trimmed and on one line; its length is the
+/// writer's.
 fn validate_project_audit_text(
     field: &'static str,
     value: &str,
-    maximum: usize,
 ) -> Result<(), ProjectDescriptorError> {
     if value.is_empty() {
         return Err(ProjectDescriptorError::RequiredField(field));
@@ -438,11 +439,6 @@ fn validate_project_audit_text(
     if value != value.trim() {
         return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
             "{field} must not begin or end with whitespace"
-        )));
-    }
-    if value.chars().count() > maximum {
-        return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
-            "{field} exceeds {maximum} Unicode scalar values"
         )));
     }
     if value.chars().any(char::is_control) {
@@ -1278,15 +1274,11 @@ impl ProjectDescriptor {
                     "receipt[{index}] has invalid content or chain linkage"
                 )));
             }
-            validate_project_audit_text("technology_change.actor_id", &receipt.actor_id, 240)?;
-            validate_project_audit_text(
-                "technology_change.authority_id",
-                &receipt.authority_id,
-                240,
-            )?;
+            validate_project_audit_text("technology_change.actor_id", &receipt.actor_id)?;
+            validate_project_audit_text("technology_change.authority_id", &receipt.authority_id)?;
             validate_technology_change_reason(&receipt.reason)?;
             if let Some(label) = receipt.after_binding_label.as_deref() {
-                validate_project_audit_text("technology_change.after_binding_label", label, 1_024)?;
+                validate_project_audit_text("technology_change.after_binding_label", label)?;
             }
             if receipt.after_binding_digest.is_some() != receipt.after_binding_label.is_some() {
                 return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(
@@ -1297,12 +1289,8 @@ impl ProjectDescriptor {
                 .before_binding_label
                 .as_deref()
                 .is_some_and(|label| {
-                    validate_project_audit_text(
-                        "technology_change.before_binding_label",
-                        label,
-                        1_024,
-                    )
-                    .is_err()
+                    validate_project_audit_text("technology_change.before_binding_label", label)
+                        .is_err()
                 })
             {
                 return Err(ProjectDescriptorError::TechnologyAuditCorrupted(format!(

@@ -94,7 +94,8 @@ fn publication_and_restore_fields_are_strict_audit_text() {
     assert!(!audit_text_valid(" leading"));
     assert!(!audit_text_valid("trailing "));
     assert!(!audit_text_valid("line\nbreak"));
-    assert!(!audit_text_valid(&"x".repeat(241)));
+    // A field is as long as its writer makes it.
+    assert!(audit_text_valid(&"x".repeat(4096)));
 
     let app = RSpiceApp::test_instance();
     let mut draft = PublicationDraft::new(&app.state.model);
@@ -138,6 +139,38 @@ fn native_writer_persists_exact_candidate_before_committing_receipt() {
     assert_eq!(bytes.len() as u64, receipt.snapshot_byte_len());
     validate_restore_file(&app.state, receipt.publication_id(), bytes)
         .expect("written bytes match committed receipt");
+}
+
+/// A field holds what its writer puts in it: a reason of thousands of
+/// characters is recorded whole.
+#[test]
+fn a_publication_records_a_reason_of_any_length() {
+    let mut app = RSpiceApp::test_instance();
+    let mut draft = complete_publication_draft(&app);
+    draft.reason = "Qualified library handoff for the second tape-out. "
+        .repeat(80)
+        .trim()
+        .to_owned();
+    assert!(draft.reason.chars().count() > 4000);
+    assert_eq!(draft.field_error(), None);
+    app.export_workflow_io = Box::new(PublicationIo {
+        destination: PathBuf::from("release").join("analog-core"),
+        reopenable: true,
+        writes: Rc::new(RefCell::new(Vec::new())),
+    });
+
+    publish_native(&mut app, &draft).expect("publication succeeds");
+    let [receipt] = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .library_publications()
+    else {
+        panic!("exactly one publication receipt must commit");
+    };
+    assert_eq!(receipt.reason(), draft.reason);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

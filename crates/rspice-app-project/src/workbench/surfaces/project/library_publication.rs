@@ -46,17 +46,15 @@ fn remembered_identity(ctx: &Context) -> RememberedIdentity {
 }
 
 /// The first field of `fields` the dialog cannot record, as the reader is
-/// told it: each is required, on one line, and at most 240 characters.
-/// Spaces around a value are dropped when it is recorded.
+/// told it: each is required and on one line. Spaces around a value are
+/// dropped when it is recorded.
 fn first_field_error(fields: &[(&'static str, &str)]) -> Option<String> {
     fields.iter().find_map(|(label, value)| {
         let value = value.trim();
         if value.is_empty() {
             Some(format!("Enter {label}."))
         } else if !audit_text_valid(value) {
-            Some(format!(
-                "Shorten {label} to one line of at most 240 characters."
-            ))
+            Some(format!("Put {label} on one line."))
         } else {
             None
         }
@@ -382,8 +380,7 @@ fn transaction_field(
             [ui.available_width().max(180.0), t.metrics.ctl_h],
             egui::TextEdit::singleline(value)
                 .id_source(id)
-                .hint_text(hint)
-                .char_limit(240),
+                .hint_text(hint),
         );
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_label(label);
@@ -442,10 +439,7 @@ pub fn selected_receipt(
 }
 
 pub fn audit_text_valid(value: &str) -> bool {
-    !value.is_empty()
-        && value == value.trim()
-        && value.chars().count() <= 240
-        && !value.chars().any(char::is_control)
+    !value.is_empty() && value == value.trim() && !value.chars().any(char::is_control)
 }
 
 /// What stopped the transaction, or what it is waiting for.

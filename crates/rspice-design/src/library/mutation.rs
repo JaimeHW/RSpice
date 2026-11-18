@@ -323,16 +323,14 @@ impl ProjectLibraryMutation {
     }
 }
 
-/// Validate bounded audit text for a library operation or publication.
+/// Validate the audit text of a library operation or publication: present,
+/// trimmed and on one line. Its length is the writer's.
 pub fn validate_library_audit_text(field: &str, value: &str) -> Result<(), String> {
     if value.is_empty() {
         return Err(format!("{field} is required"));
     }
     if value != value.trim() {
         return Err(format!("{field} must not begin or end with whitespace"));
-    }
-    if value.chars().count() > 240 {
-        return Err(format!("{field} exceeds 240 Unicode scalar values"));
     }
     if value.chars().any(char::is_control) {
         return Err(format!("{field} contains a control character"));
