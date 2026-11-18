@@ -35,7 +35,13 @@ use rspice_design::schematic::document::SchematicDocument;
 pub struct LibraryOperationStart {
     operation: ProjectLibraryMutation,
     libraries: LibraryManager,
+    /// The drawings the operation can change, each whole: those of the cells
+    /// it names and those placing one of them.
     drawings: BTreeMap<String, SchematicState>,
+    /// Every drawing the project held. One the operation cannot change is
+    /// held by name alone, so the step does not take it for one the
+    /// operation brought in.
+    held: BTreeSet<String>,
     tabs: Tabs,
     top: (String, String),
     configurations: BTreeMap<ConfigurationSetId, ConfigurationSetDefinition>,
@@ -114,22 +120,40 @@ impl Model {
         reversal(operation)?;
         let content = &self.workspace.content;
         let active = content.active_schematic_reference().key();
-        let drawings = content
-            .schematic_buffers
-            .keys()
-            .filter_map(|key| {
-                let drawing = if *key == active {
-                    self.schematic.clone()
-                } else {
-                    self.workspace.clone_schematic_editor(key)?
-                };
-                Some((key.clone(), drawing))
-            })
-            .collect();
+        let reach = OperatedCells::of(operation);
+        let mut held = BTreeSet::new();
+        let mut drawings = BTreeMap::new();
+        for key in content.schematic_buffers.keys() {
+            let reached = if *key == active {
+                Some(reach.reaches(key, self.schematic.document()))
+            } else {
+                self.workspace
+                    .schematic_editor(key)
+                    .map(|drawing| reach.reaches(key, drawing.document()))
+            };
+            let Some(reached) = reached else {
+                continue;
+            };
+            held.insert(key.clone());
+            if !reached {
+                continue;
+            }
+            let drawing = if *key == active {
+                Some(self.schematic.clone())
+            } else {
+                self.workspace.clone_schematic_editor(key)
+            };
+            if let Some(drawing) = drawing {
+                drawings.insert(key.clone(), drawing);
+            }
+        }
+        #[cfg(any(test, feature = "test-support"))]
+        DRAWINGS_TAKEN.with(|taken| taken.set(taken.get() + drawings.len()));
         Some(Box::new(LibraryOperationStart {
             operation: operation.clone(),
             libraries: self.library_manager.clone(),
             drawings,
+            held,
             tabs: Tabs::capture(self),
             top: project_top(self),
             configurations: configuration_definitions(&content.configuration_sets),
@@ -683,6 +707,8 @@ fn sides(state: &Model, start: &LibraryOperationStart) -> (Side, Side) {
         let sides = match (start.drawings.get(key), live) {
             (None, None) => None,
             (Some(was), None) => Some((Drawing::Whole(Box::new(was.clone())), Drawing::Absent)),
+            // A drawing the operation could not change, standing as it was.
+            (None, Some(_)) if start.held.contains(key) => None,
             (None, Some(is)) => {
                 Some((Drawing::Absent, Drawing::Whole(Box::new(is.clone_editor()))))
             }
@@ -743,6 +769,141 @@ fn sides(state: &Model, start: &LibraryOperationStart) -> (Side, Side) {
         after.top = Some(top);
     }
     (before, after)
+}
+
+/// The cells a library operation names: by library, and by cell where it
+/// names one, `None` standing for every cell of the library. The drawings an
+/// operation can change are theirs and the ones that place one of them; a
+/// library operation writes no other drawing.
+struct OperatedCells(Option<Vec<(String, Option<String>)>>);
+
+impl OperatedCells {
+    fn of(operation: &ProjectLibraryMutation) -> Self {
+        let mut cells = Vec::new();
+        Self(collect_operated_cells(operation, &mut cells).then_some(cells))
+    }
+
+    /// Whether the operation can change the drawing `key` names, which
+    /// holds `document`. A key that spells no cell view is taken as reached.
+    fn reaches(&self, key: &str, document: &SchematicDocument) -> bool {
+        let Some(cells) = &self.0 else {
+            return true;
+        };
+        let names = |library: &str, cell: &str| {
+            cells.iter().any(|(named_library, named_cell)| {
+                named_library.eq_ignore_ascii_case(library)
+                    && named_cell
+                        .as_deref()
+                        .is_none_or(|named_cell| named_cell.eq_ignore_ascii_case(cell))
+            })
+        };
+        CellViewRef::from_key(key)
+            .is_none_or(|reference| names(&reference.library, &reference.cell))
+            || document.components.iter().any(|component| {
+                component
+                    .library_cell
+                    .as_ref()
+                    .is_some_and(|binding| names(&binding.library, &binding.cell))
+            })
+    }
+}
+
+/// Add the cells `operation` names to `cells`. `false` for an operation
+/// whose reach its names do not state: every drawing is taken for it.
+fn collect_operated_cells(
+    operation: &ProjectLibraryMutation,
+    cells: &mut Vec<(String, Option<String>)>,
+) -> bool {
+    let mut cell = |library: &str, cell: Option<&str>| {
+        cells.push((library.to_owned(), cell.map(str::to_owned)));
+    };
+    match operation {
+        ProjectLibraryMutation::CreateLibrary { library }
+        | ProjectLibraryMutation::DeleteLibrary { library } => cell(library, None),
+        ProjectLibraryMutation::RenameLibrary {
+            from_library: source_library,
+            to_library: target_library,
+        }
+        | ProjectLibraryMutation::CopyLibrary {
+            source_library,
+            target_library,
+        } => {
+            cell(source_library, None);
+            cell(target_library, None);
+        }
+        ProjectLibraryMutation::CreateCell {
+            library,
+            cell: name,
+        }
+        | ProjectLibraryMutation::CreateView {
+            library,
+            cell: name,
+            ..
+        }
+        | ProjectLibraryMutation::RenameView {
+            library,
+            cell: name,
+            ..
+        }
+        | ProjectLibraryMutation::DeleteCell {
+            library,
+            cell: name,
+        }
+        | ProjectLibraryMutation::DeleteView {
+            library,
+            cell: name,
+            ..
+        } => cell(library, Some(name)),
+        ProjectLibraryMutation::CopyCell {
+            source_library,
+            source_cell,
+            target_library,
+            target_cell,
+        }
+        | ProjectLibraryMutation::MoveCell {
+            source_library,
+            source_cell,
+            target_library,
+            target_cell,
+        }
+        | ProjectLibraryMutation::CopyView {
+            source_library,
+            source_cell,
+            target_library,
+            target_cell,
+            ..
+        } => {
+            cell(source_library, Some(source_cell));
+            cell(target_library, Some(target_cell));
+        }
+        ProjectLibraryMutation::RenameCell {
+            library,
+            from_cell,
+            to_cell,
+        } => {
+            cell(library, Some(from_cell));
+            cell(library, Some(to_cell));
+        }
+        ProjectLibraryMutation::EditProperties {
+            library,
+            cell: name,
+        } => {
+            cell(library, name.as_deref());
+        }
+        ProjectLibraryMutation::RollbackPublication { .. } => return false,
+        ProjectLibraryMutation::Batch { operations } => {
+            return operations
+                .iter()
+                .all(|operation| collect_operated_cells(operation, cells));
+        }
+    }
+    true
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Drawings this thread took whole at the start of a library operation.
+    pub static DRAWINGS_TAKEN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The drawing `key` names as the project holds it: the editor's own for

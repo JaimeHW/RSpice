@@ -747,3 +747,51 @@ fn undoing_a_five_thousand_cell_library_rename_revalidates_each_drawing_once() {
         "each of the {drawings} drawings is revalidated once"
     );
 }
+
+/// A library operation takes whole, for its step, only the drawings it can
+/// change: those of the cells it names and those placing one of them. The
+/// rest it holds by name, and its Undo still puts back exactly what stood.
+#[test]
+fn a_library_operation_takes_only_the_drawings_it_can_change() {
+    use rspice_app_state::workbench::app_state::design_history::DRAWINGS_TAKEN;
+    let taken = |app: &mut RSpiceApp, operation: fn(&mut RSpiceApp)| {
+        DRAWINGS_TAKEN.with(|taken| taken.set(0));
+        operation(app);
+        DRAWINGS_TAKEN.with(std::cell::Cell::get)
+    };
+    let mut app = app_with_parts();
+    let before = Standing::of(&app);
+
+    let created = taken(&mut app, |app| {
+        app.state
+            .model
+            .create_library("extra")
+            .expect("the library is created");
+    });
+    let renamed_note = taken(&mut app, |app| {
+        app.state
+            .rename_cell("scratch", "note", "memo")
+            .expect("the cell is renamed");
+    });
+    // The top places parts/amp, whose own drawing places parts/leaf; the
+    // scratch library's drawing places nothing of parts.
+    let renamed_parts = taken(&mut app, |app| {
+        app.state
+            .rename_library("parts", "blocks")
+            .expect("the library is renamed");
+    });
+    assert_eq!(
+        (created, renamed_note, renamed_parts),
+        (0, 1, 4),
+        "drawings taken by: creating a library, renaming a cell, renaming a library"
+    );
+
+    for _ in 0..3 {
+        app.execute_command_key(ids::UNDO);
+    }
+    let found = Standing::of(&app).differences(&before);
+    assert!(
+        found.is_empty(),
+        "three Undos left these unlike before: {found:#?}"
+    );
+}

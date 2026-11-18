@@ -36,6 +36,8 @@ mod stimulus_readoption;
 mod veriloga_build;
 
 pub use hierarchy_extraction::validate_hierarchy_target_unreferenced;
+#[cfg(any(test, feature = "test-support"))]
+pub use library_operation::DRAWINGS_TAKEN;
 pub use library_operation::LibraryOperationStart;
 pub use simulation_setup::{SetupParts, SetupSnapshot};
 pub use veriloga_build::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
