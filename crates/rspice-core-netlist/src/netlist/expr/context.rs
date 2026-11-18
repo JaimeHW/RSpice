@@ -389,6 +389,8 @@ pub struct ParamContext {
     expression_dialect: ExpressionDialect,
     /// Whose meaning an `EXP` with a repeat takes in this deck.
     exp_train_dialect: crate::netlist::ExpTrainDialect,
+    /// How a `.FUNC` formal read as a `V()`/`I()` operand reads in this deck.
+    function_probe_operands: FunctionProbeOperands,
     /// Repeated-definition behavior selected for this parse/elaboration.
     parameter_redefinition_policy: ParameterRedefinitionPolicy,
     /// Diagnostic behavior for a repeated definition in this parse scope.
@@ -1212,6 +1214,14 @@ impl ParamContext {
         self.exp_train_dialect
     }
 
+    pub(crate) fn set_function_probe_operands(&mut self, reading: FunctionProbeOperands) {
+        self.function_probe_operands = reading;
+    }
+
+    pub(crate) fn function_probe_operands(&self) -> FunctionProbeOperands {
+        self.function_probe_operands
+    }
+
     /// Select repeated parameter-definition behavior for subsequent parsing.
     pub fn set_parameter_redefinition_policy(&mut self, policy: ParameterRedefinitionPolicy) {
         self.parameter_redefinition_policy = policy;
@@ -1432,11 +1442,12 @@ impl ParamContext {
         let mut functions = self.functions.values().cloned().collect::<Vec<_>>();
         functions.sort_unstable_by(|left, right| left.name.cmp(&right.name));
         let mut snapshot = format!(
-            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nparameter_expressions={parameter_expressions:?}\nglobal_numeric={global_numeric:?}\nglobal_complex={global_complex:?}\nglobal_strings={global_strings:?}\nglobal_expressions={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nspectre_statistical_parameters={:?}\nexpression_dialect={:?}\nparameter_redefinition_policy={:?}\n",
+            "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nparameter_expressions={parameter_expressions:?}\nglobal_numeric={global_numeric:?}\nglobal_complex={global_complex:?}\nglobal_strings={global_strings:?}\nglobal_expressions={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nspectre_statistical_parameters={:?}\nexpression_dialect={:?}\nfunction_probe_operands={:?}\nparameter_redefinition_policy={:?}\n",
             self.random.seed,
             self.statistical_mode,
             self.spectre_statistical_parameters,
             self.expression_dialect,
+            self.function_probe_operands,
             self.parameter_redefinition_policy,
         );
         let mut names = self.statistical_captures.keys().collect::<Vec<_>>();

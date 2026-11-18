@@ -984,6 +984,16 @@ fn parse_netlist_impl(
         )?
         .unwrap_or_default(),
     );
+    // A `.FUNC` call expanded on any card reads its probe operands by the
+    // simulator the deck was written for, so the deck's own
+    // `.options rspice_source=` counts wherever it appears.
+    state.params.set_function_probe_operands(
+        crate::netlist::expr::FunctionProbeOperands::for_deck(
+            state.spice_dialect,
+            options.expression_dialect,
+            prescan_deck_word_option(scanned_options, "RSPICE_SOURCE", source_simulator_named)?,
+        ),
+    );
     // Xyce draws `agauss`, `gauss`, `aunif` and `unif` only inside a sampling
     // analysis and reads their nominal value everywhere else (`agaussOp::val`
     // in ast_random.h). RSpice samples by reparsing with a seed.
@@ -5017,6 +5027,14 @@ fn statistical_mode_named(name: &str) -> Option<StatisticalParamMode> {
     match name.to_ascii_uppercase().as_str() {
         "SAMPLE" => Some(StatisticalParamMode::Sample),
         "NOMINAL" => Some(StatisticalParamMode::Nominal),
+        _ => None,
+    }
+}
+
+fn source_simulator_named(name: &str) -> Option<crate::netlist::SourceSimulator> {
+    match name.to_ascii_uppercase().as_str() {
+        "QSPICE" => Some(crate::netlist::SourceSimulator::Qspice),
+        "LTSPICE" => Some(crate::netlist::SourceSimulator::Ltspice),
         _ => None,
     }
 }

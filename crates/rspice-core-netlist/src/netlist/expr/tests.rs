@@ -887,6 +887,90 @@ fn a_function_formal_read_as_a_probe_operand_binds_to_the_node_the_call_names() 
     }
 }
 
+/// ngspice and Xyce read a formal inside `v()` or `i()` as the node or
+/// device literally named after it; the formal is still substituted
+/// everywhere else in the body, and an argument that names no node is no
+/// longer read as one.
+#[test]
+fn a_function_formal_read_as_a_probe_operand_is_literal_where_the_deck_says_so() {
+    let mut ctx = ParamContext::new();
+    ctx.set_function_probe_operands(FunctionProbeOperands::Literal);
+    ctx.define_function("fv", vec!["x".to_string()], "v(x)*2");
+    ctx.define_function("fd", vec!["x".to_string(), "y".to_string()], "v(x,y)*3");
+    ctx.define_function("fi", vec!["d".to_string()], "i(d)*1000");
+    ctx.define_function("fp", vec!["p".to_string()], "v(p)+p");
+
+    for (call, expected) in [
+        ("fv(n1)", "(V(x)*2)"),
+        ("fd(n1,n2)", "(V(x,y)*3)"),
+        ("fi(V2)", "(I(d)*1000)"),
+        ("fp(17)", "(V(p)+17)"),
+        ("fv(1+2)", "(V(x)*2)"),
+    ] {
+        let prepared = prepare_behavioral_expression(call, &ctx)
+            .unwrap_or_else(|error| panic!("{call} prepares: {error}"));
+        assert_eq!(
+            prepared.to_ascii_uppercase(),
+            expected.to_ascii_uppercase(),
+            "{call}"
+        );
+    }
+}
+
+#[test]
+fn a_deck_s_simulator_decides_how_a_function_s_probe_operands_read() {
+    use crate::config::SpiceDialect;
+    use crate::netlist::SourceSimulator;
+    use FunctionProbeOperands::{Bound, Literal};
+    for (dialect, expression, source, reading) in [
+        (
+            SpiceDialect::BestAvailable,
+            ExpressionDialect::Ngspice,
+            None,
+            Bound,
+        ),
+        (
+            SpiceDialect::Ngspice,
+            ExpressionDialect::Ngspice,
+            None,
+            Literal,
+        ),
+        (
+            SpiceDialect::Xyce,
+            ExpressionDialect::Ngspice,
+            None,
+            Literal,
+        ),
+        (SpiceDialect::Xyce, ExpressionDialect::Xyce, None, Literal),
+        (
+            SpiceDialect::BestAvailable,
+            ExpressionDialect::Xyce,
+            None,
+            Literal,
+        ),
+        // The program a deck came from outranks the dialect.
+        (
+            SpiceDialect::Ngspice,
+            ExpressionDialect::Ngspice,
+            Some(SourceSimulator::Ltspice),
+            Bound,
+        ),
+        // QSPICE's reading is not established; its decks read as the default.
+        (
+            SpiceDialect::BestAvailable,
+            ExpressionDialect::Ngspice,
+            Some(SourceSimulator::Qspice),
+            Bound,
+        ),
+    ] {
+        assert_eq!(
+            FunctionProbeOperands::for_deck(dialect, expression, source),
+            reading,
+            "{dialect:?} {expression:?} {source:?}"
+        );
+    }
+}
+
 #[test]
 fn xyce_i0_user_function_is_not_a_current_probe_accessor() {
     let options = crate::netlist::NetlistParseOptions {

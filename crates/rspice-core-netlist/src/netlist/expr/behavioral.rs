@@ -3,7 +3,8 @@
 //! User-defined `.FUNC` calls and scalar `.PARAM` references are expanded here,
 //! while circuit-state probes such as `V(...)` and `I(...)` remain symbolic for
 //! the behavioral compiler and final circuit binding pass. A `.FUNC` formal
-//! written as a probe operand binds to the node or device the call names.
+//! written as a probe operand reads as the deck's simulator reads it (see
+//! [`FunctionProbeOperands`]).
 
 use super::{
     BinOpKind, Expr as NetExpr, ParamContext, ParameterResolutionError, ParameterResolver,
@@ -2023,17 +2024,60 @@ fn ensure_function_substitution_fits(
     Ok(())
 }
 
-/// The actual arguments of one `.FUNC` call. A formal written as a probe
-/// operand (`V(x)`, `V(x,y)` or `I(x)`) binds to the node or device the call
-/// names, as LTspice does.
+/// How a `.FUNC` formal written as the operand of `V()` or `I()` in the
+/// function's body reads. The simulators disagree, so a deck reads it as the
+/// simulator it was written for does: `.func fv(x) {v(x)}` called as
+/// `fv(n1)` reads `V(n1)` in LTspice and `V(x)` in ngspice and Xyce.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FunctionProbeOperands {
+    /// The formal names the node or device the call passes, as LTspice 17.2.4
+    /// reads it. The default: QSPICE's reading is not established, and LTspice
+    /// ranks next.
+    #[default]
+    Bound,
+    /// The formal is the node or device literally named after it. ngspice-46
+    /// leaves a formal inside `v()` or `i()` unsubstituted (inpcom.c
+    /// `inp_do_macro_param_replace`: "exclude v(nn, parameter), v(parameter,
+    /// nn), v(parameter), and i(parameter)"). Xyce 7.10 builds the probe on the
+    /// name as written (ExpressionParser.yxx `createVoltageOp`, and the
+    /// `currentOp` on the device name) and binds a formal only where it is a
+    /// parameter operand (newExpression.C, `functionArgStringVec_`).
+    Literal,
+}
+
+impl FunctionProbeOperands {
+    /// The reading for a deck read in `dialect` with `expression` functions,
+    /// written for `source` (`.options rspice_source=`). The program a deck
+    /// came from outranks the dialect, as it does for source defaults; a
+    /// QSPICE deck reads as the default does, since QSPICE's reading is not
+    /// established.
+    pub(crate) fn for_deck(
+        dialect: crate::config::SpiceDialect,
+        expression: crate::config::ExpressionDialect,
+        source: Option<crate::netlist::SourceSimulator>,
+    ) -> Self {
+        use crate::config::{ExpressionDialect, SpiceDialect};
+        match (source, dialect, expression) {
+            (Some(_), _, _) => Self::Bound,
+            (None, SpiceDialect::Ngspice | SpiceDialect::Xyce, _)
+            | (None, _, ExpressionDialect::Xyce) => Self::Literal,
+            (None, SpiceDialect::BestAvailable, ExpressionDialect::Ngspice) => Self::Bound,
+        }
+    }
+}
+
+/// The actual arguments of one `.FUNC` call. Where the deck reads a formal
+/// written as a probe operand (`V(x)`, `V(x,y)` or `I(x)`) as
+/// [`FunctionProbeOperands::Bound`], it binds to the node or device the call
+/// names; otherwise the operand is left as written.
 ///
 /// The actual argument names the node by its parameter value when it has one
 /// (`.PARAM p=3` makes `f(p)` read `V(3)`), and otherwise by its own spelling.
 /// The binding is made once while the call is expanded, so the prepared
 /// expression reads the node directly and a call costs no more than writing
 /// the probe out. An actual argument that names nothing, such as `1+2`, is
-/// refused: reading the formal's own spelling as a node instead, as ngspice
-/// and Xyce do, would silently read a different node.
+/// refused: reading the formal's own spelling as a node instead would
+/// silently read a different node.
 struct ProbeOperandBinder<'b> {
     function: &'b str,
     bindings: &'b HashMap<String, NetExpr>,
@@ -2051,6 +2095,9 @@ impl ProbeOperandBinder<'_> {
         let NetExpr::Param(placeholder) = operand else {
             return Ok(operand.clone());
         };
+        if self.params.function_probe_operands() == FunctionProbeOperands::Literal {
+            return Ok(operand.clone());
+        }
         let Some(formal) = self.probe_protector.original(placeholder) else {
             return Ok(operand.clone());
         };

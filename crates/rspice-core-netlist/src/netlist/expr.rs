@@ -64,6 +64,12 @@ pub use behavioral::{
     materialize_available_parameter_expressions_with_abort,
     prepare_behavioral_expression_with_abort,
 };
+pub(crate) use behavioral::{
+    FunctionProbeOperands, finalize_parameter_expressions_with_abort,
+    prepare_behavioral_expression_preserving_parameters_with_abort,
+    prepare_behavioral_expression_preserving_spelling_with_abort,
+    validate_prepared_behavioral_runtime_expression,
+};
 pub use behavioral::{
     ParameterCircuitProbe, ParameterCircuitProbeKind, RuntimeSpecialQuantity,
     behavioral_expression_references_runtime_quantity,
@@ -71,12 +77,6 @@ pub use behavioral::{
     materialize_available_parameter_expressions, parameter_expression_circuit_probe,
     prepare_behavioral_expression, runtime_special_quantity, validate_global_parameter_expressions,
     validate_parameter_expressions,
-};
-pub(crate) use behavioral::{
-    finalize_parameter_expressions_with_abort,
-    prepare_behavioral_expression_preserving_parameters_with_abort,
-    prepare_behavioral_expression_preserving_spelling_with_abort,
-    validate_prepared_behavioral_runtime_expression,
 };
 pub(crate) use context::{CapturedStatisticalParameter, MODEL_TEMPERATURE_PARAMETERS, splitmix64};
 pub use context::{

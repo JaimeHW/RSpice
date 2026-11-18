@@ -19,6 +19,7 @@ mod forward_parameters;
 mod forward_sources;
 mod forward_startup;
 mod function_argument_cycles;
+mod function_probe_operands;
 mod hierarchical_node_references;
 mod hierarchy_expression_cancellation;
 mod hierarchy_validation;
