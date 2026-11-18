@@ -318,3 +318,43 @@ fn the_card_links_open_the_pages_that_list_everything() {
     click_announced(&ctx, &mut app, settled, "All runs");
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
 }
+
+/// Past the top cell, the testbenches and the cells being edited, the Cells
+/// table lists the most recently saved cell first, as the reader last left
+/// them, and its Modified column says when a save last wrote each: an age
+/// inside a day, the date and time past one. A cell no save has written
+/// comes after them, by name, its time a dash.
+#[test]
+fn the_cells_table_lists_the_most_recently_saved_first_and_says_when() {
+    let now = rspice_app_state::time_compat::checked_unix_time_ms().expect("the clock reads");
+    let three_days_ago = now - 3 * 86_400_000;
+    let mut library = Library::new("bench");
+    for (name, saved_at) in [
+        ("cell00", None),
+        ("cell01", Some(three_days_ago)),
+        ("cell02", Some(now - 330_000)),
+        ("cell03", None),
+    ] {
+        let mut cell = Cell::new(name);
+        let mut schematic = View::new("schematic", ViewType::Schematic);
+        schematic.saved_at = saved_at;
+        cell.add_view(schematic);
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+    }
+    let (ctx, mut app, settled) = settle(app_with(library), ProjectPage::Overview);
+
+    let snapshot = kept_snapshot(&ctx, &mut app);
+    let listed = snapshot
+        .cells
+        .iter()
+        .filter(|row| row.library == "bench")
+        .map(|row| row.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(listed, ["cell02", "cell01", "cell00", "cell03"]);
+
+    row_with(&settled, &["Cell: cell02", "Modified: 5 min ago"]);
+    let stamp = rspice_app_state::time_compat::utc_stamp(three_days_ago);
+    row_with(&settled, &["Cell: cell01", &format!("Modified: {stamp}")]);
+    row_with(&settled, &["Cell: cell00", "Modified: \u{2014}"]);
+}

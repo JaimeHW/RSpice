@@ -25,10 +25,12 @@ use std::sync::Arc;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::design_checks::finding_identities;
-use crate::workbench::app_state::{DesignCheckStatus, Model};
+use crate::workbench::app_state::{DesignCheckStatus, Model, PlatformState};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::lifecycle::project_lifecycle::{ProjectDocumentId, dirty_documents};
+use crate::workbench::lifecycle::project_lifecycle::{
+    ProjectDocumentId, accepted_generation, dirty_documents,
+};
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::health::{self, DesignSubject, SubjectStatus};
 use crate::workbench::project::schematic_row_key;
@@ -45,7 +47,20 @@ use super::{
 };
 
 /// A day, in milliseconds: inside one an age is told, past one a date.
-const DAY_MS: u64 = 86_400_000;
+pub(super) const DAY_MS: u64 = 86_400_000;
+
+/// A time as a table says it, and in full for the pointer: how long ago
+/// inside a day, the date and time past one. `None` where there is no time.
+fn told<'a>(at: Option<u64>, stamp: &'a str, now_ms: u64) -> Option<(String, &'a str)> {
+    let at = at?;
+    let short = match now_ms.checked_sub(at) {
+        Some(ago) if ago < DAY_MS => {
+            crate::time_compat::relative_age(std::time::Duration::from_millis(ago))
+        }
+        _ => stamp.to_owned(),
+    };
+    Some((short, stamp))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusSnapshot {
@@ -126,8 +141,22 @@ pub struct CellRowSnapshot {
     pub instances: Option<usize>,
     /// One of its views has unsaved changes.
     pub unsaved: bool,
+    /// When a save last wrote a change to one of its views; `None` for a
+    /// cell no save has written.
+    pub saved_ms: Option<u64>,
+    /// That time as a date and a time, written once when the rows are
+    /// derived.
+    pub(super) saved_stamp: String,
     /// What opening the row does: its schematic, else the view it has.
     pub intent: OverviewIntent,
+}
+
+impl CellRowSnapshot {
+    /// When a save last wrote it, as the Modified column says it and in full
+    /// for the pointer, told as the Activity card tells a time.
+    pub fn modified(&self, now_ms: u64) -> Option<(String, &str)> {
+        told(self.saved_ms, &self.saved_stamp, now_ms)
+    }
 }
 
 /// One row of the Activity table: a run, a validated revision, a library
@@ -162,14 +191,7 @@ impl OperationSnapshot {
     /// how long ago inside a day, the date and time past one. `None` where
     /// its record keeps no time.
     pub fn when(&self, now_ms: u64) -> Option<(String, &str)> {
-        let at = self.timestamp_ms?;
-        let short = match now_ms.checked_sub(at) {
-            Some(ago) if ago < DAY_MS => {
-                crate::time_compat::relative_age(std::time::Duration::from_millis(ago))
-            }
-            _ => self.stamp.clone(),
-        };
-        Some((short, &self.stamp))
+        told(self.timestamp_ms, &self.stamp, now_ms)
     }
 }
 
@@ -195,7 +217,8 @@ pub struct OverviewSnapshot {
     /// The deck a netlist-first project is made of, listed before its cells.
     pub deck: Option<CellRowSnapshot>,
     /// Every cell of the project's libraries: the top cell, the testbenches,
-    /// those with unsaved changes, then the rest by library and name.
+    /// those with unsaved changes, then the rest, each lot most recently
+    /// saved first.
     pub cells: Arc<[CellRowSnapshot]>,
     /// Every operation the project keeps, newest first.
     pub operations: Arc<[OperationSnapshot]>,
@@ -246,6 +269,8 @@ fn deck_row(deck: &SourceDeckSnapshot) -> CellRowSnapshot {
         views: format!("SPICE \u{b7} {}", deck.path),
         instances: None,
         unsaved: false,
+        saved_ms: None,
+        saved_stamp: String::new(),
         intent: OverviewIntent::Command(ids::open_workspace(Workspace::Netlist)),
     }
 }
@@ -286,7 +311,7 @@ impl OverviewSnapshot {
         let cells = derived(
             ctx,
             "overview.cells",
-            CellsKey::of(cx.model, netlist_first),
+            CellsKey::of(cx.model, cx.platform, netlist_first),
             || cell_rows(cx.model, netlist_first),
         );
 
@@ -436,12 +461,15 @@ fn status_rows(
     ]
 }
 
-/// What the Cells table is read from, by identity: the catalogue, every
-/// schematic (whose instances it counts), the configurations (whose roots
-/// are the testbenches), the documents with unsaved changes and the top.
+/// What the Cells table is read from, by identity: the catalogue, the save
+/// that last wrote the project (which stamps the views it wrote without
+/// changing the catalogue), every schematic (whose instances it counts), the
+/// configurations (whose roots are the testbenches), the documents with
+/// unsaved changes and the top.
 #[derive(Clone, PartialEq)]
 struct CellsKey {
     catalog: u64,
+    saved: u64,
     schematics: (usize, u64, u64),
     configurations: u64,
     unsaved: u64,
@@ -450,7 +478,7 @@ struct CellsKey {
 }
 
 impl CellsKey {
-    fn of(model: &Model, netlist_first: bool) -> Self {
+    fn of(model: &Model, platform: &PlatformState, netlist_first: bool) -> Self {
         let content = &model.workspace.content;
         let mut configurations = DefaultHasher::new();
         for configuration in content.configuration_sets.configurations() {
@@ -467,6 +495,7 @@ impl CellsKey {
         content.project.top_cell.hash(&mut top);
         Self {
             catalog: model.library_manager.catalog().stamp(),
+            saved: accepted_generation(platform),
             schematics: schematic_stamps(model),
             configurations: configurations.finish(),
             unsaved: unsaved.finish(),
@@ -490,9 +519,10 @@ const fn opening_rank(view_type: ViewType) -> u8 {
 
 /// Every cell of the project's libraries, in the order the Cells table lists
 /// them: the top cell, the cells a configuration runs as its testbench, the
-/// cells with unsaved changes, then the rest by library and name. The cell
-/// a netlist-first project keeps pristine is not part of the design the
-/// reader made, so it is not listed.
+/// cells with unsaved changes, then the rest; each lot the most recently
+/// saved first, and the cells no save has written by library and name. The
+/// cell a netlist-first project keeps pristine is not part of the design
+/// the reader made, so it is not listed.
 fn cell_rows(model: &Model, netlist_first: bool) -> Arc<[CellRowSnapshot]> {
     let content = &model.workspace.content;
     let project = &content.project;
@@ -567,6 +597,7 @@ fn cell_rows(model: &Model, netlist_first: bool) -> Arc<[CellRowSnapshot]> {
                     },
                     |view| OverviewIntent::OpenView(reference(&view.name), view.view_type),
                 );
+            let saved_ms = views.iter().filter_map(|view| view.saved_at).max();
             let rank = if top {
                 0
             } else if testbench {
@@ -595,13 +626,16 @@ fn cell_rows(model: &Model, netlist_first: bool) -> Arc<[CellRowSnapshot]> {
                         .join(", "),
                     instances,
                     unsaved,
+                    saved_ms,
+                    saved_stamp: saved_ms.map_or_else(String::new, crate::time_compat::utc_stamp),
                     intent,
                 },
             ));
         }
     }
-    // Stable, so each rank keeps the catalogue's library and name order.
-    rows.sort_by_key(|(rank, _)| *rank);
+    // Stable, so the cells of a rank saved alike, or never, keep the
+    // catalogue's library and name order.
+    rows.sort_by_key(|(rank, row)| (*rank, std::cmp::Reverse(row.saved_ms)));
     rows.into_iter().map(|(_, row)| row).collect()
 }
 
