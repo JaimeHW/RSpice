@@ -253,6 +253,11 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             .layout(Layout::right_to_left(Align::Center)),
     );
     actions.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
+    // Every labelled button in the strip stands at the kit's compact control
+    // height, so the run and save buttons sit level, an equal gap above and
+    // below them in the row.
+    let control_h = crate::ui::widgets::compact_height(&t.metrics);
+    actions.spacing_mut().interact_size.y = control_h;
     if compact {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let mut find_clicked = false;
@@ -304,7 +309,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                 };
                 if ui
                     .add_sized(
-                        [PHONE_PRIMARY_WIDTH, 28.0],
+                        [PHONE_PRIMARY_WIDTH, control_h],
                         egui::Button::new(&label).truncate(),
                     )
                     .clicked()
@@ -365,7 +370,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                         let primary = ui
                             .add_enabled_ui(primary_ready, |ui| {
                                 ui.add_sized(
-                                    [PHONE_PRIMARY_WIDTH, 28.0],
+                                    [PHONE_PRIMARY_WIDTH, control_h],
                                     egui::Button::new(&label).truncate(),
                                 )
                             })
@@ -381,7 +386,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                         let save = ui
                             .add_enabled_ui(save_ready, |ui| {
                                 ui.add_sized(
-                                    [PHONE_PRIMARY_WIDTH, 28.0],
+                                    [PHONE_PRIMARY_WIDTH, control_h],
                                     egui::Button::new(save_source_label.as_str()).truncate(),
                                 )
                             })
@@ -396,7 +401,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                     ActiveNetlistDocument::GeneratedDiff => {
                         if ui
                             .add_sized(
-                                [PHONE_PRIMARY_WIDTH, 28.0],
+                                [PHONE_PRIMARY_WIDTH, control_h],
                                 egui::Button::new(
                                     messages.text(MessageId::NetlistReturnGeneratedPrimary),
                                 )
@@ -410,7 +415,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                     ActiveNetlistDocument::RunSnapshot => {
                         if ui
                             .add_sized(
-                                [PHONE_PRIMARY_WIDTH, 28.0],
+                                [PHONE_PRIMARY_WIDTH, control_h],
                                 egui::Button::new(messages.text(MessageId::NetlistReturnPrimary))
                                     .truncate(),
                             )
@@ -528,7 +533,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
                         let response = ui
                             .add_enabled(
                                 primary_ready,
-                                egui::Button::new(&label).min_size(vec2(0.0, 28.0)),
+                                egui::Button::new(&label),
                             )
                             .on_disabled_hover_text(generation_block_reason(cx.model, messages));
                         if response.clicked() {
@@ -885,7 +890,7 @@ fn run_control(
     };
     let response = ui
         .add_enabled_ui(enabled, |ui| {
-            ui.add(egui::Button::new(&label).min_size(vec2(0.0, 28.0)))
+            ui.add(egui::Button::new(&label))
         })
         .inner
         .on_disabled_hover_text(blocked);

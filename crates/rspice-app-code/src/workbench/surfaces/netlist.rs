@@ -956,13 +956,15 @@ fn strip_button(ui: &mut Ui, label: &str, hint: Option<&str>) -> egui::Response 
 
 /// The banner recipe every advisory band above the editor shares: one inset
 /// row that states a condition of the document, with a problem's mark as the
-/// only colour on it.
+/// only colour on it. It is one row of the header's height: its buttons are
+/// the kit's compact ones, with the same gap above and below them as in the
+/// header, so the band and the header read as one family.
 fn advisory_band(ui: &mut Ui, problem: Option<Problem>, contents: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.bg_inset)
         .stroke(egui::Stroke::new(1.0, t.color.border))
-        .inner_margin(8)
+        .inner_margin(egui::Margin::symmetric(8, 3))
         .show(ui, |ui| {
             // A frame shrinks to its content: the band runs the page's whole
             // width however short its words are.

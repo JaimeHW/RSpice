@@ -45,6 +45,21 @@ const MENU_CHEVRON_GAP: f32 = 4.0;
 const COMPACT_ROW_GAP: f32 = 3.0;
 const COMPACT_PADDING_RELIEF: f32 = 6.0;
 
+/// The height of a compact control in a row of the design's row height: the
+/// row's last point is its rule, and what is left takes an equal gap above
+/// and below. A touch shell gives nothing up: there it is the control height.
+///
+/// Public because a strip that draws its own controls must stand them at the
+/// height the kit's compact button takes, or the two sit a point apart.
+#[must_use]
+pub fn compact_height(metrics: &tokens::Metrics) -> f32 {
+    if metrics.is_touch() {
+        metrics.ctl_h
+    } else {
+        (metrics.row_h - 1.0 - 2.0 * COMPACT_ROW_GAP).min(metrics.ctl_h)
+    }
+}
+
 impl<'a> Button<'a> {
     /// A standard bordered button.
     pub fn new(label: &'a str) -> Self {
@@ -263,9 +278,7 @@ impl<'a> Button<'a> {
         // apart. Deriving it from the control height instead left whichever of
         // the two densities had an odd remainder visibly off-centre.
         let height = if self.compact_relief(&t, 1.0) > 0.0 {
-            (t.metrics.row_h - 1.0 - 2.0 * COMPACT_ROW_GAP)
-                .min(t.metrics.ctl_h)
-                .max(galley.size().y + 4.0)
+            compact_height(&t.metrics).max(galley.size().y + 4.0)
         } else {
             t.metrics.ctl_h.max(galley.size().y + 8.0)
         }

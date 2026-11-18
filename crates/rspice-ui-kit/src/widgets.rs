@@ -46,7 +46,7 @@ mod toast;
 mod tree;
 mod view_switch;
 
-pub use button::{Button, IconButton};
+pub use button::{Button, IconButton, compact_height};
 pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
 pub use chip::{chip, chip_width};
 pub use combo::Combo;

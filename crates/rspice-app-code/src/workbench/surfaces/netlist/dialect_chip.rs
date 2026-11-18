@@ -6,6 +6,7 @@ use egui::Ui;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
+use crate::ui::widgets::Button;
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::dialect::{
     DeckReading, Dialect, DialectHint, declare, dialect_name, hint_once_per_check, reading_detail,
@@ -192,12 +193,11 @@ fn dialect_hint_band(
         ui.spacing_mut().item_spacing.x = HINT_BUTTON_GAP;
         ui.label(with_card(ui, &sentence, hint.marker));
         ui.add_space(HINT_BUTTON_GAP);
-        read = ui
-            .button(messages.format(MessageId::NetlistDialectHintRead, &[("program", &program)]))
-            .clicked();
-        dismiss = ui
-            .button(messages.text(MessageId::NetlistDialectHintDismiss))
-            .clicked();
+        let read_label =
+            messages.format(MessageId::NetlistDialectHintRead, &[("program", &program)]);
+        let dismiss_label = messages.text(MessageId::NetlistDialectHintDismiss);
+        read = Button::new(&read_label).compact().show(ui).clicked();
+        dismiss = Button::new(&dismiss_label).compact().show(ui).clicked();
     });
     if dismiss {
         ui.ctx()
