@@ -11,7 +11,7 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Problem, ordered_chips, problem_line, select};
+use crate::ui::widgets::{Problem, name_control, ordered_chips, problem_line, select, text_field};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{property_row, property_row_wrapped};
 use crate::workbench::project::configuration_state::{
@@ -19,6 +19,8 @@ use crate::workbench::project::configuration_state::{
     ConfigurationSelection, FieldEdit, ONLY_ON, apply_binding_change, apply_cell_binding_change,
     cell_binding, cell_view_names, inherited_views, instance_binding, only_on_label, used_for_runs,
 };
+
+use super::inspector_action_enabled;
 
 const NO_STOP: &str = "None";
 
@@ -221,20 +223,8 @@ fn used_for_runs_row(
         return None;
     }
     property_row(ui, "Used for runs", "No");
-    action_button(ui, "Use for runs", runs_allowed)
+    inspector_action_enabled(ui, "Use for runs", runs_allowed)
         .then_some(InspectorAction::UseForRuns(selection))
-}
-
-fn action_button(ui: &mut Ui, label: &str, enabled: bool) -> bool {
-    let width = ui.available_width().max(1.0);
-    let clicked = ui
-        .add_enabled_ui(enabled, |ui| {
-            ui.add_sized([width, 28.0], egui::Button::new(label))
-        })
-        .inner
-        .clicked();
-    ui.add_space(4.0);
-    clicked
 }
 
 /// The configuration itself, with no row selected. Its name is a fact here:
@@ -329,7 +319,7 @@ fn instance(
                 "Status",
                 "This instance is not in the design any more. Pick another row.",
             );
-            return action_button(ui, "Show the configuration", true)
+            return inspector_action_enabled(ui, "Show the configuration", true)
                 .then_some(InspectorAction::Deselect);
         }
     };
@@ -384,8 +374,10 @@ fn instance(
         fields,
     )
     .or_else(|| {
-        (editable && own_views.is_some() && action_button(ui, "Inherit the view list", true))
-            .then_some(BindingChange::Inherit)
+        (editable
+            && own_views.is_some()
+            && inspector_action_enabled(ui, "Inherit the view list", true))
+        .then_some(BindingChange::Inherit)
     });
     change.map(|change| InspectorAction::Binding {
         path: path.to_owned(),
@@ -479,8 +471,10 @@ fn cell_facts(
         &mut unused,
     )
     .or_else(|| {
-        (editable && own_views.is_some() && action_button(ui, "Inherit the view list", true))
-            .then_some(BindingChange::Inherit)
+        (editable
+            && own_views.is_some()
+            && inspector_action_enabled(ui, "Inherit the view list", true))
+        .then_some(BindingChange::Inherit)
     });
     change.map(|change| InspectorAction::CellBinding {
         library: library.to_owned(),
@@ -532,7 +526,7 @@ fn pattern_binding(
         fields,
     );
     change = change.or(edited);
-    if editable && action_button(ui, "Remove pattern binding", true) {
+    if editable && inspector_action_enabled(ui, "Remove pattern binding", true) {
         change = Some(BindingChange::Remove);
     }
     change.map(|change| InspectorAction::Binding {
@@ -736,12 +730,14 @@ fn committed_text(
     let mut committed = None;
     ui.horizontal(|ui| {
         let width = ui.available_width().max(80.0);
-        let response = ui.add_sized(
-            [width, 24.0],
+        let response = text_field(
+            ui,
             TextEdit::singleline(&mut text)
                 .id(egui::Id::new(("configuration-field", field)))
                 .font(theme::field_mono()),
+            width,
         );
+        name_control(ui, &response, label);
         if response.changed() {
             fields.buffer = Some(FieldEdit {
                 field: field.to_owned(),
