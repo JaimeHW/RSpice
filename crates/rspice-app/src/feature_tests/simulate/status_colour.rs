@@ -212,7 +212,7 @@ const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 9] = [
             "surfaces/project/library_publication.rs",
             "surfaces/project/overview.rs",
             "surfaces/project/overview/activity.rs",
-            "surfaces/project/overview/design.rs",
+            "surfaces/project/overview/cells.rs",
             "surfaces/project/overview/header.rs",
             "surfaces/project/overview/snapshot.rs",
             "surfaces/project/overview/status.rs",
