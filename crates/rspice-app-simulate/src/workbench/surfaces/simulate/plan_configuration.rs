@@ -99,7 +99,7 @@ pub fn configuration_row(
             let height = ui.spacing().interact_size.y;
             let (label_rect, _) = ui.allocate_exact_size(vec2(label_width, height), Sense::hover());
             paint_text(ui, label_rect, CONFIGURATION_LABEL, font, t.color.text_dim);
-            let width = ui.available_width().min(SELECT_WIDTH).max(1.0);
+            let width = ui.available_width().clamp(1.0, SELECT_WIDTH);
             picked = select(
                 ui,
                 "simulation.plan.configuration",
