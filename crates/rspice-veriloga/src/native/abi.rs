@@ -3924,6 +3924,8 @@ call_helpers!(
     rspice_tasks_enabled_operands_native,
     rspice_task_guard_operands_native,
     rspice_finish_operands_native,
+    rspice_system_call_native,
+    rspice_system_output_native,
     rspice_output_operands_native,
     rspice_simparam_native,
     rspice_evaluation_state_native,
@@ -4108,7 +4110,10 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, evaluation_state_inputs), 544);
         assert_eq!(offset_of!(EvalContext, evaluation_state_inputs_len), 552);
         assert_eq!(offset_of!(EvalContext, analog_occurrences), 560);
-        assert_eq!(size_of::<EvalContext>(), 568);
+        assert_eq!(offset_of!(EvalContext, event_deferral), 568);
+        assert_eq!(offset_of!(EvalContext, analog_system), 576);
+        assert_eq!(offset_of!(EvalContext, analog_files), 584);
+        assert_eq!(size_of::<EvalContext>(), 592);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
