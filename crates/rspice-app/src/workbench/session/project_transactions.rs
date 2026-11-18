@@ -1422,7 +1422,16 @@ fn save_native_scope(
     authority: DestinationAuthority,
 ) -> Result<(), String> {
     state.commit_inline_component_edit()?;
-    project_workflow::save_native_scope(save_parts(state), scope, path, authority)
+    let saved = project_workflow::save_native_scope(save_parts(state), scope, path, authority);
+    // A save refused for a library file that changed on disk since its
+    // edits began asks, for each such file, which version to keep.
+    if saved.is_err() {
+        state
+            .project
+            .library_files
+            .open_changed_on_disk(&state.model);
+    }
+    saved
 }
 
 /// What the project's save reads and writes, with the features' facts its

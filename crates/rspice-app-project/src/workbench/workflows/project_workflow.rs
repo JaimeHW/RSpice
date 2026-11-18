@@ -1545,6 +1545,8 @@ pub fn install_loaded_project(model: &mut Model, install: LoadedProjectInstall) 
     model.model_library_manager = install.model_library_manager;
     model.release_library_locks();
     model.library_files = install.library_files;
+    // Who else holds each library file is read once the project is open.
+    model.check_library_files();
 }
 
 /// What an installed project's restore leaves for the shell and the report.

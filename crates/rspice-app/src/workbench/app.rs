@@ -507,6 +507,19 @@ impl RSpiceApp {
         }
 
         self.poll_code(ctx);
+        // Coming back to the window reads the library folders again:
+        // another writer may have saved a cellview, or taken a lock, while
+        // the reader was away.
+        #[cfg(not(target_arch = "wasm32"))]
+        if ctx.input(|input| {
+            input
+                .raw
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::WindowFocused(true)))
+        }) {
+            self.state.model.check_library_files();
+        }
 
         #[cfg(target_arch = "wasm32")]
         synchronize_browser_surface_navigation(&mut self.state);

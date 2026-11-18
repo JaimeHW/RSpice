@@ -512,6 +512,12 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         },
     },
     DialogSpec {
+        key: DialogKey("project.library_files"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.library_files"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.library_files")),
+    },
+    DialogSpec {
         key: DialogKey("simulate.plan_removal_review"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.simulate.plan_removal_review.target.is_some()),

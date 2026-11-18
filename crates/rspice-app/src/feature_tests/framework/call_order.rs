@@ -95,6 +95,13 @@ const PREPARE_FRAME: &[Step] = &[
     ("5.5", &["if initializing_frame", "ctx.request_repaint()"]),
     ("5.6", &["self.poll_code(ctx)"]),
     (
+        "5.7",
+        &[
+            "egui::Event::WindowFocused(true)",
+            "self.state.model.check_library_files()",
+        ],
+    ),
+    (
         "5.17",
         &["synchronize_browser_surface_navigation(&mut self.state)"],
     ),
@@ -372,6 +379,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
+    ("features::render_dialog", "project"),
     ("features::render_dialog", "project"),
     ("features::render_dialog", "project"),
     ("features::render_dialog", "project"),
@@ -1519,8 +1527,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
         .collect::<Vec<_>>();
     assert_eq!(
         recorded.len(),
-        82,
-        "the frame's 80 dialog steps, the route overlays' 3 owners in place of their host"
+        83,
+        "the frame's 81 dialog steps, the route overlays' 3 owners in place of their host"
     );
 
     let specs = dialog_specs(DIALOG_ORDER);
@@ -1576,8 +1584,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
     }
     assert_eq!(
         DIALOG_STEPS.len() - SYNTHETIC_DIALOG_STEPS.len() - SYNTHETIC_FEATURE_STEPS.len(),
-        75,
-        "the frame draws 75 dialog steps beside its synthetic ones"
+        76,
+        "the frame draws 76 dialog steps beside its synthetic ones"
     );
 }
 
@@ -1970,6 +1978,10 @@ fn the_library_deletion_steps_run_in_the_project_context_and_a_deletion_is_answe
     assert_project_step(
         "project.pending_library_deletions",
         "|cx, _| ProjectFeature::process_pending_library_deletions(cx)",
+    );
+    assert_project_step(
+        "project.library_files",
+        "ProjectFeature::process_library_files_dialog",
     );
 
     let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);

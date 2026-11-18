@@ -1089,6 +1089,17 @@ pub(crate) fn restore_project_from_publication(
     state.model.release_library_locks();
     candidate.model.library_files = library_files;
     state.commit_candidate(candidate);
+    // A library folder may have moved on since the publication: each file
+    // that differs from the publication's copy is named, and the reader can
+    // write the publication's copy back over the picked ones.
+    state.model.check_library_files();
+    let moved_on = state
+        .model
+        .refresh_rows()
+        .into_iter()
+        .filter(|row| !row.edited)
+        .collect();
+    state.project.library_files.open_moved_on(moved_on);
     for warning in execution_warnings {
         state.record(
             rspice_app_state::diagnostics::LogSeverity::Warning,
