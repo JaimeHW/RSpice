@@ -94,29 +94,20 @@ fn storage_reports_the_owned_lease_and_recovers_after_release() {
         let accepted = b"accepted bytes";
         std::fs::write(target, accepted).unwrap();
         let expected = NativeStorage.observe_destination(target).unwrap();
-        let leases: Vec<_> = std::fs::read_dir(root)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| {
-                path.file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .starts_with(".rspice-lock-v2-")
-            })
-            .collect();
-        assert_eq!(leases.len(), 1);
-        let owned = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&leases[0])
-            .unwrap();
-        owned.lock().unwrap();
+        let beside = || {
+            std::fs::read_dir(root)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(beside(), [target.file_name().unwrap()], "no lock file outlives a read");
+        let owned = durable_file::hold_lease(target).unwrap();
         let raw = durable_file::reconcile_publication(target).unwrap_err();
         let diagnostic = raw.to_string();
         let CompareExchangeError::LeaseBusy(lease) = raw else {
             panic!("the held lease did not prevent publication")
         };
-        assert_eq!(lease, leases[0]);
+        assert!(lease.is_file(), "the held lease's lock file is there");
         for result in operations(target, expected) {
             let error = result.unwrap_err();
             assert_eq!(error.to_string(), diagnostic);
@@ -127,6 +118,7 @@ fn storage_reports_the_owned_lease_and_recovers_after_release() {
             assert_eq!(std::fs::read(target).unwrap(), accepted);
         }
         drop(owned);
+        assert!(!lease.exists(), "a released lease leaves no lock file");
         assert_eq!(NativeStorage.observe_destination(target).unwrap(), expected);
         let successor = b"successful after release";
         assert_eq!(
@@ -134,6 +126,7 @@ fn storage_reports_the_owned_lease_and_recovers_after_release() {
             digest_bytes(successor)
         );
         assert_eq!(std::fs::read(target).unwrap(), successor);
+        assert_eq!(beside(), [target.file_name().unwrap()], "nothing beside the save");
     });
 }
 

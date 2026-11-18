@@ -2,10 +2,12 @@
 //!
 //! A destination lease serializes one write. The open lease says who has the
 //! project open: a small file beside the project whose first byte an open
-//! window holds an exclusive lock on. The operating system lets the lock go
-//! with the window, however the window ends, so a crashed window leaves no
-//! stale lease. The holder's user, machine and opening time follow the locked
-//! byte, where another window can read them while the lock is held.
+//! window holds an exclusive lock on, there only while it is held. The
+//! operating system lets the lock go with the window, however the window
+//! ends, so a crashed window's file is held by nobody: the next window takes
+//! it over and removes it when it closes the project. The holder's user,
+//! machine and opening time follow the locked byte, where another window can
+//! read them while the lock is held.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -14,8 +16,8 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    create_unique_sibling, parent_directory, remove_transaction_temp, resolved_destination,
-    try_lock_exclusive, unlock_file,
+    create_unique_sibling, lock_file_still_named, parent_directory, release_lock_file,
+    remove_transaction_temp, resolved_destination, try_lock_exclusive, unlock_file,
 };
 
 /// Where the holder's record starts: past the locked byte, so a window that
@@ -143,9 +145,7 @@ impl std::fmt::Debug for OpenLease {
 
 impl Drop for OpenLease {
     fn drop(&mut self) {
-        // The lease file stays, as the destination lease's does: removing it
-        // after unlocking would race a window taking it.
-        let _ = unlock_file(&self.file);
+        release_lock_file(&self.path, &self.file);
     }
 }
 
@@ -165,21 +165,33 @@ pub fn acquire_open_lease(
     holder: &OpenLeaseHolder,
 ) -> io::Result<OpenLeaseAttempt> {
     let path = open_lease_path(project);
-    let (mut file, writable) = match open_lease_file(&path, true) {
-        Ok(file) => (file, true),
-        // A lease another user created may be one this user can only read;
-        // the lock is still the lock.
-        Err(error) if error.kind() == io::ErrorKind::PermissionDenied && path.exists() => {
-            (open_lease_file(&path, false)?, false)
+    let (mut file, writable) = loop {
+        let (mut file, writable) = match open_lease_file(&path, true) {
+            Ok(file) => (file, true),
+            // A lease another user created may be one this user can only
+            // read; the lock is still the lock.
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied && path.exists() => {
+                match open_lease_file(&path, false) {
+                    Ok(file) => (file, false),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) => return Err(error),
+        };
+        if let Err(error) = try_lock_exclusive(&file) {
+            if error.kind() != io::ErrorKind::WouldBlock {
+                return Err(error);
+            }
+            return Ok(OpenLeaseAttempt::HeldElsewhere(read_holder(&mut file)));
         }
-        Err(error) => return Err(error),
+        // A window that let the lease go removed its name before the lock:
+        // this lock is on a removed file, so start again on a new one.
+        if lock_file_still_named(&path, &file)? {
+            break (file, writable);
+        }
+        let _ = unlock_file(&file);
     };
-    if let Err(error) = try_lock_exclusive(&file) {
-        if error.kind() != io::ErrorKind::WouldBlock {
-            return Err(error);
-        }
-        return Ok(OpenLeaseAttempt::HeldElsewhere(read_holder(&mut file)));
-    }
     if writable {
         let record = holder.encode();
         let written = (|| {
@@ -309,11 +321,17 @@ fn open_lease_file(path: &Path, write: bool) -> io::Result<File> {
     options.open(path)
 }
 
+/// A writing window asks for deletion, so it can remove the file's name
+/// through its own handle when it lets the lease go. The file it makes is
+/// hidden, as a dot file is elsewhere: it marks the project open and is not
+/// a file of the author's.
 #[cfg(windows)]
 fn open_lease_file(path: &Path, write: bool) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt as _;
+    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        DELETE, FILE_ATTRIBUTE_HIDDEN, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
 
     let mut options = OpenOptions::new();
@@ -322,7 +340,11 @@ fn open_lease_file(path: &Path, write: bool) -> io::Result<File> {
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     if write {
-        options.write(true).create(true);
+        options
+            .write(true)
+            .create(true)
+            .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
+            .attributes(FILE_ATTRIBUTE_HIDDEN);
     }
     options.open(path)
 }
@@ -485,10 +507,23 @@ mod tests {
 
         drop(first);
         assert_eq!(open_lease_holder(&project).unwrap(), None);
+        assert!(
+            !open_lease_path(&project).exists(),
+            "a released open lease leaves no file"
+        );
         let third = acquire_open_lease(&project, &holder("grace")).unwrap();
         assert!(matches!(third, OpenLeaseAttempt::Held(_)));
         assert_eq!(open_lease_holder(&project).unwrap(), Some(holder("grace")));
         drop(third);
+        let left = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            left,
+            ["amp.rspiceproj"],
+            "only the project is left once closed"
+        );
         let _ = std::fs::remove_dir_all(folder);
     }
 

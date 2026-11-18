@@ -303,32 +303,149 @@ impl DestinationLease {
         Ok(lease)
     }
 
+    /// Take the destination's lease: its lock file, made if there is none,
+    /// locked, and still the file its name names once locked. A holder
+    /// removes the name before it lets the lock go, so a writer that opened
+    /// the file meanwhile finds, once it has the lock, that the name names
+    /// nothing or another file, and starts again. A file a crashed writer
+    /// left is locked by nobody, so the next writer takes it over and
+    /// removes it when it is done.
     fn acquire_without_reconciliation(target: &Path) -> Result<Self, CompareExchangeError> {
         let path = lease_path(target);
         let target_binding = lease_target_binding(target);
-        install_lease_if_missing(&path, target_binding)?;
-        let mut file = open_lease_nofollow(&path)?;
-        if let Err(error) = try_lock_exclusive(&file) {
-            return if matches!(error.kind(), io::ErrorKind::WouldBlock) {
-                Err(CompareExchangeError::LeaseBusy(path))
-            } else {
-                Err(error.into())
+        loop {
+            install_lease_if_missing(&path, target_binding)?;
+            let mut file = match open_lease_nofollow(&path) {
+                Ok(file) => file,
+                // Released and removed between its making and its opening.
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
             };
+            if let Err(error) = try_lock_exclusive(&file) {
+                return if matches!(error.kind(), io::ErrorKind::WouldBlock) {
+                    Err(CompareExchangeError::LeaseBusy(path))
+                } else {
+                    Err(error.into())
+                };
+            }
+            if !lock_file_still_named(&path, &file)? {
+                let _ = unlock_file(&file);
+                continue;
+            }
+            validate_open_lease(&path, &mut file, target_binding)?;
+            return Ok(Self { path, file });
         }
-        validate_open_lease(&path, &mut file, target_binding)?;
-        Ok(Self { path, file })
     }
 }
 
 impl Drop for DestinationLease {
     fn drop(&mut self) {
-        // The inode is permanent. Removing a lock pathname after unlocking
-        // has an unavoidable read-owner/remove race that can delete another
-        // writer's replacement lease. Keeping it is safe and bounded: exactly
-        // one small lease file exists per project destination.
-        let _ = unlock_file(&self.file);
-        let _ = &self.path;
+        release_lock_file(&self.path, &self.file);
     }
+}
+
+/// Let a held lock file go: its name is removed while the lock is still
+/// held, then the lock is released, so no lock file outlives its holder.
+/// A writer that opened the file before its name went sees, once it has
+/// the lock, that the name no longer names what it locked.
+fn release_lock_file(path: &Path, file: &File) {
+    #[cfg(unix)]
+    if lock_file_still_named(path, file).unwrap_or(false) {
+        let _ = std::fs::remove_file(path);
+    }
+    #[cfg(windows)]
+    {
+        let _ = path;
+        let _ = delete_through_handle(file);
+    }
+    let _ = unlock_file(file);
+}
+
+/// Whether `path` still names the file `file` has open: a holder that let
+/// it go removed the name, and a writer after it made a new file there.
+#[cfg(unix)]
+fn lock_file_still_named(path: &Path, file: &File) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let opened = file.metadata()?;
+    match std::fs::symlink_metadata(path) {
+        Ok(named) => Ok(named.dev() == opened.dev() && named.ino() == opened.ino()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether `path` still names the file `file` has open: a holder that let
+/// it go removed the name, and a writer after it made a new file there.
+#[cfg(windows)]
+fn lock_file_still_named(path: &Path, file: &File) -> io::Result<bool> {
+    let opened = windows_file_identity(file)?;
+    match open_lease_nofollow(path) {
+        Ok(named) => {
+            let named = windows_file_identity(&named)?;
+            Ok(named.0 == opened.0 && named.1 == opened.1)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Remove the name of the file `file` has open. The name goes at once,
+/// while other handles are still open, where the volume keeps POSIX
+/// deletion; elsewhere it goes when the last handle closes.
+#[cfg(windows)]
+fn delete_through_handle(file: &File) -> io::Result<()> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO,
+        FILE_DISPOSITION_INFO_EX, FileDispositionInfo, FileDispositionInfoEx,
+        SetFileInformationByHandle,
+    };
+
+    let handle = file.as_raw_handle() as *mut _;
+    let posix = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    };
+    let done = unsafe {
+        SetFileInformationByHandle(
+            handle,
+            FileDispositionInfoEx,
+            (&raw const posix).cast(),
+            std::mem::size_of::<FILE_DISPOSITION_INFO_EX>() as u32,
+        )
+    };
+    if done != 0 {
+        return Ok(());
+    }
+    let classic = FILE_DISPOSITION_INFO { DeleteFile: true };
+    let done = unsafe {
+        SetFileInformationByHandle(
+            handle,
+            FileDispositionInfo,
+            (&raw const classic).cast(),
+            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
+    };
+    if done == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Another writer's hold on a destination's lease, for a test that needs a
+/// writer to meet one. Released when dropped, as a writer's is.
+#[cfg(any(test, feature = "test-support"))]
+pub struct HeldLease {
+    _lease: DestinationLease,
+}
+
+/// Take the lease of the destination at `path` as another writer would.
+#[cfg(any(test, feature = "test-support"))]
+pub fn hold_lease(path: &Path) -> Result<HeldLease, CompareExchangeError> {
+    let destination = resolved_destination(path);
+    DestinationLease::acquire_without_reconciliation(&destination)
+        .map(|lease| HeldLease { _lease: lease })
 }
 
 /// Reconcile durable native publication evidence before a caller parses or
@@ -1198,38 +1315,25 @@ fn publish_new_bytes_impl(path: &Path, bytes: &[u8], owner_only: bool) -> io::Re
 }
 
 /// Remove a file nothing will be published at again, such as a write-once
-/// file whose unique name is being retired, and the lease a replacement of
-/// it left beside it.
+/// file whose unique name is being retired.
 ///
 /// The lease is taken first, so a writer replacing the file finishes before
-/// it goes and the evidence of an interrupted replacement is settled. The
-/// lease's pathname then goes too: on Unix while it is still held, since
-/// every writer checks after locking that the pathname still names what it
-/// locked; elsewhere once it is closed, since a writer holding it open keeps
-/// it from being deleted. A lease another writer holds open stays, harmless.
-/// A file already gone is not a failure.
+/// it goes and the evidence of an interrupted replacement is settled; the
+/// lease goes with its release. A file already gone, or a folder already
+/// gone, is not a failure.
 pub fn remove_published(path: &Path) -> Result<(), CompareExchangeError> {
     let destination = resolved_destination(path);
     let path = destination.as_path();
-    let lease = lease_path(path);
-    let held = match lease.symlink_metadata() {
-        Ok(_) => Some(DestinationLease::acquire(path)?),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
-    };
-    let mut removed = match std::fs::remove_file(path) {
+    if !parent_directory(path).exists() {
+        return Ok(());
+    }
+    let held = DestinationLease::acquire(path)?;
+    let removed = match std::fs::remove_file(path) {
         Ok(()) => true,
         Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(error.into()),
     };
-    if let Some(held) = held {
-        #[cfg(unix)]
-        let gone = std::fs::remove_file(&held.path).is_ok();
-        drop(held);
-        #[cfg(not(unix))]
-        let gone = std::fs::remove_file(&lease).is_ok();
-        removed |= gone;
-    }
+    drop(held);
     if removed {
         sync_parent_of(path)?;
     }
@@ -1450,17 +1554,22 @@ fn open_lease_nofollow(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+/// Every handle shares deletion, so the holder can remove the name while
+/// a writer waiting on the lock has the file open, and asks for it, so the
+/// holder can remove the name through its own handle.
 #[cfg(windows)]
 fn open_lease_nofollow(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt as _;
+    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        DELETE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
 
     OpenOptions::new()
         .read(true)
         .write(true)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
 }

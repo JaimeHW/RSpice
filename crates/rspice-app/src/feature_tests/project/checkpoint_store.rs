@@ -14,6 +14,7 @@ use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, ProjectCheckpointSummary, budget_use, create,
     keep_unsaved_checkpoints_in, list, storage_location,
 };
+use rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{ComponentType, Point};
 use rspice_app_state::workbench::preferences::ScalarPreference;
@@ -227,6 +228,68 @@ fn a_save_of_every_document_removes_the_autosave() {
         reasons.contains(&ProjectCheckpointReason::Manual),
         "{reasons:?}"
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A save leaves nothing beside the project but its file and its checkpoints
+/// folder: the write's lock file goes with the write. While the project is
+/// open, a hidden marker beside it says who has it open; closing the project
+/// takes that away too.
+#[test]
+fn a_save_leaves_only_the_project_and_its_checkpoints_beside_it() {
+    let (mut app, root) = saved_project("checkpoint-store-beside");
+    edit(&mut app, 0);
+    assert!(
+        app.state
+            .save_project_to_path(&root.join("idle.rspiceproj"))
+    );
+    let checkpoints = storage_location(&app.state.model).expect("the folder is named");
+    let beside = || {
+        let mut names = std::fs::read_dir(&root)
+            .expect("the folder is read")
+            .map(|entry| {
+                entry
+                    .expect("an entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+    let mut expected = vec![
+        "idle.rspiceproj".to_owned(),
+        checkpoints
+            .file_name()
+            .expect("the folder has a name")
+            .to_string_lossy()
+            .into_owned(),
+    ];
+    expected.sort();
+
+    let open = beside();
+    let markers = open
+        .iter()
+        .filter(|name| !expected.contains(name))
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1, "only the open marker besides: {open:?}");
+    assert!(markers[0].starts_with(".rspice-open-"), "{open:?}");
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        let attributes = std::fs::metadata(root.join(markers[0]))
+            .expect("the marker is there")
+            .file_attributes();
+        assert_ne!(attributes & FILE_ATTRIBUTE_HIDDEN, 0, "the open marker is hidden");
+    }
+
+    assert!(
+        app.state
+            .close_project_discard(ProjectCloseDestination::EmptyWorkbench)
+    );
+    assert_eq!(beside(), expected, "a closed project leaves its file and checkpoints");
     let _ = std::fs::remove_dir_all(root);
 }
 

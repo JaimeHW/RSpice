@@ -1,7 +1,7 @@
 //! Tests for atomic publication and crash recovery.
 //!
 //! The suite asserts what must survive an interrupted write: only the target
-//! and its lease are left behind, no recovery artifacts leak, and an existing
+//! is left behind, no lease or recovery artifact leaks, and an existing
 //! file's mode is preserved across replacement. These are the invariants a
 //! partially-completed publication would break.
 
@@ -23,7 +23,7 @@ fn failed_staging_preserves_target_and_removes_unique_temp() {
         std::fs::read(&target).expect("read predecessor"),
         b"durable predecessor"
     );
-    assert_only_target_and_lease(&root, &target);
+    assert_only_target(&root, &target);
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -39,7 +39,7 @@ fn successful_publication_replaces_target_without_fixed_temp_names() {
         std::fs::read(&target).expect("read successor"),
         b"new durable bytes"
     );
-    assert_only_target_and_lease(&root, &target);
+    assert_only_target(&root, &target);
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -62,7 +62,7 @@ fn compare_exchange_rejects_external_change_without_touching_target() {
         std::fs::read(&target).expect("read target"),
         b"external revision"
     );
-    assert_only_target_and_lease(&root, &target);
+    assert_only_target(&root, &target);
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -86,7 +86,7 @@ fn compare_exchange_publishes_exact_successor_and_releases_predecessor_evidence(
     );
     #[cfg(windows)]
     assert_no_windows_recovery_artifacts(&target);
-    assert_only_target_and_lease(&root, &target);
+    assert_only_target(&root, &target);
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -128,7 +128,7 @@ fn publication_completes_where_the_derived_pathnames_outgrow_the_windows_limit()
         b"deep successor"
     );
     assert_no_windows_recovery_artifacts(&target);
-    assert_only_target_and_lease(&parent, &target);
+    assert_only_target(&parent, &target);
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -193,7 +193,7 @@ fn compare_exchange_preserves_the_existing_windows_security_contract() {
         b"verified successor"
     );
     assert_no_windows_recovery_artifacts(&target);
-    assert_only_target_and_lease(&root, &target);
+    assert_only_target(&root, &target);
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -905,24 +905,74 @@ fn compare_exchange_requires_missing_destination_when_requested() {
 }
 
 #[test]
-fn destination_lease_serializes_writers_and_reuses_one_stable_inode() {
+fn destination_lease_serializes_writers_and_leaves_nothing_once_released() {
     let root = unique_temp_dir("lease");
     let target = internal_target(&root);
     let first = DestinationLease::acquire(&target).expect("acquire first lease");
+    assert!(
+        lease_path(&target).is_file(),
+        "the lock file is there while held"
+    );
     assert!(matches!(
         DestinationLease::acquire(&target),
         Err(CompareExchangeError::LeaseBusy(path)) if path == lease_path(&target)
     ));
 
     drop(first);
-    let reacquired = DestinationLease::acquire(&target).expect("reacquire released lease");
-    drop(reacquired);
     assert_eq!(
         std::fs::read_dir(&root).expect("read fixture").count(),
-        1,
-        "the permanent lease inode is bounded to one file per destination"
+        0,
+        "a released lease leaves no lock file"
     );
+    let reacquired = DestinationLease::acquire(&target).expect("reacquire released lease");
+    drop(reacquired);
+    assert_eq!(std::fs::read_dir(&root).expect("read fixture").count(), 0);
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// A lock file a crashed writer left is held by nobody: the next writer
+/// takes it over, and it goes when that writer is done.
+#[test]
+fn a_lease_a_crashed_writer_left_is_taken_over_and_removed() {
+    let root = unique_temp_dir("stale-lease");
+    let target = internal_target(&root);
+    install_lease_if_missing(&lease_path(&target), lease_target_binding(&target))
+        .expect("leave a lock file as a crashed writer would");
     assert!(lease_path(&target).is_file());
+
+    let taken = DestinationLease::acquire(&target).expect("take the stale lease over");
+    drop(taken);
+
+    assert_eq!(
+        std::fs::read_dir(&root).expect("read fixture").count(),
+        0,
+        "the stale lock file is gone with the release"
+    );
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// A writer that opened the lock file before its holder let it go finds,
+/// once it has the lock, that the name no longer names what it locked, so
+/// it never holds a lock on a removed file while another writer holds the
+/// file now made there.
+#[test]
+fn a_writer_that_locks_a_released_lock_file_is_told_to_start_again() {
+    let root = unique_temp_dir("released-lease");
+    let target = internal_target(&root);
+    let held = DestinationLease::acquire(&target).expect("acquire the lease");
+    let waiting = open_lease_nofollow(&lease_path(&target)).expect("a second writer opens it");
+
+    drop(held);
+    try_lock_exclusive(&waiting).expect("the lock is free once released");
+
+    assert!(
+        !lock_file_still_named(&lease_path(&target), &waiting).unwrap_or(false),
+        "the released file's name is gone"
+    );
+    drop(waiting);
+    let next = DestinationLease::acquire(&target).expect("a fresh lease is taken");
+    drop(next);
+    assert_eq!(std::fs::read_dir(&root).expect("read fixture").count(), 0);
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
@@ -1044,7 +1094,7 @@ fn a_junction_spelling_and_the_directory_it_reaches_contend_for_one_lease() {
         lease_path(&target),
         "both spellings reach one file, so both must derive its one lease"
     );
-    assert_only_target_and_lease(&real, &target);
+    assert_only_target(&real, &target);
 
     std::fs::remove_dir(&junction).expect("remove the junction");
     assert_eq!(
@@ -1347,12 +1397,12 @@ fn internal_target(root: &Path) -> PathBuf {
     resolved_destination(&root.join("state.json"))
 }
 
-/// Nothing but the destination, its lease, and live recovery slots may remain.
+/// Nothing but the destination and live recovery slots may remain.
 ///
 /// Every candidate is a name in one directory, so names are what is compared:
 /// a resolved derivation and a fixture spelling reach the same entry by
 /// different pathnames.
-fn assert_only_target_and_lease(root: &Path, target: &Path) {
+fn assert_only_target(root: &Path, target: &Path) {
     fn entry_name(path: &Path) -> std::ffi::OsString {
         path.file_name()
             .expect("a publication pathname names an entry")
@@ -1364,7 +1414,7 @@ fn assert_only_target_and_lease(root: &Path, target: &Path) {
         .expect("read fixture")
         .map(|entry| entry.expect("entry").file_name())
         .collect::<Vec<_>>();
-    let mut expected = vec![entry_name(target), entry_name(&lease_path(&destination))];
+    let mut expected = vec![entry_name(target)];
     #[cfg(windows)]
     expected.extend(
         recovery_slot_paths(&destination)
