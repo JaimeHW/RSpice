@@ -2,18 +2,12 @@
 //! read from, the dialect its options declare, the one edit that declares
 //! another, and the card that names the program that wrote it.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reading, the declaration and the hint are used once the deck's check carries its reading"
-    )
-)]
-
 use std::ops::Range;
 use std::path::PathBuf;
 
-use rspice_core::netlist::{SourceKind, comment_start, is_spectre_source};
+use rspice_core::netlist::{SourceKind, comment_start};
+
+pub(crate) use crate::state::netlist_diagnostics::{DeckReading, Dialect};
 
 use super::{ActiveNetlistDocument, Model, NetlistDocumentState};
 use crate::workbench::MessageId;
@@ -82,45 +76,24 @@ pub(crate) fn shown_source_in(
     })
 }
 
-/// A dialect a deck can declare: how the engine reads its cards.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum Dialect {
-    /// No declaration: the engine's own reading.
-    RSpice,
-    /// `.options rspice_dialect=ngspice`: ngspice's device models and number
-    /// suffixes.
-    Ngspice,
-    /// `.options rspice_source=ltspice`: LTspice's defaults for what a card
-    /// leaves out.
-    Ltspice,
-    /// `.options rspice_source=qspice`: QSPICE's defaults for what a card
-    /// leaves out.
-    Qspice,
+/// The option and value that declare `dialect`; RSpice is declared by
+/// neither.
+const fn declaration(dialect: Dialect) -> Option<(&'static str, &'static str)> {
+    match dialect {
+        Dialect::RSpice => None,
+        Dialect::Ngspice => Some((DIALECT_OPTION, "ngspice")),
+        Dialect::Ltspice => Some((SOURCE_OPTION, "ltspice")),
+        Dialect::Qspice => Some((SOURCE_OPTION, "qspice")),
+    }
 }
 
-impl Dialect {
-    /// Every dialect a deck can be given, in the order they are offered.
-    pub(crate) const CHOICES: [Self; 4] =
-        [Self::RSpice, Self::Ngspice, Self::Ltspice, Self::Qspice];
-
-    /// The option and value that declare it; RSpice is declared by neither.
-    const fn declaration(self) -> Option<(&'static str, &'static str)> {
-        match self {
-            Self::RSpice => None,
-            Self::Ngspice => Some((DIALECT_OPTION, "ngspice")),
-            Self::Ltspice => Some((SOURCE_OPTION, "ltspice")),
-            Self::Qspice => Some((SOURCE_OPTION, "qspice")),
-        }
-    }
-
-    /// Its name.
-    pub(crate) const fn name(self) -> MessageId {
-        match self {
-            Self::RSpice => MessageId::NetlistDialectRspice,
-            Self::Ngspice => MessageId::NetlistDialectNgspice,
-            Self::Ltspice => MessageId::NetlistDialectLtspice,
-            Self::Qspice => MessageId::NetlistDialectQspice,
-        }
+/// The name of `dialect`.
+pub(crate) const fn dialect_name(dialect: Dialect) -> MessageId {
+    match dialect {
+        Dialect::RSpice => MessageId::NetlistDialectRspice,
+        Dialect::Ngspice => MessageId::NetlistDialectNgspice,
+        Dialect::Ltspice => MessageId::NetlistDialectLtspice,
+        Dialect::Qspice => MessageId::NetlistDialectQspice,
     }
 }
 
@@ -129,64 +102,21 @@ const DIALECT_OPTION: &str = "rspice_dialect";
 /// The option whose value names the program a deck was written for.
 const SOURCE_OPTION: &str = "rspice_source";
 
-/// How the engine reads a deck, as its last check found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeckReading {
-    Declared(Dialect),
-    /// `.options rspice_dialect=xyce`: Xyce's device models. Xyce's
-    /// expression syntax is read only by `rspice run --spice-dialect xyce`.
-    XyceDevices,
-    /// The Spectre front end reads it: the file's `.scs` name or a
-    /// `simulator lang=` line decides, not a choice.
-    Spectre,
+/// The name of `reading`, as the chip shows it.
+pub(crate) const fn reading_name(reading: DeckReading) -> MessageId {
+    match reading {
+        DeckReading::Declared(dialect) => dialect_name(dialect),
+        DeckReading::XyceDevices => MessageId::NetlistDialectXyceDevices,
+        DeckReading::Spectre => MessageId::NetlistDialectSpectre,
+    }
 }
 
-impl DeckReading {
-    /// The reading of a deck read from `source` holding `text`, whose check
-    /// found `options`. A deck that names two programs is read with both;
-    /// the program it was written for names it.
-    pub(crate) fn of(
-        options: &rspice_core::netlist::SimulationOptions,
-        source: &ShownSource,
-        text: &str,
-    ) -> Self {
-        use rspice_core::SpiceDialect;
-        use rspice_core::netlist::SourceSimulator;
-
-        if is_spectre_source(&source.path, text) {
-            return Self::Spectre;
-        }
-        match (options.spice_dialect, options.source_simulator) {
-            (Some(SpiceDialect::Xyce), _) => Self::XyceDevices,
-            (_, Some(SourceSimulator::Ltspice)) => Self::Declared(Dialect::Ltspice),
-            (_, Some(SourceSimulator::Qspice)) => Self::Declared(Dialect::Qspice),
-            (Some(SpiceDialect::Ngspice), _) => Self::Declared(Dialect::Ngspice),
-            _ => Self::Declared(Dialect::RSpice),
-        }
-    }
-
-    /// Its name, as the chip shows it.
-    pub(crate) const fn name(self) -> MessageId {
-        match self {
-            Self::Declared(dialect) => dialect.name(),
-            Self::XyceDevices => MessageId::NetlistDialectXyceDevices,
-            Self::Spectre => MessageId::NetlistDialectSpectre,
-        }
-    }
-
-    /// What the chip says of it under the pointer.
-    pub(crate) const fn detail(self) -> MessageId {
-        match self {
-            Self::Declared(_) => MessageId::NetlistDialectDetail,
-            Self::XyceDevices => MessageId::NetlistDialectXyceDetail,
-            Self::Spectre => MessageId::NetlistDialectSpectreDetail,
-        }
-    }
-
-    /// Whether another dialect can be chosen for a deck read so: a Spectre
-    /// deck's is its file's to say.
-    pub(crate) const fn choosable(self) -> bool {
-        !matches!(self, Self::Spectre)
+/// What the chip says of `reading` under the pointer.
+pub(crate) const fn reading_detail(reading: DeckReading) -> MessageId {
+    match reading {
+        DeckReading::Declared(_) => MessageId::NetlistDialectDetail,
+        DeckReading::XyceDevices => MessageId::NetlistDialectXyceDetail,
+        DeckReading::Spectre => MessageId::NetlistDialectSpectreDetail,
     }
 }
 
@@ -223,6 +153,7 @@ impl DeckEdit {
     }
 
     /// `deck` with the edit made.
+    #[cfg(test)]
     pub(crate) fn applied_to(&self, deck: &str) -> String {
         let mut edited = deck.to_owned();
         edited.replace_range(self.range.clone(), &self.text);
@@ -356,7 +287,7 @@ pub(crate) fn declares_dialect(deck: &str) -> bool {
 /// declares just that.
 pub(crate) fn declare(deck: &str, dialect: Dialect) -> Option<DeckEdit> {
     let (cards, declarations) = options_cards(deck);
-    let wanted = dialect.declaration();
+    let wanted = declaration(dialect);
     // The declaration kept, and what of it is rewritten to what.
     let kept = wanted.and_then(|(option, value)| {
         match declarations
@@ -450,6 +381,27 @@ const MARKERS: [(&str, Dialect); 2] = [
     (".control", Dialect::Ngspice),
 ];
 
+/// [`hint`] for the root deck `deck` the editor `editor_id` shows, read once
+/// per check of the deck, `checked` naming the check, rather than once per
+/// frame or keystroke.
+pub(crate) fn hint_once_per_check(
+    context: &egui::Context,
+    editor_id: egui::Id,
+    checked: u64,
+    deck: &str,
+) -> Option<DialectHint> {
+    let id = editor_id.with("dialect-hint");
+    if let Some((held, hinted)) =
+        context.data(|data| data.get_temp::<(u64, Option<DialectHint>)>(id))
+        && held == checked
+    {
+        return hinted;
+    }
+    let hinted = hint(deck);
+    context.data_mut(|data| data.insert_temp(id, (checked, hinted)));
+    hinted
+}
+
 /// The first marker card in the root deck `deck`, when it declares no
 /// dialect.
 pub(crate) fn hint(deck: &str) -> Option<DialectHint> {
@@ -477,21 +429,14 @@ mod tests {
     use super::*;
     use crate::workbench::{MessageCatalog, UiTextLocale};
 
-    fn deck_source(path: &str) -> ShownSource {
-        ShownSource {
-            path: path.into(),
-            root: true,
-        }
-    }
-
-    /// How the engine reads `deck`, checked as the file `amp.cir`.
+    /// How the engine reads the SPICE deck `deck`.
     fn checked(deck: &str) -> DeckReading {
         let netlist = rspice_core::Netlist::parse(deck).expect("the deck parses");
-        DeckReading::of(&netlist.options, &deck_source("amp.cir"), deck)
+        DeckReading::of(&netlist.options, false)
     }
 
     fn named(reading: DeckReading) -> String {
-        MessageCatalog::new(UiTextLocale::EnglishUnitedStates).text(reading.name())
+        MessageCatalog::new(UiTextLocale::EnglishUnitedStates).text(reading_name(reading))
     }
 
     #[test]
@@ -509,7 +454,9 @@ mod tests {
         }
         let messages = MessageCatalog::new(UiTextLocale::EnglishUnitedStates);
         assert_eq!(
-            messages.text(checked(&deck(".options rspice_dialect=xyce")).detail()),
+            messages.text(reading_detail(checked(&deck(
+                ".options rspice_dialect=xyce"
+            )))),
             "Xyce expression syntax is read only by rspice run --spice-dialect xyce"
         );
     }
@@ -517,16 +464,10 @@ mod tests {
     #[test]
     fn a_spectre_deck_is_read_as_spectre_and_offers_no_choice() {
         let options = rspice_core::netlist::SimulationOptions::default();
-        let spectre = "simulator lang=spectre\nr1 (a 0) resistor r=1k\n";
-        for (path, text) in [
-            ("amp.scs", "r1 (a 0) resistor r=1k\n"),
-            ("amp.cir", spectre),
-        ] {
-            let reading = DeckReading::of(&options, &deck_source(path), text);
-            assert_eq!(reading, DeckReading::Spectre, "{path}");
-            assert_eq!(named(reading), "Spectre");
-            assert!(!reading.choosable());
-        }
+        let reading = DeckReading::of(&options, true);
+        assert_eq!(reading, DeckReading::Spectre);
+        assert_eq!(named(reading), "Spectre");
+        assert!(!reading.choosable());
         assert!(DeckReading::XyceDevices.choosable());
     }
 

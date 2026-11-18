@@ -37,14 +37,13 @@ use super::{
     diagnostics::{parser_diagnostics, unknown_reference_diagnostics},
     highlight,
 };
-use crate::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
+use crate::state::netlist_diagnostics::{DeckReading, Diagnostic, NetlistDiagnosticCollection};
 use crate::workbench::documents::editor_font;
 
 const CODE_LEFT_PADDING: f32 = 12.0;
 const CODE_TOP_PADDING: i8 = 8;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
-const SYNTHETIC_EDITOR_SOURCE: &str = "__rspice_netlist_editor__.cir";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IncludeAccess {
@@ -709,12 +708,10 @@ fn validate_visible_source_in(
                 for diagnostic in &mut diagnostics {
                     diagnostic.bind_validation(revision, &validation_id);
                 }
-                netlist.diagnostics = Arc::new(bounded_netlist_diagnostics(
-                    diagnostics,
-                    &buffer,
-                    revision,
-                    &validation_id,
-                ));
+                netlist.diagnostics = Arc::new(
+                    bounded_netlist_diagnostics(diagnostics, &buffer, revision, &validation_id)
+                        .with_reading(netlist.diagnostics.reading()),
+                );
                 netlist.diag_revision = Some(revision);
                 return;
             }
@@ -723,19 +720,34 @@ fn validate_visible_source_in(
         None
     };
     let include_search = model.include_search_chain();
+    // The name the page shows the text under: what a source with no file is
+    // read as, and what its findings name.
+    let shown = super::dialect::shown_source_in(model, netlist)
+        .map(|shown| shown.path)
+        .filter(|path| !path.as_os_str().is_empty());
     // Only a parse of the buffer itself, as its own root, says which of its
     // lines a run reads. A composed override's parse reads the lines of the
     // composed deck, and a dependency's sections are selected, and its
     // conditions decided, by the deck that includes it.
     let reads_buffer_as_root = composed.is_none() && netlist.active_dependency_identity.is_none();
-    let (mut diagnostics, symbols, unread) = if buffer.trim().is_empty() {
-        (Vec::new(), Some(Vec::new()), Some(Vec::new()))
+    let (mut diagnostics, symbols, unread, reading) = if buffer.trim().is_empty() {
+        let spectre = rspice_core::netlist::is_spectre_source(
+            source_path.or(shown.as_deref()).unwrap_or(Path::new("")),
+            &buffer,
+        );
+        (
+            Vec::new(),
+            Some(Vec::new()),
+            Some(Vec::new()),
+            Some(DeckReading::of(&Default::default(), spectre)),
+        )
     } else {
         match &materialized {
             Ok(source) => {
-                let (diagnostics, symbols, unread) = parse_buffer_with_context(
+                let (diagnostics, symbols, unread, reading) = parse_buffer_with_context(
                     source,
                     source_path,
+                    shown.as_deref(),
                     &include_search,
                     platform_include_access(),
                     sealed_sources.as_ref(),
@@ -745,26 +757,24 @@ fn validate_visible_source_in(
                     in_buffer(diagnostics),
                     symbols,
                     unread.filter(|_| reads_buffer_as_root),
+                    reading,
                 )
             }
-            Err(error) => (vec![Diagnostic::error(error.clone())], None, None),
+            Err(error) => (vec![Diagnostic::error(error.clone())], None, None, None),
         }
     };
     diagnostics.extend(shadowed_include_diagnostics(include_resolutions, &buffer));
-    let shown = super::dialect::shown_source_in(model, netlist)
-        .map(|shown| shown.path)
-        .filter(|path| !path.as_os_str().is_empty());
     super::diagnostics::as_the_reader_sees_them(&mut diagnostics, &buffer, shown.as_deref());
     let validation_id = crate::state::content_digest(&buffer).to_string();
     for diagnostic in &mut diagnostics {
         diagnostic.bind_validation(revision, &validation_id);
     }
-    netlist.diagnostics = Arc::new(bounded_netlist_diagnostics(
-        diagnostics,
-        &buffer,
-        revision,
-        &validation_id,
-    ));
+    // A check that could not read the text keeps the reading of the last one
+    // that could, so a slip while typing does not flip the chip.
+    netlist.diagnostics = Arc::new(
+        bounded_netlist_diagnostics(diagnostics, &buffer, revision, &validation_id)
+            .with_reading(reading.or_else(|| netlist.diagnostics.reading())),
+    );
     if let Some(symbols) = symbols {
         netlist.symbols = symbols;
     }
@@ -798,8 +808,9 @@ fn bounded_netlist_diagnostics(
 /// receives the exact active-document origin used by execution.
 #[cfg(test)]
 fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
-    let (diagnostics, symbols, _) = parse_buffer_with_context(
+    let (diagnostics, symbols, _, _) = parse_buffer_with_context(
         buffer,
+        None,
         None,
         &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
         platform_include_access(),
@@ -810,101 +821,137 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
 }
 
 /// One parse of the visible source: its findings, the symbols it defines,
-/// and the lines of the source itself the parse did not read. The last two
-/// are absent when the parse did not complete.
+/// the lines of the source itself the parse did not read, and how the engine
+/// read it. The last three are absent when the parse did not complete.
 type BufferParse = (
     Vec<Diagnostic>,
     Option<Vec<completion::SymbolEntry>>,
     Option<Vec<rspice_core::netlist::UnreadSourceRegion>>,
+    Option<DeckReading>,
 );
 
+/// Check `buffer`, the text of the file `source_path`, or of no file and
+/// called `name`, as the engine reads it under that name: SPICE, or Spectre
+/// for a `.scs` name or a `simulator lang=` line.
 fn parse_buffer_with_context(
     buffer: &str,
     source_path: Option<&Path>,
+    name: Option<&Path>,
     include_search: &rspice_simulation::netlist_preparation::IncludeSearchChain,
     include_access: IncludeAccess,
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
     abort: &dyn AbortSignal,
 ) -> BufferParse {
     let external_line = first_external_dependency_line(buffer);
-    if source_path.is_none()
-        && let Some(line) = external_line
-    {
-        return (
-            vec![Diagnostic::error(
-                "Relative .include/.inc/.lib sources require an imported deck origin before they can be resolved and sealed.",
-            )
-            .with_line(Some(line))],
-            None,
-            None,
-        );
-    }
-
-    let parse_source = match editor_parse_source(source_path) {
-        Ok(path) => path,
-        Err(error) => return (vec![Diagnostic::error(error)], None, None),
+    let file = match source_path.map(editor_parse_source).transpose() {
+        Ok(file) => file,
+        Err(error) => return (vec![Diagnostic::error(error)], None, None, None),
     };
+    let spectre = rspice_core::netlist::is_spectre_source(
+        file.as_deref().or(name).unwrap_or(Path::new("")),
+        buffer,
+    );
     let options = rspice_core::netlist::NetlistParseOptions {
         resource_limits: rspice_core::ResourceLimits::default(),
         ..Default::default()
     };
-    let parsed = if external_line.is_none() {
-        // A dependency-free deck needs no ambient filesystem or browser-file
-        // capability. Parsing it in-memory is both sufficient and prevents
-        // the authenticated-bundle policy from rejecting ordinary owned
-        // source merely because the target is WASM.
-        rspice_core::Netlist::parse_with_options_and_abort(buffer, options, abort)
-    } else {
-        match include_access {
-            IncludeAccess::NativeFilesystem => {
-                // One owner decides which engine entry point a host-file parse
-                // goes through, so the editor lints the deck against exactly
-                // the chain a run would seal it against.
-                include_search.parse_with_abort(buffer, Some(&parse_source), options, abort)
-            }
-            IncludeAccess::AuthenticatedBundleOnly => {
-                let Some(sealed_sources) = sealed_sources else {
+    // The name the parse reads the text under, which its findings name, and
+    // the parse.
+    let (parse_source, parsed) = match (file, external_line) {
+        (None, Some(line)) => {
+            return (
+                vec![Diagnostic::error(
+                    "Relative .include/.inc/.lib sources require an imported deck origin before they can be resolved and sealed.",
+                )
+                .with_line(Some(line))],
+                None,
+                None,
+                None,
+            );
+        }
+        (file, None) if !spectre => (
+            file.or_else(|| name.map(Path::to_path_buf)),
+            // A dependency-free deck needs no ambient filesystem or
+            // browser-file capability. Parsing it in-memory is both
+            // sufficient and prevents the authenticated-bundle policy from
+            // rejecting ordinary owned source merely because the target is
+            // WASM.
+            rspice_core::Netlist::parse_with_options_and_abort(buffer, options, abort),
+        ),
+        (Some(file), _) if include_access == IncludeAccess::NativeFilesystem => {
+            // One owner decides which engine entry point a host-file parse
+            // goes through, so the editor lints the deck against exactly the
+            // chain a run would seal it against.
+            let parsed = include_search.parse_with_abort(buffer, Some(&file), options, abort);
+            (Some(file), parsed)
+        }
+        (file, None) => {
+            // Only a parse under a name reaches the Spectre front end. A
+            // Spectre deck with no file to read includes from, or in the
+            // browser, is read alone, under its own name.
+            let root = spectre_root(file.as_deref().or(name));
+            let bundle = match rspice_core::netlist::SealedSourceBundle::try_new([(
+                root.clone(),
+                buffer.to_owned(),
+            )]) {
+                Ok(bundle) => bundle,
+                Err(error) => return (parse_error_diagnostics_at(error, None), None, None, None),
+            };
+            let parsed =
+                rspice_core::Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+                    buffer, &root, bundle, options, abort,
+                );
+            (Some(root), parsed)
+        }
+        (Some(file), Some(_)) => {
+            let Some(sealed_sources) = sealed_sources else {
+                return (
+                    vec![Diagnostic::error(
+                        "In the browser, external .include/.inc/.lib sources must come from an imported source bundle.",
+                    )
+                    .with_line(external_line)],
+                    None,
+                    None,
+                    None,
+                );
+            };
+            let bundle = match sealed_sources.bundle_for_root(&file, buffer) {
+                Ok(bundle) => bundle,
+                Err(error) => {
                     return (
-                        vec![Diagnostic::error(
-                            "In the browser, external .include/.inc/.lib sources must come from an imported source bundle.",
-                        )
-                        .with_line(external_line)],
+                        vec![Diagnostic::error(error).with_line(external_line)],
+                        None,
                         None,
                         None,
                     );
-                };
-                let bundle = match sealed_sources.bundle_for_root(&parse_source, buffer) {
-                    Ok(bundle) => bundle,
-                    Err(error) => {
-                        return (
-                            vec![Diagnostic::error(error).with_line(external_line)],
-                            None,
-                            None,
-                        );
-                    }
-                };
+                }
+            };
+            let parsed =
                 rspice_core::Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
-                    buffer,
-                    &parse_source,
-                    bundle,
-                    options,
-                    abort,
-                )
-            }
+                    buffer, &file, bundle, options, abort,
+                );
+            (Some(file), parsed)
         }
     };
+    let parse_source = parse_source.as_deref();
     match parsed {
         Ok(netlist) => {
             let unread = netlist.unread_root_source().cloned().collect::<Vec<_>>();
-            let mut diagnostics = parser_diagnostics(&netlist, Some(&parse_source));
+            let mut diagnostics = parser_diagnostics(&netlist, parse_source);
             if let Err(error) = rspice_core::netlist::validate_output_requests(&netlist) {
-                diagnostics.extend(parse_error_diagnostics_at(error, Some(&parse_source)));
+                diagnostics.extend(parse_error_diagnostics_at(error, parse_source));
             }
             diagnostics.extend(unknown_reference_diagnostics(buffer, &unread));
-            (diagnostics, Some(harvest_symbols(&netlist)), Some(unread))
+            (
+                diagnostics,
+                Some(harvest_symbols(&netlist)),
+                Some(unread),
+                Some(DeckReading::of(&netlist.options, spectre)),
+            )
         }
         Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => (
-            parse_error_diagnostics_at(error, Some(&parse_source)),
+            parse_error_diagnostics_at(error, parse_source),
+            None,
             None,
             None,
         ),
@@ -920,15 +967,24 @@ fn parse_buffer_with_context(
             ],
             None,
             None,
+            None,
         ),
     }
 }
 
+/// The absolute name a deck that is no file on disk is read under: its own
+/// name under the root folder, or `netlist` there when it has none.
+fn spectre_root(name: Option<&Path>) -> PathBuf {
+    let name = name.unwrap_or(Path::new("netlist"));
+    if name.has_root() {
+        name.to_path_buf()
+    } else {
+        Path::new("/").join(name)
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
-fn editor_parse_source(source_path: Option<&Path>) -> Result<PathBuf, String> {
-    let Some(path) = source_path else {
-        return Ok(PathBuf::from(SYNTHETIC_EDITOR_SOURCE));
-    };
+fn editor_parse_source(path: &Path) -> Result<PathBuf, String> {
     if path.is_absolute() {
         return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     }
@@ -939,10 +995,8 @@ fn editor_parse_source(source_path: Option<&Path>) -> Result<PathBuf, String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn editor_parse_source(source_path: Option<&Path>) -> Result<PathBuf, String> {
-    Ok(source_path
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from(SYNTHETIC_EDITOR_SOURCE)))
+fn editor_parse_source(path: &Path) -> Result<PathBuf, String> {
+    Ok(path.to_path_buf())
 }
 
 /// One warning per include whose relative name names a second file later in

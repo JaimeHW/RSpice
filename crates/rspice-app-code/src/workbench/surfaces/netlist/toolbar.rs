@@ -1,9 +1,9 @@
 //! The netlist document toolbar.
 //!
-//! One 33-point row: language and ownership status on the left, document
-//! actions on the right. Which actions appear is decided by the active
-//! document's ownership, and the advisory chip yields its space before the
-//! language label or a blocking status can clip.
+//! One 33-point row: the dialect chip and the check's status on the left,
+//! document actions on the right. Which actions appear is decided by the
+//! active document's ownership, and the advisory chip yields its space before
+//! the dialect chip or a blocking status can clip.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
@@ -184,11 +184,6 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             cx.model,
             &cx.state.netlist,
         );
-    let dependency_authority = crate::workbench::documents::netlist_document::active_dependency_in(
-        cx.model,
-        &cx.state.netlist,
-    )
-    .map(crate::state::DependencyMetadata::authority);
     let generated_ready = generated_primary_ready_in(cx.model);
     let active_available = active_document_available(cx.model, &cx.state.netlist, cx.runs);
     let active_editable =
@@ -222,58 +217,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         width,
         full_action_width,
     );
-    let language = match active {
-        ActiveNetlistDocument::Generated => messages.text(MessageId::NetlistLanguageGenerated),
-        ActiveNetlistDocument::OwnedSource => cx
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref()
-            .map_or_else(
-                || messages.text(MessageId::NetlistLanguageOwned),
-                |descriptor| {
-                    messages.text(match descriptor.strategy {
-                        crate::state::OwnedNetlistEditStrategy::OwnedSource => {
-                            MessageId::NetlistLanguageOwned
-                        }
-                        crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride => {
-                            MessageId::NetlistLanguageParameterOverride
-                        }
-                        crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride => {
-                            MessageId::NetlistLanguageIncludeOrderOverride
-                        }
-                        crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck => {
-                            MessageId::NetlistLanguageAnalysisDeck
-                        }
-                    })
-                },
-            ),
-        ActiveNetlistDocument::GeneratedDiff => messages.text(MessageId::NetlistLanguageDiff),
-        ActiveNetlistDocument::RunSnapshot => messages.text(MessageId::NetlistLanguageRunSnapshot),
-    };
-    let language = if dependency_visible {
-        if dependency_owned {
-            messages.text(MessageId::NetlistLanguageOwnedInclude)
-        } else {
-            messages.text(match dependency_authority.unwrap_or_default() {
-                crate::state::DependencySourceAuthority::External => {
-                    MessageId::NetlistLanguageExternalInclude
-                }
-                crate::state::DependencySourceAuthority::Vendor => {
-                    MessageId::NetlistLanguageVendorInclude
-                }
-                crate::state::DependencySourceAuthority::TechnologyPackage => {
-                    MessageId::NetlistLanguageTechnologyInclude
-                }
-                crate::state::DependencySourceAuthority::StandardLibrary => {
-                    MessageId::NetlistLanguageStandardInclude
-                }
-            })
-        }
-    } else {
-        language
-    };
+    let dialect = super::dialect_chip::DeckChip::shown(cx.model, &cx.state.netlist);
     let status = document_syntax_status(cx.model, &cx.state.netlist, messages)
         .filter(|(_, problem)| toolbar_status_visible(phone, *problem));
     // Nothing is advised when the count is zero, and "0 advisories" is not
@@ -668,7 +612,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     let status_only_width = status.as_ref().map_or(0.0, |(label, _)| {
         CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim)
     });
-    let language_width = label_width(&language, t.color.text_dim);
+    let language_width = dialect.map_or(0.0, |chip| chip.width(ui, messages));
     let advisory_count = advisory_candidate.filter(|count| {
         let label = format!("{count} advisor{}", if *count == 1 { "y" } else { "ies" });
         toolbar_advisory_fits(
@@ -697,20 +641,13 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             left_rect.bottom(),
         ),
     );
-    if language_rect.width() > 0.0 {
+    if let Some(chip) = dialect.filter(|_| language_rect.width() >= language_width) {
         let mut language_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(language_rect)
                 .layout(Layout::left_to_right(Align::Center)),
         );
-        language_ui.add(
-            egui::Label::new(
-                egui::RichText::new(&language)
-                    .font(status_font.clone())
-                    .color(t.color.text_dim),
-            )
-            .truncate(),
-        );
+        chip.show(&mut language_ui, cx.model, &cx.state.netlist, messages);
     }
     if status_width > 0.0 {
         let mut status_ui = ui.new_child(

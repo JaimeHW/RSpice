@@ -2,39 +2,110 @@
 //! other dialects a deck can declare, and the band over a deck whose text
 //! names the program that wrote it.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the chip and the band are drawn once the deck's check carries its reading"
-    )
-)]
-
 use egui::Ui;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
-use crate::workbench::documents::netlist_document::dialect::{DeckReading, Dialect, DialectHint};
+use crate::workbench::app_state::Model;
+use crate::workbench::documents::netlist_document::dialect::{
+    DeckReading, Dialect, DialectHint, declare, dialect_name, hint_once_per_check, reading_detail,
+    reading_name, shown_source_in,
+};
+use crate::workbench::documents::netlist_document::{
+    NetlistDocumentState, active_netlist_source_is_editable_in, editor_id_in,
+};
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// Room a select keeps beside its value: the inset before it and the
 /// chevron after it.
 const SELECT_ROOM: f32 = 8.0 + 24.0;
 
-/// The chip for a deck read as `reading`. It is a select of the dialects a
-/// deck can declare when the deck is `editable` and its dialect can be
-/// chosen, and otherwise the reading's name in the select's face, without
-/// the well. Returns the dialect chosen this frame, when it is another than
-/// the deck's.
-pub(crate) fn dialect_chip(
+/// The chip in the header of the document the page shows: the reading its
+/// last check found, with the menu of dialects on an editable deck whose
+/// dialect can be chosen.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DeckChip {
+    reading: DeckReading,
+    menu: bool,
+}
+
+impl DeckChip {
+    /// The chip for the document the page shows; `None` before its first
+    /// check, and for a comparison, which is no deck.
+    pub(crate) fn shown(model: &Model, netlist: &NetlistDocumentState) -> Option<Self> {
+        let source = shown_source_in(model, netlist)?;
+        let reading = netlist.diagnostics.reading()?;
+        Some(Self {
+            reading,
+            menu: source.root
+                && reading.choosable()
+                && active_netlist_source_is_editable_in(model, netlist),
+        })
+    }
+
+    /// The width it takes.
+    pub(crate) fn width(self, ui: &Ui, messages: MessageCatalog) -> f32 {
+        let t = Tokens::get(ui.ctx());
+        let measure = |label: String| {
+            ui.painter()
+                .layout_no_wrap(label, theme::field_sans(), t.color.text)
+                .size()
+                .x
+        };
+        let name = measure(messages.text(reading_name(self.reading)));
+        if !self.menu {
+            return name;
+        }
+        (Dialect::CHOICES
+            .iter()
+            .map(|dialect| measure(messages.text(dialect_name(*dialect))))
+            .fold(name, f32::max)
+            + SELECT_ROOM)
+            .ceil()
+    }
+
+    /// Draw it. A dialect chosen from its menu is declared in the deck as
+    /// one edit of the editor's own, saved like any edit.
+    pub(crate) fn show(
+        self,
+        ui: &mut Ui,
+        model: &Model,
+        netlist: &NetlistDocumentState,
+        messages: MessageCatalog,
+    ) {
+        if let Some(dialect) = dialect_chip(ui, self.reading, self.menu, messages) {
+            read_deck_as(ui.ctx(), model, netlist, dialect);
+        }
+    }
+}
+
+/// Declare `dialect` in the deck the page shows, as one edit of the editor's
+/// own.
+fn read_deck_as(
+    context: &egui::Context,
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    dialect: Dialect,
+) {
+    let deck = &model.simulation.source.netlist_content;
+    if let Some(edit) = declare(deck, dialect) {
+        edit.queue(context, editor_id_in(model, netlist), deck);
+    }
+}
+
+/// The chip for a deck read as `reading`: a select of the dialects a deck can
+/// declare when it offers the `menu` and its dialect can be chosen, and
+/// otherwise the reading's name in the select's face, without the well. Returns the dialect chosen this frame,
+/// when it is another than the deck's.
+fn dialect_chip(
     ui: &mut Ui,
     reading: DeckReading,
-    editable: bool,
+    menu: bool,
     messages: MessageCatalog,
 ) -> Option<Dialect> {
-    let name = messages.text(reading.name());
-    let detail = messages.text(reading.detail());
-    if !(editable && reading.choosable()) {
+    let name = messages.text(reading_name(reading));
+    let detail = messages.text(reading_detail(reading));
+    if !(menu && reading.choosable()) {
         let t = Tokens::get(ui.ctx());
         ui.add(egui::Label::new(
             egui::RichText::new(name)
@@ -44,26 +115,15 @@ pub(crate) fn dialect_chip(
         .on_hover_text(detail);
         return None;
     }
-    let options = Dialect::CHOICES.map(|dialect| messages.text(dialect.name()));
-    let t = Tokens::get(ui.ctx());
-    let width = options
-        .iter()
-        .chain([&name])
-        .map(|label| {
-            ui.painter()
-                .layout_no_wrap(label.clone(), theme::field_sans(), t.color.text)
-                .size()
-                .x
-        })
-        .fold(0.0, f32::max)
-        + SELECT_ROOM;
+    let options = Dialect::CHOICES.map(|dialect| messages.text(dialect_name(dialect)));
+    let width = DeckChip { reading, menu }.width(ui, messages);
     let output = crate::ui::widgets::select_with_response(
         ui,
         "netlist-dialect",
         &messages.text(MessageId::NetlistDialect),
         &name,
         &options,
-        width.ceil(),
+        width,
     );
     output.response.on_hover_text(detail);
     output
@@ -72,11 +132,35 @@ pub(crate) fn dialect_chip(
         .filter(|dialect| reading != DeckReading::Declared(*dialect))
 }
 
+/// The band over the editable deck the page shows when its text names the
+/// program that wrote it and declares no dialect; its button declares that
+/// program's dialect in the deck.
+pub(crate) fn deck_hint_band(
+    ui: &mut Ui,
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    messages: MessageCatalog,
+) {
+    let editable_deck = shown_source_in(model, netlist).is_some_and(|source| source.root)
+        && active_netlist_source_is_editable_in(model, netlist);
+    let Some(checked) = netlist.validated_revision().filter(|_| editable_deck) else {
+        return;
+    };
+    let editor_id = editor_id_in(model, netlist);
+    let deck = &model.simulation.source.netlist_content;
+    let Some(hint) = hint_once_per_check(ui.ctx(), editor_id, checked, deck) else {
+        return;
+    };
+    if let Some(dialect) = dialect_hint_band(ui, hint, editor_id, messages) {
+        read_deck_as(ui.ctx(), model, netlist, dialect);
+    }
+}
+
 /// The band over a deck whose text names the program that wrote it, until it
 /// is dismissed: dismissing it lasts the session, for the deck `deck_id`
 /// names. Returns the dialect to read the deck in when its button is
 /// pressed.
-pub(crate) fn dialect_hint_band(
+fn dialect_hint_band(
     ui: &mut Ui,
     hint: DialectHint,
     deck_id: egui::Id,
@@ -90,7 +174,7 @@ pub(crate) fn dialect_hint_band(
     {
         return None;
     }
-    let program = messages.text(hint.dialect.name());
+    let program = messages.text(dialect_name(hint.dialect));
     let line = hint.line.to_string();
     let mut read = false;
     let mut dismiss = false;
@@ -214,13 +298,13 @@ mod tests {
         ] {
             let shown = chip_with_its_menu_open(reading, true);
             for dialect in Dialect::CHOICES {
-                let choice = messages().text(dialect.name());
+                let choice = messages().text(dialect_name(dialect));
                 assert!(
                     shown.contains(&choice),
                     "{reading:?}: {choice} in {shown:?}"
                 );
             }
-            let name = messages().text(reading.name());
+            let name = messages().text(reading_name(reading));
             assert!(shown.contains(&name), "{reading:?}: {name} in {shown:?}");
         }
         let shown = chip_with_its_menu_open(DeckReading::XyceDevices, true);
@@ -241,7 +325,7 @@ mod tests {
         ] {
             assert_eq!(
                 chip_with_its_menu_open(reading, editable),
-                vec![messages().text(reading.name())],
+                vec![messages().text(reading_name(reading))],
                 "{reading:?}"
             );
         }
@@ -313,5 +397,240 @@ mod tests {
                 .is_empty(),
             "another deck's hint stays"
         );
+    }
+
+    /// The Netlist page over a deck, drawn as the application draws it.
+    mod page {
+        use std::path::PathBuf;
+
+        use crate::workbench::code::tests::{CodeHarness, harness};
+        use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, editor_id_in};
+        use crate::workbench::framework::command_registry::CommandAvailability;
+        use crate::workbench::framework::feature::{Feature, ForeignAvailability};
+        use crate::workbench::framework::requests::{SourceEditorRequest, StandardCommand};
+
+        /// An application window wide enough for the full toolbar.
+        fn input(events: Vec<egui::Event>) -> egui::RawInput {
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            }
+        }
+
+        /// The deck `source` open on the page as its file `path`.
+        fn deck(path: &str, source: &str) -> CodeHarness {
+            let mut harness = harness();
+            harness.model.workspace.content.netlist_source = Some(source.to_owned());
+            harness.model.workspace.content.netlist_source_path = Some(PathBuf::from(path));
+            harness.model.simulation.source.netlist_content = source.to_owned();
+            harness.state.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+            harness.state.netlist.active_document_initialized = true;
+            harness
+        }
+
+        /// Every text one frame of the page painted, and where.
+        fn frame(
+            context: &egui::Context,
+            harness: &mut CodeHarness,
+            events: Vec<egui::Event>,
+        ) -> Vec<(String, egui::Rect)> {
+            fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+                match shape {
+                    egui::Shape::Text(text) => {
+                        out.push((text.galley.text().to_owned(), text.visual_bounding_rect()));
+                    }
+                    egui::Shape::Vec(shapes) => {
+                        for shape in shapes {
+                            walk(shape, out);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // The shell lends the page with the dispatcher's answer for each
+            // command it reads, Run among them.
+            let answers = ForeignAvailability::take(
+                <crate::workbench::code::CodeFeature as Feature>::FOREIGN_AVAILABILITY,
+                |_| CommandAvailability::Available,
+            );
+            let output = context.run_ui(input(events), |ui| {
+                super::super::super::show_prepared(
+                    ui,
+                    &mut harness.cx().with_foreign_availability(answers),
+                );
+            });
+            let mut painted = Vec::new();
+            for clipped in &output.shapes {
+                walk(&clipped.shape, &mut painted);
+            }
+            painted
+        }
+
+        fn context() -> egui::Context {
+            let context = egui::Context::default();
+            crate::ui::Theme::default().apply(&context);
+            context
+        }
+
+        /// Press what reads `label` on the page; what the page painted on the
+        /// frame after the press.
+        fn press(
+            context: &egui::Context,
+            harness: &mut CodeHarness,
+            label: &str,
+        ) -> Vec<(String, egui::Rect)> {
+            let shown = frame(context, harness, Vec::new());
+            let at = shown
+                .iter()
+                .rev()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("{label} is on the page: {shown:?}"))
+                .1
+                .center();
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let _ = frame(context, harness, vec![egui::Event::PointerMoved(at)]);
+            let _ = frame(context, harness, vec![button(true)]);
+            let _ = frame(context, harness, vec![button(false)]);
+            frame(context, harness, Vec::new())
+        }
+
+        /// The texts the header painted: what stands above the editor's
+        /// first line.
+        fn header(painted: &[(String, egui::Rect)]) -> Vec<String> {
+            painted
+                .iter()
+                .filter(|(_, rect)| {
+                    rect.bottom() <= super::super::super::toolbar::CODE_TOOLBAR_HEIGHT
+                })
+                .map(|(text, _)| text.clone())
+                .collect()
+        }
+
+        /// The deck header names the dialect the deck declares, in place of
+        /// the words that said who owns the deck, on a deck and on the
+        /// generated netlist alike.
+        #[test]
+        fn the_header_names_the_dialect_the_deck_declares() {
+            let context = context();
+            let mut ngspice = deck(
+                "amp.cir",
+                "amp\n.options rspice_dialect=ngspice\nR1 a 0 1k\n.op\n.end\n",
+            );
+            let _ = frame(&context, &mut ngspice, Vec::new());
+            let shown = header(&frame(&context, &mut ngspice, Vec::new()));
+            assert!(shown.iter().any(|text| text == "ngspice"), "{shown:?}");
+
+            let mut generated = harness();
+            crate::workbench::surfaces::netlist::fixtures::retain_generated(
+                &mut generated.model,
+                &mut generated.state.netlist,
+                "generated\nR1 out 0 1k\n.op\n.end\n",
+            );
+            generated.model.simulation.source.netlist_content =
+                generated.model.netlist_artifacts.generated_source.clone();
+            generated.state.netlist.active_document = ActiveNetlistDocument::Generated;
+            generated.state.netlist.active_document_initialized = true;
+            let _ = frame(&context, &mut generated, Vec::new());
+            let generated_shown = header(&frame(&context, &mut generated, Vec::new()));
+            assert!(
+                generated_shown.iter().any(|text| text == "RSpice"),
+                "{generated_shown:?}"
+            );
+            for text in shown.iter().chain(&generated_shown) {
+                for word in ["OWNED", "EDITABLE", "READ-ONLY", "GENERATED", "SPICE ·"] {
+                    assert!(!text.contains(word), "{text:?} in the header");
+                }
+            }
+        }
+
+        /// LTspice chosen from the header's chip is one edit to the deck's
+        /// text, which one Undo takes back.
+        #[test]
+        fn choosing_a_dialect_from_the_header_is_one_edit_one_undo_takes_back() {
+            let source = "amp\nR1 a 0 1k\n.op\n.end\n";
+            let context = context();
+            let mut harness = deck("amp.cir", source);
+            let _ = frame(&context, &mut harness, Vec::new());
+            let menu = press(&context, &mut harness, "RSpice");
+            assert!(
+                menu.iter().any(|(text, _)| text == "QSPICE"),
+                "the menu is open: {menu:?}"
+            );
+            let _ = press(&context, &mut harness, "LTspice");
+            assert_eq!(
+                harness.model.simulation.source.netlist_content,
+                "amp\n.options rspice_source=ltspice\nR1 a 0 1k\n.op\n.end\n"
+            );
+            let editor_id = editor_id_in(&harness.model, &harness.state.netlist);
+            crate::workbench::documents::text_editor_commands::queue_source_editor_request(
+                &context,
+                editor_id,
+                SourceEditorRequest::Standard(StandardCommand::Undo),
+            );
+            let _ = frame(&context, &mut harness, Vec::new());
+            let _ = frame(&context, &mut harness, Vec::new());
+            assert_eq!(harness.model.simulation.source.netlist_content, source);
+        }
+
+        /// A `.scs` deck is checked by the Spectre front end: the header
+        /// names Spectre and offers no menu, and the check reports none of
+        /// the SPICE parser's reading of Spectre syntax.
+        #[test]
+        fn a_spectre_deck_is_named_spectre_and_checked_as_spectre() {
+            let context = context();
+            let mut harness = deck(
+                "amp.scs",
+                "simulator lang=spectre\nv1 (a 0) vsource dc=1\nr1 (a 0) resistor r=1k\n",
+            );
+            let _ = frame(&context, &mut harness, Vec::new());
+            let shown = header(&frame(&context, &mut harness, Vec::new()));
+            assert!(shown.iter().any(|text| text == "Spectre"), "{shown:?}");
+            for choice in ["RSpice", "ngspice", "LTspice", "QSPICE"] {
+                assert!(!shown.iter().any(|text| text == choice), "{shown:?}");
+            }
+            let findings = harness
+                .state
+                .netlist
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.clone())
+                .collect::<Vec<_>>();
+            assert!(
+                !findings
+                    .iter()
+                    .any(|message| message.contains("Expected node name")),
+                "{findings:?}"
+            );
+        }
+
+        /// A deck whose text names LTspice and declares nothing shows the
+        /// band, and its button declares LTspice in the deck.
+        #[test]
+        fn the_hint_band_reads_the_deck_as_the_program_its_text_names() {
+            let context = context();
+            let mut harness = deck("amp.cir", "* amp.asc\nR1 a 0 1k\n.backanno\n.end\n");
+            let _ = frame(&context, &mut harness, Vec::new());
+            let shown = frame(&context, &mut harness, Vec::new());
+            assert!(
+                shown
+                    .iter()
+                    .any(|(text, _)| text == "Written by LTspice? .backanno on line 3."),
+                "{shown:?}"
+            );
+            let _ = press(&context, &mut harness, "Read as LTspice");
+            assert_eq!(
+                harness.model.simulation.source.netlist_content,
+                "* amp.asc\n.options rspice_source=ltspice\nR1 a 0 1k\n.backanno\n.end\n"
+            );
+        }
     }
 }

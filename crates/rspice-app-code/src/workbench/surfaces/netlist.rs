@@ -298,6 +298,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     if execution_profile_review_banner(ui, cx.model, cx.wb.messages()) {
         cx.wb.outbox.push(CodeRequest::BeginNetlistProfileReview);
     }
+    dialect_chip::deck_hint_band(ui, cx.model, &cx.state.netlist, cx.wb.messages());
     control_disposition_band(ui, &cx.state.netlist, cx.wb.messages());
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui,

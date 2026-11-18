@@ -180,6 +180,68 @@ impl Diagnostic {
     }
 }
 
+/// A dialect a deck can declare: how the engine reads its cards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Dialect {
+    /// No declaration: the engine's own reading.
+    RSpice,
+    /// `.options rspice_dialect=ngspice`: ngspice's device models and number
+    /// suffixes.
+    Ngspice,
+    /// `.options rspice_source=ltspice`: LTspice's defaults for what a card
+    /// leaves out.
+    Ltspice,
+    /// `.options rspice_source=qspice`: QSPICE's defaults for what a card
+    /// leaves out.
+    Qspice,
+}
+
+impl Dialect {
+    /// Every dialect a deck can be given, in the order they are offered.
+    pub const CHOICES: [Self; 4] = [Self::RSpice, Self::Ngspice, Self::Ltspice, Self::Qspice];
+}
+
+/// How the engine reads a deck, as its last check found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckReading {
+    Declared(Dialect),
+    /// `.options rspice_dialect=xyce`: Xyce's device models. Xyce's
+    /// expression syntax is read only by `rspice run --spice-dialect xyce`.
+    XyceDevices,
+    /// The Spectre front end reads it: the file's `.scs` name or a
+    /// `simulator lang=` line decides, not a choice.
+    Spectre,
+}
+
+impl DeckReading {
+    /// The reading of a source whose check found `options`, read by the
+    /// Spectre front end when `spectre`. A deck that names two programs is
+    /// read with both; the program it was written for names it.
+    #[must_use]
+    pub const fn of(options: &rspice_core::netlist::SimulationOptions, spectre: bool) -> Self {
+        use rspice_core::SpiceDialect;
+        use rspice_core::netlist::SourceSimulator;
+
+        if spectre {
+            return Self::Spectre;
+        }
+        match (options.spice_dialect, options.source_simulator) {
+            (Some(SpiceDialect::Xyce), _) => Self::XyceDevices,
+            (_, Some(SourceSimulator::Ltspice)) => Self::Declared(Dialect::Ltspice),
+            (_, Some(SourceSimulator::Qspice)) => Self::Declared(Dialect::Qspice),
+            (Some(SpiceDialect::Ngspice), _) => Self::Declared(Dialect::Ngspice),
+            _ => Self::Declared(Dialect::RSpice),
+        }
+    }
+
+    /// Whether another dialect can be chosen for a deck read so: a Spectre
+    /// deck's is its file's to say.
+    #[must_use]
+    pub const fn choosable(self) -> bool {
+        !matches!(self, Self::Spectre)
+    }
+}
+
 /// Immutable publication unit for the canonical Netlist diagnostics. The
 /// editor keeps it behind an `Arc`, so rendering never clones or rescans a
 /// release-scale result set.
@@ -189,6 +251,9 @@ pub struct NetlistDiagnosticCollection {
     severity_by_line: HashMap<usize, DiagnosticSeverity>,
     interned_strings: HashMap<Arc<str>, Arc<str>>,
     summary: NetlistDiagnosticSummary,
+    /// How the engine read the text these findings are about; `None` until a
+    /// check has read it.
+    reading: Option<DeckReading>,
 }
 
 /// A lightweight projection of the canonical collection used by chrome that
@@ -283,7 +348,21 @@ impl NetlistDiagnosticCollection {
             severity_by_line,
             interned_strings,
             summary,
+            reading: None,
         })
+    }
+
+    /// The same findings, about text the engine read as `reading`.
+    #[must_use]
+    pub const fn with_reading(mut self, reading: Option<DeckReading>) -> Self {
+        self.reading = reading;
+        self
+    }
+
+    /// How the engine read the text these findings are about.
+    #[must_use]
+    pub const fn reading(&self) -> Option<DeckReading> {
+        self.reading
     }
 
     pub fn clear(&mut self) {
@@ -291,6 +370,7 @@ impl NetlistDiagnosticCollection {
         self.severity_by_line.clear();
         self.interned_strings.clear();
         self.summary = NetlistDiagnosticSummary::default();
+        self.reading = None;
     }
 
     pub fn mark_all_stale(&mut self) {
