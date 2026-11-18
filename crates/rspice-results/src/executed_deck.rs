@@ -27,9 +27,7 @@ pub const MAX_RETAINED_RUNS: usize = 4;
 #[must_use]
 pub fn absent_deck_reason() -> &'static str {
     static REASON: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-        format!(
-            "only the last {MAX_RETAINED_RUNS} runs' inputs are kept, and this run is older"
-        )
+        format!("only the last {MAX_RETAINED_RUNS} runs' inputs are kept, and this run is older")
     });
     &REASON
 }

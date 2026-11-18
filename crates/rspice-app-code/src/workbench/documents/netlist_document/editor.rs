@@ -1852,12 +1852,9 @@ fn parse_error_diagnostic_at(
             messages.format(
                 MessageId::NetlistStartupConflictDetail,
                 &[
-                    ("first", &error.first_kind.as_spice_directive().to_string()),
+                    ("first", error.first_kind.as_spice_directive()),
                     ("first_place", &error.first.to_string()),
-                    (
-                        "second",
-                        &error.conflicting_kind.as_spice_directive().to_string()
-                    ),
+                    ("second", error.conflicting_kind.as_spice_directive()),
                     ("second_place", &error.conflicting.to_string()),
                 ],
             )
