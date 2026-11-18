@@ -651,12 +651,12 @@ const DOCUMENTATION: &[(&str, Option<&str>, &str)] = &[
     (
         "$random",
         Some("[seed]"),
-        "A 32-bit signed random integer, the IEEE 1364 sequence; draws once per accepted point.",
+        "A 32-bit signed random integer, the IEEE 1364 sequence; draws once per accepted point. Without a seed, each instance draws from a stream of its own, fixed by the run's seed and the instance's name.",
     ),
     (
         "$arandom",
         Some("[seed], [type_string]"),
-        "A 32-bit signed random integer, as $random; the seed may be a constant.",
+        "A 32-bit signed random integer, as $random; the seed may be a constant. \"global\" draws the same values in every instance, \"instance\" values of the instance's own.",
     ),
     (
         "$dist_uniform",

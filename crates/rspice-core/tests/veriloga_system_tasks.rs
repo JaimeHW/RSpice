@@ -152,8 +152,8 @@ fn fatal_and_stop_end_the_run_with_their_source_line() {
 /// s = 3; x = $random(s);
 /// ```
 ///
-/// and a `$random` without a seed starts from the run's `hdlseed`, as the
-/// digital kernel's does.
+/// and `$arandom("global")`, the design's stream, starts from the run's
+/// `hdlseed`, as the digital kernel's `$random` does.
 #[test]
 fn random_and_integer_distributions_draw_what_icarus_draws() {
     let directory = scratch("random");
@@ -165,7 +165,7 @@ fn random_and_integer_distributions_draw_what_icarus_draws() {
          f = $dist_exponential(seed, 4); g = $dist_poisson(seed, 6);\n\
          h = $dist_chi_square(seed, 3); i = $dist_t(seed, 4); j = $dist_erlang(seed, 2, 5);\n\
          $display(\"%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d seed=%0d\", a, b, c, d, e, f, g, h, i, j, seed);\n\
-         n = $random; $display(\"hdlseed %0d\", n); end",
+         n = $arandom(\"global\"); $display(\"hdlseed %0d\", n); end",
         1e-9,
         |hdl| hdl.seed = 3,
     );
@@ -330,4 +330,104 @@ fn debug_writes_at_every_evaluation_a_rejected_points_included() {
         .map(|time| time.parse().unwrap())
         .collect();
     assert_eq!(written, printed);
+}
+
+/// A module that draws at a timer every nanosecond and prints what it drew:
+/// a seedless `$random`, the design's stream, and a constant seed scoped to
+/// the design and to the instance.
+const DRAWS: &str = "`include \"disciplines.vams\"\nmodule draws(x); inout x; electrical x;\n\
+     integer r, g; real dg, di;\nanalog begin\n\
+     @(timer(0, 1n)) begin r = $random; g = $arandom(\"global\");\n\
+     dg = $rdist_normal(7, 0, 1, \"global\"); di = $rdist_normal(7, 0, 1, \"instance\");\n\
+     $display(\"%m %0d %0d %.17g %.17g\", r, g, dg, di); end\n\
+     I(x) <+ V(x) / 1k;\nend\nendmodule\n";
+
+/// What each instance of [`DRAWS`] printed, by instance, in a transient of
+/// `instances` (deck lines) to `stop`; with `checkpoint`, the run stops there
+/// and a second run resumes from its checkpoint.
+fn draws_by_instance(
+    name: &str,
+    instances: &str,
+    stop: f64,
+    checkpoint: Option<f64>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let directory = scratch(name);
+    std::fs::write(directory.join("draws.va"), DRAWS).unwrap();
+    let deck = directory.join("deck.cir");
+    std::fs::write(
+        &deck,
+        format!("* draws\n.hdl \"draws.va\"\nv1 s 0 1\n{instances}.end\n"),
+    )
+    .unwrap();
+    let netlist = Netlist::parse_file(&deck).unwrap();
+    let collector = Arc::new(HdlOutputCollector::new());
+    let mut config = rspice_core::SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    config.hdl.deck_directory = Some(directory.clone());
+    config.hdl.seed = 11;
+    let engine = Engine::new(config);
+    let step = 1e-10;
+    match checkpoint {
+        None => {
+            engine
+                .run_tran_with_abort(&netlist, stop, step, &NoAbort)
+                .unwrap();
+        }
+        Some(at) => {
+            let (_, saved) = engine
+                .run_tran_checkpointed_with_abort(&netlist, at, step, &NoAbort)
+                .unwrap();
+            let saved = saved.into_checkpoint().unwrap();
+            let saved =
+                rspice_core::engine::TransientCheckpoint::from_text(&saved.to_text()).unwrap();
+            engine
+                .run_tran_resume_with_abort(&netlist, &saved, stop, step, &NoAbort)
+                .unwrap();
+        }
+    }
+    let mut draws = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for text in stdout(&collector.take()) {
+        let (instance, values) = text.trim_end().split_once(' ').unwrap();
+        draws
+            .entry(instance.to_ascii_lowercase())
+            .or_default()
+            .push(values.to_owned());
+    }
+    draws
+}
+
+/// A `$random` without a seed draws from a stream of the instance's own,
+/// fixed by the run's seed and the instance's name: two instances of one
+/// module draw different values, a rerun draws the same, and listing the
+/// instances in another order changes nothing. A `"global"` type string
+/// draws from the design's stream, the same in every instance, and scopes a
+/// constant seed to the design; `"instance"` scopes it to the instance.
+#[test]
+fn seedless_draws_are_per_instance_and_global_draws_are_the_designs() {
+    let forward = "xa s draws\nxb s draws\n";
+    let reversed = "xb s draws\nxa s draws\n";
+    let draws = draws_by_instance("order", forward, 5e-9, None);
+    assert_eq!(draws_by_instance("rerun", forward, 5e-9, None), draws);
+    assert_eq!(draws_by_instance("reversed", reversed, 5e-9, None), draws);
+    let (a, b) = (&draws["xa"], &draws["xb"]);
+    assert!(a.len() >= 5, "{draws:?}");
+    assert_eq!(a.len(), b.len(), "{draws:?}");
+    for (a, b) in a.iter().zip(b) {
+        let a: Vec<&str> = a.split(' ').collect();
+        let b: Vec<&str> = b.split(' ').collect();
+        assert_ne!(a[0], b[0], "seedless draws differ between instances");
+        assert_eq!(a[1], b[1], "\"global\" draws are the design's");
+        assert_eq!(a[2], b[2], "a \"global\" seed is the design's");
+        assert_ne!(a[3], b[3], "an \"instance\" seed is the instance's");
+    }
+}
+
+/// A run resumed from a checkpoint draws exactly what the run it continues
+/// would have: the streams and the internal seeds are in the checkpoint.
+#[test]
+fn a_resumed_run_draws_what_the_uninterrupted_run_draws() {
+    let instances = "xa s draws\nxb s draws\n";
+    let whole = draws_by_instance("whole", instances, 6e-9, None);
+    let resumed = draws_by_instance("resumed", instances, 6e-9, Some(2.5e-9));
+    assert_eq!(resumed, whole);
 }

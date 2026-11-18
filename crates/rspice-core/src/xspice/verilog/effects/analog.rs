@@ -75,7 +75,9 @@ pub(crate) fn configure_device(
     device
         .set_analog_plusargs(answers)
         .map_err(|error| error.to_string())?;
-    // The digital kernel's `$random` starts from the same seed.
+    // Each instance's stream starts from the run's seed and the instance's
+    // name; the design's stream, a "global" draw's, from the run's seed, as
+    // the digital kernel's `$random` does.
     device.set_analog_random_seed(config.seed as i32);
     if opens_files {
         let table = AnalogHdlFiles::new(files.clone(), &device.name);

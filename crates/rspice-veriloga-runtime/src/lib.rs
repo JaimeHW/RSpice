@@ -59,7 +59,10 @@ pub use analog_lifecycle::{
     ANALYSIS_QUERY_COUNT, AnalogAnalysisPhase, AnalogEvaluationPhase, active_analysis_query_names,
     analysis_query_id, analysis_query_mask, analysis_query_name,
 };
-pub use analog_system::{AnalogSeed, AnalogSystemFunction, AnalogSystemSite, AnalogSystemState};
+pub use analog_system::{
+    AnalogDrawScope, AnalogSeed, AnalogSystemFunction, AnalogSystemSite, AnalogSystemState,
+    instance_stream_seed,
+};
 
 pub use descriptor::*;
 pub use integration::{

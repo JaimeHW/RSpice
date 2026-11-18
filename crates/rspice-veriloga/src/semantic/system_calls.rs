@@ -14,7 +14,9 @@
 //! The call's site holds what is not a number: the function, where its seed
 //! lives, and its string literals. The module keeps one site per call.
 
-use rspice_veriloga_runtime::{AnalogSeed, AnalogSystemFunction, AnalogSystemSite};
+use rspice_veriloga_runtime::{
+    AnalogDrawScope, AnalogSeed, AnalogSystemFunction, AnalogSystemSite,
+};
 use smol_str::SmolStr;
 
 use super::{AnalyzedModule, AnalyzedStatement, SemanticAnalyzer, SymbolKind};
@@ -123,6 +125,7 @@ impl SemanticAnalyzer {
         let mut outputs = Vec::new();
         let mut text = Vec::new();
         let mut seed = AnalogSeed::Stream;
+        let mut scope = AnalogDrawScope::Unscoped;
         match kind {
             _ if kind.is_random() => {
                 let parameters = kind.distribution_parameters();
@@ -130,16 +133,20 @@ impl SemanticAnalyzer {
                     kind == AnalogSystemFunction::Arandom || kind.is_real_distribution();
                 let mut args = args;
                 if takes_type && let Some(Expression::StringLit(literal)) = args.last() {
-                    if !matches!(literal.value.as_str(), "global" | "instance") {
-                        return Err(refuse(
-                            name,
-                            format!(
-                                "the type string is \"global\" or \"instance\", not \"{}\"",
-                                literal.value
-                            ),
-                            literal.span,
-                        ));
-                    }
+                    scope = match literal.value.as_str() {
+                        "global" => AnalogDrawScope::Global,
+                        "instance" => AnalogDrawScope::Instance,
+                        _ => {
+                            return Err(refuse(
+                                name,
+                                format!(
+                                    "the type string is \"global\" or \"instance\", not \"{}\"",
+                                    literal.value
+                                ),
+                                literal.span,
+                            ));
+                        }
+                    };
                     args = &args[..args.len() - 1];
                 }
                 let optional_seed = matches!(
@@ -278,6 +285,7 @@ impl SemanticAnalyzer {
             site: AnalogSystemSite {
                 function: kind,
                 seed,
+                scope,
                 text,
                 targets,
                 file: String::new(),

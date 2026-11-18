@@ -5150,11 +5150,17 @@ impl VerilogADevice {
             .unwrap_or_default()
     }
 
-    /// The run's random seed, which a `$random` or `$arandom` without a seed
-    /// draws from, as the digital kernel's `$random` does.
+    /// The run's random seed. A `$random` or `$arandom` without a seed draws
+    /// from the instance's stream, which starts from the seed and the
+    /// instance's name ([`rspice_veriloga_runtime::instance_stream_seed`]);
+    /// a `"global"` one draws from the design's, which starts from the seed
+    /// itself, as the digital kernel's `$random` does.
     pub fn set_analog_random_seed(&mut self, seed: i32) {
         if let Some(system) = &mut self.context.analog_system {
-            system.set_stream_seed(seed);
+            system.set_stream_seeds(
+                rspice_veriloga_runtime::instance_stream_seed(seed, &self.name),
+                seed,
+            );
         }
     }
 

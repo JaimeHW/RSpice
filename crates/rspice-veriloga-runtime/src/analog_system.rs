@@ -18,6 +18,23 @@
 //! section 9.3). A pass that only observes a point starts from the accepted
 //! state on a copy and leaves the candidate as it found it, so it sees the
 //! values the evaluation saw.
+//!
+//! # Streams
+//!
+//! A call without a seed draws from a stream (LRM 2.4 section 9.13.1 lets
+//! the simulator pick the seed). Each instance has its own, started by
+//! [`instance_stream_seed`] from the run's seed and the instance's
+//! hierarchical name, so two instances of a module draw different values, and
+//! the values depend on neither the order the deck lists the instances in nor
+//! the order they are evaluated in. A `"global"` type string draws from the
+//! design's stream instead, which starts from the run's seed itself in every
+//! instance, so every instance sees the same value at the same draw;
+//! `"instance"` draws from the instance's stream. A type string on a call
+//! with a seed scopes the seed the same way: the call draws the section
+//! 17.9.3 sequence that starts from the seed exclusive-ored with the
+//! instance's stream seed (`"instance"`) or with the run's seed
+//! (`"global"`), and the seed it leaves is that sequence's next seed,
+//! exclusive-ored back.
 
 use std::sync::Arc;
 
@@ -176,6 +193,38 @@ impl AnalogSystemFunction {
     }
 }
 
+/// A random call's type string (LRM 2.4 section 9.13): which stream a call
+/// without a seed draws from, and how a seed is scoped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AnalogDrawScope {
+    /// No type string: the instance's stream, or the seed as given.
+    #[default]
+    Unscoped,
+    /// `"instance"`: the instance's stream, or the seed scoped to the
+    /// instance.
+    Instance,
+    /// `"global"`: the design's stream, or the seed scoped to the design.
+    Global,
+}
+
+/// The seed an instance's stream starts from: the run's seed exclusive-ored
+/// with the 32-bit FNV-1a hash of the instance's hierarchical name, ASCII
+/// lower-cased because SPICE names are case-insensitive, then advanced once
+/// by IEEE 1364-2005 section 17.9.3's seed update. It is fixed by the run's
+/// seed and the name alone, so a rerun draws the same values and reordering
+/// the deck changes nothing.
+pub fn instance_stream_seed(run_seed: i32, instance: &str) -> i32 {
+    let mut hash = 0x811c_9dc5_u32;
+    for byte in instance.bytes() {
+        hash ^= u32::from(byte.to_ascii_lowercase());
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    let mut seed = run_seed ^ hash as i32;
+    random::random(&mut seed);
+    seed
+}
+
 /// Where a random call's seed lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -196,6 +245,8 @@ pub enum AnalogSeed {
 pub struct AnalogSystemSite {
     pub function: AnalogSystemFunction,
     pub seed: AnalogSeed,
+    /// A random call's type string.
+    pub scope: AnalogDrawScope,
     /// `$fopen`'s name and mode, `$fscanf`'s format, or the plusarg name or
     /// format.
     pub text: Vec<String>,
@@ -217,16 +268,38 @@ impl AnalogSystemSite {
 /// What a call keeps between calls besides seed variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Seeds {
+    /// The instance's stream.
     stream: i32,
+    /// The design's stream, as this instance has drawn it.
+    global: i32,
     /// Each site's internal seed, once its first call has started it.
     internal: Vec<Option<i32>>,
 }
 
 impl Seeds {
-    fn new(stream: i32, sites: usize) -> Self {
+    fn new(stream: i32, global: i32, sites: usize) -> Self {
         Self {
             stream,
+            global,
             internal: vec![None; sites],
+        }
+    }
+}
+
+/// What a type string exclusive-ors into a seed: the seeds the instance's and
+/// the design's streams start from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ScopeKeys {
+    instance: i32,
+    global: i32,
+}
+
+impl ScopeKeys {
+    fn key(self, scope: AnalogDrawScope) -> i32 {
+        match scope {
+            AnalogDrawScope::Unscoped => 0,
+            AnalogDrawScope::Instance => self.instance,
+            AnalogDrawScope::Global => self.global,
         }
     }
 }
@@ -246,6 +319,7 @@ pub struct AnalogSystemState {
     /// The host's answer for each plusarg site: `Some` when a plusarg
     /// matched, with the converted value for `$value$plusargs`.
     plusargs: Arc<[Option<f64>]>,
+    keys: ScopeKeys,
     initial: Seeds,
     accepted: Seeds,
     candidate: Seeds,
@@ -256,13 +330,14 @@ pub struct AnalogSystemState {
 }
 
 /// The checkpoint image's version.
-const CHECKPOINT_VERSION: u64 = 1;
+const CHECKPOINT_VERSION: u64 = 2;
 
 impl AnalogSystemState {
     pub fn new(sites: Arc<[AnalogSystemSite]>) -> Self {
-        let seeds = Seeds::new(0, sites.len());
+        let seeds = Seeds::new(0, 0, sites.len());
         Self {
             plusargs: vec![None; sites.len()].into(),
+            keys: ScopeKeys::default(),
             sites,
             initial: seeds.clone(),
             accepted: seeds.clone(),
@@ -277,12 +352,15 @@ impl AnalogSystemState {
         &self.sites
     }
 
-    /// The seed every call without one draws from, before the first draw:
-    /// the run's seed, as the digital kernel's `$random` uses it.
-    pub fn set_stream_seed(&mut self, seed: i32) {
-        self.initial.stream = seed;
-        self.accepted.stream = seed;
-        self.candidate.stream = seed;
+    /// The seeds the streams start from (see the module documentation): the
+    /// instance's, from [`instance_stream_seed`], and the design's, the run's
+    /// seed itself, as the digital kernel's `$random` starts from it.
+    pub fn set_stream_seeds(&mut self, instance: i32, global: i32) {
+        self.keys = ScopeKeys { instance, global };
+        for seeds in [&mut self.initial, &mut self.accepted, &mut self.candidate] {
+            seeds.stream = instance;
+            seeds.global = global;
+        }
     }
 
     /// The host's plusarg answers, one per site (`None` for a site that is not
@@ -450,24 +528,27 @@ impl AnalogSystemState {
         operands: &[f64],
     ) -> Result<f64, String> {
         let function = call.function;
+        let key = self.keys.key(call.scope);
+        let global = call.scope == AnalogDrawScope::Global;
         let seeds = match &mut self.observation {
             Some(observation) => &mut observation.seeds,
             None => &mut self.candidate,
         };
         let (mut seed, parameters) = match call.seed {
+            AnalogSeed::Stream if global => (seeds.global, operands),
             AnalogSeed::Stream => (seeds.stream, operands),
             AnalogSeed::Variable => {
                 let Some((&seed, parameters)) = operands.split_first() else {
                     return Err(format!("{} has no seed operand", call.label()));
                 };
-                (integer(seed), parameters)
+                (integer(seed) ^ key, parameters)
             }
             AnalogSeed::Internal => {
                 let Some((&start, parameters)) = operands.split_first() else {
                     return Err(format!("{} has no seed operand", call.label()));
                 };
                 let internal = seeds.internal.get(index).copied().flatten();
-                (internal.unwrap_or_else(|| integer(start)), parameters)
+                (internal.unwrap_or_else(|| integer(start)) ^ key, parameters)
             }
         };
         if parameters.len() != function.distribution_parameters() {
@@ -524,23 +605,25 @@ impl AnalogSystemState {
         }
         .map_err(|message| format!("{}: {message}", call.label()))?;
         match call.seed {
+            AnalogSeed::Stream if global => seeds.global = seed,
             AnalogSeed::Stream => seeds.stream = seed,
-            AnalogSeed::Variable => self.outputs.push(Some(f64::from(seed))),
+            AnalogSeed::Variable => self.outputs.push(Some(f64::from(seed ^ key))),
             AnalogSeed::Internal => {
                 if let Some(slot) = seeds.internal.get_mut(index) {
-                    *slot = Some(seed);
+                    *slot = Some(seed ^ key);
                 }
             }
         }
         Ok(value)
     }
 
-    /// The accepted state, for a checkpoint: the stream and each started
-    /// internal seed.
+    /// The accepted state, for a checkpoint: the two streams and each
+    /// started internal seed.
     pub fn checkpoint_words(&self) -> Vec<u64> {
         let mut words = vec![
             CHECKPOINT_VERSION,
             u64::from(self.accepted.stream as u32),
+            u64::from(self.accepted.global as u32),
             self.accepted.internal.len() as u64,
         ];
         for seed in &self.accepted.internal {
@@ -554,7 +637,7 @@ impl AnalogSystemState {
 
     /// Reopen a checkpoint's accepted state; the candidate restarts from it.
     pub fn restore_checkpoint_words(&mut self, words: &[u64]) -> Result<(), String> {
-        let [version, stream, count, internal @ ..] = words else {
+        let [version, stream, global, count, internal @ ..] = words else {
             return Err("system-function checkpoint is truncated".into());
         };
         if *version != CHECKPOINT_VERSION {
@@ -568,7 +651,11 @@ impl AnalogSystemState {
                 self.sites.len()
             ));
         }
-        let mut seeds = Seeds::new(*stream as u32 as i32, self.sites.len());
+        let mut seeds = Seeds::new(
+            *stream as u32 as i32,
+            *global as u32 as i32,
+            self.sites.len(),
+        );
         for (slot, &word) in seeds.internal.iter_mut().zip(internal) {
             *slot = match word >> 32 {
                 0 => None,
@@ -601,6 +688,7 @@ mod tests {
         AnalogSystemSite {
             function,
             seed,
+            scope: AnalogDrawScope::Unscoped,
             text: Vec::new(),
             targets: Vec::new(),
             file: "t.va".into(),
@@ -659,7 +747,7 @@ mod tests {
         ]
         .into();
         let mut state = AnalogSystemState::new(Arc::clone(&sites));
-        state.set_stream_seed(5);
+        state.set_stream_seeds(instance_stream_seed(5, "xa"), 5);
         state.begin_evaluation();
         state.call(None, 0, &[]).unwrap();
         state.call(None, 1, &[3.0]).unwrap();
@@ -674,6 +762,67 @@ mod tests {
             (restored.call(None, 0, &[]), restored.call(None, 1, &[3.0])),
             next
         );
+    }
+
+    /// Two instances draw different streams, each fixed by the run's seed and
+    /// the instance's name; `"global"` draws the design's stream, the same in
+    /// both, and scopes a seed to the design, where `"instance"` scopes it to
+    /// the instance.
+    #[test]
+    fn streams_are_per_instance_and_a_global_type_string_shares_the_designs() {
+        let scoped = |function, seed, scope| AnalogSystemSite {
+            scope,
+            ..site(function, seed)
+        };
+        let sites: Arc<[AnalogSystemSite]> = vec![
+            site(AnalogSystemFunction::Random, AnalogSeed::Stream),
+            scoped(
+                AnalogSystemFunction::Arandom,
+                AnalogSeed::Stream,
+                AnalogDrawScope::Global,
+            ),
+            scoped(
+                AnalogSystemFunction::RdistNormal,
+                AnalogSeed::Internal,
+                AnalogDrawScope::Global,
+            ),
+            scoped(
+                AnalogSystemFunction::RdistNormal,
+                AnalogSeed::Internal,
+                AnalogDrawScope::Instance,
+            ),
+        ]
+        .into();
+        let draws = |name: &str| {
+            let mut state = AnalogSystemState::new(Arc::clone(&sites));
+            state.set_stream_seeds(instance_stream_seed(3, name), 3);
+            (0..3)
+                .map(|_| {
+                    state.begin_evaluation();
+                    let drawn = [
+                        state.call(None, 0, &[]).unwrap(),
+                        state.call(None, 1, &[]).unwrap(),
+                        state.call(None, 2, &[7.0, 0.0, 1.0]).unwrap(),
+                        state.call(None, 3, &[7.0, 0.0, 1.0]).unwrap(),
+                    ];
+                    state.accept();
+                    drawn
+                })
+                .collect::<Vec<_>>()
+        };
+        let (a, b) = (draws("xa"), draws("XB"));
+        assert_eq!(draws("xa"), a, "a rerun draws the same values");
+        assert_eq!(draws("XA"), a, "names are case-insensitive");
+        for (a, b) in a.iter().zip(&b) {
+            assert_ne!(a[0], b[0], "each instance has its own stream");
+            assert_eq!(a[1], b[1], "\"global\" is the design's stream");
+            assert_eq!(a[2], b[2], "a \"global\" seed is the design's");
+            assert_ne!(a[3], b[3], "an \"instance\" seed is the instance's");
+        }
+        // The design's stream starts from the run's seed, as the digital
+        // kernel's `$random` does.
+        let mut seed = 3;
+        assert_eq!(a[0][1], f64::from(random::random(&mut seed)));
     }
 
     #[test]
