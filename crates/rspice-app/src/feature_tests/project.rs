@@ -38,6 +38,7 @@ mod new_project_fields;
 mod new_view;
 mod overview;
 mod overview_rows;
+mod plan_configuration;
 mod project_autosave;
 mod project_workflow;
 mod properties;
