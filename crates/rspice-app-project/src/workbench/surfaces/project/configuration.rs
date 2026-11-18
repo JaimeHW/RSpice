@@ -97,7 +97,8 @@ struct Toolbar {
     dirty: bool,
     checking: bool,
     out_of_date: bool,
-    edits: Option<(&'static str, Color32, Option<&'static str>)>,
+    /// The edits' state, the problem it is if it is one, and why.
+    edits: Option<(&'static str, Option<Problem>, Option<&'static str>)>,
     status: BindingStatus,
 }
 
@@ -191,18 +192,18 @@ fn toolbar(
     let out_of_date = cx.state.configuration.is_out_of_date(catalog);
     // Runs use what was applied; the tables show the edits.
     let edits = if checking {
-        Some(("Checking\u{2026}", t.color.text_dim, None))
+        Some(("Checking\u{2026}", None, None))
     } else if out_of_date {
         Some((
             "Edits out of date",
-            t.color.warn,
+            Some(Problem::Warning),
             Some(
                 "The configuration changed in a part these edits change too. Revert, then \
                  edit again.",
             ),
         ))
     } else {
-        dirty.then_some(("Edits not applied", t.color.text_dim, None))
+        dirty.then_some(("Edits not applied", None, None))
     };
     let bar = Toolbar {
         selection,
@@ -302,8 +303,9 @@ fn state_width(ui: &mut Ui, bar: &Toolbar) -> f32 {
     } else {
         Button::new("Use for runs").measured_width(ui)
     };
-    runs + bar.edits.map_or(0.0, |(edits, ..)| {
-        TOOLBAR_GAP + text_width(ui, edits, &words_font())
+    runs + bar.edits.map_or(0.0, |(edits, problem, _)| {
+        let mark = if problem.is_some() { MARK_ADVANCE } else { 0.0 };
+        TOOLBAR_GAP + mark + text_width(ui, edits, &words_font())
     })
 }
 
@@ -346,12 +348,48 @@ fn name_and_state(ui: &mut Ui, bar: &Toolbar, name_width: f32, intent: &mut Opti
     {
         *intent = Some(ToolbarIntent::UseForRuns(bar.selection));
     }
-    if let Some((edits, color, why)) = bar.edits {
-        let said = ui.label(egui::RichText::new(edits).font(words_font()).color(color));
+    if let Some((edits, problem, why)) = bar.edits {
+        let said = match problem {
+            Some(problem) => marked_words(ui, problem, edits),
+            None => ui.label(
+                egui::RichText::new(edits)
+                    .font(words_font())
+                    .color(t.color.text_dim),
+            ),
+        };
         if let Some(why) = why {
             said.on_hover_text(why);
         }
     }
+}
+
+/// Neutral words on one line with the problem's mark in front: the mark
+/// carries the severity, never the words' colour.
+fn marked_words(ui: &mut Ui, problem: Problem, words: &str) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(words.to_owned(), words_font(), t.color.text);
+    let size = vec2(MARK_ADVANCE + galley.size().x, galley.size().y.max(MARK_SIDE));
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let announcement = problem.announce(words);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
+    });
+    paint_problem_mark(
+        ui.painter(),
+        Rect::from_center_size(
+            pos2(rect.left() + MARK_SIDE * 0.5, rect.center().y),
+            vec2(MARK_SIDE, MARK_SIDE),
+        ),
+        problem,
+    );
+    ui.painter().galley(
+        pos2(rect.left() + MARK_ADVANCE, rect.center().y - galley.size().y * 0.5),
+        galley,
+        t.color.text,
+    );
+    response
 }
 
 /// Apply, Revert, New and the configuration's other actions.
