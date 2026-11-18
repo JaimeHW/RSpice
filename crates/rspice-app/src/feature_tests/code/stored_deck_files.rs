@@ -206,27 +206,36 @@ fn a_deck_that_is_a_file_is_named_with_its_path_in_the_browser() {
 }
 
 /// On the desktop, Save as files writes the deck and each file kept with
-/// it at its path beside the deck; the project then keeps the deck as the
+/// it where the deck's lines read it from there, a file above the deck's
+/// folder in the folder above; the project then keeps the deck as the
 /// file, and the run reads it and its files from the disk.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn save_as_files_writes_the_deck_and_its_files_and_the_project_keeps_the_file() {
-    let deck = "* amp\n.include \"models/opamp.inc\"\nVDD vdd 0 1.8\nVIN in 0 0.5\nXU1 in out vdd 0 opamp\n.op\n.end\n";
+fn save_as_files_writes_each_file_where_the_deck_reads_it_and_the_project_keeps_the_file() {
     let mut state = AppState::default();
-    assert!(state.import_deck_files(vec![(
-        "amp.zip".to_owned(),
-        deflated(&[("amp_tb.cir", deck), ("models/opamp.inc", OPAMP)]),
-    )]));
+    assert!(state.import_deck_files(vec![("amp.zip".to_owned(), testbench_zip())]));
     let folder = rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir("decks");
-    let path = folder.join("amp_tb.cir");
+    let path = folder.join("amp").join("amp_tb.cir");
 
     assert!(state.save_deck_as_at(&path), "{:?}", state.prompt_text());
 
-    assert_eq!(std::fs::read_to_string(&path).expect("the deck"), deck);
+    assert_eq!(std::fs::read_to_string(&path).expect("the deck"), TESTBENCH);
+    let read = |at: &[&str]| {
+        std::fs::read_to_string(at.iter().fold(folder.clone(), |path, part| path.join(part)))
+    };
     assert_eq!(
-        std::fs::read_to_string(folder.join("models").join("opamp.inc")).expect("the op-amp"),
+        read(&["amp", "models", "opamp.inc"]).expect("the op-amp"),
         OPAMP
     );
+    assert_eq!(
+        read(&["lib", "corners.lib"]).expect("../lib/corners.lib"),
+        CORNERS
+    );
+    assert_eq!(
+        read(&["amp", "notes.md"]).expect("beside the deck"),
+        "run at 1.8 V\n"
+    );
+    assert!(read(&["amp", "lib", "corners.lib"]).is_err());
     let content = &state.model.workspace.content;
     assert!(content.decks[0].is_file(&path, content.project.data_root()));
     let open = state.code.netlist.open_deck.as_ref().expect("open");
@@ -234,4 +243,37 @@ fn save_as_files_writes_the_deck_and_its_files_and_the_project_keeps_the_file() 
     assert_eq!(open.root.path, path);
     let netlist = dispatched(&mut state).expect("the deck runs from the disk");
     assert!(netlist.contains("E1 out vss inp vss 2"), "{netlist}");
+    assert!(netlist.contains(".param rload=10k"), "{netlist}");
+}
+
+/// A line that reaches above the top of the disk from where the deck is
+/// saved is refused, naming the line, and nothing is written.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn save_as_files_refuses_a_line_that_reaches_above_the_disk() {
+    let above = "../".repeat(64);
+    let deck = format!("* deep\n.include \"{above}stage.inc\"\n.op\n.end\n");
+    let mut state = AppState::default();
+    assert!(state.import_deck_files(vec![
+        ("deep.cir".to_owned(), deck.into_bytes()),
+        ("stage.inc".to_owned(), b"R1 a 0 1k\n".to_vec()),
+    ]));
+    let folder = rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir("decks");
+    let path = folder.join("deep.cir");
+
+    assert!(!state.save_deck_as_at(&path));
+
+    let said = format!("{:?}", state.prompt_text());
+    assert!(said.contains("Line 2 of deep.cir"), "{said}");
+    assert!(said.contains("above the top of the disk"), "{said}");
+    assert!(!path.exists());
+    assert!(
+        state
+            .code
+            .netlist
+            .open_deck
+            .as_ref()
+            .expect("open")
+            .is_stored()
+    );
 }

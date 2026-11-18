@@ -562,9 +562,9 @@ pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
 /// Save As: write the open deck to `path`, in its own encoding and line
 /// endings, and read it from there from now on. The project lists the new
 /// file; the old one stays as it was. A deck the project keeps as text is
-/// saved as files: the deck at `path` and each file kept with it beside it,
-/// and the project keeps the deck as that file from then on. The new
-/// file's name.
+/// saved as files: the deck at `path` and each file kept with it where the
+/// deck reads it, and the project keeps the deck as that file from then on.
+/// The new file's name.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_deck_as(
     model: &mut Model,
@@ -609,10 +609,10 @@ pub fn save_deck_as(
 }
 
 /// Save as files…: write the deck the project keeps as text to `path`, and
-/// each file kept with it beside it at its path from the deck, each in its
-/// own encoding; the project then keeps the deck as the file at `path`,
-/// and the deck is read from there. A file of the deck already on disk
-/// with other text is not overwritten, and nothing is written then.
+/// each file kept with it where a line of the deck reads it from there,
+/// each in its own encoding; the project then keeps the deck as the file
+/// at `path`, and the deck is read from there. A file of the deck already
+/// on disk with other text is not overwritten, and nothing is written then.
 #[cfg(not(target_arch = "wasm32"))]
 fn save_stored_deck_as_files(
     model: &mut Model,
@@ -625,16 +625,32 @@ fn save_stored_deck_as_files(
         .open_deck
         .as_ref()
         .ok_or_else(|| "No deck is open.".to_owned())?;
-    let folder = path.parent().unwrap_or(Path::new("."));
     let mut writes = vec![(
         path.to_path_buf(),
         deck.root
             .encoding
             .encode(&deck.root.line_ending.write(&deck.root.text))?,
     )];
-    for file in deck.stored_files.iter().flatten() {
-        let at = folder.join(file.path.split('/').collect::<PathBuf>());
+    for (at, key) in stored_file_places(model, deck, path)? {
+        let Some(file) = deck
+            .stored_files
+            .iter()
+            .flatten()
+            .find(|file| file.path == key)
+        else {
+            continue;
+        };
         let bytes = file.encoding.encode(&file.text)?;
+        if let Some((_, other)) = writes.iter().find(|(there, _)| *there == at) {
+            if *other == bytes {
+                continue;
+            }
+            return Err(format!(
+                "{} would be written twice, with other text: {} cannot be saved as files.",
+                at.display(),
+                deck.root.name()
+            ));
+        }
         if std::fs::read(&at).is_ok_and(|there| there != bytes) {
             return Err(format!(
                 "{} is already there, with other text: choose another folder for {}.",
@@ -673,6 +689,96 @@ fn save_stored_deck_as_files(
     close_open_deck(model, netlist, open_documents);
     install_open_deck(model, netlist, open_documents, runs, open);
     Ok(name)
+}
+
+/// Where each file kept with the stored `deck` goes when the deck is saved
+/// at `path`, with its path in the deck: where each line of the deck, or of
+/// one of its files, reads it from the file the line is in, so the saved
+/// deck reads the same files; a file no line reads goes beside the deck at
+/// its path. A line that reaches above the top of the disk is refused.
+#[cfg(not(target_arch = "wasm32"))]
+fn stored_file_places(
+    model: &Model,
+    deck: &OpenDeck,
+    path: &Path,
+) -> Result<Vec<(PathBuf, String)>, String> {
+    let files = deck.stored_files.as_deref().unwrap_or_default();
+    let name = deck.root.name();
+    let text = deck.root.line_ending.write(&deck.root.text).into_owned();
+    let (root, sources) = rspice_design::deck::stored_deck_sources(&name, &text, files);
+    let bundle = model
+        .model_library_manager
+        .seal_execution_sources()
+        .and_then(|sealed| sealed.relative_bundle_with(sources.clone()))
+        .or_else(|_| {
+            rspice_core::netlist::SealedSourceBundle::try_new_relative(sources)
+                .map_err(|error| error.to_string())
+        })?;
+    let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(&root, bundle);
+    // A line the deck cannot read stops the reading; the files after it go
+    // beside the deck.
+    let _ = processor.expand_content_with_abort(&text, &root, &rspice_core::abort_signal::NoAbort);
+    let root_key = rspice_design::deck::stored_file_path(&root);
+    let mut read_at = vec![(root_key, path.to_path_buf())];
+    let mut places = Vec::<(PathBuf, String)>::new();
+    for dependency in processor.resolved_dependencies() {
+        let key = rspice_design::deck::stored_file_path(dependency.resolved_path());
+        if !files.iter().any(|file| file.path == key) {
+            continue;
+        }
+        let owner = rspice_design::deck::stored_file_path(dependency.owner_path());
+        let owners = read_at
+            .iter()
+            .filter(|(at_key, _)| *at_key == owner)
+            .map(|(_, at)| at.clone())
+            .collect::<Vec<_>>();
+        let requested = dependency.requested_path().trim_matches(['"', '\'']);
+        for owner_at in owners {
+            let folder = owner_at.parent().unwrap_or(Path::new("."));
+            let at = disk_join(folder, requested).ok_or_else(|| {
+                format!(
+                    "Line {} of {owner} reads {requested}, above the top of the disk from {}: \
+                     save {name} in a folder further down.",
+                    dependency.directive_line(),
+                    folder.display()
+                )
+            })?;
+            let place = (at.clone(), key.clone());
+            if !places.contains(&place) {
+                places.push(place);
+                read_at.push((key.clone(), at));
+            }
+        }
+    }
+    let folder = path.parent().unwrap_or(Path::new("."));
+    for file in files {
+        if !places.iter().any(|(_, key)| *key == file.path) {
+            places.push((
+                folder.join(file.path.split('/').collect::<PathBuf>()),
+                file.path.clone(),
+            ));
+        }
+    }
+    Ok(places)
+}
+
+/// `requested`, a path a line of a deck names, from `folder` on disk: `..`
+/// goes up a folder, and none goes above the top of the disk.
+#[cfg(not(target_arch = "wasm32"))]
+fn disk_join(folder: &Path, requested: &str) -> Option<PathBuf> {
+    let mut at = folder.to_path_buf();
+    for part in requested.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if !at.pop() {
+                    return None;
+                }
+            }
+            part => at.push(part),
+        }
+    }
+    Some(at)
 }
 
 /// Export deck…: the name and bytes of the open deck the project keeps as
