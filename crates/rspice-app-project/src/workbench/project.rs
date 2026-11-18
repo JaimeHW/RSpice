@@ -177,6 +177,11 @@ const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
         render: ProjectFeature::process_library_deletion_review_dialog,
     },
     FeatureDialog {
+        key: DialogKey("project.library_files"),
+        is_open: |project| project.library_files.is_open(),
+        render: ProjectFeature::process_library_files_dialog,
+    },
+    FeatureDialog {
         key: DialogKey("project.pending_library_deletions"),
         is_open: |_| false,
         render: |cx, _| ProjectFeature::process_pending_library_deletions(cx),

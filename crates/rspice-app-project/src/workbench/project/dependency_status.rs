@@ -105,11 +105,7 @@ pub fn library_status(model: &Model, library: &DependencyLibrary) -> LibraryStat
             model
                 .reference_status(&library.name)
                 .map_or_else(not_in_project, |status| LibraryStatus {
-                    mark: match status.mark() {
-                        rspice_design::library::folder::StatusMark::None => Tone::Neutral,
-                        rspice_design::library::folder::StatusMark::Caution => Tone::Warn,
-                        rspice_design::library::folder::StatusMark::Error => Tone::Error,
-                    },
+                    mark: tone(status.mark()),
                     label: status.label(),
                     detail: status.detail(),
                 })
@@ -123,6 +119,192 @@ pub fn library_status(model: &Model, library: &DependencyLibrary) -> LibraryStat
 
 fn not_in_project() -> LibraryStatus {
     LibraryStatus::neutral("Not in project", None)
+}
+
+/// What a library, cell or view row of the Library page and its rail prints:
+/// only its exception, in the words the one status function gives. A row
+/// that reads Found, or In project, and that nobody else is editing, prints
+/// nothing beyond Read-only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowException {
+    pub mark: Tone,
+    pub label: String,
+    pub detail: Option<String>,
+}
+
+impl RowException {
+    fn plain(label: impl Into<String>, detail: Option<String>) -> Self {
+        Self {
+            mark: Tone::Neutral,
+            label: label.into(),
+            detail,
+        }
+    }
+
+    fn of_status(status: LibraryStatus) -> Self {
+        Self {
+            mark: status.mark,
+            label: status.label.to_owned(),
+            detail: status.detail,
+        }
+    }
+
+    fn of_file(status: &rspice_design::library::folder::CellViewStatus) -> Self {
+        Self {
+            mark: tone(status.mark()),
+            label: status.label().to_owned(),
+            detail: status.detail(),
+        }
+    }
+
+    fn being_edited(lock: &rspice_design::library::folder::LibraryFileLock) -> Self {
+        Self::plain(
+            format!("Being edited by {}", lock.holder()),
+            Some(format!(
+                "Being edited by {} in {}",
+                crate::workbench::project::library_dialogs::library_files::lock_holder(lock),
+                lock.project
+            )),
+        )
+    }
+
+    /// The exception as a table cell: its words behind its mark, and its
+    /// detail when the pointer rests on them.
+    pub fn entry(&self) -> crate::ui::widgets::table::Cell {
+        let entry = match self.mark.problem() {
+            Some(problem) => crate::ui::widgets::table::Cell::problem(self.label.as_str(), problem),
+            None => crate::ui::widgets::table::Cell::text(self.label.as_str()),
+        };
+        match &self.detail {
+            Some(detail) => entry.hint(detail.as_str()),
+            None => entry,
+        }
+    }
+}
+
+/// Every design library's row exception, by name, derived again only when
+/// the catalogue, the references or what this session read of their folders
+/// changes, so an idle frame reads them for nothing.
+pub fn library_exceptions(
+    ctx: &egui::Context,
+    model: &Model,
+) -> Arc<std::collections::BTreeMap<String, RowException>> {
+    let key = [
+        model.library_manager.catalog().stamp(),
+        model.library_manager.references_stamp(),
+        model.library_files.stamp(),
+    ];
+    derived(ctx, "library.exceptions", key, || {
+        Arc::new(
+            model
+                .library_manager
+                .libraries_sorted()
+                .into_iter()
+                .filter_map(|library| {
+                    library_exception(model, &library.name)
+                        .map(|exception| (library.name.clone(), exception))
+                })
+                .collect(),
+        )
+    })
+}
+
+fn tone(mark: rspice_design::library::folder::StatusMark) -> Tone {
+    match mark {
+        rspice_design::library::folder::StatusMark::None => Tone::Neutral,
+        rspice_design::library::folder::StatusMark::Caution => Tone::Warn,
+        rspice_design::library::folder::StatusMark::Error => Tone::Error,
+    }
+}
+
+/// A library row's exception: its status when that is neither Found nor In
+/// project, else who else is editing its own file, else Read-only.
+pub fn library_exception(model: &Model, library: &str) -> Option<RowException> {
+    let status = library_status(model, &DependencyLibrary::design(library));
+    if !matches!(status.label, "Found" | "In project") {
+        return Some(RowException::of_status(status));
+    }
+    if let Some(lock) = model.library_lock_elsewhere(
+        library,
+        &rspice_design::library::folder::LibraryFile::Manifest,
+    ) {
+        return Some(RowException::being_edited(lock));
+    }
+    model
+        .library_manager
+        .get_library(library)
+        .filter(|found| found.read_only)
+        .map(|_| RowException::plain("Read-only", None))
+}
+
+/// A file's exception: its status when that is not Found, else who else is
+/// editing it.
+fn file_exception(
+    model: &Model,
+    library: &str,
+    file: &rspice_design::library::folder::LibraryFile,
+) -> Option<RowException> {
+    match model.library_file_status(library, file) {
+        Some(status)
+            if !matches!(
+                status,
+                rspice_design::library::folder::CellViewStatus::Found { .. }
+            ) =>
+        {
+            Some(RowException::of_file(&status))
+        }
+        _ => model
+            .library_lock_elsewhere(library, file)
+            .map(RowException::being_edited),
+    }
+}
+
+/// A cell row's exception: its own file's, else the first of its views'
+/// that is not Found, so a cell holding a changed view says so.
+pub fn cell_exception(model: &Model, library: &str, cell: &str) -> Option<RowException> {
+    model.library_manager.reference(library)?;
+    if let Some(exception) = file_exception(
+        model,
+        library,
+        &rspice_design::library::folder::LibraryFile::cell(cell),
+    ) {
+        return Some(exception);
+    }
+    model
+        .library_manager
+        .get_library(library)?
+        .get_cell(cell)?
+        .views_sorted()
+        .into_iter()
+        .filter_map(|view| {
+            let file = rspice_design::library::folder::LibraryFile::cell_view(cell, view);
+            model
+                .library_file_status(library, &file)
+                .filter(|status| {
+                    !matches!(
+                        status,
+                        rspice_design::library::folder::CellViewStatus::Found { .. }
+                    )
+                })
+                .map(|status| RowException::of_file(&status))
+        })
+        .next()
+}
+
+/// A view row's exception: its file's status when that is not Found, else
+/// who else is editing it.
+pub fn view_exception(
+    model: &Model,
+    library: &str,
+    cell: &str,
+    view: &crate::state::View,
+) -> Option<RowException> {
+    model.library_manager.reference(library)?;
+    file_exception(
+        model,
+        library,
+        &rspice_design::library::folder::LibraryFile::cell_view(cell, view),
+    )
 }
 
 fn model_library_status(model: &Model, library: &ModelLibrary) -> LibraryStatus {
@@ -238,7 +420,9 @@ fn source_files(count: usize) -> String {
 /// asking for the key costs an idle frame nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DependencyStatusKey {
-    design: u64,
+    /// The catalogue, the references and what this session read of each
+    /// library's folder.
+    design: [u64; 3],
     models: [u64; 3],
     drift: (Option<ModelSourceDriftScope>, u64),
 }
@@ -257,7 +441,11 @@ pub fn dependency_status_key(model: &Model) -> DependencyStatusKey {
         }
     }
     DependencyStatusKey {
-        design: model.library_manager.content_stamp(),
+        design: [
+            model.library_manager.content_stamp(),
+            model.library_manager.references_stamp(),
+            model.library_files.stamp(),
+        ],
         models: model.model_library_manager.content_stamp(),
         drift: (model.source_drift.scanned, findings.finish()),
     }

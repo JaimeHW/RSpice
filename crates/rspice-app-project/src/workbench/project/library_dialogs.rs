@@ -4,6 +4,7 @@
 
 pub mod cell_ops;
 pub mod deletion;
+pub mod library_files;
 pub mod library_ops;
 pub mod new_cell;
 pub mod new_view;

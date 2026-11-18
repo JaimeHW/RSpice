@@ -38,6 +38,11 @@ pub struct ProjectState {
     /// Library properties or Cell properties, while one is open.
     pub library_properties:
         Box<crate::workbench::project::library_dialogs::properties::LibraryPropertiesDialog>,
+    /// The dialog a command over a library kept in a folder of its own has
+    /// open: Attach, Refresh, the changed-on-disk choice, Detach, Break lock,
+    /// a relink, or the cellviews a publication restore found moved on.
+    pub library_files:
+        Box<crate::workbench::project::library_dialogs::library_files::LibraryFilesDialogs>,
     /// New Cell creation dialog
     pub new_cell_dialog: bool,
     /// New Cell name input
@@ -245,6 +250,7 @@ impl ProjectState {
         *self.library_browser = Default::default();
         *self.library_transfer = Default::default();
         *self.library_properties = Default::default();
+        self.library_files.close();
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();
         self.project_dependency_selection = None;

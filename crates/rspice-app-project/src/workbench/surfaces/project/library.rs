@@ -14,6 +14,9 @@ use crate::workbench::design_system::elide_text;
 use crate::workbench::docks::inspector::project::LibraryShown;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
+use crate::workbench::project::library_dialogs::library_files::{
+    LibraryFileIntent, library_file_blocker, library_file_intents, library_file_label,
+};
 use crate::workbench::project::workspace_state::LibraryDeletionTarget;
 use crate::workbench::slots::ProjectState;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform;
@@ -109,6 +112,9 @@ pub enum LibraryIntent {
     ShowAuditHistory,
     PublishProject,
     RestoreFromPublication,
+    /// A command over a library kept in a folder of its own, or over an
+    /// embedded one on its way to or from a folder.
+    Files(crate::workbench::project::library_dialogs::library_files::LibraryFileIntent),
 }
 
 /// What Where used is asked of: one view, every view of a cell, or the
@@ -1224,12 +1230,18 @@ fn selection_summary(ui: &mut Ui, target: &Target) {
     }
 }
 
-/// Library actions: create a library or a cell, rename and delete the
-/// library, then the commands over the whole project that live with them,
-/// Publish project…, Restore project from publication… and Audit
-/// history…, each disabled with its reason. `selected_library` is the
+/// Why a library kept in a folder of its own cannot be renamed.
+const KEEPS_ITS_NAME: &str = "A library in its own folder keeps its name; copy it to rename it.";
+
+/// Library actions: create, attach or embed a library or create a cell;
+/// rename, copy and delete the library, or for one kept in a folder of its
+/// own change its mode, relink, refresh, embed or detach it, or move an
+/// embedded one to a folder; then the commands over the whole project that
+/// live with them, Publish project…, Restore project from publication… and
+/// Audit history…, each disabled with its reason. `selected_library` is the
 /// library the page shows and whether it is read-only; the built-in
-/// library's band passes none.
+/// library's band passes none. Attach library… stands beside it on the
+/// band, as the page's own way to bring in a library kept elsewhere.
 pub(super) fn library_actions_menu(
     ui: &mut Ui,
     cx: &Cx<'_, ProjectFeature>,
@@ -1239,6 +1251,16 @@ pub(super) fn library_actions_menu(
     ui.menu_button("Library actions", |ui| {
         intent = library_items(ui, cx, selected_library);
     });
+    let attach = LibraryFileIntent::Attach;
+    let blocker = library_file_blocker(cx.model, &attach);
+    if Button::new(library_file_label(&attach))
+        .enabled(blocker.is_none())
+        .show(ui)
+        .on_disabled_hover_text(blocker.unwrap_or_default())
+        .clicked()
+    {
+        intent = Some(LibraryIntent::Files(attach));
+    }
     intent
 }
 
@@ -1259,12 +1281,23 @@ fn library_items(
     if menu_item(ui, "New cell\u{2026}", None) {
         intent = Some(LibraryIntent::NewCell);
     }
+    for global in [
+        LibraryFileIntent::Attach,
+        LibraryFileIntent::EmbedFromFolder,
+    ] {
+        if let Some(asked) = file_item(ui, cx.model, global) {
+            intent = Some(asked);
+        }
+    }
     if let Some((library, read_only)) = selected_library {
-        if menu_item(
-            ui,
-            "Rename library\u{2026}",
-            read_only.then_some("The library is read-only; it cannot be renamed."),
-        ) {
+        ui.separator();
+        let referenced = cx.model.library_manager.is_referenced(&library);
+        let rename_refusal = if referenced {
+            Some(KEEPS_ITS_NAME)
+        } else {
+            read_only.then_some("The library is read-only; it cannot be renamed.")
+        };
+        if menu_item(ui, "Rename library\u{2026}", rename_refusal) {
             intent = Some(LibraryIntent::RenameLibrary(library.clone()));
         }
         if menu_item(ui, "Copy library\u{2026}", None) {
@@ -1281,11 +1314,20 @@ fn library_items(
                 cell: None,
             });
         }
-        if menu_item(
-            ui,
-            "Delete library\u{2026}",
-            read_only.then_some("The library is read-only; it cannot be deleted."),
-        ) {
+        for file_intent in library_file_intents(cx.model, &library) {
+            if let Some(asked) = file_item(ui, cx.model, file_intent) {
+                intent = Some(asked);
+            }
+        }
+        // A library kept in a folder of its own is detached, never deleted:
+        // its files are its folder's.
+        if !referenced
+            && menu_item(
+                ui,
+                "Delete library\u{2026}",
+                read_only.then_some("The library is read-only; it cannot be deleted."),
+            )
+        {
             intent = Some(LibraryIntent::DeleteLibrary(library));
         }
     }
@@ -1302,6 +1344,13 @@ fn library_items(
         intent = Some(LibraryIntent::ShowAuditHistory);
     }
     intent
+}
+
+/// One command over library files as a menu item, disabled with its reason.
+fn file_item(ui: &mut Ui, model: &Model, file_intent: LibraryFileIntent) -> Option<LibraryIntent> {
+    let blocker = library_file_blocker(model, &file_intent);
+    menu_item(ui, library_file_label(&file_intent), blocker.as_deref())
+        .then_some(LibraryIntent::Files(file_intent))
 }
 
 /// The view a double-click on a cell opens: the first the hierarchy's own
@@ -1455,10 +1504,25 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
             cx.wb.prompt(summary);
         }
         LibraryIntent::NewLibrary => cx.state.open_new_library_dialog(cx.model),
+        LibraryIntent::RenameLibrary(library)
+            if cx.model.library_manager.is_referenced(&library) =>
+        {
+            cx.wb.prompt(KEEPS_ITS_NAME);
+        }
         LibraryIntent::RenameLibrary(library) => {
             if let Err(error) = cx.state.open_rename_library_dialog(cx.model, &library) {
                 cx.wb.prompt(error);
             }
+        }
+        // A library kept in a folder of its own is not deleted from here:
+        // its files are its folder's. It is detached.
+        LibraryIntent::DeleteLibrary(library)
+            if cx.model.library_manager.is_referenced(&library) =>
+        {
+            crate::workbench::project::library_dialogs::library_files::run_library_file_intent(
+                cx,
+                LibraryFileIntent::Detach(library),
+            );
         }
         LibraryIntent::DeleteLibrary(library) => {
             if let Err(error) = cx.state.open_delete_library_review(cx.model, &library) {
@@ -1603,6 +1667,11 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
         }
         LibraryIntent::RestoreFromPublication => {
             super::library_publication::open_restore(ctx, cx.model);
+        }
+        LibraryIntent::Files(intent) => {
+            crate::workbench::project::library_dialogs::library_files::run_library_file_intent(
+                cx, intent,
+            );
         }
     }
 }

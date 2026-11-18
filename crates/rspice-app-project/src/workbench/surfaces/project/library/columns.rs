@@ -19,6 +19,9 @@ use crate::ui::widgets::table::{
     Cell as Entry, Column, ContextRequest, DataTable, Group, LineHeights, RowDrag, RowKey,
     Selection, TableResponse, TableState,
 };
+use crate::workbench::project::dependency_status::{
+    RowException, cell_exception, library_exceptions, view_exception,
+};
 
 /// One of the page's three columns.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -173,7 +176,6 @@ pub(super) struct LibraryRow {
     label: String,
     /// Its cells, or those the find turns up in it.
     cells: String,
-    read_only: bool,
     /// The row is the built-in Verilog-A library's.
     builtin: bool,
 }
@@ -282,7 +284,6 @@ pub(super) fn library_rows(
                             name: library.name.clone(),
                             label: library.display_name().to_owned(),
                             cells: found.to_string(),
-                            read_only: library.read_only,
                             builtin: false,
                         }
                     })
@@ -294,7 +295,6 @@ pub(super) fn library_rows(
                     name: BUILTIN_VERILOGA_LIBRARY.to_owned(),
                     label: BUILTIN_VERILOGA_LIBRARY.to_owned(),
                     cells: models.to_string(),
-                    read_only: true,
                     builtin: true,
                 });
             }
@@ -498,13 +498,9 @@ fn list_column(
     })
 }
 
-/// A read-only library says so; a writable one says nothing.
-fn access(read_only: bool) -> Entry {
-    if read_only {
-        Entry::text("read-only")
-    } else {
-        Entry::empty()
-    }
+/// A row's exception, or nothing when it has none.
+fn exception(found: Option<&RowException>) -> Entry {
+    found.map_or_else(Entry::empty, RowException::entry)
 }
 
 pub(super) fn library_column(
@@ -522,6 +518,7 @@ pub(super) fn library_column(
         .as_deref()
         .filter(|_| !builtin_open);
     let libraries = library_rows(ui.ctx(), manager, find, shown_library);
+    let exceptions = library_exceptions(ui.ctx(), cx.model);
     let lead = if builtin_open {
         Some(BUILTIN_KEY)
     } else {
@@ -533,7 +530,7 @@ pub(super) fn library_column(
     let columns = [
         Column::name("Library", 60.0),
         Column::number("Cells", 44.0),
-        Column::words("Access", 72.0),
+        Column::words("Status", 72.0),
     ];
     let focus = browser.focusing == Some(BrowserColumn::Library);
     let response = list_column(
@@ -559,7 +556,11 @@ pub(super) fn library_column(
                     vec![
                         Entry::text(library.label.as_str()),
                         Entry::number(library.cells.as_str()),
-                        access(library.read_only),
+                        if library.builtin {
+                            Entry::text("Read-only")
+                        } else {
+                            exception(exceptions.get(&library.name))
+                        },
                     ]
                 })
         },
@@ -623,10 +624,21 @@ pub(super) fn cell_column(
         total,
         empty: if total == 0 { "No cells" } else { &no_match },
     };
-    let columns = [Column::name("Cell", 60.0), Column::number("Views", 44.0)];
+    // A library kept in a folder of its own gives its cells a status
+    // column; an embedded one's cells have no exception to print.
+    let shown_library = manager
+        .selected_library
+        .as_deref()
+        .filter(|library| manager.is_referenced(library));
+    let columns = [
+        Column::name("Cell", 60.0),
+        Column::number("Views", 44.0),
+        Column::words("Status", 72.0),
+    ];
+    let columns = &columns[..if shown_library.is_some() { 3 } else { 2 }];
     let focus = browser.focusing == Some(BrowserColumn::Cell);
     let response = list_column(ui, "Cell", count, width, height, |ui, body| {
-        DataTable::new(CELLS_TABLE, &columns, cells.rows.len())
+        DataTable::new(CELLS_TABLE, columns, cells.rows.len())
             .list()
             .state(&mut browser.cells)
             .keys(&cells.keys)
@@ -637,14 +649,20 @@ pub(super) fn cell_column(
             .show(ui, |row| {
                 let cell = &cells.rows[row];
                 let name = Entry::text(cell.name.as_str());
-                vec![
+                let mut entries = vec![
                     if cell.description.trim().is_empty() {
                         name
                     } else {
                         name.hint(cell.description.as_str())
                     },
                     Entry::number(cell.views.as_str()),
-                ]
+                ];
+                if let Some(library) = shown_library {
+                    entries.push(exception(
+                        cell_exception(cx.model, library, &cell.name).as_ref(),
+                    ));
+                }
+                entries
             })
     });
     answer_moves(browser, BrowserColumn::Cell, &response);
@@ -692,6 +710,10 @@ pub(super) fn view_column(
         manager.selected_view.as_deref().map(RowKey::from),
     );
     let shown_cell = manager.current_cell();
+    let shown_names = manager
+        .selected_library
+        .as_deref()
+        .zip(manager.selected_cell.as_deref());
     let count = ColumnCount {
         shown: views.rows.len(),
         total: if cell_shown {
@@ -725,9 +747,12 @@ pub(super) fn view_column(
         .max_height(body)
         .show(ui, |row| {
             let view = &views.rows[row];
-            let modified = shown_cell
-                .and_then(|cell| cell.get_view(&view.name))
-                .is_some_and(|view| view.modified);
+            let found = shown_cell.and_then(|cell| cell.get_view(&view.name));
+            // A view kept in a library's own folder prints its exception
+            // first: a change on disk outranks the edits made here.
+            let file_exception = shown_names.zip(found).and_then(|((library, cell), found)| {
+                view_exception(cx.model, library, cell, found)
+            });
             let name = Entry::text(view.name.as_str());
             vec![
                 match &view.path {
@@ -735,7 +760,9 @@ pub(super) fn view_column(
                     None => name,
                 },
                 Entry::text(view.view_type.caption()),
-                if modified {
+                if file_exception.is_some() {
+                    exception(file_exception.as_ref())
+                } else if found.is_some_and(|view| view.modified) {
                     Entry::text("modified")
                 } else {
                     Entry::empty()

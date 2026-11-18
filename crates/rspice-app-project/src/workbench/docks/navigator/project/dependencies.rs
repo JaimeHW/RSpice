@@ -19,7 +19,7 @@ use super::super::nav_row_response;
 use super::ProjectNavigator;
 
 /// Three cells of the row's mono meta face: wider than a mark and its gap.
-const MARK_ROOM: &str = "   ";
+pub(super) const MARK_ROOM: &str = "   ";
 
 pub(super) fn project_dependency_navigator(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
     // The rail draws before the page, so it is the first to bring the drift
@@ -64,7 +64,7 @@ pub(super) fn project_dependency_navigator(ui: &mut Ui, nav: &mut ProjectNavigat
 
 /// The status's mark, set in front of the row's status word, where the
 /// table and the inspector set it in front of theirs.
-fn paint_status_mark(ui: &Ui, row: Rect, label: &str, problem: Problem) {
+pub(super) fn paint_status_mark(ui: &Ui, row: Rect, label: &str, problem: Problem) {
     let t = Tokens::get(ui.ctx());
     let label_width = ui
         .painter()
