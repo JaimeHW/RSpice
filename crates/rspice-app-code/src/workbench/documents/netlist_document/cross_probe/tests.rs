@@ -1,3 +1,6 @@
+//! Which name the caret is on in a deck, and what can be plotted from it:
+//! a node's voltage, a device's current, nothing for a subcircuit call.
+
 use super::{CaretName, PlotQuantity, name_on};
 use crate::state::NetlistSourceIndex;
 

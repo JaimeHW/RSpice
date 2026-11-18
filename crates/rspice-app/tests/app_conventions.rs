@@ -1190,6 +1190,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/code.rs", "netlist_validation"),
             ("workbench/code.rs", "requests"),
             ("workbench/code.rs", "toolbar"),
+            ("workbench/documents/netlist_document.rs", "cross_probe"),
             ("workbench/documents/netlist_document.rs", "fixtures"),
             ("workbench/documents/netlist_document.rs", "language"),
             ("workbench/surfaces/netlist.rs", "fixtures"),
