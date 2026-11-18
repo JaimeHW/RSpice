@@ -22,7 +22,6 @@ use crate::workbench::project::workspace_state::ProjectLauncherFilter;
 use crate::workbench::slots::ProjectState;
 use crate::workbench::tools::project_launcher::recent_rows::{self, RecentRowAction};
 
-const HEADER_HEIGHT: f32 = 44.0;
 const CONTENT_MAX_WIDTH: f32 = 1240.0;
 const DESKTOP_GUTTER: f32 = 30.0;
 const BODY_TOP: f32 = 14.0;
@@ -32,10 +31,16 @@ const COLUMN_GAP: f32 = 18.0;
 const STACK_BREAKPOINT: f32 = 900.0;
 const PHONE_RECENTS_BREAKPOINT: f32 = 620.0;
 const TABLE_MIN_WIDTH: f32 = 720.0;
-const TABLE_HEADER_HEIGHT: f32 = 27.0;
-const TABLE_ROW_HEIGHT: f32 = 32.0;
-const TABLE_TOOLBAR_HEIGHT: f32 = 34.0;
-const SECTION_HEADER_HEIGHT: f32 = 24.0;
+/// The landing's bands and rows are the density's: a recent project's row
+/// and a filter segment are a finger's reach under a coarse pointer, since
+/// each opens or filters with a press.
+fn landing_row_height(t: &Tokens) -> f32 {
+    if t.metrics.is_touch() {
+        t.metrics.touch_target()
+    } else {
+        t.metrics.ctl_h + 4.0
+    }
+}
 /// Side of a problem mark set in front of a card head's fact: read from the
 /// kit, so a marked head and an unmarked one keep the same rhythm.
 use crate::ui::widgets::PROBLEM_MARK_SIDE as MARK_SIDE;
@@ -81,7 +86,8 @@ pub fn landing(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> Option<LandingAc
 fn landing_header(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(vec2(width, HEADER_HEIGHT), Sense::hover());
+    let height = t.metrics.ctl_h + 2.0 * t.metrics.bar_pad;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
     ui.painter().hline(
         rect.x_range(),
@@ -375,7 +381,7 @@ fn recent_toolbar(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, shown: usize) {
         .fill(t.color.bg_panel_2)
         .inner_margin(Margin::symmetric(9, 4))
         .show(ui, |ui| {
-            ui.set_min_height(TABLE_TOOLBAR_HEIGHT - 8.0);
+            ui.set_min_height(t.metrics.ctl_h);
             if ui.available_width() < PHONE_RECENTS_BREAKPOINT {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 5.0;
@@ -451,7 +457,12 @@ fn segment_button(ui: &mut Ui, label: &str, selected: bool) -> Response {
         "Pinned" => 56.0,
         _ => 42.0,
     };
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 24.0), Sense::click());
+    let height = if t.metrics.is_touch() {
+        t.metrics.touch_target()
+    } else {
+        t.metrics.grid_row_h
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     ui.painter().rect_filled(
         rect,
         0.0,
@@ -506,7 +517,7 @@ fn recent_table_header(ui: &mut Ui) {
 fn compact_recent_header(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), TABLE_HEADER_HEIGHT),
+        vec2(ui.available_width(), t.metrics.row_h),
         Sense::hover(),
     );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
@@ -707,9 +718,9 @@ fn table_cells<const N: usize>(
     debug_assert_eq!(N, 4);
     let t = Tokens::get(ui.ctx());
     let height = if header {
-        TABLE_HEADER_HEIGHT
+        t.metrics.row_h
     } else {
-        TABLE_ROW_HEIGHT
+        landing_row_height(&t)
     };
     let (rect, response) = ui.allocate_exact_size(
         vec2(
@@ -936,7 +947,7 @@ fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
 fn compact_section_header(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), SECTION_HEADER_HEIGHT),
+        vec2(ui.available_width(), t.metrics.grid_row_h),
         Sense::hover(),
     );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
