@@ -10974,177 +10974,121 @@ mod tests {
         assert!(TransientCheckpoint::from_text(&text[..end]).is_err());
     }
 
+    /// One runtime Verilog-A instance's accepted state at `accepted_time`, as
+    /// the device's own writer encodes it at the current state version, with
+    /// `fill` setting the history the test is about.
     #[cfg(feature = "veriloga")]
-    fn runtime_veriloga_slew_words(
-        state_version: u32,
+    fn runtime_veriloga_words(
         accepted_time: Value,
-        initialized: Option<bool>,
+        fill: impl FnOnce(&mut rspice_veriloga::vm::VmAcceptedCheckpoint),
     ) -> Vec<u64> {
-        let mut words = vec![
-            u64::from(state_version),
-            0, // previous discontinuity
-            accepted_time.to_bits(),
-            0, // variables
-            0, // previous state values
-            0, // older state values
-            0, // previous state derivatives
-            0, // state initialization flags
-            0, // delay buffers
-            0, // transition filters
-            1, // slew filters
-            (-0.0_f64).to_bits(),
-            accepted_time.to_bits(),
-        ];
-        if let Some(initialized) = initialized {
-            words.push(0); // optional slew catch-up corner
-            words.push(u64::from(initialized));
+        let mut accepted = rspice_veriloga::vm::VmAcceptedCheckpoint {
+            time: accepted_time,
+            variables: Vec::new(),
+            state_values_prev: Vec::new(),
+            state_values_older: Vec::new(),
+            state_derivatives_prev: Vec::new(),
+            state_initialized: Vec::new(),
+            idtmod_origins: Vec::new(),
+            delay_buffers: Vec::new(),
+            transition_filters: Vec::new(),
+            slew_filters: Vec::new(),
+            cross_detectors: Vec::new(),
+            laplace_filters: Vec::new(),
+            zi_filters: Vec::new(),
+            timer_event_bound: None,
+            accepted_event_step: None,
+            analog_system: Vec::new(),
+            analog_files: None,
+        };
+        fill(&mut accepted);
+        rspice_veriloga::device::VerilogADeviceCheckpoint {
+            instance_name: "xfixture".into(),
+            model_name: "fixture_model".into(),
+            source_digest: "-".into(),
+            shape_identity: "0123456789abcdef".repeat(4).into(),
+            state_version: rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION,
+            accepted,
+            prev_discontinuity: false,
         }
-        words.extend([
-            0, // cross detectors
-            0, // Laplace filters
-            0, // Zi filters
-            0, // optional timer-event bound
-        ]);
-        words.push(0); // exact idtmod origins
-        words
+        .to_words()
     }
 
     #[cfg(feature = "veriloga")]
-    fn runtime_veriloga_idtmod_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
-        let mut words = vec![
-            u64::from(state_version),
-            0, // previous discontinuity
-            accepted_time.to_bits(),
-            0, // variables
-            1, // previous state values
-            0.2_f64.to_bits(),
-            1, // older state values
-            (-0.4_f64).to_bits(),
-            1, // previous state derivatives
-            1.0_f64.to_bits(),
-            1, // state initialization flags
-            1,
-            0, // delay buffers
-            0, // transition filters
-            0, // slew filters
-            0, // cross detectors
-            0, // Laplace filters
-            0, // Zi filters
-            0, // optional timer-event bound
-        ];
-        words.push(0); // exact idtmod origins
-        words
+    fn runtime_veriloga_slew_words(accepted_time: Value, initialized: bool) -> Vec<u64> {
+        runtime_veriloga_words(accepted_time, |accepted| {
+            accepted
+                .slew_filters
+                .push(rspice_veriloga::vm::SlewCheckpoint {
+                    output: -0.0,
+                    prev_time: accepted_time,
+                    next_corner_time: None,
+                    initialized,
+                });
+        })
     }
 
     #[cfg(feature = "veriloga")]
-    fn runtime_veriloga_transition_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
-        let mut words = vec![
-            u64::from(state_version),
-            0, // previous discontinuity
-            accepted_time.to_bits(),
-            0,                 // variables
-            0,                 // previous state values
-            0,                 // older state values
-            0,                 // previous state derivatives
-            0,                 // state initialization flags
-            0,                 // delay buffers
-            1,                 // transition filters
-            1,                 // transition initialized
-            1.0_f64.to_bits(), // input
-            0.5_f64.to_bits(), // output
-            accepted_time.to_bits(),
-            1,                                  // active segment present
-            (accepted_time - 1.0e-7).to_bits(), // origin time
-            0.0_f64.to_bits(),                  // origin value
-            1.0_f64.to_bits(),                  // destination
-            (accepted_time + 1.0e-7).to_bits(), // end time
-            1,                                  // pending transitions
-            (accepted_time + 1.0).to_bits(),    // pending start
-            0.0_f64.to_bits(),                  // pending destination
-            0.25_f64.to_bits(),                 // rise
-            0.5_f64.to_bits(),                  // fall
-            0,                                  // slew filters
-            0,                                  // cross detectors
-            0,                                  // Laplace filters
-            0,                                  // Zi filters
-            0,                                  // optional timer-event bound
-        ];
-        words.push(0); // exact idtmod origins
-        words
+    fn runtime_veriloga_idtmod_words(accepted_time: Value) -> Vec<u64> {
+        runtime_veriloga_words(accepted_time, |accepted| {
+            accepted.state_values_prev = vec![0.2];
+            accepted.state_values_older = vec![-0.4];
+            accepted.state_derivatives_prev = vec![1.0];
+            accepted.state_initialized = vec![true];
+        })
     }
 
     #[cfg(feature = "veriloga")]
-    fn runtime_veriloga_absdelay_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
-        let mut words = vec![
-            u64::from(state_version),
-            0, // previous discontinuity
-            accepted_time.to_bits(),
-            0, // variables
-            0, // previous state values
-            0, // older state values
-            0, // previous state derivatives
-            0, // state initialization flags
-            1, // delay buffers
-        ];
-        words.extend([
-            2,                 // bounded-delay configuration
-            2.0_f64.to_bits(), // maximum delay
-        ]);
-        words.extend([
-            2, // accepted samples
-            0.0_f64.to_bits(),
-            1.0_f64.to_bits(),
-            accepted_time.to_bits(),
-            4.0_f64.to_bits(),
-        ]);
-        words.push(0); // left limits
-        words.push(0); // known event orders
-        words.extend([
-            0, // transition filters
-            0, // slew filters
-            0, // cross detectors
-            0, // Laplace filters
-            0, // Zi filters
-            0, // optional timer-event bound
-        ]);
-        words.push(0); // exact idtmod origins
-        words
+    fn runtime_veriloga_transition_words(accepted_time: Value) -> Vec<u64> {
+        use rspice_veriloga::vm::{
+            PendingTransitionCheckpoint, TransitionCheckpoint, TransitionSegmentCheckpoint,
+        };
+        runtime_veriloga_words(accepted_time, |accepted| {
+            accepted.transition_filters.push(TransitionCheckpoint {
+                input: 1.0,
+                output: 0.5,
+                time: accepted_time,
+                active: Some(TransitionSegmentCheckpoint {
+                    origin_time: accepted_time - 1.0e-7,
+                    origin_value: 0.0,
+                    destination: 1.0,
+                    end_time: accepted_time + 1.0e-7,
+                }),
+                pending: vec![PendingTransitionCheckpoint {
+                    start_time: accepted_time + 1.0,
+                    destination: 0.0,
+                    rise_time: 0.25,
+                    fall_time: 0.5,
+                }],
+                initialized: true,
+            });
+        })
     }
 
     #[cfg(feature = "veriloga")]
-    fn runtime_veriloga_laplace_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
-        let mut words = vec![
-            u64::from(state_version),
-            0, // previous discontinuity
-            accepted_time.to_bits(),
-            0, // variables
-            0, // previous state values
-            0, // older state values
-            0, // previous state derivatives
-            0, // state initialization flags
-            0, // delay buffers
-            0, // transition filters
-            0, // slew filters
-            0, // cross detectors
-            1, // Laplace filters
-            2, // latest accepted state
-            0.5_f64.to_bits(),
-            (-0.25_f64).to_bits(),
-        ];
-        words.extend([
-            2, // older accepted state
-            0.375_f64.to_bits(),
-            (-0.125_f64).to_bits(),
-            2, // previous physical derivative
-            1.0_f64.to_bits(),
-            (-2.0_f64).to_bits(),
-        ]);
-        words.extend([
-            0, // Zi filters
-            0, // optional timer-event bound
-        ]);
-        words.push(0); // exact idtmod origins
-        words
+    fn runtime_veriloga_absdelay_words(accepted_time: Value) -> Vec<u64> {
+        use rspice_veriloga::vm::{DelayCheckpoint, DelayConfiguration};
+        runtime_veriloga_words(accepted_time, |accepted| {
+            accepted.delay_buffers.push(DelayCheckpoint {
+                configuration: Some(DelayConfiguration::Bounded { max_delay: 2.0 }),
+                samples: vec![(0.0, 1.0), (accepted_time, 4.0)],
+                left_limits: Vec::new(),
+                event_orders: Vec::new(),
+            });
+        })
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn runtime_veriloga_laplace_words(accepted_time: Value) -> Vec<u64> {
+        runtime_veriloga_words(accepted_time, |accepted| {
+            accepted
+                .laplace_filters
+                .push(rspice_veriloga::laplace::LaplaceCheckpoint {
+                    state: vec![0.5, -0.25],
+                    older_state: vec![0.375, -0.125],
+                    derivative: vec![1.0, -2.0],
+                });
+        })
     }
 
     #[cfg(feature = "veriloga")]
@@ -12638,8 +12582,7 @@ mod tests {
         let checkpoint = sample();
         for initialized in [false, true] {
             let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
-            let words =
-                runtime_veriloga_slew_words(state_version, checkpoint.time, Some(initialized));
+            let words = runtime_veriloga_slew_words(checkpoint.time, initialized);
             let fixture =
                 replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
 
@@ -12660,7 +12603,7 @@ mod tests {
     fn current_runtime_veriloga_common_branch_history_round_trips_exactly() {
         let checkpoint = sample();
         let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
-        let words = runtime_veriloga_idtmod_words(state_version, checkpoint.time);
+        let words = runtime_veriloga_idtmod_words(checkpoint.time);
         let fixture =
             replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
 
@@ -12677,7 +12620,7 @@ mod tests {
     fn current_runtime_veriloga_laplace_history_round_trips_exactly() {
         let checkpoint = sample();
         let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
-        let words = runtime_veriloga_laplace_words(state_version, checkpoint.time);
+        let words = runtime_veriloga_laplace_words(checkpoint.time);
         let fixture =
             replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
 
@@ -12697,7 +12640,7 @@ mod tests {
     fn current_runtime_veriloga_transition_queue_round_trips_exactly() {
         let checkpoint = sample();
         let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
-        let words = runtime_veriloga_transition_words(state_version, checkpoint.time);
+        let words = runtime_veriloga_transition_words(checkpoint.time);
         let fixture =
             replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
 
@@ -12720,7 +12663,7 @@ mod tests {
     fn current_runtime_veriloga_absdelay_configuration_round_trips_exactly() {
         let checkpoint = sample();
         let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
-        let words = runtime_veriloga_absdelay_words(state_version, checkpoint.time);
+        let words = runtime_veriloga_absdelay_words(checkpoint.time);
         let fixture =
             replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
 
@@ -12739,7 +12682,7 @@ mod tests {
     fn runtime_transport_sides_round_trip() {
         let checkpoint = sample();
         let current_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
-        let current_words = runtime_veriloga_absdelay_words(current_version, checkpoint.time);
+        let current_words = runtime_veriloga_absdelay_words(checkpoint.time);
         let current = TransientCheckpoint::from_text(&replace_empty_runtime_veriloga_tail(
             checkpoint.to_text(),
             current_version,

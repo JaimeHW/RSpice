@@ -43,9 +43,12 @@ pub use executor::Vm;
 pub(crate) use executor::observe_zi_state;
 #[cfg(all(feature = "wasm-jit", any(target_arch = "wasm32", test)))]
 pub(crate) use executor::{execute_zi_state, execute_zi_state_derivative};
-pub(crate) use filters::{
+// The element types of [`VmAcceptedCheckpoint`]'s public history fields, so a
+// caller can build an accepted state for the device's checkpoint writer.
+pub(crate) use filters::timer_event_evaluation;
+pub use filters::{
     CrossCheckpoint, DelayCheckpoint, DelayConfiguration, PendingTransitionCheckpoint,
-    SlewCheckpoint, TransitionCheckpoint, TransitionSegmentCheckpoint, timer_event_evaluation,
+    SlewCheckpoint, TransitionCheckpoint, TransitionSegmentCheckpoint,
 };
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
 pub(crate) use periodic::PeriodicOperatorFrame;
