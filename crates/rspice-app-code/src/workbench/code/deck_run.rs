@@ -180,7 +180,8 @@ enum Verdict {
 
 /// Bring the deck `name` the check stopped to the front, where the editor
 /// marks its errors, and say what came of it (`verdict`), on which line of
-/// `text` and why.
+/// `text` and why: once the line is named, why is what the line's finding
+/// says, as its Problems row says it.
 fn refuse(
     cx: &mut Cx<'_, CodeFeature>,
     name: &str,
@@ -190,7 +191,6 @@ fn refuse(
 ) {
     crate::workbench::documents::deck_files::show_deck(cx.model, &mut cx.state.netlist);
     let messages = cx.wb.messages();
-    let error_text = error.to_string();
     let (at_line, without_line) = match verdict {
         Verdict::DidNotRun => (
             MessageId::NetlistDeckDidNotRunAt,
@@ -207,10 +207,10 @@ fn refuse(
             &[
                 ("name", name),
                 ("line", &line.to_string()),
-                ("error", &error_text),
+                ("error", error.finding()),
             ],
         ),
-        None => messages.format(without_line, &[("name", name), ("error", &error_text)]),
+        None => messages.format(without_line, &[("name", name), ("error", error.message())]),
     };
     cx.model
         .record(LogSeverity::Error, LogSource::Netlist, notice.clone());

@@ -83,7 +83,8 @@ fn run_pressed_in_the_frame_of_a_keystroke_runs_the_text_typed() {
 
 /// A deck typed with a blocking error in the frame Run's key is pressed in
 /// does not run, neither as typed nor as it stood before: nothing starts,
-/// no result is kept, and the notice names the deck and the line.
+/// no result is kept, and the notice names the deck and the line once, then
+/// says what is wrong there as the line's finding does.
 #[test]
 fn a_deck_typed_with_an_error_in_the_frame_of_run_is_refused() {
     let mut replay = Replay::new();
@@ -116,8 +117,8 @@ fn a_deck_typed_with_an_error_in_the_frame_of_run_is_refused() {
         .prompt_text()
         .unwrap_or_default()
         .to_owned();
-    assert!(
-        notice.starts_with("deck1.cir did not run: line 3"),
-        "the notice names the deck and the line: {notice}"
+    assert_eq!(
+        notice, "deck1.cir did not run: line 3: Unterminated expression",
+        "the notice names the deck, the line and the line's finding"
     );
 }

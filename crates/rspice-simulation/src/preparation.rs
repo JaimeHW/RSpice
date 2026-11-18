@@ -35,6 +35,9 @@ pub struct PreparationError {
     message: String,
     /// The 1-based deck line this failure named, where it named one.
     line: Option<usize>,
+    /// What the parser said was wrong on that line, in its own words and
+    /// without the line: the text a finding on that line shows.
+    finding: Option<String>,
     interruption: Option<PreparationInterruption>,
     refusal: Option<PreparationRefusal>,
 }
@@ -60,6 +63,7 @@ impl PreparationError {
             stage,
             message: message.into(),
             line: None,
+            finding: None,
             interruption: None,
             refusal: None,
         }
@@ -84,6 +88,7 @@ impl PreparationError {
     /// The same failure, said as `message`.
     pub(crate) fn said_as(mut self, message: impl Into<String>) -> Self {
         self.message = message.into();
+        self.finding = None;
         self
     }
 
@@ -103,6 +108,13 @@ impl PreparationError {
 
     pub const fn line(&self) -> Option<usize> {
         self.line
+    }
+
+    /// What is wrong, without where: for a syntax error the parser's own
+    /// words, which a caller that names the [`line`](Self::line) puts after
+    /// it; else the whole message.
+    pub fn finding(&self) -> &str {
+        self.finding.as_deref().unwrap_or(&self.message)
     }
 
     pub fn is_aborted(&self) -> bool {
@@ -134,19 +146,29 @@ impl PreparationError {
         error: rspice_core::netlist::ParseWithAbortError,
     ) -> Self {
         use rspice_core::netlist::{ParseError, ParseWithAbortError};
-        let mut failure = Self::new(stage, format!("{context}: {error}"));
         match error {
             ParseWithAbortError::Aborted => {
+                let mut failure = Self::new(stage, format!("{context}: {error}"));
                 failure.interruption = Some(PreparationInterruption::Aborted);
+                failure
             }
             ParseWithAbortError::Parse(ParseError::ResourceLimit(error)) => {
+                let mut failure = Self::new(stage, format!("{context}: {error}"));
                 failure.interruption = Some(PreparationInterruption::ResourceLimit(error));
+                failure
             }
+            // A deck the parser refuses is wrong as written: the parser's
+            // words say what and where, once, with no step of the
+            // preparation in front of them.
             ParseWithAbortError::Parse(error) => {
+                let mut failure = Self::new(stage, error.to_string());
                 failure.line = crate::execution::parse_error_line(&error);
+                if let ParseError::Syntax { message, .. } = error {
+                    failure.finding = Some(message);
+                }
+                failure
             }
         }
-        failure
     }
 
     /// Keep admission failures typed when a prepared analysis performs bounded
