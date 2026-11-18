@@ -44,7 +44,7 @@ const SELECT_ALL: MenuEntry = MenuEntry::command(ids::SELECT_ALL).access('A');
 /// matches.
 const FIND: &[MenuEntry] = &[
     code(CodeCommand::FindCodeDocument).access('F'),
-    code(CodeCommand::ReplaceInCodeDocument).access('S'),
+    code(CodeCommand::ReplaceInCodeDocument).access('N'),
     code(CodeCommand::GoToLine).access('G'),
     code(CodeCommand::GoToMatchingBracket).access('B'),
 ];
