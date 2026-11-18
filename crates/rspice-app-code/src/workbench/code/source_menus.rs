@@ -60,9 +60,11 @@ const LINE: &[MenuEntry] = &[
     code(CodeCommand::MoveLineDown).access('W'),
 ];
 
-/// The document's language: going to what a name refers to and renaming
-/// it, where the language service answers them, and formatting.
+/// The document's language: what a hover would say at the caret, going to
+/// what a name refers to and renaming it, where the language service
+/// answers them, and formatting.
 const LANGUAGE: &[MenuEntry] = &[
+    code(CodeCommand::ShowValueAtCaret).access('W'),
     MenuEntry::Only(
         MenuContext::NavigableSourceEditor,
         &[

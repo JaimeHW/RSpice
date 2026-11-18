@@ -651,6 +651,7 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
             "  Move line up | move-line-up | Alt+Up | on",
             "  Move line down | move-line-down | Alt+Down | on",
             "---",
+            "Show value | show-value-at-caret | Ctrl+Shift+H | hidden",
             "Go to definition | go-to-definition | F12 | on",
             "Find references | find-references | Shift+F12 | on",
             "Rename symbol… | rename-symbol | F2 | on",

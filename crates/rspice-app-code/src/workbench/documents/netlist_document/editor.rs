@@ -195,6 +195,7 @@ pub fn show(
     {
         netlist.signature_help.open = false;
     }
+    super::value_at_caret::take_escape(ui.ctx(), editor_id, menu_open);
 
     // Document well backdrop.
     let well = ui.available_rect_before_wrap();
@@ -414,9 +415,6 @@ pub fn show(
         completion::place_caret(ui, editor_id, caret);
     }
     show_signature_help(ui, netlist, editor_id, anchor, workbench.messages());
-    let hover_value = hover_char_index.and_then(|index| {
-        super::language::value_hover_at_in(netlist, workbench.messages(), &buffer, index)
-    });
 
     // All editor writes pass through the ownership guard, which the shell
     // runs once the page has drawn, before anything else the frame raised.
@@ -435,6 +433,15 @@ pub fn show(
     // What the caret stands on is read once it has moved, so the editor's
     // menu and the commands it offers read the name rather than the deck.
     super::cross_probe::follow_caret(ui.ctx(), model, netlist, cursor_line, cursor_column);
+    super::value_at_caret::show(
+        ui,
+        model,
+        netlist,
+        workbench,
+        editor_id,
+        anchor,
+        editor_response.rect,
+    );
     // The editor's history starts again whenever the document is replaced
     // underneath it, so once it is spent the next older step is the
     // netlist's own: a replace-all or a rename.
@@ -472,22 +479,18 @@ pub fn show(
                 ui.label(egui::RichText::new(&problem.message).color(tone));
             }
         });
-    } else if let Some(hover) = hover_value
-        .as_ref()
-        .filter(|hover| hover.value.is_some() || hover.not_read)
-    {
-        show_value_hover(&editor_response, hover);
-    } else if let Some(index) = hover_char_index
-        && let Some(hover) =
-            super::language::name_hover(ui.ctx(), model, netlist, index, workbench.messages())
-    {
-        editor_response.clone().on_hover_ui_at_pointer(|ui| {
-            ui.set_max_width(360.0);
-            ui.label(egui::RichText::new(hover.title).strong());
-            ui.label(hover.detail);
-        });
-    } else if let Some(hover) = hover_value.as_ref() {
-        show_value_hover(&editor_response, hover);
+    } else if let Some(card) = hover_char_index.and_then(|index| {
+        super::value_at_caret::hover_card_at(
+            ui.ctx(),
+            model,
+            netlist,
+            workbench.messages(),
+            &[index],
+        )
+    }) {
+        editor_response
+            .clone()
+            .on_hover_ui_at_pointer(|ui| card.ui(ui));
     }
     editor_response
 }
@@ -538,25 +541,6 @@ fn buffer_byte_of(text: &str, char_index: usize) -> usize {
     text.char_indices()
         .nth(char_index)
         .map_or(text.len(), |(byte, _)| byte)
-}
-
-/// One mono line reading `token = value`, with the provenance or the reason
-/// there is no value under it. No severity colour: a name the deck has not
-/// bound yet is an ordinary state of a document being written.
-fn show_value_hover(response: &egui::Response, hover: &super::language::NetlistValueHover) {
-    response.clone().on_hover_ui_at_pointer(|ui| {
-        ui.set_max_width(360.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(egui::RichText::new(&hover.token).monospace().strong());
-            if let Some(value) = &hover.value {
-                ui.label(egui::RichText::new(format!("= {value}")).monospace());
-            }
-        });
-        if let Some(detail) = &hover.detail {
-            ui.weak(detail);
-        }
-    });
 }
 
 fn show_signature_help(

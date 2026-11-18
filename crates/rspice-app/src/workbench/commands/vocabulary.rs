@@ -599,6 +599,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CodeCommand::NextProblem.key(),
     CodeCommand::PreviousProblem.key(),
     CodeCommand::ShowProblemAtCaret.key(),
+    CodeCommand::ShowValueAtCaret.key(),
     CodeCommand::FormatDocument.key(),
     CodeCommand::FoldSelection.key(),
     CodeCommand::UnfoldAtCaret.key(),

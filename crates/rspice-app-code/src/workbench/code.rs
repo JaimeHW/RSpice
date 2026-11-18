@@ -64,6 +64,7 @@ impl Feature for CodeFeature {
     /// The source editor's right-click menu offers these, each greyed while
     /// the dispatcher would not run it.
     const MENU_AVAILABILITY: &'static [CommandKey] = &[
+        CodeCommand::ShowValueAtCaret.key(),
         CodeCommand::GoToDefinition.key(),
         CodeCommand::FindReferences.key(),
         CodeCommand::RenameSymbol.key(),
@@ -225,6 +226,13 @@ impl CommandSet for CodeCommand {
             return reads.wb.active_source_editor.is_some()
                 && netlist_page_on_screen(reads)
                 && cross_probe::generated_netlist_in_front(&reads.state.netlist);
+        }
+        // A value is read from a deck's text: a comparison lists two texts'
+        // lines, and a Verilog-A view's hovers are its own.
+        if self == Self::ShowValueAtCaret {
+            return reads.wb.active_source_editor.is_some()
+                && netlist_page_on_screen(reads)
+                && !reads.state.netlist.front.is_comparison();
         }
         // A plot is of the name under the caret, so each is offered only on
         // a name of its kind, in a document a run can be of.
@@ -403,7 +411,10 @@ impl CommandSet for CodeCommand {
             // Wrap is every source editor's, read-only or not.
             Self::ToggleWordWrap => (true, UNAVAILABLE),
             // Every source editor can be stepped through, read-only or not.
-            Self::NextProblem | Self::PreviousProblem | Self::ShowProblemAtCaret => (
+            Self::NextProblem
+            | Self::PreviousProblem
+            | Self::ShowProblemAtCaret
+            | Self::ShowValueAtCaret => (
                 reads.wb.active_source_editor.is_some(),
                 "the source document is read-only",
             ),
@@ -462,6 +473,10 @@ impl CommandSet for CodeCommand {
             }
             Self::PreviousProblem => cx.wb.outbox.push(ProblemStep::Previous),
             Self::ShowProblemAtCaret => cx.wb.outbox.push(ProblemStep::AtCaret),
+            Self::ShowValueAtCaret => cx
+                .wb
+                .outbox
+                .push(crate::workbench::documents::netlist_document::ShowValueAtCaret),
             // Asked of the source editor on screen, which refuses an edit of
             // a read-only document; with none on screen there is nothing for
             // them to act on.

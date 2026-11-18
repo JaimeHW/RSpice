@@ -868,6 +868,7 @@ define_messages! {
     StimulusRetainedNote => "The definition retains the file's bytes in the project document. The card still names the file; where that file is not reachable, previews and runs read the retained copy and the run log says so.",
     StimulusCopySpec => "Copy the source specification",
     StimulusReadopt => "Re-adopt r{revision}",
+    NetlistShowValueNothing => "No value or name at the caret.",
 }
 
 #[derive(Debug, Clone, Copy)]

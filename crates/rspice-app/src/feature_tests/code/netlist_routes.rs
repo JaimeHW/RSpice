@@ -1,17 +1,21 @@
 //! The Netlist workspace from the keyboard: every command it offers has a
-//! key or a row in a menu shown there.
+//! key or a row in a menu shown there, and Show value says at the caret what
+//! a hover says under the pointer.
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
-    DESKTOP, frame, open_project_app, themed_context,
+    DESKTOP, frame, frame_with, open_project_app, themed_context,
 };
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::documents::netlist_document;
+use rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ALL_MENUS;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{
     MenuRow, resolve_menu_rows,
 };
+use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 use rspice_app_workbench::workbench::framework::host::Host;
 
 /// The code feature's commands that act only away from the Netlist
@@ -109,4 +113,137 @@ fn every_command_the_netlist_workspace_offers_has_a_key_or_a_menu_row() {
             "{platform:?}: no key and no menu row for {unreached:?}"
         );
     }
+}
+
+/// Show value is in the deck editor's right-click menu and its Edit menu,
+/// offered on the deck and answering there.
+#[test]
+fn show_value_is_a_row_of_the_deck_editors_menus() {
+    let (_ctx, app) = deck_on_the_netlist_workspace(VALUE_DECK);
+    let key = CodeCommand::ShowValueAtCaret.key();
+    for entries in [
+        app.source_editor_menu(),
+        app.menu_entries(
+            rspice_app_workbench::workbench::chrome::title_bar::application_menus::ApplicationMenu::Edit,
+        ),
+    ] {
+        let rows = resolve_menu_rows(
+            entries,
+            &app,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
+        let row = rows
+            .iter()
+            .find_map(|row| match row {
+                MenuRow::Command(row) if row.command == key => Some(row),
+                _ => None,
+            })
+            .expect("the menu has a Show value row");
+        assert_eq!(row.label, "Show value");
+        assert_eq!(row.shortcut, "Ctrl+Shift+H");
+        assert_eq!(row.availability, CommandAvailability::Available);
+    }
+}
+
+/// Every text a frame painted.
+fn painted(output: &egui::FullOutput) -> Vec<String> {
+    output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Ctrl+Shift+`key`, pressed, as a Linux keyboard gives it.
+fn ctrl_shift(key: egui::Key) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers {
+            ctrl: true,
+            shift: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        },
+    }
+}
+
+/// The deck's editor focused with its caret at character `caret`.
+fn caret_at(ctx: &egui::Context, app: &mut RSpiceApp, caret: usize) {
+    let editor = netlist_document::editor_id_in(&app.state.model, &app.state.code.netlist);
+    queue_caret_char_index(ctx, editor, caret);
+    ctx.memory_mut(|memory| memory.request_focus(editor));
+    frame(ctx, app, DESKTOP);
+    frame(ctx, app, DESKTOP);
+    assert_eq!(app.state.code.netlist.cursor_char_index, caret);
+}
+
+/// Ctrl+Shift+H with the caret on a parameter a card reads shows the card a
+/// hover there shows, `w = 2u` and where `w` is defined, at the caret, and
+/// says it on the status line; the card is not there before the key, and
+/// moving the caret takes it away.
+#[test]
+fn show_value_shows_at_the_caret_what_a_hover_there_shows() {
+    let (ctx, mut app) = deck_on_the_netlist_workspace(VALUE_DECK);
+    let reader = VALUE_DECK.find("W={w}").expect("the card reads w") + "W={".len();
+    caret_at(&ctx, &mut app, reader);
+    let before = frame(&ctx, &mut app, DESKTOP);
+    assert!(
+        !painted(&before).iter().any(|text| text == "= 2u"),
+        "no card before it is asked for"
+    );
+
+    frame_with(&ctx, &mut app, DESKTOP, vec![ctrl_shift(egui::Key::H)]);
+    let shown = frame(&ctx, &mut app, DESKTOP);
+    let texts = painted(&shown);
+    assert!(
+        texts.iter().any(|text| text == "= 2u"),
+        "the card states the value: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text == "defined line 2"),
+        "the card says where the value comes from: {texts:?}"
+    );
+    assert_eq!(app.state.prompt_text(), Some("w = 2u · defined line 2"));
+
+    caret_at(&ctx, &mut app, reader + 4);
+    let moved = frame(&ctx, &mut app, DESKTOP);
+    assert!(
+        !painted(&moved).iter().any(|text| text == "= 2u"),
+        "the card leaves when the caret moves"
+    );
+}
+
+/// From the palette or a menu, Show value with the caret just after a
+/// parameter's name reads that name; on a line with nothing to read, the
+/// status line says there is nothing there.
+#[test]
+fn show_value_reads_the_name_the_caret_ends_and_says_when_there_is_none() {
+    let (ctx, mut app) = deck_on_the_netlist_workspace(VALUE_DECK);
+    let after = VALUE_DECK.find(".param l=").expect("l is defined") + ".param l".len();
+    caret_at(&ctx, &mut app, after);
+    app.execute_command_key(CodeCommand::ShowValueAtCaret.key());
+    frame(&ctx, &mut app, DESKTOP);
+    let shown = frame(&ctx, &mut app, DESKTOP);
+    assert!(
+        painted(&shown).iter().any(|text| text == "= 6u"),
+        "l = {{w*3}} with w = 2u, the value before the name's binding: {:?}",
+        app.state.prompt_text()
+    );
+    assert_eq!(app.state.prompt_text(), Some("l = 6u"));
+
+    // The title line names no parameter, expression or model.
+    caret_at(&ctx, &mut app, 2);
+    app.execute_command_key(CodeCommand::ShowValueAtCaret.key());
+    frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("No value or name at the caret.")
+    );
 }

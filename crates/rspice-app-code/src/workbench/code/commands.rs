@@ -86,6 +86,9 @@ pub enum CodeCommand {
     PreviousProblem,
     /// Say what the finding at the caret of the focused source document is.
     ShowProblemAtCaret,
+    /// What a hover over the name or expression at the caret of the deck in
+    /// front says, shown at the caret: the keyboard's way to a value.
+    ShowValueAtCaret,
     FormatDocument,
     FoldSelection,
     UnfoldAtCaret,
@@ -418,6 +421,12 @@ const SHOW_IN_SCHEMATIC: &[ShortcutBinding] = &[primary(
     chord(Key::F12, false, true, false, "Alt+F12"),
     DESKTOP_BROWSER,
 )];
+// A hover's answer at the caret. A browser keeps Ctrl+Shift+H for its
+// history, so there the menus reach it.
+const SHOW_VALUE_AT_CARET: &[ShortcutBinding] = &[primary(
+    chord(Key::H, true, false, true, "Ctrl+Shift+H"),
+    DESKTOP,
+)];
 // F8 also steps through a drawing's violations; with a source editor focused
 // the editor's context outranks the workspace's, so the key follows focus.
 const NEXT_PROBLEM: &[ShortcutBinding] = &[primary(chord(Key::F8, false, false, false, "F8"), ALL)];
@@ -453,7 +462,7 @@ pub const fn new_deck_label(browser: bool) -> &'static str {
 
 impl CodeCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 48] = [
         Self::NewVerilogADevice,
         Self::OpenNetlist,
         Self::NewDeck,
@@ -487,6 +496,7 @@ impl CodeCommand {
         Self::NextProblem,
         Self::PreviousProblem,
         Self::ShowProblemAtCaret,
+        Self::ShowValueAtCaret,
         Self::FormatDocument,
         Self::FoldSelection,
         Self::UnfoldAtCaret,
@@ -539,6 +549,7 @@ impl CodeCommand {
             Self::NextProblem => CommandKey::new("next-problem"),
             Self::PreviousProblem => CommandKey::new("previous-problem"),
             Self::ShowProblemAtCaret => CommandKey::new("show-problem-at-caret"),
+            Self::ShowValueAtCaret => CommandKey::new("show-value-at-caret"),
             Self::FormatDocument => CommandKey::new("format-document"),
             Self::FoldSelection => CommandKey::new("fold-selection"),
             Self::UnfoldAtCaret => CommandKey::new("unfold-at-caret"),
@@ -629,6 +640,7 @@ impl CodeCommand {
             | Self::NextProblem
             | Self::PreviousProblem
             | Self::ShowProblemAtCaret
+            | Self::ShowValueAtCaret
             | Self::FormatDocument
             | Self::FoldSelection
             | Self::UnfoldAtCaret
@@ -664,6 +676,7 @@ impl CodeCommand {
             Self::FormatDocument => FORMAT_DOCUMENT,
             Self::NextProblem => NEXT_PROBLEM,
             Self::PreviousProblem => PREVIOUS_PROBLEM,
+            Self::ShowValueAtCaret => SHOW_VALUE_AT_CARET,
             Self::FoldSelection => FOLD_SELECTION,
             Self::UnfoldAtCaret => UNFOLD_AT_CARET,
             Self::ToggleWordWrap => TOGGLE_WORD_WRAP,
@@ -732,6 +745,7 @@ impl CodeCommand {
             Self::NextProblem => ("Next problem", "Edit", palette),
             Self::PreviousProblem => ("Previous problem", "Edit", palette),
             Self::ShowProblemAtCaret => ("Show problem at caret", "Edit", palette),
+            Self::ShowValueAtCaret => ("Show value", "Code", palette),
             Self::FormatDocument => ("Format document", "Edit", palette),
             Self::FoldSelection => ("Fold selection", "View", palette),
             Self::UnfoldAtCaret => ("Unfold at caret", "View", palette),
