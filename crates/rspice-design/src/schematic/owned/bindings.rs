@@ -26,14 +26,20 @@ pub fn reset_binding_revalidation_count() {
 }
 
 impl Schematic {
+    /// Rewrite every binding `rebind` matches, answering how many it did. A
+    /// drawing that places none of them is not written, so its stamp, and
+    /// everything derived from its content, stands.
     fn remap_bindings(&mut self, rebind: impl Fn(&mut LibraryCellInstance) -> bool) -> usize {
         let mut remapped = 0;
-        for component in &mut self.document.components {
+        for component in &mut self.document.unstamped_mut().components {
             if let Some(binding) = component.library_cell.as_mut()
                 && rebind(binding)
             {
                 remapped += 1;
             }
+        }
+        if remapped > 0 {
+            self.document.touch();
         }
         remapped
     }

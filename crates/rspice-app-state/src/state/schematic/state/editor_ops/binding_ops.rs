@@ -44,3 +44,51 @@ impl SchematicState {
         self.session.is_dirty = true;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::state::{LibraryCellInstance, Point, SchematicState};
+
+    /// A rename rewrites only the drawings that place what it renames; any
+    /// other keeps its stamp, so nothing derived from its content is read
+    /// again.
+    #[test]
+    fn a_rename_leaves_a_drawing_that_places_none_of_it_on_its_stamp() {
+        let mut drawing = SchematicState::default();
+        drawing.add_library_cell_component(
+            Point::new(10, 10),
+            LibraryCellInstance::new("parts", "amp", "schematic"),
+        );
+        let stamp = drawing.content_stamp();
+
+        assert_eq!(drawing.rename_cell_bindings("parts", "leaf", "twig"), 0);
+        assert_eq!(drawing.rename_library_bindings("scratch", "notes"), 0);
+        assert_eq!(
+            drawing.rebind_cell_bindings(("parts", "leaf"), ("blocks", "leaf")),
+            0
+        );
+        assert_eq!(
+            drawing.rename_view_bindings("parts", "amp", "symbol", "icon"),
+            0
+        );
+        assert_eq!(
+            drawing.content_stamp(),
+            stamp,
+            "nothing renamed, nothing written"
+        );
+
+        assert_eq!(drawing.rename_cell_bindings("parts", "amp", "buffer"), 1);
+        assert_ne!(
+            drawing.content_stamp(),
+            stamp,
+            "the renamed placement is a new content"
+        );
+        assert_eq!(
+            drawing.document().components[0]
+                .library_cell
+                .as_ref()
+                .map(|binding| binding.cell.as_str()),
+            Some("buffer")
+        );
+    }
+}
