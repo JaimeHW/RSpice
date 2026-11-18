@@ -33,7 +33,8 @@ use rspice_app_state::state::{Cell, CellViewRef, Library, Point, SchematicState,
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_design::library::folder::{
-    CellViewStatus, LibraryFile, LibraryFileLock, LibraryMode, LibraryPath, ReferenceStatus,
+    CellViewStatus, HostPlatform, LibraryFile, LibraryFileLock, LibraryMode, LibraryPath,
+    ReferenceStatus,
 };
 
 use super::dependencies::said_about;
@@ -1202,4 +1203,109 @@ fn relink_with_a_view_of_the_library_open_shows_the_picked_folders_drawing() {
         0,
         "and shows the drawing of the folder relinked to"
     );
+}
+
+/// A library whose folder is gone reads one sentence for one state: the
+/// same while the session runs as after a reopen, naming the folder as the
+/// project stores it, relative to the project.
+#[test]
+fn a_librarys_gone_folder_reads_one_sentence_live_and_after_reopen() {
+    let (mut app, folders) = kept_in_a_folder("library-gone-one-sentence");
+    let stored = app
+        .state
+        .model
+        .library_manager
+        .reference(LIBRARY)
+        .expect("work is kept in a folder of its own")
+        .path
+        .shown(HostPlatform::current());
+    assert!(
+        stored.starts_with(".."),
+        "stored relative to the project: {stored}"
+    );
+    let said = format!("No folder at {stored}");
+    let detail = |app: &RSpiceApp| {
+        app.state
+            .model
+            .reference_status(LIBRARY)
+            .and_then(|status| status.detail())
+    };
+    std::fs::remove_dir_all(&folders.folder).expect("the folder goes");
+    focus(&mut app);
+    assert_eq!(
+        detail(&app).as_deref(),
+        Some(said.as_str()),
+        "while it runs"
+    );
+
+    let app = reopened(app, &folders);
+    assert_eq!(
+        detail(&app).as_deref(),
+        Some(said.as_str()),
+        "after a reopen"
+    );
+}
+
+/// A design that places a cell of a library whose folder could not be read
+/// says the library is what is missing, and where it is repaired, wherever
+/// it says why the design does not resolve: the Overview's Configuration
+/// row and the Design rails.
+#[test]
+fn a_design_placing_a_cell_of_a_missing_library_names_the_library() {
+    use crate::workbench::examples::hierarchy_reference;
+    let reference = hierarchy_reference::build();
+    let mut app = RSpiceApp::test_instance();
+    app.state = reference.state;
+    app.state.open_project_session();
+    let root = unique_temp_dir("library-missing-in-design");
+    let project = root.join("design").join("chip.rspiceproj");
+    std::fs::create_dir_all(project.parent().expect("a folder")).expect("its folder");
+    let folder = root
+        .join("libraries")
+        .join(hierarchy_reference::VENDOR_LIBRARY);
+    assert!(
+        app.state.save_project_to_path(&project),
+        "the project is saved"
+    );
+    app.state
+        .model
+        .move_library_to_folder(hierarchy_reference::VENDOR_LIBRARY, &folder)
+        .expect("vendor moves to a folder of its own");
+    assert!(app.state.save_project_to_path(&project), "and saved so");
+    std::fs::remove_dir_all(&folder).expect("the folder goes");
+    drop(app);
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state.load_project_from_path(&project),
+        "the project opens"
+    );
+
+    let said = "Library 'vendor' is not found. See Project \u{b7} Dependencies.";
+    assert_eq!(
+        app.state
+            .model
+            .design_projection_through_gesture()
+            .err()
+            .map(|error| error.to_string())
+            .as_deref(),
+        Some(said),
+        "the Design rails"
+    );
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Overview;
+    let snapshot = OverviewSnapshot::capture(
+        &egui::Context::default(),
+        &features::cx_with_foreign_answers(&mut app, |_| true),
+    );
+    let configuration = snapshot
+        .statuses
+        .iter()
+        .find(|status| status.area == "Configuration")
+        .expect("the Overview has a Configuration row");
+    assert!(
+        configuration.text().ends_with(said),
+        "the Overview: {}",
+        configuration.text()
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }

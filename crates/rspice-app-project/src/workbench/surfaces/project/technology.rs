@@ -542,7 +542,20 @@ pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectF
     } else {
         (Ok(None), Some(TECHNOLOGY_CONSEQUENCE))
     };
-    let choice = CommandForm::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
+    // With a technology attached the dialog changes it, in its own words.
+    let changing = cx
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .is_some();
+    let (title, primary_label) = match (changing, primary.label) {
+        (false, label) => (TECHNOLOGY_DIALOG_TITLE, label),
+        (true, TECHNOLOGY_DIALOG_PRIMARY) => (TECHNOLOGY_CHANGE_TITLE, TECHNOLOGY_CHANGE_PRIMARY),
+        (true, label) => (TECHNOLOGY_CHANGE_TITLE, label),
+    };
+    let choice = CommandForm::new(title, primary_label)
         .describe(
             "Choose the model library and the PDK this project simulates with.",
         )

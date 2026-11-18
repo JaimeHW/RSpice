@@ -52,10 +52,23 @@ impl Model {
             let Some(folder) = self.library_folder(&name).map(Path::to_path_buf) else {
                 continue;
             };
+            // A folder gone as a whole reads as the open says it: the folder
+            // is not there, not the first file looked for in it.
+            let gone = (!folder.is_dir())
+                .then(|| self.library_manager.reference(&name))
+                .flatten()
+                .map(super::folders::no_folder);
             let Some(session) = self.library_files.library_mut(&name) else {
                 continue;
             };
             for (file, state) in &mut session.files {
+                if let Some(missing) = &gone {
+                    if state.loaded.is_some() {
+                        state.on_disk = OnDisk::Missing(missing.clone());
+                        state.locked_by = None;
+                    }
+                    continue;
+                }
                 // Who else is editing the file is read on every check: a lock
                 // comes and goes without the file itself moving.
                 state.locked_by =
@@ -65,6 +78,10 @@ impl Model {
                 }
                 let stamp = library_file_stamp(&folder, file);
                 if stamp.is_some() && stamp == state.stamp {
+                    // Back as it was loaded, after it was found gone.
+                    if matches!(state.on_disk, OnDisk::Missing(_)) {
+                        state.on_disk = OnDisk::AsLoaded;
+                    }
                     continue;
                 }
                 state.on_disk = match read_library_file(&folder, file) {

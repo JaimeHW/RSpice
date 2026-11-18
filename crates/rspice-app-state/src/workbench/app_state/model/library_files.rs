@@ -218,9 +218,53 @@ impl ReferenceLoad {
     pub const fn is_read(&self) -> bool {
         matches!(self, Self::Loaded | Self::ReadForSession(_))
     }
+
+    /// What stands in the way of a library this session could not read;
+    /// none for one it read.
+    fn unread(&self, library: &str) -> Option<UnreadLibrary> {
+        let (short, state) = match self {
+            Self::Loaded | Self::ReadForSession(_) => return None,
+            Self::NotLoaded => ("library not read", "is not read in this browser".to_owned()),
+            Self::NotFound(_) => ("library not found", "is not found".to_owned()),
+            Self::Unreadable(_) => ("library unreadable", "cannot be read".to_owned()),
+            Self::DifferentLibrary(holds) => (
+                "library not found",
+                format!("is not in its folder, which holds '{holds}'"),
+            ),
+        };
+        Some(UnreadLibrary {
+            short,
+            sentence: format!("Library '{library}' {state}. See Project \u{b7} Dependencies."),
+        })
+    }
+}
+
+/// What every place that finds a cell of a library this session could not
+/// read says in place of a missing view: that the library is what is
+/// missing, and where it is repaired.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadLibrary {
+    /// The few words a table cell holds.
+    pub short: &'static str,
+    /// The sentence a status line or a hint holds.
+    pub sentence: String,
 }
 
 impl Model {
+    /// The referenced libraries this session could not read, each with what
+    /// stands in the way.
+    pub fn unread_libraries(&self) -> BTreeMap<String, UnreadLibrary> {
+        self.library_files
+            .libraries()
+            .filter_map(|(name, session)| {
+                session
+                    .load
+                    .unread(name)
+                    .map(|unread| (name.to_owned(), unread))
+            })
+            .collect()
+    }
+
     /// Where the design library `library` stands: In project when the
     /// project file holds it, its folder's status when it is referenced,
     /// and none when the project has no such library.

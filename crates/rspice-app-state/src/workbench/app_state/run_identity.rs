@@ -39,12 +39,7 @@ impl Model {
         crate::state::workspace::ConfigurationExecutionProjection,
         crate::state::workspace::ConfigurationExecutionPlanError,
     > {
-        self.workspace.plan_execution_projection(
-            self.sim_setup.design_configuration,
-            &self.library_manager,
-            &self.workspace.content.active_view,
-            &self.schematic,
-        )
+        self.blame_unread_library(self.plan_inspect_design_projection())
     }
 
     /// [`Self::plan_execution_projection`], resolved or not, for a reader

@@ -214,6 +214,11 @@ pub fn configuration(ctx: &egui::Context, model: &Model) -> SubjectStatus {
                 )
             ),
         ),
+        // A library that could not be read is named as what is missing,
+        // in the one sentence every place says it in.
+        Err(rspice_design::projection::ConfigurationExecutionPlanError::LibraryUnavailable(
+            sentence,
+        )) => SubjectStatus::new(Tone::Error, active.name(), sentence),
         Err(error) => SubjectStatus::new(
             Tone::Error,
             active.name(),

@@ -12,6 +12,7 @@
 
 use super::*;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rspice_design::hierarchy::{
@@ -23,6 +24,7 @@ use crate::ui::widgets::table::{
     Cell, Column, DataTable, Group, RowKey, TableResponse, TableState,
 };
 use crate::ui::widgets::{FILTER_CLEAR_INSET, SegmentedWidth, filter_field_clear, segmented};
+use crate::workbench::app_state::model::UnreadLibrary;
 use crate::workbench::project::configuration_state::{
     ConfigurationPageState, ConfigurationRow, ConfigurationTab, ConfigurationTables, INHERITED,
     InstanceRow, PatternRow, instance_key,
@@ -73,12 +75,15 @@ pub(super) fn tables(
     let editable = id.is_some_and(|id| cx.state.configuration.definition(catalog, id).is_some())
         && !cx.model.safe_mode.project_read_only();
     let visible = cx.state.configuration.visible_instances();
+    // A cell of a library this session could not read is unbound because
+    // the library is missing, not a view of it.
+    let unread = cx.model.unread_libraries();
     let page = &mut cx.state.configuration;
     let mut actions = tab_header(ui, resolution, page, editable)
         .into_iter()
         .collect::<Vec<_>>();
     actions.extend(match page.tab {
-        ConfigurationTab::Instances => instance_table(ui, page, resolution, visible),
+        ConfigurationTab::Instances => instance_table(ui, page, resolution, visible, &unread),
         ConfigurationTab::Cells => super::cells::cells_table(ui, page, &resolution.tables),
     });
     let mut menu_at = None;
@@ -391,6 +396,7 @@ fn instance_table(
     page: &mut ConfigurationPageState,
     resolution: &ConfigurationResolution,
     visible: Arc<[InstanceRow]>,
+    unread: &BTreeMap<String, UnreadLibrary>,
 ) -> Vec<TableAction> {
     let tables = &resolution.tables;
     let hierarchy = resolution.hierarchy.as_ref().ok();
@@ -401,7 +407,7 @@ fn instance_table(
     let instances = match hierarchy {
         None => Arc::from(Vec::new()),
         Some(hierarchy) if flat => page.matching_instances(&filter, &|row| {
-            instance_cells(tables, &hierarchy.bindings, row, false, true)
+            instance_cells(tables, &hierarchy.bindings, row, false, true, unread)
                 .iter()
                 .any(|cell| cell.text.to_lowercase().contains(&filter))
         }),
@@ -443,7 +449,14 @@ fn instance_table(
             Line::Pattern(at) => pattern_cells(&tables.patterns[at]),
             Line::Instance(at) => hierarchy.map_or_else(Vec::new, |hierarchy| {
                 let row = &lines.instances[at];
-                instance_cells(tables, &hierarchy.bindings, row, collapsed(&row.path), flat)
+                instance_cells(
+                    tables,
+                    &hierarchy.bindings,
+                    row,
+                    collapsed(&row.path),
+                    flat,
+                    unread,
+                )
             }),
         });
     page.instances_table = state;
@@ -567,6 +580,7 @@ fn instance_cells(
     row: &InstanceRow,
     collapsed: bool,
     flat: bool,
+    unread: &BTreeMap<String, UnreadLibrary>,
 ) -> Vec<Cell> {
     let binding = &hierarchy[row.binding];
     let reference = &binding.reference;
@@ -595,6 +609,9 @@ fn instance_cells(
     let to_use = tables
         .instance_to_use(&row.path)
         .map_or_else(|| Cell::text(INHERITED), ident);
+    let missing = unbound_reason(binding.status)
+        .and_then(|_| unread.get(&reference.library))
+        .map(|unread| Cell::problem(unread.short, Problem::Failure).hint(unread.sentence.as_str()));
     let status = match unbound_reason(binding.status) {
         Some(reason) => Cell::problem(reason, Problem::Failure),
         None => match binding.warnings.first() {
@@ -602,9 +619,10 @@ fn instance_cells(
             None => Cell::empty(),
         },
     };
-    let status = match &binding.diagnostic {
-        Some(diagnostic) => status.hint(diagnostic.as_str()),
-        None => status,
+    let status = match (missing, &binding.diagnostic) {
+        (Some(missing), _) => missing,
+        (None, Some(diagnostic)) => status.hint(diagnostic.as_str()),
+        (None, None) => status,
     };
     vec![
         instance,

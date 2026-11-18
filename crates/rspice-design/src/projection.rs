@@ -594,6 +594,11 @@ pub enum ConfigurationExecutionPlanError {
     /// words that say which and what to do.
     #[error("{0}")]
     PlanConfiguration(String),
+    /// The hierarchy places a cell of a library the project could not read:
+    /// the library is what is missing, in words that say which and where it
+    /// is repaired.
+    #[error("{0}")]
+    LibraryUnavailable(String),
 }
 
 // Count of cell-view materializations performed since the last reset, so a

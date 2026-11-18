@@ -73,6 +73,15 @@ pub(super) fn resolve_folder(
         .map_err(Missing::Path)
 }
 
+/// The one sentence a library whose folder is not there reads, at open and
+/// once a check finds it gone alike: the folder as the project stores it,
+/// relative to the project when it is; the inspector's Resolves to row
+/// holds the whole path.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn no_folder(reference: &LibraryReference) -> Missing {
+    Missing::NoFolder(reference.path.shown(HostPlatform::current()))
+}
+
 /// Read the folder `folder` as the library `reference` names.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn read_folder(
@@ -88,10 +97,9 @@ pub(super) fn read_folder(
         }
     };
     match rspice_project::library_folder::read_library_folder(&path) {
-        Err(FolderProblem::NoFolder) => FolderReading::not_read(
-            folder,
-            ReferenceLoad::NotFound(Missing::NoFolder(path.display().to_string())),
-        ),
+        Err(FolderProblem::NoFolder) => {
+            FolderReading::not_read(folder, ReferenceLoad::NotFound(no_folder(reference)))
+        }
         Err(FolderProblem::Unreadable(reason)) => {
             FolderReading::not_read(folder, ReferenceLoad::Unreadable(reason))
         }

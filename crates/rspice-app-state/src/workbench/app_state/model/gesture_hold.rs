@@ -55,12 +55,35 @@ impl Model {
         {
             return held.clone();
         }
-        let projection = self.workspace.design_projection(
+        let projection = self.blame_unread_library(self.workspace.inspect_design_projection(
             &self.library_manager,
             &self.workspace.content.active_view,
             &self.schematic,
-        );
+        ));
         *self.held_projection.0.borrow_mut() = Some((key, projection.clone()));
         projection
+    }
+
+    /// An inspected projection admitted for execution, as a reader states
+    /// it: one that does not resolve because it places a cell of a library
+    /// this session could not read says that library is what is missing,
+    /// not a view of the cell.
+    pub(crate) fn blame_unread_library(&self, inspected: Projected) -> Projected {
+        let inspected = inspected?;
+        let error = match Arc::clone(&inspected).into_execution() {
+            Ok(projection) => return Ok(projection),
+            Err(error) => error,
+        };
+        let unread = self.unread_libraries();
+        let blamed = inspected
+            .hierarchy_resolution()
+            .bindings
+            .iter()
+            .filter(|binding| !binding.status.is_resolved())
+            .find_map(|binding| {
+                let library = &binding.reference.library;
+                unread.get(library).map(|unread| unread.sentence.clone())
+            });
+        Err(blamed.map_or(error, ConfigurationExecutionPlanError::LibraryUnavailable))
     }
 }

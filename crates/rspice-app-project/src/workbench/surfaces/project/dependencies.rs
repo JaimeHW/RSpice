@@ -21,7 +21,7 @@ use crate::ui::widgets::table::{Cell, Column, DataTable, RowKey, SortKey};
 use crate::workbench::design_system::property_row_toned;
 use crate::workbench::project::dependency_status::{
     DependencyKind, DependencyLibrary, DependencyRow, UNSET, dependency_status_key,
-    refresh_source_drift, settle_selection, technology_status, visible_dependency_rows,
+    refresh_source_drift, settle_selection, shown_path, technology_status, visible_dependency_rows,
 };
 use crate::workbench::project::library_dialogs::library_files::{
     LibraryFileIntent, library_file_blocker, library_file_label, run_library_file_intent,
@@ -217,7 +217,7 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     if let Some(binding) = binding.as_ref() {
         value_row(ui, "Technology", &binding.display_label());
         value_row(ui, "Model library", binding.model_library());
-        let source = binding.root_source().display().to_string();
+        let source = shown_path(binding.root_source());
         value_row(ui, "Main model file", &source);
         let files = binding.source_closure().len();
         value_row(
@@ -284,11 +284,13 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     }
     let model_paths = cx.commands.label(ids::PDK_SETTINGS);
     dependency_action_bar(ui, |ui| {
-        if Button::new(TECHNOLOGY_SURFACE_ACTION)
-            .accent()
-            .show(ui)
-            .clicked()
-        {
+        // With one attached, the card above states it and the button offers
+        // to change it: the primary action is never one already done.
+        let attach = match binding {
+            Some(_) => Button::new(TECHNOLOGY_CHANGE_ACTION),
+            None => Button::new(TECHNOLOGY_SURFACE_ACTION).accent(),
+        };
+        if attach.show(ui).clicked() {
             open_technology_attachment_dialog(cx);
         }
         // Beside Attach, through the same checkpointed change.
@@ -1074,7 +1076,7 @@ fn dependency_manifest(cx: &Cx<'_, ProjectFeature>, rows: &[DependencyRow]) -> D
         .map(|binding| TechnologyManifest {
             label: binding.display_label(),
             model_library: binding.model_library().to_owned(),
-            model_file: binding.root_source().display().to_string(),
+            model_file: shown_path(binding.root_source()),
             source_files: binding.source_closure().len(),
         });
     DependencyManifest {
