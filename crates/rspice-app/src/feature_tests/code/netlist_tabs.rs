@@ -37,16 +37,41 @@ fn application_frame(app: &mut RSpiceApp) {
 /// One whole application frame on a desktop window, `seconds` into the
 /// session.
 fn application_frame_at(app: &mut RSpiceApp, seconds: f64) {
+    let _ = drawn_frame_at(app, seconds);
+}
+
+/// One whole application frame `seconds` into the session, and every string
+/// it painted, one per line.
+fn drawn_frame_at(app: &mut RSpiceApp, seconds: f64) -> String {
+    fn collect(shape: &egui::epaint::Shape, text: &mut String) {
+        match shape {
+            egui::epaint::Shape::Text(shape) => {
+                text.push_str(shape.galley.text());
+                text.push('\n');
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, text);
+                }
+            }
+            _ => {}
+        }
+    }
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, DESKTOP)),
         time: Some(seconds),
         ..Default::default()
     };
-    let _ = themed_context().run_ui(input, |ui| {
+    let output = themed_context().run_ui(input, |ui| {
         app.prepare_frame(ui.ctx());
         app.render_frame_chrome(ui);
         app.render_frame_dialogs(ui.ctx());
     });
+    let mut text = String::new();
+    for clipped in &output.shapes {
+        collect(&clipped.shape, &mut text);
+    }
+    text
 }
 
 /// The tab strip's tabs, by label and whether each closes.
@@ -183,7 +208,8 @@ fn an_added_line_the_plan_owns_is_refused_on_its_line() {
 }
 
 /// A run's input opened from Results is a tab named for the run, holding
-/// the text the run read through the frames after.
+/// the text the run read through the frames after, and the inspector says
+/// which run it is and what that run ran.
 #[test]
 fn a_run_input_opened_from_results_is_a_tab_that_keeps_its_text() {
     use crate::workbench::commands::tests::{RunOrigin, app_with_prepared_run};
@@ -221,6 +247,15 @@ fn a_run_input_opened_from_results_is_a_tab_that_keeps_its_text() {
     let tab = tab_labelled(&app, &format!("Run {run} input"));
     assert!(tab.active, "{tab:?}");
     assert_eq!(app.state.model.simulation.source.netlist_content, INPUT);
+
+    // The inspector states whose input it is.
+    let painted = drawn_frame_at(&mut app, 0.0);
+    for row in ["Run input", "Run", &run.to_string(), "Ran", "The plan"] {
+        assert!(
+            painted.lines().any(|line| line == row),
+            "the inspector shows {row}: {painted}"
+        );
+    }
 }
 
 /// The deck compared with its file on disk shows what was typed since, on
@@ -316,4 +351,27 @@ fn a_comparison_tab_names_the_two_texts_it_compares() {
         shown.starts_with("--- deck.cir\n+++ Generated netlist\n"),
         "{shown}"
     );
+}
+
+/// With the Added lines in front, the inspector names the design they
+/// belong to and says they run with the plan.
+#[test]
+fn the_inspector_says_whose_added_lines_are_in_front() {
+    let mut app = plan_and_deck_session();
+    assert!(activate_document(
+        &mut app.state,
+        &WorkspaceDocumentId::NetlistAddedLines
+    ));
+    let design = netlist_document::added_lines_design(&app.state.model)
+        .expect("the reference design has a root")
+        .display_path();
+
+    let painted = drawn_frame_at(&mut app, 0.0);
+
+    for row in ["Design", design.as_str(), "Runs with", "The plan"] {
+        assert!(
+            painted.lines().any(|line| line == row),
+            "the inspector shows {row}: {painted}"
+        );
+    }
 }

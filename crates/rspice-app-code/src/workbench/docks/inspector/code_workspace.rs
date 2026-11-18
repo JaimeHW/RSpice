@@ -1,4 +1,6 @@
-//! The Netlist workspace's inspector: the deck's diagnostics and provenance.
+//! The Netlist workspace's inspector: the findings of the text in front, and
+//! where that text comes from: the deck's file, an include, the generated
+//! netlist's design, the Added lines' design, or the run a run input is of.
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use rspice_ui_kit::panels::{Problem, code_inspector_section, panel_inset, section_header};
@@ -111,10 +113,18 @@ pub(in crate::workbench) fn code_workspace_inspector(
     if active_dependency_in(reads.model, reads.netlist).is_some() {
         dependency_provenance(ui, reads);
     } else {
-        match reads.netlist.front.root_kind() {
-            NetlistRoot::Deck => deck_file_provenance(ui, reads),
-            NetlistRoot::RunInput => {} // its run's, stated by the strip over the deck
-            _ => generated_provenance(ui, reads.model, messages),
+        match &reads.netlist.front {
+            crate::workbench::documents::netlist_document::NetlistTab::RunInput { run, point } => {
+                run_input_facts(ui, reads, *run, *point);
+            }
+            crate::workbench::documents::netlist_document::NetlistTab::AddedLines => {
+                added_lines_facts(ui, reads);
+            }
+            front => match front.root_kind() {
+                NetlistRoot::Deck => deck_file_provenance(ui, reads),
+                NetlistRoot::Comparison => {}
+                _ => generated_provenance(ui, reads.model, messages),
+            },
         }
     }
     pressed
@@ -237,6 +247,120 @@ fn generated_provenance(ui: &mut Ui, model: &Model, messages: MessageCatalog) {
             Some(problem),
         );
     }
+}
+
+/// A run's input: the run, the point of it when it read several, whether
+/// it ran a deck or the plan, and when it finished.
+fn run_input_facts(ui: &mut Ui, reads: &CodeInspector<'_>, run: u64, point: Option<usize>) {
+    use crate::workbench::MessageId;
+    let messages = reads.messages;
+    let simulation = &reads.model.simulation;
+    section_header(
+        ui,
+        &messages.text(MessageId::NetlistInspectorRunInput),
+        None,
+    );
+    property_row(
+        ui,
+        &messages.text(MessageId::NetlistInspectorRun),
+        &run.to_string(),
+    );
+    let points = simulation
+        .retained
+        .executed_decks
+        .get(run)
+        .map_or(&[][..], |deck| deck.points.as_slice());
+    if let Some(index) = point
+        && points.len() > 1
+        && let Some(of) = points.get(index)
+    {
+        property_row(
+            ui,
+            &messages.text(MessageId::NetlistInspectorPoint),
+            &messages.format(
+                MessageId::NetlistInspectorPointOf,
+                &[
+                    ("point", &(index + 1).to_string()),
+                    ("count", &points.len().to_string()),
+                    ("label", &of.label),
+                ],
+            ),
+        );
+    }
+    let Some(record) = simulation
+        .retained
+        .runs
+        .iter()
+        .find(|record| record.id == run)
+    else {
+        return;
+    };
+    if let Some(receipt) = record.prepared_receipt() {
+        let ran = if receipt.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
+        {
+            MessageId::NetlistInspectorRanDeck
+        } else {
+            MessageId::NetlistInspectorRanPlan
+        };
+        property_row(
+            ui,
+            &messages.text(MessageId::NetlistInspectorRan),
+            &messages.text(ran),
+        );
+    }
+    if record.elapsed_time > 0.0
+        && let Some(finished) = local_time(record.timestamp + record.elapsed_time)
+    {
+        property_row(
+            ui,
+            &messages.text(MessageId::NetlistInspectorFinished),
+            &finished,
+        );
+    }
+}
+
+/// An instant on the reader's clock, `2026-10-16 14:03:12`; `None` when the
+/// clock did not know it.
+fn local_time(unix_seconds: f64) -> Option<String> {
+    if !(unix_seconds.is_finite() && unix_seconds > 0.0) {
+        return None;
+    }
+    let local = crate::time_compat::local_date_time((unix_seconds * 1_000.0) as u64)?;
+    Some(format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        local.year(),
+        u8::from(local.month()),
+        local.day(),
+        local.hour(),
+        local.minute(),
+        local.second()
+    ))
+}
+
+/// The Added lines: the design they belong to, and that they run with the
+/// plan.
+fn added_lines_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
+    use crate::workbench::MessageId;
+    let messages = reads.messages;
+    section_header(
+        ui,
+        &messages.text(MessageId::NetlistAddedLinesDocument),
+        None,
+    );
+    if let Some(design) =
+        crate::workbench::documents::netlist_document::added_lines_design(reads.model)
+    {
+        property_row(
+            ui,
+            &messages.text(MessageId::NetlistInspectorDesign),
+            &design.display_path(),
+        );
+    }
+    property_row(
+        ui,
+        &messages.text(MessageId::NetlistInspectorRunsWith),
+        &messages.text(MessageId::NetlistInspectorRunsWithPlan),
+    );
 }
 
 /// The file in front, the deck or one of its includes: where it is, and the
