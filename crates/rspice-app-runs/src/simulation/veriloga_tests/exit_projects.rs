@@ -14,8 +14,8 @@ use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::connect_rules::ConnectRuleColumn;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{
-    Cell, CellViewRef, ComponentType, Library, Point, ProjectSourceBundle, ProjectSourceLanguage,
-    ProjectSourceOwner, SimulationRun, View, ViewType,
+    Cell, CellViewRef, ComponentType, Library, Point, ProjectSourceBundle, ProjectSourceOwner,
+    SimulationRun, View, ViewType,
 };
 use rspice_app_state::workbench::app_state::model::{
     apply_compiled_interface, compile_project_bundle_receipt,
@@ -144,7 +144,6 @@ impl Drawing {
             .expect("a file name");
         let bundle = ProjectSourceBundle::try_new(
             ProjectSourceOwner::cell_view(reference.clone()),
-            ProjectSourceLanguage::VerilogA,
             root,
             corpus_text(file),
             [],

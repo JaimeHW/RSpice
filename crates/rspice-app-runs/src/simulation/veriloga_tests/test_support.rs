@@ -5,8 +5,7 @@ use super::{
     build_profile, compile_model_library_source_runtimes, project_veriloga_directive,
 };
 use crate::state::{
-    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceRole, ProjectSourceRoleBinding,
+    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner,
 };
 
 pub fn standalone_connection_authority()
@@ -61,9 +60,8 @@ endmodule
 "#;
 
 pub fn project_bundle(profile: &build_profile::VerilogABuildProfile) -> ProjectSourceBundle {
-    ProjectSourceBundle::try_new_with_roles(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
+    ProjectSourceBundle::try_new_with_build_profile(
+        ProjectSourceOwner::CodeWorkspace,
         "model.va",
         PROJECT_SOURCE,
         [
@@ -74,11 +72,7 @@ pub fn project_bundle(profile: &build_profile::VerilogABuildProfile) -> ProjectS
             ProjectSourceDependency::try_new("model.va", "models/gain.vams").unwrap(),
             ProjectSourceDependency::try_new("model.va", "config/build.data").unwrap(),
         ],
-        [ProjectSourceRoleBinding::try_new(
-            "config/build.data",
-            ProjectSourceRole::VerilogABuildProfile,
-        )
-        .unwrap()],
+        Some("config/build.data".to_owned()),
     )
     .unwrap()
 }

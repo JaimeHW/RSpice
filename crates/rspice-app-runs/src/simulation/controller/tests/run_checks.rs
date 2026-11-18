@@ -84,7 +84,6 @@ fn an_hdl_call_routes_to_the_one_project_bundle_that_holds_its_file() {
             crate::state::ProjectSourceOwner::cell_view(crate::state::CellViewRef::new(
                 library, "tb", "veriloga",
             )),
-            crate::state::ProjectSourceLanguage::VerilogA,
             "tb/tb.va",
             "module tb; endmodule\n",
             Vec::<crate::state::ProjectSourceFile>::new(),
