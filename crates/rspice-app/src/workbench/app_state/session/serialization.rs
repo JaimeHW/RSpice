@@ -26,13 +26,7 @@ impl AppState {
         if let Some(folder) = rspice_app_services::io::result_segments::session_segment_folder() {
             rspice_results::store_reader::keep_segments_in(&folder);
         }
-        Some(Self::restore_session_text(&text))
-    }
-
-    /// Restore a session from the text it was stored as. One that will not
-    /// decode is replaced by a new one whose Console says so.
-    pub(crate) fn restore_session_text(text: &str) -> Self {
-        serde_json::from_str(text).unwrap_or_else(|error| {
+        Some(serde_json::from_str(&text).unwrap_or_else(|error| {
             log::warn!("the stored session did not decode: {error}");
             let mut state = Self::default();
             state.record(
@@ -42,7 +36,7 @@ impl AppState {
                  Saved projects are unchanged.",
             );
             state
-        })
+        }))
     }
 
     /// Put the runs a session kept back, checked against the simulation plan

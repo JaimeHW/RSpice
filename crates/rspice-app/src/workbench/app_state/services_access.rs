@@ -525,27 +525,18 @@ impl AppState {
         }
     }
 
-    /// Keep the session in the browser's durable records, as the browser does
-    /// when its page is left: the project's unsaved work first, as an
-    /// autosave, then the session itself, and its runs only when they
-    /// changed. Encoded here, when eframe saves, never on a frame; written in
-    /// a browser task, whose outcome a later frame settles.
-    pub(crate) fn keep_browser_session(&mut self, ctx: Option<&egui::Context>) {
-        use rspice_app_services::workbench::app_state::session::browser_session::{
-            self, FinishedWrite, RunsDecision, RunsToKeep,
-        };
-        use rspice_app_services::workbench::lifecycle::durable_records;
-        let Some(records) = durable_records::browser_records() else {
+    /// Keep the session as the browser does when its page is left: the
+    /// project's unsaved work as an autosave, and the runs when they changed,
+    /// each written in a browser task; then the session itself, at once, in
+    /// local storage, because the page may be gone before a task runs. The
+    /// session names the runs record it goes with.
+    pub(crate) fn keep_browser_session(&mut self, storage: &mut dyn eframe::Storage) {
+        use rspice_app_services::workbench::app_state::session::browser_session;
+        if rspice_app_services::workbench::lifecycle::durable_records::browser_records().is_none() {
             return;
-        };
-        autosave::write_now(self, ctx);
-        let history = self.model.simulation.retained.runs.revision();
-        let decision = browser_session::runs_decision(
-            &history,
-            !self.model.simulation.retained.runs.is_empty(),
-            &self.platform.session_kept,
-            self.platform.session_runs_stored.as_ref(),
-        );
+        }
+        autosave::write_now(self, None);
+        browser_session::keep_runs(&self.model, &mut self.platform, None);
         let session = match serde_json::to_string(&WithoutRuns(self)) {
             Ok(session) => session,
             Err(error) => {
@@ -553,33 +544,21 @@ impl AppState {
                 return;
             }
         };
-        let runs = match decision {
-            RunsDecision::Unchanged => RunsToKeep::Unchanged,
-            RunsDecision::Removed => RunsToKeep::Removed,
-            RunsDecision::Encode => {
-                let results =
-                    rspice_app_services::io::capture_simulation_results(&self.model.simulation);
-                match serde_json::to_string(&results) {
-                    Ok(runs) => RunsToKeep::Write(runs),
-                    Err(error) => {
-                        log::warn!("the session's runs could not be encoded: {error}");
-                        RunsToKeep::Removed
-                    }
+        // Local storage refuses a write it has no room for and keeps what it
+        // held, saying nothing: the session is read back to know.
+        storage.set_string(eframe::APP_KEY, session.clone());
+        let kept = storage
+            .get_string(eframe::APP_KEY)
+            .is_some_and(|stored| stored == session);
+        if kept {
+            match self.platform.session_runs.record {
+                Some(record) => {
+                    storage.set_string(browser_session::RUNS_RECORD_KEY, record.to_string());
                 }
+                None => storage.remove_string(browser_session::RUNS_RECORD_KEY),
             }
-        };
-        let decision = match runs {
-            RunsToKeep::Removed => RunsDecision::Removed,
-            RunsToKeep::Unchanged | RunsToKeep::Write(_) => decision,
-        };
-        durable_records::spawn_task(ctx, async move {
-            let written = browser_session::keep_session(&*records.session, session, runs).await;
-            browser_session::finished(FinishedWrite {
-                written,
-                history,
-                runs: decision,
-            });
-        });
+        }
+        browser_session::session_written(&mut self.model, &mut self.platform, kept);
     }
 }
 

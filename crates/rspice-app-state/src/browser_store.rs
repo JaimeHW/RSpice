@@ -76,8 +76,8 @@ pub const PROJECT_BINDINGS: Schema = Schema {
     refusal: "too many browser storage operations are still pending",
 };
 
-/// The session: its layout and selections, and the runs it holds, each its
-/// own record, so the runs never ride inside the session's text.
+/// The runs the session holds, kept apart from the session's own text in
+/// local storage, so they never ride inside it.
 pub const SESSION: Schema = Schema {
     database: "rspice-session",
     version: 1,

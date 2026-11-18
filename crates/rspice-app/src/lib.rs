@@ -68,7 +68,8 @@ mod feature_tests;
 /// The application root, constructed by both the desktop and browser entry
 /// points.
 pub use workbench::RSpiceApp;
-/// Read the session the browser kept, before the application starts.
+/// Read the runs the browser kept for the session, before the application
+/// starts.
 #[cfg(target_arch = "wasm32")]
 pub use workbench::app_state::session::session_store::read_browser_session;
 

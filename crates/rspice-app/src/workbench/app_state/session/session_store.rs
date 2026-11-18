@@ -1,25 +1,25 @@
-//! Keeping the session for the next start.
+//! The runs the browser kept for the session.
 //!
-//! The desktop keeps the session in eframe's store when the application
-//! closes. The browser keeps it in its durable records, the session in one
-//! record and its runs in another
+//! The browser keeps its session in local storage, as eframe's store, and
+//! the runs it holds apart from it, in its durable records
 //! (`rspice_app_services::workbench::app_state::session::browser_session`).
-//! A record store answers later, so the browser reads them before the
-//! application starts, and the start restores them here.
+//! Those answer later, so the runs are read before the application starts,
+//! and the start puts them back under the session that names them.
 
 use std::cell::RefCell;
 
-use rspice_app_services::workbench::app_state::session::browser_session::StoredSession;
+use rspice_app_services::workbench::app_state::session::browser_session::{self, RestoredRuns};
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 use crate::workbench::app_state::AppState;
 
 thread_local! {
-    /// The session the browser read before the application started.
-    static READ_AT_START: RefCell<Option<StoredSession>> = const { RefCell::new(None) };
+    /// The runs record the browser read before the application started.
+    static READ_AT_START: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// Read the session the browser kept, before the application starts.
+/// Read the runs the browser kept for the session, before the application
+/// starts.
 #[cfg(any(target_arch = "wasm32", test))]
 pub async fn read_browser_session() {
     let Some(records) =
@@ -27,45 +27,42 @@ pub async fn read_browser_session() {
     else {
         return;
     };
-    let stored = rspice_app_services::workbench::app_state::session::browser_session::read_session(
-        &*records.session,
-    )
-    .await;
-    READ_AT_START.with(|read| *read.borrow_mut() = Some(stored));
-}
-
-/// The session the browser read before the application started, once.
-pub(in crate::workbench) fn take_browser_session() -> Option<StoredSession> {
-    READ_AT_START.with(|read| read.borrow_mut().take())
+    let runs = browser_session::read_runs(&*records.session).await;
+    READ_AT_START.with(|read| *read.borrow_mut() = runs);
 }
 
 impl AppState {
-    /// Restore a session the browser kept: the session, then the runs kept
-    /// beside it. `None` only when nothing was kept.
-    pub(crate) fn restore_browser_session(stored: StoredSession) -> Option<Self> {
-        let mut state = Self::restore_session_text(&stored.session?);
-        if let Some(runs) = stored.runs {
-            match serde_json::from_str(&runs) {
-                Ok(results) => {
-                    if let Some(warning) = state.restore_session_results(results) {
-                        state.record(LogSeverity::Warning, LogSource::Studio, warning);
-                    }
+    /// Put back the runs the restored session was kept with, read from the
+    /// browser's records before the start. Runs the page was left before
+    /// keeping are said to be lost.
+    pub(crate) fn restore_browser_runs(&mut self, storage: Option<&dyn eframe::Storage>) {
+        let expected = storage
+            .and_then(|storage| storage.get_string(browser_session::RUNS_RECORD_KEY))
+            .and_then(|record| record.parse::<u64>().ok());
+        let stored = READ_AT_START.with(|read| read.borrow_mut().take());
+        match browser_session::restore_runs(
+            expected,
+            stored.as_deref(),
+            &mut self.platform.session_runs,
+        ) {
+            RestoredRuns::None => {}
+            RestoredRuns::Kept(results) => {
+                if let Some(warning) = self.restore_session_results(results) {
+                    self.record(LogSeverity::Warning, LogSource::Studio, warning);
                 }
-                Err(error) => {
-                    log::warn!("the stored runs did not decode: {error}");
-                    state.record(
-                        LogSeverity::Warning,
-                        LogSource::Studio,
-                        "The runs of the previous session could not be restored. Saved projects \
-                         are unchanged.",
-                    );
-                }
+                // What the store holds is these runs: they are not written
+                // again until they change.
+                self.platform.session_runs.history =
+                    Some(self.model.simulation.retained.runs.revision());
             }
-            // What the store holds is these runs: the next save of the
-            // session does not encode them again.
-            state.platform.session_runs_stored =
-                Some(state.model.simulation.retained.runs.revision());
+            RestoredRuns::Lost => {
+                self.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    "The run results of the previous session were not restored: the page was left \
+                     before the browser kept them. Saved projects are unchanged.",
+                );
+            }
         }
-        Some(state)
     }
 }

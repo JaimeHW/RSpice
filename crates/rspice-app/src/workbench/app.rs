@@ -1021,10 +1021,7 @@ impl eframe::App for RSpiceApp {
         }
         log::debug!("save: serialize app state");
         if rspice_app_services::workbench::lifecycle::durable_records::browser_records().is_some() {
-            // The browser keeps its session in its durable records; the
-            // local-storage copy an earlier build wrote only takes space.
-            storage.remove_string(eframe::APP_KEY);
-            self.state.keep_browser_session(None);
+            self.state.keep_browser_session(storage);
         } else {
             self.state.store_session(storage);
         }
@@ -1053,6 +1050,7 @@ impl RSpiceApp {
         autosave::take_recovered_work(&mut self.state.model, &mut self.state.platform);
         crate::workbench::app_state::services_access::settle_restart_offer(&mut self.state);
         browser_session::settle_finished(&mut self.state.model, &mut self.state.platform);
+        browser_session::keep_runs(&self.state.model, &mut self.state.platform, Some(ctx));
         #[cfg(not(target_arch = "wasm32"))]
         autosave::take_unopened_project(&mut self.state.platform);
         #[cfg(not(target_arch = "wasm32"))]

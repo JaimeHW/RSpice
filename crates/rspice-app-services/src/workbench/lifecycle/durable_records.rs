@@ -199,6 +199,13 @@ pub fn run_browser_tasks() -> usize {
     }
 }
 
+/// Drop the browser tasks spawned on this thread unrun, as leaving a page
+/// drops the tasks it had not run.
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+pub fn forget_browser_tasks() {
+    TASKS.with(|tasks| tasks.borrow_mut().clear());
+}
+
 /// Drive a future whose every step is ready at once, as the in-memory
 /// records' are, to its answer.
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]

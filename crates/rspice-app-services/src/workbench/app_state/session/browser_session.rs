@@ -1,74 +1,127 @@
-//! The browser's session, kept in its durable records rather than in one
-//! local-storage string: the session itself (its layout and selections, and
-//! the workspace they are over) in one record, and the runs it holds in
-//! another, written only when they changed.
+//! The browser's session. The session itself (its layout and selections,
+//! and the workspace they are over) is kept in local storage when the page
+//! is left: written at once, while the page goes, so a reload finds it. The
+//! runs it holds are kept apart from it, in the browser's durable records,
+//! written in a browser task when they change, never on a frame and never
+//! inside the session's text.
 //!
-//! The session is written when the page is left, never between frames. When
-//! the browser's storage is full the project's autosave comes first: the runs
-//! give way to it, and what was not kept is said once, when it starts.
+//! The session names the runs record it was kept with, and is restored with
+//! that one only: runs a page left before their write landed are said to be
+//! lost, never put under a session they do not belong to. When the browser's
+//! storage is full the project's autosave comes first: the runs give way to
+//! it, and what was not kept is said once, when it starts.
+
+use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::io::ProjectSimulationResults;
 use crate::services::session::SessionKept;
 use crate::state::RunHistoryRevision;
-use crate::workbench::lifecycle::durable_records::{DurableRecords, Record};
+use crate::workbench::lifecycle::durable_records::{self, DurableRecords, Record, RecordError};
 use crate::workbench::lifecycle::project_lifecycle::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
-/// The record that holds the session.
-pub const SESSION_KEY: &str = "session";
 /// The record that holds the session's runs.
 pub const RUNS_KEY: &str = "runs";
+/// The local-storage key, beside the session's, naming the runs record the
+/// session was kept with.
+pub const RUNS_RECORD_KEY: &str = "rspice.session.runs";
 
-/// What a start reads back.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct StoredSession {
-    pub session: Option<String>,
-    pub runs: Option<String>,
+/// The runs the browser keeps for the session.
+#[derive(Debug, Clone, Default)]
+pub struct KeptRuns {
+    /// The run history the last write was taken at.
+    pub history: Option<RunHistoryRevision>,
+    /// The write the runs record holds, or is being written with. `None`
+    /// when it holds none.
+    pub record: Option<u64>,
+    /// The last write started: each write is numbered.
+    pub generation: u64,
+    /// A write has not finished.
+    pub writing: bool,
 }
 
-/// Read the session and its runs back. A store that cannot be read is a
-/// session started afresh, said in the log.
-pub async fn read_session(records: &dyn DurableRecords) -> StoredSession {
-    let read = |key: &'static str| async move {
-        match records.get(key).await {
-            Ok(record) => record.and_then(Record::into_text),
-            Err(error) => {
-                log::warn!("the stored {key} could not be read: {error}");
-                None
-            }
+/// The runs record: the runs, tagged with the write that kept them.
+fn runs_record(generation: u64, results: &str) -> String {
+    format!("{{\"generation\":{generation},\"results\":{results}}}")
+}
+
+#[derive(serde::Deserialize)]
+struct StoredRuns {
+    generation: u64,
+    results: ProjectSimulationResults,
+}
+
+/// Read the runs record. A store that cannot be read keeps none, said in
+/// the log.
+pub async fn read_runs(records: &dyn DurableRecords) -> Option<String> {
+    match records.get(RUNS_KEY).await {
+        Ok(record) => record.and_then(Record::into_text),
+        Err(error) => {
+            log::warn!("the stored runs could not be read: {error}");
+            None
         }
-    };
-    let session = read(SESSION_KEY).await;
-    // Runs without the session they belong to are never restored.
-    let runs = match session {
-        Some(_) => read(RUNS_KEY).await,
+    }
+}
+
+/// What a start found of the session's runs.
+#[derive(Debug)]
+pub enum RestoredRuns {
+    /// The session was kept with none.
+    None,
+    /// The runs the session was kept with.
+    Kept(ProjectSimulationResults),
+    /// The session was kept with runs the store does not hold: their write
+    /// had not landed when the page was left, or they do not read.
+    Lost,
+}
+
+/// Match the runs record to the session: `expected` is the write the session
+/// names, `stored` the runs record as read. The kept runs are set to what the
+/// store holds, so a record no session names is removed by the next write.
+pub fn restore_runs(
+    expected: Option<u64>,
+    stored: Option<&str>,
+    kept: &mut KeptRuns,
+) -> RestoredRuns {
+    let stored = stored.map(|text| {
+        serde_json::from_str::<StoredRuns>(text).map_err(|error| {
+            log::warn!("the stored runs did not decode: {error}");
+        })
+    });
+    let stored_generation = match &stored {
+        Some(Ok(runs)) => Some(runs.generation),
+        // A record that does not read is removed by the next write.
+        Some(Err(())) => Some(u64::MAX),
         None => None,
     };
-    StoredSession { session, runs }
+    kept.record = stored_generation;
+    kept.generation = expected
+        .max(stored_generation.filter(|generation| *generation != u64::MAX))
+        .unwrap_or(0);
+    match (expected, stored) {
+        (None, _) => RestoredRuns::None,
+        (Some(expected), Some(Ok(runs))) if runs.generation == expected => {
+            RestoredRuns::Kept(runs.results)
+        }
+        (Some(_), _) => RestoredRuns::Lost,
+    }
 }
 
-/// What becomes of the stored runs when the session is written.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunsToKeep {
+/// What becomes of the stored runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunsDecision {
     /// The stored runs are the session's: nothing to write.
     Unchanged,
     /// No runs are kept: the session has none, or they gave way.
     Removed,
-    /// The session's runs, encoded.
-    Write(String),
-}
-
-/// What the runs are, for the session about to be written: unchanged since
-/// the last write that kept them, left out since they gave way at this very
-/// history, or to be encoded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunsDecision {
-    Unchanged,
-    Removed,
+    /// The session's runs, to be encoded and written.
     Encode,
 }
 
-/// Decide what the session write does with the runs at `history`.
+/// What the runs at `history` need: nothing when they are what the last
+/// write was taken at, removing when there are none or they gave way at
+/// this very history, or writing.
 pub fn runs_decision(
     history: &RunHistoryRevision,
     has_runs: bool,
@@ -84,112 +137,159 @@ pub fn runs_decision(
     }
 }
 
-/// What a session write kept.
+/// What a runs write kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SessionWritten {
-    Whole,
-    /// The session without its runs, which the store refused; the runs it
-    /// held before are gone too, so they never come back with a later
-    /// session.
-    WithoutRuns,
-    /// Nothing: the store refused the session, for the reason given.
-    Nothing(String),
+pub enum RunsWritten {
+    Kept,
+    Removed,
+    /// The store refused them; the runs it held before are gone too, so
+    /// they never come back with a later session.
+    Refused,
+    /// The store failed, for the reason given; it holds no runs.
+    Failed(String),
 }
 
-/// Write the session, then its runs. A session the store refuses keeps
-/// the one stored before, with its runs; runs it refuses leave the new
-/// session without any.
-pub async fn keep_session(
+/// Write the runs record, or remove it when `runs` is `None`.
+async fn write_runs(
     records: &dyn DurableRecords,
-    session: String,
-    runs: RunsToKeep,
-) -> SessionWritten {
-    if let Err(error) = records.put(SESSION_KEY, Record::Text(session)).await {
-        return SessionWritten::Nothing(error.to_string());
-    }
-    let removed = match runs {
-        RunsToKeep::Unchanged => return SessionWritten::Whole,
-        RunsToKeep::Removed => records.delete(RUNS_KEY).await,
-        RunsToKeep::Write(text) => match records.put(RUNS_KEY, Record::Text(text)).await {
-            Ok(()) => return SessionWritten::Whole,
-            Err(refused) => {
-                log::warn!("the session's runs were not kept: {refused}");
-                return match records.delete(RUNS_KEY).await {
-                    Ok(()) => SessionWritten::WithoutRuns,
-                    Err(error) => SessionWritten::Nothing(error.to_string()),
-                };
-            }
-        },
+    generation: u64,
+    runs: Option<String>,
+) -> RunsWritten {
+    let Some(runs) = runs else {
+        return match records.delete(RUNS_KEY).await {
+            Ok(()) => RunsWritten::Removed,
+            Err(error) => RunsWritten::Failed(error.to_string()),
+        };
     };
-    match removed {
-        Ok(()) => SessionWritten::Whole,
-        Err(error) => SessionWritten::Nothing(format!(
-            "the runs it no longer holds could not be removed: {error}"
-        )),
+    let refused = match records
+        .put(RUNS_KEY, Record::Text(runs_record(generation, &runs)))
+        .await
+    {
+        Ok(()) => return RunsWritten::Kept,
+        Err(refused) => refused,
+    };
+    let removed = records.delete(RUNS_KEY).await;
+    match (refused, removed) {
+        (RecordError::Full, Ok(())) => RunsWritten::Refused,
+        (refused, Ok(())) => RunsWritten::Failed(refused.to_string()),
+        (_, Err(error)) => RunsWritten::Failed(error.to_string()),
     }
 }
 
-/// A session write the browser finished, for the frame to settle.
+/// A runs write the browser finished, for a frame to settle.
 #[derive(Debug, Clone)]
-pub struct FinishedWrite {
-    pub written: SessionWritten,
-    /// The run history the write was taken at.
-    pub history: RunHistoryRevision,
-    pub runs: RunsDecision,
+struct FinishedRuns {
+    written: RunsWritten,
+    history: RunHistoryRevision,
+    generation: u64,
 }
 
 thread_local! {
-    static FINISHED: std::cell::RefCell<Vec<FinishedWrite>> =
+    static FINISHED: std::cell::RefCell<Vec<FinishedRuns>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Leave a finished write for the next frame.
-pub fn finished(write: FinishedWrite) {
-    FINISHED.with(|finished| finished.borrow_mut().push(write));
+/// Keep the session's runs when they changed: read off the model here,
+/// encoded and written in a browser task. Not while a run is still being
+/// produced, and one write at a time.
+pub fn keep_runs(model: &Model, platform: &mut PlatformState, ctx: Option<&Context>) {
+    let Some(records) = durable_records::browser_records() else {
+        return;
+    };
+    let kept = &mut platform.session_runs;
+    if kept.writing || model.simulation.execution.has_active_execution() {
+        return;
+    }
+    let history = model.simulation.retained.runs.revision();
+    let decision = runs_decision(
+        &history,
+        !model.simulation.retained.runs.is_empty(),
+        &platform.session_kept,
+        kept.history.as_ref(),
+    );
+    match decision {
+        RunsDecision::Unchanged => return,
+        RunsDecision::Removed if kept.record.is_none() => {
+            kept.history = Some(history);
+            return;
+        }
+        RunsDecision::Removed | RunsDecision::Encode => {}
+    }
+    let results = (decision == RunsDecision::Encode)
+        .then(|| crate::io::capture_simulation_results(&model.simulation));
+    kept.generation += 1;
+    let generation = kept.generation;
+    kept.history = Some(history.clone());
+    kept.record = results.is_some().then_some(generation);
+    kept.writing = true;
+    durable_records::spawn_task(ctx, async move {
+        let runs = results.and_then(|results| {
+            serde_json::to_string(&results)
+                .inspect_err(|error| log::warn!("the session's runs could not be encoded: {error}"))
+                .ok()
+        });
+        let written = write_runs(&*records.session, generation, runs).await;
+        FINISHED.with(|finished| {
+            finished.borrow_mut().push(FinishedRuns {
+                written,
+                history,
+                generation,
+            });
+        });
+    });
 }
 
-/// Settle every session write the browser finished: remember which runs
-/// the store holds, and say what was not kept when that starts.
+/// Settle every runs write the browser finished, and say what was not kept
+/// when that starts.
 pub fn settle_finished(model: &mut Model, platform: &mut PlatformState) {
     let writes = FINISHED.with(|finished| std::mem::take(&mut *finished.borrow_mut()));
     for write in writes {
-        let kept = match write.written {
-            SessionWritten::Whole => {
-                platform.session_runs_stored = match write.runs {
-                    RunsDecision::Unchanged => platform.session_runs_stored.take(),
-                    RunsDecision::Removed => None,
-                    RunsDecision::Encode => Some(write.history.clone()),
-                };
-                if write.runs == RunsDecision::Removed
-                    && platform.session_kept == SessionKept::WithoutRuns(write.history.clone())
-                {
-                    // Still left out for the history they gave way at.
-                    continue;
+        platform.session_runs.writing = false;
+        match write.written {
+            RunsWritten::Kept | RunsWritten::Removed => {
+                if platform.session_kept != SessionKept::Nothing {
+                    settle(model, platform, SessionKept::Whole);
                 }
-                SessionKept::Whole
             }
-            SessionWritten::WithoutRuns => {
-                platform.session_runs_stored = None;
-                SessionKept::WithoutRuns(write.history)
+            RunsWritten::Refused | RunsWritten::Failed(_) => {
+                if let RunsWritten::Failed(error) = &write.written {
+                    log::warn!("the session's runs were not kept: {error}");
+                }
+                if platform.session_runs.record == Some(write.generation) {
+                    platform.session_runs.record = None;
+                }
+                settle(model, platform, SessionKept::WithoutRuns(write.history));
             }
-            SessionWritten::Nothing(reason) => {
-                log::warn!("the session was not kept: {reason}");
-                SessionKept::Nothing
-            }
-        };
-        settle(model, platform, kept);
+        }
     }
 }
 
 /// The session's runs gave way to the project's autosave: the store holds
 /// none, and none are written again until the runs change.
 pub fn runs_gave_way(model: &mut Model, platform: &mut PlatformState) {
-    platform.session_runs_stored = None;
+    platform.session_runs.record = None;
     let history = model.simulation.retained.runs.revision();
+    platform.session_runs.history = Some(history.clone());
     settle(model, platform, SessionKept::WithoutRuns(history));
 }
 
-/// Remember what this save kept, and say so when that changes.
+/// The session was written to local storage (`kept`) or refused.
+pub fn session_written(model: &mut Model, platform: &mut PlatformState, kept: bool) {
+    if !kept {
+        settle(model, platform, SessionKept::Nothing);
+    } else if platform.session_kept == SessionKept::Nothing {
+        let runs_left_out =
+            platform.session_runs.record.is_none() && !model.simulation.retained.runs.is_empty();
+        let now = if runs_left_out {
+            SessionKept::WithoutRuns(model.simulation.retained.runs.revision())
+        } else {
+            SessionKept::Whole
+        };
+        settle(model, platform, now);
+    }
+}
+
+/// Remember what the session keeps, and say so when that changes.
 pub fn settle(model: &mut Model, platform: &mut PlatformState, kept: SessionKept) {
     let before = std::mem::replace(&mut platform.session_kept, kept);
     match (&before, &platform.session_kept) {
@@ -223,78 +323,51 @@ mod tests {
     use super::*;
     use crate::workbench::lifecycle::durable_records::{MemoryOrigin, block_on};
 
-    #[test]
-    fn a_session_and_its_runs_are_kept_as_two_records() {
-        let origin = MemoryOrigin::new(None);
-        let records = origin.store();
-        let written = block_on(keep_session(
-            &*records,
-            "{\"layout\":1}".to_owned(),
-            RunsToKeep::Write("[1,2,3]".to_owned()),
-        ));
-        assert_eq!(written, SessionWritten::Whole);
-        assert_eq!(
-            block_on(read_session(&*records)),
-            StoredSession {
-                session: Some("{\"layout\":1}".to_owned()),
-                runs: Some("[1,2,3]".to_owned()),
-            }
-        );
+    fn results() -> String {
+        serde_json::to_string(&ProjectSimulationResults::default()).expect("results encode")
     }
 
-    /// Runs the store refuses go, the ones it held before them too, and the
-    /// session is kept: a reload brings back the session without runs, not
-    /// with runs from another time.
+    /// The runs are kept tagged with their write, and a session is restored
+    /// with the runs it names and no others.
     #[test]
-    fn runs_the_store_refuses_leave_the_session_kept_without_any() {
+    fn a_session_is_restored_with_the_runs_it_was_kept_with_and_no_others() {
         let origin = MemoryOrigin::new(None);
         let records = origin.store();
-        block_on(keep_session(
-            &*records,
-            "old".to_owned(),
-            RunsToKeep::Write("old runs".to_owned()),
-        ));
+        assert_eq!(
+            block_on(write_runs(&*records, 7, Some(results()))),
+            RunsWritten::Kept
+        );
+        let stored = block_on(read_runs(&*records));
+
+        let mut kept = KeptRuns::default();
+        let restored = restore_runs(Some(7), stored.as_deref(), &mut kept);
+        assert!(matches!(restored, RestoredRuns::Kept(_)), "{restored:?}");
+        assert_eq!((kept.record, kept.generation), (Some(7), 7));
+
+        // A session kept while a later write was still going.
+        let mut kept = KeptRuns::default();
+        let restored = restore_runs(Some(8), stored.as_deref(), &mut kept);
+        assert!(matches!(restored, RestoredRuns::Lost), "{restored:?}");
+        assert_eq!((kept.record, kept.generation), (Some(7), 8));
+
+        // A session kept with none leaves the record to be removed.
+        let mut kept = KeptRuns::default();
+        let restored = restore_runs(None, stored.as_deref(), &mut kept);
+        assert!(matches!(restored, RestoredRuns::None), "{restored:?}");
+        assert_eq!(kept.record, Some(7));
+    }
+
+    /// Runs the store refuses go, the ones it held before them too: a reload
+    /// brings back the session without runs, not with runs from another time.
+    #[test]
+    fn runs_the_store_refuses_leave_none_kept() {
+        let origin = MemoryOrigin::new(None);
+        let records = origin.store();
+        block_on(write_runs(&*records, 1, Some(results())));
         origin.set_quota(Some(origin.used() + 16));
-        let written = block_on(keep_session(
-            &*records,
-            "new".to_owned(),
-            RunsToKeep::Write("x".repeat(1_000)),
-        ));
-        assert_eq!(written, SessionWritten::WithoutRuns);
-        assert_eq!(
-            block_on(read_session(&*records)),
-            StoredSession {
-                session: Some("new".to_owned()),
-                runs: None,
-            }
-        );
-    }
-
-    /// A session the store refuses leaves the one it kept before, with that
-    /// session's runs.
-    #[test]
-    fn a_session_the_store_refuses_leaves_the_last_one_kept() {
-        let origin = MemoryOrigin::new(None);
-        let records = origin.store();
-        block_on(keep_session(
-            &*records,
-            "old".to_owned(),
-            RunsToKeep::Write("old runs".to_owned()),
-        ));
-        origin.set_quota(Some(origin.used()));
-        let written = block_on(keep_session(
-            &*records,
-            "a much longer session".to_owned(),
-            RunsToKeep::Removed,
-        ));
-        assert!(matches!(written, SessionWritten::Nothing(_)), "{written:?}");
-        assert_eq!(
-            block_on(read_session(&*records)),
-            StoredSession {
-                session: Some("old".to_owned()),
-                runs: Some("old runs".to_owned()),
-            }
-        );
+        let written = block_on(write_runs(&*records, 2, Some("x".repeat(1_000))));
+        assert_eq!(written, RunsWritten::Refused);
+        assert_eq!(block_on(read_runs(&*records)), None);
     }
 
     #[test]

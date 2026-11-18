@@ -24,9 +24,9 @@ pub struct PlatformState {
     /// What the last save of the session kept. Like `autosave_failing`, it
     /// makes a refusal said when it starts, not at every save. Transient.
     pub session_kept: crate::services::session::SessionKept,
-    /// The run history the browser's stored runs hold, so a session write
-    /// encodes the runs only when they changed. Transient.
-    pub session_runs_stored: Option<crate::state::RunHistoryRevision>,
+    /// The runs the browser keeps for the session, written only when they
+    /// changed. Transient.
+    pub session_runs: crate::workbench::app_state::session::browser_session::KeptRuns,
     /// The scanned native checkpoint catalog the Project Launcher's recovery
     /// page lists. Runtime state, never project or user preferences.
     pub recovery_catalog: Box<crate::workbench::lifecycle::recovery::RecoveryCatalog>,
@@ -68,7 +68,7 @@ impl Default for PlatformState {
             autosave_minutes: 5,
             autosave_failing: false,
             session_kept: Default::default(),
-            session_runs_stored: None,
+            session_runs: Default::default(),
             recovery_catalog: Default::default(),
             project_lifecycle: Box::default(),
             recent_files: Vec::new(),
