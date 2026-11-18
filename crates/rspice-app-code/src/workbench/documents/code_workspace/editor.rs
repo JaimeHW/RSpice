@@ -450,11 +450,16 @@ fn show_code_document_impl(
     });
     let assist_keys = (language == CodeEditorLanguage::VerilogA)
         .then(|| assist::consume_keys(ui, editor_id, editable));
+    let mut text = crate::workbench::documents::virtual_text_editor::string_owner_text(
+        ui.ctx(),
+        editor_id,
+        source_revision,
+        source,
+    );
     let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
         ui,
         editor_id,
-        source,
-        source_revision,
+        &mut text,
         editable,
         syntax,
         requested_line,
@@ -477,6 +482,15 @@ fn show_code_document_impl(
             held.worst_on_line(logical_line)
                 .map(|finding| line_diagnostic_description(finding, messages))
         },
+    );
+    if output.changed {
+        *source = text.to_string();
+    }
+    crate::workbench::documents::virtual_text_editor::keep_string_owner_text(
+        ui.ctx(),
+        editor_id,
+        source_revision,
+        text,
     );
     let assist_answer = assist_keys.map(|keys| {
         assist::show(

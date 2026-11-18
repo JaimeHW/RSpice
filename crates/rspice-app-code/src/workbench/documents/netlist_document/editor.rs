@@ -248,11 +248,16 @@ pub fn show(
             occurrences: &net_marks,
         };
         let revision = netlist.revision;
+        let mut text = crate::workbench::documents::virtual_text_editor::string_owner_text(
+            ui.ctx(),
+            editor_id,
+            revision,
+            &buffer,
+        );
         let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
             ui,
             editor_id,
-            &mut buffer,
-            revision,
+            &mut text,
             editable,
             shown_source.syntax(),
             requested_line,
@@ -295,6 +300,15 @@ pub fn show(
             },
         );
         changed = output.changed;
+        if changed {
+            buffer = text.to_string();
+        }
+        crate::workbench::documents::virtual_text_editor::keep_string_owner_text(
+            ui.ctx(),
+            editor_id,
+            revision,
+            text,
+        );
         cursor_line = output.cursor_line;
         cursor_column = output.cursor_column;
         cursor_char_index = output.cursor_char_index;

@@ -5580,6 +5580,7 @@ dependencies = [
  "log",
  "num-complex",
  "ron",
+ "ropey",
  "rspice-core",
  "rspice-design",
  "rspice-design-model",

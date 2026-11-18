@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use egui::{Color32, FontId, Key, Modifiers, Response, Sense, Stroke, Ui, Vec2};
 
+use crate::state::TextSnapshot;
 use crate::ui::widgets::{Problem, paint_problem_mark};
 
 use super::text_document_model::{TextDocumentModel, TextSelection};
@@ -284,9 +285,41 @@ pub fn shown_source(ctx: &egui::Context, editor_id: egui::Id) -> Option<String> 
     })
 }
 
+/// The text of an owner that keeps it as a string, at the owner's
+/// `revision`, as the editor `editor_id` takes it. The snapshot is kept
+/// between frames: it is built again only when the owner's text is not the
+/// one kept, so a revision the owner moved on for an edit the editor made
+/// itself costs a comparison, not a copy.
+pub(crate) fn string_owner_text(
+    ctx: &egui::Context,
+    editor_id: egui::Id,
+    revision: u64,
+    source: &str,
+) -> TextSnapshot {
+    let kept =
+        ctx.data_mut(|data| data.remove_temp::<(u64, TextSnapshot)>(editor_id.with("owner-text")));
+    match kept {
+        Some((kept_revision, text)) if kept_revision == revision || text.equals_str(source) => text,
+        _ => TextSnapshot::new(source),
+    }
+}
+
+/// Keep `text` as the text of the string owner of the editor `editor_id` at
+/// its `revision`, for [`string_owner_text`] to take next frame.
+pub(crate) fn keep_string_owner_text(
+    ctx: &egui::Context,
+    editor_id: egui::Id,
+    revision: u64,
+    text: TextSnapshot,
+) {
+    ctx.data_mut(|data| data.insert_temp(editor_id.with("owner-text"), (revision, text)));
+}
+
 /// Show a virtualized source document.
 ///
-/// `source_revision` is the application document revision, not a frame counter.
+/// `source` is the owner's text. The editor takes it again only when its
+/// revision changes, and an edit hands back a snapshot of the editor's own
+/// text: nothing in proportion to the text is copied either way.
 /// `layout_line` receives a bounded horizontal slice of a row, where it starts
 /// and the document it belongs to, so a language service can lay it out
 /// without constructing a whole-document galley. `line_problem` returns the mark the strongest current diagnostic on
@@ -297,8 +330,7 @@ pub fn shown_source(ctx: &egui::Context, editor_id: egui::Id) -> Option<String> 
 pub(crate) fn show_virtual_text_editor(
     ui: &mut Ui,
     editor_id: egui::Id,
-    source: &mut String,
-    source_revision: u64,
+    source: &mut TextSnapshot,
     editable: bool,
     syntax: EditorSyntax,
     requested_line: Option<usize>,
@@ -312,12 +344,12 @@ pub(crate) fn show_virtual_text_editor(
         .ctx()
         .data_mut(|data| data.remove_temp::<VirtualEditorSession>(session_id))
         .unwrap_or_default();
-    if session.bound_revision != source_revision {
-        if session.model.synchronize_source(source) {
+    if session.bound_revision != source.revision() {
+        if session.model.adopt(source) {
             restart_maximum_column_scan(&mut session);
             session.ime = None;
         }
-        session.bound_revision = source_revision;
+        session.bound_revision = source.revision();
     }
 
     if let Some(line) = requested_line {
@@ -895,7 +927,8 @@ pub(crate) fn show_virtual_text_editor(
     }
     let changed = session.model.revision() != initial_model_revision;
     if changed {
-        *source = session.model.to_source();
+        *source = session.model.snapshot();
+        session.bound_revision = source.revision();
         session.maximum_columns = session
             .maximum_columns
             .max(session.model.maximum_selected_line_columns());
@@ -1611,7 +1644,7 @@ fn apply_model_structural(
     command: StructuralCommand,
 ) -> bool {
     if command == StructuralCommand::MatchBracket {
-        return apply_primary_structural(model, syntax, command);
+        return match_bracket_at_caret(model);
     }
     let mut groups = structural_line_groups(model);
     if groups.is_empty() {
@@ -1626,19 +1659,28 @@ fn apply_model_structural(
         groups.clear();
         groups.push(combined);
     }
-    let mut source = model.to_source();
+    // A command reads and rewrites the lines it acts on and, for a move,
+    // the line either side it trades places with. Only those lines are
+    // taken out of the document and put back, so the cost of a command
+    // follows the lines it touches, not the length of the document.
+    let line_start = |line: usize| {
+        if line < model.line_count() {
+            model.char_at_line_column(line, 0)
+        } else {
+            model.len_chars()
+        }
+    };
+    let first_line = groups[0].start.saturating_sub(1);
+    let window = line_start(first_line)
+        ..line_start(groups.last().map_or(0, |group| group.end).saturating_add(1));
+    let window_byte = model.char_to_byte(window.start);
+    let mut source = model.text_range(window.clone());
     let mut mapped_byte_selections: Vec<ByteSelection> = Vec::with_capacity(groups.len());
     let mut any_changed = false;
     for group in groups.into_iter().rev() {
-        let anchor_char = model.char_at_line_column(group.start, 0);
-        let cursor_char = if group.end < model.line_count() {
-            model.char_at_line_column(group.end, 0)
-        } else {
-            model.len_chars()
-        };
         let selection = ByteSelection {
-            anchor: model.char_to_byte(anchor_char),
-            cursor: model.char_to_byte(cursor_char),
+            anchor: model.char_to_byte(line_start(group.start)) - window_byte,
+            cursor: model.char_to_byte(line_start(group.end)) - window_byte,
         };
         let before_len = source.len();
         let result = apply_structural_command(&mut source, selection, syntax, command);
@@ -1661,18 +1703,18 @@ fn apply_model_structural(
         command,
         StructuralCommand::Indent | StructuralCommand::Outdent
     ) {
-        selections_after_reindent(model, &source)
+        selections_after_reindent(model, first_line, window.start, &source)
     } else {
         mapped_byte_selections
             .into_iter()
             .map(|selection| TextSelection {
-                anchor: byte_to_char_index(&source, selection.anchor),
-                cursor: byte_to_char_index(&source, selection.cursor),
+                anchor: window.start + byte_to_char_index(&source, selection.anchor),
+                cursor: window.start + byte_to_char_index(&source, selection.cursor),
             })
             .collect::<Vec<_>>()
     };
     if any_changed {
-        model.replace_source_transaction(&source, mapped)
+        model.replace_range_transaction(window, &source, mapped)
     } else {
         model.set_selections(mapped);
         false
@@ -1704,10 +1746,16 @@ fn indent_at_selections(model: &mut TextDocumentModel, syntax: EditorSyntax) {
 }
 
 /// The model's selections carried across a change of leading indentation to
-/// `source`, which has the same lines. Each end keeps its line and the text
-/// it sits before: a caret moves with its text, and a selection that starts
-/// at a line's start keeps the indentation inside it.
-fn selections_after_reindent(model: &TextDocumentModel, source: &str) -> Vec<TextSelection> {
+/// `source`, the same lines from `first_line` on, which start at character
+/// `window_start`. Each end keeps its line and the text it sits before: a
+/// caret moves with its text, and a selection that starts at a line's start
+/// keeps the indentation inside it.
+fn selections_after_reindent(
+    model: &TextDocumentModel,
+    first_line: usize,
+    window_start: usize,
+    source: &str,
+) -> Vec<TextSelection> {
     let mut starts = vec![0];
     let mut lengths = Vec::new();
     let mut length = 0;
@@ -1723,7 +1771,8 @@ fn selections_after_reindent(model: &TextDocumentModel, source: &str) -> Vec<Tex
     lengths.push(length);
     let carry = |index: usize, keep_line_start: bool| {
         let (line, column) = model.line_column_for_char(index);
-        let (Some(&start), Some(&new_length)) = (starts.get(line), lengths.get(line)) else {
+        let local = line.wrapping_sub(first_line);
+        let (Some(&start), Some(&new_length)) = (starts.get(local), lengths.get(local)) else {
             return index;
         };
         let old_length = model
@@ -1738,7 +1787,7 @@ fn selections_after_reindent(model: &TextDocumentModel, source: &str) -> Vec<Tex
         } else {
             column.saturating_sub(old_length - new_length)
         };
-        start + column.min(new_length)
+        window_start + start + column.min(new_length)
     };
     model
         .selections()
@@ -1763,36 +1812,65 @@ fn selections_after_reindent(model: &TextDocumentModel, source: &str) -> Vec<Tex
         .collect()
 }
 
-fn apply_primary_structural(
-    model: &mut TextDocumentModel,
-    syntax: EditorSyntax,
-    command: StructuralCommand,
-) -> bool {
+/// Put the primary caret on the bracket that pairs with the one at the caret,
+/// or just before it, counting nested pairs of the same kind. The text is
+/// read in place, as far as the pair reaches.
+fn match_bracket_at_caret(model: &mut TextDocumentModel) -> bool {
     let selection = model
         .selections()
         .last()
         .copied()
         .unwrap_or(TextSelection::caret(model.len_chars()));
-    let mut source = model.to_source();
-    let result = apply_structural_command(
-        &mut source,
-        ByteSelection {
-            anchor: model.char_to_byte(selection.anchor),
-            cursor: model.char_to_byte(selection.cursor),
-        },
-        syntax,
-        command,
-    );
-    let mapped = TextSelection {
-        anchor: byte_to_char_index(&source, result.selection.anchor),
-        cursor: byte_to_char_index(&source, result.selection.cursor),
+    let cursor = selection.cursor;
+    let is_bracket = |character: &char| matches!(character, '(' | ')' | '[' | ']' | '{' | '}');
+    let candidate = model
+        .char_at(cursor)
+        .filter(is_bracket)
+        .map(|character| (cursor, character))
+        .or_else(|| {
+            let before = cursor.checked_sub(1)?;
+            model
+                .char_at(before)
+                .filter(is_bracket)
+                .map(|character| (before, character))
+        });
+    let Some((at, bracket)) = candidate else {
+        model.set_selections(vec![selection]);
+        return false;
     };
-    if result.changed {
-        model.replace_source_transaction(&source, vec![mapped])
-    } else {
-        model.set_selections(vec![mapped]);
+    let (open, close, forward) = match bracket {
+        '(' => ('(', ')', true),
+        '[' => ('[', ']', true),
+        '{' => ('{', '}', true),
+        ')' => ('(', ')', false),
+        ']' => ('[', ']', false),
+        _ => ('{', '}', false),
+    };
+    let text = model.rope();
+    let mut depth = 0_i64;
+    let mut step = |character: char, toward: char, away: char| {
+        if character == toward {
+            depth += 1;
+        } else if character == away {
+            depth -= 1;
+            return depth == 0;
+        }
         false
-    }
+    };
+    let matched = if forward {
+        text.chars_at(at)
+            .enumerate()
+            .find(|(_, character)| step(*character, open, close))
+            .map(|(offset, _)| at + offset)
+    } else {
+        let mut chars = text.chars_at(at + 1);
+        std::iter::from_fn(|| chars.prev())
+            .enumerate()
+            .find(|(_, character)| step(*character, close, open))
+            .map(|(offset, _)| at - offset)
+    };
+    model.set_selections(vec![matched.map_or(selection, TextSelection::caret)]);
+    false
 }
 
 fn structural_line_groups(model: &TextDocumentModel) -> Vec<Range<usize>> {

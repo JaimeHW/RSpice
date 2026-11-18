@@ -52,6 +52,7 @@ web-time.workspace = true
 base64 = { version = "0.23", optional = true }
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 unicode-normalization.workspace = true
+ropey.workspace = true
 egui = { version = "0.35.0", default-features = false }
 dirs = "7.0"
 

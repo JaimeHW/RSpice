@@ -10,6 +10,8 @@ use std::ops::Range;
 
 use ropey::Rope;
 
+use crate::state::TextSnapshot;
+
 const DEFAULT_HISTORY_LIMIT: usize = 512;
 /// Texts the owner's edits can leave behind and still come back to.
 const PARKED_HISTORY_LIMIT: usize = 64;
@@ -134,11 +136,13 @@ impl TextDocumentModel {
                 valid_up_to: error.valid_up_to()
                     + usize::from(encoding == TextEncoding::Utf8Bom) * 3,
             })?;
+        let text = Rope::from_str(source);
+        let preferred_newline = detect_preferred_newline(&text);
         Ok(Self {
-            text: Rope::from_str(source),
+            text,
             #[cfg(test)]
             encoding,
-            preferred_newline: detect_preferred_newline(source),
+            preferred_newline,
             selections: vec![TextSelection::caret(0)],
             folds: Vec::new(),
             fold_projection: Vec::new(),
@@ -147,7 +151,11 @@ impl TextDocumentModel {
             parked: Vec::new(),
             published: None,
             history_limit: DEFAULT_HISTORY_LIMIT,
-            revision: 0,
+            revision: if source.is_empty() {
+                TextSnapshot::default().revision()
+            } else {
+                TextSnapshot::next_revision()
+            },
         })
     }
 
@@ -164,8 +172,15 @@ impl TextDocumentModel {
         self.preferred_newline
     }
 
+    /// The revision of the text the model holds. No other text in the
+    /// process carries it.
     pub const fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// The text as it stands, shared with the model rather than copied.
+    pub fn snapshot(&self) -> TextSnapshot {
+        TextSnapshot::from_rope(self.text.clone(), self.revision)
     }
 
     pub fn len_chars(&self) -> usize {
@@ -225,25 +240,8 @@ impl TextDocumentModel {
         self.text.to_string()
     }
 
-    /// Compare against an externally owned UTF-8 buffer without first
-    /// materializing another complete `String` from the rope.
-    pub fn source_equals(&self, source: &str) -> bool {
-        if self.text.len_bytes() != source.len() {
-            return false;
-        }
-        let mut offset = 0;
-        for chunk in self.text.chunks() {
-            let end = offset + chunk.len();
-            if source.get(offset..end) != Some(chunk) {
-                return false;
-            }
-            offset = end;
-        }
-        true
-    }
-
-    /// Accept a source revision published by the application layer. External
-    /// replacement is deliberately not added to the local undo stack: the
+    /// Accept a text the document's owner published. External replacement
+    /// is deliberately not added to the local undo stack: the
     /// project/document service owns undo and conflict semantics across that
     /// boundary. The new text starts with no history of its own, and the
     /// history of the text it replaced is kept: when the owner takes its step
@@ -252,24 +250,26 @@ impl TextDocumentModel {
     /// the owner refusing them: the refused edits are dropped, and the
     /// history and the selections are what they were before the first of
     /// them. Otherwise cursor locations are retained and clamped when
-    /// possible.
-    pub fn synchronize_source(&mut self, source: &str) -> bool {
-        if self.source_equals(source) {
+    /// possible. The model takes the snapshot's storage and revision, so
+    /// owner and editor share one copy of the text.
+    pub fn adopt(&mut self, snapshot: &TextSnapshot) -> bool {
+        let source = snapshot.rope();
+        if snapshot.revision() == self.revision || *source == self.text {
             self.keep_published();
             return false;
         }
         if let Some(published) = self
             .published
             .take()
-            .filter(|published| published.text == source)
+            .filter(|published| published.text == *source)
         {
-            self.text = published.text;
             self.undo = published.undo;
             self.redo = published.redo;
             self.selections = published.selections;
+            self.text = source.clone();
         } else {
             let left = ParkedHistory {
-                text: std::mem::replace(&mut self.text, Rope::from_str(source)),
+                text: std::mem::replace(&mut self.text, source.clone()),
                 undo: std::mem::take(&mut self.undo),
                 redo: std::mem::take(&mut self.redo),
             };
@@ -292,10 +292,16 @@ impl TextDocumentModel {
         self.preferred_newline = detect_preferred_newline(source);
         self.selections =
             normalize_selections(std::mem::take(&mut self.selections), self.text.len_chars());
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = snapshot.revision();
         self.prune_invalid_folds();
         self.keep_published();
         true
+    }
+
+    /// [`TextDocumentModel::adopt`] for a text an owner holds as a string.
+    #[cfg(test)]
+    pub fn synchronize_source(&mut self, source: &str) -> bool {
+        self.adopt(&TextSnapshot::new(source))
     }
 
     /// Keep the text as the owner published it, with its history and the
@@ -457,22 +463,24 @@ impl TextDocumentModel {
         true
     }
 
-    /// Commit a complete locally produced source transformation (formatting,
-    /// line movement, normalization, or another structural edit) as one exact
-    /// undo step while retaining explicitly mapped cursor selections.
-    pub fn replace_source_transaction(
+    /// Replace the characters `range` with `replacement` as one exact undo
+    /// step, with the selections the caller mapped onto the result: a
+    /// structural edit that rewrote only the lines it touched.
+    pub fn replace_range_transaction(
         &mut self,
-        source: &str,
+        range: Range<usize>,
+        replacement: &str,
         selections: Vec<TextSelection>,
     ) -> bool {
-        if self.source_equals(source) {
+        let range = range.start.min(self.text.len_chars())..range.end.min(self.text.len_chars());
+        if self.text.slice(range.clone()) == replacement {
             self.set_selections(selections);
             return false;
         }
         let before = self.text.clone();
         let before_selections = self.selections.clone();
-        self.text = Rope::from_str(source);
-        self.preferred_newline = detect_preferred_newline(source);
+        self.text.remove(range.clone());
+        self.text.insert(range.start, replacement);
         self.selections = normalize_selections(selections, self.text.len_chars());
         self.commit_history(before, before_selections);
         true
@@ -536,7 +544,7 @@ impl TextDocumentModel {
         self.text = entry.before.clone();
         self.selections = entry.before_selections.clone();
         self.redo.push(entry);
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = TextSnapshot::next_revision();
         self.prune_invalid_folds();
         true
     }
@@ -549,7 +557,7 @@ impl TextDocumentModel {
         self.text = entry.after.clone();
         self.selections = entry.after_selections.clone();
         self.undo.push(entry);
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = TextSnapshot::next_revision();
         self.prune_invalid_folds();
         true
     }
@@ -755,7 +763,7 @@ impl TextDocumentModel {
             self.undo.remove(0);
         }
         self.redo.clear();
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = TextSnapshot::next_revision();
         self.prune_invalid_folds();
     }
 
@@ -856,29 +864,29 @@ fn normalize_selections(selections: Vec<TextSelection>, maximum: usize) -> Vec<T
 
 /// The line break an edit inserts: the source's most common one, preferring
 /// CRLF then LF on a tie, and LF when the source has none.
-fn detect_preferred_newline(source: &str) -> &'static str {
-    let bytes = source.as_bytes();
+fn detect_preferred_newline(source: &Rope) -> &'static str {
     let mut lf = 0_usize;
     let mut crlf = 0_usize;
     let mut cr = 0_usize;
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
-                crlf += 1;
-                index += 2;
-            }
-            b'\r' => {
+    let mut pending_cr = false;
+    for chunk in source.chunks() {
+        for &byte in chunk.as_bytes() {
+            if pending_cr {
+                pending_cr = false;
+                if byte == b'\n' {
+                    crlf += 1;
+                    continue;
+                }
                 cr += 1;
-                index += 1;
             }
-            b'\n' => {
-                lf += 1;
-                index += 1;
+            match byte {
+                b'\r' => pending_cr = true,
+                b'\n' => lf += 1,
+                _ => {}
             }
-            _ => index += 1,
         }
     }
+    cr += usize::from(pending_cr);
     if crlf >= lf && crlf >= cr && crlf > 0 {
         "\r\n"
     } else if cr > lf && cr > 0 {
@@ -928,7 +936,11 @@ mod tests {
         model.set_selections(vec![TextSelection::caret(0), TextSelection::caret(6)]);
         assert!(model.insert_at_selections("# "));
         assert_eq!(model.to_source(), "# alpha\n# beta\n");
-        assert_eq!(model.revision(), 1);
+        assert_ne!(
+            model.revision(),
+            TextDocumentModel::from_source("alpha\nbeta\n").revision(),
+            "every text takes a revision of its own"
+        );
         assert!(model.undo());
         assert_eq!(model.to_source(), "alpha\nbeta\n");
         assert!(model.redo());
@@ -975,7 +987,7 @@ mod tests {
         assert!(model.synchronize_source("new"));
         assert_eq!(model.selections(), &[TextSelection::caret(3)]);
         assert!(!model.undo());
-        assert!(model.source_equals("new"));
+        assert_eq!(model.to_source(), "new");
         assert!(!model.synchronize_source("new"));
     }
 

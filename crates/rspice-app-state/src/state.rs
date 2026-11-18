@@ -33,6 +33,7 @@ mod simulation;
 pub mod stimulus_library;
 use rspice_design::symbol;
 pub(crate) mod symbol_resolver;
+mod text_snapshot;
 mod veriloga_receipt;
 mod viewer_cache;
 pub mod workspace;
@@ -55,6 +56,7 @@ pub use connectivity_contract::{
     BundleWidthMismatchPolicy, ConnectivityContract, ConnectivityPolicy,
     GlobalAliasComparisonPolicy, GlobalNetPromotionPolicy,
 };
+pub use text_snapshot::TextSnapshot;
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
 #[cfg(any(test, feature = "test-support"))]

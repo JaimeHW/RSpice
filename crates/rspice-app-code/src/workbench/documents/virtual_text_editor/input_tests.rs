@@ -27,7 +27,7 @@ struct Shown {
 struct Bench {
     context: egui::Context,
     id: egui::Id,
-    source: String,
+    source: TextSnapshot,
     editable: bool,
     edited: std::collections::HashSet<usize>,
     time: f64,
@@ -44,7 +44,7 @@ impl Bench {
         Self {
             context,
             id: egui::Id::new("input-bench-editor"),
-            source: source.to_owned(),
+            source: TextSnapshot::new(source),
             editable,
             edited: std::collections::HashSet::new(),
             time: 0.0,
@@ -72,7 +72,6 @@ impl Bench {
                         ui,
                         id,
                         source,
-                        1,
                         editable,
                         EditorSyntax::VerilogA,
                         None,
@@ -447,6 +446,7 @@ fn page_down_moves_the_caret_and_the_view_by_one_viewport() {
     let line_start = |line: usize| -> usize {
         bench
             .source
+            .to_string()
             .lines()
             .take(line)
             .map(|text| text.len() + 1)
@@ -511,7 +511,7 @@ fn go_to_line_proposes_the_caret_line() {
     bench.focus();
     bench.move_caret_to(27, 3);
     queue_go_to_line(&bench.context, bench.id);
-    let (id, source) = (bench.id, bench.source.clone());
+    let (id, source) = (bench.id, bench.source.to_string());
     let input = |events: Vec<egui::Event>| egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
         events,
@@ -549,7 +549,10 @@ fn a_jump_to_a_line_and_column_lands_the_caret_in_view() {
     bench.move_caret_to(300, 6);
     let far = bench.frame(Vec::new());
     assert_eq!(far.cursor_line, 299);
-    assert_eq!(far.cursor_char_index, line_start(&bench.source, 299) + 5);
+    assert_eq!(
+        far.cursor_char_index,
+        line_start(&bench.source.to_string(), 299) + 5
+    );
     assert_caret_in_view(&far, "a jump far below");
     let viewport = bench.session().viewport_size.expect("the view was drawn");
     let caret_middle = 8.0 + 299.5 * LINE_HEIGHT;
@@ -567,7 +570,7 @@ fn a_jump_to_a_line_and_column_lands_the_caret_in_view() {
 
     // A revealed line lands the same way, at its start.
     queue_reveal_line(&bench.context, bench.id, 40);
-    let (id, source) = (bench.id, bench.source.clone());
+    let (id, source) = (bench.id, bench.source.to_string());
     let _ = bench.context.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
@@ -579,7 +582,10 @@ fn a_jump_to_a_line_and_column_lands_the_caret_in_view() {
         },
     );
     let revealed = bench.frame(Vec::new());
-    assert_eq!(revealed.cursor_char_index, line_start(&bench.source, 39));
+    assert_eq!(
+        revealed.cursor_char_index,
+        line_start(&bench.source.to_string(), 39)
+    );
     let row_top = 8.0 + 39.0 * LINE_HEIGHT;
     let view = bench.scroll_offset().y..=bench.scroll_offset().y + viewport.y;
     assert!(

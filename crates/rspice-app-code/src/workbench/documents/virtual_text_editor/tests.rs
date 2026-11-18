@@ -2,6 +2,7 @@
 //! viewport.
 
 use super::*;
+use crate::workbench::documents::text_editor_commands::queue_caret_char_index;
 
 pub(super) fn test_style<'a>(
     edited: &'a std::collections::HashSet<usize>,
@@ -244,13 +245,13 @@ fn fold_all_discovers_language_regions_and_unfold_all_restores_every_line() {
 fn requested_line_unfolds_and_reveals_a_collapsed_target() {
     let context = egui::Context::default();
     let editor_id = egui::Id::new("folded-reveal-editor-test");
-    let mut source = ".subckt amp in out\nR1 in out 1k\n.ends\n.end\n".to_owned();
     let mut session = VirtualEditorSession {
-        model: TextDocumentModel::from_source(&source),
+        model: TextDocumentModel::from_source(".subckt amp in out\nR1 in out 1k\n.ends\n.end\n"),
         ..Default::default()
     };
     assert!(session.model.fold_lines(0, 3));
-    session.bound_revision = 1;
+    let mut source = session.model.snapshot();
+    session.bound_revision = source.revision();
     session.maximum_columns = session.model.maximum_line_columns();
     context.data_mut(|data| {
         data.insert_temp(editor_id.with("virtual-session"), session);
@@ -262,7 +263,6 @@ fn requested_line_unfolds_and_reveals_a_collapsed_target() {
             ui,
             editor_id,
             &mut source,
-            1,
             true,
             EditorSyntax::Spice,
             Some(2),
@@ -393,9 +393,11 @@ fn five_million_line_fold_discovery_streams_without_a_line_vector() {
 #[test]
 fn widget_lays_out_only_a_bounded_large_document_viewport() {
     let context = egui::Context::default();
-    let mut source = (0..100_000)
-        .map(|line| format!("R{line} n{line} 0 1k\n"))
-        .collect::<String>();
+    let mut source = TextSnapshot::new(
+        &(0..100_000)
+            .map(|line| format!("R{line} n{line} 0 1k\n"))
+            .collect::<String>(),
+    );
     let original = source.clone();
     let edited = std::collections::HashSet::new();
     let style = test_style(&edited);
@@ -413,7 +415,6 @@ fn widget_lays_out_only_a_bounded_large_document_viewport() {
             ui,
             egui::Id::new("large-editor-test"),
             &mut source,
-            1,
             true,
             EditorSyntax::Spice,
             None,
@@ -480,7 +481,7 @@ fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
     let context = egui::Context::default();
     context.enable_accesskit();
     crate::ui::Theme::default().apply(&context);
-    let mut source = "R1 input output 1k\nV1 input 0 1\n".to_owned();
+    let mut source = TextSnapshot::from("R1 input output 1k\nV1 input 0 1\n");
     let mut edited = std::collections::HashSet::new();
     edited.insert(1);
     let mut style = test_style(&edited);
@@ -498,7 +499,6 @@ fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
                 ui,
                 egui::Id::new("accessible-editor-test"),
                 &mut source,
-                1,
                 false,
                 EditorSyntax::Spice,
                 Some(2),
@@ -560,9 +560,11 @@ fn accessible_text_is_the_caret_line_and_three_lines_either_side() {
     let context = egui::Context::default();
     context.enable_accesskit();
     crate::ui::Theme::default().apply(&context);
-    let mut source = (1..=20)
-        .map(|line| format!("line {line}\n"))
-        .collect::<String>();
+    let mut source = TextSnapshot::from(
+        (1..=20)
+            .map(|line| format!("line {line}\n"))
+            .collect::<String>(),
+    );
     let edited = std::collections::HashSet::new();
     let style = test_style(&edited);
     let nodes = context
@@ -579,7 +581,6 @@ fn accessible_text_is_the_caret_line_and_three_lines_either_side() {
                     ui,
                     egui::Id::new("window-accessible-editor-test"),
                     &mut source,
-                    1,
                     true,
                     EditorSyntax::Spice,
                     Some(10),
@@ -630,7 +631,7 @@ fn accesskit_active_line_payload_is_bounded_for_extreme_source_lines() {
     let context = egui::Context::default();
     context.enable_accesskit();
     crate::ui::Theme::default().apply(&context);
-    let mut source = "x".repeat(50_000);
+    let mut source = TextSnapshot::from("x".repeat(50_000));
     let edited = std::collections::HashSet::new();
     let style = test_style(&edited);
     let nodes = context
@@ -647,7 +648,6 @@ fn accesskit_active_line_payload_is_bounded_for_extreme_source_lines() {
                     ui,
                     egui::Id::new("bounded-accessible-editor-test"),
                     &mut source,
-                    1,
                     true,
                     EditorSyntax::Spice,
                     None,
@@ -685,15 +685,15 @@ fn accesskit_excerpt_geometry_tracks_the_real_horizontal_source_column() {
     context.enable_accesskit();
     crate::ui::Theme::default().apply(&context);
     let editor_id = egui::Id::new("horizontal-accessible-editor-test");
-    let mut source = "x".repeat(2_000);
     let mut session = VirtualEditorSession {
-        model: TextDocumentModel::from_source(&source),
+        model: TextDocumentModel::from_source(&"x".repeat(2_000)),
         ..Default::default()
     };
     session
         .model
         .set_selections(vec![TextSelection::caret(1_500)]);
-    session.bound_revision = 1;
+    let mut source = session.model.snapshot();
+    session.bound_revision = source.revision();
     session.maximum_columns = session.model.maximum_line_columns();
     context.data_mut(|data| {
         data.insert_temp(editor_id.with("virtual-session"), session);
@@ -714,7 +714,6 @@ fn accesskit_excerpt_geometry_tracks_the_real_horizontal_source_column() {
                     ui,
                     editor_id,
                     &mut source,
-                    1,
                     true,
                     EditorSyntax::Spice,
                     None,
@@ -746,4 +745,433 @@ fn accesskit_excerpt_geometry_tracks_the_real_horizontal_source_column() {
         node.description()
             .is_some_and(|description| description.contains("Source excerpt columns"))
     }));
+}
+
+/// The editor driven a frame at a time over a text its owner keeps, the
+/// way a page drives it, with the keyboard focused on it.
+struct ScriptedEditor {
+    context: egui::Context,
+    id: egui::Id,
+    source: TextSnapshot,
+    time: f64,
+}
+
+/// What a frame left: whether the text changed and where the caret is.
+struct ScriptedFrame {
+    changed: bool,
+    cursor: usize,
+}
+
+impl ScriptedEditor {
+    fn new(source: &str) -> Self {
+        let context = egui::Context::default();
+        crate::ui::Theme::default().apply(&context);
+        context.set_os(egui::os::OperatingSystem::Windows);
+        let mut editor = Self {
+            context,
+            id: egui::Id::new("scripted-editor"),
+            source: TextSnapshot::new(source),
+            time: 0.0,
+        };
+        editor
+            .context
+            .memory_mut(|memory| memory.request_focus(editor.id));
+        let _ = editor.frame(Vec::new());
+        let _ = editor.frame(Vec::new());
+        editor
+    }
+
+    fn frame(&mut self, events: Vec<egui::Event>) -> ScriptedFrame {
+        self.time += 1.0 / 60.0;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(900.0, 600.0),
+            )),
+            time: Some(self.time),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let edited = std::collections::HashSet::new();
+        let style = test_style(&edited);
+        let (id, source) = (self.id, &mut self.source);
+        let mut frame = None;
+        let _ = self.context.run_ui(input, |ui| {
+            let output = show_virtual_text_editor(
+                ui,
+                id,
+                source,
+                true,
+                EditorSyntax::Spice,
+                None,
+                &style,
+                |ui, row, font| {
+                    ui.fonts_mut(|fonts| {
+                        fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
+                    })
+                },
+                |_| None,
+                |_| None,
+            );
+            frame = Some(ScriptedFrame {
+                changed: output.changed,
+                cursor: output.cursor_char_index,
+            });
+        });
+        frame.expect("the editor was drawn")
+    }
+
+    /// A key pressed in one frame and released in the next; what the press
+    /// did.
+    fn key(&mut self, key: Key, modifiers: Modifiers) -> ScriptedFrame {
+        let event = |pressed| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat: false,
+            modifiers,
+        };
+        let pressed = self.frame(vec![event(true)]);
+        let _ = self.frame(vec![event(false)]);
+        pressed
+    }
+}
+
+/// A small, seeded source of choices, so a failing script can be run again.
+struct Choices(u64);
+
+impl Choices {
+    fn below(&mut self, bound: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 % bound.max(1) as u64) as usize
+    }
+}
+
+/// The byte where character `index` of `text` starts.
+fn byte_at(text: &str, index: usize) -> usize {
+    text.char_indices()
+        .nth(index)
+        .map_or(text.len(), |(byte, _)| byte)
+}
+
+/// A text an edit script passed through: the caret the edit that made it
+/// left, and the selection the next edit from it started with.
+struct ScriptState {
+    text: String,
+    reached: usize,
+    left_from: (usize, Option<usize>),
+}
+
+/// Random edit scripts on a large text leave the editor's text, its caret
+/// and its undo history exactly where the same edits leave a plain string:
+/// typing, pasting lines, deleting either way, replacing a selection, undo
+/// and redo, and the owner putting a new text in.
+#[test]
+fn random_edits_on_a_large_buffer_keep_text_caret_and_undo_as_a_string_does() {
+    let base = (0..20_000)
+        .map(|line| format!("R{line} n{line} n{} 1k\n", line + 1))
+        .collect::<String>();
+    for seed in [0x9E37_79B9_7F4A_7C15_u64, 0xD1B5_4A32_D192_ED03] {
+        let mut choices = Choices(seed);
+        let mut editor = ScriptedEditor::new(&base);
+        let mut text = base.clone();
+        let mut cursor = 0_usize;
+        let mut anchor = None::<usize>;
+        let mut states = vec![ScriptState {
+            text: text.clone(),
+            reached: 0,
+            left_from: (0, None),
+        }];
+        let mut at = 0_usize;
+        for step in 0..240 {
+            let length = text.chars().count();
+            let what = choices.below(10);
+            let context = format!("seed {seed:#x}, step {step}, action {what}");
+            // The span an edit replaces, and the selection it starts from as
+            // the editor records it for undo.
+            let (start, end, left_from) = match (what, anchor) {
+                (_, Some(anchor)) => (
+                    anchor.min(cursor),
+                    anchor.max(cursor),
+                    (cursor, Some(anchor)),
+                ),
+                (5, None) if cursor > 0 => (cursor - 1, cursor, (cursor, Some(cursor - 1))),
+                (6, None) if cursor < length => (cursor, cursor + 1, (cursor + 1, Some(cursor))),
+                _ => (cursor, cursor, (cursor, None)),
+            };
+            let inserted = match what {
+                1..=3 => ["x", "1k", " ", "\u{3A9}", "R9 a b"][choices.below(5)],
+                4 => "\nC1 p q 1p\n",
+                _ => "",
+            };
+            let edits = match what {
+                1..=4 => {
+                    let event = if what == 4 {
+                        egui::Event::Paste(inserted.to_owned())
+                    } else {
+                        egui::Event::Text(inserted.to_owned())
+                    };
+                    editor.frame(vec![event]).changed
+                }
+                5 | 6 => {
+                    let key = if what == 6 {
+                        Key::Delete
+                    } else {
+                        Key::Backspace
+                    };
+                    let changed = editor.key(key, Modifiers::NONE).changed;
+                    assert_eq!(changed, start < end, "{context}: what a delete deletes");
+                    changed
+                }
+                _ => false,
+            };
+            match what {
+                _ if edits => {
+                    let range = byte_at(&text, start)..byte_at(&text, end);
+                    text.replace_range(range, inserted);
+                    cursor = start + inserted.chars().count();
+                    anchor = None;
+                    states[at].left_from = left_from;
+                    states.truncate(at + 1);
+                    states.push(ScriptState {
+                        text: text.clone(),
+                        reached: cursor,
+                        left_from: (cursor, None),
+                    });
+                    at += 1;
+                }
+                0 => {
+                    cursor = choices.below(length + 1);
+                    anchor = None;
+                    queue_caret_char_index(&editor.context, editor.id, cursor);
+                    assert!(!editor.frame(Vec::new()).changed, "{context}");
+                }
+                1..=4 => panic!("{context}: typing changed nothing"),
+                7 => {
+                    let reach = 1 + choices.below(4);
+                    let from = anchor.unwrap_or(cursor);
+                    for _ in 0..reach {
+                        let _ = editor.key(Key::ArrowRight, Modifiers::SHIFT);
+                    }
+                    cursor = (cursor + reach).min(length);
+                    anchor = (from != cursor).then_some(from);
+                }
+                8 => {
+                    if editor.key(Key::Z, Modifiers::COMMAND).changed {
+                        at = states[..at]
+                            .iter()
+                            .rposition(|state| editor.source == state.text)
+                            .unwrap_or_else(|| {
+                                panic!("{context}: undo reached a text no edit left")
+                            });
+                        text.clone_from(&states[at].text);
+                        (cursor, anchor) = states[at].left_from;
+                    } else {
+                        assert_eq!(at, 0, "{context}: undo had a step to take");
+                    }
+                }
+                9 => {
+                    if editor.key(Key::Y, Modifiers::COMMAND).changed {
+                        at += 1 + states[at + 1..]
+                            .iter()
+                            .position(|state| editor.source == state.text)
+                            .unwrap_or_else(|| {
+                                panic!("{context}: redo reached a text no edit left")
+                            });
+                        text.clone_from(&states[at].text);
+                        cursor = states[at].reached;
+                        anchor = None;
+                    } else {
+                        assert_eq!(at + 1, states.len(), "{context}: redo had a step to take");
+                    }
+                }
+                _ => {}
+            }
+            assert!(
+                editor.source == text,
+                "{context}: the text differs from the string's"
+            );
+            let shown = editor.frame(Vec::new());
+            assert_eq!(shown.cursor, cursor, "{context}: the caret");
+            assert!(
+                !shown.changed,
+                "{context}: a frame with no input edits nothing"
+            );
+        }
+
+        // Everything undone is the text the script started from, and
+        // everything redone is where it ended.
+        let end = text.clone();
+        while editor.key(Key::Z, Modifiers::COMMAND).changed {}
+        assert!(editor.source == base, "seed {seed:#x}: undo all");
+        while editor.key(Key::Y, Modifiers::COMMAND).changed {}
+        assert!(editor.source == end, "seed {seed:#x}: redo all");
+
+        // A text the owner puts in replaces the editor's, history and all.
+        let half = end
+            .chars()
+            .take(end.chars().count() / 2)
+            .collect::<String>();
+        let replaced = format!("{half}* appended by the owner\n");
+        editor.source = TextSnapshot::new(&replaced);
+        assert!(!editor.frame(Vec::new()).changed);
+        assert!(editor.source == replaced);
+        assert!(!editor.key(Key::Z, Modifiers::COMMAND).changed);
+        assert!(
+            editor.source == replaced,
+            "the owner's text is not undone by the editor"
+        );
+    }
+}
+
+/// A structural command read over the whole text: the reference the editor's
+/// reading of only the lines a command touches must match.
+fn structural_over_whole_text(
+    model: &TextDocumentModel,
+    syntax: EditorSyntax,
+    command: StructuralCommand,
+) -> (String, Vec<TextSelection>) {
+    let mut source = model.to_source();
+    if command == StructuralCommand::MatchBracket {
+        let selection = model
+            .selections()
+            .last()
+            .copied()
+            .unwrap_or(TextSelection::caret(model.len_chars()));
+        let result = apply_structural_command(
+            &mut source,
+            ByteSelection {
+                anchor: model.char_to_byte(selection.anchor),
+                cursor: model.char_to_byte(selection.cursor),
+            },
+            syntax,
+            command,
+        );
+        let mapped = TextSelection {
+            anchor: byte_to_char_index(&source, result.selection.anchor),
+            cursor: byte_to_char_index(&source, result.selection.cursor),
+        };
+        return (source, vec![mapped]);
+    }
+    let mut groups = structural_line_groups(model);
+    if matches!(
+        command,
+        StructuralCommand::MoveLineUp | StructuralCommand::MoveLineDown
+    ) && groups.len() > 1
+    {
+        let combined = groups[0].start..groups.last().unwrap().end;
+        groups = vec![combined];
+    }
+    let line_start = |line: usize| {
+        if line < model.line_count() {
+            model.char_at_line_column(line, 0)
+        } else {
+            model.len_chars()
+        }
+    };
+    let mut mapped_byte_selections = Vec::new();
+    for group in groups.into_iter().rev() {
+        let selection = ByteSelection {
+            anchor: model.char_to_byte(line_start(group.start)),
+            cursor: model.char_to_byte(line_start(group.end)),
+        };
+        let before_len = source.len();
+        let result = apply_structural_command(&mut source, selection, syntax, command);
+        let delta = source.len() as isize - before_len as isize;
+        let changed_from = selection
+            .anchor
+            .min(selection.cursor)
+            .min(result.selection.anchor.min(result.selection.cursor));
+        if delta != 0 {
+            for mapped in &mut mapped_byte_selections {
+                let mapped: &mut ByteSelection = mapped;
+                mapped.anchor = shift_byte_after(mapped.anchor, changed_from, delta);
+                mapped.cursor = shift_byte_after(mapped.cursor, changed_from, delta);
+            }
+        }
+        mapped_byte_selections.push(result.selection);
+    }
+    mapped_byte_selections.reverse();
+    let mapped = if matches!(
+        command,
+        StructuralCommand::Indent | StructuralCommand::Outdent
+    ) {
+        selections_after_reindent(model, 0, 0, &source)
+    } else {
+        mapped_byte_selections
+            .into_iter()
+            .map(|selection| TextSelection {
+                anchor: byte_to_char_index(&source, selection.anchor),
+                cursor: byte_to_char_index(&source, selection.cursor),
+            })
+            .collect()
+    };
+    (source, mapped)
+}
+
+/// Every structural command, rewriting only the lines it touches, leaves the
+/// text and the selections exactly as the same command over the whole text
+/// does: at the start and the end of a document, with and without a final
+/// line break, with several selections, and in SPICE and Verilog-A.
+#[test]
+fn structural_commands_on_the_lines_they_touch_match_the_whole_text() {
+    const LINES: [&str; 8] = [
+        "R1 a b 1k",
+        "    C1 a 0 {cap(1)}",
+        "* a comment",
+        "",
+        "  analog begin [x] (y)",
+        "\tend",
+        "// done",
+        "X1 (a b) sub",
+    ];
+    const COMMANDS: [StructuralCommand; 8] = [
+        StructuralCommand::Indent,
+        StructuralCommand::Outdent,
+        StructuralCommand::ToggleComment,
+        StructuralCommand::DuplicateLine,
+        StructuralCommand::DeleteLine,
+        StructuralCommand::MoveLineUp,
+        StructuralCommand::MoveLineDown,
+        StructuralCommand::MatchBracket,
+    ];
+    let mut choices = Choices(0x2545_F491_4F6C_DD1D);
+    for case in 0..600 {
+        let count = 1 + choices.below(9);
+        let newline = if choices.below(3) == 0 { "\r\n" } else { "\n" };
+        let mut text = (0..count)
+            .map(|_| LINES[choices.below(LINES.len())])
+            .collect::<Vec<_>>()
+            .join(newline);
+        if choices.below(2) == 0 {
+            text.push_str(newline);
+        }
+        let syntax = if choices.below(2) == 0 {
+            EditorSyntax::Spice
+        } else {
+            EditorSyntax::VerilogA
+        };
+        let command = COMMANDS[choices.below(COMMANDS.len())];
+        let mut model = TextDocumentModel::from_source(&text);
+        let length = model.len_chars();
+        let selections = (0..1 + choices.below(3))
+            .map(|_| TextSelection {
+                anchor: choices.below(length + 1),
+                cursor: choices.below(length + 1),
+            })
+            .collect();
+        model.set_selections(selections);
+        let (expected_text, expected_selections) =
+            structural_over_whole_text(&model, syntax, command);
+        let changed = apply_model_structural(&mut model, syntax, command);
+        let context = format!("case {case}: {command:?} in {syntax:?} over {text:?}");
+        assert_eq!(model.to_source(), expected_text, "{context}");
+        assert_eq!(changed, expected_text != text, "{context}");
+        let mut expected = model.clone();
+        expected.set_selections(expected_selections);
+        assert_eq!(model.selections(), expected.selections(), "{context}");
+    }
 }
