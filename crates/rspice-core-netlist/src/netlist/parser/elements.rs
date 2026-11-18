@@ -476,16 +476,14 @@ pub(super) fn parse_resistor(
             diagnostics.push(ParseDiagnostic::warning(
                 line_num,
                 "xyce_resistor_missing_value",
-                format!(
-                    "Resistor '{name}' has no value or model field; using Xyce's default 1000 ohm resistance"
-                ),
+                format!("Resistor '{name}' has no value; it is taken as 1 kΩ"),
             ));
         } else {
             diagnostics.push(ParseDiagnostic::warning(
                 line_num,
                 "xyce_resistor_model_missing_value",
                 format!(
-                    "Resistor '{name}' has no explicit value; model resolution may use Xyce's default 1000 ohm resistance"
+                    "Resistor '{name}' has no value; unless its model gives one, it is taken as 1 kΩ"
                 ),
             ));
         }

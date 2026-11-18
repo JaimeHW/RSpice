@@ -6895,7 +6895,7 @@ V_V1 N14553 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
             && diagnostics[0].code == "xyce_resistor_model_missing_value"
             && diagnostics[0]
                 .message
-                .contains("no explicit value; model resolution may use Xyce's default 1000 ohm")
+                .contains("has no value; unless its model gives one, it is taken as 1 kΩ")
     }
 
     pub(super) fn plain_unit_resistor_on_nodes(
