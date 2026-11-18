@@ -85,7 +85,11 @@ fn nested_begin_joins_the_outer_atomic_transaction() {
     assert!(created);
     assert_eq!(history.committed.undo_count(), 1);
     assert_eq!(history.committed.undo_description(), Some("First"));
-    let restored = history.committed.undo(snapshot_with(2), None).unwrap().snapshot;
+    let restored = history
+        .committed
+        .undo(snapshot_with(2), None)
+        .unwrap()
+        .snapshot;
     assert!(restored.is_equal(&snapshot_with(0)));
 }
 
