@@ -735,3 +735,51 @@ fn a_session_naming_the_retired_setup_document_opens_on_the_plan() {
         Some(WorkspaceDocumentId::SimulationPlan)
     );
 }
+
+/// A strip of two hundred tabs lists each workspace's documents a few times
+/// a frame, not once or twice a tab, and lays out only the tabs it shows:
+/// those in view, the active one among them.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_strip_of_two_hundred_tabs_lists_its_documents_once_and_draws_only_what_it_shows() {
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut app = design_session(200);
+    // The active tab scrolls into view over the first frames.
+    for _ in 0..60 {
+        strip_frame(&ctx, &mut app, Vec::new());
+    }
+
+    DOCUMENT_LISTS.with(|lists| lists.set(0));
+    TABS_LAID_OUT.with(|tabs| tabs.set(0));
+    let output = strip_frame(&ctx, &mut app, Vec::new());
+    let lists = DOCUMENT_LISTS.with(std::cell::Cell::get);
+    let laid_out = TABS_LAID_OUT.with(std::cell::Cell::get);
+
+    // Keeping the registry asks every workspace once; the strip asks its
+    // own three times more.
+    assert_eq!(
+        lists,
+        Workspace::ALL.len() + 4,
+        "documents listed in one frame"
+    );
+    let in_view = (1440.0 / TAB_MIN_WIDTH).ceil() as usize + 1;
+    assert!(
+        (1..=in_view).contains(&laid_out),
+        "{laid_out} of 202 tabs laid out; at most {in_view} fit in view"
+    );
+    fn says(shape: &egui::epaint::Shape, text: &str) -> bool {
+        match shape {
+            egui::epaint::Shape::Text(shape) => shape.galley.text().contains(text),
+            egui::epaint::Shape::Vec(shapes) => shapes.iter().any(|shape| says(shape, text)),
+            _ => false,
+        }
+    }
+    assert!(
+        output
+            .shapes
+            .iter()
+            .any(|clipped| says(&clipped.shape, "testdev")),
+        "the active tab is drawn"
+    );
+}

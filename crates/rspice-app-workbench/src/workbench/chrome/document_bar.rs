@@ -79,15 +79,12 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 (rect.bottom() - 0.5).max(rect.top()),
                 egui::Stroke::new(1.0, t.color.border),
             );
+            let closable = closable_documents(app.session(), &documents);
             let natural = documents
                 .iter()
-                .map(|document| {
-                    natural_tab_width(
-                        ui.painter(),
-                        &document.label,
-                        document.dirty,
-                        document_is_closable(app.session(), &document.id),
-                    )
+                .zip(&closable)
+                .map(|(document, closable)| {
+                    natural_tab_width(ui.painter(), &document.label, document.dirty, *closable)
                 })
                 .collect::<Vec<_>>();
             let hidden_button_width = HIDDEN_BUTTON_WIDTH.max(t.metrics.ctl_h);
@@ -111,7 +108,11 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                                         document_tabs(
                                             ui,
                                             app.session_mut(),
-                                            &documents,
+                                            StripTabs {
+                                                documents: &documents,
+                                                closable: &closable,
+                                                natural: &natural,
+                                            },
                                             height,
                                             fit.cap,
                                         )
@@ -506,7 +507,17 @@ pub fn available_documents_for_workspace(
     state: &impl DocumentSession,
     workspace: Workspace,
 ) -> Vec<WorkspaceDocument> {
+    #[cfg(any(test, feature = "test-support"))]
+    DOCUMENT_LISTS.with(|lists| lists.set(lists.get() + 1));
     state.workspace_documents(workspace)
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Times this thread listed a workspace's documents.
+    pub static DOCUMENT_LISTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Tabs this thread laid out and painted.
+    pub static TABS_LAID_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn owned_available_documents(state: &impl DocumentSession) -> Vec<WorkspaceDocument> {
@@ -541,6 +552,34 @@ fn document_is_closable(state: &impl DocumentSession, document: &WorkspaceDocume
     available_documents_for_workspace(state, document.workspace())
         .first()
         .is_some_and(|root| root.id != *document)
+}
+
+/// Whether each of `documents` can be closed, as [`document_is_closable`]
+/// answers it, with each workspace's documents listed once rather than once
+/// a tab: a strip can hold hundreds of retained runs.
+fn closable_documents(state: &impl DocumentSession, documents: &[WorkspaceDocument]) -> Vec<bool> {
+    let mut roots = Vec::<(Workspace, Option<WorkspaceDocumentId>)>::new();
+    documents
+        .iter()
+        .map(|document| {
+            let workspace = document.id.workspace();
+            let at = roots
+                .iter()
+                .position(|(listed, _)| *listed == workspace)
+                .unwrap_or_else(|| {
+                    let root = available_documents_for_workspace(state, workspace)
+                        .into_iter()
+                        .next()
+                        .map(|root| root.id);
+                    roots.push((workspace, root));
+                    roots.len() - 1
+                });
+            roots[at]
+                .1
+                .as_ref()
+                .is_some_and(|root| *root != document.id)
+        })
+        .collect()
 }
 
 fn authoritative_active_document(
@@ -644,16 +683,38 @@ pub fn document_strip_visible(workspace: Workspace, document_count: usize) -> bo
         || (matches!(workspace, Workspace::Design | Workspace::Models) && document_count == 1)
 }
 
+/// The tabs a strip draws: its documents, whether each can be closed, and
+/// the width each takes when nothing asks it to share.
+struct StripTabs<'a> {
+    documents: &'a [WorkspaceDocument],
+    closable: &'a [bool],
+    natural: &'a [f32],
+}
+
 /// Draw every tab, at most `cap` wide when the strip has asked them to
 /// share it, and return where each one went, in document order.
+///
+/// A tab wholly outside the strip's view is given its room and nothing
+/// else: no pointer can reach it and no key can focus it, since only the
+/// active tab takes focus. The active tab is always drawn, and so is every
+/// tab while a reader of the accessibility tree is listening, which must
+/// hear them all.
 fn document_tabs(
     ui: &mut egui::Ui,
     state: &mut impl DocumentSession,
-    documents: &[WorkspaceDocument],
+    tabs: StripTabs<'_>,
     height: f32,
     cap: Option<f32>,
 ) -> Vec<Rect> {
+    let StripTabs {
+        documents,
+        closable,
+        natural,
+    } = tabs;
     let active = authoritative_active_document(state, documents);
+    let max_width = cap.map_or(TAB_MAX_WIDTH, |cap| cap.min(TAB_MAX_WIDTH));
+    let listened = ui.ctx().accesskit_node_builder(ui.id(), |_| ()).is_some();
+    let view = ui.clip_rect().x_range();
     let mut open = None;
     let mut close = None;
     let mut focus_index = None;
@@ -662,6 +723,18 @@ fn document_tabs(
 
     for (index, document) in documents.iter().enumerate() {
         let selected = active.as_ref() == Some(&document.id);
+        let size = Vec2::new(natural[index].min(max_width), height);
+        let left = ui.cursor().min.x;
+        if !selected && !listened && (left + size.x < view.min || left > view.max) {
+            let (rect, response) = ui
+                .push_id(("document", &document.id), |ui| {
+                    ui.allocate_exact_size(size, Sense::hover())
+                })
+                .inner;
+            tab_ids.push(response.id);
+            tab_rects.push(rect);
+            continue;
+        }
         let tab = ui
             .push_id(("document", &document.id), |ui| {
                 document_tab(
@@ -672,9 +745,9 @@ fn document_tabs(
                         short_label: document.short_label(),
                         selected,
                         dirty: document.dirty,
-                        closable: document_is_closable(state, &document.id),
+                        closable: closable[index],
                         height,
-                        max_width: cap.map_or(TAB_MAX_WIDTH, |cap| cap.min(TAB_MAX_WIDTH)),
+                        max_width,
                     },
                 )
             })
@@ -716,7 +789,7 @@ fn document_tabs(
                 Some(TabKey::Next) => focus_index = Some((index + 1) % documents.len()),
                 Some(TabKey::First) => focus_index = Some(0),
                 Some(TabKey::Last) => focus_index = Some(documents.len() - 1),
-                Some(TabKey::Close) if document_is_closable(state, &document.id) => {
+                Some(TabKey::Close) if closable[index] => {
                     close = Some((index, document.id.clone(), true))
                 }
                 Some(TabKey::Close) | None => {}
@@ -908,6 +981,8 @@ fn document_tab(
         height,
         max_width,
     } = presentation;
+    #[cfg(any(test, feature = "test-support"))]
+    TABS_LAID_OUT.with(|tabs| tabs.set(tabs.get() + 1));
     let t = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let suffix_width = suffix_width(dirty, closable);
