@@ -284,6 +284,70 @@ fn queue_between_rhs_static(
     }
 }
 
+/// The weight a DIG device's static (F) load takes in this evaluation.
+///
+/// Xyce loads the DIG resistors into F and its capacitors into Q
+/// (`N_DEV_Digital.C` `loadDAEFVector`/`loadDAEQVector`). OneStep's order-2
+/// residual is `(Q-Qprev)/h + (F+Fprev)/2`, so a trial stamps half the
+/// conductance and the accepted evaluation queues the whole of it as the
+/// next step's `Fprev` ([`queue_between_static`]). Loading F at full weight
+/// beside rails whose sources are half-weighted leaves the supply branch
+/// current ringing at the trapezoid's undamped mode after every edge.
+fn one_step_static_scale(ctx: &CmContext) -> Value {
+    if ctx.is_transient()
+        && ctx.xyce_one_step_order2()
+        && ctx.evaluation_phase() != EvaluationPhase::AcceptedStep
+    {
+        0.5
+    } else {
+        1.0
+    }
+}
+
+/// Load one DIG input: `RLOAD` (F) and `CLOAD` (Q) to the ground rail.
+fn stamp_dig_input_load(
+    ctx: &mut CmContext,
+    index: usize,
+    voltage_state_index: usize,
+    params: DigParams,
+) {
+    if ctx.is_ac() {
+        return;
+    }
+    let input_pair = ctx.port_vector_node_pair("in", index).unwrap_or((0, 0));
+    let dgnd_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
+    let g_load = 1.0 / params.rload;
+    stamp_between(
+        ctx,
+        input_pair,
+        dgnd_pair,
+        one_step_static_scale(ctx) * g_load,
+    );
+    queue_between_static(ctx, input_pair, dgnd_pair, g_load);
+
+    if !ctx.is_transient() || !ctx.timestep.is_finite() || ctx.timestep <= 0.0 {
+        return;
+    }
+
+    let current_voltage = ctx
+        .input_analog_vector_values("in")
+        .and_then(|values| values.get(index).copied())
+        .map(|value| value.value)
+        .unwrap_or(0.0);
+    let dgnd_voltage = ctx.input("dgnd");
+    let current_relative = current_voltage - dgnd_voltage;
+    let previous_relative = ctx.state_prev(voltage_state_index);
+    let initial_point = ctx.time == 0.0 && ctx.time_prev == 0.0;
+    let history = if !previous_relative.is_finite() || initial_point {
+        current_relative
+    } else {
+        previous_relative
+    };
+    let conductance = params.cload / ctx.timestep;
+    stamp_between(ctx, input_pair, dgnd_pair, conductance);
+    stamp_between_rhs(ctx, input_pair, dgnd_pair, -conductance * history);
+}
+
 fn q_state(value: Value) -> Option<bool> {
     if (value - Q_HIGH).abs() <= 0.25 {
         Some(true)
@@ -674,8 +738,11 @@ impl XyceDTff {
             return;
         }
 
-        stamp_between(ctx, output_pair, dgnd_pair, g_low);
-        stamp_between(ctx, output_pair, dpwr_pair, g_high);
+        let static_scale = one_step_static_scale(ctx);
+        stamp_between(ctx, output_pair, dgnd_pair, static_scale * g_low);
+        stamp_between(ctx, output_pair, dpwr_pair, static_scale * g_high);
+        queue_between_static(ctx, output_pair, dgnd_pair, g_low);
+        queue_between_static(ctx, output_pair, dpwr_pair, g_high);
 
         if ctx.is_transient() && ctx.time == 0.0 {
             // Capture the converged t=0 operating-point voltage as the
@@ -1175,42 +1242,6 @@ impl XyceDGate {
         (q, transition_start, transition_from)
     }
 
-    fn stamp_input_load(
-        ctx: &mut CmContext,
-        index: usize,
-        voltage_state_index: usize,
-        params: DigParams,
-    ) {
-        if ctx.is_ac() {
-            return;
-        }
-        let input_pair = ctx.port_vector_node_pair("in", index).unwrap_or((0, 0));
-        let dgnd_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
-        stamp_between(ctx, input_pair, dgnd_pair, 1.0 / params.rload);
-
-        if !ctx.is_transient() || !ctx.timestep.is_finite() || ctx.timestep <= 0.0 {
-            return;
-        }
-
-        let current_voltage = ctx
-            .input_analog_vector_values("in")
-            .and_then(|values| values.get(index).copied())
-            .map(|value| value.value)
-            .unwrap_or(0.0);
-        let dgnd_voltage = ctx.input("dgnd");
-        let current_relative = current_voltage - dgnd_voltage;
-        let previous_relative = ctx.state_prev(voltage_state_index);
-        let initial_point = ctx.time == 0.0 && ctx.time_prev == 0.0;
-        let history = if !previous_relative.is_finite() || initial_point {
-            current_relative
-        } else {
-            previous_relative
-        };
-        let conductance = params.cload / ctx.timestep;
-        stamp_between(ctx, input_pair, dgnd_pair, conductance);
-        stamp_between_rhs(ctx, input_pair, dgnd_pair, -conductance * history);
-    }
-
     fn gate_parameters() -> &'static [ParamSpec] {
         use std::sync::OnceLock;
         static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
@@ -1289,7 +1320,7 @@ impl CodeModel for XyceDGate {
         let (output_state, transition_start, transition_from) =
             self.update_output(ctx, desired, last_input_transition_time, params);
         for index in 0..ctx.port_width("in") {
-            Self::stamp_input_load(
+            stamp_dig_input_load(
                 ctx,
                 index,
                 Self::input_state_index(index, Self::INPUT_VOLTAGE),
@@ -1553,42 +1584,6 @@ impl XyceDAdd {
         (q, transition_start, transition_from)
     }
 
-    fn stamp_input_load(
-        ctx: &mut CmContext,
-        index: usize,
-        voltage_state_index: usize,
-        params: DigParams,
-    ) {
-        if ctx.is_ac() {
-            return;
-        }
-        let input_pair = ctx.port_vector_node_pair("in", index).unwrap_or((0, 0));
-        let dgnd_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
-        stamp_between(ctx, input_pair, dgnd_pair, 1.0 / params.rload);
-
-        if !ctx.is_transient() || !ctx.timestep.is_finite() || ctx.timestep <= 0.0 {
-            return;
-        }
-
-        let current_voltage = ctx
-            .input_analog_vector_values("in")
-            .and_then(|values| values.get(index).copied())
-            .map(|value| value.value)
-            .unwrap_or(0.0);
-        let dgnd_voltage = ctx.input("dgnd");
-        let current_relative = current_voltage - dgnd_voltage;
-        let previous_relative = ctx.state_prev(voltage_state_index);
-        let initial_point = ctx.time == 0.0 && ctx.time_prev == 0.0;
-        let history = if !previous_relative.is_finite() || initial_point {
-            current_relative
-        } else {
-            previous_relative
-        };
-        let conductance = params.cload / ctx.timestep;
-        stamp_between(ctx, input_pair, dgnd_pair, conductance);
-        stamp_between_rhs(ctx, input_pair, dgnd_pair, -conductance * history);
-    }
-
     fn ports() -> &'static [PortSpec] {
         use std::sync::OnceLock;
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
@@ -1757,7 +1752,7 @@ impl CodeModel for XyceDAdd {
         );
 
         for index in 0..3 {
-            Self::stamp_input_load(
+            stamp_dig_input_load(
                 ctx,
                 index,
                 Self::input_state_index(index, Self::INPUT_VOLTAGE),
@@ -2141,13 +2136,7 @@ impl XyceDLegacyGate {
         let input_pair = ctx.port_vector_node_pair("in", index).unwrap_or((0, 0));
         let ground = (0, 0);
         let g_load = 1.0 / params.rload;
-        let static_scale = if ctx.xyce_one_step_order2()
-            && ctx.evaluation_phase() != EvaluationPhase::AcceptedStep
-        {
-            0.5
-        } else {
-            1.0
-        };
+        let static_scale = one_step_static_scale(ctx);
         stamp_between(ctx, input_pair, ground, static_scale * g_load);
         stamp_between_rhs(ctx, input_pair, ground, -static_scale * g_load * vref);
         queue_between_static(ctx, input_pair, ground, g_load);
@@ -2207,14 +2196,7 @@ impl XyceDLegacyGate {
             return;
         }
 
-        let static_scale = if ctx.is_transient()
-            && ctx.xyce_one_step_order2()
-            && ctx.evaluation_phase() != EvaluationPhase::AcceptedStep
-        {
-            0.5
-        } else {
-            1.0
-        };
+        let static_scale = one_step_static_scale(ctx);
         stamp_between(ctx, output_pair, ground, static_scale * (g_low + g_high));
         stamp_between_rhs(
             ctx,
@@ -3753,14 +3735,7 @@ impl XyceDSequential {
             return;
         }
 
-        let static_scale = if ctx.is_transient()
-            && ctx.xyce_one_step_order2()
-            && ctx.evaluation_phase() != EvaluationPhase::AcceptedStep
-        {
-            0.5
-        } else {
-            1.0
-        };
+        let static_scale = one_step_static_scale(ctx);
         stamp_between(ctx, output_pair, low_pair, static_scale * g_low);
         stamp_between(ctx, output_pair, high_pair, static_scale * g_high);
         queue_between_static(ctx, output_pair, low_pair, g_low);
@@ -3881,13 +3856,7 @@ impl XyceDSequential {
 
         let input_pair = ctx.port_vector_node_pair("in", index).unwrap_or((0, 0));
         let dgnd_pair = ctx.port_node_pair("dgnd").unwrap_or((0, 0));
-        let static_scale = if ctx.xyce_one_step_order2()
-            && ctx.evaluation_phase() != EvaluationPhase::AcceptedStep
-        {
-            0.5
-        } else {
-            1.0
-        };
+        let static_scale = one_step_static_scale(ctx);
         let g_load = 1.0 / params.rload;
         stamp_between(ctx, input_pair, dgnd_pair, static_scale * g_load);
         queue_between_static(ctx, input_pair, dgnd_pair, g_load);
