@@ -624,7 +624,7 @@ fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
             .iter()
             .map(|tick| tick.label.as_str())
             .collect::<Vec<_>>(),
-        ["1.00", "10.0", "100", "1.00 k", "10.0 k", "100 k", "1.00 M"]
+        ["1", "10", "100", "1k", "10k", "100k", "1M"]
     );
     // A span of exactly six decades still rules its mantissas, because that
     // is what the sheet rules: `ui::plot::scale::minor_grid_values` stands
