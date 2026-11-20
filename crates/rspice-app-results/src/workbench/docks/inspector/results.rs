@@ -176,9 +176,16 @@ fn selected_result_trace(
         &waveform.name,
         waveform.visible,
     );
-    let sample_count = waveform.x.len().min(waveform.y.len());
-    let statistics = finite_trace_statistics(&waveform.y);
-    let available_sample_count = waveform.y.iter().filter(|value| value.is_finite()).count();
+    // Computed once per trace and data version; a stored trace is read off
+    // the frame, and its rows wait for it.
+    let statistics =
+        crate::workbench::documents::result_document::trace_statistics::trace_statistics(
+            state.results_reads(),
+            selected.analysis_key(),
+            waveform_index,
+            waveform,
+            ui.ctx(),
+        );
     // The statistics are measurements of the trace, read in the trace's own
     // unit to the reader's significant digits: the measurement rows below
     // them read to those, and one panel holds one precision.
@@ -199,25 +206,37 @@ fn selected_result_trace(
 
     section_header(ui, "Selected trace", None);
     property_row(ui, "Name", &waveform_name);
-    // Samples the solver could not give a finite value are a problem with
-    // the trace; a complete trace says nothing about its sample count.
-    if available_sample_count < sample_count {
-        property_row_problem(
-            ui,
-            "Finite samples",
-            &format!("{available_sample_count} of {sample_count}"),
-            Some(Problem::Warning),
-        );
-    }
-    if let Some(statistics) = statistics {
-        property_row(ui, "Minimum", &measured(statistics.minimum));
-        property_row(ui, "Maximum", &measured(statistics.maximum));
-        property_row(ui, "Mean", &measured(statistics.mean));
-        property_row(
-            ui,
-            "Peak-to-peak",
-            &measured(statistics.maximum - statistics.minimum),
-        );
+    match statistics {
+        Some(statistics) => {
+            // Samples the solver could not give a finite value are a problem
+            // with the trace; a complete trace says nothing about its sample
+            // count.
+            if statistics.finite < statistics.samples {
+                property_row_problem(
+                    ui,
+                    "Finite samples",
+                    &format!("{} of {}", statistics.finite, statistics.samples),
+                    Some(Problem::Warning),
+                );
+            }
+            if let Some((minimum, maximum)) = statistics.extremes {
+                property_row(ui, "Minimum", &measured(minimum));
+                property_row(ui, "Maximum", &measured(maximum));
+                // The average over X, as `avg()` takes it: a mean of the
+                // samples leans toward wherever the solver stepped finely.
+                let average = match &statistics.average {
+                    Ok(average) => measured(*average),
+                    Err(reason) => reason.clone(),
+                };
+                property_row(ui, "Average", &average);
+                property_row(ui, "Peak-to-peak", &measured(maximum - minimum));
+            }
+        }
+        None => {
+            for label in ["Minimum", "Maximum", "Average", "Peak-to-peak"] {
+                property_row(ui, label, "Computing\u{2026}");
+            }
+        }
     }
 
     // The swatch is the curve's colour as the strip drew it, through the one
@@ -406,31 +425,6 @@ fn axis_limit_row(
         set_active_axis_range(&tokens, state, axis, None);
         state.results.session.axis_limit_draft = None;
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct TraceStatistics {
-    minimum: f64,
-    maximum: f64,
-    mean: f64,
-}
-
-fn finite_trace_statistics(values: &[f64]) -> Option<TraceStatistics> {
-    let mut minimum = f64::INFINITY;
-    let mut maximum = f64::NEG_INFINITY;
-    let mut sum = 0.0;
-    let mut count = 0_u64;
-    for value in values.iter().copied().filter(|value| value.is_finite()) {
-        minimum = minimum.min(value);
-        maximum = maximum.max(value);
-        sum += value;
-        count += 1;
-    }
-    (count != 0).then_some(TraceStatistics {
-        minimum,
-        maximum,
-        mean: sum / count as f64,
-    })
 }
 
 /// The trace's colour as one more property row: its name in the label column,

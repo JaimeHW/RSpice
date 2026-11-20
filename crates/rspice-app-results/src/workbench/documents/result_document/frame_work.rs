@@ -80,12 +80,15 @@ pub enum DatasetWalk {
     /// Accumulating the signed cumulative shares of a retained DC mismatch
     /// result, and locating its largest contribution.
     MismatchCumulative,
+    /// The selected trace's statistics: its finite extremes and count, and its
+    /// average over X.
+    TraceStatistics,
 }
 
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(any(test, feature = "test-support"))]
-    pub(crate) const ALL: [Self; 22] = [
+    pub(crate) const ALL: [Self; 23] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -108,6 +111,7 @@ impl DatasetWalk {
         Self::EventOrder,
         Self::EventProjectionScan,
         Self::MismatchCumulative,
+        Self::TraceStatistics,
     ];
 }
 

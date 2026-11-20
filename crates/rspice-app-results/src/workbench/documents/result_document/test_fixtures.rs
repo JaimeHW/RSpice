@@ -243,6 +243,174 @@ pub fn completed_prepared_run(
     run
 }
 
+/// A column of a results store held in memory, counting what is read of it: the store a
+/// stored run's waveforms are windows of, without a segment file. It tiles and finds the rows
+/// around a cursor from its own rows, as a store does from its summaries, and counts only what
+/// a waveform reads through [`ColumnSource::read`].
+pub struct CountedColumn {
+    name: String,
+    x: std::sync::Arc<Vec<f64>>,
+    values: std::sync::Arc<Vec<f64>>,
+    index: u64,
+    digest: Option<[u8; 32]>,
+    rows_read: std::sync::atomic::AtomicU64,
+    whole_reads: std::sync::atomic::AtomicU64,
+}
+
+impl CountedColumn {
+    /// Rows read so far.
+    pub fn rows_read(&self) -> u64 {
+        self.rows_read.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Reads so far that took every row of the column.
+    pub fn whole_reads(&self) -> u64 {
+        self.whole_reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The rows with x in `x0 ..= x1` among `rows`.
+    fn rows_in(&self, rows: std::ops::Range<u64>, x0: f64, x1: f64) -> std::ops::Range<usize> {
+        let rows = &self.x[rows.start as usize..rows.end as usize];
+        let first = rows.partition_point(|x| *x < x0);
+        let end = rows.partition_point(|x| *x <= x1);
+        first..end.max(first)
+    }
+}
+
+impl rspice_results::waveform::ColumnSource for CountedColumn {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn store(&self) -> String {
+        "run.rsr".to_owned()
+    }
+
+    fn rows(&self) -> u64 {
+        self.values.len() as u64
+    }
+
+    fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        self.rows_read.fetch_add(out.len() as u64, Ordering::SeqCst);
+        if out.len() == self.values.len() {
+            self.whole_reads.fetch_add(1, Ordering::SeqCst);
+        }
+        let first = first as usize;
+        out.copy_from_slice(&self.values[first..first + out.len()]);
+        Ok(())
+    }
+
+    fn ascending(&self) -> bool {
+        self.index == 0
+    }
+
+    fn identity(&self) -> Option<([u8; 32], u64)> {
+        self.digest.map(|digest| (digest, self.index))
+    }
+
+    fn tile(
+        &self,
+        rows: std::ops::Range<u64>,
+        x0: f64,
+        x1: f64,
+        pixels: usize,
+    ) -> Option<Result<rspice_results::waveform::ColumnTile, String>> {
+        let offset = rows.start as usize;
+        let (mut min, mut max) = (vec![f64::NAN; pixels], vec![f64::NAN; pixels]);
+        let mut touched = vec![false; pixels];
+        for row in self.rows_in(rows, x0, x1) {
+            let (x, value) = (self.x[offset + row], self.values[offset + row]);
+            let pixel = if x1 > x0 {
+                (((x - x0) / (x1 - x0) * pixels as f64) as usize).min(pixels - 1)
+            } else {
+                0
+            };
+            touched[pixel] = true;
+            if value.is_finite() {
+                min[pixel] = if min[pixel] <= value {
+                    min[pixel]
+                } else {
+                    value
+                };
+                max[pixel] = if max[pixel] >= value {
+                    max[pixel]
+                } else {
+                    value
+                };
+            }
+        }
+        Some(Ok(rspice_results::waveform::ColumnTile::Envelope {
+            min,
+            max,
+            touched,
+        }))
+    }
+
+    fn rows_around(
+        &self,
+        rows: std::ops::Range<u64>,
+        x: f64,
+    ) -> Option<Result<rspice_results::waveform::RowsAround, String>> {
+        let (start, end) = (rows.start as usize, rows.end as usize);
+        let after = start + self.x[start..end].partition_point(|row| *row <= x);
+        let first = after.saturating_sub(2).max(start);
+        let last = (after + 2).min(end);
+        let around = (first..last)
+            .map(|row| (self.x[row], self.values[row]))
+            .collect();
+        Some(Ok((first as u64, around)))
+    }
+}
+
+/// A transient whose time axis and signals a results store keeps, each a window of a
+/// [`CountedColumn`]; the columns come back too, axis first, to count what is read of them.
+/// `digest` is the store's: `None` stands for a run recovered without its end.
+pub fn stored_transient(
+    x: Vec<f64>,
+    signals: Vec<(String, Vec<f64>)>,
+    digest: Option<[u8; 32]>,
+) -> (AnalysisResult, Vec<std::sync::Arc<CountedColumn>>) {
+    use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
+    let x = std::sync::Arc::new(x);
+    let column = |index: u64, name: String, values: std::sync::Arc<Vec<f64>>| {
+        std::sync::Arc::new(CountedColumn {
+            name,
+            x: std::sync::Arc::clone(&x),
+            values,
+            index,
+            digest,
+            rows_read: Default::default(),
+            whole_reads: Default::default(),
+        })
+    };
+    let window = StoredWindow {
+        first: 0,
+        rows: x.len() as u64,
+        lead: WindowLead::None,
+    };
+    let stored = |column: &std::sync::Arc<CountedColumn>| {
+        WaveformValues::stored(column.clone(), window).expect("the window fits the column")
+    };
+    let axis = column(0, "time".to_owned(), std::sync::Arc::clone(&x));
+    let time = stored(&axis);
+    let mut columns = vec![axis];
+    let traces = signals
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, values))| {
+            let signal = column(index as u64 + 1, name.clone(), std::sync::Arc::new(values));
+            let trace = RetainedTrace::new(name, time.clone(), stored(&signal), "#55aaff");
+            columns.push(signal);
+            trace
+        })
+        .collect();
+    (
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(traces),
+        columns,
+    )
+}
+
 #[derive(Debug)]
 pub struct MockExportWorkflowIo {
     pub datasets: RefCell<Vec<crate::io::WaveformDataset>>,

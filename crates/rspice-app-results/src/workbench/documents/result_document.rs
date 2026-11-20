@@ -40,6 +40,7 @@ pub(crate) mod signal_sets;
 pub mod smith;
 mod soa;
 mod table;
+pub(crate) mod trace_statistics;
 mod transfer_function;
 pub mod view_context;
 mod view_history;
@@ -1585,6 +1586,10 @@ pub struct ResultsState {
     /// Source-aware structural verdicts per analysis and question;
     /// see [`analysis_answers_structural_gate`].
     structural_gates: RetainedMemo<(AnalysisPresentationKey, StructuralGate), bool>,
+    /// Source-aware statistics per selected trace; see
+    /// [`trace_statistics::trace_statistics`].
+    trace_statistics:
+        RetainedMemo<(AnalysisPresentationKey, usize), trace_statistics::PendingStatistics>,
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
     /// The views each waveform sheet showed, for Zoom previous. Transient.

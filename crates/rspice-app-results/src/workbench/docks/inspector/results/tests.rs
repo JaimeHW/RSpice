@@ -76,13 +76,162 @@ fn dc_inspector_names_its_sources_and_primary_traversal() {
 
 #[test]
 fn result_trace_statistics_ignore_non_finite_samples() {
-    let statistics = finite_trace_statistics(&[f64::NAN, -2.0, 1.0, f64::INFINITY, 4.0])
-        .expect("three finite samples");
+    use crate::workbench::documents::result_document::trace_statistics::measure;
 
-    assert_eq!(statistics.minimum, -2.0);
-    assert_eq!(statistics.maximum, 4.0);
-    assert_eq!(statistics.mean, 1.0);
-    assert!(finite_trace_statistics(&[f64::NAN, f64::INFINITY]).is_none());
+    let statistics = measure(
+        &[0.0, 1.0, 2.0, 3.0, 4.0],
+        &[f64::NAN, -2.0, 1.0, f64::INFINITY, 4.0],
+    );
+    assert_eq!(statistics.extremes, Some((-2.0, 4.0)));
+    assert_eq!((statistics.finite, statistics.samples), (3, 5));
+    assert!(
+        statistics
+            .average
+            .as_ref()
+            .is_err_and(|reason| reason.contains("missing or undefined samples")),
+        "an average over holes is refused, as avg() refuses it: {:?}",
+        statistics.average
+    );
+    assert_eq!(
+        measure(&[0.0, 1.0], &[f64::NAN, f64::INFINITY]).extremes,
+        None
+    );
+}
+
+/// One frame of the inspector over `host` at 480 x 900, and the value of each
+/// property row it drew, by label.
+fn inspector_rows(
+    ctx: &egui::Context,
+    host: &mut crate::workbench::documents::result_document::ResultsTestHost,
+) -> std::collections::HashMap<String, String> {
+    let mut run_details = None;
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(480.0, 900.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                results(ui, &mut host.results_parts(), &mut run_details);
+            });
+        },
+    );
+    output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree update")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| Some((node.label()?.to_owned(), node.value()?.to_owned())))
+        .collect()
+}
+
+/// A selected trace's Average is its average over time, as the calculator's
+/// `avg()` takes it. A solver steps finely at an edge, so the mean of the
+/// samples leans toward the edge: on an RC step sampled densely after the
+/// step it read 0.78 V where the time average is 0.8013 V.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_selected_trace_states_its_average_over_time() {
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
+    use crate::workbench::documents::result_document::{AnalysisPresentationKey, ResultsTestHost};
+    use rspice_app_state::workbench::preferences::ScalarPreference;
+    use rspice_results_ui::selection::SelectedResultTrace;
+
+    // V(out) = 1 - exp(-t / RC) over 5 ms, RC = 1 ms, the samples crowding
+    // after the step as an adaptive step does. Over [0, T] its average is
+    // 1 - (RC / T)(1 - exp(-T / RC)) = 0.8013476 V.
+    let (rc, stop) = (1.0e-3, 5.0e-3);
+    let time: Vec<f64> = (0..=4_000)
+        .map(|step| stop * (f64::from(step) / 4_000.0).powi(3))
+        .collect();
+    let out: Vec<f64> = time.iter().map(|t| 1.0 - (-t / rc).exp()).collect();
+    let mean_of_samples = out.iter().sum::<f64>() / out.len() as f64;
+    assert!(
+        mean_of_samples < 0.7,
+        "the fixture leans: {mean_of_samples}"
+    );
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![RetainedTrace::new("V(out)", time, out, "")]),
+    );
+    let run = host.model.simulation.active_run().expect("a run");
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    host.results.results.session.selected_trace =
+        Some(SelectedResultTrace::from_identity(analysis, "V(out)"));
+    host.model
+        .preferences
+        .set_scalar(ScalarPreference::DisplayedSignificantDigits, 5)
+        .expect("five digits");
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let rows = inspector_rows(&ctx, &mut host);
+    assert_eq!(rows.get("Average").map(String::as_str), Some("801.35 mV"));
+    assert!(!rows.contains_key("Mean"), "{rows:?}");
+}
+
+/// A selected trace whose samples a results store keeps is measured off the
+/// frame: no frame reads its columns, its rows say they are computing until
+/// the measurement is in, and then they state it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_stored_selected_trace_is_measured_without_a_frame_reading_its_columns() {
+    use crate::workbench::documents::result_document::test_fixtures::stored_transient;
+    use crate::workbench::documents::result_document::{AnalysisPresentationKey, ResultsTestHost};
+    use rspice_results::waveform::column_work::ColumnWork;
+    use rspice_results_ui::selection::SelectedResultTrace;
+
+    let time: Vec<f64> = (0..=10_000).map(|step| f64::from(step) * 1.0e-6).collect();
+    let ramp: Vec<f64> = time.iter().map(|t| t * 1.0e3).collect();
+    let (analysis, columns) =
+        stored_transient(time, vec![("V(out)".to_owned(), ramp)], Some([7; 32]));
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(analysis);
+    let run = host.model.simulation.active_run().expect("a run");
+    let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    host.results.results.session.selected_trace =
+        Some(SelectedResultTrace::from_identity(key, "V(out)"));
+    // A sheet whose own readout measures nothing, so the frame's reads are
+    // the inspector's.
+    host.results.results.session.viewer =
+        crate::workbench::documents::result_document::ResultViewer::Table;
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let before = ColumnWork::read();
+    let mut rows = inspector_rows(&ctx, &mut host);
+    for _ in 0..500 {
+        if rows
+            .get("Average")
+            .is_some_and(|value| !value.starts_with("Computing"))
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        rows = inspector_rows(&ctx, &mut host);
+    }
+    let work = before.since();
+    assert_eq!(
+        (work.stored_views, work.stored_reads),
+        (0, 0),
+        "a frame read a stored column whole"
+    );
+    // The ramp runs from 0 to 10 V over 10 ms: its average is 5 V.
+    assert_eq!(rows.get("Average").map(String::as_str), Some("5 V"));
+    assert_eq!(rows.get("Maximum").map(String::as_str), Some("10 V"));
+    assert_eq!(
+        columns
+            .iter()
+            .map(|column| column.whole_reads())
+            .sum::<u64>(),
+        2,
+        "the background measurement read the axis and the trace once each"
+    );
 }
 
 /// The Inspector's colour swatch for a selected trace is the colour the strip

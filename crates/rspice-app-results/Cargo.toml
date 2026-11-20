@@ -20,6 +20,7 @@ doctest = false
 test-support = [
     "rspice-app-state/test-support",
     "rspice-results-ui/test-support",
+    "rspice-results/test-support",
     "dep:fst-writer",
 ]
 
@@ -49,6 +50,7 @@ rspice-app-services = { workspace = true, features = ["test-support"] }
 rspice-app-runs = { workspace = true, features = ["test-support"] }
 rspice-app-workbench = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }
+rspice-results = { workspace = true, features = ["engine-evidence", "test-support"] }
 rspice-ui-kit = { workspace = true, features = ["test-support"] }
 rspice-formats = { workspace = true, features = ["result-validation-observation"] }
 csv.workspace = true
