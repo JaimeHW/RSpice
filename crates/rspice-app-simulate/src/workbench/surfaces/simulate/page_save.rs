@@ -529,6 +529,16 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     // The deck sentence names both halves of what is drawn below it, so the
     // ledger can be added up against it rather than believed.
     let deck_storage = executed_deck_summary(retained, unattributed, &decks);
+    let storage = crate::state::run_reader::results_storage(
+        simulation.retained.runs.iter(),
+        crate::state::run_reader::run_reader(),
+    );
+    let results_storage = format!(
+        "{} on disk \u{b7} {} of {} loaded in memory",
+        format_bytes(storage.disk_bytes),
+        format_bytes(storage.loaded_bytes),
+        format_bytes(storage.budget)
+    );
     let note = if rows.is_empty() {
         RETENTION_NOTE.to_owned()
     } else {
@@ -580,6 +590,7 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 );
                 rule_row(ui, "Beyond the limit", &beyond_limit);
                 rule_row(ui, "Executed decks", &deck_storage);
+                rule_row(ui, "Results storage", &results_storage);
             });
             if !rows.is_empty() {
                 ledger_head(
