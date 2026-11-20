@@ -302,6 +302,63 @@ mod browser {
             opened(&runs, &segment_file_name(index), create).await
         }
 
+        /// The path a member's manifest entry names for segment `index`: `runs/<index>.rsr`, as
+        /// a store on disk names it.
+        pub fn segment_name(index: u32) -> String {
+            format!("{RUNS}/{}", segment_file_name(index))
+        }
+
+        /// Delete segment `index`. One already gone is not an error.
+        pub async fn remove_segment(&self, index: u32) -> io::Result<()> {
+            let runs = match directory(&self.root, RUNS, false).await {
+                Ok(runs) => runs,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => return Err(error),
+            };
+            match resolved::<JsValue>(runs.remove_entry(&segment_file_name(index))).await {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+                _ => Ok(()),
+            }
+        }
+
+        /// The index of every segment file the `runs` folder holds, finished or not.
+        pub async fn segment_indices(&self) -> io::Result<Vec<u32>> {
+            let runs = match directory(&self.root, RUNS, false).await {
+                Ok(runs) => runs,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+                Err(error) => return Err(error),
+            };
+            let keys = js_sys::Reflect::get(&runs, &JsValue::from_str("keys"))
+                .ok()
+                .and_then(|keys| keys.dyn_into::<js_sys::Function>().ok())
+                .ok_or_else(|| io::Error::other("this browser cannot list a folder's files"))?;
+            let names = keys.call0(&runs).map_err(js_error)?;
+            let next = js_sys::Reflect::get(&names, &JsValue::from_str("next"))
+                .ok()
+                .and_then(|next| next.dyn_into::<js_sys::Function>().ok())
+                .ok_or_else(|| io::Error::other("this browser cannot list a folder's files"))?;
+            let mut indices = Vec::new();
+            loop {
+                let step = next
+                    .call0(&names)
+                    .map_err(js_error)?
+                    .dyn_into::<js_sys::Promise>()
+                    .map_err(|_| io::Error::other("a folder listing answered another type"))?;
+                let step = wasm_bindgen_futures::JsFuture::from(step)
+                    .await
+                    .map_err(js_error)?;
+                let field = |name: &str| js_sys::Reflect::get(&step, &JsValue::from_str(name));
+                if field("done").map_err(js_error)?.is_truthy() {
+                    return Ok(indices);
+                }
+                let index = field("value")
+                    .map_err(js_error)?
+                    .as_string()
+                    .and_then(|name| name.strip_suffix(".rsr")?.parse::<u32>().ok());
+                indices.extend(index);
+            }
+        }
+
         /// The manifest, or `None` before the first member finished.
         pub async fn load_manifest(&self) -> Result<Option<Manifest>, StoreError> {
             let main = existing(&self.root, MANIFEST).await?;

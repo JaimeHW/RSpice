@@ -20,6 +20,9 @@ let runVerilogACompileRequest = null;
 let runHardcopyRequest = null;
 let runModelImportRequest = null;
 let runModelQualificationRequest = null;
+let runResultsStoreRequest = null;
+// A results store holds one request at a time: each waits for the one before it.
+let resultsStoreQueue = Promise.resolve();
 let primaryWasmExports = null;
 let workerModule = null;
 const wasmJitModelCache = new Map();
@@ -83,6 +86,16 @@ function responseTransferList(response) {
 
 function hardcopyResponseTransferList(response) {
   return protocolResponseTransferList(response, HARDCOPY_PROTOCOL_VERSION);
+}
+
+function resultsStoreTransferList(answer) {
+  const transfer = new Set();
+  for (const view of Array.isArray(answer?.buffers) ? answer.buffers : []) {
+    if (ArrayBuffer.isView(view) && view.buffer instanceof ArrayBuffer) {
+      transfer.add(view.buffer);
+    }
+  }
+  return Array.from(transfer);
 }
 
 function modelImportResponseTransferList(response) {
@@ -433,11 +446,15 @@ async function initializeWorkerModule() {
   if (typeof module.runRspiceUiModelQualificationRequest !== "function") {
     throw new Error("RSpice worker package is missing its model-qualification executor.");
   }
+  if (typeof module.runRspiceUiResultsStoreRequest !== "function") {
+    throw new Error("RSpice worker package is missing its results-store executor.");
+  }
   runWorkerRequest = module.runRspiceUiWorkerRequest;
   runVerilogACompileRequest = module.runRspiceUiVerilogACompileRequest;
   runHardcopyRequest = module.runRspiceUiHardcopyRequest;
   runModelImportRequest = module.runRspiceUiModelImportRequest;
   runModelQualificationRequest = module.runRspiceUiModelQualificationRequest;
+  runResultsStoreRequest = module.runRspiceUiResultsStoreRequest;
   module.installRspiceUiWasmJitDispatcher(dispatchWasmJitEntry);
   wasmJitCapability = await qualifyWasmJitArchitecture(module, wasmExports);
 }
@@ -451,6 +468,7 @@ async function ensureReady() {
       runHardcopyRequest = null;
       runModelImportRequest = null;
       runModelQualificationRequest = null;
+      runResultsStoreRequest = null;
       primaryWasmExports = null;
       workerModule = null;
       wasmJitModelCache.clear();
@@ -467,6 +485,33 @@ async function ensureReady() {
 
 self.addEventListener("message", (event) => {
   const message = event.data || {};
+  if (message.type === "results-store") {
+    resultsStoreQueue = resultsStoreQueue.then(async () => {
+      try {
+        await ensureReady();
+        if (typeof message.request !== "string" || !Array.isArray(message.buffers)) {
+          throw new Error("Malformed RSpice results-store request transport.");
+        }
+        const answer = await runResultsStoreRequest(message.request, message.buffers);
+        postMessage(
+          {
+            type: "results-store-result",
+            id: message.id,
+            response: answer.response,
+            buffers: answer.buffers,
+          },
+          resultsStoreTransferList(answer),
+        );
+      } catch (error) {
+        postMessage({
+          type: "results-store-error",
+          id: message.id ?? 0,
+          error: asErrorMessage(error),
+        });
+      }
+    });
+    return;
+  }
   if (message.type === "run-model-import") {
     void (async () => {
       try {

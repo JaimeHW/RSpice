@@ -7,6 +7,8 @@
 //! values or buffers cross: a run needs the memory its result needs, and an
 //! allocation the memory cannot give is refused as that allocation, with the
 //! size it asked for ([`try_f64_buffer`]).
+//!
+//! The worker that keeps a browser's results stores is asked through [`ResultsStoreRequest`].
 
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +101,202 @@ impl WorkerF64Series {
     }
 }
 
+/// The worker that keeps this browser's results stores: what a page asks of it.
+///
+/// A browser keeps a project's results store in its origin-private file system, which a page
+/// cannot read or write synchronously; a dedicated worker can, through synchronous access
+/// handles. The page writes a segment it holds by sending its rows, and loads a kept segment by
+/// asking for its bytes. Each request crosses as JSON beside its numeric buffers: [`Self::Rows`]
+/// carries x in buffer 0 and the value slots, row-major, in buffer 1; [`Self::Read`] is answered
+/// with the bytes in buffer 0.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ResultsStoreRequest {
+    /// Hold the store `store` for this tab, unless another tab holds it, and list what it keeps.
+    Open { store: String },
+    /// Let go of the store this tab holds.
+    Close,
+    /// Start writing a segment of `schema`, which the page holds under the logical `digest`.
+    Begin {
+        schema: WorkerResultsSchema,
+        digest: String,
+    },
+    /// Rows for writing `write`.
+    Rows { write: u32 },
+    /// Close writing `write` on the rows it took.
+    Finish { write: u32 },
+    /// Drop writing `write` and what it wrote.
+    Abandon { write: u32 },
+    /// Check that the kept segment `digest` holds what its name states, and say its length.
+    Check { digest: String },
+    /// Bytes `offset .. offset + len` of the kept segment `digest`.
+    Read {
+        digest: String,
+        offset: u64,
+        len: u64,
+    },
+    /// Delete every kept segment but `digests`, and every file no write finished.
+    Keep { digests: Vec<String> },
+}
+
+/// What the worker answered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ResultsStoreResponse {
+    Opened {
+        standing: ResultsStoreStanding,
+        segments: Vec<KeptSegmentRecord>,
+    },
+    Closed,
+    Begun {
+        write: u32,
+    },
+    /// The rows were taken, or the store filled while they were written: the write then takes
+    /// no more, and closes on the rows it holds.
+    Taken {
+        full: bool,
+    },
+    /// The write closed: what the store keeps of it, and whether a full store stopped it.
+    Finished {
+        record: KeptSegmentRecord,
+        full: bool,
+    },
+    Abandoned,
+    Checked {
+        len: u64,
+    },
+    /// Buffer 0 holds the bytes.
+    Bytes,
+    Kept {
+        removed: u32,
+    },
+    Failed {
+        reason: String,
+    },
+}
+
+/// Whether this tab holds a store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ResultsStoreStanding {
+    /// This tab holds it, and only this tab writes it.
+    Held,
+    /// Another tab holds it.
+    HeldElsewhere,
+    /// This browser cannot keep a store, in its words.
+    Unavailable { reason: String },
+}
+
+/// A segment a store keeps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeptSegmentRecord {
+    /// Its logical digest, in hex.
+    pub digest: String,
+    /// Its length in bytes.
+    pub bytes: u64,
+    pub rows: u64,
+}
+
+/// The schema and run of a segment as the page sends it to be written: its x axis and analog
+/// signals, and the run it records. Event signals do not cross: their changes are not rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerResultsSchema {
+    pub x: (String, String),
+    pub signals: Vec<WorkerResultsSignal>,
+    pub analysis: String,
+    pub sweep: Vec<(String, f64)>,
+    pub seed: Option<u64>,
+    pub options: Vec<(String, String)>,
+}
+
+/// One analog signal: one value slot when real, two (real, imaginary) when complex.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerResultsSignal {
+    pub name: String,
+    pub unit: String,
+    pub complex: bool,
+    pub quantity: String,
+    pub path: String,
+}
+
+impl WorkerResultsSchema {
+    /// The schema and run of a segment, or why it cannot be sent as rows: an event signal.
+    pub fn of(
+        schema: &rspice_results_store::Schema,
+        meta: &rspice_results_store::RunMeta,
+    ) -> Result<Self, String> {
+        use rspice_results_store::SignalKind;
+        let signals = schema
+            .signals
+            .iter()
+            .map(|signal| {
+                let complex = match signal.kind {
+                    SignalKind::Real => false,
+                    SignalKind::Complex => true,
+                    _ => {
+                        return Err(format!(
+                            "'{}' is an event signal, whose changes are not rows",
+                            signal.name
+                        ));
+                    }
+                };
+                Ok(WorkerResultsSignal {
+                    name: signal.name.clone(),
+                    unit: signal.unit.clone(),
+                    complex,
+                    quantity: signal.quantity.clone(),
+                    path: signal.path.clone(),
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            x: (schema.x.name.clone(), schema.x.unit.clone()),
+            signals,
+            analysis: meta.analysis.clone(),
+            sweep: meta.sweep.clone(),
+            seed: meta.seed,
+            options: meta.options.clone(),
+        })
+    }
+
+    /// The schema and run the worker writes.
+    pub fn store(&self) -> (rspice_results_store::Schema, rspice_results_store::RunMeta) {
+        use rspice_results_store::{Axis, RunMeta, Schema, Signal, SignalKind};
+        let signals = self
+            .signals
+            .iter()
+            .map(|signal| Signal {
+                name: signal.name.clone(),
+                unit: signal.unit.clone(),
+                kind: if signal.complex {
+                    SignalKind::Complex
+                } else {
+                    SignalKind::Real
+                },
+                quantity: signal.quantity.clone(),
+                path: signal.path.clone(),
+            })
+            .collect();
+        let schema = Schema {
+            x: Axis {
+                name: self.x.0.clone(),
+                unit: self.x.1.clone(),
+            },
+            signals,
+        };
+        let meta = RunMeta {
+            analysis: self.analysis.clone(),
+            sweep: self.sweep.clone(),
+            seed: self.seed,
+            options: self.options.clone(),
+        };
+        (schema, meta)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,6 +322,59 @@ mod tests {
             "{failure}"
         );
         assert_eq!(failure.code(), "allocation_failed");
+    }
+
+    fn signal(name: &str, kind: rspice_results_store::SignalKind) -> rspice_results_store::Signal {
+        rspice_results_store::Signal {
+            quantity: "voltage".to_owned(),
+            path: "x1".to_owned(),
+            ..rspice_results_store::Signal::new(name, "V", kind)
+        }
+    }
+
+    #[test]
+    fn a_segment_crosses_to_the_store_worker_as_the_schema_it_was_written_with() {
+        use rspice_results_store::{Axis, RunMeta, Schema, SignalKind};
+        let schema = Schema {
+            x: Axis {
+                name: "time".to_owned(),
+                unit: "s".to_owned(),
+            },
+            signals: vec![
+                signal("v(out)", SignalKind::Real),
+                signal("h", SignalKind::Complex),
+            ],
+        };
+        let meta = RunMeta {
+            analysis: ".tran 1u 1m".to_owned(),
+            sweep: vec![("r1".to_owned(), 1e3)],
+            seed: Some(7),
+            options: vec![("reltol".to_owned(), "1e-4".to_owned())],
+        };
+        let sent = WorkerResultsSchema::of(&schema, &meta).expect("analog signals cross");
+        let request = ResultsStoreRequest::Begin {
+            schema: sent,
+            digest: "ab".repeat(32),
+        };
+        let wire = serde_json::to_string(&request).expect("written");
+        let ResultsStoreRequest::Begin { schema: read, .. } =
+            serde_json::from_str(&wire).expect("read back")
+        else {
+            panic!("a begin request, not {wire}")
+        };
+        assert_eq!(read.store(), (schema, meta));
+    }
+
+    #[test]
+    fn an_event_signal_is_refused_as_rows() {
+        use rspice_results_store::{RunMeta, Schema, SignalKind};
+        let schema = Schema {
+            signals: vec![signal("d", SignalKind::Logic)],
+            ..Schema::default()
+        };
+        let refused = WorkerResultsSchema::of(&schema, &RunMeta::default())
+            .expect_err("an event signal has no rows");
+        assert!(refused.contains("'d' is an event signal"), "{refused}");
     }
 
     #[test]
