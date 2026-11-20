@@ -564,9 +564,15 @@ fn a_resume_beside_a_store_another_run_holds_is_refused() {
     let dir = scratch("resume-busy");
     let (args, state, store) = first_segment(&dir);
     let rows = rows_of(&store);
-    let other = rspice_results_store::StoreLock::try_acquire(&store)
-        .unwrap()
-        .expect("nobody holds the store");
+    // Another process's lock on the store: a handle of its own on the lock file, locked.
+    let other = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(rspice_results_store::StoreLock::file_for(&store))
+        .unwrap();
+    other.lock().unwrap();
     let refused = crate::commands::run(
         args(&["--resume", state.to_str().unwrap()]),
         &Config::default(),
