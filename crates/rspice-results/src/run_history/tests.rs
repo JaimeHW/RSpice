@@ -26,8 +26,8 @@ fn history_reads_and_clones_preserve_revision_but_forked_edits_do_not() {
         assert!(run.id > 0);
     }
     assert_eq!(original.revision(), revision);
-    original.prune_runs(2);
-    original.prune_plan_runs(SimulationPlanId::new(), 1, None);
+    original.prune_runs(2, &HashSet::new());
+    original.prune_plan_runs(SimulationPlanId::new(), 1, None, &HashSet::new());
     assert_eq!(original.newest_retained_result_run_index(), None);
     assert_eq!(
         original.retained_plan_dataset_count(SimulationPlanId::new()),
@@ -58,7 +58,7 @@ fn every_mutable_history_access_invalidates_a_retained_revision() {
         },
         |runs| runs.retain(|run| run.id == 1),
         |runs| runs.clear(),
-        |runs| runs.prune_runs(1),
+        |runs| runs.prune_runs(1, &HashSet::new()),
         |runs| {
             let id = runs[0].run_id;
             assert!(runs.set_run_retention(id, RunRetention::GoldenBaseline));
@@ -86,4 +86,19 @@ fn replacing_a_history_cannot_reuse_a_retained_revision() {
     assert_ne!(runs.revision(), revision);
     runs = retained;
     assert_eq!(runs.revision(), revision);
+}
+
+#[test]
+fn pruning_keeps_a_run_a_saved_document_reads_and_discards_the_next_oldest() {
+    let mut runs: RunHistory = (1..=4)
+        .rev()
+        .map(|id| SimulationRun::new(id, 0.0, ExecutionTarget::LocalDesktop))
+        .collect();
+    let read_by_a_document = HashSet::from([runs[3].dataset_id]);
+    runs.prune_runs(2, &read_by_a_document);
+    assert_eq!(
+        runs.iter().map(|run| run.id).collect::<Vec<_>>(),
+        [4, 1],
+        "the oldest run is read by a document, so the two after it go"
+    );
 }

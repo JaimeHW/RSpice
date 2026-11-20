@@ -87,6 +87,11 @@ pub struct RetainedSimulationState {
     /// Last allocated display sequence; zero before the first run. The legacy
     /// field name is retained, but allocation increments it before assigning.
     pub next_run_id: u64,
+
+    /// The datasets the project's saved result documents read. Pruning never
+    /// discards their runs, whatever the limit. Runtime only: the model
+    /// restates it from the documents before anything that may prune.
+    pub held_by_documents: std::collections::HashSet<DatasetId>,
 }
 
 /// Working netlist buffer and its schematic cross-probe mapping.

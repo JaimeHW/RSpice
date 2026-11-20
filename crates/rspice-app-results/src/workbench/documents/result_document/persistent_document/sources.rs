@@ -368,6 +368,7 @@ fn restore_archived_run(
                 .to_owned(),
         );
     }
+    state.model.hold_document_datasets();
     let simulation = &mut state.model.simulation;
     let slot = simulation.start_imported_run()?;
     let sequence = slot.id;

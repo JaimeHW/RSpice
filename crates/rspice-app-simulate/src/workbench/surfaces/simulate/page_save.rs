@@ -174,8 +174,9 @@ const DATASETS_LISTED: usize = 6;
 /// The retention rules the controls cannot state on their own.
 const RETENTION_NOTE: &str = "A dataset is sealed against the manifest that produced it, so a \
                               retained result can still be trusted after the plan has moved on. \
-                              Lowering the limit discards the oldest unpinned datasets \
-                              immediately, and raising it never recovers one already discarded. \
+                              Lowering the limit discards the oldest datasets immediately, \
+                              except pinned ones and those a saved result document reads, and \
+                              raising it never recovers one already discarded. \
                               Discarding a dataset also discards the netlist the simulator read \
                               for it.";
 
@@ -471,6 +472,21 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         .and_then(|payload| payload.regression_baseline_run);
     let (rows, summarized, decks) =
         retention_ledger(simulation, plan_id, regression_baseline, active_run_id);
+    // A run a saved result document reads is kept like a pinned one, and the
+    // card says how many the limit passes over that way.
+    let read_by_documents = cx.model.document_read_datasets();
+    let kept_for_documents = simulation
+        .retained
+        .runs
+        .iter()
+        .filter(|run| {
+            run.prepared_receipt()
+                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                == Some(plan_id)
+                && run.retention().is_pruneable()
+                && read_by_documents.contains(&run.dataset_id)
+        })
+        .count();
     let status = if retained > limit {
         format!("{retained} of {limit} · {pinned} pinned · over the limit")
     } else if unenforceable {
@@ -482,10 +498,17 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     } else {
         format!("{retained} of {limit} retained")
     };
+    let status = if kept_for_documents > 0 {
+        format!("{status} · {kept_for_documents} kept for saved documents")
+    } else {
+        status
+    };
     let beyond_limit = if unenforceable {
         format!("{pinned} pinned · nothing left to discard within the limit of {limit}")
     } else {
-        "the oldest unpinned dataset is discarded when a new run exceeds it".to_owned()
+        "the oldest dataset neither pinned nor read by a saved document is discarded when a new \
+         run exceeds it"
+            .to_owned()
     };
     // A run whose receipt names no plan is retained and is not counted above:
     // `retained_plan_dataset_count` counts this plan's datasets, and a legacy
@@ -627,6 +650,7 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         let mut policy = cx.model.sim_setup.save_policy;
         policy.retained_dataset_limit = *depth;
         if commit_save_policy(cx, policy, "Save policy · dataset retention") {
+            cx.model.hold_document_datasets();
             cx.model.simulation.prune_plan_runs(plan_id, *depth);
         }
     }

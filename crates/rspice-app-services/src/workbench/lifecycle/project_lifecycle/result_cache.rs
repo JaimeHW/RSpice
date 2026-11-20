@@ -53,6 +53,9 @@ impl CachedResults {
                     // plan's limits, both persisted, so it never is.
                     yield_evidence: _,
                     verification: _,
+                    // Runtime: the model restates it from the saved
+                    // documents before anything that may prune.
+                    held_by_documents: _,
                 },
             view:
                 crate::state::SimulationViewState {

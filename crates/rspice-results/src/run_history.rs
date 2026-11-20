@@ -5,11 +5,12 @@
 //! Revision handles keep their allocation alive, so replacing or dropping a
 //! history cannot recycle an identity still held by a snapshot cache.
 
+use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 
 use crate::run::{RunRetention, SimulationRun};
 use crate::run_receipt::PreparedRunReceipt;
-use rspice_vocabulary::product::{RunId, SimulationPlanId};
+use rspice_vocabulary::product::{DatasetId, RunId, SimulationPlanId};
 
 #[cfg(test)]
 mod tests;
@@ -77,9 +78,11 @@ impl<R> RunHistory<R> {
             .count()
     }
 
-    /// Prune oldest eligible runs, always keeping the newest and pinned baselines.
+    /// Prune oldest eligible runs, always keeping the newest, pinned
+    /// baselines, and the runs whose datasets are `held` (the ones a saved
+    /// result document reads).
     /// Selection repair and dependent-view cleanup belong to the caller.
-    pub fn prune_runs<A>(&mut self, limit: usize)
+    pub fn prune_runs<A>(&mut self, limit: usize, held: &HashSet<DatasetId>)
     where
         R: AsRef<SimulationRun<A>>,
     {
@@ -89,7 +92,7 @@ impl<R> RunHistory<R> {
             // a newest-first history is the run that was just produced.
             let Some(oldest_pruneable) = self
                 .iter()
-                .rposition(|run| run.as_ref().retention().is_pruneable())
+                .rposition(|run| pruneable(run.as_ref(), held))
                 .filter(|index| *index > 0)
             else {
                 break;
@@ -98,12 +101,14 @@ impl<R> RunHistory<R> {
         }
     }
 
-    /// Prune only this plan's oldest eligible datasets, preserving the selected run.
+    /// Prune only this plan's oldest eligible datasets, preserving the
+    /// selected run and every run whose dataset is `held`.
     pub fn prune_plan_runs<A>(
         &mut self,
         plan_id: SimulationPlanId,
         limit: usize,
         selected_run_id: Option<RunId>,
+        held: &HashSet<DatasetId>,
     ) where
         R: AsRef<SimulationRun<A>>,
     {
@@ -111,7 +116,7 @@ impl<R> RunHistory<R> {
         while self.retained_plan_dataset_count(plan_id) > limit {
             let Some(index) = self.iter().rposition(|run| {
                 let run = run.as_ref();
-                run.retention().is_pruneable()
+                pruneable(run, held)
                     && run
                         .prepared_receipt()
                         .and_then(PreparedRunReceipt::simulation_plan_id)
@@ -140,6 +145,12 @@ impl<R> RunHistory<R> {
         run.as_mut().set_retention(retention);
         true
     }
+}
+
+/// Whether pruning may discard `run`: it is not pinned and no saved result
+/// document reads it.
+fn pruneable<A>(run: &SimulationRun<A>, held: &HashSet<DatasetId>) -> bool {
+    run.retention().is_pruneable() && !held.contains(&run.dataset_id)
 }
 
 impl<R> Default for RunHistory<R> {

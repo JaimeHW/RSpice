@@ -797,15 +797,16 @@ impl SimulationState {
 
     /// Prune runs history to stay within the project's retention limit.
     ///
-    /// Two runs are never discarded: a golden baseline, and the newest run in
-    /// the history. When those alone exceed the limit the history stays over
-    /// it, because the alternative is destroying a signed-off baseline or the
-    /// dataset a run has just produced, and neither is what "retain fewer"
-    /// asks for.
+    /// Three runs are never discarded: a golden baseline, a run a saved result
+    /// document reads, and the newest run in the history. When those alone
+    /// exceed the limit the history stays over it, because the alternative is
+    /// destroying a signed-off baseline, a document's data or the dataset a
+    /// run has just produced, and none is what "retain fewer" asks for.
     fn prune_runs_history(&mut self) {
         let limit = self.retained.effective_retained_dataset_limit();
         let selected_run_id = self.active_run().map(|run| run.run_id);
-        self.retained.runs.prune_runs(limit);
+        let held = &self.retained.held_by_documents;
+        self.retained.runs.prune_runs(limit, held);
         // Pinning makes pruning remove from the middle, so the index-based
         // selection is re-resolved from the identity it pointed at rather than
         // left to land on whichever run shifted into that slot.
@@ -825,9 +826,10 @@ impl SimulationState {
 
     pub fn prune_plan_runs(&mut self, plan_id: crate::product::SimulationPlanId, limit: usize) {
         let selected_run_id = self.active_run().map(|run| run.run_id);
+        let held = &self.retained.held_by_documents;
         self.retained
             .runs
-            .prune_plan_runs(plan_id, limit, selected_run_id);
+            .prune_plan_runs(plan_id, limit, selected_run_id, held);
         if let Some(run_id) = selected_run_id {
             self.view.active_run_idx = self
                 .retained
@@ -1307,6 +1309,48 @@ mod tests {
             state.retained.runs.len(),
             1,
             "retaining nothing is never the intent"
+        );
+    }
+
+    #[test]
+    fn a_twenty_first_run_does_not_discard_a_run_a_saved_document_reads() {
+        let mut state = SimulationState::default();
+        let read = state.start_run();
+        let (read_run, read_dataset) = (read.run_id, read.dataset_id);
+        state.retained.held_by_documents.insert(read_dataset);
+        let second = state.start_run().run_id;
+        for _ in 0..MAX_RUN_HISTORY - 1 {
+            state.start_run();
+        }
+
+        assert_eq!(state.retained.runs.len(), MAX_RUN_HISTORY);
+        assert!(
+            state.retained.run_by_stable_id(read_run).is_some(),
+            "the document's run outlives the limit"
+        );
+        assert!(
+            state.retained.run_by_stable_id(second).is_none(),
+            "the oldest run no document reads goes in its place"
+        );
+    }
+
+    #[test]
+    fn plan_retention_keeps_a_run_a_saved_document_reads() {
+        let plan = crate::product::SimulationPlanId::new();
+        let mut state = SimulationState::default();
+        let read = state.start_prepared_run(plan_receipt(plan, 1)).unwrap();
+        let (read_run, read_dataset) = (read.run_id, read.dataset_id);
+        state.retained.held_by_documents.insert(read_dataset);
+        state.start_prepared_run(plan_receipt(plan, 21)).unwrap();
+        state.start_prepared_run(plan_receipt(plan, 41)).unwrap();
+
+        state.prune_plan_runs(plan, 1);
+
+        assert!(state.retained.run_by_stable_id(read_run).is_some());
+        assert_eq!(
+            state.retained.retained_plan_dataset_count(plan),
+            2,
+            "the newest and the document's run; the run between them goes"
         );
     }
 

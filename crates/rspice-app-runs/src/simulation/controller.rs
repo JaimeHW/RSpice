@@ -525,6 +525,7 @@ impl SimulationController {
         // under the one Preferences sets when the project names none.
         let model = state.model_mut();
         model.simulation.retained.preferred_dataset_limit = Some(model.preferences.runs_kept());
+        model.hold_document_datasets();
         // Allocate before changing controller queues, cross-probe mappings, or
         // manual-deck publication state: exhaustion must leave no partial batch.
         let run = model
@@ -633,7 +634,9 @@ impl SimulationController {
             dispatched_plan_id,
             dispatched_save_policy.retained_dataset_limit(),
         ) {
-            state.model_mut().simulation.prune_plan_runs(plan_id, limit);
+            let model = state.model_mut();
+            model.hold_document_datasets();
+            model.simulation.prune_plan_runs(plan_id, limit);
         }
         // The new run supersedes the outcomes earlier runs reported, and the
         // pruning above may have retired a run whose failure still stood.

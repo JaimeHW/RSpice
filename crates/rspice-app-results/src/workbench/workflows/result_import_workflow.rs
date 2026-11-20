@@ -469,6 +469,7 @@ fn commit_parsed_result_dataset(
     let previous_workbench = state.workbench.clone();
 
     let (run_sequence, dataset_id) = {
+        state.model.hold_document_datasets();
         let run = state.model.simulation.start_imported_run()?;
         run.job_id = None;
         run.execution_target = None;

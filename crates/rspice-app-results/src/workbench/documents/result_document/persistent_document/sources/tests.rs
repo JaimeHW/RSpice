@@ -229,6 +229,39 @@ fn one_view_compares_three_runs() {
 }
 
 #[test]
+fn a_saved_views_runs_and_its_comparison_baseline_outlive_twenty_one_result_imports() {
+    use crate::workbench::workflows::result_import_workflow::{
+        commit_result_import_draft, stage_imported_result_dataset,
+    };
+    let viewed = run(1, 2, 16, 0.0);
+    let baseline = run(2, 2, 16, 0.5);
+    let unread = run(3, 2, 16, 1.0);
+    let mut state = host(&[&viewed, &baseline, &unread]);
+    state.platform.project_lifecycle.authority.open_session();
+    save_view(&mut state);
+    compare_with(&mut state, &baseline);
+
+    for import in 0..21 {
+        let csv = format!("time,V(out)\n0,{import}\n1,{import}\n");
+        let mut parts = state.results_parts();
+        stage_imported_result_dataset(&mut parts, "scope.csv", csv.as_bytes()).unwrap();
+        commit_result_import_draft(&mut parts).unwrap();
+    }
+
+    let retained = |run: &SimulationRun| {
+        state
+            .model
+            .simulation
+            .retained
+            .run_by_dataset_id(run.dataset_id)
+            .is_some()
+    };
+    assert!(retained(&viewed), "the view's run is kept");
+    assert!(retained(&baseline), "the comparison's baseline is kept");
+    assert!(!retained(&unread), "a run no document reads is pruned");
+}
+
+#[test]
 fn a_deleted_run_is_named_and_the_view_repoints_to_a_run_with_its_signals() {
     let original = run(1, 4, 32, 0.0);
     let other = run(2, 4, 32, 1.0);

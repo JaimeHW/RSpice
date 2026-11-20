@@ -310,6 +310,26 @@ impl Model {
         self.netlist_artifacts.validation_error = None;
     }
 
+    /// The datasets the project's saved result documents read from retained
+    /// runs. A document that embeds its samples reads no run.
+    #[must_use]
+    pub fn document_read_datasets(&self) -> std::collections::HashSet<crate::product::DatasetId> {
+        self.workspace
+            .content
+            .visualization_documents
+            .iter()
+            .flat_map(|document| document.datasets())
+            .filter(|dataset| dataset.run_source().is_some())
+            .map(|dataset| dataset.binding().dataset_id)
+            .collect()
+    }
+
+    /// Restate which runs the saved result documents read, so that pruning
+    /// keeps them. Called before anything that may prune.
+    pub fn hold_document_datasets(&mut self) {
+        self.simulation.retained.held_by_documents = self.document_read_datasets();
+    }
+
     /// Report a failure of something the user asked for, as
     /// [`AppState::report_failure`](super::AppState::report_failure) states it.
     pub fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
