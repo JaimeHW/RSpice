@@ -212,15 +212,15 @@ fn a_missing_verilog_a_source_names_the_path_it_tried_and_the_deck_line() {
 
     let error = Netlist::parse_file(&deck).expect_err("a missing Verilog-A source must refuse");
     let text = error.to_string();
-    let tried = fixture.root().join("sub").join("absent.va");
+    // The folders searched are named from the deck's, never as full paths
+    // beside it, and the deck it was named in is named with its line.
     assert!(
-        text.contains(&tried.display().to_string()),
-        "the refusal must name the path it tried ({}): {text}",
-        tried.display()
+        text.contains("absent.va not found (looked in the deck's folder,"),
+        "the refusal must name the file and where it looked: {text}"
     );
     assert!(
-        text.contains("line 5"),
-        "the refusal must name the deck line the directive sits on: {text}"
+        text.contains("deck.cir:5"),
+        "the refusal must name the deck and the line the directive sits on: {text}"
     );
 }
 
