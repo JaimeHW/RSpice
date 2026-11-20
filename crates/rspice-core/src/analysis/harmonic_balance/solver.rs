@@ -293,6 +293,9 @@ pub struct HbSolverState {
     pub(crate) capacitor_rate_branch_start: Option<usize>,
     /// Physical branch rows whose constitutive equation has current units.
     pub(crate) current_equation_branches: Vec<usize>,
+    /// The junction bias each native BJT was evaluated at in each time
+    /// sample, while a Newton solve limits them.
+    pub(crate) junction_bias: Option<native_bjt::PeriodicJunctionBias>,
 }
 
 impl HbSolverState {
@@ -321,6 +324,7 @@ impl HbSolverState {
             integral_branch_start: None,
             capacitor_rate_branch_start: None,
             current_equation_branches: Vec::new(),
+            junction_bias: None,
         }
     }
 
@@ -493,6 +497,16 @@ impl HbSolverState {
             || current_abstol < 0.0
             || !voltage_abstol.is_finite()
             || voltage_abstol < 0.0
+        {
+            return false;
+        }
+        // A residual taken at limited junctions is not the circuit's, as a
+        // limited SPICE load is not converged (Xyce's origFlag, ngspice's
+        // CKTnoncon).
+        if self
+            .junction_bias
+            .as_ref()
+            .is_some_and(native_bjt::PeriodicJunctionBias::limited)
         {
             return false;
         }

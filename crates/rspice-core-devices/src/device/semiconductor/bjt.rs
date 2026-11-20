@@ -353,6 +353,10 @@ pub const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
 pub const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
 #[doc(hidden)]
 pub const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
+/// Coordinates of the bias a periodic sample presents to a BJT's junctions:
+/// its eight internal states, without the excess-phase pair.
+#[doc(hidden)]
+pub const BJT_PERIODIC_BIAS_DIM: usize = INTERNAL_DIM;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 10;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX: usize = 2;
 

@@ -1096,7 +1096,10 @@ impl HbSolver {
         abort: &dyn AbortSignal,
         dc_seed_policy: HbDcSeedPolicy,
     ) -> Result<(), HbError> {
-        self.solve_newton_orbit(state, abort, dc_seed_policy)?;
+        let solved = self.solve_newton_orbit(state, abort, dc_seed_policy);
+        // The limiting history belongs to the Newton solve alone.
+        state.junction_bias = None;
+        solved?;
         #[cfg(feature = "veriloga")]
         if state.converged {
             for device in &self.veriloga_nonlinear_devices {
@@ -1429,6 +1432,11 @@ impl HbSolver {
             // a seed that meets the row test only loosely, such as one
             // transient period, still gets its Newton step.
             if iter == 0 {
+                // The starting point is evaluated at its own junction bias,
+                // the history its first step is limited against, as Xyce's
+                // first HB iteration limits against the initial-condition
+                // state (N_DEV_BJT.C:2938-2950).
+                state.junction_bias = self.own_junction_bias(state).ok().flatten();
                 match self.compute_full_residual_with_gmin(state, gmin, source_scale) {
                     Ok(()) => {}
                     // A starting state some device cannot evaluate leaves this
@@ -1759,11 +1767,7 @@ impl HbSolver {
         Ok(jac)
     }
 
-    /// Apply line search with GMIN and PN voltage limiting
-    ///
-    /// Advanced implementation following standard methodology:
-    /// - Armijo backtracking line search
-    /// - PN junction voltage limiting on DC component
+    /// Apply an Armijo backtracking line search with GMIN.
     ///
     /// The backtracking envelope is the configuration's own: the first trial
     /// is scaled by [`HbConfig::damping`](crate::analysis::harmonic_balance::HbConfig)
@@ -1799,12 +1803,20 @@ impl HbSolver {
         self.ensure_newton_step_shape(delta)?;
         let x_orig = state.x.clone();
         let branch_orig = state.mna_branch_currents.clone();
+        let bias_orig = state.junction_bias.clone();
 
         while alpha >= min_alpha {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            self.set_newton_trial(state, &x_orig, &branch_orig, delta, alpha);
+            self.set_newton_trial(
+                state,
+                &x_orig,
+                &branch_orig,
+                bias_orig.as_ref(),
+                delta,
+                alpha,
+            );
 
             match self.compute_full_residual_with_gmin(state, gmin, source_scale) {
                 Ok(()) => {}
@@ -1835,6 +1847,7 @@ impl HbSolver {
             // was finite, and let continuation decide.
             state.x = x_orig;
             state.mna_branch_currents = branch_orig;
+            state.junction_bias = bias_orig;
             self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
             return Err(HbError::NonFiniteSample(
                 "every damped trial of the Newton step reached a state a device cannot evaluate"
@@ -1842,8 +1855,15 @@ impl HbSolver {
             ));
         }
 
-        // Use best step found with voltage limiting
-        self.set_newton_trial(state, &x_orig, &branch_orig, delta, best_alpha);
+        // Use the best step found.
+        self.set_newton_trial(
+            state,
+            &x_orig,
+            &branch_orig,
+            bias_orig.as_ref(),
+            delta,
+            best_alpha,
+        );
         self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
 
         Ok(best_alpha)
@@ -1896,17 +1916,33 @@ impl HbSolver {
         self.ensure_newton_step_shape(delta)?;
         let x_orig = state.x.clone();
         let branch_orig = state.mna_branch_currents.clone();
-        self.set_newton_trial(state, &x_orig, &branch_orig, delta, 1.0);
+        let bias_orig = state.junction_bias.clone();
+        self.set_newton_trial(state, &x_orig, &branch_orig, bias_orig.as_ref(), delta, 1.0);
         match self.compute_full_residual_with_gmin(state, gmin, source_scale) {
             Ok(()) => {}
             // A full step some device cannot evaluate goes to the line search.
             Err(HbError::NonFiniteSample(_)) => {
                 state.x = x_orig;
                 state.mna_branch_currents = branch_orig;
+                state.junction_bias = bias_orig;
                 self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
                 return Ok(FullNewtonStep::Rejected);
             }
             Err(error) => return Err(error),
+        }
+        // A full step whose junctions the devices held back is the limited
+        // Newton step that SPICE and Xyce's HB take as it comes: the limiter
+        // bounds every junction's move and evaluates the overshoot along the
+        // linearization at the limited bias (N_LOA_HBLoader.C:985-1089), so
+        // that residual measures the limiter, not the step, and the merit
+        // test would turn back the very steps limiting exists to allow. A
+        // limited residual never certifies convergence.
+        if state
+            .junction_bias
+            .as_ref()
+            .is_some_and(native_bjt::PeriodicJunctionBias::limited)
+        {
+            return Ok(FullNewtonStep::Accepted);
         }
         let merit = state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
         if merit < initial_merit * (1.0 - HB_ARMIJO_C) {
@@ -1920,8 +1956,10 @@ impl HbSolver {
         // iterate's coordinates beside the endpoint's residual.
         let mut endpoint_x = x_orig;
         let mut endpoint_branches = branch_orig;
+        let mut endpoint_bias = bias_orig;
         std::mem::swap(&mut state.x, &mut endpoint_x);
         std::mem::swap(&mut state.mna_branch_currents, &mut endpoint_branches);
+        std::mem::swap(&mut state.junction_bias, &mut endpoint_bias);
         let contracts = match self.newton_correction(state, gmin, abort)? {
             Ok(simplified) => {
                 let size = self.newton_step_size(
@@ -1946,6 +1984,7 @@ impl HbSolver {
         if contracts {
             std::mem::swap(&mut state.x, &mut endpoint_x);
             std::mem::swap(&mut state.mna_branch_currents, &mut endpoint_branches);
+            std::mem::swap(&mut state.junction_bias, &mut endpoint_bias);
             return Ok(FullNewtonStep::Accepted);
         }
         self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
@@ -2062,30 +2101,51 @@ impl HbSolver {
         Ok(())
     }
 
-    /// Set the state `alpha` times a Newton step from the saved iterate, with
-    /// PN voltage limiting on the DC node coefficients.
+    /// Whether the collocation grid holds exactly as many time samples as a
+    /// node has real spectral unknowns, Xyce's grid: the HB equations are
+    /// then KCL at every sample. An oversampled grid enforces only the
+    /// samples' projection onto the retained harmonics.
+    pub(super) fn every_sample_is_an_equation(&self) -> bool {
+        self.num_harmonics
+            .checked_mul(2)
+            .and_then(|unknowns| unknowns.checked_add(1))
+            == Some(self.fft.size())
+    }
+
+    /// Set the state `alpha` times a Newton step from the saved iterate.
+    ///
+    /// Where every sample is an equation the coordinates take the step as it
+    /// is: junction limiting belongs to the devices, which limit each time
+    /// sample's junctions against `bias_orig`, the iterate's own, as Xyce's
+    /// HB devices do while the solution vector takes the full Newton update.
+    /// A junction limiter applied to the node voltages instead crept a 5 V
+    /// supply node up from zero in logarithmic steps. On an oversampled grid
+    /// a sample's limited bias is not held to its own KCL, and limited full
+    /// steps ran the overdriven common-emitter stage's DC coefficients to
+    /// kilovolts, so there the DC node coefficients keep the PN-limited
+    /// steps and the devices are evaluated as sampled.
     fn set_newton_trial(
         &self,
         state: &mut HbSolverState,
         x_orig: &[Vec<Complex64>],
         branch_orig: &[Vec<Complex64>],
+        bias_orig: Option<&native_bjt::PeriodicJunctionBias>,
         delta: &HbNewtonStep,
         alpha: Value,
     ) {
+        state.junction_bias = bias_orig.map(native_bjt::PeriodicJunctionBias::trial);
+        let node_limited = !self.every_sample_is_an_equation();
         let vt = 0.02585; // Thermal voltage at 300K
         for (node, dx_node) in delta.node_voltages.iter().enumerate() {
             for (k, &dx) in dx_node.iter().enumerate() {
                 if node < state.x.len() && k < state.x[node].len() {
                     let v_old = x_orig[node][k].re;
-                    let v_new_raw = v_old + alpha * dx.re;
-
-                    // Apply PN voltage limiting to DC component only
-                    let v_new = if k == 0 && self.electrical_node(node) {
-                        limit_pn_voltage(v_old, v_new_raw, vt)
+                    let v_new = v_old + alpha * dx.re;
+                    let v_new = if node_limited && k == 0 && self.electrical_node(node) {
+                        limit_pn_voltage(v_old, v_new, vt)
                     } else {
-                        v_new_raw
+                        v_new
                     };
-
                     // The DC coefficient of a real waveform has no
                     // imaginary degree of freedom. Keeping a stale or
                     // updated imaginary part here would make the line
@@ -4315,7 +4375,7 @@ mod exact_matrix_free_tests {
                 .unwrap();
             let (nodes, branches) = (state.x.clone(), state.mna_branch_currents.clone());
             let alpha = 1e-4;
-            solver.set_newton_trial(&mut state, &nodes, &branches, &step, alpha);
+            solver.set_newton_trial(&mut state, &nodes, &branches, None, &step, alpha);
             let trial = residual(&mut solver, &mut state);
             // Along an exact Newton direction R(x + a dx) = (1 - a) R(x) + O(a^2).
             let defect = trial
@@ -4510,5 +4570,47 @@ mod exact_matrix_free_tests {
         // scale is ever accepted and the halving walks 0.25, 0.125 and stops:
         // 0.0625 is below the floor. The best trial seen is the floor itself.
         assert_eq!(search(config, -1.0), 0.125);
+    }
+}
+
+#[cfg(test)]
+mod junction_limiting_tests {
+    use crate::analysis::HbConfig;
+    use crate::engine::Engine;
+    use crate::{Netlist, SimulationConfig};
+
+    fn newton_corrections(deck: &str, fundamental: f64, harmonics: usize) -> usize {
+        let netlist = Netlist::parse(deck).unwrap();
+        let result = Engine::new(SimulationConfig::default())
+            .run_hb(
+                &netlist,
+                HbConfig::new(fundamental)
+                    .with_harmonics(harmonics)
+                    .with_collocation_points(2 * harmonics + 1),
+            )
+            .unwrap_or_else(|error| panic!("HB failed: {error}"))
+            .result;
+        assert!(result.converged);
+        result.iterations
+    }
+
+    /// Each time sample limits its own junctions while the coordinates take
+    /// the whole Newton step, as Xyce's HB does, so a transistor driven from
+    /// its operating point (TAHB=2) into saturation and cut-off converges in
+    /// tens of corrections. Damping the step instead crawled at 1/64 for
+    /// about a hundred.
+    #[test]
+    fn hb_newton_limits_an_overdriven_amplifier_per_time_sample() {
+        let corrections = newton_corrections(
+            "Overdriven common-emitter stage\n\
+             VCC vcc 0 10\nVIN in 0 SIN(0 1.2 1MEG)\nCIN in b 4.7u\n\
+             R1 vcc b 47k\nR2 b 0 8.2k\nRC vcc c 2.2k\nRE e 0 330\n\
+             COUT c out 4.7u\nRL out 0 100k\nQ1 c b e QN\n\
+             .model QN NPN(IS=1e-14 BF=200 VAF=80 RB=10 RC=1 CJE=20p CJC=8p TF=0.4n TR=50n)\n\
+             .options hbint tahb=2\n.end\n",
+            1e6,
+            40,
+        );
+        assert!(corrections <= 30, "{corrections} Newton corrections");
     }
 }

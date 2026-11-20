@@ -2,7 +2,59 @@
 
 use super::*;
 use crate::device::MatrixStamper;
+use crate::device::semiconductor::BJT_PERIODIC_BIAS_DIM;
 use std::collections::BTreeMap;
+
+/// One native BJT's junction bias in one time sample.
+type BjtSampleBias = [Value; BJT_PERIODIC_BIAS_DIM];
+
+/// The junction bias each native BJT was evaluated at in each time sample of
+/// a Newton iterate, sample-major. Each sample's junctions are limited
+/// against the bias the same sample took on the iterate the step leaves, as
+/// each of Xyce's HB time points keeps its own device state and limits its
+/// own junctions (N_LOA_HBLoader.C:760-830, HBINT VOLTLIM on by default at
+/// N_ANP_HB.C:139). A trial is a function of its coordinates and its
+/// reference, so restoring both restores its residual exactly.
+#[derive(Debug, Clone)]
+pub(crate) struct PeriodicJunctionBias {
+    /// The bias each sample is limited against.
+    reference: Vec<BjtSampleBias>,
+    /// The bias each sample was evaluated at, limited against `reference`.
+    evaluated: Vec<BjtSampleBias>,
+    /// Whether limiting held any sample off its own bias.
+    limited: bool,
+}
+
+impl PeriodicJunctionBias {
+    /// A trial step from this iterate: limited against its evaluated bias.
+    pub(super) fn trial(&self) -> Self {
+        Self {
+            reference: self.evaluated.clone(),
+            evaluated: self.evaluated.clone(),
+            limited: false,
+        }
+    }
+
+    /// Whether the residual was evaluated with some junction held off the
+    /// iterate's own bias, so that it is not the circuit's.
+    pub(crate) fn limited(&self) -> bool {
+        self.limited
+    }
+}
+
+/// How one time sample evaluates the native BJTs' junctions.
+enum JunctionBias<'a> {
+    /// At the sample's own bias.
+    Unlimited,
+    /// Limited against `reference`, recording each bias in `evaluated`.
+    Limit {
+        reference: &'a [BjtSampleBias],
+        evaluated: &'a mut [BjtSampleBias],
+        limited: &'a mut bool,
+    },
+    /// At the bias the limiting pass recorded for this sample.
+    Recorded(&'a [BjtSampleBias]),
+}
 
 pub(super) struct NativeStamp {
     residual: Vec<Value>,
@@ -477,6 +529,10 @@ impl HbSolver {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
+    )]
     fn sample_native_devices(
         &mut self,
         solution: &[Value],
@@ -485,6 +541,7 @@ impl HbSolver {
         f: &mut NativeStamp,
         q: &mut NativeStamp,
         small_signal: bool,
+        junctions: JunctionBias<'_>,
     ) -> Result<(), HbError> {
         self.sample_native_devices_selected(
             solution,
@@ -494,7 +551,52 @@ impl HbSolver {
             q,
             small_signal,
             None,
+            junctions,
         )
+    }
+
+    /// Each native BJT's own bias in every time sample of `state`. None
+    /// where the devices do not limit: without native BJTs, or on an
+    /// oversampled grid, where a sample's limited bias is not held to its
+    /// own KCL.
+    pub(super) fn own_junction_bias(
+        &mut self,
+        state: &HbSolverState,
+    ) -> Result<Option<PeriodicJunctionBias>, HbError> {
+        if self.native_bjts.is_empty() || !self.every_sample_is_an_equation() {
+            return Ok(None);
+        }
+        let waves = self.native_state_waveforms(state)?;
+        let mut solution = vec![0.0; waves.len()];
+        let mut evaluated = Vec::with_capacity(self.fft.size() * self.native_bjts.len());
+        for time in 0..self.fft.size() {
+            for (value, wave) in solution.iter_mut().zip(&waves) {
+                *value = wave[time];
+            }
+            evaluated.extend(
+                self.native_bjts
+                    .iter()
+                    .map(|bjt| bjt.periodic_bias(&solution)),
+            );
+        }
+        Ok(Some(PeriodicJunctionBias {
+            reference: evaluated.clone(),
+            evaluated,
+            limited: false,
+        }))
+    }
+
+    /// The junction bias of time sample `time` within `bias`, when `bias`
+    /// covers every native BJT in every sample.
+    fn sample_junction_range(
+        &self,
+        bias: &PeriodicJunctionBias,
+        time: usize,
+    ) -> Option<std::ops::Range<usize>> {
+        let devices = self.native_bjts.len();
+        (bias.evaluated.len() == devices * self.fft.size()
+            && bias.reference.len() == bias.evaluated.len())
+        .then(|| time * devices..(time + 1) * devices)
     }
 
     #[expect(
@@ -510,6 +612,7 @@ impl HbSolver {
         q: &mut NativeStamp,
         small_signal: bool,
         selected: Option<&[bool]>,
+        mut junctions: JunctionBias<'_>,
     ) -> Result<(), HbError> {
         if solution.len() != self.num_nodes + self.exact_mna_branches().len() {
             return Err(HbError::InvalidCircuit(
@@ -518,7 +621,7 @@ impl HbSolver {
         }
         f.clear();
         q.clear();
-        for bjt in &mut self.native_bjts {
+        for (index, bjt) in self.native_bjts.iter_mut().enumerate() {
             if selected.is_some_and(|rows| {
                 !bjt.mna_coupling_nodes()
                     .iter()
@@ -526,7 +629,27 @@ impl HbSolver {
             }) {
                 continue;
             }
-            bjt.stamp_periodic_fq(solution, f, q);
+            let bias = match &mut junctions {
+                JunctionBias::Unlimited => None,
+                JunctionBias::Limit {
+                    reference,
+                    evaluated,
+                    limited,
+                } => {
+                    let bias = bjt.limit_periodic_bias(solution, &reference[index]);
+                    evaluated[index] = bias;
+                    let held = bias != bjt.periodic_bias(solution);
+                    **limited |= held;
+                    held.then_some(bias)
+                }
+                JunctionBias::Recorded(evaluated) => {
+                    Some(evaluated[index]).filter(|&bias| bias != bjt.periodic_bias(solution))
+                }
+            };
+            match bias {
+                Some(bias) => bjt.stamp_periodic_fq_at_bias(solution, &bias, f, q),
+                None => bjt.stamp_periodic_fq(solution, f, q),
+            }
             if f.invalid || q.invalid {
                 return Err(HbError::InvalidCircuit(format!(
                     "BJT '{}' produced invalid physical F/Q entries",
@@ -751,7 +874,15 @@ impl HbSolver {
             .collect();
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
-        self.sample_native_devices(&solution, 0.0, &solution, &mut f, &mut q, false)?;
+        self.sample_native_devices(
+            &solution,
+            0.0,
+            &solution,
+            &mut f,
+            &mut q,
+            false,
+            JunctionBias::Unlimited,
+        )?;
         Ok(f)
     }
 
@@ -787,6 +918,7 @@ impl HbSolver {
             &mut q,
             small_signal,
             selected,
+            JunctionBias::Unlimited,
         )?;
         Ok(crate::analysis::quasi_periodic::solve::Sample {
             current: f.contributions,
@@ -972,12 +1104,36 @@ impl HbSolver {
         let mut f_time = Vec::new();
         let mut q_time = Vec::new();
         let integral_start = self.num_nodes + self.physical_branch_count();
-        for time in 0..times {
+        // The bias is the state's; it goes back whatever the samples return.
+        let mut junctions = state.junction_bias.take();
+        if let Some(bias) = &mut junctions {
+            bias.limited = false;
+        }
+        let sampled = (0..times).try_for_each(|time| {
             for (value, wave) in solution.iter_mut().zip(&waves) {
                 *value = wave[time];
             }
             let sample_time = time as Value / times as Value / self.config.fundamental_freq;
-            self.sample_native_devices(&solution, sample_time, &solution, &mut f, &mut q, false)?;
+            let mode = match junctions
+                .as_mut()
+                .and_then(|bias| Some((self.sample_junction_range(bias, time)?, bias)))
+            {
+                Some((range, bias)) => JunctionBias::Limit {
+                    reference: &bias.reference[range.clone()],
+                    evaluated: &mut bias.evaluated[range],
+                    limited: &mut bias.limited,
+                },
+                None => JunctionBias::Unlimited,
+            };
+            self.sample_native_devices(
+                &solution,
+                sample_time,
+                &solution,
+                &mut f,
+                &mut q,
+                false,
+                mode,
+            )?;
             // Known primitive rows are already exact spectral constraints.
             // Transform only physical equations and unresolved integral rates.
             let sampled_row = |(row, _): &(usize, Value)| {
@@ -988,8 +1144,10 @@ impl HbSolver {
             f.contributions.retain(sampled_row);
             q.contributions.retain(sampled_row);
             record_native_terms(&mut f_time, &f.contributions, time, times)?;
-            record_native_terms(&mut q_time, &q.contributions, time, times)?;
-        }
+            record_native_terms(&mut q_time, &q.contributions, time, times)
+        });
+        state.junction_bias = junctions;
+        sampled?;
         self.add_native_waveform_terms(state, f_time, false)?;
         self.add_native_waveform_terms(state, q_time, true)?;
         self.add_prescribed_integral_residual(state)
@@ -1058,6 +1216,14 @@ impl HbSolver {
                 *value = wave[time];
             }
             let sample_time = time as Value / times as Value / self.config.fundamental_freq;
+            let mode = match state
+                .junction_bias
+                .as_ref()
+                .and_then(|bias| Some(&bias.evaluated[self.sample_junction_range(bias, time)?]))
+            {
+                Some(evaluated) => JunctionBias::Recorded(evaluated),
+                None => JunctionBias::Unlimited,
+            };
             self.sample_native_devices(
                 &solution,
                 sample_time,
@@ -1065,6 +1231,7 @@ impl HbSolver {
                 &mut f,
                 &mut q,
                 small_signal,
+                mode,
             )?;
             for &(row, col, value) in if charge { &q.jacobian } else { &f.jacobian } {
                 let sum = &mut entries

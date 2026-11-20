@@ -1303,6 +1303,18 @@ impl Bjt {
             candidate[EXTERNAL_DIM + IDX_VXF1],
             candidate[EXTERNAL_DIM + IDX_VXF2],
         ];
+        self.evaluate_mna_bias([vc, vb, ve, vs], state, excess_phase, rbi_current);
+    }
+
+    /// Evaluate the model at a resolved bias, terminal anchor `[vc, vb, ve,
+    /// vs]` and internal `state`, and cache that evaluation for the stamps.
+    fn evaluate_mna_bias(
+        &mut self,
+        [vc, vb, ve, vs]: [Value; EXTERNAL_DIM],
+        state: [Value; INTERNAL_DIM],
+        excess_phase: [Value; 2],
+        rbi_current: Value,
+    ) {
         if self.mna_dissipation_drops.is_none()
             && self.mna_eval_holds([vc, vb, ve, vs], &state, excess_phase, rbi_current)
         {
@@ -1793,6 +1805,135 @@ impl Bjt {
         Ok(())
     }
 
+    /// The internal bias one periodic time sample of `solution` presents to
+    /// this device, before limiting: the bias [`Self::stamp_periodic_fq`]
+    /// evaluates for that sample.
+    #[doc(hidden)]
+    pub fn periodic_bias(&self, solution: &[Value]) -> [Value; BJT_PERIODIC_BIAS_DIM] {
+        self.periodic_bias_with(solution, |_| None)
+    }
+
+    /// Limit one periodic time sample's junctions against `previous`, the
+    /// bias the same sample was evaluated at on the preceding Newton iterate,
+    /// with the limiter this device's own Newton load applies to its
+    /// iterates (`update_mna_from_solution`): pnjlim on the Gummel-Poon
+    /// junctions, the VBIC junction and thermal limits, and nothing under
+    /// `DEVICE VOLTLIM=0`. Each sample keeps its own history, as each of
+    /// Xyce's HB time points keeps its own state vectors
+    /// (N_LOA_HBLoader.C:760-830). Unlimited, this is [`Self::periodic_bias`].
+    #[doc(hidden)]
+    pub fn limit_periodic_bias(
+        &self,
+        solution: &[Value],
+        previous: &[Value; BJT_PERIODIC_BIAS_DIM],
+    ) -> [Value; BJT_PERIODIC_BIAS_DIM] {
+        self.periodic_bias_with(solution, |raw| {
+            if self.uses_legacy_gummel_poon() {
+                self.uses_legacy_junction_limiting()
+                    .then(|| self.limit_legacy_internal_state_to_previous(raw, *previous))
+            } else {
+                self.voltage_limiting_enabled
+                    .then(|| self.limit_vbic_internal_state_to_previous(raw, *previous))
+            }
+        })
+    }
+
+    /// One periodic time sample's internal bias with `load` in place of the
+    /// raw internal state wherever it returns one. Collapsed terminal
+    /// coordinates share a Gummel-Poon load's bias, as in the Newton load,
+    /// and the intrinsic node constraints hold either way.
+    fn periodic_bias_with(
+        &self,
+        solution: &[Value],
+        load: impl FnOnce([Value; INTERNAL_DIM]) -> Option<[Value; INTERNAL_DIM]>,
+    ) -> [Value; BJT_PERIODIC_BIAS_DIM] {
+        let candidate = self.mna_solution_bias(solution);
+        let [mut vc, mut vb, mut ve, mut vs] =
+            [candidate[0], candidate[1], candidate[2], candidate[3]];
+        let mut raw = [0.0; INTERNAL_DIM];
+        raw.copy_from_slice(&candidate[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM]);
+        let mut state = match load(raw) {
+            Some(state) => {
+                if self.uses_legacy_gummel_poon() {
+                    if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
+                        vc = state[IDX_VCI];
+                    }
+                    if !Self::series_active(self.rbx) && !Self::series_active(self.rbi) {
+                        vb = state[IDX_VBI];
+                    }
+                    if !Self::series_active(self.re) {
+                        ve = state[IDX_VEI];
+                    }
+                    if !self.has_substrate_resistance() {
+                        vs = state[IDX_VSI];
+                    }
+                }
+                state
+            }
+            None => raw,
+        };
+        self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
+        state
+    }
+
+    /// Sample physical F/Q and their Jacobians at `bias`, a junction bias
+    /// from [`Self::limit_periodic_bias`] for this time sample of `solution`.
+    /// The model is evaluated at the limited bias and every stamped term is
+    /// its linearization there carried to `solution`, F(b) + J(b)(x - b) and
+    /// Q(b) + C(b)(x - b): the correction the transient Newton load applies
+    /// about its anchor (`stamp_mna_correction`), and the one Xyce's HB
+    /// loader adds as dFdxdVp and dQdxdVp (N_LOA_HBLoader.C:985-1089). The
+    /// Jacobians are J(b) and C(b). At an unlimited bias this is
+    /// [`Self::stamp_periodic_fq`].
+    #[doc(hidden)]
+    pub fn stamp_periodic_fq_at_bias(
+        &mut self,
+        solution: &[Value],
+        bias: &[Value; BJT_PERIODIC_BIAS_DIM],
+        static_part: &mut impl MatrixStamper,
+        charge_part: &mut impl MatrixStamper,
+    ) {
+        let candidate = self.mna_solution_bias(solution);
+        let raw = &candidate[..EXTERNAL_DIM];
+        // A collapsed terminal shares its limited internal coordinate.
+        let anchor = [
+            if Self::series_active(self.rcx) {
+                raw[EXT_C]
+            } else {
+                bias[IDX_VCX]
+            },
+            if Self::series_active(self.rbx) {
+                raw[EXT_B]
+            } else {
+                bias[IDX_VBX]
+            },
+            if Self::series_active(self.re) {
+                raw[EXT_E]
+            } else {
+                bias[IDX_VEI]
+            },
+            if self.has_substrate_resistance() || self.vbic_three_terminal {
+                raw[EXT_S]
+            } else {
+                bias[IDX_VSI]
+            },
+        ];
+        self.mna_limited_from.set(None);
+        self.remember_mna_iteration();
+        self.legacy_junction_limited = false;
+        self.mna_dissipation_drops = None;
+        self.evaluate_mna_bias(
+            anchor,
+            *bias,
+            [
+                candidate[EXTERNAL_DIM + IDX_VXF1],
+                candidate[EXTERNAL_DIM + IDX_VXF2],
+            ],
+            Self::node_voltage(solution, self.mna_rbi_matrix_node),
+        );
+        self.stamp_periodic_fq_evaluated(solution, static_part, charge_part, false, true);
+    }
+
     /// Sample physical F/Q and their Jacobians at an unlimited state. Stamped
     /// RHS values are -F and -Q (not absolute Newton companion sources); both
     /// matrices contain positive derivatives of the physical equations. The
@@ -1816,6 +1957,32 @@ impl Bjt {
         forward_limit: bool,
     ) {
         self.update_mna_static_probe(solution);
+        self.stamp_periodic_fq_evaluated(solution, static_part, charge_part, forward_limit, false);
+    }
+
+    /// Stamp the cached evaluation's physical F/Q and Jacobians. With
+    /// `carried`, each term is its linearization carried from the evaluated
+    /// bias to `solution`; otherwise the evaluated bias is `solution`'s own.
+    fn stamp_periodic_fq_evaluated(
+        &mut self,
+        solution: &[Value],
+        static_part: &mut impl MatrixStamper,
+        charge_part: &mut impl MatrixStamper,
+        forward_limit: bool,
+        carried: bool,
+    ) {
+        // The evaluated bias less `solution`, each coordinate on its own node.
+        let offsets = carried.then(|| {
+            let mut internal = self.mna_internal_state();
+            for (index, voltage) in internal.iter_mut().enumerate() {
+                *voltage -= Self::node_voltage(solution, self.mna_internal_node(index));
+            }
+            let mut external = self.mna_external_state();
+            for (voltage, node) in external.iter_mut().zip(self.external_terminal_nodes()) {
+                *voltage -= Self::node_voltage(solution, node);
+            }
+            (internal, external)
+        });
         self.stamp_mna_at(
             &mut PeriodicJacobian {
                 stamper: static_part,
@@ -1825,7 +1992,7 @@ impl Bjt {
             Some(solution),
             true,
         );
-        self.stamp_periodic_static_terms(static_part);
+        self.stamp_periodic_static_terms(static_part, solution, offsets.as_ref());
         let external_nodes = self.external_terminal_nodes();
         let branches = if forward_limit && self.uses_legacy_gummel_poon() {
             self.legacy_dynamic_charge_branches_with_forward_limit(
@@ -1849,11 +2016,24 @@ impl Bjt {
             if pos == neg {
                 continue;
             }
+            let charge = match &offsets {
+                Some((internal, external)) => {
+                    branch.charge
+                        - branch
+                            .d_internal
+                            .iter()
+                            .zip(internal)
+                            .chain(branch.d_external.iter().zip(external))
+                            .map(|(derivative, offset)| derivative * offset)
+                            .sum::<Value>()
+                }
+                None => branch.charge,
+            };
             for (row, sign) in [(pos, polarity), (neg, -polarity)] {
                 if row == 0 {
                     continue;
                 }
-                charge_part.stamp_rhs(row, -sign * branch.charge);
+                charge_part.stamp_rhs(row, -sign * charge);
                 for (column, &derivative) in branch.d_internal.iter().enumerate() {
                     if derivative != 0.0 {
                         charge_part.stamp(row, self.mna_internal_node(column), sign * derivative);
@@ -1882,9 +2062,24 @@ impl Bjt {
     /// Emit each physical term separately, in a stable topology order, so HB
     /// can Fourier-transform before summing its convergence magnitudes. The
     /// canonical RBI port owns its two electrical current incidences.
-    fn stamp_periodic_static_terms(&self, stamper: &mut impl MatrixStamper) {
+    ///
+    /// With `offsets`, the evaluated bias less `solution` in internal and
+    /// terminal coordinates, each term is carried to `solution` along its
+    /// own linearization.
+    fn stamp_periodic_static_terms(
+        &self,
+        stamper: &mut impl MatrixStamper,
+        solution: &[Value],
+        offsets: Option<&([Value; BJT_INTERNAL_STATE_DIM], [Value; EXTERNAL_DIM])>,
+    ) {
         let Some(eval) = self.mna_eval else {
             return;
+        };
+        let leaving = |term: &BranchLinearization| match offsets {
+            Some((internal, external)) => {
+                term.source(internal[..INTERNAL_DIM].try_into().unwrap(), external)
+            }
+            None => -term.current,
         };
         let state = IntrinsicTerminalState {
             vcx: self.vcx,
@@ -1906,19 +2101,33 @@ impl Bjt {
             |row, terms| {
                 let sign = Self::vbic_residual_row_sign(row);
                 for term in terms {
-                    stamper.stamp_rhs(self.mna_internal_node(row), -sign * term.current);
+                    stamper.stamp_rhs(self.mna_internal_node(row), sign * leaving(term));
                 }
             },
         );
         let external_nodes = self.external_terminal_nodes();
         self.visit_external_kcl_terms(&eval, external_rbi_port, |row, terms| {
             for term in terms {
-                stamper.stamp_rhs(external_nodes[row], -term.current);
+                stamper.stamp_rhs(external_nodes[row], leaving(term));
             }
         });
         if external_rbi_port {
-            let resistance = self.mna_rbi_stamp_resistance(eval.linearized, true).current;
-            stamper.stamp_rhs(self.mna_rbi_matrix_node, -(self.vbx - self.vbi));
+            let resistance = self.mna_rbi_stamp_resistance(eval.linearized, true);
+            let (drop, resistance) = match offsets {
+                // Vbx - Vbi is linear; RBI/qb moves with the bias.
+                Some((internal, external)) => (
+                    Self::node_voltage(solution, self.node_bx)
+                        - Self::node_voltage(solution, self.node_bi),
+                    resistance.current
+                        - BranchLinearization {
+                            current: 0.0,
+                            ..resistance
+                        }
+                        .source(internal[..INTERNAL_DIM].try_into().unwrap(), external),
+                ),
+                None => (self.vbx - self.vbi, resistance.current),
+            };
+            stamper.stamp_rhs(self.mna_rbi_matrix_node, -drop);
             stamper.stamp_rhs(self.mna_rbi_matrix_node, resistance * self.mna_rbi_current);
         }
         // Delay equations are affine in the transport-current coordinates.
@@ -1935,7 +2144,13 @@ impl Bjt {
                 branch.d_internal[IDX_VXF1] * self.vxf1,
                 branch.d_internal[IDX_VXF2] * self.vxf2,
             ];
-            let remainder = branch.current - linear.iter().sum::<Value>();
+            // The excess-phase coordinates are never limited, so carrying the
+            // branch to `solution` moves only its remainder.
+            let remainder = branch.current
+                - linear.iter().sum::<Value>()
+                - offsets.map_or(0.0, |(internal, external)| {
+                    branch.linearization_dot(internal, external)
+                });
             self.visit_vbic_residual_rows(branch, |row, sign| {
                 for term in linear.into_iter().chain([remainder]) {
                     stamper.stamp_rhs(row, -sign * term);
@@ -2633,6 +2848,179 @@ mod tests {
                                 "LEVEL={level} IRB={irb} polarity={p} F/Q={kind} ({row},{col}): FD={fd:e}, analytic={analytic:e}"
                             );
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A sample evaluated at a limited junction bias stamps the model there
+    /// and carries every term to the solution along its linearization: at
+    /// the sample's own bias it is the unlimited sample, its right-hand side
+    /// moves with the solution exactly as the stamped Jacobian says, and
+    /// where a solution vector holds the limited bias it is that vector's
+    /// own sample plus J(b)(x - b). A grounded terminal tied to its
+    /// intrinsic node may keep a limited bias no solution vector holds.
+    #[test]
+    fn periodic_fq_at_a_limited_bias_carries_each_term_to_the_solution() {
+        let common = [
+            ("IS", 1e-14),
+            ("IKF", 1e-2),
+            ("CJE", 10e-12),
+            ("CJC", 5e-12),
+            ("TF", 1e-9),
+            ("TR", 2e-9),
+        ];
+        let gummel_poon = [("LEVEL", 1.0), ("BF", 80.0), ("VAF", 30.0), ("RB", 100.0)];
+        // Name, model, emitter, substrate.
+        let configs = [
+            (
+                "Gummel-Poon with series resistances",
+                [&gummel_poon[..], &[("RC", 20.0), ("RE", 1.0)][..]].concat(),
+                3,
+                4,
+            ),
+            (
+                "Gummel-Poon with a tied, grounded emitter and substrate",
+                gummel_poon.to_vec(),
+                0,
+                0,
+            ),
+            (
+                "VBIC",
+                vec![
+                    ("LEVEL", 4.0),
+                    ("IBEI", 1e-16),
+                    ("IBCI", 1e-16),
+                    ("VEF", 30.0),
+                    ("RCX", 10.0),
+                    ("RCI", 20.0),
+                    ("RBX", 10.0),
+                    ("RE", 1.0),
+                ],
+                3,
+                0,
+            ),
+        ];
+        for (name, model, emitter, substrate) in configs {
+            let params = std::collections::HashMap::from_iter(
+                common
+                    .iter()
+                    .chain(&model)
+                    .map(|&(key, value)| (key.to_string(), value)),
+            );
+            let mut bjt = Bjt::new_npn("QL".into(), 1, 2, emitter).with_params(&params);
+            if substrate != 0 {
+                bjt.set_substrate_node(substrate);
+            }
+            let mut next = 5;
+            bjt.assign_mna_internal_nodes(|_| {
+                let node = next;
+                next += 1;
+                node
+            });
+            let n = next - 1;
+            bjt.prepare_periodic_mna(n).unwrap();
+            assert_eq!(bjt.mna_rbi_matrix_node, 0, "{name}");
+            let mut point = vec![0.0; n];
+            for (node, value) in [
+                (bjt.node_cx, 1.999),
+                (bjt.node_ci, 1.998),
+                (bjt.node_bx, 0.949),
+                (bjt.node_bi, 0.948),
+                (bjt.node_ei, 0.011),
+                (1, 2.0),
+                (2, 0.95),
+                (emitter, 0.01),
+            ] {
+                if node != 0 {
+                    point[node - 1] = value;
+                }
+            }
+            let sample =
+                |bjt: &mut Bjt, point: &[Value], bias: Option<&[Value; BJT_PERIODIC_BIAS_DIM]>| {
+                    let mut f = DenseStamper::new(n);
+                    let mut q = DenseStamper::new(n);
+                    match bias {
+                        Some(bias) => bjt.stamp_periodic_fq_at_bias(point, bias, &mut f, &mut q),
+                        None => bjt.stamp_periodic_fq(point, &mut f, &mut q),
+                    }
+                    [f, q]
+                };
+
+            let own = bjt.periodic_bias(&point);
+            let at_own = sample(&mut bjt, &point, Some(&own));
+            for (at_own, unlimited) in at_own.iter().zip(&sample(&mut bjt, &point, None)) {
+                assert_eq!(at_own.a, unlimited.a, "{name}");
+                assert_eq!(at_own.b, unlimited.b, "{name}");
+            }
+
+            let bias = bjt.limit_periodic_bias(&point, &bjt.periodic_bias(&vec![0.0; n]));
+            assert_ne!(bias, own, "{name}: the forward step must be limited");
+            let limited = sample(&mut bjt, &point, Some(&bias));
+            assert_ne!(
+                limited[0].a, at_own[0].a,
+                "{name}: evaluated at the limited bias"
+            );
+            for col in 0..n {
+                let step = 1e-6;
+                let mut plus = point.clone();
+                plus[col] += step;
+                let mut minus = point.clone();
+                minus[col] -= step;
+                let plus = sample(&mut bjt, &plus, Some(&bias));
+                let minus = sample(&mut bjt, &minus, Some(&bias));
+                for (kind, ((limited, plus), minus)) in
+                    limited.iter().zip(&plus).zip(&minus).enumerate()
+                {
+                    for row in 0..n {
+                        let fd = -(plus.b[row] - minus.b[row]) / (2.0 * step);
+                        let stamped = limited.a[row][col];
+                        let roundoff =
+                            64.0 * Value::EPSILON * (plus.b[row].abs() + minus.b[row].abs()) / step;
+                        let floor = if kind == 0 { 1e-10 } else { 1e-20 };
+                        assert!(
+                            (fd - stamped).abs()
+                                <= 2e-5 * fd.abs().max(stamped.abs()) + roundoff + floor,
+                            "{name} F/Q={kind} ({row},{col}): FD={fd:e}, stamped={stamped:e}"
+                        );
+                    }
+                }
+            }
+
+            let mut holder = point.clone();
+            for (index, &value) in bias.iter().enumerate() {
+                let node = bjt.mna_internal_node(index);
+                if node != 0 {
+                    holder[node - 1] = value;
+                }
+            }
+            if bjt.periodic_bias(&holder) != bias {
+                assert!(
+                    emitter == 0 && substrate == 0,
+                    "{name}: no solution holds the limited bias"
+                );
+                continue;
+            }
+            let at_holder = sample(&mut bjt, &holder, None);
+            for (kind, (limited, at_holder)) in limited.iter().zip(&at_holder).enumerate() {
+                for row in 0..n {
+                    let carry =
+                        (0..n).map(|col| at_holder.a[row][col] * (point[col] - holder[col]));
+                    let scale =
+                        at_holder.b[row].abs() + carry.clone().map(Value::abs).sum::<Value>();
+                    let expected = at_holder.b[row] - carry.sum::<Value>();
+                    assert!(
+                        (limited.b[row] - expected).abs() <= 1e-12 * scale,
+                        "{name} F/Q={kind} row {row}: carried {:e}, expected {expected:e}",
+                        limited.b[row]
+                    );
+                    for col in 0..n {
+                        let (left, right) = (limited.a[row][col], at_holder.a[row][col]);
+                        assert!(
+                            (left - right).abs() <= 1e-12 * left.abs().max(right.abs()),
+                            "{name} F/Q={kind} ({row},{col}): {left:e} != {right:e}"
+                        );
                     }
                 }
             }
