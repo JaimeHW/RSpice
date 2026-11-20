@@ -123,6 +123,7 @@ impl SimulationController {
                 self.apply_result_side_effects(state, &sim_result);
                 // A transient its results storage stopped keeps the rows it
                 // wrote: its result stands, and the stop is said beside it.
+                self.forget_released_segments(&*state);
                 let storage_stop =
                     self.note_results_store(&sim_result, &current_label, target_run_id);
                 // A recorded FFT carries the quality of the transient it

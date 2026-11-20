@@ -123,10 +123,16 @@ impl SimulationController {
                 }
             }
         }
+        self.forget_released_segments(&*state);
+        state.prompt(prompt);
+    }
+
+    /// Forget the stores of runs the history no longer keeps, so the map names only stores a
+    /// kept run wrote: done for every result a run delivers and after every read failure.
+    pub(super) fn forget_released_segments(&mut self, state: &impl RunHost) {
         let retained = &state.model().simulation.retained;
         self.stored_segments
             .retain(|_, (run, _)| retained.run_by_sequence(*run).is_some());
-        state.prompt(prompt);
     }
 }
 

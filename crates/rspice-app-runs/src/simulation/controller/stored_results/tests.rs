@@ -266,6 +266,50 @@ fn a_stored_column_that_cannot_be_read_is_a_finding_of_the_run_that_wrote_it() {
 }
 
 #[test]
+fn a_run_the_history_no_longer_keeps_leaves_no_store_behind() {
+    const SECOND: &str = "/tmp/rspice-results/8-1-0/0.rsr";
+    let mut controller = SimulationController::new();
+    let (mut state, first) = running(&mut controller);
+    let export_io = super::super::test_execution::MockExportWorkflowIo::default();
+    controller.accept_completion(&mut state, &export_io, Ok(stored_transient(None)));
+    assert_eq!(
+        controller.stored_segments.get(SEGMENT).map(|(run, _)| *run),
+        Some(first)
+    );
+
+    // The history lets the first run go; the next run writes a store of its own.
+    state.model.simulation.clear_runs();
+    let second = state.model.simulation.start_run().id;
+    let run = state
+        .model
+        .simulation
+        .retained
+        .run_by_sequence_mut(second)
+        .expect("the second run is retained");
+    run.mark_running()
+        .expect("the second run enters running state");
+    state.model.simulation.execution.active_execution = run.execution_identity();
+    controller.current_run_id = Some(second);
+    controller.current_analysis_idx = 1;
+    let mut result = stored_transient(None);
+    if let crate::simulation::SimulationResult::Transient {
+        store: Some(receipt),
+        ..
+    } = &mut result
+    {
+        receipt.path = SECOND.into();
+    }
+    controller.accept_completion(&mut state, &export_io, Ok(result));
+
+    let kept: Vec<_> = controller
+        .stored_segments
+        .iter()
+        .map(|(store, (run, _))| (store.as_str(), *run))
+        .collect();
+    assert_eq!(kept, [(SECOND, second)]);
+}
+
+#[test]
 fn a_stored_run_saved_with_its_project_keeps_its_segment_and_reopens_to_draw() {
     let deck = "stored run saved with its project
 V1 in 0 PULSE(0 1 0 1u 1u 50u 100u)
