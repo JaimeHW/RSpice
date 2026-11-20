@@ -636,6 +636,8 @@ fn completed_result_attaches_to_started_run_when_active_selection_changes() {
     assert_eq!(started_run.lifecycle, SimulationRunLifecycle::Completed);
 }
 
+/// A finished transient's samples move into the results store as it is retained: its waveforms
+/// read windows of a segment, and the engine's buffers are let go rather than kept beside them.
 #[test]
 fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
     let mut state = RunTestHost::default();
@@ -654,10 +656,10 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
 
-    let time = exact_vec(&[0.0, 1.0e-9, 2.0e-9]);
-    let time_ptr = time.as_ptr();
-    let values = exact_vec(&[0.0, 0.5, 1.0]);
-    let values_ptr = values.as_ptr();
+    let time = std::sync::Arc::new(exact_vec(&[0.0, 1.0e-9, 2.0e-9]));
+    let engine_time = std::sync::Arc::downgrade(&time);
+    let values = std::sync::Arc::new(exact_vec(&[0.0, 0.5, 1.0]));
+    let engine_values = std::sync::Arc::downgrade(&values);
     let mut waveforms = std::collections::HashMap::new();
     waveforms.insert(
         "V(out)".to_string(),
@@ -699,18 +701,32 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
         .find(|waveform| waveform.name == "V(out)")
         .expect("transient waveform is stored in run history");
 
+    assert!(
+        waveform.x.is_stored() && waveform.y.is_stored(),
+        "the run history reads the samples from the results store"
+    );
+    assert!(
+        engine_time.upgrade().is_none(),
+        "time vector should move into the store instead of being kept beside it"
+    );
+    assert!(
+        engine_values.upgrade().is_none(),
+        "sample vector should move into the store instead of being kept beside it"
+    );
+    assert!(!crate::state::run_store::holds_samples_in_memory(analysis));
     assert_eq!(
-        waveform.x.iter().as_slice().as_ptr(),
-        time_ptr,
-        "time vector should move into run history instead of being copied"
+        waveform.x.read_range(0..3).unwrap().as_ref(),
+        [0.0, 1.0e-9, 2.0e-9]
     );
     assert_eq!(
-        waveform.y.iter().as_slice().as_ptr(),
-        values_ptr,
-        "sample vector should move into run history instead of being copied"
+        waveform.y.read_range(0..3).unwrap().as_ref(),
+        [0.0, 0.5, 1.0]
     );
 }
 
+/// A finished DC sweep's samples move into the results store as it is retained: its curves read
+/// one stored window of the shared sweep axis, and the engine's buffers are let go rather than
+/// kept beside them.
 #[test]
 fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
     let mut state = RunTestHost::default();
@@ -735,21 +751,23 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
     controller.total_analyses = 1;
 
     let sweep_values = exact_vec(&[0.0, 1.0, 2.0]);
-    let sweep_ptr = sweep_values.as_ptr();
-    let values = exact_vec(&[0.1, 0.2, 0.3]);
-    let values_ptr = values.as_ptr();
     let mut waveforms = std::collections::HashMap::new();
-    waveforms.insert(
-        "V(out)".to_string(),
-        rspice_simulation::results::SampledWaveform {
-            name: "V(out)".to_string(),
-            x_values: Vec::new().into(),
-            y_values: values.into(),
-            y_unit: "V".to_string(),
-            is_complex: false,
-            y_imag: None,
-        },
-    );
+    let mut engine_buffers = Vec::new();
+    for (name, samples) in [("V(out)", [0.1, 0.2, 0.3]), ("V(in)", [0.0, 1.0, 2.0])] {
+        let values = std::sync::Arc::new(exact_vec(&samples));
+        engine_buffers.push(std::sync::Arc::downgrade(&values));
+        waveforms.insert(
+            name.to_string(),
+            rspice_simulation::results::SampledWaveform {
+                name: name.to_string(),
+                x_values: Vec::new().into(),
+                y_values: values.into(),
+                y_unit: "V".to_string(),
+                is_complex: false,
+                y_imag: None,
+            },
+        );
+    }
 
     controller.accept_completion(
         &mut state,
@@ -769,22 +787,28 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
         .simulation
         .active_analysis()
         .expect("completed DC sweep analysis is selected");
-    let waveform = analysis
-        .waveforms
-        .iter()
-        .find(|waveform| waveform.name == "V(out)")
-        .expect("DC sweep waveform is stored in run history");
+    let curve = |name: &str| {
+        analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == name)
+            .expect("DC sweep waveform is stored in run history")
+    };
+    let (out, input) = (curve("V(out)"), curve("V(in)"));
 
-    assert_eq!(
-        waveform.x.iter().as_slice().as_ptr(),
-        sweep_ptr,
-        "shared sweep axis should move into run history instead of being copied"
+    assert!(
+        out.x.is_stored() && rspice_results::waveform::WaveformValues::ptr_eq(&out.x, &input.x),
+        "shared sweep axis should move into the store once instead of being copied per curve"
     );
-    assert_eq!(
-        waveform.y.iter().as_slice().as_ptr(),
-        values_ptr,
-        "sweep samples should move into run history instead of being copied"
+    assert!(
+        engine_buffers
+            .iter()
+            .all(|buffer| buffer.upgrade().is_none()),
+        "sweep samples should move into the store instead of being kept beside it"
     );
+    assert!(!crate::state::run_store::holds_samples_in_memory(analysis));
+    assert_eq!(out.x.read_range(0..3).unwrap().as_ref(), [0.0, 1.0, 2.0]);
+    assert_eq!(out.y.read_range(0..3).unwrap().as_ref(), [0.1, 0.2, 0.3]);
 }
 
 #[test]
