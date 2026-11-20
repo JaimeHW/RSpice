@@ -401,24 +401,20 @@ impl DecimationCache {
         members: &[BandMember<'_>],
         view: TraceView,
     ) -> Arc<[[f64; 2]]> {
-        let key = CacheKey {
-            trace: band_key,
-            columns: view.columns as u32,
-            x0_bits: view.x0.to_bits(),
-            x1_bits: view.x1.to_bits(),
-            rows: 0,
-            y0_bits: 0,
-            y1_bits: 0,
-            reduction: Reduction::Band,
-            x_scale: view.x_scale,
-            y_scale: view.y_scale,
-        };
+        let key = band_cache_key(band_key, view);
         if let Some(hit) = self.lookup(&key) {
             return hit;
         }
         let band: Arc<[[f64; 2]]> = band_columns(members, view).into();
         self.retain(key, &band);
         band
+    }
+
+    /// The band [`Self::band`] keeps under `band_key` for `view`, if it keeps
+    /// one: a caller whose members' samples are costly to hand over asks
+    /// first.
+    pub fn held_band(&mut self, band_key: u64, view: TraceView) -> Option<Arc<[[f64; 2]]>> {
+        self.lookup(&band_cache_key(band_key, view))
     }
 
     /// The block extrema of one trace, read now if no index of these very
@@ -501,6 +497,22 @@ pub struct BandMember<'a> {
 ///
 /// The columns are the ones [`decimate_minmax`] quantizes against, so the
 /// band's edge is where the members' own envelopes would have stroked it.
+/// Where a band over `view` is kept.
+fn band_cache_key(band_key: u64, view: TraceView) -> CacheKey {
+    CacheKey {
+        trace: band_key,
+        columns: view.columns as u32,
+        x0_bits: view.x0.to_bits(),
+        x1_bits: view.x1.to_bits(),
+        rows: 0,
+        y0_bits: 0,
+        y1_bits: 0,
+        reduction: Reduction::Band,
+        x_scale: view.x_scale,
+        y_scale: view.y_scale,
+    }
+}
+
 fn band_columns(members: &[BandMember<'_>], view: TraceView) -> Vec<[f64; 2]> {
     let columns = view.columns;
     let mut out = vec![[f64::NAN; 2]; columns];
@@ -1516,10 +1528,13 @@ mod tests {
         let view = sweep_view(0.0, 1_999.0);
         let mut cache = DecimationCache::default();
         cache.ensure_version(1);
+        assert!(cache.held_band(7, view).is_none(), "nothing is kept yet");
         let first = cache.band(7, &[member(&x, &y), member(&x, &y)], view);
         let before = cache.work();
         let again = cache.band(7, &[], view);
         assert!(Arc::ptr_eq(&first, &again));
+        let held = cache.held_band(7, view).expect("the band is kept");
+        assert!(Arc::ptr_eq(&first, &held));
         assert_eq!(cache.work().since(before).rebuilds, 0);
         // A trace with the same key is a different reduction.
         let trace = cache.series(7, &x, &y, view, false, None);

@@ -681,6 +681,11 @@ pub fn show_plot<'a>(
                     .map(|(_, trace)| trace_key(model, trace))
                     .collect::<Vec<_>>(),
             );
+            // A band kept for this view needs none of its members' samples:
+            // handing over a stored member's reads its column whole.
+            if let Some(held) = cache.held_band(identity, view) {
+                return held;
+            }
             let members: Vec<plot::BandMember<'_>> = members
                 .iter()
                 .map(|(_, trace)| plot::BandMember {
@@ -769,8 +774,7 @@ pub fn show_plot<'a>(
             .filter(|nearest| {
                 // Only a member the pointer is on: a pointer anywhere else in
                 // the plot is placing a cursor or reading the axis.
-                let value =
-                    sample_at_with_shape(&nearest.x, &nearest.y, &nearest.shape, x, interpolation);
+                let value = super::trace_value_at(nearest, x, interpolation);
                 let y = plot_rect.bottom()
                     - (y_scale.normalize(value, spec.y.min, spec.y.max) as f32)
                         * plot_rect.height();
