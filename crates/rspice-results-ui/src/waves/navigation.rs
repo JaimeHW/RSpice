@@ -3,7 +3,7 @@
 use super::{StripModel, StripTrace, trace_key};
 use crate::derived::DerivedSeries;
 use egui::Ui;
-use rspice_ui_kit::plot::{Axis, CursorPair, XScale};
+use rspice_ui_kit::plot::{Axis, CursorPair, XScale, floored_span};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -30,10 +30,6 @@ const RULER_CAPTION_GAP: f32 = 8.0;
 /// The least space between a ruler's gutter caption and the strip's edge.
 const RULER_CAPTION_EDGE: f32 = 2.0;
 
-/// The narrowest viewport an overview-handle drag can produce, as a fraction
-/// of the full retained sweep. It is the reciprocal of the zoom ceiling, so
-/// dragging a handle cannot reach a magnification the zoom controls refuse.
-const SHARED_X_MIN_WINDOW: f64 = 1.0 / 200.0;
 /// Points the overview lane's mini-trace is drawn from, whatever the run
 /// retained. The lane is fourteen pixels tall and a plot wide, so a denser
 /// curve would not reach the reader as anything but the same grey band.
@@ -792,6 +788,17 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     }
 
     if response.has_focus() {
+        // Left and Right pan the ruler; egui must not also move the focus on
+        // them.
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
         let fit_key =
             ui.input(|input| input.key_pressed(egui::Key::F) || input.key_pressed(egui::Key::Home));
         if fit_key {
@@ -998,13 +1005,26 @@ pub fn zoomed_shared_x_view(
     }
     let anchor = anchor_fraction.clamp(0.0, 1.0);
     let relative = ((anchor - start) / width).clamp(0.0, 1.0);
-    let next_width = (width * factor).clamp(1.0e-6, 1.0);
+    let next_width = (width * factor).clamp(narrowest_window(scale, full, anchor), 1.0);
     let next_start = (anchor - relative * next_width).clamp(0.0, 1.0 - next_width);
     let next_end = next_start + next_width;
     Some((
         scale.denormalize(next_start, full.0, full.1),
         scale.denormalize(next_end, full.0, full.1),
     ))
+}
+
+/// The narrowest window at `at` (a fraction of the full sweep), as a fraction
+/// of the sweep: the plots' own floor, so a ruler zooms no further than the
+/// panes it stands under and no less far.
+fn narrowest_window(scale: XScale, full: (f64, f64), at: f64) -> f64 {
+    let value = scale.denormalize(at, full.0, full.1);
+    floored_span((value, value), scale)
+        .map(|(low, high)| {
+            (scale.normalize(high, full.0, full.1) - scale.normalize(low, full.0, full.1)).abs()
+        })
+        .filter(|width| width.is_finite() && *width > 0.0)
+        .unwrap_or(f64::EPSILON)
 }
 
 /// Resize the shared viewport by dragging one edge of the overview window.
@@ -1024,13 +1044,15 @@ pub fn resized_shared_x_view(
     }
     let (start, end) = shared_axis_viewport_fraction(scale, full, view);
     let edge = edge_fraction.clamp(0.0, 1.0);
+    // The edge that holds is where the window cannot narrow past.
+    let least = narrowest_window(scale, full, if move_start { end } else { start });
     let (next_start, next_end) = if move_start {
-        (edge.min(end - SHARED_X_MIN_WINDOW), end)
+        (edge.min(end - least), end)
     } else {
-        (start, edge.max(start + SHARED_X_MIN_WINDOW))
+        (start, edge.max(start + least))
     };
-    let next_start = next_start.clamp(0.0, 1.0 - SHARED_X_MIN_WINDOW);
-    let next_end = next_end.clamp(next_start + SHARED_X_MIN_WINDOW, 1.0);
+    let next_start = next_start.clamp(0.0, 1.0 - least);
+    let next_end = next_end.clamp(next_start + least, 1.0);
     Some((
         scale.denormalize(next_start, full.0, full.1),
         scale.denormalize(next_end, full.0, full.1),
