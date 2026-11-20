@@ -7,14 +7,19 @@ use super::*;
 use crate::results::SimulationResult;
 use crate::results_store::tests::{FREE_SPACE, quota};
 
-/// A pulse into an RC low-pass, a branch current, a measurement over the output window, and an
-/// output start that falls between two accepted steps.
+/// A pulse into an RC low-pass, a branch current, measurements over the output window (an
+/// extreme, an average, an integral, a rise time and a value found at a crossing, the last two
+/// read in more than one pass), and an output start that falls between two accepted steps.
 const DECK: &str = "stored transient
 V1 in 0 PULSE(0 1 0 1u 1u 50u 100u)
 R1 in out 1k
 C1 out 0 10n
 .tran 0.1u 300u 33.3u
 .meas tran vmax MAX v(out)
+.meas tran vavg AVG v(out) FROM=50u TO=250u
+.meas tran charge INTEG i(V1)
+.meas tran trise TRIG v(out) VAL=0.1 RISE=2 TARG v(out) VAL=0.5 RISE=2
+.meas tran vfound FIND v(out) WHEN v(in)=0.5 FALL=2
 .end
 ";
 
@@ -106,10 +111,10 @@ fn a_stored_transient_holds_the_samples_the_in_memory_route_returns_without_read
     assert!(time.is_stored());
     // The authored start falls between two steps: the axis starts there.
     assert_eq!(time.len(), expected_time.len());
-    assert_eq!(time.in_memory().unwrap().first().copied(), Some(33.3e-6));
+    assert_eq!(time.read_whole().unwrap().first().copied(), Some(33.3e-6));
     assert_eq!(
-        bits(&time.in_memory().unwrap()),
-        bits(&expected_time.in_memory().unwrap())
+        bits(&time.read_whole().unwrap()),
+        bits(&expected_time.read_whole().unwrap())
     );
     let mut names = waveforms.keys().collect::<Vec<_>>();
     names.sort();
@@ -129,8 +134,8 @@ fn a_stored_transient_holds_the_samples_the_in_memory_route_returns_without_read
         );
         assert_eq!(waveform.y_unit, expected.y_unit, "{name}");
         assert_eq!(
-            bits(&waveform.y_values.in_memory().unwrap()),
-            bits(&expected.y_values.in_memory().unwrap()),
+            bits(&waveform.y_values.read_whole().unwrap()),
+            bits(&expected.y_values.read_whole().unwrap()),
             "{name}"
         );
     }
@@ -138,7 +143,7 @@ fn a_stored_transient_holds_the_samples_the_in_memory_route_returns_without_read
         format!("{measurements:?}"),
         format!("{expected_measurements:?}")
     );
-    assert_eq!(measurements.len(), 1);
+    assert_eq!(measurements.len(), 5);
     assert_eq!(format!("{events:?}"), format!("{expected_events:?}"));
     assert_eq!(
         format!("{:?}", convergence.as_deref()),
@@ -261,7 +266,7 @@ fn a_volume_that_fills_stops_the_run_keeping_the_rows_it_wrote_and_names_the_sto
     );
     assert_eq!(time.len(), kept);
     assert_eq!(stop.at, Some(full_time[kept - 1]));
-    assert_eq!(bits(&time.in_memory().unwrap()), bits(&full_time[..kept]));
+    assert_eq!(bits(&time.read_whole().unwrap()), bits(&full_time[..kept]));
     assert!(
         waveforms
             .values()

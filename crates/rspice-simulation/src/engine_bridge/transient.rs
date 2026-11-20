@@ -611,13 +611,25 @@ fn convert_stored_transient(
         sample_count,
         lead,
     };
-    // `.MEAS TRAN` and `.ASSERT` read the whole run: it is read back for them, then dropped.
     let measured = netlist
         .measurements
         .iter()
         .any(|measurement| measurement.analysis.eq_ignore_ascii_case("TRAN"));
     let asserted = !netlist.assertions.is_empty() || !netlist.vector_files.is_empty();
-    let (measurements, assertions) = if measured || asserted {
+    // `.MEAS TRAN` is measured from the store a chunk at a time when every statement streams.
+    let streamed = if measured && !asserted {
+        let streamed = stored.measure(netlist, &window, abort, translate)?;
+        stored.drop_rows(device_traces);
+        stored.read_span()?;
+        streamed
+    } else {
+        None
+    };
+    // `.ASSERT`, and a `.MEAS TRAN` statement that does not stream, read the whole run: it is
+    // read back for them, then dropped.
+    let (measurements, assertions) = if let Some(measurements) = streamed {
+        (measurements, Vec::new())
+    } else if measured || asserted {
         stored.drop_rows(device_traces);
         stored.read_rows()?;
         let assertions =
@@ -1615,10 +1627,13 @@ mod tests {
             if start_time > 0.0 {
                 assert!(basis.sample_count > time.len() as u64);
             }
-            assert_eq!(time.in_memory().unwrap().first().copied(), Some(start_time));
-            assert_eq!(time.in_memory().unwrap().last().copied(), Some(1.0));
+            assert_eq!(
+                time.read_whole().unwrap().first().copied(),
+                Some(start_time)
+            );
+            assert_eq!(time.read_whole().unwrap().last().copied(), Some(1.0));
             let largest_step = time
-                .in_memory()
+                .read_whole()
                 .unwrap()
                 .windows(2)
                 .map(|pair| pair[1] - pair[0])
@@ -1640,7 +1655,7 @@ mod tests {
             assert!(
                 output
                     .y_values
-                    .in_memory()
+                    .read_whole()
                     .unwrap()
                     .iter()
                     .all(|value| (*value - 1.0).abs() < 1.0e-12)
@@ -1830,14 +1845,18 @@ mod tests {
             panic!("expected transient result");
         };
         assert_eq!(
-            time.in_memory().unwrap().first().copied().map(f64::to_bits),
+            time.read_whole()
+                .unwrap()
+                .first()
+                .copied()
+                .map(f64::to_bits),
             Some(0.125_f64.to_bits())
         );
         assert_eq!(waveforms["out"].x_values, time);
         assert_eq!(waveforms["I(V1)"].x_values, time);
         assert_eq!(
-            waveforms["I(V1)"].y_values.in_memory().unwrap()[0].to_bits(),
-            (-waveforms["out"].y_values.in_memory().unwrap()[0]).to_bits()
+            waveforms["I(V1)"].y_values.read_whole().unwrap()[0].to_bits(),
+            (-waveforms["out"].y_values.read_whole().unwrap()[0]).to_bits()
         );
 
         let config = crate::engine_services::FourierRunConfig {
@@ -1853,8 +1872,8 @@ mod tests {
             method: rspice_core::analysis::FourierMethod::Interpolant,
         };
         crate::engine_services::run_fourier_from_signal_with_abort(
-            time.in_memory().unwrap(),
-            waveforms["out"].y_values.in_memory().unwrap(),
+            &time.read_whole().unwrap(),
+            &waveforms["out"].y_values.read_whole().unwrap(),
             &config,
             &rspice_core::abort_signal::NoAbort,
         )

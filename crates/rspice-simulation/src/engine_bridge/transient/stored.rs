@@ -9,8 +9,9 @@
 //! segment the run writes counts against it, and the write that would pass it stops the run.
 //!
 //! A deck whose `.FFT` cards or lead-power outputs read whole waveforms after the run is read
-//! back whole, completed by the engine and converted in memory, as before. `.MEAS TRAN` and
-//! `.ASSERT` read the rows back for their own evaluation only.
+//! back whole, completed by the engine and converted in memory, as before. `.MEAS TRAN` is
+//! measured from the store a chunk at a time; `.ASSERT`, and a measurement that does not stream,
+//! read the rows back for their own evaluation only.
 
 use std::sync::Arc;
 
@@ -661,6 +662,8 @@ fn store_failure(path: &std::path::Path, error: StoreError) -> SimulationError {
         }),
     }
 }
+
+mod measure;
 
 #[cfg(test)]
 mod tests;
