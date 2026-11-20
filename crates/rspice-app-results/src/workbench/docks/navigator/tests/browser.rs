@@ -500,3 +500,33 @@ fn a_measurement_reads_as_its_plan_spells_it() {
         labels(&nodes)
     );
 }
+
+/// The row model is built once and kept while nothing it lists changes, and
+/// built again when the query changes: building it walks every retained
+/// signal and copies its name, which an idle frame used to do.
+#[test]
+fn the_row_model_is_kept_until_what_it_lists_changes() {
+    use crate::workbench::documents::result_document::frame_work::{DatasetWalk, WorkCounts};
+
+    let mut browser = Browser::new(hierarchical_run());
+    browser.frame(Vec::new());
+    let idle = WorkCounts::reset();
+    for _ in 0..5 {
+        browser.frame(Vec::new());
+    }
+    assert_eq!(
+        idle.since().get(DatasetWalk::BrowserRows),
+        0,
+        "an idle frame built the row model again"
+    );
+    browser.host.workbench.set_navigator_filter("x1.*");
+    let filtered = WorkCounts::reset();
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    assert_eq!(filtered.since().get(DatasetWalk::BrowserRows), 1);
+    assert!(
+        find(&nodes, "V(out), Voltage").is_none() && find(&nodes, "V(x1.a), Voltage").is_some(),
+        "the rows are the new query's: {:?}",
+        labels(&nodes)
+    );
+}

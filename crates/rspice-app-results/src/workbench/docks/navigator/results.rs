@@ -192,7 +192,19 @@ pub(in crate::workbench) fn results(
             (key, valid)
         })
         .collect::<std::collections::HashMap<_, _>>();
-    let runs = state.model.simulation
+    // The row model is kept until something it is built from changes: the
+    // retained runs or the state of one of their analyses, the query and the
+    // facets, what is ticked, or what was recent. Building it walks every
+    // retained signal and copies its name, which no idle frame should do.
+    let fingerprint = browser_rows_fingerprint(
+        &*state,
+        &analysis_integrity,
+        (kind, layout, scope, producer_facet, show_internal),
+        &ticked,
+        (active_run, expression_query_match),
+    );
+    let runs = browser_rows(ui.ctx(), &*state, fingerprint, || {
+        state.model.simulation
         .retained.runs
         .iter()
         .enumerate()
@@ -485,7 +497,8 @@ pub(in crate::workbench) fn results(
                 analyses,
             })
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+    });
 
     let signal_count = runs
         .iter()
@@ -844,7 +857,7 @@ pub(in crate::workbench) fn results(
                         },
                     );
                 }
-                for run in runs {
+                for run in runs.iter() {
                     let run_active = active_run == Some(run.run_index);
                     let run_meta = data_state_meta(run.data_state);
                     let overlaid = state.model.simulation.is_dataset_overlaid(run.dataset_id);
@@ -908,7 +921,7 @@ pub(in crate::workbench) fn results(
                     if !run_active && query.is_empty() {
                         continue;
                     }
-                    for analysis in run.analyses {
+                    for analysis in &run.analyses {
                         let analysis_active =
                             run_active && active_analysis == Some(analysis.analysis_index);
                         if result_browser_manifest_row(
@@ -1003,6 +1016,112 @@ enum ResultsBrowserTab {
     Signals,
     Datasets,
     Expressions,
+}
+
+/// The data browser's row model, kept between frames with what it was built
+/// from.
+#[derive(Clone)]
+struct BrowserRows {
+    revision: crate::state::RunHistoryRevision,
+    fingerprint: u64,
+    runs: std::sync::Arc<Vec<ResultRun>>,
+}
+
+/// The row model `build` makes, built again only when the retained runs or
+/// `fingerprint` changed since the frame that last built it.
+fn browser_rows(
+    ctx: &egui::Context,
+    state: &ResultsParts<'_>,
+    fingerprint: u64,
+    build: impl FnOnce() -> Vec<ResultRun>,
+) -> std::sync::Arc<Vec<ResultRun>> {
+    let id = egui::Id::new("rspice.results.browser.row-model");
+    let revision = state.model.simulation.retained.runs.revision();
+    if let Some(kept) = ctx.data(|data| data.get_temp::<BrowserRows>(id))
+        && kept.revision == revision
+        && kept.fingerprint == fingerprint
+    {
+        return kept.runs;
+    }
+    crate::workbench::documents::result_document::frame_work::note(
+        crate::workbench::documents::result_document::frame_work::DatasetWalk::BrowserRows,
+    );
+    let runs = std::sync::Arc::new(build());
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            id,
+            BrowserRows {
+                revision,
+                fingerprint,
+                runs: std::sync::Arc::clone(&runs),
+            },
+        );
+    });
+    runs
+}
+
+/// Everything besides the retained runs themselves that the row model reads,
+/// as one number: the data version, the query, the facets, what is ticked,
+/// the reader's recent signals, the active run, and each analysis's
+/// integrity and currentness.
+fn browser_rows_fingerprint(
+    state: &ResultsParts<'_>,
+    integrity: &std::collections::HashMap<AnalysisPresentationKey, bool>,
+    (kind, layout, scope, producer, show_internal): (
+        ResultsBrowserKind,
+        ResultsBrowserLayout,
+        ResultsBrowserScope,
+        Option<AnalysisPresentationKey>,
+        bool,
+    ),
+    ticked: &std::collections::HashSet<ResultBrowserSelectionKey>,
+    (active_run, expression_query_match): (Option<usize>, bool),
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let stable = rspice_results_ui::waves::stable_hash;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    state.model.simulation.view.data_version.hash(&mut hasher);
+    state.workbench.navigator_filter().hash(&mut hasher);
+    (kind as u8, layout as u8, scope as u8).hash(&mut hasher);
+    (producer, show_internal, active_run, expression_query_match).hash(&mut hasher);
+    // A set's order is its hasher's: combine its members in any order.
+    ticked
+        .iter()
+        .fold(0_u64, |combined, key| combined ^ stable(key))
+        .hash(&mut hasher);
+    ticked.len().hash(&mut hasher);
+    state.results.session.recent_signals.hash(&mut hasher);
+    state
+        .results
+        .session
+        .recent_result_artifacts
+        .hash(&mut hasher);
+    let reads = state.results_reads();
+    for run in state.model.simulation.retained.runs.iter() {
+        let valid = |analysis: &crate::state::AnalysisResult| {
+            integrity
+                .get(&AnalysisPresentationKey::new(run.dataset_id, analysis))
+                .copied()
+                .unwrap_or(false)
+        };
+        crate::workbench::documents::result_document::operational_state::run_currentness(
+            reads, run, valid,
+        )
+        .id()
+        .hash(&mut hasher);
+        for analysis in &run.analyses {
+            let valid = valid(analysis);
+            (
+                valid,
+                crate::workbench::documents::result_document::operational_state::analysis_currentness(
+                    reads, run, analysis, valid,
+                )
+                .id(),
+            )
+                .hash(&mut hasher);
+        }
+    }
+    hasher.finish()
 }
 
 /// Quantity-kind facet of the browser toolbar.
