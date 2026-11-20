@@ -1448,7 +1448,7 @@ mod tests {
             );
             assert_eq!(
                 app.availability(key),
-                CommandAvailability::Disabled("command is unavailable in this context"),
+                CommandAvailability::Disabled("the report editor is not open"),
                 "off the report route, {left_out:?} is the feature's to refuse"
             );
             assert!(!app.is_enabled(key), "{left_out:?}");
