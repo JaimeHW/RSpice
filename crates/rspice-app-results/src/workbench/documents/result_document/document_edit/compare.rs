@@ -360,6 +360,13 @@ pub(crate) struct Running {
     request: Request,
 }
 
+/// A difference's tolerance band, `None` where none can be drawn, with the
+/// evaluation of the difference it was read from.
+type DrawnBand = (
+    u64,
+    Option<Arc<rspice_results_ui::waves::pane::ToleranceBand>>,
+);
+
 /// The comparison that last answered, as its report states it.
 #[derive(Debug)]
 pub(crate) struct Finished {
@@ -372,15 +379,7 @@ pub(crate) struct Finished {
     relative_tolerance: f64,
     /// Each drawn difference's tolerance band, by the difference's text,
     /// with the evaluation it was read from.
-    bands: Mutex<
-        HashMap<
-            String,
-            (
-                u64,
-                Option<Arc<rspice_results_ui::waves::pane::ToleranceBand>>,
-            ),
-        >,
-    >,
+    bands: Mutex<HashMap<String, DrawnBand>>,
     /// The X span of each place, a list per compared signal.
     place_spans: Vec<Arc<[(f64, f64)]>>,
     candidate: String,
@@ -536,12 +535,8 @@ pub fn settle_comparison(state: &mut ResultsParts<'_>) {
     }
 }
 
-fn answered(
-    state: &mut ResultsParts<'_>,
-    request: &Request,
-    answer: Result<ComparisonOutcome, String>,
-) {
-    if let Err(error) = answer.and_then(|found| finish(state, request, found)) {
+fn answered(state: &mut ResultsParts<'_>, request: &Request, answer: worker::Answer) {
+    if let Err(error) = answer.and_then(|found| finish(state, request, *found)) {
         state.prompt(error);
     }
 }

@@ -71,16 +71,20 @@ impl Job {
     }
 }
 
+/// What a comparison answers: its outcome, boxed so the progress messages
+/// that precede it stay small, or why it has none.
+pub(crate) type Answer = Result<Box<ComparisonOutcome>, String>;
+
 enum Message {
     Progress(usize, usize),
-    Done(Result<ComparisonOutcome, String>),
+    Done(Answer),
 }
 
 /// Where a running comparison has got.
 pub(crate) enum Poll {
     /// Signals compared, of how many.
     Running(usize, usize),
-    Done(Result<ComparisonOutcome, String>),
+    Done(Answer),
 }
 
 /// A comparison running, or answered and not yet collected.
@@ -111,7 +115,7 @@ impl Worker {
                     let _ = sender.send(Message::Progress(done, total));
                     !stop.load(Ordering::Relaxed)
                 };
-                let answer = job.run(&mut progress);
+                let answer = job.run(&mut progress).map(Box::new);
                 let _ = sender.send(Message::Done(answer));
             }
         };
@@ -154,7 +158,7 @@ impl Worker {
 
     /// Wait for the answer.
     #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn wait(&self) -> Result<ComparisonOutcome, String> {
+    pub(crate) fn wait(&self) -> Answer {
         let messages = lock(&self.messages);
         loop {
             match messages.recv() {
