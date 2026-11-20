@@ -261,3 +261,49 @@ fn a_stored_waveform_tiles_fits_and_reads_cursors_from_its_store_as_from_its_val
     .unwrap();
     assert!(out.tile_over(&other, 0.0, 1.0, 10).is_none());
 }
+
+#[test]
+fn a_segment_left_without_its_end_closes_again_on_its_rows_and_states_its_digest() {
+    let schema = Schema {
+        x: Default::default(),
+        signals: vec![Signal::new("out", "V", SignalKind::Real)],
+    };
+    let (path, io) = create_segment().unwrap();
+    let mut writer =
+        rspice_results_store::SegmentWriter::create(io, &schema, &RunMeta::default()).unwrap();
+    for row in 0..10_000u64 {
+        writer
+            .push_row(row as f64 * 1e-9, &[row as f64 * 0.5])
+            .unwrap();
+    }
+    // The run stops here: the rows of its whole chunks are on disk, its `END` is not.
+    drop(writer);
+    let mut recovered = SegmentReader::open(FileIo::open(&path).unwrap()).unwrap();
+    assert_eq!(
+        *recovered.state(),
+        rspice_results_store::SegmentState::Recovered
+    );
+    let kept = recovered.rows();
+    assert!(kept > 0, "whole chunks were kept");
+    let read = recovered.digest().unwrap();
+    drop(recovered);
+
+    let closed = close_recovered_segment(
+        &path,
+        RunStatus::Stopped(rspice_results_store::StopReason::StorageBudget),
+    )
+    .expect("the segment closes again");
+    assert_eq!(closed.rows(), kept, "closing kept every row");
+    let rspice_results_store::SegmentState::Complete { digest, .. } = closed.state() else {
+        panic!("the segment states its end");
+    };
+    assert_eq!(*digest, read, "the digest is that of the rows it kept");
+    let run = StoredRun::temporary(StoreReader::new(closed), path.clone()).shared();
+    assert_eq!(
+        run.reader().digest(),
+        Some(read),
+        "its columns have an identity"
+    );
+    drop(run);
+    assert!(!path.exists());
+}

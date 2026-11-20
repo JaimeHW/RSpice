@@ -246,6 +246,30 @@ pub fn write_finished_segment(
     Ok(StoredRun::temporary(rspice_results::store_reader::StoreReader::new(reader), path).shared())
 }
 
+/// The segment at `path` that its run left without `END`, closed again on the rows it kept with
+/// `status`: it then states its logical digest, read once here, so the run is kept and saved by
+/// reference instead of being hashed and written sample by sample. `None` when it cannot be
+/// closed (a volume with no room left for `END`) or holds no row, leaving it as it was.
+pub(crate) fn close_recovered_segment(
+    path: &Path,
+    status: rspice_results_store::RunStatus,
+) -> Option<rspice_results_store::SegmentReader<rspice_results::store_reader::SegmentBytes>> {
+    let through = rspice_results_store::SegmentReader::open(FileIo::open(path).ok()?)
+        .ok()?
+        .x_range()?
+        .1;
+    let writer = rspice_results_store::SegmentWriter::reopen(
+        TemporaryIo(FileIo::open_writable(path).ok()?),
+        through,
+    )
+    .ok()?;
+    let (_, io) = writer.finish(status).ok()?;
+    rspice_results_store::SegmentReader::open(
+        Box::new(io.into_file()) as rspice_results::store_reader::SegmentBytes
+    )
+    .ok()
+}
+
 /// A segment of this process's store folder, as its run writes it.
 ///
 /// Nothing reads the segment once this process ends: the last waveform that reads it deletes

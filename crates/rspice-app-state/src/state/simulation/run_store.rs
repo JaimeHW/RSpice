@@ -53,7 +53,15 @@ type FillSegment<'a> = dyn FnMut(&mut PushRows<'_>) -> Result<(), StoreError> + 
 /// Makes a finished segment of a schema from the rows its filler pushes.
 type MakeSegment = fn(&Schema, &RunMeta, &mut FillSegment<'_>) -> Result<Arc<Segment>, String>;
 
-/// Whether any series of `waveform` is held in memory.
+/// Whether a saved file can name `values`: a window of a segment that states its digest. A
+/// segment its run left without `END` states none, and is kept again as if in memory, read once.
+fn named_by_store(values: &WaveformValues) -> bool {
+    values
+        .stored_window()
+        .is_some_and(|(source, _)| source.identity().is_some())
+}
+
+/// Whether any series of `waveform` is held in memory, or in a segment that states no digest.
 fn holds_memory(waveform: &RetainedWaveform) -> bool {
     let complex = waveform
         .complex
@@ -62,10 +70,11 @@ fn holds_memory(waveform: &RetainedWaveform) -> bool {
     [&waveform.x, &waveform.y]
         .into_iter()
         .chain(complex)
-        .any(|values| !values.is_stored())
+        .any(|values| !named_by_store(values))
 }
 
-/// Whether any waveform of `analysis` holds a series in memory.
+/// Whether any waveform of `analysis` holds a series in memory, or in a segment that states no
+/// digest: one a saved file cannot name.
 pub fn holds_samples_in_memory<W: AsRef<RetainedWaveform>>(
     analysis: &RetainedAnalysisResult<W>,
 ) -> bool {

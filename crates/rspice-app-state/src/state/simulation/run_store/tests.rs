@@ -98,3 +98,92 @@ fn a_finished_analysis_keeps_every_sample_in_the_process_store() {
 fn a_finished_analysis_keeps_every_sample_in_a_store_held_in_memory() {
     assert_kept(store_analysis_in_memory);
 }
+
+/// A waveform of 20,000 rows read from a segment whose `END` was lost: its rows are readable and
+/// it states no digest.
+fn waveform_of_a_segment_without_its_end() -> RetainedWaveform {
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: vec![Signal::new("V(out)", "V", SignalKind::Real)],
+    };
+    /// Memory a test reads back after the writer that wrote it is gone.
+    #[derive(Clone, Default)]
+    struct SharedIo(Arc<std::sync::Mutex<MemoryIo>>);
+    use rspice_results_store::SegmentIo;
+    impl SegmentIo for SharedIo {
+        fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+            self.0.lock().unwrap().read_at(offset, buf)
+        }
+        fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
+            self.0.lock().unwrap().write_at(offset, data)
+        }
+        fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+            self.0.lock().unwrap().truncate(len)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.0.lock().unwrap().flush()
+        }
+        fn size(&self) -> std::io::Result<u64> {
+            self.0.lock().unwrap().size()
+        }
+    }
+    let io = SharedIo::default();
+    let mut writer = SegmentWriter::create(io.clone(), &schema, &RunMeta::default()).unwrap();
+    for row in 0..20_000_u32 {
+        let t = f64::from(row) * 1e-9;
+        writer.push_row(t, &[(t * 1e6).sin()]).unwrap();
+    }
+    // The run stops here: what it synced is on disk, its `END` is not.
+    writer.sync().unwrap();
+    drop(writer);
+    let bytes = io.0.lock().unwrap().bytes().to_vec();
+    let reader =
+        SegmentReader::open(Box::new(MemoryIo::from_bytes(bytes)) as SegmentBytes).unwrap();
+    assert_eq!(
+        *reader.state(),
+        rspice_results_store::SegmentState::Recovered
+    );
+    let segment = Segment::kept(StoreReader::new(reader), std::path::PathBuf::new()).shared();
+    let window = StoredWindow {
+        first: 0,
+        rows: segment.rows(),
+        lead: WindowLead::None,
+    };
+    assert!(window.rows > 0);
+    let column = |slot, name: &str| {
+        WaveformValues::stored(
+            SegmentColumn::new(Arc::clone(&segment), slot, name.to_owned()),
+            window,
+        )
+        .unwrap()
+    };
+    RetainedWaveform::new("V(out)", column(None, "time"), column(Some(0), "V(out)")).with_unit("V")
+}
+
+#[test]
+fn a_waveform_of_a_segment_that_states_no_digest_is_kept_again_where_a_file_can_name_it() {
+    let mut analysis = RetainedAnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0);
+    analysis.waveforms = vec![waveform_of_a_segment_without_its_end()];
+    let before = analysis.waveforms[0].clone();
+    assert!(before.y.is_stored());
+    assert!(
+        rspice_results::store_reader::ColumnReference::of(&before.y).is_none(),
+        "a segment without its end names no digest"
+    );
+    assert!(holds_samples_in_memory(&analysis), "a file cannot name it");
+
+    store_analysis_in_memory(&mut analysis).unwrap();
+    let after = &analysis.waveforms[0];
+    assert!(!holds_samples_in_memory(&analysis));
+    for (kept, read) in [(&after.x, &before.x), (&after.y, &before.y)] {
+        assert!(rspice_results::store_reader::ColumnReference::of(kept).is_some());
+        assert_eq!(bits(kept), bits(read));
+    }
+    assert!(
+        after.x.is_ascending_axis(),
+        "its time axis is the new segment's own"
+    );
+}

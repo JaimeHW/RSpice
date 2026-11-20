@@ -23,7 +23,10 @@ use rspice_results::stored_transient::{
     instance_parameters, slot_targets,
 };
 use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
-use rspice_results_store::{FileIo, SegmentReader, StoreError, StoreSink, WatchedIo, WatchedSink};
+use rspice_results_store::{
+    FileIo, RunStatus, SegmentReader, SegmentState, StopReason, StoreError, StoreSink, WatchedIo,
+    WatchedSink,
+};
 use rspice_simulation_contract::resource_failure::ResourceFailure;
 use rspice_simulation_contract::result_storage::ResultStorageFailure;
 
@@ -184,6 +187,30 @@ impl EngineBridge {
                 return Err(store_failure(&path, error));
             }
         };
+        // A run its volume or budget stopped as it handed over its events left its segment
+        // without `END`: closed again on the rows it kept, it states its digest, so the run is
+        // kept and saved by reference. A volume with no room left for `END` keeps it as it is.
+        let reader = match (reader.state(), &stopped) {
+            (SegmentState::Recovered, Some(stop)) => {
+                let status = RunStatus::Stopped(match stop {
+                    SinkStop::StorageBudget { .. } => StopReason::StorageBudget,
+                    _ => StopReason::DiskFull,
+                });
+                drop(reader);
+                match crate::results_store::close_recovered_segment(&path, status) {
+                    Some(closed) => closed,
+                    None => FileIo::open(&path)
+                        .map_err(StoreError::from)
+                        .and_then(|io| SegmentReader::open(Box::new(io) as SegmentBytes))
+                        .map_err(|error| store_failure(&path, error))?,
+                }
+            }
+            _ => reader,
+        };
+        let digest = digest.or(match reader.state() {
+            SegmentState::Complete { digest, .. } => Some(digest.0),
+            SegmentState::Recovered => None,
+        });
         let bytes = std::fs::metadata(&path).map_or(0, |meta| meta.len());
         let run = StoredRun::temporary(StoreReader::new(reader), path.clone()).shared();
         let (shell, targets, parameters) = run
