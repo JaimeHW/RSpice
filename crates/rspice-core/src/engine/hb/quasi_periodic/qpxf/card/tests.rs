@@ -62,7 +62,9 @@ fn qpxf_card_round_trip_preserves_every_control_and_selection() {
         );
     }
     let mut escaped = default;
-    escaped.input_sources = QpxfSources::Named(vec!["X one:\"probe\\path".into()]);
+    // Quoted punctuation never injects a keyword on writing, and a backslash
+    // is kept as written.
+    escaped.input_sources = QpxfSources::Named(vec!["X one:probe\\path".into()]);
     escaped.output = QpxfOutput::BranchCurrent {
         branch: "probe) AXIS=oops".into(),
     };
@@ -70,6 +72,10 @@ fn qpxf_card_round_trip_preserves_every_control_and_selection() {
         escaped,
         QpxfRequest::from_qpxf_card(&parse(&escaped.to_spice().unwrap()).unwrap()).unwrap()
     );
+    // A name holding a quote would end its string early, so it is refused.
+    let mut quoted = escaped.clone();
+    quoted.input_sources = QpxfSources::Named(vec!["X one:\"probe".into()]);
+    assert!(quoted.to_spice().is_err());
     let signed = QpxfRequest::from_qpxf_card(
         &parse(".QPXF LIN 5 -100 100 OUT=V(out) OUTLATTICE=(0,0)").unwrap(),
     )

@@ -37,12 +37,14 @@ impl QpacRequest {
                 "input and output tuples need the same number of coordinates (at least two)",
             ));
         }
+        // A card writes each name between quotes as written, and a deck
+        // string ends at its next quote, so a name cannot hold one.
         if [&self.input_source, &self.output_node, &self.output_ref]
             .iter()
-            .any(|name| name.trim().is_empty() || name.contains(['\r', '\n']))
+            .any(|name| name.trim().is_empty() || name.contains(['\r', '\n', '"']))
         {
             return Err(qpac_error(
-                "input source, output node and reference must be nonempty single-line names",
+                "input source, output node and reference must be nonempty single-line names without a double quote",
             ));
         }
         if !self.magnitude.is_finite() || self.magnitude <= 0.0 || !self.phase_degrees.is_finite() {

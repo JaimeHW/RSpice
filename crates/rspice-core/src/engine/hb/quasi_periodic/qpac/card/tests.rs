@@ -41,14 +41,19 @@ fn qpac_card_round_trip_preserves_sweeps_arbitrary_tuples_and_all_controls() {
     assert_eq!(default.solver, QuasiPeriodicAcConfig::default());
     assert_eq!((default.magnitude, default.phase_degrees), (1.0, 0.0));
     assert_eq!(default.offsets_hz, [0.0]);
-    // Escaped punctuation never injects an extra card or keyword on writing.
+    // Quoted punctuation never injects an extra card or keyword on writing,
+    // and a backslash is kept as written.
     let mut names = default.clone();
-    names.input_source = "X one:\"probe\\path".into();
+    names.input_source = "X one:probe\\path".into();
     names.output_node = "out) MAG=99".into();
     assert_eq!(
         names,
         QpacRequest::from_qpac_card(&parse(&names.to_spice().unwrap()).unwrap()).unwrap()
     );
+    // A name holding a quote would end its string early, so it is refused.
+    names.input_source = "X one:\"probe".into();
+    let refusal = names.to_spice().unwrap_err().to_string();
+    assert!(refusal.contains("double quote"), "{refusal}");
 }
 
 #[test]

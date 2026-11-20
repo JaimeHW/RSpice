@@ -87,8 +87,10 @@ pub struct QpnoiseRequest {
     pub noise_figure: Option<QpnoiseNoiseFigure>,
     pub linear: QuasiPeriodicLinearConfig,
 }
+/// A card writes each name between quotes as written, and a deck string ends
+/// at its next quote, so a name cannot hold one.
 fn name(value: &str) -> bool {
-    !value.trim().is_empty() && !value.contains(['\r', '\n'])
+    !value.trim().is_empty() && !value.contains(['\r', '\n', '"'])
 }
 fn tuples_valid(tuples: &[Vec<i32>], dimensions: usize) -> bool {
     let mut seen = BTreeSet::new();

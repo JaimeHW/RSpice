@@ -57,7 +57,9 @@ fn qpnoise_card_roundtrip_preserves_all_measurement_and_solver_controls() {
     )
     .unwrap();
     assert_eq!(req.frequencies_hz, [-100.0, -50.0, 0.0, 50.0, 100.0]);
-    req.sources = QpnoiseSources::Only(vec!["X one:\"probe\\path thermal".into()]);
+    // Quoted punctuation never injects a keyword on writing, and a backslash
+    // is kept as written.
+    req.sources = QpnoiseSources::Only(vec!["X one:probe\\path thermal".into()]);
     req.outputs[0].observation = QpnoiseObservation::BranchCurrent {
         branch: "probe) AXIS=oops".into(),
     };
@@ -65,6 +67,9 @@ fn qpnoise_card_roundtrip_preserves_all_measurement_and_solver_controls() {
         req,
         QpnoiseRequest::from_qpnoise_card(&parse(&req.to_spice().unwrap()).unwrap()).unwrap()
     );
+    // A name holding a quote would end its string early, so it is refused.
+    req.sources = QpnoiseSources::Only(vec!["X one:\"probe thermal".into()]);
+    assert!(req.to_spice().is_err());
 }
 #[test]
 fn qpnoise_card_rejects_inert_ambiguous_and_unbounded_options() {

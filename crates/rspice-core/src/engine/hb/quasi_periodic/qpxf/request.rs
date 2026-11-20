@@ -86,7 +86,9 @@ impl QpxfRequest {
         if dimensions < 2 {
             return Err(qpxf_error("output tuple needs at least two coordinates"));
         }
-        let valid_name = |name: &str| !name.trim().is_empty() && !name.contains(['\r', '\n']);
+        // A card writes each name between quotes as written, and a deck
+        // string ends at its next quote, so a name cannot hold one.
+        let valid_name = |name: &str| !name.trim().is_empty() && !name.contains(['\r', '\n', '"']);
         let valid_output = match &self.output {
             QpxfOutput::Voltage { positive, negative } => {
                 valid_name(positive)
