@@ -9,7 +9,9 @@ use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 mod jump;
-pub use jump::{CursorJump, crossing_level, jump_cursor, jump_trace};
+pub use jump::{
+    CursorJump, crossing_level, jump_cursor, jump_trace, place_stepping_cursor, stepping_from,
+};
 
 pub const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
 

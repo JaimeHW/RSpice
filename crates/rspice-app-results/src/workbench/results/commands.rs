@@ -61,6 +61,12 @@ pub enum ResultsCommand {
     CursorToNextCrossing,
     /// Move the stepping cursor to the previous crossing of the level.
     CursorToPreviousCrossing,
+    /// Move the stepping cursor to the next place the compared runs part by
+    /// more than the tolerance.
+    CursorToNextDifference,
+    /// Move the stepping cursor to the previous place the compared runs
+    /// part by more than the tolerance.
+    CursorToPreviousDifference,
     /// Hand the arrow keys and the jumps to the other cursor of the pair.
     SwitchSteppingCursor,
     /// Place a point marker on the trace at cursor A.
@@ -100,7 +106,7 @@ const PROJECT_TRANSACTION: CommandFlags =
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 53] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -149,6 +155,8 @@ impl ResultsCommand {
         Self::CursorToPreviousPeak,
         Self::CursorToNextCrossing,
         Self::CursorToPreviousCrossing,
+        Self::CursorToNextDifference,
+        Self::CursorToPreviousDifference,
         Self::SwitchSteppingCursor,
         Self::MarkerAtCursor,
         Self::FitYToVisibleX,
@@ -187,6 +195,8 @@ impl ResultsCommand {
             Self::CursorToPreviousPeak => CommandKey::new("cursor-to-previous-peak"),
             Self::CursorToNextCrossing => CommandKey::new("cursor-to-next-crossing"),
             Self::CursorToPreviousCrossing => CommandKey::new("cursor-to-previous-crossing"),
+            Self::CursorToNextDifference => CommandKey::new("cursor-to-next-difference"),
+            Self::CursorToPreviousDifference => CommandKey::new("cursor-to-previous-difference"),
             Self::SwitchSteppingCursor => CommandKey::new("switch-stepping-cursor"),
             Self::MarkerAtCursor => CommandKey::new("marker-at-cursor"),
             Self::FitYToVisibleX => CommandKey::new("fit-y-to-visible-x"),
@@ -339,6 +349,8 @@ impl ResultsCommand {
             Self::CursorToPreviousPeak => cursor_command("Cursor to previous peak"),
             Self::CursorToNextCrossing => cursor_command("Cursor to next crossing"),
             Self::CursorToPreviousCrossing => cursor_command("Cursor to previous crossing"),
+            Self::CursorToNextDifference => cursor_command("Cursor to next difference"),
+            Self::CursorToPreviousDifference => cursor_command("Cursor to previous difference"),
             Self::SwitchSteppingCursor => cursor_command("Step the other cursor"),
             Self::MarkerAtCursor => cursor_command("Place marker at cursor A"),
             Self::FitYToVisibleX => (

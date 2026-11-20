@@ -619,6 +619,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::CursorToPreviousPeak.key(),
     ResultsCommand::CursorToNextCrossing.key(),
     ResultsCommand::CursorToPreviousCrossing.key(),
+    ResultsCommand::CursorToNextDifference.key(),
+    ResultsCommand::CursorToPreviousDifference.key(),
     ResultsCommand::SwitchSteppingCursor.key(),
     ResultsCommand::MarkerAtCursor.key(),
     ResultsCommand::FitYToVisibleX.key(),

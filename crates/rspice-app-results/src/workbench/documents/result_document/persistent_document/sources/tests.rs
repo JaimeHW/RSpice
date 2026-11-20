@@ -234,6 +234,48 @@ fn one_view_compares_three_runs() {
     );
 }
 
+/// A difference from the baseline is kept with the view as its text and the
+/// two runs it reads, by reference, never as samples.
+#[test]
+fn a_difference_from_the_baseline_is_kept_with_both_runs_it_reads() {
+    let runs = [run(1, 2, 64, 0.0), run(2, 2, 64, 0.5)];
+    let mut state = host(&[&runs[0], &runs[1]]);
+    let document_id = save_view(&mut state);
+    compare_with(&mut state, &runs[1]);
+    // The difference is added inside the pane's frame, between its
+    // projection and its capture, as the expression editor commits it.
+    let pane = super::super::projection(state.results_reads(), document_id)
+        .expect("the document projects")
+        .pages[0]
+        .panes[0]
+        .clone();
+    let viewer = super::super::super::ResultViewer::from_viewer_document_id(&pane.viewer_id)
+        .expect("the pane names a Results viewer");
+    super::super::project_pane_presentation(&mut state.results_parts(), &pane, viewer)
+        .expect("the pane projects onto its strip");
+    let text = "V(n0) - V(n0)@baseline";
+    let key =
+        super::super::super::AnalysisPresentationKey::new(runs[0].dataset_id, &runs[0].analyses[0]);
+    state
+        .results
+        .results
+        .add_expression_trace(&state.model.simulation, key, text.to_owned())
+        .expect("the strip accepts the difference");
+    super::super::capture_pane_presentation(&mut state.results_parts(), &pane, viewer);
+    let saved = document(&state, document_id);
+    let kept = saved
+        .expression_traces()
+        .iter()
+        .find(|trace| trace.text == text)
+        .expect("the view keeps the difference");
+    let read: Vec<_> = kept
+        .datasets
+        .iter()
+        .map(|binding| binding.dataset_id)
+        .collect();
+    assert_eq!(read, [runs[0].dataset_id, runs[1].dataset_id]);
+}
+
 #[test]
 fn a_saved_views_runs_and_its_comparison_baseline_outlive_twenty_one_result_imports() {
     use crate::workbench::workflows::result_import_workflow::{

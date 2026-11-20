@@ -222,10 +222,9 @@ fn a_comparison_of_three_chosen_signals_reads_only_those() {
     );
 }
 
-/// The report states the comparison and lists the places the runs part, the
-/// same places the comparison found.
-#[test]
-fn the_report_lists_every_place_the_runs_part() {
+/// Two runs of six samples whose V(out) parts by more than 100 mV from 1 ms
+/// to 2 ms and at 5 ms, the first compared with the second.
+fn parted_comparison() -> ResultsTestHost {
     let mut host = ResultsTestHost::default();
     let time = vec![0.0, 1.0e-3, 2.0e-3, 3.0e-3, 4.0e-3, 5.0e-3];
     let mut runs = Vec::new();
@@ -253,7 +252,29 @@ fn the_report_lists_every_place_the_runs_part() {
     draft.absolute_tolerance = "100m".to_owned();
     let outcome = compare_draft(&mut host, draft);
     assert_eq!(outcome.signals[0].verdict, Verdict::Fail);
+    host
+}
 
+/// The places the report lists.
+fn reported_places(host: &mut ResultsTestHost) -> Vec<String> {
+    let io =
+        crate::workbench::documents::result_document::test_fixtures::MockExportWorkflowIo::default(
+        );
+    save_report_with_io(&mut host.results_parts(), &io);
+    let files = io.text_files.borrow();
+    let (_, text) = files.first().expect("the report is written");
+    text.lines()
+        .skip_while(|line| !line.starts_with("Where the runs part"))
+        .skip(2)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The report states the comparison and lists the places the runs part, the
+/// same places the comparison found.
+#[test]
+fn the_report_lists_every_place_the_runs_part() {
+    let mut host = parted_comparison();
     let io =
         crate::workbench::documents::result_document::test_fixtures::MockExportWorkflowIo::default(
         );
@@ -279,4 +300,55 @@ fn the_report_lists_every_place_the_runs_part() {
     );
     assert!(text.contains("Aligned by X value"), "{text}");
     assert!(text.contains("V(out)  3 of 6"), "{text}");
+}
+
+/// Next difference moves the stepping cursor to the first sample outside
+/// the tolerance of each place the report lists, in order, and no further;
+/// Previous difference steps back.
+#[test]
+fn next_difference_lands_on_each_place_the_report_lists() {
+    use rspice_results::feature_search::Direction;
+
+    let mut host = parted_comparison();
+    let places = reported_places(&mut host);
+    let tokens = crate::ui::tokens::Tokens::default();
+    let mut step = |direction| step_difference(&mut host.results_parts(), &tokens, direction);
+    let mut landed = Vec::new();
+    while let Ok(x) = step(Direction::Next) {
+        landed.push(x);
+    }
+    assert_eq!(landed, [1.0e-3, 5.0e-3]);
+    let refusal = step(Direction::Next).expect_err("no place follows the last");
+    assert!(refusal.contains("after the cursor"), "{refusal}");
+    assert_eq!(step(Direction::Previous), Ok(1.0e-3));
+    let session = &host.results.results.session;
+    assert_eq!(session.cursors.get(session.stepping_cursor), Some(1.0e-3));
+    // Each place the report lists starts where a step landed.
+    assert_eq!(places.len(), landed.len(), "{places:?}");
+    for (place, from) in places.iter().zip(["1 ms", "5 ms"]) {
+        assert!(place.starts_with(&format!("V(out)  {from}")), "{place}");
+    }
+}
+
+/// Plot difference draws the difference of each signal that parts from the
+/// baseline on the result's strip, read through the pinned baseline, and
+/// Next difference is offered.
+#[test]
+fn plot_difference_draws_each_parted_signal_less_its_baseline() {
+    let mut host = parted_comparison();
+    plot_difference(&mut host.results_parts()).expect("V(out) can be named");
+    let simulation = &host.model.simulation;
+    let run = simulation.active_run().expect("a run is shown");
+    let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    let drawn: Vec<&str> = host.results.results.session.analysis_exprs[&key]
+        .iter()
+        .map(|expr| expr.text.as_str())
+        .collect();
+    assert_eq!(drawn, ["V(out) - V(out)@baseline"]);
+    let baseline = simulation.retained.runs[1].dataset_id;
+    assert_eq!(
+        pinned_baseline(host.results_reads(), run.dataset_id),
+        Some(baseline)
+    );
+    assert!(compared(host.results_reads()));
 }

@@ -491,10 +491,112 @@ pub struct PanePlot<'a> {
     pub cursors: Option<CursorPair>,
     pub specification_limits: Vec<plot::LimitLine>,
     pub markers: Vec<plot::Marker>,
+    /// What the comparison that last answered marks on the pane.
+    pub comparison: ComparisonMarks,
     pub expressions: &'a [ResolvedExpr],
     pub family_envelopes: &'a [FamilyEnvelopeSeries],
     /// Hit testing is only needed for marker placement or a newly anchored cursor A.
     pub find_nearest: bool,
+}
+
+/// The tolerance a difference is judged against, drawn as the band about
+/// zero the difference may stay inside: at each X, the absolute tolerance
+/// and the relative one's share of the baseline there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToleranceBand {
+    pub x: Vec<f64>,
+    /// How far from zero the difference may stand at each X.
+    pub half_width: Vec<f64>,
+    pub color: egui::Color32,
+}
+
+impl ToleranceBand {
+    /// The Y interval the band spans.
+    #[must_use]
+    pub fn extremes(&self) -> Option<(f64, f64)> {
+        let widest = self
+            .half_width
+            .iter()
+            .copied()
+            .filter(|width| width.is_finite())
+            .fold(None, |widest: Option<f64>, width| {
+                Some(widest.map_or(width, |widest| widest.max(width)))
+            })?;
+        Some((-widest, widest))
+    }
+}
+
+/// What a comparison marks on a pane: the places its runs part by more than
+/// the tolerance, and the tolerance band of a difference drawn there.
+#[derive(Debug, Clone, Default)]
+pub struct ComparisonMarks {
+    /// The X span of each place, a list per compared signal the pane draws.
+    pub places: Vec<Arc<[(f64, f64)]>>,
+    pub place_color: egui::Color32,
+    pub tolerance: Option<Arc<ToleranceBand>>,
+}
+
+impl ComparisonMarks {
+    fn is_empty(&self) -> bool {
+        self.places.iter().all(|places| places.is_empty()) && self.tolerance.is_none()
+    }
+}
+
+/// Shade each place across the plot, at least a few points wide so a place
+/// of one sample shows at any zoom.
+fn paint_places(
+    painter: &egui::Painter,
+    mapper: &plot::PlotMapper,
+    places: &[Arc<[(f64, f64)]>],
+    color: egui::Color32,
+) {
+    const NARROWEST: f32 = 3.0;
+    let rect = mapper.rect;
+    for &(first, last) in places.iter().flat_map(|places| places.iter()) {
+        let (left, right) = (mapper.x(first), mapper.x(last));
+        let (left, right) = (left.min(right), left.max(right));
+        let grow = ((NARROWEST - (right - left)) * 0.5).max(0.0);
+        let (left, right) = (
+            (left - grow).max(rect.left()),
+            (right + grow).min(rect.right()),
+        );
+        if left < right {
+            painter.rect_filled(
+                egui::Rect::from_x_y_ranges(left..=right, rect.y_range()),
+                0.0,
+                color,
+            );
+        }
+    }
+}
+
+/// Fill the band between `-half_width` and `half_width`, a quad per pair of
+/// samples a point or more apart on screen.
+fn paint_tolerance(painter: &egui::Painter, mapper: &plot::PlotMapper, band: &ToleranceBand) {
+    let mut mesh = egui::Mesh::default();
+    let mut last: Option<(f32, f32, f32)> = None;
+    for (&x, &width) in band.x.iter().zip(&band.half_width) {
+        if !(x.is_finite() && width.is_finite()) {
+            last = None;
+            continue;
+        }
+        let (sx, top, bottom) = (mapper.x(x), mapper.y(width), mapper.y(-width));
+        if let Some((px, ptop, pbottom)) = last {
+            if sx - px < 1.0 && sx >= px {
+                continue;
+            }
+            let base = mesh.vertices.len() as u32;
+            for (vx, vy) in [(px, ptop), (sx, top), (sx, bottom), (px, pbottom)] {
+                mesh.colored_vertex(egui::pos2(vx, vy), band.color);
+            }
+            mesh.add_triangle(base, base + 1, base + 2);
+            mesh.add_triangle(base, base + 2, base + 3);
+        }
+        last = Some((sx, top, bottom));
+    }
+    if !mesh.is_empty() {
+        painter.add(egui::Shape::mesh(mesh));
+    }
 }
 
 pub struct PanePlotResponse<'a> {
@@ -794,6 +896,22 @@ pub fn show_plot<'a>(
         let (band_scale, band_range) = (spec.y_scale, (spec.y.min, spec.y.max));
         spec.underlay = Some(Box::new(move |painter, mapper| {
             paint_family_bands(painter, mapper.rect, &bands, band_scale, band_range);
+        }));
+    }
+    // The places the runs part and the tolerance band of a difference lie
+    // under every curve; the band only on a linear axis, where zero and the
+    // band about it can be drawn.
+    if !input.comparison.is_empty() {
+        let marks = input.comparison;
+        let under = spec.underlay.take();
+        spec.underlay = Some(Box::new(move |painter, mapper| {
+            paint_places(painter, mapper, &marks.places, marks.place_color);
+            if let Some(tolerance) = marks.tolerance.as_deref().filter(|_| !log_y) {
+                paint_tolerance(painter, mapper, tolerance);
+            }
+            if let Some(under) = &under {
+                under(painter, mapper);
+            }
         }));
     }
 

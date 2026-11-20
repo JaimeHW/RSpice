@@ -223,6 +223,9 @@ pub(crate) enum ExpressionSource {
 pub struct ExpressionWaveform {
     pub(crate) source: ExpressionSource,
     pub(crate) waveform: crate::state::RetainedTrace,
+    /// How a signal read from another run was brought onto this axis
+    /// (`Run 2, linear`), when the expression reads one.
+    pub(crate) reading: Option<String>,
 }
 /// Whether retained evidence belongs to the stable analysis authored in the
 /// simulation plan. Deterministically expanded executions (for example PVT

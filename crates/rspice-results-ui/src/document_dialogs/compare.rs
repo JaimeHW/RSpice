@@ -130,14 +130,16 @@ pub struct CompareOutcome {
 
 /// Show the form, or the outcome once Compare has run. `Primary` on the form
 /// asks the host to run the comparison, and `Cancelled` while it runs asks
-/// the host to stop it; on the outcome `Primary` closes and `Ghost` asks for
-/// the comparison as a text report.
+/// the host to stop it; on the outcome `Primary` closes, `Secondary` asks
+/// for each difference from the baseline drawn on the result's strip, and
+/// `Ghost` asks for the comparison as a text report.
 pub fn show(ctx: &Context, draft: &mut CompareDraft, choices: &CompareChoices) -> DialogChoice {
     if let Some(outcome) = &draft.outcome {
         return Dialog::new("Comparison result", "Done")
             .size(DialogSize::CommandForm)
             .description("The per-signal outcome of comparing the result with its baseline.")
             .ghost("Save report\u{2026}")
+            .secondary("Plot difference")
             .show(ctx, |ui| outcome_body(ui, &choices.candidate, outcome));
     }
     let refusal = choices.refusal.as_deref();

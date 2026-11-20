@@ -23,6 +23,7 @@ mod markers;
 mod measurements;
 mod pane_axes;
 mod pane_legend;
+mod run_difference;
 mod source_cache;
 mod strip_chrome;
 mod xy;

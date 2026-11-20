@@ -367,7 +367,7 @@ impl AxisWarp {
     #[must_use]
     pub const fn words(self) -> &'static str {
         match self {
-            Self::Linear => "linear",
+            Self::Linear => "linear X",
             Self::Log => "log X",
         }
     }

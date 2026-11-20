@@ -14,6 +14,18 @@ use rspice_results_ui::waves::expression_editor::Action;
 use rspice_results_ui::waves::lanes::EventLaneLayout;
 pub(super) use rspice_results_ui::waves::stack::{expr_color, expr_palette_slot, expression_label};
 
+/// The baseline `@baseline` reads over the active run, and a fingerprint of
+/// it to fold into an expression's version, so a new pin evaluates again.
+fn pinned(state: ResultsReads<'_>) -> (Option<crate::product::DatasetId>, u64) {
+    let pin = state.model.simulation.active_run().and_then(|run| {
+        super::super::document_edit::compare::pinned_baseline(state, run.dataset_id)
+    });
+    (
+        pin,
+        pin.map_or(0, |pin| rspice_results_ui::waves::stable_hash(&pin)),
+    )
+}
+
 /// The inline expression editor row under a strip header (when open for
 /// this strip): mono input, Enter/Add commits, Esc closes, and a bounded
 /// validation message that moves below the controls on compact surfaces.
@@ -94,9 +106,10 @@ pub(super) fn expr_editor_row(
                 return;
             }
             let sample_selection = state.results.session.sample_selection.clone();
+            let (baseline, pin) = pinned(state.results_reads());
             let series = evaluate_expression_reading(
                 &state.model.simulation,
-                analysis_index,
+                (analysis_index, baseline),
                 &text,
                 sample_selection.as_ref(),
                 ComplexExpressionPolicy::Rectangular,
@@ -111,7 +124,7 @@ pub(super) fn expr_editor_row(
                                 state.model.simulation.view.data_version,
                                 sample_selection.as_ref(),
                                 ComplexExpressionPolicy::Rectangular,
-                            ),
+                            ) ^ pin,
                             series: Ok(series),
                         },
                     );
@@ -191,13 +204,15 @@ pub(super) fn resolve_strip_exprs(
     // `analog()` reads a bus in its radix's signedness and may name the
     // reader's own buses, so a change to either evaluates again.
     let bus_reading = lanes.as_ref().map_or(0, bus_reading_fingerprint);
+    let (baseline, pin) = pinned(state.results_reads());
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let version = expression_version(
             state.model.simulation.view.data_version,
             sample_selection.as_ref(),
             expr.complex_policy,
-        ) ^ bus_reading.rotate_left(41);
+        ) ^ bus_reading.rotate_left(41)
+            ^ pin;
         let key = (model.analysis_key, expr.text.clone());
         let fresh = state
             .results
@@ -207,7 +222,7 @@ pub(super) fn resolve_strip_exprs(
         if !fresh {
             let series = evaluate_expression_reading(
                 &state.model.simulation,
-                model.analysis_index,
+                (model.analysis_index, baseline),
                 &expr.text,
                 sample_selection.as_ref(),
                 expr.complex_policy,
@@ -259,6 +274,10 @@ pub(super) fn resolve_strip_exprs(
                 }
             };
             let base_label = expression_label(&expr, output.waveform.complex.is_some());
+            let base_label = match &output.reading {
+                Some(reading) => format!("{base_label} · {reading}"),
+                None => base_label,
+            };
             let x = output.waveform.data.x;
             let y = output.waveform.data.y;
             let family_style = group.map(|group| group.style);
@@ -325,11 +344,13 @@ pub(super) fn resolve_abscissa_expression(
     let sample_selection = session.sample_selection.clone();
     let lanes = session.event_lanes.get(&model.analysis_key).cloned();
     let bus_reading = lanes.as_ref().map_or(0, bus_reading_fingerprint);
+    let (baseline, pin) = pinned(state.results_reads());
     let version = expression_version(
         state.model.simulation.view.data_version,
         sample_selection.as_ref(),
         complex_policy,
-    ) ^ bus_reading.rotate_left(41);
+    ) ^ bus_reading.rotate_left(41)
+        ^ pin;
     let key = (model.analysis_key, text.to_owned());
     let fresh = state
         .results
@@ -339,7 +360,7 @@ pub(super) fn resolve_abscissa_expression(
     if !fresh {
         let series = evaluate_expression_reading(
             &state.model.simulation,
-            model.analysis_index,
+            (model.analysis_index, baseline),
             text,
             sample_selection.as_ref(),
             complex_policy,
@@ -410,7 +431,7 @@ pub(super) fn resolve_abscissa_expression(
 
 /// Add `text` to the strip's expressions, as a trace's or lane's menu asks
 /// for a conversion. One already there is not added twice.
-pub(super) fn add_strip_expression(
+pub(in crate::workbench::documents::result_document) fn add_strip_expression(
     state: &mut ResultsParts<'_>,
     analysis: AnalysisPresentationKey,
     text: String,

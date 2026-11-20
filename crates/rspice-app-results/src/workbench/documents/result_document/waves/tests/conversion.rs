@@ -126,7 +126,7 @@ fn the_code_bus_staircase_follows_the_dac() {
         let lanes = state.results.results.session.event_lanes.get(&key).cloned();
         let outputs = super::super::evaluate_expression_reading(
             &state.model.simulation,
-            models[0].analysis_index,
+            (models[0].analysis_index, None),
             "analog(D(code))",
             None,
             ComplexExpressionPolicy::Rectangular,

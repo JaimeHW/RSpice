@@ -181,6 +181,31 @@ pub fn jump_cursor(
     Ok(found.x)
 }
 
+/// Where a step along `model`'s strip starts: the stepping cursor, else the
+/// other cursor, when the cursors are on that strip.
+#[must_use]
+pub fn stepping_from(session: &ResultViewerState, model: &StripModel) -> Option<f64> {
+    let id = session.stepping_cursor;
+    (session.cursor_strip == Some(model.analysis_index))
+        .then(|| session.cursors.get(id).or(session.cursors.get(id.other())))
+        .flatten()
+}
+
+/// Move the stepping cursor to `x` on `model`'s strip, found by a search of
+/// something other than one trace, as [`jump_cursor`] moves it: onto the
+/// strip, armed, and scrolled into view.
+pub fn place_stepping_cursor(session: &mut ResultViewerState, model: &StripModel, x: f64) {
+    let id = session.stepping_cursor;
+    if session.cursor_strip != Some(model.analysis_index) {
+        session.clear_cursors();
+        session.cursor_strip = Some(model.analysis_index);
+        session.stepping_cursor = id;
+    }
+    session.arm_cursor_tool();
+    session.cursors.set(id, x);
+    follow(session, model, x);
+}
+
 /// Scroll the strip so `x` is in view, keeping the zoom.
 fn follow(session: &mut ResultViewerState, model: &StripModel, x: f64) {
     let Some(full) = model.x_range else {

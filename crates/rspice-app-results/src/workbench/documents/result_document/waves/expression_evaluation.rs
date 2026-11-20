@@ -1,7 +1,9 @@
 //! Resolve the input family before evaluating and retain each output's axis.
 
 use super::*;
-use crate::state::ComplexExpressionPolicy;
+use crate::product::DatasetId;
+use crate::state::{ComplexExpressionPolicy, SimulationRun};
+use rspice_results::calculator::datasets::{BASELINE, NamedRun, RunDatasets, named_runs};
 use rspice_results_ui::waves::lanes::EventLaneLayout;
 
 #[cfg(test)]
@@ -13,7 +15,7 @@ pub(super) fn evaluate_expression(
 ) -> ExpressionSeriesResult {
     evaluate_expression_reading(
         simulation,
-        analysis_index,
+        (analysis_index, None),
         text,
         selection,
         ComplexExpressionPolicy::Rectangular,
@@ -21,12 +23,43 @@ pub(super) fn evaluate_expression(
     )
 }
 
+/// The retained runs an expression over `analysis` of `run` can read with
+/// `@`, each by its name, `Run 3`, and the pinned baseline also as
+/// `baseline`: the analysis of each that matches the one evaluated.
+fn other_runs<'a>(
+    simulation: &'a SimulationState,
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+    baseline: Option<DatasetId>,
+) -> Vec<NamedRun<'a, crate::state::RetainedTrace>> {
+    simulation
+        .retained
+        .runs
+        .iter()
+        .filter(|other| other.dataset_id != run.dataset_id)
+        .filter_map(|other| {
+            let matching =
+                rspice_results::waveform_comparison::matching_comparison_analysis(analysis, other)?;
+            let mut names = vec![format!("Run {}", other.id)];
+            if baseline == Some(other.dataset_id) {
+                names.push(BASELINE.to_owned());
+            }
+            Some(NamedRun {
+                names,
+                waveforms: matching.waveforms.as_slice(),
+                coordinate_unit: matching.waveform_coordinate_unit(),
+            })
+        })
+        .collect()
+}
+
 /// Evaluate `text` with the strip's buses readable by `analog()`, each in
 /// the signedness of the radix `lanes` reads it in, the reader's own buses
-/// among them.
+/// among them, and the other retained runs readable with `@`, `baseline`
+/// naming the pinned one.
 pub(super) fn evaluate_expression_reading(
     simulation: &SimulationState,
-    analysis_index: usize,
+    (analysis_index, baseline): (usize, Option<DatasetId>),
     text: &str,
     selection: Option<&SourceSampleSelection>,
     complex_policy: ComplexExpressionPolicy,
@@ -44,6 +77,12 @@ pub(super) fn evaluate_expression_reading(
     });
     let expr =
         calculator::parser::try_parse(text).map_err(|error| format!("parse error: {error}"))?;
+    let datasets = RunDatasets {
+        own: analysis.waveforms.as_slice(),
+        coordinate_unit: analysis.waveform_coordinate_unit(),
+        runs: other_runs(simulation, run, analysis, baseline),
+    };
+    let lanes = (lanes, &datasets);
     if let Some(selection) = selection {
         if selection.source_indices.is_empty() {
             return Err("the expression selection contains no samples".to_owned());
@@ -92,7 +131,13 @@ pub(super) fn evaluate_expression_reading(
 }
 
 fn evaluate_scope(
-    (analysis, lanes): (&AnalysisResult, Option<&EventLaneLayout>),
+    (analysis, (lanes, datasets)): (
+        &AnalysisResult,
+        (
+            Option<&EventLaneLayout>,
+            &RunDatasets<'_, crate::state::RetainedTrace>,
+        ),
+    ),
     text: &str,
     expr: &calculator::ast::CalculatorExpr,
     policy: ComplexExpressionPolicy,
@@ -100,7 +145,8 @@ fn evaluate_scope(
     indices: Option<&[usize]>,
     axis: Option<&[f64]>,
 ) -> Result<ExpressionWaveform, String> {
-    let mut ctx = calculator::WaveformsContext::with_policy(&analysis.waveforms, policy);
+    let mut ctx = calculator::WaveformsContext::with_policy(&analysis.waveforms, policy)
+        .with_datasets(datasets);
     if let Some(indices) = indices {
         ctx = ctx
             .with_sample_projection(indices, axis)
@@ -139,7 +185,17 @@ fn evaluate_scope(
     if waveform.x.is_empty() {
         return Err("expression produced no samples".to_owned());
     }
-    Ok(ExpressionWaveform { source, waveform })
+    // A signal read from another run carries interpolation onto this axis,
+    // so the trace says which run and how.
+    let readings = named_runs(expr)
+        .iter()
+        .filter_map(|(signal, run)| datasets.reading(signal, run))
+        .collect::<Vec<_>>();
+    Ok(ExpressionWaveform {
+        source,
+        waveform,
+        reading: (!readings.is_empty()).then(|| readings.join("; ")),
+    })
 }
 
 /// An analysis' values, with its digital nets and buses read from their exact

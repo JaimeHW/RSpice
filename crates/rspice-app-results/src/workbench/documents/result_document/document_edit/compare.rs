@@ -8,8 +8,8 @@
 //! both datasets attached in the same transaction by reference; over a quick
 //! view the outcome is shown and not kept.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use rspice_results::number_format::fmt_si_significant;
 use rspice_results::waveform_comparison::{
@@ -26,7 +26,11 @@ use crate::product::DatasetId;
 use crate::results::visualization_document::ComparisonAlignmentMethod;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 
+mod difference;
 mod worker;
+
+pub(super) use difference::plot_difference;
+pub(crate) use difference::{compared, comparison_marks, step_difference};
 
 /// A run the candidate can be compared with, and the signals the two share.
 #[derive(Debug, Clone)]
@@ -348,6 +352,26 @@ pub(crate) struct Running {
 /// The comparison that last answered, as its report states it.
 #[derive(Debug)]
 pub(crate) struct Finished {
+    /// The compared runs, and the candidate's analysis, whose strip draws
+    /// the differences and is stepped through them.
+    candidate_id: DatasetId,
+    baseline_id: DatasetId,
+    analysis: AnalysisPresentationKey,
+    absolute_tolerance: f64,
+    relative_tolerance: f64,
+    /// Each drawn difference's tolerance band, by the difference's text,
+    /// with the evaluation it was read from.
+    bands: Mutex<
+        HashMap<
+            String,
+            (
+                u64,
+                Option<Arc<rspice_results_ui::waves::pane::ToleranceBand>>,
+            ),
+        >,
+    >,
+    /// The X span of each place, a list per compared signal.
+    place_spans: Vec<Arc<[(f64, f64)]>>,
     candidate: String,
     baseline: String,
     alignment: String,
@@ -470,6 +494,26 @@ pub(super) fn stop(state: &mut ResultsParts<'_>) {
 /// Whether a comparison is running.
 pub(super) fn running(state: ResultsReads<'_>) -> bool {
     state.results.compare_run.is_some()
+}
+
+/// The run `@baseline` reads over `candidate`: the baseline of the last
+/// comparison recorded with the open result document, or, over a quick
+/// view, of the comparison that last answered, while it is retained and is
+/// not the candidate itself.
+pub(crate) fn pinned_baseline(state: ResultsReads<'_>, candidate: DatasetId) -> Option<DatasetId> {
+    let pinned = match active_document_id(state) {
+        Some(document_id) => project_document(state, document_id)
+            .ok()?
+            .comparisons()
+            .last()
+            .map(|receipt| receipt.baseline.dataset_id),
+        None => state
+            .results
+            .last_comparison
+            .as_ref()
+            .map(|finished| finished.baseline_id),
+    }?;
+    (pinned != candidate && retained_run(state, pinned).is_some()).then_some(pinned)
 }
 
 /// Wait for a running comparison and collect its answer into the open form.
@@ -632,6 +676,22 @@ fn finished(
         fmt_si_significant(request.relative_tolerance, "", digits),
     );
     Finished {
+        candidate_id: run.dataset_id,
+        baseline_id: baseline.dataset_id,
+        analysis: AnalysisPresentationKey::new(run.dataset_id, analysis),
+        absolute_tolerance: request.absolute_tolerance,
+        relative_tolerance: request.relative_tolerance,
+        bands: Mutex::default(),
+        place_spans: (0..outcome.signals.len())
+            .map(|signal| {
+                outcome
+                    .places
+                    .iter()
+                    .filter(|place| place.signal == signal)
+                    .map(|place| (place.first, place.last))
+                    .collect()
+            })
+            .collect(),
         candidate: format!("{} · {}", run_label(run), analysis.label),
         baseline: run_label(baseline),
         alignment,

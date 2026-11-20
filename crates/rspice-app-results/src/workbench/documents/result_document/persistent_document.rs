@@ -1399,10 +1399,16 @@ fn expression_edits(
         })
         .collect();
     for expr in drawn {
+        let mut datasets = vec![binding.dataset];
+        for read in named_datasets(state.results_reads(), document, run, &expr.text) {
+            if !datasets.contains(&read) {
+                datasets.push(read);
+            }
+        }
         let wanted = ExpressionTrace {
             pane_id: pane.id,
             text: expr.text.clone(),
-            datasets: vec![binding.dataset],
+            datasets,
             unit: session
                 .expression_units
                 .get(&(analysis_key, expr.text.clone()))
@@ -1414,6 +1420,44 @@ fn expression_edits(
         }
     }
     edits
+}
+
+/// The attached datasets `text` reads with `@` over `run`: the pinned
+/// baseline and each run it names as `Run 3`, where the document holds
+/// them. A run named and not attached is read while it is retained and not
+/// kept with the document.
+fn named_datasets(
+    state: ResultsReads<'_>,
+    document: &VisualizationDocument,
+    run: &SimulationRun,
+    text: &str,
+) -> Vec<crate::product::DatasetBinding> {
+    let Ok(expr) = crate::analysis::calculator::parser::try_parse(text) else {
+        return Vec::new();
+    };
+    rspice_results::calculator::datasets::named_runs(&expr)
+        .into_iter()
+        .filter_map(|(_, named)| {
+            let dataset_id =
+                if named.eq_ignore_ascii_case(rspice_results::calculator::datasets::BASELINE) {
+                    super::document_edit::compare::pinned_baseline(state, run.dataset_id)?
+                } else {
+                    state
+                        .model
+                        .simulation
+                        .retained
+                        .runs
+                        .iter()
+                        .find(|other| format!("Run {}", other.id).eq_ignore_ascii_case(&named))?
+                        .dataset_id
+                };
+            document
+                .datasets()
+                .iter()
+                .map(|dataset| dataset.binding())
+                .find(|binding| binding.dataset_id == dataset_id)
+        })
+        .collect()
 }
 
 fn select_pane_context(state: &mut ResultsParts<'_>, pane: &PaneProjection) -> Result<(), String> {

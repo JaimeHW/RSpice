@@ -408,6 +408,21 @@ fn jump(cx: &mut Cx<'_, ResultsFeature>, to: CursorJump) {
     }
 }
 
+/// Move the stepping cursor to the next or previous place the compared runs
+/// part, saying on the status bar why when it cannot.
+fn step_difference(cx: &mut Cx<'_, ResultsFeature>, direction: Direction) {
+    let mut parts = results_parts(cx);
+    if let Err(refusal) =
+        crate::workbench::documents::result_document::document_edit::compare::step_difference(
+            &mut parts,
+            &rspice_ui_kit::tokens::Tokens::default(),
+            direction,
+        )
+    {
+        parts.prompt(refusal);
+    }
+}
+
 /// What the results workspace's predicates read of a command's reads.
 fn results_reads<'a>(reads: &Reads<'a, ResultsFeature>) -> ResultsReads<'a> {
     reads.state.reads(reads.model, reads.wb)
@@ -583,6 +598,18 @@ impl CommandSet for ResultsCommand {
                         })
                 }
             }
+            Self::CursorToNextDifference | Self::CursorToPreviousDifference => {
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else if !crate::workbench::documents::result_document::document_edit::compare::compared(state) {
+                    CommandAvailability::Disabled("compare the result with a baseline first")
+                } else {
+                    cursor_jump_availability(state)
+                        .map_or_else(CommandAvailability::Disabled, |()| {
+                            CommandAvailability::Available
+                        })
+                }
+            }
             Self::SwitchSteppingCursor => available_or(
                 workbench.workspace == Workspace::Results && state.results.session.cursors.any(),
                 "place a cursor in Results",
@@ -685,6 +712,8 @@ impl CommandSet for ResultsCommand {
             Self::CursorToPreviousCrossing => {
                 jump(cx, CursorJump::Crossing(Direction::Previous));
             }
+            Self::CursorToNextDifference => step_difference(cx, Direction::Next),
+            Self::CursorToPreviousDifference => step_difference(cx, Direction::Previous),
             Self::SwitchSteppingCursor => cx.state.results.session.switch_stepping_cursor(),
             Self::MarkerAtCursor => place_marker_at_cursor(&mut results_parts(cx)),
             Self::FitYToVisibleX => fit_y_to_visible_x(&mut results_parts(cx)),

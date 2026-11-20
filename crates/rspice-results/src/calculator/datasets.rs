@@ -7,6 +7,7 @@
 //! is extrapolated. It is refused where the difference would mean nothing:
 //! another X quantity, another unit, or no X the two runs share.
 
+use super::ast::CalculatorExpr;
 use super::evaluator::EvaluationError;
 use super::retained::{DatasetSource, find_waveform};
 use crate::number_format::fmt_si_significant;
@@ -48,6 +49,64 @@ fn read(values: &crate::waveform::WaveformValues, what: &str) -> Result<Vec<f64>
         .map_err(|failure| EvaluationError::WaveformMismatch(format!("{what}: {failure}")))
 }
 
+/// Each run `expr` names with `@`, once, with the first signal it reads
+/// there: `(signal, run)`.
+#[must_use]
+pub fn named_runs(expr: &CalculatorExpr) -> Vec<(String, String)> {
+    let mut named: Vec<(String, String)> = Vec::new();
+    let mut pending = vec![expr];
+    while let Some(expr) = pending.pop() {
+        match expr {
+            CalculatorExpr::WaveformRef {
+                signal,
+                dataset: Some(dataset),
+            } => {
+                if !named
+                    .iter()
+                    .any(|(_, run)| run.eq_ignore_ascii_case(dataset))
+                {
+                    named.push((signal.clone(), dataset.clone()));
+                }
+            }
+            CalculatorExpr::BinaryOp { left, right, .. } => {
+                pending.extend([right.as_ref(), left.as_ref()]);
+            }
+            CalculatorExpr::UnaryOp { operand, .. } => pending.push(operand),
+            CalculatorExpr::FunctionCall { args, .. } => pending.extend(args.iter().rev()),
+            CalculatorExpr::WaveformRef { dataset: None, .. }
+            | CalculatorExpr::Number(_)
+            | CalculatorExpr::Constant(_)
+            | CalculatorExpr::Keyword(_) => {}
+        }
+    }
+    named
+}
+
+impl<W: AsRef<RetainedWaveform>> RunDatasets<'_, W> {
+    fn run(&self, dataset: &str) -> Option<&NamedRun<'_, W>> {
+        self.runs.iter().find(|run| {
+            run.names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(dataset))
+        })
+    }
+
+    /// How `signal@dataset` is read onto this result's axis, as a trace
+    /// states it: the run by its first name, and whether it is interpolated
+    /// straight in X or in log X. `None` when it cannot be read.
+    #[must_use]
+    pub fn reading(&self, signal: &str, dataset: &str) -> Option<String> {
+        let run = self.run(dataset)?;
+        let source = find_waveform(run.waveforms, signal)?;
+        let x = read(&source.x, signal).ok()?;
+        Some(format!(
+            "{}, {}",
+            run.names.first()?,
+            AxisWarp::of(&x).words()
+        ))
+    }
+}
+
 impl<W: AsRef<RetainedWaveform>> DatasetSource for RunDatasets<'_, W> {
     fn waveform_on(
         &self,
@@ -56,24 +115,16 @@ impl<W: AsRef<RetainedWaveform>> DatasetSource for RunDatasets<'_, W> {
         axis: &[f64],
     ) -> Result<RetainedWaveform, EvaluationError> {
         let named = format!("{signal}@{dataset}");
-        let run = self
-            .runs
-            .iter()
-            .find(|run| {
-                run.names
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(dataset))
-            })
-            .ok_or_else(|| {
-                EvaluationError::IdentifierNotFound(if dataset.eq_ignore_ascii_case(BASELINE) {
-                    format!(
-                        "{named}: no baseline is pinned here; compare this result with another \
+        let run = self.run(dataset).ok_or_else(|| {
+            EvaluationError::IdentifierNotFound(if dataset.eq_ignore_ascii_case(BASELINE) {
+                format!(
+                    "{named}: no baseline is pinned here; compare this result with another \
                          run first, or name a run, as in {signal}@\"Run 2\""
-                    )
-                } else {
-                    format!("{named}: no retained run named {dataset} holds this analysis")
-                })
-            })?;
+                )
+            } else {
+                format!("{named}: no retained run named {dataset} holds this analysis")
+            })
+        })?;
         if run.coordinate_unit != self.coordinate_unit {
             return Err(EvaluationError::WaveformMismatch(format!(
                 "{named} sweeps X in {} and this result sweeps it in {}, so the two cannot be \

@@ -52,6 +52,21 @@ impl StackHost for WaveStackHost<'_, '_> {
     ) -> Vec<plot::LimitLine> {
         matching_spec_limits(self.0.results_reads(), model, pane, tokens)
     }
+    fn comparison_marks(
+        &mut self,
+        model: &StripModel,
+        pane: &UnitPane,
+        expressions: &[ResolvedExpr],
+        tokens: &Tokens,
+    ) -> rspice_results_ui::waves::pane::ComparisonMarks {
+        super::super::document_edit::compare::comparison_marks(
+            self.0,
+            model,
+            pane,
+            expressions,
+            tokens,
+        )
+    }
     fn pane_header(
         &mut self,
         ui: &mut Ui,

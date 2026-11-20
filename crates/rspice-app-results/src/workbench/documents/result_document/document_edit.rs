@@ -176,6 +176,10 @@ pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) -> Option<DialogRequest
         DialogChoice::Ghost if comparison_shown => {
             return Some(DialogRequest::SaveComparisonReport);
         }
+        DialogChoice::Secondary if comparison_shown => match compare::plot_difference(state) {
+            Ok(()) => *state.result_document_dialog = None,
+            Err(refusal) => state.prompt(refusal),
+        },
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             *state.result_document_dialog = None;
         }

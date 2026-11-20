@@ -164,7 +164,7 @@ fn add_logic_lanes(
             }
             let Ok(outputs) = super::evaluate_expression_reading(
                 simulation,
-                model.analysis_index,
+                (model.analysis_index, None),
                 &expr.text,
                 None,
                 expr.complex_policy,

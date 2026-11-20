@@ -57,6 +57,18 @@ pub trait StackHost {
         pane: &UnitPane,
         tokens: &Tokens,
     ) -> Vec<plot::LimitLine>;
+    /// What the comparison that last answered marks on `pane`, whose
+    /// expressions are `expressions`. A host that compares nothing marks
+    /// nothing.
+    fn comparison_marks(
+        &mut self,
+        _model: &StripModel,
+        _pane: &UnitPane,
+        _expressions: &[ResolvedExpr],
+        _tokens: &Tokens,
+    ) -> pane_view::ComparisonMarks {
+        pane_view::ComparisonMarks::default()
+    }
     fn pane_header(
         &mut self,
         ui: &mut Ui,
@@ -1568,6 +1580,7 @@ fn show_unit_pane(
     } else {
         Vec::new()
     };
+    let comparison = host.comparison_marks(model, pane, exprs, &t);
     // A pane with nothing to draw has no Y axis for its header to act on.
     let plotted = whole.range().is_some();
     // A logarithmic axis draws a pane's positive values; one with none has
@@ -1638,6 +1651,15 @@ fn show_unit_pane(
         |count| extrema_samples += count,
     );
     host.note_sample_reads(0, extrema_samples);
+    // A difference's tolerance band stays in view with the difference.
+    let auto_y = match (auto_y, comparison.tolerance.as_ref().filter(|_| !log_y)) {
+        (Some((low, high)), Some(band)) => {
+            Some(band.extremes().map_or((low, high), |(bottom, top)| {
+                (low.min(bottom), high.max(top))
+            }))
+        }
+        (auto_y, _) => auto_y,
+    };
     let Some((auto_y0, auto_y1)) = auto_y else {
         // A pane with nothing plotted is its header alone; the hint is for a
         // pane whose plotted traces hold no finite value to fit.
@@ -1704,6 +1726,7 @@ fn show_unit_pane(
         cursors,
         specification_limits,
         markers,
+        comparison,
         expressions: exprs,
         family_envelopes,
         find_nearest: host.session().marker_tool.is_armed()
