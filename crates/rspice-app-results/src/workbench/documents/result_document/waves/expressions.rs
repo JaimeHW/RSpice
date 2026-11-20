@@ -316,6 +316,7 @@ pub(super) fn resolve_strip_exprs(
                 ),
                 family_style,
                 presentation_key: group.map_or(0, |group| group.stable_key),
+                reading: output.reading.clone(),
             });
         }
     }

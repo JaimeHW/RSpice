@@ -39,5 +39,6 @@ pub fn real_step_trace(
         y_extremes,
         family_style: None,
         presentation_key: 0,
+        reading: None,
     }
 }

@@ -1171,10 +1171,15 @@ fn pane_expressions(
                 usize::from(presentation.displayed_significant_digits().get()),
             )
         });
+        // A signal read from another run says which run and how.
+        let label = match &first.reading {
+            Some(reading) => format!("{} · {reading}", label(expr)),
+            None => label(expr),
+        };
         Some(pane_header::PaneExpression {
             slot,
             text: expr.text.clone(),
-            label: label(expr),
+            label,
             color: first.color,
             swatch: swatch(slot, first.family_style),
             visible: true,

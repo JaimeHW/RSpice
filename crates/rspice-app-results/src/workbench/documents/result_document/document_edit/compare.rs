@@ -84,8 +84,19 @@ fn retained_run(state: ResultsReads<'_>, dataset_id: DatasetId) -> Option<&Simul
         .find(|run| run.dataset_id == dataset_id)
 }
 
+/// A run as the form names it: by its number, and its label unless the label
+/// already starts with that number.
 fn run_label(run: &SimulationRun) -> String {
-    format!("Run {} · {}", run.id, run.label)
+    let name = format!("Run {}", run.id);
+    if run
+        .label
+        .strip_prefix(&name)
+        .is_some_and(|rest| !rest.starts_with(|next: char| next.is_ascii_digit()))
+    {
+        run.label.clone()
+    } else {
+        format!("{name} · {}", run.label)
+    }
 }
 
 /// Whether Compare datasets has a candidate and a baseline to compare it with.

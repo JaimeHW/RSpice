@@ -38,6 +38,9 @@ pub struct ResolvedExpr {
     /// The family group it was evaluated on, as a trace's
     /// [`StripTrace::presentation_key`]; 0 outside a family.
     pub presentation_key: u64,
+    /// How the signals it reads from other runs are read onto its axis,
+    /// which its legend entry states: `Run 2, linear X`.
+    pub reading: Option<String>,
 }
 
 /// The envelope of one family of curves in a pane: its members, folded per
@@ -507,7 +510,9 @@ pub struct ToleranceBand {
     pub x: Vec<f64>,
     /// How far from zero the difference may stand at each X.
     pub half_width: Vec<f64>,
-    pub color: egui::Color32,
+    pub fill: egui::Color32,
+    /// The band's two edges.
+    pub edge: egui::Color32,
 }
 
 impl ToleranceBand {
@@ -571,31 +576,49 @@ fn paint_places(
 }
 
 /// Fill the band between `-half_width` and `half_width`, a quad per pair of
-/// samples a point or more apart on screen.
+/// samples a point or more apart on screen, and stroke its two edges over
+/// the fill.
 fn paint_tolerance(painter: &egui::Painter, mapper: &plot::PlotMapper, band: &ToleranceBand) {
     let mut mesh = egui::Mesh::default();
-    let mut last: Option<(f32, f32, f32)> = None;
+    // Each unbroken run of the band: its top and bottom edges on screen.
+    let mut runs: Vec<(Vec<egui::Pos2>, Vec<egui::Pos2>)> = vec![(Vec::new(), Vec::new())];
     for (&x, &width) in band.x.iter().zip(&band.half_width) {
+        let Some((tops, bottoms)) = runs.last_mut() else {
+            break;
+        };
         if !(x.is_finite() && width.is_finite()) {
-            last = None;
+            if !tops.is_empty() {
+                runs.push((Vec::new(), Vec::new()));
+            }
             continue;
         }
         let (sx, top, bottom) = (mapper.x(x), mapper.y(width), mapper.y(-width));
-        if let Some((px, ptop, pbottom)) = last {
-            if sx - px < 1.0 && sx >= px {
+        if let (Some(&previous_top), Some(&previous_bottom)) = (tops.last(), bottoms.last()) {
+            if sx - previous_top.x < 1.0 && sx >= previous_top.x {
                 continue;
             }
             let base = mesh.vertices.len() as u32;
-            for (vx, vy) in [(px, ptop), (sx, top), (sx, bottom), (px, pbottom)] {
-                mesh.colored_vertex(egui::pos2(vx, vy), band.color);
+            for vertex in [
+                previous_top,
+                egui::pos2(sx, top),
+                egui::pos2(sx, bottom),
+                previous_bottom,
+            ] {
+                mesh.colored_vertex(vertex, band.fill);
             }
             mesh.add_triangle(base, base + 1, base + 2);
             mesh.add_triangle(base, base + 2, base + 3);
         }
-        last = Some((sx, top, bottom));
+        tops.push(egui::pos2(sx, top));
+        bottoms.push(egui::pos2(sx, bottom));
     }
     if !mesh.is_empty() {
         painter.add(egui::Shape::mesh(mesh));
+    }
+    for edge in runs.into_iter().flat_map(|(tops, bottoms)| [tops, bottoms]) {
+        if edge.len() > 1 {
+            painter.add(egui::Shape::line(edge, egui::Stroke::new(1.0, band.edge)));
+        }
     }
 }
 

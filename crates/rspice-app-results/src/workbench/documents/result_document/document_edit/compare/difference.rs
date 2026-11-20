@@ -58,7 +58,7 @@ impl Finished {
         state: ResultsReads<'_>,
         (text, signal): (&str, &str),
         expr: &ResolvedExpr,
-        color: egui::Color32,
+        (fill, edge): (egui::Color32, egui::Color32),
     ) -> Option<Arc<ToleranceBand>> {
         let mut bands = self
             .bands
@@ -69,7 +69,9 @@ impl Finished {
         {
             return band.clone();
         }
-        let band = self.read_band(state, signal, expr, color).map(Arc::new);
+        let band = self
+            .read_band(state, signal, expr, (fill, edge))
+            .map(Arc::new);
         bands.insert(text.to_owned(), (expr.cache_key, band.clone()));
         band
     }
@@ -84,7 +86,7 @@ impl Finished {
         state: ResultsReads<'_>,
         signal: &str,
         expr: &ResolvedExpr,
-        color: egui::Color32,
+        (fill, edge): (egui::Color32, egui::Color32),
     ) -> Option<ToleranceBand> {
         let x = expr.x.read_range(0..expr.x.len()).ok()?;
         if self.relative_tolerance == 0.0 {
@@ -99,7 +101,8 @@ impl Finished {
             return Some(ToleranceBand {
                 half_width: vec![self.absolute_tolerance; ends.len()],
                 x: ends,
-                color,
+                fill,
+                edge,
             });
         }
         let run = retained_run(state, self.candidate_id)?;
@@ -120,7 +123,8 @@ impl Finished {
         Some(ToleranceBand {
             x: x.into_owned(),
             half_width,
-            color,
+            fill,
+            edge,
         })
     }
 }
@@ -208,7 +212,10 @@ pub(crate) fn comparison_marks(
                 reads,
                 (text, &signals[signal]),
                 expr,
-                tokens.color.ok.gamma_multiply(0.16),
+                (
+                    tokens.color.text_faint.gamma_multiply(0.14),
+                    tokens.color.text_faint.gamma_multiply(0.7),
+                ),
             );
         }
     }
@@ -220,7 +227,7 @@ pub(crate) fn comparison_marks(
             .filter(|(_, marked)| **marked)
             .map(|(places, _)| Arc::clone(places))
             .collect(),
-        place_color: tokens.color.err.gamma_multiply(0.18),
+        place_color: tokens.color.err.gamma_multiply(0.12),
         tolerance,
     }
 }
