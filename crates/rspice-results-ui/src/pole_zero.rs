@@ -55,15 +55,7 @@ fn format_dominant_pole(
     significant_digits: usize,
 ) -> String {
     if root.is_real() {
-        let sign = if root.real < 0.0 { "−" } else { "+" };
-        format!(
-            "{sign}{}",
-            frequency_readout(
-                quantity_policy,
-                root.real.abs() / std::f64::consts::TAU,
-                significant_digits
-            )
-        )
+        real_root_text(root, quantity_policy, significant_digits)
     } else {
         format!(
             "σ {} · jω {}",
@@ -71,6 +63,63 @@ fn format_dominant_pole(
             fmt_si_significant(root.imag, "rad/s", significant_digits)
         )
     }
+}
+
+/// A real root as the frequency of its real part, signed: `+1 kHz` sits in
+/// the right half-plane and `−1 kHz` in the left, so a Miller zero never
+/// reads like its stable mirror.
+fn real_root_text(
+    root: &ComplexRoot,
+    quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
+) -> String {
+    let sign = if root.real < 0.0 { "−" } else { "+" };
+    format!(
+        "{sign}{}",
+        frequency_readout(
+            quantity_policy,
+            root.real.abs() / std::f64::consts::TAU,
+            significant_digits
+        )
+    )
+}
+
+/// The Roots list: one row per root, conjugate pairs once, at most `limit`
+/// rows, and how many it left out.
+fn root_rows(
+    data: &PoleZeroData,
+    quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
+    limit: usize,
+) -> (Vec<(String, String, bool)>, usize) {
+    let mut rows: Vec<(String, String, bool)> = Vec::new();
+    let mut pole_index = 0usize;
+    let mut zero_index = 0usize;
+    let (representatives, omitted) = retained_root_representatives(data, limit);
+    for root in representatives {
+        let name = if root.is_pole() {
+            pole_index += 1;
+            format!("p{pole_index}")
+        } else {
+            zero_index += 1;
+            format!("z{zero_index}")
+        };
+        let value = if root.is_real() {
+            real_root_text(root, quantity_policy, digits)
+        } else {
+            format!(
+                "ζ {} · fₙ {}",
+                fmt_si_significant(root.damping_ratio(), "", digits),
+                frequency_readout(
+                    quantity_policy,
+                    root.natural_frequency() / std::f64::consts::TAU,
+                    digits
+                )
+            )
+        };
+        rows.push((name, value, false));
+    }
+    (rows, omitted)
 }
 
 /// Render the s-plane map; the root card reads at the reader's
@@ -333,38 +382,7 @@ pub fn right_panel(
     crate::presentation::stat_table(ui, &summary_rows);
 
     section_header(ui, "Roots", None);
-    let mut rows: Vec<(String, String, bool)> = Vec::new();
-    let mut pole_index = 0usize;
-    let mut zero_index = 0usize;
-    let (representatives, omitted) = retained_root_representatives(data, 12);
-    for root in representatives {
-        let name = if root.is_pole() {
-            pole_index += 1;
-            format!("p{pole_index}")
-        } else {
-            zero_index += 1;
-            format!("z{zero_index}")
-        };
-        let value = if root.is_real() {
-            // A real root is a frequency like every other root on the map.
-            frequency_readout(
-                quantity_policy,
-                root.real.abs() / std::f64::consts::TAU,
-                digits,
-            )
-        } else {
-            format!(
-                "ζ {} · fₙ {}",
-                fmt_si_significant(root.damping_ratio(), "", digits),
-                frequency_readout(
-                    quantity_policy,
-                    root.natural_frequency() / std::f64::consts::TAU,
-                    digits
-                )
-            )
-        };
-        rows.push((name, value, false));
-    }
+    let (rows, omitted) = root_rows(data, quantity_policy, digits, 12);
     let row_refs: Vec<(&str, String, bool)> = rows
         .iter()
         .map(|(k, v, h)| (k.as_str(), v.clone(), *h))
@@ -378,6 +396,21 @@ pub fn right_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A real root in the right half-plane reads differently from its
+    /// left-half-plane mirror, as the dominant-pole row already did.
+    #[test]
+    fn a_real_root_keeps_the_side_of_the_plane_it_sits_on() {
+        let mut data = PoleZeroData::new("Miller zero");
+        let kilohertz = std::f64::consts::TAU * 1.0e3;
+        data.roots.push(ComplexRoot::zero(kilohertz, 0.0));
+        data.roots.push(ComplexRoot::zero(-kilohertz, 0.0));
+        let policy = QuantityPresentationPolicy::default();
+        let (rows, omitted) = root_rows(&data, &policy, 4, 12);
+        assert_eq!(omitted, 0);
+        let values: Vec<&str> = rows.iter().map(|(_, value, _)| value.as_str()).collect();
+        assert_eq!(values, ["+1 kHz", "\u{2212}1 kHz"]);
+    }
 
     #[test]
     fn root_summary_reports_rhp_and_axis_content_without_inventing_reduction() {
