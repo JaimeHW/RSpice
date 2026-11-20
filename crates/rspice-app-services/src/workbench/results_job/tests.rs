@@ -1,3 +1,6 @@
+//! The job runner's contract: progress, a stated failure, and a cancel that
+//! drops what the work made, on its own thread.
+
 use std::time::Duration;
 
 use super::*;

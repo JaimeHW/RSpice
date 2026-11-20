@@ -516,24 +516,24 @@ fn vcd_imports_initialized_digital_events() {
 fn a_vcd_of_more_than_a_million_ticks_imports_every_tick() {
     const TICKS: usize = 1_000_003;
     let mut vcd = String::from(
-        "$timescale 1 ns $end
-$scope module top $end
-$var wire 1 ! clk $end
-         $upscope $end
-$enddefinitions $end
-",
+        "$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n\
+         $upscope $end\n$enddefinitions $end\n",
     );
     for tick in 0..TICKS {
-        vcd.push_str(&format!("#{tick}
-{}!
-", tick % 2));
+        vcd.push_str(&format!("#{tick}\n{}!\n", tick % 2));
     }
     let parsed = parse_vcd(vcd.as_bytes(), ResultImportFormat::Vcd).expect("a long dump imports");
     assert_eq!(parsed.sample_count, TICKS);
     let clock = &parsed.waveforms[0];
     assert_eq!(clock.x.len(), TICKS);
-    assert_eq!(clock.x.read_range(TICKS - 1..TICKS).unwrap()[0], (TICKS - 1) as f64 * 1.0e-9);
-    assert_eq!(clock.y.read_range(TICKS - 2..TICKS).unwrap().as_ref(), &[1.0, 0.0]);
+    assert_eq!(
+        clock.x.read_range(TICKS - 1..TICKS).unwrap()[0],
+        (TICKS - 1) as f64 * 1.0e-9
+    );
+    assert_eq!(
+        clock.y.read_range(TICKS - 2..TICKS).unwrap().as_ref(),
+        &[1.0, 0.0]
+    );
 }
 
 /// A vector no `f64` sample can hold used to be refused outright, taking the

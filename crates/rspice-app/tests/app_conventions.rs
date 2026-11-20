@@ -1618,6 +1618,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "recent_files"),
             ("lib.rs", "recovery"),
             ("lib.rs", "recovery_checkpoint"),
+            ("lib.rs", "results_job"),
             ("lib.rs", "services"),
             ("lib.rs", "session"),
             ("lib.rs", "slots"),

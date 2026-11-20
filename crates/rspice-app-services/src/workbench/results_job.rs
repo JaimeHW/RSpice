@@ -77,6 +77,10 @@ struct Progress {
     total: AtomicU64,
     step: Mutex<String>,
     held: AtomicBool,
+    /// Work done past which the job cancels itself, as a reader would: set only by tests, so a
+    /// cancel lands in the middle of the work however fast it runs.
+    #[cfg(any(test, feature = "test-support"))]
+    cancel_past: AtomicU64,
 }
 
 struct Shared<T> {
@@ -134,7 +138,36 @@ impl JobContext {
     /// The work done of the current step so far.
     pub fn done(&self, done: u64) {
         self.progress.done.store(done, Ordering::Relaxed);
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            let past = self.progress.cancel_past.load(Ordering::Relaxed);
+            if past != 0 && done >= past {
+                self.progress.cancel.store(true, Ordering::Release);
+            }
+        }
     }
+
+    /// The step, work done and work total the work last reported.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn reported(&self) -> (String, u64, u64) {
+        (
+            lock(&self.progress.step).clone(),
+            self.progress.done.load(Ordering::Relaxed),
+            self.progress.total.load(Ordering::Relaxed),
+        )
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    static CANCEL_PAST: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Make jobs started on this thread cancel themselves once a step reports `done` work of at
+/// least `past`; `None` stops it. A test's way to cancel in the middle of the work.
+#[cfg(any(test, feature = "test-support"))]
+pub fn cancel_jobs_past_for_tests(past: Option<u64>) {
+    CANCEL_PAST.with(|cell| cell.set(past.unwrap_or(0)));
 }
 
 /// A Results job: its progress, its cancel, and how it ended.
@@ -194,6 +227,10 @@ impl<T: Send + 'static> ResultsJob<T> {
     ) -> Self {
         let progress = Arc::new(Progress::default());
         progress.held.store(held_for_tests(), Ordering::Release);
+        #[cfg(any(test, feature = "test-support"))]
+        progress
+            .cancel_past
+            .store(CANCEL_PAST.with(std::cell::Cell::get), Ordering::Relaxed);
         let shared = Arc::new(Shared {
             progress,
             outcome: Mutex::new(None),

@@ -1020,14 +1020,23 @@ fn show_result_import_job(
                 JobState::Running { step, .. } if !step.is_empty() => step.as_str(),
                 _ => "Starting",
             };
+            let fraction = progress.fraction();
+            let text = match fraction {
+                Some(fraction) => format!("{step} \u{00b7} {:.0}%", fraction * 100.0),
+                None => step.to_owned(),
+            };
             ui.add(
-                egui::ProgressBar::new(progress.fraction().unwrap_or(0.0))
+                egui::ProgressBar::new(fraction.unwrap_or(0.0))
                     .desired_width(360.0)
-                    .text(step),
+                    .text(text),
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                cancel = ui.button("Cancel").clicked();
-            });
+            ui.add_space(8.0);
+            let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+            ui.allocate_ui_with_layout(
+                row,
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| cancel = ui.button("Cancel").clicked(),
+            );
         });
     if cancel {
         job.cancel();
@@ -1889,5 +1898,142 @@ mod tests {
             error.contains("time"),
             "the refusal names the column: {error:?}"
         );
+    }
+
+    /// A binary rawfile of `rows` points of time and seven signals, 64 bytes a
+    /// row, written to `path`; returns the generator every value came from.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn write_generated_rawfile(path: &Path, rows: usize) -> impl Fn(usize, usize) -> f64 {
+        use std::io::Write as _;
+        let value = |row: usize, signal: usize| -> f64 {
+            if signal == 0 {
+                return row as f64 * 1.0e-9;
+            }
+            // SplitMix64 of the row and signal, as a value in [-1, 1).
+            let mut z = (row as u64 * 8 + signal as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^= z >> 31;
+            (z >> 11) as f64 / (1_u64 << 52) as f64 - 1.0
+        };
+        let mut file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+        write!(
+            file,
+            "Title: generated\nDate: generated\nPlotname: Transient Analysis\n\
+             Flags: real forward double\nNo. Variables: 8\nNo. Points: {rows}\n\
+             Variables:\n\t0\ttime\ttime\n"
+        )
+        .unwrap();
+        for signal in 1..8 {
+            writeln!(file, "\t{signal}\tV(n{signal})\tvoltage").unwrap();
+        }
+        writeln!(file, "Binary:").unwrap();
+        for row in 0..rows {
+            for signal in 0..8 {
+                file.write_all(&value(row, signal).to_le_bytes()).unwrap();
+            }
+        }
+        file.flush().unwrap();
+        value
+    }
+
+    /// Import a generated rawfile of `rows` points through the job: its read
+    /// reports progress in the file's bytes, a cancel after the first chunk
+    /// leaves no draft and no run, and the whole file stages, keeps its
+    /// samples in segments and commits as a run holding every sample.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(clippy::print_stderr)] // the times are the measurement a big run is made for
+    fn import_a_generated_rawfile(rows: usize) {
+        use crate::workbench::results_job::cancel_jobs_past_for_tests;
+        let folder = std::env::temp_dir().join(format!(
+            "rspice-generated-raw-{}-{rows}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("generated.raw");
+        let value = write_generated_rawfile(&path, rows);
+        let size = std::fs::metadata(&path).unwrap().len();
+
+        let job = JobContext::detached();
+        let started = std::time::Instant::now();
+        let bytes = read_native_file(&path, &job).unwrap();
+        let read = started.elapsed();
+        assert_eq!(job.reported(), ("Reading".to_owned(), size, size));
+        assert_eq!(bytes.len() as u64, size);
+        drop(bytes);
+
+        let mut state =
+            crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
+        state.platform.project_lifecycle.authority.open_session();
+        cancel_jobs_past_for_tests(Some(1));
+        assert!(import_result_dataset_from_path(
+            &mut state.results_parts(),
+            &path
+        ));
+        cancel_jobs_past_for_tests(None);
+        finish_result_import_job(&mut state.results_parts());
+        assert!(!state.results_parts().result_import.open);
+        assert!(
+            state.model.notices.take().is_empty(),
+            "a cancel is no failure"
+        );
+        assert!(state.model.simulation.retained.runs.is_empty());
+
+        let started = std::time::Instant::now();
+        assert!(import_result_dataset_from_path(
+            &mut state.results_parts(),
+            &path
+        ));
+        finish_result_import_job(&mut state.results_parts());
+        let staged = started.elapsed();
+        {
+            let parts = state.results_parts();
+            let draft = &parts.result_import;
+            assert_eq!(draft.sample_count, rows);
+            assert_eq!(draft.waveforms.len(), 7);
+            assert!(
+                draft
+                    .waveforms
+                    .iter()
+                    .all(|waveform| waveform.y.is_stored())
+            );
+        }
+        let started = std::time::Instant::now();
+        start_result_import_commit(&mut state.results_parts()).unwrap();
+        finish_result_import_job(&mut state.results_parts());
+        let committed = started.elapsed();
+        std::fs::remove_dir_all(&folder).unwrap();
+        eprintln!(
+            "{size} bytes: read in {read:?}, staged in {staged:?}, committed in {committed:?}"
+        );
+
+        let run = state
+            .model
+            .simulation
+            .active_run()
+            .expect("the import is shown");
+        let signals = &run.analyses[0].waveforms;
+        assert_eq!(signals.len(), 7);
+        for (index, signal) in signals.iter().enumerate() {
+            let last = signal.y.read_range(rows - 1..rows).unwrap()[0];
+            assert_eq!(last.to_bits(), value(rows - 1, index + 1).to_bits());
+        }
+        let time = signals[0].x.read_range(rows - 1..rows).unwrap()[0];
+        assert_eq!(time.to_bits(), value(rows - 1, 0).to_bits());
+    }
+
+    /// A 64 MiB rawfile, the size an import was once refused past.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_64_mib_rawfile_imports_through_the_job_and_cancels_cleanly() {
+        import_a_generated_rawfile(1 << 20);
+    }
+
+    /// A 1 GiB rawfile. Run on its own: it writes and reads a gigabyte.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "writes and imports a 1 GiB rawfile; run on its own"]
+    fn a_1_gib_rawfile_imports_through_the_job_and_cancels_cleanly() {
+        import_a_generated_rawfile(1 << 24);
     }
 }
