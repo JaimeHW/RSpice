@@ -44,6 +44,8 @@ mod measure_current_derivatives;
 mod measure_failvalue;
 #[cfg(not(target_arch = "wasm32"))]
 mod measurement_event_allocations;
+#[cfg(not(target_arch = "wasm32"))]
+mod measurement_signal_views;
 mod monte_carlo_engine;
 mod noise_input_reference;
 mod noise_mechanism;
