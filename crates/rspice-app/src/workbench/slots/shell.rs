@@ -16,6 +16,9 @@ pub(crate) struct ShellState {
     /// Quitting asks whether to wait for the save copying its results to
     /// another volume, or to quit without saving.
     pub(crate) quit_while_saving: bool,
+    /// Closing waits while the session's results go into its folder, and
+    /// closes once they are there.
+    pub(crate) closing_for_session_results: bool,
     /// Whether the focused source editor has keys of this frame still to
     /// apply, which it does as the page draws.
     pub(crate) editor_keys_pending: bool,

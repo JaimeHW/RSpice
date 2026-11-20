@@ -328,26 +328,298 @@ fn keep_segments_now_in(segments: Vec<StoredSegment>, folder: PathBuf) -> Result
         .map_err(|error| format!("the results could not be kept beside the project: {error}"))
 }
 
-/// The folder that keeps the segments the stored session reads, beside the application's other
-/// local data.
-pub fn session_segment_folder() -> Option<PathBuf> {
+/// The folder that holds every instance's session folder, beside the application's other local
+/// data.
+#[cfg(not(any(test, feature = "test-support")))]
+fn session_root() -> Option<PathBuf> {
     dirs::data_local_dir().map(|data| data.join("RSpice").join("results").join("session"))
 }
 
-/// Keep every segment `results` reads in the session's folder before the session is stored, so
-/// a relaunch reads them after this process's own store is gone.
+/// A test keeps its sessions' results under the temporary folder, never in the reader's own.
+#[cfg(any(test, feature = "test-support"))]
+fn session_root() -> Option<PathBuf> {
+    Some(std::env::temp_dir().join("rspice-session-tests"))
+}
+
+/// The lock file beside an instance's session folder, held for as long as the instance runs.
+fn session_lock_path(folder: &Path) -> PathBuf {
+    let mut name = folder.as_os_str().to_owned();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+/// An instance's session folder and its hold on the folder's lock: while the hold lasts, no
+/// other instance touches the folder.
+struct InstanceFolder {
+    folder: PathBuf,
+    _lock: std::fs::File,
+}
+
+/// What this instance knows of the sessions it reads and stores.
+#[derive(Default)]
+struct SessionSegments {
+    own: Option<InstanceFolder>,
+    /// The segments the session on disk reads: the one read at launch, then each one stored. Its
+    /// folder keeps them until the next session stored is on disk.
+    previous: std::collections::HashSet<SegmentDigest>,
+    /// The session's segments going into its folder while closing waits.
+    placing: Option<SegmentPlacement>,
+    /// Closing chose not to wait for them: the session is stored without its runs.
+    without_runs: bool,
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+static SESSION: Mutex<Option<SessionSegments>> = Mutex::new(None);
+
+// Each test thread is an instance of its own, so tests running together never share a folder.
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    static SESSION: std::cell::RefCell<Option<SessionSegments>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn with_session<T>(act: impl FnOnce(&mut SessionSegments) -> T) -> T {
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        act(lock(&SESSION).get_or_insert_with(SessionSegments::default))
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        SESSION.with(|session| {
+            act(session
+                .borrow_mut()
+                .get_or_insert_with(SessionSegments::default))
+        })
+    }
+}
+
+/// Make this instance's folder: lock a new lock file, then make the folder it guards.
+fn create_instance_folder(root: &Path) -> std::io::Result<InstanceFolder> {
+    std::fs::create_dir_all(root)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    let mut attempt = 0u32;
+    loop {
+        let folder = root.join(format!("{}-{stamp:x}-{attempt}", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(session_lock_path(&folder))
+        {
+            Ok(lock) => {
+                lock.try_lock().map_err(std::io::Error::other)?;
+                std::fs::create_dir(&folder)?;
+                return Ok(InstanceFolder {
+                    folder,
+                    _lock: lock,
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => attempt += 1,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// This instance's own session folder, made the first time it is asked for.
+fn own_session_folder(session: &mut SessionSegments) -> Option<PathBuf> {
+    if session.own.is_none() {
+        let root = session_root()?;
+        session.own = create_instance_folder(&root)
+            .inspect_err(|error| log::warn!("{}: {error}", root.display()))
+            .ok();
+    }
+    session.own.as_ref().map(|own| own.folder.clone())
+}
+
+/// The session folders of the other instances, each with whether that instance still runs.
+fn other_session_folders(own: &Path) -> Vec<(PathBuf, bool)> {
+    let Some(entries) = session_root().and_then(|root| std::fs::read_dir(root).ok()) else {
+        return Vec::new();
+    };
+    let mut folders: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|folder| folder.is_dir() && folder != own)
+        .map(|folder| {
+            let running = std::fs::File::open(session_lock_path(&folder))
+                .is_ok_and(|lock| lock.try_lock().is_err());
+            (folder, running)
+        })
+        .collect();
+    folders.sort();
+    folders
+}
+
+/// Before the stored session is read: this instance takes over what the instances that have
+/// ended kept, moving it into its own folder, and looks for the session's segments there first,
+/// then in the folders of the instances still running. Any of them may have stored the session;
+/// a segment is read only when its rows are the digest its run names.
+pub fn read_stored_session_segments() {
+    let Some(own) = with_session(own_session_folder) else {
+        return;
+    };
+    for (folder, running) in other_session_folders(&own) {
+        if running {
+            rspice_formats::project_results::keep_segments_in(&folder);
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let target = own.join(entry.file_name());
+            if target.exists() {
+                let _ = std::fs::remove_file(entry.path());
+            } else if let Err(error) = std::fs::rename(entry.path(), &target) {
+                log::warn!("{}: {error}", entry.path().display());
+            }
+        }
+        if std::fs::remove_dir(&folder).is_ok() {
+            let _ = std::fs::remove_file(session_lock_path(&folder));
+        }
+    }
+    rspice_formats::project_results::keep_segments_in(&own);
+}
+
+/// The stored session just read reads `segments`: this instance's folder keeps them until a
+/// session it stores is on disk.
+pub fn stored_session_reads(segments: &[StoredSegment]) {
+    with_session(|session| {
+        session.previous = segments.iter().map(|segment| segment.digest).collect();
+    });
+}
+
+/// Keep every one of `segments` in this instance's session folder before the session is
+/// stored, so a relaunch reads them after this process's own store is gone. Fails when closing
+/// chose not to wait for them.
 pub fn keep_session_segments(segments: Vec<StoredSegment>) -> Result<(), String> {
-    let folder = session_segment_folder()
-        .ok_or_else(|| "no local folder is available to keep the results in".to_owned())?;
+    let (folder, placing, without_runs) = with_session(|session| {
+        (
+            own_session_folder(session),
+            session.placing.take(),
+            session.without_runs,
+        )
+    });
+    if let Some(placing) = placing {
+        placing.cancel_and_wait(std::time::Duration::from_secs(5));
+    }
+    if without_runs {
+        return Err("closing did not wait for the results to be kept".to_owned());
+    }
+    let folder =
+        folder.ok_or_else(|| "no local folder is available to keep the results in".to_owned())?;
     keep_segments_now_in(segments, folder)
 }
 
-/// After the session was stored with `results`, let its folder go of the segments they no
-/// longer read.
+/// After the session was stored with `segments`: this instance's folder lets go of what neither
+/// it nor the session on disk reads. The stored session is written out after this, and a crash
+/// before then leaves the one on disk, whose segments stay. Another instance's folder is never
+/// touched.
 pub fn release_unread_session_segments(segments: &[StoredSegment]) {
-    if let Some(folder) = session_segment_folder() {
-        release_unread_segments_in(segments, &folder);
+    let read: std::collections::HashSet<SegmentDigest> =
+        segments.iter().map(|segment| segment.digest).collect();
+    with_session(|session| {
+        let kept = read.union(&session.previous).copied().collect();
+        if let Some(own) = &session.own {
+            remove_unkept_segments(&own.folder, &kept);
+        }
+        session.previous = read;
+    });
+}
+
+/// What keeping the session's results asks of closing.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionResultsAtClose {
+    /// The session's folder holds them: closing goes on.
+    Kept,
+    /// They are linked or cloned into it, which takes a moment.
+    Placing,
+    /// They are copied to the volume named, the bytes copied and the bytes to copy so far.
+    Copying {
+        volume: String,
+        copied: u64,
+        total: u64,
+    },
+}
+
+/// Closing: start putting `segments` into this instance's session folder off the frame, unless
+/// it holds them. Closing waits while this says they are not kept yet.
+pub fn place_session_segments_for_close(segments: Vec<StoredSegment>) -> SessionResultsAtClose {
+    with_session(|session| {
+        if session.without_runs {
+            return SessionResultsAtClose::Kept;
+        }
+        if session.placing.is_none() {
+            let Some(folder) = own_session_folder(session) else {
+                return SessionResultsAtClose::Kept;
+            };
+            let plan = segments_to_keep_in(segments, folder);
+            if plan.is_empty() {
+                return SessionResultsAtClose::Kept;
+            }
+            session.placing = Some(SegmentPlacement::start(plan, place_ways()));
+        }
+        placement_at_close(session)
+    })
+}
+
+/// Where keeping the session's results for closing stands. A placement that ended is let go:
+/// what it could not keep, storing the session tries once more.
+pub fn session_results_at_close() -> SessionResultsAtClose {
+    with_session(placement_at_close)
+}
+
+fn placement_at_close(session: &mut SessionSegments) -> SessionResultsAtClose {
+    let Some(placing) = &session.placing else {
+        return SessionResultsAtClose::Kept;
+    };
+    if let Some(outcome) = placing.outcome() {
+        if let Err(error) = outcome {
+            log::warn!("the session's results were not kept: {error}");
+        }
+        session.placing = None;
+        return SessionResultsAtClose::Kept;
     }
+    match placing.copy_progress() {
+        Some((copied, total)) => SessionResultsAtClose::Copying {
+            volume: placing.volume().to_owned(),
+            copied,
+            total,
+        },
+        None => SessionResultsAtClose::Placing,
+    }
+}
+
+/// Closing does not wait for the session's results: the copy stops and leaves nothing, and the
+/// session is stored without its runs.
+pub fn close_without_session_results() {
+    with_session(|session| {
+        if let Some(placing) = session.placing.take() {
+            placing.cancel_and_wait(std::time::Duration::from_secs(5));
+        }
+        session.without_runs = true;
+    });
+}
+
+/// Closing was called off: the copy stops and leaves nothing.
+pub fn stop_placing_session_segments() {
+    with_session(|session| {
+        if let Some(placing) = session.placing.take() {
+            placing.cancel();
+        }
+    });
+}
+
+/// Run `act` as another instance of the application: with a session folder of its own, let go
+/// of when `act` returns, as the instance ending.
+#[cfg(any(test, feature = "test-support"))]
+pub fn as_another_instance<T>(act: impl FnOnce() -> T) -> T {
+    let this = SESSION.with(|session| session.borrow_mut().take());
+    let acted = act();
+    let other = SESSION.with(|session| std::mem::replace(&mut *session.borrow_mut(), this));
+    drop(other);
+    acted
 }
 
 /// Locate results: look for kept segments in `folder` too, and read again every run of the

@@ -31,6 +31,13 @@ impl AppState {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_quit_while_saving_dialog(&mut self, ctx: &Context) {
+        // Closing that waits for the session's results asks in the same place.
+        if self.state.shell.closing_for_session_results {
+            self.render_close_while_keeping_results_dialog(ctx);
+        }
+        if !self.state.shell.quit_while_saving {
+            return;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             // A save that ended while the question was open leaves nothing to wait for.

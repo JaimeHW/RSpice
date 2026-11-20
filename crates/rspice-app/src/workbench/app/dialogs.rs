@@ -6,6 +6,7 @@
 //! them all so a single read answers whether any modal owns input this
 //! frame; the dialogs themselves never inspect each other.
 
+mod close_while_keeping_results;
 pub(in crate::workbench) mod help;
 mod quit_while_saving;
 pub(in crate::workbench) mod state;

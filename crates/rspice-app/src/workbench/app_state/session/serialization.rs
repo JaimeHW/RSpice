@@ -21,12 +21,11 @@ impl AppState {
     /// a position in the stored text, goes to the log.
     pub(crate) fn restore_eframe_session(storage: &dyn eframe::Storage) -> Option<Self> {
         let text = storage.get_string(eframe::APP_KEY)?;
-        // A stored run's results are read from the folder the session kept them in.
+        // A stored run's results are read from the folder the instance that stored the session
+        // kept them in.
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(folder) = rspice_app_services::io::result_segments::session_segment_folder() {
-            rspice_formats::project_results::keep_segments_in(&folder);
-        }
-        Some(serde_json::from_str(&text).unwrap_or_else(|error| {
+        rspice_app_services::io::result_segments::read_stored_session_segments();
+        let state = serde_json::from_str::<Self>(&text).unwrap_or_else(|error| {
             log::warn!("the stored session did not decode: {error}");
             let mut state = Self::default();
             state.record(
@@ -36,7 +35,19 @@ impl AppState {
                  Saved projects are unchanged.",
             );
             state
-        }))
+        });
+        #[cfg(not(target_arch = "wasm32"))]
+        rspice_app_services::io::result_segments::stored_session_reads(
+            &rspice_app_services::io::result_segments::file_segments(
+                &state
+                    .platform
+                    .project_lifecycle
+                    .result_cache
+                    .capture(&state.model.simulation),
+                &state.model.workspace.content.visualization_documents,
+            ),
+        );
+        Some(state)
     }
 
     /// Put the runs a session kept back, checked against the simulation plan
@@ -424,6 +435,9 @@ where
     )
     .map(Some)
 }
+
+#[cfg(test)]
+mod instance_folders;
 
 #[cfg(test)]
 mod populated_session;

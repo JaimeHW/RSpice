@@ -577,7 +577,14 @@ impl RSpiceApp {
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.state.shell.quit_while_saving = true;
+        } else if should_persist_application_state(&self.state)
+            && ctx.input(|input| input.viewport().close_requested())
+            && self.state.hold_close_for_session_results()
+        {
+            // Closing waits, off the frame, while the session's results go into its folder.
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
+        self.close_once_session_results_are_kept(ctx);
         #[cfg(target_arch = "wasm32")]
         if let Some(opened) =
             rspice_app_project::workbench::workflows::file_workflow::poll_browser_schematic_import(
