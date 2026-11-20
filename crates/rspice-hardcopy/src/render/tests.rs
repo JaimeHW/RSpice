@@ -2968,3 +2968,18 @@ fn gray_percent_is_black_ink_coverage_not_reflected_channel_value() {
         Rgb8::new(102, 102, 102)
     );
 }
+
+/// A report table prints a number as the sheets do: the value, not twelve
+/// fixed decimals of its SI base unit.
+#[test]
+fn a_report_table_number_reads_with_its_prefix() {
+    let cell = |value: f64, unit: Option<&str>| {
+        format_table_cell(&TableCell::Number {
+            value,
+            unit: unit.map(str::to_owned),
+        })
+    };
+    assert_eq!(cell(1.5e-15, Some("F")), "1.5 fF");
+    assert_eq!(cell(1.234_567e9, Some("Hz")), "1.234567 GHz");
+    assert_eq!(cell(-0.25, None), "\u{2212}0.25");
+}

@@ -1112,14 +1112,19 @@ fn conversion_error(message: impl Into<String>) -> HardcopyRenderError {
     HardcopyRenderError::SourceConversion(message.into())
 }
 
+/// One report table cell as the page prints it. A number reads as a sheet
+/// reads it, at the default significant digits with an SI prefix on its
+/// unit: 1.5 fF, never "0.000000000000 F". A report leaves the screen, so it
+/// does not follow one reader's digits preference.
 fn format_table_cell(cell: &TableCell) -> String {
     match cell {
         TableCell::Empty => String::new(),
         TableCell::Text(value) => value.clone(),
-        TableCell::Number { value, unit } => match unit {
-            Some(unit) => format!("{value:.12} {unit}"),
-            None => format!("{value:.12}"),
-        },
+        TableCell::Number { value, unit } => rspice_results::number_format::fmt_si_significant(
+            *value,
+            unit.as_deref().unwrap_or_default(),
+            usize::from(rspice_results::display_preferences::DisplayedSignificantDigits::DEFAULT),
+        ),
         TableCell::Integer(value) => value.to_string(),
         TableCell::Boolean(value) => value.to_string(),
     }
