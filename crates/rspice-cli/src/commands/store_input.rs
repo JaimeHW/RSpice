@@ -5,13 +5,21 @@
 //! A conversion to a rawfile or a delimited table reads the store a chunk at a time, as the run
 //! that wrote it publishes its own outputs; one the table would refuse, or that keeps a column
 //! that is not one of the store's, reads the whole table and converts it as any result file.
+//!
+//! Every conversion checks the store first ([`store_notes`]): a segment that is not the run its
+//! manifest names is refused, and a store that cannot show its run is whole converts with a note
+//! saying why.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use rspice_core::analysis::transient::TransientResult;
 use rspice_core::execution::HeldEvents;
 use rspice_results::stored_transient::{StoreEvents, StoredTransientRun, fill_rows};
-use rspice_results_store::{FileIo, SegmentReader, StoreDir, StoreError};
+use rspice_results_store::{
+    FileIo, RunStatus, SegmentReader, SegmentState, StopReason, StoreDir, StoreError,
+};
 
 use crate::cli::{CliError, ConvertArgs, InputFormat, NumericBound, OutputFormat};
 use crate::commands::export_table::{ExportTable, scalar_table_taking_samples};
@@ -43,8 +51,111 @@ fn open_io(path: &Path) -> Result<FileIo, CliError> {
     })
 }
 
+/// What a conversion must say about the store at `path` before it reads it, or why it must
+/// refuse it. A segment whose `END` names other results than its manifest records (a sync or a
+/// copy that brought back an older segment) is refused. A store that cannot show its run is whole
+/// converts with a note for each reason: its run stopped early, its segment has no sound `END` (a
+/// run that did not finish, or an `END` damaged since), or it has no readable manifest to check
+/// its segment against.
+pub(crate) fn store_notes(path: &Path) -> Result<Vec<String>, CliError> {
+    let reader = SegmentReader::open(open_io(path)?).map_err(|error| read_error(path, error))?;
+    let rows = reader.rows();
+    let mut notes = Vec::new();
+    let held = match reader.state() {
+        SegmentState::Complete { status, digest } => {
+            if let RunStatus::Stopped(reason) = status {
+                notes.push(format!(
+                    "was written by a run that stopped early ({}): it holds the {rows} rows \
+                     computed before the stop",
+                    stopped_because(reason)
+                ));
+            }
+            Some(*digest)
+        }
+        SegmentState::Recovered => {
+            notes.push(match reader.end_damage() {
+                Some(damage) => format!(
+                    "has no sound END, so it was cut short or damaged since its run finished \
+                     ({damage}): its {rows} rows are read back without the digest that checks \
+                     them"
+                ),
+                None => format!(
+                    "was written by a run that did not finish: the {rows} rows it made durable \
+                     are read back without a digest to check them"
+                ),
+            });
+            None
+        }
+    };
+    if !path.is_dir() {
+        return Ok(notes);
+    }
+    let unchecked = "so its segment is read unchecked against the run it was written for";
+    match StoreDir::new(path).load_manifest() {
+        Ok(Some(manifest)) => {
+            let named = manifest.members().iter().find(|member| member.index == 0);
+            match (named.and_then(|member| member.digest), held) {
+                (Some(named), Some(held)) if named != held => {
+                    return Err(conversion_error(
+                        path,
+                        format_args!(
+                            "the results store's segment is not the run its manifest names: the \
+                             manifest records results {named} and the segment holds {held}, as \
+                             when a sync or a copy brings back an older segment"
+                        ),
+                    ));
+                }
+                _ if named.is_none() => {
+                    notes.push(format!(
+                        "has a manifest that does not name its segment, {unchecked}"
+                    ));
+                }
+                _ => {}
+            }
+        }
+        Ok(None) => notes.push(format!("has no manifest, {unchecked}")),
+        Err(error) => notes.push(format!(
+            "has a manifest that cannot be read ({error}), {unchecked}"
+        )),
+    }
+    Ok(notes)
+}
+
+fn stopped_because(reason: &StopReason) -> String {
+    match reason {
+        StopReason::DiskFull => "the disk filled".to_owned(),
+        StopReason::StorageBudget => "it reached its storage budget".to_owned(),
+        StopReason::MemoryFull => "memory ran out".to_owned(),
+        StopReason::Cancelled => "it was cancelled".to_owned(),
+        StopReason::Timeout => "it timed out".to_owned(),
+        StopReason::Failed(message) => format!("it failed: {message}"),
+    }
+}
+
+/// Check the store at `path` before a conversion reads it: refuse it as [`store_notes`] does,
+/// and say each of its notes once however many readers the conversion opens.
+fn check_store(path: &Path) -> Result<(), CliError> {
+    static NOTED: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+    let notes = store_notes(path)?;
+    let first = NOTED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(path.to_path_buf());
+    if first {
+        for note in notes {
+            crate::observability::diagnostic(
+                "results_store_unverified",
+                None,
+                format_args!("Note: the results store {} {note}", path.display()),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// The transient a store holds, with its event histories read back.
 pub(crate) fn open(path: &Path) -> Result<StoredTransientRun<FileIo>, CliError> {
+    check_store(path)?;
     StoredTransientRun::open(open_io(path)?).map_err(|error| read_error(path, error))
 }
 
@@ -118,6 +229,7 @@ pub(crate) fn convert_streamed(
         InputFormat::Rsr,
         args.section.as_deref(),
     )?;
+    check_store(path)?;
     let StoredTransientRun {
         mut shell,
         mut reader,
@@ -289,6 +401,7 @@ pub(crate) fn convert_vcd_streamed(args: &ConvertArgs) -> Result<bool, CliError>
         InputFormat::Rsr,
         args.section.as_deref(),
     )?;
+    check_store(path)?;
     let run = StoredTransientRun::open_leaving_events(open_io(path)?)
         .map_err(|error| read_error(path, error))?;
     let shell = &run.shell;

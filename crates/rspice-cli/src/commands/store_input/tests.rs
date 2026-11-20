@@ -128,3 +128,109 @@ fn a_store_converts_to_the_event_dump_its_run_wrote() {
     assert!(!document.signals.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+const LONG_RC: &str = "* rc into a store over several chunks\nv1 in 0 sin(0 1 10meg)\n\
+                       r1 in out 1k\nc1 out 0 1p\n.tran 0.1n 2000n 0 0.1n\n.end\n";
+
+fn try_convert(input: &Path, output: &Path) -> Result<(), crate::cli::CliError> {
+    let Commands::Convert(args) = command(&[
+        "convert",
+        input.to_str().unwrap(),
+        output.to_str().unwrap(),
+        "--to",
+        "csv",
+    ]) else {
+        panic!("expected the convert command");
+    };
+    crate::commands::convert::execute(args, &Config::default(), true).map(drop)
+}
+
+/// A copy of the store at `from` as `to`, its files as they are.
+fn copy_store(from: &Path, to: &Path) -> PathBuf {
+    let _ = std::fs::remove_dir_all(to);
+    std::fs::create_dir_all(to.join("runs")).unwrap();
+    for name in [
+        rspice_results_store::StoreDir::MANIFEST.to_owned(),
+        rspice_results_store::StoreDir::segment_name(0),
+    ] {
+        std::fs::copy(from.join(&name), to.join(&name)).unwrap();
+    }
+    to.join(rspice_results_store::StoreDir::segment_name(0))
+}
+
+/// A store whose segment is not the run its manifest names (a sync that brought back another
+/// run's segment) is refused, never converted as the run the manifest records.
+#[test]
+fn a_segment_its_manifest_does_not_name_is_refused() {
+    let dir = scratch("synced");
+    let (first, second) = (dir.join("first"), dir.join("second"));
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    run(&first, RC, "csv", &first.join("run.csv"));
+    run(&second, LONG_RC, "csv", &second.join("run.csv"));
+    let store = first.join("run.rsr");
+    assert_eq!(super::store_notes(&store).unwrap(), Vec::<String>::new());
+    let segment = rspice_results_store::StoreDir::segment_name(0);
+    std::fs::copy(second.join("run.rsr").join(&segment), store.join(&segment)).unwrap();
+    let refused = try_convert(&store, &dir.join("out.csv")).unwrap_err();
+    assert!(
+        refused
+            .to_string()
+            .contains("not the run its manifest names"),
+        "{refused}"
+    );
+    assert!(!dir.join("out.csv").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A store that cannot show its run is whole still converts what it holds, and says why: a run
+/// that did not finish, a damaged `END`, a missing or damaged manifest.
+#[test]
+fn a_store_that_cannot_show_its_run_is_whole_converts_with_a_note() {
+    let dir = scratch("notes");
+    run(&dir, LONG_RC, "csv", &dir.join("run.csv"));
+    let store = dir.join("run.rsr");
+    let bytes = std::fs::read(store.join(rspice_results_store::StoreDir::segment_name(0))).unwrap();
+    let end = u64::from_le_bytes(bytes[32..40].try_into().unwrap()) as usize;
+    let mut damaged_end = bytes.clone();
+    damaged_end[end + 16 + 40] ^= 0x01;
+    // A run that died: its whole chunks on disk, no END, and the superblock naming none.
+    let mut crashed = bytes[..bytes.len() * 3 / 5].to_vec();
+    crashed[32..40].fill(0);
+    let mut manifest = std::fs::read(store.join(rspice_results_store::StoreDir::MANIFEST)).unwrap();
+    manifest[30] ^= 0x01;
+    for (case, expected) in [
+        ("crash", "did not finish"),
+        ("cut", "no sound END"),
+        ("end", "no sound END"),
+        ("no manifest", "has no manifest"),
+        ("bad manifest", "cannot be read"),
+    ] {
+        let copy = dir.join(format!("{}.rsr", case.replace(' ', "-")));
+        let segment = copy_store(&store, &copy);
+        match case {
+            "crash" => std::fs::write(&segment, &crashed).unwrap(),
+            "cut" => std::fs::write(&segment, &bytes[..bytes.len() * 3 / 5]).unwrap(),
+            "end" => std::fs::write(&segment, &damaged_end).unwrap(),
+            "no manifest" => {
+                std::fs::remove_file(copy.join(rspice_results_store::StoreDir::MANIFEST)).unwrap()
+            }
+            _ => std::fs::write(
+                copy.join(rspice_results_store::StoreDir::MANIFEST),
+                &manifest,
+            )
+            .unwrap(),
+        }
+        let notes = super::store_notes(&copy).unwrap();
+        assert!(
+            notes.iter().any(|note| note.contains(expected)),
+            "{case}: {notes:?}"
+        );
+        assert!(
+            !notes.iter().any(|note| note.contains(" 0 rows")),
+            "{case}: {notes:?}"
+        );
+        try_convert(&copy, &dir.join(format!("{case}.csv"))).unwrap();
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
