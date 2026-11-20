@@ -1586,6 +1586,9 @@ pub struct ResultsState {
     /// Source-aware structural verdicts per analysis and question;
     /// see [`analysis_answers_structural_gate`].
     structural_gates: RetainedMemo<(AnalysisPresentationKey, StructuralGate), bool>,
+    /// Whether Compare datasets has a baseline for a candidate analysis; see
+    /// [`document_edit::compare::compare_available`].
+    compare_availability: RetainedMemo<AnalysisPresentationKey, bool>,
     /// Source-aware statistics per selected trace; see
     /// [`trace_statistics::trace_statistics`].
     trace_statistics:

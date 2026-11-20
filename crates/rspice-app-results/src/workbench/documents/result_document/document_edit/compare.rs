@@ -14,6 +14,7 @@ use rspice_results_ui::document_dialogs::compare::{
     CompareChoices, CompareDraft, CompareOutcome, SignalOutcome, Verdict,
 };
 
+use super::super::AnalysisPresentationKey;
 use super::*;
 use crate::results::visualization_document::ComparisonReceipt;
 
@@ -44,8 +45,66 @@ fn run_label(run: &SimulationRun) -> String {
 }
 
 /// Whether Compare datasets has a candidate and a baseline to compare it with.
+///
+/// The toolbar asks on every frame, so the answer is kept per candidate until
+/// the retained runs change, and it reads no sample: see [`comparable`].
 pub fn compare_available(state: ResultsReads<'_>) -> bool {
-    reading_analysis(state).is_ok_and(|(run, analysis)| !baselines(state, run, analysis).is_empty())
+    let Ok((run, analysis)) = reading_analysis(state) else {
+        return false;
+    };
+    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+    state
+        .results
+        .compare_availability
+        .get_or_insert_with(&state.model.simulation, key, || {
+            state
+                .model
+                .simulation
+                .retained
+                .runs
+                .iter()
+                .filter(|other| other.dataset_id != run.dataset_id)
+                .filter_map(|other| matching_comparison_analysis(analysis, other))
+                .any(|baseline| comparable(analysis, baseline))
+        })
+}
+
+/// Whether `baseline` can be compared with `candidate` as far as their
+/// waveforms' names, units, lengths and axes say: the same coordinate unit,
+/// and a signal on the candidate's axis that the baseline holds once, in the
+/// same unit, with a sample for every coordinate. No sample is read; the
+/// samples are checked when the comparison opens ([`baselines`]).
+fn comparable(candidate: &AnalysisResult, baseline: &AnalysisResult) -> bool {
+    use rspice_results::waveform::WaveformValues;
+
+    if candidate.waveform_coordinate_unit() != baseline.waveform_coordinate_unit() {
+        return false;
+    }
+    let Some(reference) = candidate.waveforms.first() else {
+        return false;
+    };
+    // A run's waveforms share its axis; an axis held twice is the same axis
+    // when its length and ends agree.
+    let on_axis = |x: &WaveformValues| {
+        WaveformValues::ptr_eq(x, &reference.x)
+            || (x.len() == reference.x.len() && x.ends() == reference.x.ends())
+    };
+    candidate
+        .waveforms
+        .iter()
+        .filter(|waveform| on_axis(&waveform.x) && waveform.y.len() == waveform.x.len())
+        .any(|waveform| {
+            let mut matching = baseline
+                .waveforms
+                .iter()
+                .filter(|other| other.name == waveform.name);
+            match (matching.next(), matching.next()) {
+                (Some(other), None) => {
+                    other.unit == waveform.unit && other.y.len() == other.x.len()
+                }
+                _ => false,
+            }
+        })
 }
 
 /// Whether Compare datasets can run here, and why not: away from Results
@@ -68,18 +127,21 @@ pub fn compare_availability(
 /// Open Compare datasets on the result the reader is looking at, against the
 /// first compatible baseline.
 pub fn open_compare(state: &mut ResultsParts<'_>) {
-    let baseline = match reading_analysis(state.results_reads()) {
-        Ok((run, analysis)) => baselines(state.results_reads(), run, analysis)
-            .first()
-            .map(|(baseline, _)| baseline.dataset_id),
-        // Compare datasets is disabled while either is missing.
-        Err(_) => return,
-    };
-    let Some(baseline) = baseline else {
+    // Compare datasets is disabled while either is missing.
+    if !compare_available(state.results_reads()) {
         return;
-    };
+    }
+    let baseline = reading_analysis(state.results_reads())
+        .ok()
+        .and_then(|(run, analysis)| {
+            baselines(state.results_reads(), run, analysis)
+                .first()
+                .map(|(baseline, _)| baseline.dataset_id)
+        });
+    // It is offered from the runs' names and axes alone; a baseline whose
+    // samples turn out not to compare opens the form with its refusal.
     *state.result_document_dialog = Some(ResultDocumentDialog::Compare(CompareDraft {
-        baseline: Some(baseline),
+        baseline,
         ..CompareDraft::default()
     }));
 }
@@ -315,3 +377,6 @@ fn outcome(
         signals,
     }
 }
+
+#[cfg(test)]
+mod tests;
