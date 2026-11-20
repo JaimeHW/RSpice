@@ -91,6 +91,11 @@ pub trait Curve {
     fn len(&self) -> usize;
     /// Sample `index`, which is below [`Self::len`].
     fn at(&self, index: usize) -> f64;
+    /// Whether its samples are known to ascend strictly, so a search need not read them all to
+    /// check their order.
+    fn ascending(&self) -> bool {
+        false
+    }
 }
 
 impl Curve for [f64] {
@@ -162,6 +167,10 @@ impl Curve for WindowedCurve<'_> {
         }
         samples[index - *first]
     }
+
+    fn ascending(&self) -> bool {
+        self.values.is_ascending_axis()
+    }
 }
 
 /// The first `len` samples of a curve.
@@ -174,6 +183,10 @@ impl<C: Curve + ?Sized> Curve for Prefix<'_, C> {
 
     fn at(&self, index: usize) -> f64 {
         self.0.at(index)
+    }
+
+    fn ascending(&self) -> bool {
+        self.0.ascending()
     }
 }
 
@@ -226,10 +239,7 @@ pub fn find<X: Curve + ?Sized, Y: Curve + ?Sized>(
         Feature::Valley(direction) => {
             pick(extrema(y, excursion, false), x, from, direction).map(point)
         }
-        Feature::Sample(direction) => {
-            let finite = (0..count).filter(|index| y.at(*index).is_finite());
-            pick(finite, x, from, direction).map(point)
-        }
+        Feature::Sample(direction) => step(x, y, from, direction).map(point),
         Feature::Crossing { level, direction } => {
             let crossings = crossings(x, y, level);
             let found = match direction {
@@ -324,6 +334,11 @@ fn ordered_len<X: Curve + ?Sized, Y: Curve + ?Sized>(x: &X, y: &Y) -> Result<usi
     if !(0..count).any(|index| y.at(index).is_finite()) {
         return Err(SearchRefusal::NoSamples);
     }
+    // A stored run's time axis was checked as its run ended; walking it again would read it
+    // whole.
+    if x.ascending() {
+        return Ok(count);
+    }
     let mut previous = f64::NEG_INFINITY;
     for sample in 0..count {
         let here = x.at(sample);
@@ -359,6 +374,38 @@ fn pick<X: Curve + ?Sized>(
     match direction {
         Direction::Next => candidates.find(|index| x.at(*index) > from),
         Direction::Previous => candidates.rev().find(|index| x.at(*index) < from),
+    }
+}
+
+/// The finite sample nearest `from` strictly after or before it on an ordered axis: found by
+/// bisection, so a step reads the few blocks around the cursor however long the curve.
+fn step<X: Curve + ?Sized, Y: Curve + ?Sized>(
+    x: &X,
+    y: &Y,
+    from: f64,
+    direction: Direction,
+) -> Option<usize> {
+    if from.is_nan() {
+        return None;
+    }
+    // The first sample whose X `beyond` holds of; every one after it holds too.
+    let first = |beyond: &dyn Fn(f64) -> bool| {
+        let (mut low, mut high) = (0, x.len());
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if beyond(x.at(middle)) {
+                high = middle;
+            } else {
+                low = middle + 1;
+            }
+        }
+        low
+    };
+    match direction {
+        Direction::Next => (first(&|at| at > from)..x.len()).find(|&index| y.at(index).is_finite()),
+        Direction::Previous => (0..first(&|at| at >= from))
+            .rev()
+            .find(|&index| y.at(index).is_finite()),
     }
 }
 

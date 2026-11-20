@@ -119,7 +119,7 @@ fn a_stored_column_reads_any_window_across_chunks_and_its_segment_goes_with_the_
     let values = WaveformValues::stored(out.clone(), window(1, rows - 1)).unwrap();
     assert_eq!(axis.len(), 5000);
     assert!(
-        axis.in_memory()
+        axis.read_whole()
             .unwrap()
             .iter()
             .enumerate()
@@ -127,7 +127,7 @@ fn a_stored_column_reads_any_window_across_chunks_and_its_segment_goes_with_the_
     );
     assert!(
         values
-            .in_memory()
+            .read_whole()
             .unwrap()
             .iter()
             .enumerate()
@@ -179,8 +179,8 @@ fn a_stored_waveform_tiles_fits_and_reads_cursors_from_its_store_as_from_its_val
 
     // What the same samples give read whole, from copies that do not share the windows.
     let (x, y) = (
-        axis.in_memory().unwrap().to_vec(),
-        out.in_memory().unwrap().to_vec(),
+        axis.read_whole().unwrap().to_vec(),
+        out.read_whole().unwrap().to_vec(),
     );
     let linear = rspice_results::sampling::SampleInterpolation::Linear;
     let cubic = rspice_results::sampling::SampleInterpolation::MonotoneCubic;

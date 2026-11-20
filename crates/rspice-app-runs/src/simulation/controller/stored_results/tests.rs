@@ -757,11 +757,8 @@ fn a_reopened_run_reads_one_time_axis_for_ten_signals() {
     let work = before.since();
     assert_eq!(rows, nodes.len() * nodes[0].x.len());
     assert_eq!(
-        work.stored_reads,
-        1,
-        "{} signals read their time axis {} times",
-        nodes.len(),
-        work.stored_reads
+        work.stored_reads, 0,
+        "counting a stored axis reads none of it"
     );
     assert!(
         nodes

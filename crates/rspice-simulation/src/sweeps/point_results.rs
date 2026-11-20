@@ -161,8 +161,7 @@ fn terminal_dc_node_samples<W: AsRef<RetainedWaveform>>(
         |trace| DcTraceView {
             name: &trace.name,
             unit: trace.unit.as_deref(),
-            x: trace.x.in_memory(),
-            x_len: trace.x.len(),
+            x: rspice_results::dc_sweep::DcAxis::Retained(&trace.x),
             sample_count: trace.y.len(),
             complex: trace.complex.is_some(),
         },

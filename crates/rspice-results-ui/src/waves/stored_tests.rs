@@ -14,16 +14,19 @@ use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::executed_deck::ExecutedDeckArchive;
 use rspice_results::waveform::{
-    ColumnSource, ColumnTile, RetainedTrace, RowsAround, StoredWindow, WaveformValues, WindowLead,
+    ColumnSource, ColumnTile, Read, ReadService, ReadValue, RetainedTrace, RowsAround,
+    StoredWindow, WaveformValues, WindowLead, perform,
 };
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::{plot, raster};
 
-/// A stored column in memory that counts how often it is read.
+/// A stored column in memory that counts how often it is read whole, and the rows it is read
+/// otherwise.
 struct Counted {
     name: &'static str,
     values: Vec<f64>,
     reads: AtomicUsize,
+    rows_read: AtomicUsize,
 }
 
 impl ColumnSource for Counted {
@@ -40,10 +43,53 @@ impl ColumnSource for Counted {
     }
 
     fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
-        self.reads.fetch_add(1, Ordering::SeqCst);
+        if out.len() == self.values.len() {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+        } else {
+            self.rows_read.fetch_add(out.len(), Ordering::SeqCst);
+        }
         let first = first as usize;
         out.copy_from_slice(&self.values[first..first + out.len()]);
         Ok(())
+    }
+
+    /// The run's time axis ascends, as its run checked when it ended.
+    fn ascending(&self) -> bool {
+        self.name == "time"
+    }
+}
+
+/// A reader service that makes each read as it is asked and keeps it, as the app's keeps a read
+/// once it has arrived.
+#[derive(Default)]
+struct Keeping {
+    held: std::sync::Mutex<Vec<(WaveformValues, Read, ReadValue)>>,
+}
+
+impl ReadService for Keeping {
+    fn request(
+        &self,
+        run: u64,
+        values: &WaveformValues,
+        x: &WaveformValues,
+        read: Read,
+    ) -> Option<ReadValue> {
+        if let Some(value) = self.held(run, values, read) {
+            return Some(value);
+        }
+        let value = perform(values, x, read);
+        self.held
+            .lock()
+            .unwrap()
+            .push((values.clone(), read, value.clone()));
+        Some(value)
+    }
+
+    fn held(&self, _run: u64, values: &WaveformValues, read: Read) -> Option<ReadValue> {
+        let held = self.held.lock().unwrap();
+        held.iter()
+            .find(|(kept, kept_read, _)| WaveformValues::ptr_eq(kept, values) && *kept_read == read)
+            .map(|(_, _, value)| value.clone())
     }
 }
 
@@ -52,6 +98,7 @@ fn counted(name: &'static str, values: Vec<f64>) -> Arc<Counted> {
         name,
         values,
         reads: AtomicUsize::new(0),
+        rows_read: AtomicUsize::new(0),
     })
 }
 
@@ -85,6 +132,9 @@ fn models(
     models
 }
 
+/// A stored column that cannot tile or find the rows around a cursor is read whole, once, by the
+/// reader service, which keeps it for every model and frame after; beyond that only the rows at
+/// its ends are read, once.
 #[test]
 fn a_stored_trace_is_read_once_and_kept_however_many_frames_draw_it() {
     const ROWS: usize = 20_000;
@@ -113,60 +163,71 @@ fn a_stored_trace_is_read_once_and_kept_however_many_frames_draw_it() {
 
     let mut cache = plot::DecimationCache::default();
     let mut derived = DerivedSeries::default();
+    let reader: &'static Keeping = Box::leak(Box::default());
     // Two generations of models, as a visibility toggle or a new overlay rebuilds them, each
     // drawn for several frames with a cursor whose readout reads the trace.
-    for generation in 0..2 {
-        let models = models(&run);
-        let model = &models[0];
-        assert!(
-            model.traces[0].y.is_stored(),
-            "the model shares the stored values"
-        );
-        let (x0, x1) = model.x_range.expect("the strip has an X range");
-        for frame in 0..4 {
-            raster::render(egui::vec2(640.0, 320.0), |ui, _| {
-                cache.ensure_version(generation);
-                for pane in model.unit_panes() {
-                    let range = pane_y_range(&mut derived, model, &pane.traces, |_| {});
-                    let auto_y = pane_auto_y(range, None, &[]).expect("the pane has a range");
-                    show_plot(
-                        ui,
-                        &mut cache,
-                        model,
-                        &pane,
-                        PanePlot {
-                            x_range: (x0, x1),
-                            auto_y,
-                            y_view: None,
-                            log_y: false,
-                            left_margin: 64.0,
-                            readout: ReadoutPolicy::default(),
-                            quantity: Default::default(),
-                            minor_grid: false,
-                            trace_width: 1.8,
-                            horizontal_cursors: [None, None],
-                            horizontal_cursor_interactive: false,
-                            cursors: Some(plot::CursorPair {
-                                a: Some(x0 + (x1 - x0) * 0.25),
-                                b: Some(x0 + (x1 - x0) * (0.5 + 0.1 * f64::from(frame))),
-                            }),
-                            specification_limits: Vec::new(),
-                            markers: Vec::new(),
-                            comparison: Default::default(),
-                            expressions: &[],
-                            family_envelopes: &[],
-                            find_nearest: true,
-                        },
-                    );
-                }
-            });
-            assert_eq!(
-                reads(),
-                (1, 1),
-                "generation {generation}, frame {frame}: each stored column is read once and kept"
+    rspice_results::waveform::read_through(reader, || {
+        for generation in 0..2 {
+            let models = models(&run);
+            let model = &models[0];
+            assert!(
+                model.traces[0].y.is_stored(),
+                "the model shares the stored values"
             );
+            let (x0, x1) = model.x_range.expect("the strip has an X range");
+            for frame in 0..4 {
+                raster::render(egui::vec2(640.0, 320.0), |ui, _| {
+                    cache.ensure_version(generation);
+                    for pane in model.unit_panes() {
+                        let range = pane_y_range(&mut derived, model, &pane.traces, |_| {});
+                        let auto_y = pane_auto_y(range, None, &[]).expect("the pane has a range");
+                        show_plot(
+                            ui,
+                            &mut cache,
+                            model,
+                            &pane,
+                            PanePlot {
+                                x_range: (x0, x1),
+                                auto_y,
+                                y_view: None,
+                                log_y: false,
+                                left_margin: 64.0,
+                                readout: ReadoutPolicy::default(),
+                                quantity: Default::default(),
+                                minor_grid: false,
+                                trace_width: 1.8,
+                                horizontal_cursors: [None, None],
+                                horizontal_cursor_interactive: false,
+                                cursors: Some(plot::CursorPair {
+                                    a: Some(x0 + (x1 - x0) * 0.25),
+                                    b: Some(x0 + (x1 - x0) * (0.5 + 0.1 * f64::from(frame))),
+                                }),
+                                specification_limits: Vec::new(),
+                                markers: Vec::new(),
+                                comparison: Default::default(),
+                                expressions: &[],
+                                family_envelopes: &[],
+                                find_nearest: true,
+                            },
+                        );
+                    }
+                });
+                assert_eq!(
+                    reads(),
+                    (1, 1),
+                    "generation {generation}, frame {frame}: each stored column is read once and kept"
+                );
+                let rows_read = (
+                    time.rows_read.load(Ordering::SeqCst),
+                    out.rows_read.load(Ordering::SeqCst),
+                );
+                assert!(
+                    rows_read.0 <= 2 && rows_read.1 <= 2,
+                    "generation {generation}, frame {frame}: other rows read {rows_read:?}"
+                );
+            }
         }
-    }
+    });
 }
 
 /// A stored column that tiles and finds the rows around a cursor itself, as a results store
@@ -535,8 +596,8 @@ fn a_peak_marker_on_a_stored_trace_is_searched_for_once() {
     assert!(searched <= 2 * ROWS, "the search read {searched} rows");
     assert_eq!(
         work.since().stored_reads,
-        2,
-        "the search read the axis and the trace once each"
+        0,
+        "the search reads the blocks it walks, never a whole column"
     );
 
     let (before, work) = (rows_read(), ColumnWork::read());

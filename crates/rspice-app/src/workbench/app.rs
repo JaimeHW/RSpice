@@ -284,6 +284,10 @@ impl RSpiceApp {
                 arch: env!("RSPICE_BUILD_ARCH"),
             },
         );
+        // Stored results are read off the frame; each read that arrives asks
+        // for the frame that draws it.
+        let repaint = cc.egui_ctx.clone();
+        rspice_app_state::state::run_reader::install_run_reader(move || repaint.request_repaint());
         // Load the persisted session, with the preferences file read over it.
         let mut state = AppState::restore_with_preferences_file(cc.storage);
 

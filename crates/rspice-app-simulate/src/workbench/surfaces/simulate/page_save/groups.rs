@@ -67,7 +67,7 @@ pub(super) fn capture_groups(
         "Selection preflight unavailable".to_owned()
     } else if over_budget {
         format!(
-            "{} needed exceeds {} ceiling",
+            "{} needed exceeds {} on disk",
             format_bytes(ledger.proven_bytes()),
             format_bytes(budget)
         )
@@ -135,11 +135,11 @@ pub(super) fn capture_groups(
                             width,
                         );
                     }),
-                    Some(("Results storage ceiling", &mut |ui: &mut Ui, width: f32| {
+                    Some(("Disk per run", &mut |ui: &mut Ui, width: f32| {
                         picked_budget = select(
                             ui,
                             "simulation.save.storage-budget",
-                            "Plan results storage ceiling",
+                            "Plan results disk ceiling per run",
                             &selected_budget,
                             &budget_choices,
                             width,
@@ -147,6 +147,14 @@ pub(super) fn capture_groups(
                     })),
                 );
                 rule_row(ui, "Selection behavior", selection_mode.description());
+                // A run of any length is drawn at the screen's resolution and read back a
+                // window at a time: the ceiling is what it may take on disk, never what can
+                // be viewed.
+                rule_row(
+                    ui,
+                    "Viewing",
+                    "a stored run of any size is drawn at the screen's resolution",
+                );
             });
             ledger_head(
                 ui,
@@ -242,7 +250,7 @@ pub(super) fn capture_groups(
                     "Save All reserves the engine's complete bounded result-value allowance for \
                      every enabled analysis and Run Set point. Authored outputs and probes still \
                      control initial plotting, and a capture group's overrides still decide how \
-                     its own members are sampled and stored. The storage ceiling is checked \
+                     its own members are sampled and stored. The disk ceiling is checked \
                      again before each finished analysis is saved."
                 } else {
                     GROUP_NOTE

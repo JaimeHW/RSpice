@@ -12,9 +12,11 @@ pub use retained::{
 mod reads;
 mod trace;
 mod values;
+#[cfg(feature = "test-support")]
+pub use reads::read_through;
 pub use reads::{
-    Fetched, HeldColumn, Read, ReadService, ReadValue, SampleSlice, install_read_service, perform,
-    read_service,
+    Fetched, HeldColumn, Read, ReadService, ReadValue, SampleSlice, ViewTile, install_read_service,
+    perform, read_service,
 };
 pub use trace::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 #[cfg(feature = "engine-evidence")]

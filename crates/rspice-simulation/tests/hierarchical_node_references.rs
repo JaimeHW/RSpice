@@ -180,7 +180,7 @@ fn every_analysis_reports_one_connected_internal_node() {
             SimulationResult::Ac { waveforms, .. } => {
                 let key = only_internal_signal(waveforms.keys(), "ac");
                 let waveform = &waveforms[key];
-                let magnitude = waveform.y_values.in_memory().unwrap()[0]
+                let magnitude = waveform.y_values.read_whole().unwrap()[0]
                     .hypot(waveform.y_imag.as_ref().expect("complex")[0]);
                 // |R / ((1k + R) + j w R C 1k)| with R = 400 and C = 1n.
                 let omega = 2.0 * std::f64::consts::PI * 1.0e5;
@@ -200,7 +200,7 @@ fn every_analysis_reports_one_connected_internal_node() {
                 let waveform = &waveforms[key];
                 let last = *waveform
                     .y_values
-                    .in_memory()
+                    .read_whole()
                     .unwrap()
                     .last()
                     .expect("samples");

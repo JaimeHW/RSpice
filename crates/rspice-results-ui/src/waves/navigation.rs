@@ -3,6 +3,7 @@
 use super::{StripModel, StripTrace, trace_key};
 use crate::derived::DerivedSeries;
 use egui::Ui;
+use rspice_results::waveform::Fetched;
 use rspice_ui_kit::plot::{Axis, CursorPair, XScale, floored_span};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -357,13 +358,19 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
             // The miniature, fit and segments both, is read once per data
             // version and scale: the lane is drawn on every frame.
             let key = super::stable_hash(&(trace_key(model, trace), scale == XScale::Log10));
+            // A stored trace's miniature is drawn once the reader service
+            // has read its tile.
             let miniature = match derived.overview(key) {
-                Some(held) => held,
-                None => {
-                    let miniature = overview_miniature(derived, model, trace, scale, &mut output);
-                    derived.keep_overview(key, miniature)
-                }
+                Some(held) => Some(held),
+                None => overview_miniature(derived, model, trace, scale, &mut output)
+                    .map(|miniature| derived.keep_overview(key, miniature)),
             };
+            let miniature = miniature.unwrap_or_else(|| {
+                std::sync::Arc::new(crate::derived::OverviewMiniature {
+                    range: None,
+                    segments: Vec::new(),
+                })
+            });
             let (minimum, maximum) = miniature.range.unwrap_or((0.0, 1.0));
             let span = (maximum - minimum).max(f64::EPSILON);
             for segment in &miniature.segments {
@@ -851,18 +858,23 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
 /// A stored trace's range, and its miniature as unbroken runs of points.
 type StoredOverview = (Option<(f64, f64)>, Vec<Vec<(f64, f64)>>);
 
-/// Read the overview miniature of `trace` on a `scale` axis.
+/// Read the overview miniature of `trace` on a `scale` axis; `None` while the
+/// tile of a stored trace is being read.
 fn overview_miniature(
     derived: &mut DerivedSeries,
     model: &StripModel,
     trace: &StripTrace,
     scale: XScale,
     output: &mut SharedXAxisResponse,
-) -> crate::derived::OverviewMiniature {
+) -> Option<crate::derived::OverviewMiniature> {
     // A stored trace's miniature is its tile across the whole axis, by
     // decade on a logarithmic one, read from the store's summaries rather
-    // than its column.
-    let stored = stored_overview(trace, scale);
+    // than its column, off the frame.
+    let stored = match stored_overview(trace, scale) {
+        Fetched::Ready(overview) => Some(overview),
+        Fetched::Pending => return None,
+        Fetched::Refused(_) => None,
+    };
     // The lane's vertical fit is the trace's own finite extremes, which the
     // pane axis above it already holds under this very key.
     let range = derived.range_or(trace_key(model, trace), || match &stored {
@@ -892,39 +904,36 @@ fn overview_miniature(
         // read its whole column.
         (None, ..) => Vec::new(),
     };
-    crate::derived::OverviewMiniature { range, segments }
+    Some(crate::derived::OverviewMiniature { range, segments })
 }
 
 /// The range and miniature of a trace whose samples a results store keeps: its
 /// tile across its whole axis on a `scale` axis, each pixel's least and
 /// greatest value at the pixel's middle, broken where a pixel holds no
-/// available value. `None` for a trace held in memory.
-fn stored_overview(trace: &StripTrace, scale: XScale) -> Option<StoredOverview> {
+/// available value. `Refused` for a trace held in memory or one that cannot
+/// tile.
+fn stored_overview(trace: &StripTrace, scale: XScale) -> Fetched<StoredOverview> {
     use rspice_results::waveform::ColumnTile;
-    let (x0, x1) = trace.x.ends()?;
-    (x1 > x0).then_some(())?;
-    let tile = match scale {
-        XScale::Linear => trace
+    if trace.y.in_memory().is_some() {
+        return Fetched::Refused("held in memory".to_owned());
+    }
+    let tile =
+        match trace
             .y
-            .tile_over(&trace.x, x0, x1, SHARED_X_OVERVIEW_POINTS)?,
-        XScale::Log10 => trace
-            .y
-            .log_tile_over(&trace.x, x0, x1, SHARED_X_OVERVIEW_POINTS)?,
-    };
+            .fetch_axis_tile(&trace.x, scale == XScale::Log10, SHARED_X_OVERVIEW_POINTS)
+        {
+            Fetched::Ready(tile) => tile,
+            Fetched::Pending => return Fetched::Pending,
+            Fetched::Refused(reason) => return Fetched::Refused(reason),
+        };
     let mut points: Vec<(f64, f64)> = Vec::new();
-    match tile {
-        ColumnTile::Samples { x, y, .. } => points.extend(x.into_iter().zip(y)),
+    match tile.tile.as_ref() {
+        ColumnTile::Samples { x, y, .. } => {
+            points.extend(x.iter().copied().zip(y.iter().copied()));
+        }
         ColumnTile::Envelope { min, max, touched } => {
-            let pixels = min.len() as f64;
-            let middle = |pixel: usize| {
-                let fraction = (pixel as f64 + 0.5) / pixels;
-                match scale {
-                    XScale::Linear => x0 + fraction * (x1 - x0),
-                    XScale::Log10 => 10f64.powf(x0.log10() + fraction * (x1 / x0).log10()),
-                }
-            };
             for pixel in (0..min.len()).filter(|&pixel| touched[pixel]) {
-                let x = middle(pixel);
+                let x = tile.middle(pixel, min.len());
                 points.push((x, min[pixel]));
                 if max[pixel] != min[pixel] {
                     points.push((x, max[pixel]));
@@ -944,7 +953,7 @@ fn stored_overview(trace: &StripTrace, scale: XScale) -> Option<StoredOverview> 
         .filter(|segment| !segment.is_empty())
         .map(<[(f64, f64)]>::to_vec)
         .collect();
-    Some((range, segments))
+    Fetched::Ready((range, segments))
 }
 
 fn overview_segments(x: &[f64], y: &[f64], indices: &[usize]) -> Vec<Vec<(f64, f64)>> {

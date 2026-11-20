@@ -12,11 +12,21 @@ use std::sync::Arc;
 
 mod blocks;
 
+use rspice_results::waveform::{ColumnTile, Fetched, ViewTile};
+
 use super::sample::{LogicalView, SweepClass, SweepShape, XOrientation};
 use super::scale::XScale;
 #[cfg(test)]
 use rspice_results::sampling::sample_at_with;
 pub use rspice_results::sampling::{SampleInterpolation, sample_at};
+
+/// The columns a plot `width` points wide is decimated into at `pixels_per_point`: one per
+/// device pixel, so a dense trace at 250 % draws as a solid stroke and a stored trace is read at
+/// the screen's resolution, rounded up to a multiple of 64 so a live window resize reuses the
+/// envelopes it cached instead of reducing every trace every frame.
+pub fn display_columns(width: f32, pixels_per_point: f32) -> usize {
+    ((width * pixels_per_point).ceil().max(0.0) as usize).next_multiple_of(64)
+}
 
 /// Cache of decimated envelopes. Owned by the results workspace state;
 /// cleared wholesale when the data version changes.
@@ -354,8 +364,10 @@ impl DecimationCache {
     }
 
     /// [`Self::series`] of samples a results store keeps: the store's tile of
-    /// the view, read without reading either column. Without a `trace_key`
-    /// the tile is read every frame.
+    /// the view, read without reading either column. The reader service
+    /// reads it off the frame; until it has, a coarser tile it holds is drawn,
+    /// and kept for no later frame, so the view sharpens as its own tile
+    /// arrives. Without a `trace_key` the tile is asked for every frame.
     pub fn stored_series(
         &mut self,
         trace_key: Option<u64>,
@@ -363,7 +375,7 @@ impl DecimationCache {
         view: TraceView,
     ) -> Arc<[[f64; 2]]> {
         let Some(trace_key) = trace_key else {
-            return stored_envelope(stored, view);
+            return stored_envelope(stored, view).0;
         };
         let key = CacheKey {
             trace: trace_key,
@@ -380,8 +392,10 @@ impl DecimationCache {
         if let Some(hit) = self.lookup(&key) {
             return hit;
         }
-        let envelope = stored_envelope(stored, view);
-        self.retain(key, &envelope);
+        let (envelope, complete) = stored_envelope(stored, view);
+        if complete {
+            self.retain(key, &envelope);
+        }
         envelope
     }
 
@@ -394,7 +408,8 @@ impl DecimationCache {
     /// place on screen and is left out, as the curve's own stroke leaves it.
     ///
     /// `band_key` names the member set, so a frame that finds the band cached
-    /// reads none of the members' samples at all.
+    /// reads none of the members' samples at all. A band whose stored members'
+    /// tiles have not all arrived folds what has, and is kept once they have.
     pub fn band(
         &mut self,
         band_key: u64,
@@ -405,8 +420,11 @@ impl DecimationCache {
         if let Some(hit) = self.lookup(&key) {
             return hit;
         }
-        let band: Arc<[[f64; 2]]> = band_columns(members, view).into();
-        self.retain(key, &band);
+        let (band, complete) = band_columns(members, view);
+        let band: Arc<[[f64; 2]]> = band.into();
+        if complete {
+            self.retain(key, &band);
+        }
         band
     }
 
@@ -516,7 +534,7 @@ fn band_cache_key(band_key: u64, view: TraceView) -> CacheKey {
     }
 }
 
-fn band_columns(members: &[BandMember<'_>], view: TraceView) -> Vec<[f64; 2]> {
+fn band_columns(members: &[BandMember<'_>], view: TraceView) -> (Vec<[f64; 2]>, bool) {
     let columns = view.columns;
     let mut out = vec![[f64::NAN; 2]; columns];
     if columns == 0
@@ -525,8 +543,9 @@ fn band_columns(members: &[BandMember<'_>], view: TraceView) -> Vec<[f64; 2]> {
             Some(std::cmp::Ordering::Greater)
         )
     {
-        return out;
+        return (out, true);
     }
+    let mut complete = true;
     let width = columns as f64;
     let decade_y = view.y_scale == XScale::Log10;
     let mut fold = |column: usize, value: f64| {
@@ -541,40 +560,54 @@ fn band_columns(members: &[BandMember<'_>], view: TraceView) -> Vec<[f64; 2]> {
         let tile_rows;
         let mut member = *member;
         if let Some(stored) = member.stored {
-            use rspice_results::waveform::ColumnTile;
-            let tile = match view.x_scale {
-                XScale::Linear => stored.y.tile_over(stored.x, view.x0, view.x1, columns),
-                XScale::Log10 => stored.y.log_tile_over(stored.x, view.x0, view.x1, columns),
+            let log = view.x_scale == XScale::Log10;
+            let tile = match stored
+                .y
+                .fetch_tile(stored.x, log, view.x0, view.x1, columns)
+            {
+                Fetched::Ready(tile) => tile,
+                Fetched::Pending => {
+                    complete = false;
+                    continue;
+                }
+                // Samples the store cannot tile are not folded: reading them
+                // would read the column whole.
+                Fetched::Refused(_) => continue,
             };
-            match tile {
-                Some(ColumnTile::Envelope { min, max, touched }) => {
-                    for column in (0..columns.min(min.len())).filter(|&column| touched[column]) {
-                        for value in [min[column], max[column]] {
-                            if value.is_finite() && !(decade_y && value <= 0.0) {
-                                fold(column, value);
+            complete &= tile.exact;
+            match tile.tile.as_ref() {
+                ColumnTile::Envelope { min, max, touched } => {
+                    let pixels = min.len();
+                    for pixel in (0..pixels).filter(|&pixel| touched[pixel]) {
+                        for column in tile_columns(&tile, pixel, pixels, view)
+                            .into_iter()
+                            .flatten()
+                        {
+                            for value in [min[pixel], max[pixel]] {
+                                if value.is_finite() && !(decade_y && value <= 0.0) {
+                                    fold(column, value);
+                                }
                             }
                         }
                     }
                     continue;
                 }
-                Some(ColumnTile::Samples {
+                ColumnTile::Samples {
                     x,
                     y,
                     before,
                     after,
-                }) => {
+                } => {
                     let rows: Vec<(f64, f64)> = before
-                        .into_iter()
-                        .chain(x.into_iter().zip(y))
-                        .chain(after)
+                        .iter()
+                        .copied()
+                        .chain(x.iter().copied().zip(y.iter().copied()))
+                        .chain(after.iter().copied())
                         .collect();
                     tile_rows = rows.into_iter().unzip::<f64, f64, Vec<f64>, Vec<f64>>();
                     member.x = &tile_rows.0;
                     member.y = &tile_rows.1;
                 }
-                // Samples the store cannot tile are not folded: reading them
-                // would read the column whole.
-                None => continue,
             }
         }
         // An X-ordered member is read over its visible window, with one
@@ -631,7 +664,34 @@ fn band_columns(members: &[BandMember<'_>], view: TraceView) -> Vec<[f64; 2]> {
             previous = Some((t, value));
         }
     }
-    out
+    (out, complete)
+}
+
+/// The columns of `view` that pixel `pixel` of a tile of `pixels` pixels folds into: every
+/// column whose centre the pixel spans, or the column of its middle when it spans none, as a
+/// pixel narrower than a column does. `None` for a pixel off the view.
+fn tile_columns(
+    tile: &ViewTile,
+    pixel: usize,
+    pixels: usize,
+    view: TraceView,
+) -> Option<std::ops::RangeInclusive<usize>> {
+    let width = view.columns as f64;
+    let at = |x: f64| view.x_scale.normalize(x, view.x0, view.x1) * width;
+    let (start, end) = (
+        at(tile.edge(pixel, pixels)),
+        at(tile.edge(pixel + 1, pixels)),
+    );
+    let first = (start - 0.5).ceil().max(0.0);
+    let last = ((end - 0.5).ceil() - 1.0).min(width - 1.0);
+    if first <= last {
+        return Some(first as usize..=last as usize);
+    }
+    let middle = at(tile.middle(pixel, pixels));
+    (0.0..width).contains(&middle).then(|| {
+        let column = middle as usize;
+        column..=column
+    })
 }
 
 /// Which reduction a trace's declared data facts select.
@@ -770,85 +830,87 @@ pub fn decimate_minmax(
     out
 }
 
-/// The envelope of samples a results store keeps, over `view`: the store's
-/// tile at `view.columns` pixels, as two points in the middle of each pixel
-/// its rows touch (its least and greatest value, the one nearer the stroke
-/// so far first), or as the rows themselves with one row of margin either
-/// side when few enough fall in the view. A pixel whose rows hold no
-/// available value breaks the stroke, as a hole in the samples does.
-/// On a decade axis the tile is read by decade and its pixels are spaced
-/// evenly in log10 x. Samples the store cannot tile (an axis that does not
-/// ascend, or a decade view reaching zero) are reduced as [`decimate_minmax`]
-/// reduces them when the loaded results may hold them whole, and are not
-/// drawn when they may not.
-fn stored_envelope(stored: super::spec::StoredSamples<'_>, view: TraceView) -> Arc<[[f64; 2]]> {
-    use rspice_results::waveform::ColumnTile;
+/// The envelope of a stored trace over `view`, and whether it is the view's own: the store's
+/// tile, read through `reader`, each pixel's least and greatest value at the pixel's middle in
+/// the order that strokes it, evenly in log10 x on a decade axis. Only the tile's pixels that
+/// reach the view are drawn, with one either side so the stroke enters and leaves the plot where
+/// the data does. A tile not yet read draws the coarser one standing in for it, or nothing.
+/// Samples the store cannot tile (an axis that does not ascend, or a decade view reaching zero)
+/// are reduced as [`decimate_minmax`] reduces them when the loaded results may hold them whole,
+/// read off the frame, and are not drawn when they may not.
+fn stored_envelope(
+    stored: super::spec::StoredSamples<'_>,
+    view: TraceView,
+) -> (Arc<[[f64; 2]]>, bool) {
     if view.columns == 0
         || !matches!(
             view.x1.partial_cmp(&view.x0),
             Some(std::cmp::Ordering::Greater)
         )
     {
-        return Arc::from([]);
+        return (Arc::from([]), true);
     }
-    let tile = match view.x_scale {
-        XScale::Linear => stored.y.tile_over(stored.x, view.x0, view.x1, view.columns),
-        XScale::Log10 => stored
-            .y
-            .log_tile_over(stored.x, view.x0, view.x1, view.columns),
-    };
-    let Some(tile) = tile else {
-        let (Ok(x), Ok(y)) = (stored.x.read_whole(), stored.y.read_whole()) else {
-            return Arc::from([]);
-        };
-        return decimate_minmax(
-            &x,
-            &y,
-            view.x0,
-            view.x1,
-            view.x_scale,
-            view.columns,
-            XOrientation::Ascending,
-        )
-        .into();
-    };
-    // The middle of each envelope pixel, evenly spaced in the view's scale.
-    let middle = |pixel: usize, pixels: usize| {
-        let fraction = (pixel as f64 + 0.5) / pixels as f64;
-        match view.x_scale {
-            XScale::Linear => view.x0 + fraction * (view.x1 - view.x0),
-            XScale::Log10 => {
-                10f64.powf(view.x0.log10() + fraction * (view.x1.log10() - view.x0.log10()))
-            }
+    let log = view.x_scale == XScale::Log10;
+    let tile = match stored
+        .y
+        .fetch_tile(stored.x, log, view.x0, view.x1, view.columns)
+    {
+        Fetched::Ready(tile) => tile,
+        Fetched::Pending => return (Arc::from([]), false),
+        Fetched::Refused(_) => {
+            return match (stored.x.fetch_whole(), stored.y.fetch_whole()) {
+                (Fetched::Ready(x), Fetched::Ready(y)) => (
+                    decimate_minmax(
+                        &x,
+                        &y,
+                        view.x0,
+                        view.x1,
+                        view.x_scale,
+                        view.columns,
+                        XOrientation::Ascending,
+                    )
+                    .into(),
+                    true,
+                ),
+                (Fetched::Pending, _) | (_, Fetched::Pending) => (Arc::from([]), false),
+                _ => (Arc::from([]), true),
+            };
         }
     };
-    match tile {
+    let envelope = match tile.tile.as_ref() {
         ColumnTile::Samples {
             x,
             y,
             before,
             after,
         } => before
-            .into_iter()
-            .chain(x.into_iter().zip(y))
-            .chain(after)
+            .iter()
+            .copied()
+            .chain(x.iter().copied().zip(y.iter().copied()))
+            .chain(after.iter().copied())
             .map(|(x, y)| [x, y])
             .collect(),
         ColumnTile::Envelope { min, max, touched } => {
-            let mut out = Vec::with_capacity(2 * min.len());
-            let mut last = f64::NAN;
-            for pixel in 0..min.len() {
+            let pixels = min.len();
+            // The pixels that reach the view, and one either side.
+            let (u0, u1) = (tile.edge(0, pixels), tile.edge(pixels, pixels));
+            let fraction = |x: f64| view.x_scale.normalize(x, u0, u1) * pixels as f64;
+            let first = (fraction(view.x0).floor().max(0.0) as usize).saturating_sub(1);
+            let last = ((fraction(view.x1).ceil().max(0.0) as usize).saturating_add(1)).min(pixels);
+            let mut out = Vec::with_capacity(2 * last.saturating_sub(first));
+            let mut previous = f64::NAN;
+            for pixel in first..last {
                 if !touched[pixel] {
                     continue;
                 }
-                let x = middle(pixel, min.len());
+                let x = tile.middle(pixel, pixels);
                 let (lo, hi) = (min[pixel], max[pixel]);
                 if lo.is_nan() || hi.is_nan() {
                     out.push([x, f64::NAN]);
-                    last = f64::NAN;
+                    previous = f64::NAN;
                     continue;
                 }
-                let (first, second) = if (hi - last).abs() < (lo - last).abs() {
+                let (first, second) = if (hi - previous).abs() < (lo - previous).abs() {
                     (hi, lo)
                 } else {
                     (lo, hi)
@@ -857,11 +919,12 @@ fn stored_envelope(stored: super::spec::StoredSamples<'_>, view: TraceView) -> A
                 if second != first {
                     out.push([x, second]);
                 }
-                last = second;
+                previous = second;
             }
             out.into()
         }
-    }
+    };
+    (envelope, tile.exact)
 }
 
 /// Screen cell index of one sample under `view`'s projection.
@@ -1464,7 +1527,7 @@ mod tests {
             .collect();
         let view = sweep_view(0.0, 19.999);
         let members: Vec<BandMember<'_>> = curves.iter().map(|y| member(&x, y)).collect();
-        let band = band_columns(&members, view);
+        let (band, _) = band_columns(&members, view);
         assert_eq!(band.len(), view.columns);
         let column = |value: f64| {
             ((XScale::Linear.normalize(value, view.x0, view.x1) * view.columns as f64) as usize)
@@ -1519,7 +1582,7 @@ mod tests {
         let rising: Vec<f64> = x.clone();
         let falling: Vec<f64> = x.iter().map(|value| 10.0 - value).collect();
         let members = [member(&x, &rising), member(&x, &falling)];
-        let band = band_columns(&members, sweep_view(0.0, 10.0));
+        let (band, _) = band_columns(&members, sweep_view(0.0, 10.0));
         assert!(
             band.iter()
                 .all(|[low, high]| low.is_finite() && high.is_finite())
@@ -1545,7 +1608,7 @@ mod tests {
         let x: Vec<f64> = (0..=50).map(f64::from).collect();
         let mut y: Vec<f64> = x.iter().map(|value| value.sin()).collect();
         y[20] = f64::NAN;
-        let band = band_columns(&[member(&x, &y)], sweep_view(0.0, 100.0));
+        let (band, _) = band_columns(&[member(&x, &y)], sweep_view(0.0, 100.0));
         let empty = |[low, high]: [f64; 2]| low.is_nan() && high.is_nan();
         assert!(band[band.len() * 3 / 4..].iter().copied().all(empty));
         // Columns strictly between samples 19 and 21 are left to nobody.
@@ -1567,7 +1630,7 @@ mod tests {
             y_scale: XScale::Log10,
             ..sweep_view(0.0, 2.0)
         };
-        let band = band_columns(&[member(&x, &y)], view);
+        let (band, _) = band_columns(&[member(&x, &y)], view);
         assert!(
             band[..band.len() / 2 - 1]
                 .iter()
@@ -1600,5 +1663,204 @@ mod tests {
         // A trace with the same key is a different reduction.
         let trace = cache.series(7, &x, &y, view, false, None);
         assert!(!Arc::ptr_eq(&first, &trace));
+    }
+
+    /// At 2.5 device pixels per point a plot is reduced to 2.5 times the
+    /// columns it is reduced to at 1: one per device pixel.
+    #[test]
+    fn two_and_a_half_pixels_per_point_ask_two_and_a_half_times_the_columns() {
+        assert_eq!(display_columns(640.0, 1.0), 640);
+        assert_eq!(display_columns(640.0, 2.5), 1600);
+    }
+
+    /// A run's axis and one of its series, kept by a store that tiles them
+    /// from memory, as a segment's summaries would.
+    struct Tiled {
+        x: Arc<Vec<f64>>,
+        y: Vec<f64>,
+        axis: bool,
+    }
+
+    impl rspice_results::waveform::ColumnSource for Tiled {
+        fn name(&self) -> &str {
+            if self.axis { "time" } else { "V(out)" }
+        }
+
+        fn store(&self) -> String {
+            "run.rsr".to_owned()
+        }
+
+        fn rows(&self) -> u64 {
+            self.y.len() as u64
+        }
+
+        fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+            let first = first as usize;
+            out.copy_from_slice(&self.y[first..first + out.len()]);
+            Ok(())
+        }
+
+        fn ascending(&self) -> bool {
+            self.axis
+        }
+
+        fn tile(
+            &self,
+            rows: std::ops::Range<u64>,
+            x0: f64,
+            x1: f64,
+            pixels: usize,
+        ) -> Option<Result<ColumnTile, String>> {
+            let mut min = vec![f64::NAN; pixels];
+            let mut max = vec![f64::NAN; pixels];
+            let mut touched = vec![false; pixels];
+            for row in rows.start as usize..rows.end as usize {
+                let at = self.x[row];
+                if !(x0..=x1).contains(&at) {
+                    continue;
+                }
+                let pixel = (((at - x0) / (x1 - x0) * pixels as f64) as usize).min(pixels - 1);
+                touched[pixel] = true;
+                min[pixel] = min[pixel].min(self.y[row]);
+                max[pixel] = max[pixel].max(self.y[row]);
+            }
+            Some(Ok(ColumnTile::Envelope { min, max, touched }))
+        }
+    }
+
+    fn tiled_sine(
+        rows: usize,
+    ) -> (
+        rspice_results::waveform::WaveformValues,
+        rspice_results::waveform::WaveformValues,
+    ) {
+        use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
+        let x: Arc<Vec<f64>> = Arc::new((0..rows).map(|row| row as f64).collect());
+        let y: Vec<f64> = x.iter().map(|at| (at * 0.01).sin()).collect();
+        let window = StoredWindow {
+            first: 0,
+            rows: rows as u64,
+            lead: WindowLead::None,
+        };
+        let stored = |y: Vec<f64>, axis: bool| {
+            let source = Arc::new(Tiled {
+                x: Arc::clone(&x),
+                y,
+                axis,
+            });
+            WaveformValues::stored(source, window).expect("the window fits the column")
+        };
+        (stored(x.to_vec(), true), stored(y, false))
+    }
+
+    /// A reader service whose reads arrive only when the test lets them.
+    #[derive(Default)]
+    struct Patient {
+        held: std::sync::Mutex<
+            Vec<(
+                rspice_results::waveform::Read,
+                rspice_results::waveform::ReadValue,
+            )>,
+        >,
+        asked: std::sync::Mutex<
+            Vec<(
+                rspice_results::waveform::WaveformValues,
+                rspice_results::waveform::WaveformValues,
+                rspice_results::waveform::Read,
+            )>,
+        >,
+    }
+
+    impl Patient {
+        /// Every read asked for so far arrives.
+        fn arrive(&self) {
+            let asked = std::mem::take(&mut *self.asked.lock().unwrap());
+            for (values, x, read) in asked {
+                let value = rspice_results::waveform::perform(&values, &x, read);
+                self.held.lock().unwrap().push((read, value));
+            }
+        }
+    }
+
+    impl rspice_results::waveform::ReadService for Patient {
+        fn request(
+            &self,
+            run: u64,
+            values: &rspice_results::waveform::WaveformValues,
+            x: &rspice_results::waveform::WaveformValues,
+            read: rspice_results::waveform::Read,
+        ) -> Option<rspice_results::waveform::ReadValue> {
+            if let Some(value) = self.held(run, values, read) {
+                return Some(value);
+            }
+            let mut asked = self.asked.lock().unwrap();
+            if !asked.iter().any(|(_, _, queued)| *queued == read) {
+                asked.push((values.clone(), x.clone(), read));
+            }
+            None
+        }
+
+        fn held(
+            &self,
+            _run: u64,
+            _values: &rspice_results::waveform::WaveformValues,
+            read: rspice_results::waveform::Read,
+        ) -> Option<rspice_results::waveform::ReadValue> {
+            let held = self.held.lock().unwrap();
+            held.iter()
+                .find(|(kept, _)| *kept == read)
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    /// A stored trace is drawn from what the reader holds: nothing before its
+    /// first tile arrives, then that tile, kept; zoomed in, the coarser tile
+    /// it already holds stands in, kept for no later frame, until the view's
+    /// own arrives and sharpens it.
+    #[test]
+    fn a_tile_not_yet_read_draws_its_coarser_parent_and_refines() {
+        let reader: &'static Patient = Box::leak(Box::default());
+        let (x, y) = tiled_sine(100_000);
+        let stored = super::super::spec::StoredSamples { x: &x, y: &y };
+        let mut cache = DecimationCache::default();
+        cache.ensure_version(1);
+        rspice_results::waveform::read_through(reader, || {
+            let whole = sweep_view(0.0, 99_999.0);
+            assert!(
+                cache.stored_series(Some(1), stored, whole).is_empty(),
+                "nothing is drawn before a tile arrives"
+            );
+            reader.arrive();
+            let first = cache.stored_series(Some(1), stored, whole);
+            assert!(!first.is_empty(), "the arrived tile is drawn");
+            let again = cache.stored_series(Some(1), stored, whole);
+            assert!(Arc::ptr_eq(&first, &again), "the view's own tile is kept");
+
+            let zoomed = sweep_view(10_000.0, 22_500.0);
+            let in_view = |envelope: &[[f64; 2]]| {
+                envelope
+                    .iter()
+                    .filter(|point| (zoomed.x0..=zoomed.x1).contains(&point[0]))
+                    .count()
+            };
+            let standing_in = cache.stored_series(Some(1), stored, zoomed);
+            assert!(
+                in_view(&standing_in) > 0,
+                "the coarser tile draws the zoomed view"
+            );
+            let still = cache.stored_series(Some(1), stored, zoomed);
+            assert!(!Arc::ptr_eq(&standing_in, &still), "a stand-in is not kept");
+
+            reader.arrive();
+            let refined = cache.stored_series(Some(1), stored, zoomed);
+            assert!(
+                in_view(&refined) >= zoomed.columns,
+                "the view's own tile has a pixel in every column: {} points",
+                in_view(&refined)
+            );
+            assert!(in_view(&refined) > 4 * in_view(&standing_in));
+            let kept = cache.stored_series(Some(1), stored, zoomed);
+            assert!(Arc::ptr_eq(&refined, &kept), "the refined envelope is kept");
+        });
     }
 }

@@ -103,11 +103,7 @@ pub enum DcCurveSelection {
 pub struct DcTraceView<'a> {
     pub name: &'a str,
     pub unit: Option<&'a str>,
-    /// The axis when its samples are in memory. A stored axis has none here: its rows were
-    /// checked as its run ended, and a check reads no store.
-    pub x: Option<&'a [f64]>,
-    /// The samples the axis holds.
-    pub x_len: usize,
+    pub x: DcAxis<'a>,
     pub sample_count: usize,
     pub complex: bool,
 }
@@ -193,6 +189,37 @@ impl DcSweepEvidence {
             Ok(())
         } else {
             validate_axis(axis)
+        }
+    }
+
+    /// [`Self::validate_axis`] of a curve's axis, a retained one read a block at a time. A stored
+    /// run's axis that ascends was checked strictly ascending as its run ended, and is not read
+    /// again.
+    pub fn validate_curve_axis(&self, axis: DcAxis<'_>) -> Result<(), String> {
+        let axis = match axis {
+            DcAxis::Samples(samples) => return self.validate_axis(samples),
+            DcAxis::Retained(values) => values,
+        };
+        if let Some(samples) = axis.in_memory() {
+            return self.validate_axis(samples);
+        }
+        if self.direction == DcSweepDirection::AsAuthored {
+            if axis.is_empty() || axis.samples(..).any(|value| !value.is_finite()) {
+                return Err("DC list coordinates must be finite and nonempty".into());
+            }
+            return Ok(());
+        }
+        let mut previous = f64::NEG_INFINITY;
+        let ascending = axis.is_ascending_axis()
+            || axis.samples(..).all(|value| {
+                let ordered = value.is_finite() && value > previous;
+                previous = value;
+                ordered
+            });
+        if axis.is_empty() || !ascending {
+            Err("DC sweep display axis must be finite and strictly ascending".to_owned())
+        } else {
+            Ok(())
         }
     }
 
@@ -291,7 +318,7 @@ impl DcSweepEvidence {
         if let Some(axis) = primary_axis {
             self.validate_axis(axis)?;
         }
-        let mut reference_axis = primary_axis;
+        let mut reference_axis = primary_axis.map(DcAxis::Samples);
         for curve in self.curve_indices() {
             let member = curve.member;
             let quantity = &self.quantities[curve.quantity];
@@ -304,24 +331,54 @@ impl DcSweepEvidence {
                     "DC sweep curve '{name}' has an inconsistent quantity"
                 ));
             }
-            if trace.x_len == 0 || trace.x_len != trace.sample_count {
+            if trace.x.is_empty() || trace.x.len() != trace.sample_count {
                 return Err(format!(
                     "DC sweep curve '{name}' has an invalid sample shape"
                 ));
             }
-            let Some(x) = trace.x else {
-                continue;
-            };
             if let Some(reference) = reference_axis {
-                if !std::ptr::eq(reference, x) && reference != x {
+                if !reference.same_as(trace.x) {
                     return Err("DC sweep curves have different primary axes".to_owned());
                 }
             } else {
-                self.validate_axis(x)?;
-                reference_axis = Some(x);
+                self.validate_curve_axis(trace.x)?;
+                reference_axis = Some(trace.x);
             }
         }
         Ok(())
+    }
+}
+
+/// A DC curve's primary axis: samples in memory, or a retained series, which may be stored.
+#[derive(Debug, Clone, Copy)]
+pub enum DcAxis<'a> {
+    Samples(&'a [f64]),
+    Retained(&'a crate::waveform::WaveformValues),
+}
+
+impl DcAxis<'_> {
+    pub fn len(self) -> usize {
+        match self {
+            Self::Samples(samples) => samples.len(),
+            Self::Retained(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    /// Whether both hold the same samples, compared without reading when they are the same
+    /// samples.
+    pub fn same_as(self, other: DcAxis<'_>) -> bool {
+        match (self, other) {
+            (Self::Samples(left), DcAxis::Samples(right)) => {
+                std::ptr::eq(left, right) || left == right
+            }
+            (Self::Samples(samples), DcAxis::Retained(values)) => *values == *samples,
+            (Self::Retained(values), DcAxis::Samples(samples)) => *values == *samples,
+            (Self::Retained(left), DcAxis::Retained(right)) => left == right,
+        }
     }
 }
 

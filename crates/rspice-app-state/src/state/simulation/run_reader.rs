@@ -343,7 +343,15 @@ pub fn results_storage<'a>(
 /// The process's reader service, holding [`DEFAULT_BUDGET`] until the reader sets another.
 pub fn run_reader() -> &'static RunReader {
     static READER: std::sync::OnceLock<RunReader> = std::sync::OnceLock::new();
-    let reader = READER.get_or_init(|| RunReader::new(DEFAULT_BUDGET));
+    READER.get_or_init(|| RunReader::new(DEFAULT_BUDGET))
+}
+
+/// Read every stored series through the process's reader service from now on, asking `waker`
+/// for a frame each time a read arrives: what the app does as it starts. A process that installs
+/// none, a test or a command-line run, reads each series as it asks.
+pub fn install_run_reader(waker: impl Fn() + Send + Sync + 'static) -> &'static RunReader {
+    let reader = run_reader();
+    reader.set_waker(waker);
     rspice_results::waveform::install_read_service(reader);
     reader
 }
@@ -357,6 +365,10 @@ impl rspice_results::waveform::ReadService for RunReader {
         read: Read,
     ) -> Option<ReadValue> {
         RunReader::request(self, run, values, x, read)
+    }
+
+    fn held(&self, run: u64, values: &WaveformValues, read: Read) -> Option<ReadValue> {
+        self.get(&ReadKey::of(run, values, read)?)
     }
 }
 

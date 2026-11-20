@@ -152,13 +152,17 @@ fn peak_to_peak(analysis: &AnalysisResult, name: &str, start: f64, stop: f64) ->
 }
 
 /// The bytes the run's member transients retain, each shared sample array
-/// counted once.
+/// (one allocation, or one window of one stored column) counted once.
 fn retained_bytes(analyses: &[AnalysisResult]) -> usize {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen: Vec<&rspice_results::waveform::WaveformValues> = Vec::new();
     let mut bytes = 0;
     for waveform in analyses.iter().flat_map(|analysis| &analysis.waveforms) {
         for values in [&waveform.x, &waveform.y] {
-            if seen.insert(values.in_memory().unwrap().as_ptr() as usize) {
+            if !seen
+                .iter()
+                .any(|held| rspice_results::waveform::WaveformValues::ptr_eq(held, values))
+            {
+                seen.push(values);
                 bytes += values.len() * std::mem::size_of::<f64>();
             }
         }

@@ -449,6 +449,12 @@ fn paint_trace_marker(
 /// the tessellator puts a vertex at infinity, which degenerates the whole
 /// mesh — one bad sample would blank the trace rather than a single point of
 /// it. Markers already skip non-finite points individually.
+/// A hairline `width` points wide in whole device pixels: at least one and never a fraction, as
+/// a browser draws a thin border, so a line snapped to the pixel grid stays sharp at 150 %.
+fn hairline(width: f32, pixels_per_point: f32) -> f32 {
+    (width * pixels_per_point).floor().max(1.0) / pixels_per_point
+}
+
 fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
     points
         .split(|point| !(point.x.is_finite() && point.y.is_finite()))
@@ -1081,8 +1087,11 @@ pub fn show(
     // statement about the data and becomes one about the tick gutter.
     let inside = ui.painter_at(plot_rect.expand(1.0));
     let tick_font = theme::mono(Y_TICK_FONT_SIZE, FontWeight::Regular);
-    let grid = Stroke::new(1.0, c.canvas_grid);
-    let frame = Stroke::new(1.0, c.canvas_frame);
+    // Grid and reference lines are hairlines the painter centres on device pixels.
+    let pixels_per_point = painter.pixels_per_point();
+    let hair = hairline(1.0, pixels_per_point);
+    let grid = Stroke::new(hair, c.canvas_grid);
+    let frame = Stroke::new(hair, c.canvas_frame);
 
     // ---- bands (under everything)
     for band in &spec.bands {
@@ -1116,7 +1125,7 @@ pub fn show(
     // A logarithmic axis is read against its mantissas, 2 … 9 in each decade,
     // lighter than the decades, as ViVA and ADS rule one; a linear axis
     // subdivides only when the reader asks for a minor grid.
-    let minor = Stroke::new(1.0, c.canvas_grid.gamma_multiply(0.45));
+    let minor = Stroke::new(hair, c.canvas_grid.gamma_multiply(0.45));
     let minors = |scale: XScale, axis: &Axis| {
         if spec.minor_grid || scale == XScale::Log10 {
             super::scale::minor_grid_values(scale, &axis.ticks, axis.min, axis.max)
@@ -1194,7 +1203,7 @@ pub fn show(
         }
     }
     // ---- reference lines
-    let ref_stroke = Stroke::new(1.0, c.canvas_text_faint);
+    let ref_stroke = Stroke::new(hair, c.canvas_text_faint);
     for line in &spec.ref_lines {
         if !(line.y >= spec.y.min && line.y <= spec.y.max) {
             continue;
@@ -1214,7 +1223,7 @@ pub fn show(
         let py = my(line.y);
         inside.extend(Shape::dashed_line(
             &[pos2(plot_rect.left(), py), pos2(plot_rect.right(), py)],
-            Stroke::new(1.0, line.color),
+            Stroke::new(hair, line.color),
             6.0,
             4.0,
         ));
@@ -1247,19 +1256,26 @@ pub fn show(
     // ---- traces (clipped to the plot area)
     {
         let clipped = ui.painter_at(plot_rect.expand(1.0));
-        // Round the column count up to 64-px buckets: a live window resize
-        // then reuses cached envelopes instead of re-decimating every trace
-        // every frame (the envelope is always at least pixel-dense).
-        let columns = (plot_rect.width().ceil() as usize).next_multiple_of(64);
+        // One column per device pixel, so a dense trace strokes every pixel at
+        // any scaling.
+        let columns = super::decimate::display_columns(plot_rect.width(), pixels_per_point);
         // A parametric reduction quantizes both axes, so it needs the vertical
-        // resolution too. Bucketed for the same reason as `columns`.
-        let rows = (plot_rect.height().ceil() as usize).next_multiple_of(64);
+        // resolution too, counted the same way.
+        let rows = super::decimate::display_columns(plot_rect.height(), pixels_per_point);
         let marker_slots = MarkerSlots::for_pane(spec, plot_rect, t.color_safe_traces);
         for (trace_index, trace) in spec.traces.iter().enumerate() {
             if trace.is_empty() {
                 continue;
             }
-            let stroke = Stroke::new(trace.width, trace.color);
+            // A hairline trace is a whole number of device pixels wide and
+            // runs through pixel centres, so its flat stretches stay sharp.
+            let hairline_trace = trace.width <= 1.0;
+            let width = if hairline_trace {
+                hairline(trace.width, pixels_per_point)
+            } else {
+                trace.width
+            };
+            let stroke = Stroke::new(width, trace.color);
             let view = super::decimate::TraceView {
                 x0: spec.x.min,
                 x1: spec.x.max,
@@ -1287,6 +1303,19 @@ pub fn show(
                     .zip(trace.y.iter())
                     .map(|(&x, &y)| pos2(mx(x), my(y)))
                     .collect(),
+            };
+            let points = if hairline_trace {
+                points
+                    .into_iter()
+                    .map(|point| {
+                        pos2(
+                            clipped.round_to_pixel_center(point.x),
+                            clipped.round_to_pixel_center(point.y),
+                        )
+                    })
+                    .collect()
+            } else {
+                points
             };
             let look = trace.look(trace_index, t.color_safe_traces);
             let marker = look.marker.or_else(|| {
@@ -1508,7 +1537,8 @@ pub fn show(
                 continue;
             }
             let px = mx(x);
-            painter.vline(px, plot_rect.y_range(), Stroke::new(1.0, color));
+            let hair = hairline(1.0, painter.pixels_per_point());
+            painter.vline(px, plot_rect.y_range(), Stroke::new(hair, color));
             let flag = Rect::from_min_size(pos2(px - 7.0, plot_rect.top() - 1.0), vec2(14.0, 13.0));
             painter.rect_filled(flag, 1.0, color);
             painter.text(
@@ -1624,7 +1654,8 @@ pub fn show(
         };
         let py = my(y);
         let color = horizontal_colors[slot];
-        painter.hline(plot_rect.x_range(), py, Stroke::new(1.0, color));
+        let hair = hairline(1.0, painter.pixels_per_point());
+        painter.hline(plot_rect.x_range(), py, Stroke::new(hair, color));
         painter.text(
             pos2(plot_rect.left() + 4.0, py - 3.0),
             Align2::LEFT_BOTTOM,

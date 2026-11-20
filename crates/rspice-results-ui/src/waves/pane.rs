@@ -794,9 +794,9 @@ pub fn show_plot<'a>(
         .any(|(_, trace)| trace.family_group_ordinal.is_some());
     if !families.is_empty() || !enveloped.is_empty() || family_in_pane {
         let plot_rect = plot::plot_rect(ui, &spec);
-        // The renderer's own column bucketing, so a band is quantized as its
+        // The renderer's own column count, so a band is quantized as its
         // members' envelopes would have been.
-        let columns = (plot_rect.width().ceil().max(0.0) as usize).next_multiple_of(64);
+        let columns = plot::display_columns(plot_rect.width(), ui.ctx().pixels_per_point());
         let view = plot::TraceView {
             x0: spec.x.min,
             x1: spec.x.max,

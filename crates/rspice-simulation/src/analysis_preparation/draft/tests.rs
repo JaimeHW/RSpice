@@ -100,7 +100,7 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
         assert_eq!(
             output
                 .x
-                .in_memory()
+                .read_whole()
                 .unwrap()
                 .iter()
                 .copied()
@@ -109,7 +109,7 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
         );
         for (actual, expected) in output
             .y
-            .in_memory()
+            .read_whole()
             .unwrap()
             .iter()
             .zip([0.5, 2.0 / 3.0, 0.2])
@@ -150,7 +150,7 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
     assert_eq!(actual_axis, frequencies);
     for (actual, expected) in waveforms["V(OUT)"]
         .y_values
-        .in_memory()
+        .read_whole()
         .unwrap()
         .iter()
         .zip([0.5, 2.0 / 3.0, 0.2])
@@ -261,14 +261,14 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
             .unwrap();
         let time = output
             .x
-            .in_memory()
+            .read_whole()
             .unwrap()
             .iter()
             .copied()
             .collect::<Vec<_>>();
         let values = output
             .y
-            .in_memory()
+            .read_whole()
             .unwrap()
             .iter()
             .copied()

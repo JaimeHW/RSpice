@@ -553,7 +553,7 @@ fn final_values(netlist: &str, requests: &[String]) -> Vec<f64> {
                     waveform.name.eq_ignore_ascii_case(request)
                         || waveform.name.eq_ignore_ascii_case(bare)
                 })
-                .and_then(|waveform| waveform.y_values.in_memory().unwrap().last().copied())
+                .and_then(|waveform| waveform.y_values.read_whole().unwrap().last().copied())
                 .unwrap_or_else(|| {
                     panic!(
                         "{request} is absent from {:?}\ndeck:\n{deck}",
@@ -1359,7 +1359,7 @@ fn an_sp_port_against_the_drawn_ground_is_a_port_to_node_zero() {
         panic!("{result:?}");
     };
     // S11 = (100 - 50) / (100 + 50).
-    let s11 = waveforms["S11"].y_values.in_memory().unwrap()[0];
+    let s11 = waveforms["S11"].y_values.read_whole().unwrap()[0];
     assert!((s11 - 1.0 / 3.0).abs() < 1e-9, "S11 = {s11}");
     assert!(card.contains("PORT1=(IN,0,50)"), "{card}");
 }
@@ -1451,7 +1451,7 @@ fn periodic_ports_against_the_drawn_ground_bind_the_drawn_rf_ports() {
         };
         // A 50 ohm series arm between two 50 ohm ports.
         for (parameter, expected) in [("S11", 1.0 / 3.0), ("S21", 2.0 / 3.0)] {
-            let measured = waveforms[parameter].y_values.in_memory().unwrap()[0];
+            let measured = waveforms[parameter].y_values.read_whole().unwrap()[0];
             assert!(
                 (measured - expected).abs() < 1e-6,
                 "{analysis}: {parameter} = {measured}"

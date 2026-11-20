@@ -101,9 +101,23 @@ pub trait ReadService: Send + Sync {
         x: &WaveformValues,
         read: Read,
     ) -> Option<ReadValue>;
+
+    /// What the service holds for `read` of `values` in run `run` now, without asking for it:
+    /// how a view finds a coarser tile to draw while the one it asked for is read.
+    fn held(&self, run: u64, values: &WaveformValues, read: Read) -> Option<ReadValue> {
+        let _ = (run, values, read);
+        None
+    }
 }
 
 static SERVICE: OnceLock<&'static dyn ReadService> = OnceLock::new();
+
+#[cfg(feature = "test-support")]
+thread_local! {
+    /// The service a test reads through on this thread, in place of the process's.
+    static THREAD_SERVICE: std::cell::Cell<Option<&'static dyn ReadService>> =
+        const { std::cell::Cell::new(None) };
+}
 
 /// Make `service` the process's read service. The first one installed stays.
 pub fn install_read_service(service: &'static dyn ReadService) {
@@ -112,7 +126,25 @@ pub fn install_read_service(service: &'static dyn ReadService) {
 
 /// The process's read service, if a host installed one.
 pub fn read_service() -> Option<&'static dyn ReadService> {
+    #[cfg(feature = "test-support")]
+    if let Some(service) = THREAD_SERVICE.get() {
+        return Some(service);
+    }
     SERVICE.get().copied()
+}
+
+/// Run `body` reading every stored series through `service` on this thread, as a test stands a
+/// reader service of its own in for the app's without installing one for the whole process.
+#[cfg(feature = "test-support")]
+pub fn read_through<R>(service: &'static dyn ReadService, body: impl FnOnce() -> R) -> R {
+    struct Restore(Option<&'static dyn ReadService>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            THREAD_SERVICE.set(self.0);
+        }
+    }
+    let _restore = Restore(THREAD_SERVICE.replace(Some(service)));
+    body()
 }
 
 /// Every sample of a series, held as a slice a view can keep across frames: the series' own
@@ -209,6 +241,106 @@ impl<T> Fetched<T> {
     }
 }
 
+/// A tile a view draws: the store's pixels over an x window that holds the view, and whether it
+/// is the tile of the view's own level or a coarser one drawn while that one is read.
+#[derive(Debug, Clone)]
+pub struct ViewTile {
+    pub tile: Arc<ColumnTile>,
+    /// The x window the tile's pixels span, evenly in log10 x when `log`.
+    pub x0: f64,
+    pub x1: f64,
+    pub log: bool,
+    /// Whether this is the tile the view asked for; a coarser one stands in until it arrives.
+    pub exact: bool,
+}
+
+impl ViewTile {
+    /// The x at `fraction` of the window, in its scale.
+    pub fn x_at(&self, fraction: f64) -> f64 {
+        if self.log {
+            let (l0, l1) = (self.x0.log10(), self.x1.log10());
+            10f64.powf(l0 + fraction * (l1 - l0))
+        } else {
+            self.x0 + fraction * (self.x1 - self.x0)
+        }
+    }
+
+    /// The middle of pixel `pixel` of `pixels` on the run's axis.
+    pub fn middle(&self, pixel: usize, pixels: usize) -> f64 {
+        self.x_at((pixel as f64 + 0.5) / pixels as f64)
+    }
+
+    /// The x where pixel `pixel` of `pixels` begins.
+    pub fn edge(&self, pixel: usize, pixels: usize) -> f64 {
+        self.x_at(pixel as f64 / pixels as f64)
+    }
+}
+
+/// How many times a view's columns a tile of the pyramid reads: a view at least half as wide as
+/// its level's tile, and at most a quarter of the pair it reads, then has at least one pixel of
+/// the tile in every column.
+const TILE_OVERSAMPLE: usize = 4;
+
+/// The window of level `level` of the tile pyramid that holds the view `u0 ..= u1`, in the
+/// view's scale (log10 x on a decade axis): the pair of tiles `2^level` wide, starting at a
+/// multiple of that width, that begins at or before `u0`. `None` when the level's width is not
+/// a finite non-zero number or the pair does not hold the view, as at the end of the floats.
+fn pyramid_window(u0: f64, u1: f64, level: i32) -> Option<(f64, f64)> {
+    let width = 2f64.powi(level);
+    if !(width.is_finite() && width > 0.0) {
+        return None;
+    }
+    let first = (u0 / width).floor() * width;
+    let last = 2f64.mul_add(width, first);
+    (first <= u0 && u1 <= last && last.is_finite()).then_some((first, last))
+}
+
+/// The read of a tile of `pixels` pixels over `x0 ..= x1`, evenly in log10 x when `log`.
+fn tile_read(log: bool, x0: f64, x1: f64, pixels: usize) -> Read {
+    if log {
+        Read::LogTile { x0, x1, pixels }
+    } else {
+        Read::Tile { x0, x1, pixels }
+    }
+}
+
+/// What a view has of a tile read over `x0 ..= x1`.
+fn view_tile(
+    value: Option<ReadValue>,
+    log: bool,
+    x0: f64,
+    x1: f64,
+    exact: bool,
+) -> Fetched<ViewTile> {
+    match value {
+        None => Fetched::Pending,
+        Some(ReadValue::Tile(tile)) => Fetched::Ready(ViewTile {
+            tile,
+            x0,
+            x1,
+            log,
+            exact,
+        }),
+        Some(ReadValue::Failed(reason)) => Fetched::Refused(reason),
+        Some(ReadValue::Samples(_) | ReadValue::Point(_)) => {
+            Fetched::Refused("the reader answered a tile with another read".to_owned())
+        }
+    }
+}
+
+/// The narrowest level of the tile pyramid at least as wide as the view `u0 ..= u1`.
+fn view_level(u0: f64, u1: f64) -> Option<i32> {
+    let span = u1 - u0;
+    if !(span > 0.0 && span.is_finite()) {
+        return None;
+    }
+    let mut level = span.log2().ceil() as i32;
+    if 2f64.powi(level) < span {
+        level += 1;
+    }
+    Some(level)
+}
+
 impl WaveformValues {
     /// The value at `at` by `interpolation`, as [`crate::sampling::sample_at_with`] reads it
     /// from the whole series, `x` being its run's axis over the same rows: from memory; from the
@@ -227,6 +359,120 @@ impl WaveformValues {
             }
             _ => f64::NAN,
         }
+    }
+
+    /// The tile a view of `x0 ..= x1` at `columns` columns draws (evenly in log10 x when `log`),
+    /// `x` being these samples' run axis over the same rows. Without a service, or for samples
+    /// in memory, the view's own tile is read now. The installed service reads views in tiles
+    /// of a pyramid over the axis, so a pan or zoom within a tile pair draws the pair already
+    /// held: the view's tile comes back once it has arrived, and until then the nearest coarser
+    /// level the service holds stands in, the tile of the whole axis being asked for so one
+    /// always will. `Refused` when these samples cannot be tiled, so the view must read them
+    /// another way.
+    pub fn fetch_tile(
+        &self,
+        x: &Self,
+        log: bool,
+        x0: f64,
+        x1: f64,
+        columns: usize,
+    ) -> Fetched<ViewTile> {
+        self.fetch_tile_from(read_service(), x, log, x0, x1, columns)
+    }
+
+    /// [`Self::fetch_tile`] through `service`.
+    fn fetch_tile_from(
+        &self,
+        service: Option<&dyn ReadService>,
+        x: &Self,
+        log: bool,
+        x0: f64,
+        x1: f64,
+        columns: usize,
+    ) -> Fetched<ViewTile> {
+        let service = service.filter(|_| self.in_memory().is_none());
+        let Some(service) = service else {
+            let read = tile_read(log, x0, x1, columns);
+            return view_tile(Some(perform(self, x, read)), log, x0, x1, true);
+        };
+        let to_u = |at: f64| if log { at.log10() } else { at };
+        let to_x = |u: f64| if log { 10f64.powf(u) } else { u };
+        let (u0, u1) = (to_u(x0), to_u(x1));
+        let pixels = columns.saturating_mul(TILE_OVERSAMPLE);
+        let level = view_level(u0, u1);
+        let Some((level, (w0, w1))) =
+            level.and_then(|level| Some((level, pyramid_window(u0, u1, level)?)))
+        else {
+            // A view the pyramid cannot hold is read as it is.
+            let read = tile_read(log, x0, x1, columns);
+            return view_tile(service.request(0, self, x, read), log, x0, x1, true);
+        };
+        let (w0, w1) = (to_x(w0), to_x(w1));
+        let read = tile_read(log, w0, w1, pixels);
+        if let Some(value) = service.request(0, self, x, read) {
+            return view_tile(Some(value), log, w0, w1, true);
+        }
+        // The axis, as far as the view's scale can show it: a decade axis from zero shows from
+        // the view's own first decade.
+        let (first, last) = x.ends().map_or((u0, u1), |(first, last)| {
+            let (first, last) = (to_u(first), to_u(last));
+            (
+                if first.is_finite() { first.min(u0) } else { u0 },
+                if last.is_finite() { last.max(u1) } else { u1 },
+            )
+        });
+        // Coarser levels up to the first as wide as the axis, whose tile the axis' own stands for.
+        let mut parent = level;
+        while let Some(next) = parent.checked_add(1) {
+            parent = next;
+            if 2f64.powi(parent - 1) >= last - first {
+                break;
+            }
+            let Some((p0, p1)) = pyramid_window(u0, u1, parent) else {
+                break;
+            };
+            let (p0, p1) = (to_x(p0), to_x(p1));
+            if let Some(value) = service.held(0, self, tile_read(log, p0, p1, pixels)) {
+                return view_tile(Some(value), log, p0, p1, false);
+            }
+        }
+        match self.fetch_axis_tile_from(Some(service), x, log, pixels) {
+            Fetched::Ready(tile) => Fetched::Ready(ViewTile {
+                exact: false,
+                ..tile
+            }),
+            Fetched::Pending | Fetched::Refused(_) => Fetched::Pending,
+        }
+    }
+
+    /// [`Self::fetch_axis_tile`] through `service`.
+    fn fetch_axis_tile_from(
+        &self,
+        service: Option<&dyn ReadService>,
+        x: &Self,
+        log: bool,
+        pixels: usize,
+    ) -> Fetched<ViewTile> {
+        let Some((x0, x1)) = x.ends().filter(|(x0, x1)| x1 > x0) else {
+            return Fetched::Refused("the axis spans no range".to_owned());
+        };
+        if log && x0 <= 0.0 {
+            return Fetched::Refused("a decade axis from zero has no tile".to_owned());
+        }
+        let read = tile_read(log, x0, x1, pixels);
+        let value = match service.filter(|_| self.in_memory().is_none()) {
+            Some(service) => service.request(0, self, x, read),
+            None => Some(perform(self, x, read)),
+        };
+        view_tile(value, log, x0, x1, true)
+    }
+
+    /// The tile of these samples across their run's whole axis `x` at `pixels` pixels (evenly in
+    /// log10 x when `log`), as an overview draws it: read now without a service or for samples
+    /// in memory, and by the installed service off the frame otherwise. `Refused` when they
+    /// cannot be tiled, as on a decade axis from zero.
+    pub fn fetch_axis_tile(&self, x: &Self, log: bool, pixels: usize) -> Fetched<ViewTile> {
+        self.fetch_axis_tile_from(read_service(), x, log, pixels)
     }
 
     /// Every sample of the window, for a view that shows a whole series at once (a polar or

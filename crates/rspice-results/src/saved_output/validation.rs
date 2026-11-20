@@ -48,7 +48,7 @@ where
             .collect::<HashMap<_, _>>();
         let mut identities = HashSet::new();
         let mut digests = HashSet::new();
-        let mut raw_dc_axis: Option<&[f64]> = None;
+        let mut raw_dc_axis: Option<crate::dc_sweep::DcAxis<'_>> = None;
         for receipt in self.saved_output_receipts {
             if receipt.output_kind != SavedOutputKind::DerivedExpression
                 && !receipt.complex_policy.is_legacy()
@@ -94,7 +94,7 @@ where
                 let waveform = waveforms.get(name).ok_or_else(|| {
                     format!("saved-output receipt names absent materialized waveform '{name}'")
                 })?;
-                if usize::try_from(count).ok() != Some(waveform.x_len) {
+                if usize::try_from(count).ok() != Some(waveform.x.len()) {
                     return Err(format!(
                         "saved-output sample count does not match waveform '{name}'"
                     ));
@@ -138,18 +138,16 @@ where
                                         .to_owned(),
                                 );
                             }
-                            let Some(x) = waveform.x else {
-                                continue;
-                            };
+                            let x = waveform.x;
                             if let Some(axis) = raw_dc_axis {
-                                if !std::ptr::eq(axis, x) && axis != x {
+                                if !axis.same_as(x) {
                                     return Err(
                                         "saved-output DC raw members have different primary axes"
                                             .to_owned(),
                                     );
                                 }
                             } else {
-                                evidence.validate_axis(x)?;
+                                evidence.validate_curve_axis(x)?;
                                 raw_dc_axis = Some(x);
                             }
                         }
@@ -192,9 +190,7 @@ where
                     .trace_name(&evidence.quantities[curve.quantity], curve.member)
                     .as_str(),
             )
-            && let Some(x) = source.x
-            && !std::ptr::eq(axis, x)
-            && axis != x
+            && !axis.same_as(source.x)
         {
             return Err(
                 "saved-output DC raw members differ from the retained solved primary axis"

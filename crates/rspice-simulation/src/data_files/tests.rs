@@ -223,8 +223,8 @@ fn a_vector_file_drives_and_checks_through_a_prepared_run() {
         .unwrap_or_else(|| panic!("V(a) in {:?}", waveforms.keys()));
     assert_eq!(
         (
-            a.in_memory().unwrap().first(),
-            a.in_memory().unwrap().last()
+            a.read_whole().unwrap().first(),
+            a.read_whole().unwrap().last()
         ),
         (Some(&0.0), Some(&1.8))
     );

@@ -32,6 +32,8 @@ rspice-fonts = { workspace = true, features = ["bidi", "egui", "system"] }
 [dev-dependencies]
 serde_json.workspace = true
 sha2.workspace = true
+# Tests stand a reader service of their own in for the app's.
+rspice-results = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 rspice-fonts = { workspace = true, features = ["test-support"] }
