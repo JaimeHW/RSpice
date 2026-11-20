@@ -202,11 +202,8 @@ pub fn select_result_dataset(state: &mut ResultsParts<'_>, run_index: usize) -> 
     else {
         return false;
     };
-    if !super::super::super::chrome::document_bar::results::show_result_dataset(
-        &mut state.model.simulation,
-        state.workbench,
-        &dataset_id,
-    ) {
+    if !super::super::super::chrome::document_bar::results::show_result_dataset(state, &dataset_id)
+    {
         return false;
     }
     state.results.session.selected_trace = None;

@@ -1,7 +1,6 @@
 //! The document bar's Results tabs: one per retained dataset and one per
 //! saved result document, and the activation of either.
 
-use crate::state::SimulationState;
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::documents::result_document::ResultsParts;
@@ -75,40 +74,41 @@ pub(in crate::workbench) fn show_visualization_document(
     true
 }
 
-/// Show a retained result dataset.
+/// Show a retained result dataset in the quick view, with the quick view's
+/// own viewer if a saved document's pane took it.
+///
+/// This path runs on every frame the document bar or a window draws.
+/// Selecting the run already shown changes nothing, and another run comes
+/// back on the analysis it was last shown on.
 pub fn activate_result_dataset(
-    simulation: &mut SimulationState,
+    state: &mut ResultsParts<'_>,
     dataset_id: &crate::product::DatasetId,
 ) -> bool {
-    // Re-activating the dataset that is already active must not re-select
-    // its run. `select_run` resynchronizes the displayed waveforms, which
-    // advances the simulation data version, and every version change
-    // retires cursors, the selected trace, the active pane, and pinned
-    // readouts. This path runs on every frame the document bar draws, so
-    // an unguarded re-selection made those states impossible to hold.
-    simulation
+    let simulation = &mut state.model.simulation;
+    let shown = simulation
         .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == *dataset_id)
-        .is_some_and(|index| {
-            simulation.view.active_run_idx == Some(index) || simulation.select_run(index)
-        })
+        .is_some_and(|index| simulation.select_run(index));
+    if shown {
+        crate::workbench::documents::result_document::restore_quick_view_viewer(state.results);
+    }
+    shown
 }
 
 /// Show a retained result dataset as the document Results reads, as
 /// choosing its tab does: only while Results is the workspace showing.
 pub(in crate::workbench) fn show_result_dataset(
-    simulation: &mut SimulationState,
-    workbench: &mut WorkbenchSession,
+    state: &mut ResultsParts<'_>,
     dataset_id: &crate::product::DatasetId,
 ) -> bool {
     let document = WorkspaceDocumentId::ResultDataset(*dataset_id);
-    if document.workspace() != workbench.workspace
-        || !activate_result_dataset(simulation, dataset_id)
+    if document.workspace() != state.workbench.workspace
+        || !activate_result_dataset(state, dataset_id)
     {
         return false;
     }
-    super::record_active_document(workbench, &document);
+    super::record_active_document(state.workbench, &document);
     true
 }

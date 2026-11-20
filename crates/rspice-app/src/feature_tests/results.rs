@@ -18,6 +18,7 @@ mod persistent_document;
 mod result_import_adapters;
 mod result_import_workflow;
 mod retained_memo;
+mod two_windows;
 mod viewer_capabilities;
 mod waveform_export;
 

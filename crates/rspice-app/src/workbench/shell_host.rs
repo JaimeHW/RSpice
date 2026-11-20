@@ -1152,7 +1152,7 @@ impl DocumentHost for AppState {
                 activate_visualization_document(&mut state.results_parts(), document_id)
             }
             WorkspaceDocumentId::ResultDataset(dataset_id) => {
-                activate_result_dataset(&mut state.model.simulation, dataset_id)
+                activate_result_dataset(&mut state.results_parts(), dataset_id)
             }
             WorkspaceDocumentId::NetlistGenerated(document_id) => {
                 activate_generated_netlist(&mut state.model, &mut state.code.netlist, document_id)

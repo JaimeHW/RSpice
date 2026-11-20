@@ -1543,8 +1543,22 @@ pub struct ResultsState {
     /// Cached Nyquist stability numbers for the active data version.
     pub nyquist: Option<nyquist::NyquistDerived>,
     /// `simulation.data_version` last seen by the workspace; when it
-    /// advances, cursors are cleared so they never report stale data.
+    /// advances, the merged event order is read again.
     seen_version: u64,
+    /// The run and analysis the workspace last prepared for. New samples, an
+    /// overlay or a hidden trace leave the reader's cursors and selection be;
+    /// another run or analysis retires what named the one before.
+    seen_selection: Option<ShownSelection>,
+    /// The analysis kind the A/B cursors were last read against. Their X is
+    /// kept across runs and analyses of one kind, and cleared for another.
+    cursor_kind: Option<crate::state::AnalysisType>,
+    /// Which retained samples the decimation and derived caches hold. It
+    /// moves when the run history changes, not when the selection does: both
+    /// caches key every entry by its run, analysis and trace.
+    samples_generation: u64,
+    /// The quick view's viewer while a saved document's pane shows its own,
+    /// put back when the quick view is shown again.
+    pub(crate) quick_view_viewer: Option<ResultViewer>,
     /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
     pub analysis_expr_cache:
@@ -2014,8 +2028,26 @@ pub fn show_persistent_pane_viewer(
     ) = cursors;
     results.session.hidden_family_traces = hidden;
     prepare_viewer_state(state);
-    state.results.session.viewer = viewer;
+    show_document_viewer(state, viewer);
     show_viewer_well(ui, state, run_controller, ResultChrome::Full);
+}
+
+/// The run and analysis on screen, by identity, and the kind of analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ShownSelection {
+    dataset: crate::product::DatasetId,
+    analysis: Option<u64>,
+    kind: Option<crate::state::AnalysisType>,
+}
+
+fn shown_selection(simulation: &crate::state::SimulationState) -> Option<ShownSelection> {
+    let run = simulation.active_run()?;
+    let analysis = simulation.active_analysis();
+    Some(ShownSelection {
+        dataset: run.dataset_id,
+        analysis: analysis.map(|analysis| analysis.id),
+        kind: analysis.map(|analysis| analysis.analysis_type),
+    })
 }
 
 pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
@@ -2024,26 +2056,52 @@ pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
         .results
         .reconcile_retained_datasets(&state.model.simulation);
     let data_version = state.model.simulation.view.data_version;
+    let shown = shown_selection(&state.model.simulation);
     let results = &mut *state.results;
     results.synchronize_wave_caches(&state.model.simulation);
     if results.seen_version != data_version {
         results.seen_version = data_version;
-        results.session.clear_cursors();
-        results.session.horizontal_cursors.clear();
+        // The merged event order belongs to the retained dataset version.
+        results.event_order_cache = None;
+    }
+    // New samples, an added overlay or a hidden trace change the data
+    // version and nothing the reader placed. Another run or analysis
+    // retires what named the one before; the cursors go only when it reads
+    // X in another quantity, or when nothing is shown.
+    if results.seen_selection != shown {
+        results.seen_selection = shown;
+        let kind = shown.and_then(|selection| selection.kind);
+        let other_quantity = match (results.cursor_kind, kind) {
+            (Some(placed), Some(now)) => placed != now,
+            _ => shown.is_none(),
+        };
+        if other_quantity {
+            results.session.clear_cursors();
+            results.session.horizontal_cursors.clear();
+        }
+        if shown.is_none() {
+            results.cursor_kind = None;
+        } else if kind.is_some() {
+            results.cursor_kind = kind;
+        }
         results.session.active_wave_pane = None;
         results.session.selected_trace = None;
         results.session.selected_result_artifact = None;
         // Pinned XY readouts index into the old run's point arrays;
         // a same-shape new run would silently relabel them.
         results.session.rf_pin.clear();
-        // The merged event order belongs to the retained dataset version.
-        results.event_order_cache = None;
         // Runtime operation failures and recovery notices belong to the
         // dataset generation that reported them.
         results.operational_condition = None;
     }
-    results.session.cache.ensure_version(data_version);
-    results.session.derived.ensure_version(data_version);
+    results
+        .session
+        .cache
+        .ensure_version(results.samples_generation);
+    results
+        .session
+        .derived
+        .ensure_version(results.samples_generation);
 
     smith::synchronize_active_analysis(state);
     reconcile_active_viewer(state);
@@ -2078,6 +2136,28 @@ fn synchronize_quick_view_dataset_authority(state: &mut ResultsParts<'_>) -> boo
         return false;
     }
     state.model.simulation.select_run(run_index)
+}
+
+/// Show a saved document's viewer, keeping the quick view's to put back when
+/// the quick view is shown again. A document wrote its viewer over the quick
+/// view's, so a Bode pane in one window turned the quick view in another
+/// into a Bode plot.
+pub(crate) fn show_document_viewer(state: &mut ResultsParts<'_>, viewer: ResultViewer) {
+    let results = &mut *state.results;
+    if results.session.viewer == viewer {
+        return;
+    }
+    if results.quick_view_viewer.is_none() {
+        results.quick_view_viewer = Some(results.session.viewer);
+    }
+    results.session.viewer = viewer;
+}
+
+/// Put the quick view's viewer back, if a saved document's pane took it.
+pub(crate) fn restore_quick_view_viewer(results: &mut ResultsState) {
+    if let Some(viewer) = results.quick_view_viewer.take() {
+        results.session.viewer = viewer;
+    }
 }
 
 /// Record what a single-canvas sheet's axes just spanned.

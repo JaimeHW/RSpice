@@ -69,10 +69,9 @@ impl ResultsState {
         if !self.session.hidden_family_traces.insert(key) {
             self.session.hidden_family_traces.remove(&key);
         }
+        // Hiding a member changes what is drawn, not any trace's samples: the
+        // cursors stay, and every cached series stays good for its trace.
         self.models.invalidate();
-        self.session.cache.invalidate();
-        self.session.derived = DerivedSeries::default();
-        self.session.clear_cursors();
     }
 
     /// Reveal a stored output's members through presentation state only.
@@ -94,9 +93,6 @@ impl ResultsState {
         }
         if changed {
             self.models.invalidate();
-            self.session.cache.invalidate();
-            self.session.derived = DerivedSeries::default();
-            self.session.clear_cursors();
         }
     }
 
@@ -114,10 +110,10 @@ impl ResultsState {
         } else {
             self.session.waveform_visibility.insert(key, visible);
         }
+        // Hiding or showing a trace keeps the A/B cursors, and the cached
+        // series of every other trace: each is keyed by its own trace, so the
+        // one shown again is the only one built.
         self.models.invalidate();
-        self.session.cache.invalidate();
-        self.session.derived = DerivedSeries::default();
-        self.session.clear_cursors();
         visible
     }
 
@@ -173,9 +169,6 @@ impl ResultsState {
             .retain(|key, _| key.analysis() != analysis);
         self.session.waveform_visibility.extend(desired);
         self.models.invalidate();
-        self.session.cache.invalidate();
-        self.session.derived = DerivedSeries::default();
-        self.session.clear_cursors();
     }
 
     /// Both frame preparation and direct plot/readout actions cross this
@@ -189,13 +182,21 @@ impl ResultsState {
         if self.wave_cache_source.as_ref() == Some(&source) {
             return;
         }
+        // Only a change to the history changes samples. A new selection or
+        // overlay moves the data version alone, and the decimated and derived
+        // series, each keyed by its run, analysis and trace, still hold.
+        let samples_changed = self
+            .wave_cache_source
+            .as_ref()
+            .is_none_or(|(revision, _)| *revision != source.0);
         self.wave_cache_source = Some(source);
         self.models.invalidate();
-        self.session.cache.invalidate();
-        self.session.derived = DerivedSeries::default();
-        self.session
-            .derived
-            .ensure_version(simulation.view.data_version);
+        if samples_changed {
+            self.samples_generation = self.samples_generation.wrapping_add(1);
+            self.session.cache.invalidate();
+            self.session.derived = DerivedSeries::default();
+        }
+        self.session.derived.ensure_version(self.samples_generation);
         self.analysis_expr_cache.clear();
     }
 
@@ -619,3 +620,6 @@ impl rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresent
         Self::project_presentation(self, simulation)
     }
 }
+
+#[cfg(test)]
+mod tests;

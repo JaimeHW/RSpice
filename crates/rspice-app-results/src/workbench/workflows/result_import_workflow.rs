@@ -496,11 +496,7 @@ fn commit_parsed_result_dataset(
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
-    if !crate::workbench::chrome::document_bar::results::show_result_dataset(
-        &mut state.model.simulation,
-        state.workbench,
-        &dataset_id,
-    ) {
+    if !crate::workbench::chrome::document_bar::results::show_result_dataset(state, &dataset_id) {
         state.model.simulation = previous_simulation;
         *state.workbench = previous_workbench;
         return Err(

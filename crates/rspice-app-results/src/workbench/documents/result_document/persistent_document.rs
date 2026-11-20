@@ -619,7 +619,7 @@ pub(super) fn activate(state: &mut ResultsParts<'_>, document_id: ResultDocument
         .session
         .select_persistent_document_pane(document_id, pane.id);
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
-        state.results.session.viewer = viewer;
+        super::show_document_viewer(state, viewer);
     }
     true
 }
