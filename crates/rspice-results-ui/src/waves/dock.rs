@@ -95,7 +95,13 @@ fn strip_lane_rows(
         return Vec::new();
     };
     let specs = super::lanes::lane_specs(model, state.event_lanes.get(&model.analysis_key));
-    let user = super::lanes::user_bus_lanes(&mut state.derived, model, &lanes, &specs);
+    let user = super::lanes::user_bus_lanes(
+        &mut state.derived,
+        model,
+        &lanes,
+        &specs,
+        super::lanes::BusReader::Cursors,
+    );
     super::lanes::lane_readout_rows(model, &lanes, &specs, &user, cursors, digits, display_name)
 }
 

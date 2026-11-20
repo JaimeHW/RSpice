@@ -336,12 +336,25 @@ fn window_bits(lanes: &EventLanes) -> Option<(u64, u64)> {
     lanes.window().map(|(t0, t1)| (t0.to_bits(), t1.to_bits()))
 }
 
-/// Each user bus row's word, reassembled from `lanes` once per data version and window.
+/// Which reader asks for the user buses' words. The lanes drawn over the
+/// view and the cursor table's rows read the same row over different windows,
+/// and each keeps the word over its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BusReader {
+    /// The lane stack drawn on the panes' time axis.
+    Lanes,
+    /// The cursor table's rows.
+    Cursors,
+}
+
+/// Each user bus row's word, reassembled from `lanes` once per data version and window; the
+/// word `reader` kept over another window is dropped.
 pub fn user_bus_lanes(
     derived: &mut DerivedSeries,
     model: &StripModel,
     lanes: &EventLanes,
     specs: &[LaneSpec],
+    reader: BusReader,
 ) -> Vec<Option<Arc<BusLane>>> {
     specs
         .iter()
@@ -353,10 +366,10 @@ pub fn user_bus_lanes(
                 ..
             } => {
                 let nets: Vec<&str> = members.iter().map(|member| member.net.as_str()).collect();
-                let key = stable_hash(&(model.analysis_key, label, &nets, window_bits(lanes)));
+                let key = stable_hash(&(model.analysis_key, label, &nets, reader));
                 // Every member is a plotted logic lane of this run, which is
                 // what made the row, so the word always reassembles.
-                Some(derived.bus_lane_or(key, || {
+                Some(derived.bus_lane_or(key, window_bits(lanes), || {
                     lanes
                         .user_bus(label, &nets)
                         .unwrap_or_else(|| BusLane::from_logic_lanes(label.clone(), &[]))

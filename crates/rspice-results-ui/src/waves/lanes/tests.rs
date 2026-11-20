@@ -252,6 +252,7 @@ fn the_readers_requests_edit_the_layout() {
         &model,
         model.event_lanes.as_deref().unwrap(),
         &specs,
+        BusReader::Lanes,
     );
     let word = user[0].as_ref().expect("the user bus reassembles");
     assert_eq!(word.members(), ["clk", "q[0]"]);

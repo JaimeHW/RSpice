@@ -47,9 +47,13 @@ pub struct DerivedSeries {
     /// Reading every point is a pass over the history, so it is done once per
     /// data version rather than each time the strips are rebuilt.
     event_lanes: std::collections::HashMap<u64, std::sync::Arc<crate::waves::logic::EventLanes>>,
-    /// A bus word reassembled from its members, per bus identity, so a
-    /// reader's grouping is not reassembled on every frame it is drawn.
-    bus_lanes: std::collections::HashMap<u64, std::sync::Arc<crate::waves::logic::BusLane>>,
+    /// A bus word reassembled from its members, per bus row and reader, with
+    /// the window its lanes were read over, so a reader's grouping is not
+    /// reassembled on every frame it is drawn. A stored run's lanes are read a
+    /// window at a time; the word over a window no longer shown is dropped
+    /// when its row is read over another.
+    bus_lanes:
+        std::collections::HashMap<u64, (BusWindow, std::sync::Arc<crate::waves::logic::BusLane>)>,
     /// A curve paired with the abscissa its pane is drawn against, per pair
     /// identity: merging two grids is a pass over both, and the pane is drawn
     /// every frame.
@@ -73,6 +77,10 @@ pub struct OverviewMiniature {
     pub range: Option<(f64, f64)>,
     pub segments: Vec<Vec<(f64, f64)>>,
 }
+
+/// The bits of the window a bus word's lanes were read over; `None` for lanes
+/// that hold every point.
+pub type BusWindow = Option<(u64, u64)>;
 
 type XyCurveMemo = Result<std::sync::Arc<crate::waves::xy::XyCurve>, crate::waves::xy::XyRefusal>;
 
@@ -157,17 +165,29 @@ impl DerivedSeries {
         )
     }
 
-    /// Fetch or reassemble one bus word.
+    /// Fetch the bus word kept under `key` over `window`, or reassemble it,
+    /// replacing the word kept for another window.
     pub fn bus_lane_or(
         &mut self,
         key: u64,
+        window: BusWindow,
         build: impl FnOnce() -> crate::waves::logic::BusLane,
     ) -> std::sync::Arc<crate::waves::logic::BusLane> {
-        std::sync::Arc::clone(
-            self.bus_lanes
-                .entry(key)
-                .or_insert_with(|| std::sync::Arc::new(build())),
-        )
+        if let Some((held, lane)) = self.bus_lanes.get(&key)
+            && *held == window
+        {
+            return std::sync::Arc::clone(lane);
+        }
+        let lane = std::sync::Arc::new(build());
+        self.bus_lanes
+            .insert(key, (window, std::sync::Arc::clone(&lane)));
+        lane
+    }
+
+    /// How many bus words are kept.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn bus_lane_count(&self) -> usize {
+        self.bus_lanes.len()
     }
 
     /// Fetch or pair one curve with its pane's abscissa.
@@ -337,5 +357,30 @@ mod tests {
         assert_eq!(&phase[..2], &[170.0, 190.0]);
         assert!(phase[2].is_nan());
         assert_eq!(&phase[3..], &[-170.0, -190.0]);
+    }
+}
+
+#[cfg(test)]
+mod bus_word_tests {
+    use super::DerivedSeries;
+    use crate::waves::logic::BusLane;
+
+    /// A user bus's word read over window after window, as a stored run's
+    /// lanes are while the reader pans, keeps only the word over the window
+    /// the reader is shown.
+    #[test]
+    fn a_bus_word_over_a_window_no_longer_shown_is_dropped() {
+        let mut derived = DerivedSeries::default();
+        let builds = std::cell::Cell::new(0);
+        let build = || {
+            builds.set(builds.get() + 1);
+            BusLane::from_logic_lanes("bus1".to_owned(), &[])
+        };
+        for window in 0..20_u64 {
+            let _ = derived.bus_lane_or(7, Some((window, window + 1)), build);
+        }
+        assert_eq!(derived.bus_lane_count(), 1);
+        let _ = derived.bus_lane_or(7, Some((19, 20)), build);
+        assert_eq!(builds.get(), 20, "the word over the window shown is kept");
     }
 }

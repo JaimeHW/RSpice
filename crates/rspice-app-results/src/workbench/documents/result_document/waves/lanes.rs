@@ -50,7 +50,13 @@ pub(super) fn show_lanes(
         .unwrap_or_default();
     let specs = lanes::lane_specs(model, Some(&layout));
     lanes::reconcile(&mut layout, &specs);
-    let user = lanes::user_bus_lanes(&mut session.derived, model, &history, &specs);
+    let user = lanes::user_bus_lanes(
+        &mut session.derived,
+        model,
+        &history,
+        &specs,
+        lanes::BusReader::Lanes,
+    );
     let rows = lanes::lane_rows(&history, &specs, &user);
     let selected = lanes::selected_rows(&layout, &specs);
     let owns_cursors = session.cursor_strip == Some(model.analysis_index);
