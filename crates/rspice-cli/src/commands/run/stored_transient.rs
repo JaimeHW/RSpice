@@ -2809,6 +2809,8 @@ impl RunStore {
             None => std::env::temp_dir(),
         };
         sweep_left_stores(&folder);
+        // The output's folder may not be made yet: its store's lock is taken there first.
+        std::fs::create_dir_all(&folder).map_err(|error| CliError::output_error(&folder, error))?;
         let dir = folder.join(name);
         let lock = StoreLock::try_acquire(&dir)
             .map_err(|error| CliError::output_error(&StoreLock::file_for(&dir), error))?
