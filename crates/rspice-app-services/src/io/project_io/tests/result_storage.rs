@@ -188,6 +188,51 @@ fn a_saved_file_refuses_samples_held_in_memory_and_other_writers_keep_them() {
     assert_eq!(captured.stored_segments().len(), 1);
 }
 
+/// A snapshot for a reader in another memory, as a browser's hardcopy worker is, carries each
+/// stored window's rows beside the window it names: it restores without the segment, with every
+/// sample and the run's digest as they were. A saved file that carries rows is refused.
+#[test]
+fn a_snapshot_for_another_memory_carries_the_rows_of_its_stored_windows() {
+    use rspice_formats::project_results::{ProjectSimulationResults, carrying_rows};
+    let mut simulation = SimulationState::default();
+    simulation.retained.runs = vec![large_ac_run(1, 64, 2)].into();
+    simulation.retained.next_run_id = 1;
+    let results = crate::io::capture_simulation_results(&simulation);
+    let named = serde_json::to_string(&results).expect("the results are written");
+    let carried =
+        carrying_rows(|| serde_json::to_string(&results)).expect("the snapshot is written");
+    assert!(!named.contains("\"held\""), "{named}");
+    assert!(carried.contains("\"held\""), "{carried}");
+
+    let read = carrying_rows(|| serde_json::from_str::<ProjectSimulationResults>(&carried))
+        .expect("the snapshot is read");
+    let restored = crate::io::simulation_state_from_results(read).expect("its run restores");
+    let (before, after) = (&simulation.retained.runs[0], &restored.retained.runs[0]);
+    assert_eq!(
+        after.dataset_content_digest(),
+        before.dataset_content_digest()
+    );
+    assert_eq!(run_bits(after), run_bits(before));
+    for waveform in &after.analyses[0].waveforms {
+        for values in [&waveform.x, &waveform.y] {
+            let (source, _) = values.stored_window().expect("a stored window");
+            assert!(
+                source.store().contains("snapshot carries"),
+                "{} reads {}",
+                waveform.name,
+                source.store()
+            );
+        }
+    }
+
+    let refused = serde_json::from_str::<ProjectSimulationResults>(&carried)
+        .expect_err("a saved file carries no rows");
+    assert!(
+        refused.to_string().contains("carries none of their rows"),
+        "{refused}"
+    );
+}
+
 /// Each sample of each waveform of `run`'s first analysis, bit for bit.
 fn run_bits(run: &SimulationRun) -> Vec<Vec<u64>> {
     run.analyses[0]

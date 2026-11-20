@@ -49,6 +49,8 @@ thread_local! {
     pub static RESULT_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+mod carried_windows;
+pub use carried_windows::carrying_rows;
 mod checks;
 pub use checks::{ProjectAssertViolation, ProjectAssertionReport, ProjectRunChecks};
 mod codec;

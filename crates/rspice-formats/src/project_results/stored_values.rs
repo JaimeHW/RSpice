@@ -6,7 +6,9 @@
 //! ([`super::ProjectSimulationResultsData::stored_segments`]). A file is written inside
 //! [`saving_file`], which refuses a waveform that holds its samples in memory instead of writing
 //! them: every run is in the store before its file is written. Outside it (a hardcopy worker's
-//! snapshot, a command-line artifact) samples in memory are written as they are.
+//! snapshot, a command-line artifact) samples in memory are written as they are, and a snapshot
+//! for a reader in another memory writes each stored window with the rows it reads
+//! ([`super::carrying_rows`]).
 
 use std::cell::{Cell, RefCell};
 
@@ -15,6 +17,7 @@ use rspice_results::waveform::SharedWaveformValues;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use super::carried_windows::{WindowWire, carried_values, carrying};
 use crate::numeric::sample_serde;
 
 thread_local! {
@@ -53,7 +56,7 @@ pub fn serialize_axis<S: Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     match ColumnReference::of(values) {
-        Some(reference) => reference.serialize(serializer),
+        Some(reference) => serialize_window(reference, values, serializer),
         None if saving() => Err(serde::ser::Error::custom(SAMPLES_IN_MEMORY)),
         None => values.serialize(serializer),
     }
@@ -66,9 +69,25 @@ pub fn serialize_samples<S: Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     match ColumnReference::of(values) {
-        Some(reference) => reference.serialize(serializer),
+        Some(reference) => serialize_window(reference, values, serializer),
         None if saving() => Err(serde::ser::Error::custom(SAMPLES_IN_MEMORY)),
         None => sample_serde::serialize_shared(values, serializer),
+    }
+}
+
+/// A stored window: the window `reference` names, with the rows it reads when the snapshot is for
+/// a reader in another memory.
+fn serialize_window<S: Serializer>(
+    reference: ColumnReference,
+    values: &SharedWaveformValues,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    if carrying() {
+        WindowWire::carrying(reference, values)
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    } else {
+        reference.serialize(serializer)
     }
 }
 
@@ -90,8 +109,11 @@ pub fn deserialize_run_analyses<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 }
 
 /// The waveform of the window `reference` names, the one the run being read already has for an
-/// x axis window it met before.
-fn referenced_values(reference: ColumnReference) -> Result<SharedWaveformValues, String> {
+/// x axis window it met before; read from `held` when the snapshot carried the window's rows.
+fn referenced_values(
+    reference: ColumnReference,
+    held: Option<Vec<f64>>,
+) -> Result<SharedWaveformValues, String> {
     let axis = reference.column == 0;
     let met = || {
         RUN_AXES.with(|axes| {
@@ -105,7 +127,10 @@ fn referenced_values(reference: ColumnReference) -> Result<SharedWaveformValues,
     if axis && let Some(values) = met() {
         return Ok(values);
     }
-    let values = super::unread_segments::values(&reference)?;
+    let values = match held {
+        Some(held) => carried_values(&reference, held)?,
+        None => super::unread_segments::values(&reference)?,
+    };
     if axis {
         RUN_AXES.with(|axes| {
             if let Some(axes) = axes.borrow_mut().as_mut() {
@@ -157,9 +182,17 @@ impl<'de> Visitor<'de> for Values {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
-        let reference =
-            ColumnReference::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
-        referenced_values(reference).map_err(serde::de::Error::custom)
+        let (reference, held) =
+            WindowWire::deserialize(serde::de::value::MapAccessDeserializer::new(map))?
+                .into_parts();
+        // Rows read in place of their segment are not checked against its digest: only a
+        // snapshot read as one carrying them may hold them, never a saved file.
+        if held.is_some() && !carrying() {
+            return Err(serde::de::Error::custom(
+                "a saved result names results store windows and carries none of their rows",
+            ));
+        }
+        referenced_values(reference, held).map_err(serde::de::Error::custom)
     }
 }
 

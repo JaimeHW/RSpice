@@ -399,16 +399,19 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
     run.lifecycle = SimulationRunLifecycle::Completed;
-    run.analyses.push(
+    // Kept as the run history keeps a finished analysis: its samples in the
+    // results store, which the owner names by reference.
+    run.keep_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "First").with_waveforms(vec![
             RetainedTrace::new("V(first)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
-    run.analyses.push(
+    run.keep_analysis(
         AnalysisResult::new(2, AnalysisType::Transient, "Second").with_waveforms(vec![
             RetainedTrace::new("V(second)", vec![0.0, 2.0], vec![2.0, 3.0], "#ff00aa"),
         ]),
     );
+    assert!(!run.holds_samples_in_memory());
     run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;

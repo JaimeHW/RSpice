@@ -105,29 +105,48 @@ pub enum RetainedHardcopySourceInput {
 #[serde(transparent)]
 struct CanonicalHardcopyOwner(serde_json::Value);
 
+/// Run `work` as an owner crossing to the worker is written or read. A browser's worker is
+/// another wasm instance, holding none of the page's results store segments, so its owners carry
+/// the rows of each stored window they name. The desktop resolves in the process that holds the
+/// segments, and its owners name them only.
+fn crossing_to_the_worker<T>(work: impl FnOnce() -> T) -> T {
+    #[cfg(target_arch = "wasm32")]
+    {
+        rspice_formats::project_results::carrying_rows(work)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        work()
+    }
+}
+
 impl CanonicalHardcopyOwner {
     fn capture<T: Serialize>(field: &'static str, owner: &T) -> Result<Self, HardcopySourceError> {
-        serde_json::to_value(owner).map(Self).map_err(|error| {
-            HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                "{field} cannot be serialized: {error}"
-            ))
-        })
+        crossing_to_the_worker(|| serde_json::to_value(owner))
+            .map(Self)
+            .map_err(|error| {
+                HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
+                    "{field} cannot be serialized: {error}"
+                ))
+            })
     }
 
     fn restore<T>(self, field: &'static str) -> Result<T, HardcopySourceError>
     where
         T: DeserializeOwned + Serialize,
     {
-        let owner: T = serde_json::from_value(self.0.clone()).map_err(|error| {
-            HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                "{field} is invalid: {error}"
-            ))
-        })?;
-        let canonical = serde_json::to_value(&owner).map_err(|error| {
-            HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                "{field} cannot be canonicalized: {error}"
-            ))
-        })?;
+        let owner: T =
+            crossing_to_the_worker(|| serde_json::from_value(self.0.clone())).map_err(|error| {
+                HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
+                    "{field} is invalid: {error}"
+                ))
+            })?;
+        let canonical =
+            crossing_to_the_worker(|| serde_json::to_value(&owner)).map_err(|error| {
+                HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
+                    "{field} cannot be canonicalized: {error}"
+                ))
+            })?;
         if canonical != self.0 {
             return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
                 "{field} contains unknown, aliased, or non-canonical fields"
