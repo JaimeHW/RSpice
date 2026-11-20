@@ -5927,6 +5927,7 @@ dependencies = [
  "arrow-schema",
  "bytes",
  "csv",
+ "flate2",
  "fst-reader",
  "fst-writer",
  "matfile",

@@ -3,9 +3,13 @@
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal, stated_coordinate_names};
 use std::io::Cursor;
 
+mod structure;
+
 #[derive(Debug, Clone, Copy)]
 pub struct MatlabReadLimits<'a> {
     pub max_variables: usize,
+    /// What the file's compressed variables may expand to, together.
+    pub max_expanded_bytes: u64,
     pub min_rows: usize,
     pub coordinate_names: &'a [&'a str],
 }
@@ -20,6 +24,24 @@ pub struct MatlabReadError {
 pub enum MatlabReadFailure {
     ParserPanicked,
     Parse(matfile::Error),
+    /// The file ends inside its `variable`-th element (counted from one).
+    Truncated {
+        variable: usize,
+    },
+    /// A part of a variable does not fit inside it.
+    Malformed,
+    ExpandedByteLimit {
+        expanded: u64,
+        limit: u64,
+    },
+    /// A compressed variable's stream does not expand to the size it declares.
+    CompressedSize,
+    DimensionOverflow {
+        dimensions: Vec<i32>,
+    },
+    NegativeDimension {
+        dimension: i32,
+    },
     VariableLimit {
         variables: usize,
         limit: usize,
@@ -61,6 +83,12 @@ impl std::fmt::Display for MatlabReadFailure {
         match self {
             Self::ParserPanicked => f.write_str("MATLAB parser rejected malformed input"),
             Self::Parse(source) => write!(f, "invalid MATLAB v5 file: {source}"),
+            Self::Truncated { variable } => write!(f, "the MATLAB file is cut short inside variable {variable}"),
+            Self::Malformed => f.write_str("a MATLAB variable's parts do not fit inside it"),
+            Self::ExpandedByteLimit { expanded, limit } => write!(f, "compressed MATLAB variables expand to at least {expanded} bytes, past the import limit of {limit} bytes"),
+            Self::CompressedSize => f.write_str("a compressed MATLAB variable does not expand to the size it declares"),
+            Self::DimensionOverflow { dimensions } => write!(f, "MATLAB variable dimensions {dimensions:?} multiply past the largest array size"),
+            Self::NegativeDimension { dimension } => write!(f, "MATLAB variable has a negative dimension {dimension}"),
             Self::VariableLimit { .. } => f.write_str("too many MATLAB variables"),
             Self::InexactInteger(source) => source.fmt(f),
             Self::ShapeOverflow { name, .. } => write!(f, "MATLAB variable '{name}' shape overflows"),
@@ -115,7 +143,18 @@ fn adapter_error(format: &str, reason: MatlabReadFailure) -> MatlabReadError {
 }
 
 impl MatFile {
-    fn parse(bytes: &[u8], max_variables: usize, format: &str) -> Result<Self, MatlabReadError> {
+    fn parse(
+        bytes: &[u8],
+        max_variables: usize,
+        max_expanded_bytes: u64,
+        format: &str,
+    ) -> Result<Self, MatlabReadError> {
+        // The parser trusts every size a file states and drops a variable it
+        // cannot read whole without saying so; the walk refuses those first.
+        // `catch_unwind` stays for what the walk does not cover, but it cannot
+        // be the guard: release web builds abort on panic.
+        structure::check(bytes, max_expanded_bytes)
+            .map_err(|reason| adapter_error(format, reason))?;
         let inner = std::panic::catch_unwind(|| matfile::MatFile::parse(Cursor::new(bytes)))
             .map_err(|_| adapter_error(format, MatlabReadFailure::ParserPanicked))?
             .map_err(|error| adapter_error(format, MatlabReadFailure::Parse(error)))?;
@@ -270,7 +309,12 @@ pub fn decode_matlab_v5(
     limits: MatlabReadLimits<'_>,
     format: &str,
 ) -> Result<DecodedNumericDataset, MatlabReadError> {
-    let parsed = MatFile::parse(bytes, limits.max_variables, format)?;
+    let parsed = MatFile::parse(
+        bytes,
+        limits.max_variables,
+        limits.max_expanded_bytes,
+        format,
+    )?;
     let arrays = parsed.arrays();
     let coordinate_index = arrays.iter().position(|array| {
         limits
@@ -386,7 +430,7 @@ mod tests {
             }],
         )
         .expect("MAT fixture");
-        let parsed = MatFile::parse(&bytes, 1, "matlab_v5").expect("parse");
+        let parsed = MatFile::parse(&bytes, 1, 0, "matlab_v5").expect("parse");
         let arrays = parsed.arrays();
         assert_eq!(arrays.len(), 1);
         assert_eq!(arrays[0].name(), "V_out");
@@ -395,7 +439,7 @@ mod tests {
         assert_eq!(real, [1.0, 3.0]);
         assert_eq!(imag.as_deref(), Some(&[-2.0, 4.0][..]));
 
-        let error = MatFile::parse(&bytes, 0, "matlab_v5")
+        let error = MatFile::parse(&bytes, 0, 0, "matlab_v5")
             .err()
             .expect("variable limit");
         assert!(matches!(
@@ -433,6 +477,7 @@ mod tests {
         let bytes = write_mat_v5("MATLAB 5.0 MAT-file, import fixture", &variables).unwrap();
         let limits = MatlabReadLimits {
             max_variables: 3,
+            max_expanded_bytes: 0,
             min_rows: 1,
             coordinate_names: &["time", "t"],
         };
@@ -460,6 +505,7 @@ mod tests {
     fn unnamed_table_uses_column_major_layout_and_refuses_complex_data() {
         let limits = MatlabReadLimits {
             max_variables: 1,
+            max_expanded_bytes: 0,
             min_rows: 1,
             coordinate_names: &["time", "t"],
         };
@@ -503,11 +549,215 @@ mod tests {
         }
     }
 
+    const LIMITS: MatlabReadLimits<'static> = MatlabReadLimits {
+        max_variables: 8,
+        max_expanded_bytes: 64 * 1024 * 1024,
+        min_rows: 1,
+        coordinate_names: &["time", "t"],
+    };
+
+    fn variable(name: &str, real: Vec<f64>) -> MatVariable {
+        MatVariable {
+            name: name.into(),
+            real,
+            imag: None,
+        }
+    }
+
+    fn file_of(variables: &[MatVariable]) -> Vec<u8> {
+        write_mat_v5("MATLAB 5.0 MAT-file, refusal fixture", variables).unwrap()
+    }
+
+    /// A top-level miCOMPRESSED element whose stream expands to `inner`.
+    fn compressed_element(inner: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(inner).unwrap();
+        let stream = encoder.finish().unwrap();
+        let mut element = 15_u32.to_le_bytes().to_vec();
+        element.extend_from_slice(&u32::try_from(stream.len()).unwrap().to_le_bytes());
+        element.extend_from_slice(&stream);
+        element
+    }
+
+    /// The same file with every variable compressed, as MATLAB writes it.
+    fn compressed_file_of(variables: &[MatVariable]) -> Vec<u8> {
+        let mut bytes = file_of(&[])[..crate::matlab::HEADER_BYTES].to_vec();
+        for variable in variables {
+            let plain = file_of(std::slice::from_ref(variable));
+            bytes.extend(compressed_element(&plain[crate::matlab::HEADER_BYTES..]));
+        }
+        bytes
+    }
+
+    #[test]
+    fn compressed_variables_read_like_plain_ones() {
+        let variables = [
+            variable("time", vec![0.0, 1.0, 2.0]),
+            variable("out", vec![4.0, 5.0, 6.0]),
+        ];
+        let decoded = decode_matlab_v5(&compressed_file_of(&variables), LIMITS, "matlab_v5")
+            .expect("compressed MAT file");
+        assert_eq!(decoded.coordinate, [0.0, 1.0, 2.0]);
+        assert_eq!(decoded.signals.len(), 1);
+        assert_eq!(decoded.signals[0].real, [4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn a_compressed_variable_declared_past_the_limit_is_refused_before_it_inflates() {
+        // The stream holds a matrix tag declaring 1 GiB and nothing else. A
+        // reader that inflated past the tag would find the stream short; the
+        // refusal names the declared size, so it was refused on the tag alone
+        // and nothing the size of the declaration was ever allocated.
+        let declared = 1_u32 << 30;
+        let mut inner = 14_u32.to_le_bytes().to_vec();
+        inner.extend_from_slice(&declared.to_le_bytes());
+        let mut bytes = file_of(&[])[..crate::matlab::HEADER_BYTES].to_vec();
+        bytes.extend(compressed_element(&inner));
+        let error = decode_matlab_v5(&bytes, LIMITS, "matlab_v5").unwrap_err();
+        assert!(
+            matches!(
+                error.reason,
+                MatlabReadFailure::ExpandedByteLimit { expanded, limit }
+                    if expanded == 8 + u64::from(declared) && limit == LIMITS.max_expanded_bytes
+            ),
+            "{error}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "matlab_v5 import: compressed MATLAB variables expand to at least 1073741832 bytes, \
+             past the import limit of 67108864 bytes"
+        );
+    }
+
+    #[test]
+    fn compressed_variables_count_against_the_limit_together() {
+        let variables = [
+            variable("time", vec![0.0; 64]),
+            variable("out", vec![1.0; 64]),
+        ];
+        let bytes = compressed_file_of(&variables);
+        let one = file_of(&variables[..1]).len() - crate::matlab::HEADER_BYTES;
+        let limits = MatlabReadLimits {
+            max_expanded_bytes: one as u64 + 8,
+            ..LIMITS
+        };
+        let error = decode_matlab_v5(&bytes, limits, "matlab_v5").unwrap_err();
+        assert!(
+            matches!(error.reason, MatlabReadFailure::ExpandedByteLimit { .. }),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_compressed_stream_that_runs_past_its_declared_size_is_refused() {
+        let plain = file_of(&[variable("time", vec![0.0, 1.0])]);
+        let mut inner = plain[crate::matlab::HEADER_BYTES..].to_vec();
+        inner.resize(inner.len() + 4 * 1024 * 1024, 0);
+        let mut bytes = plain[..crate::matlab::HEADER_BYTES].to_vec();
+        bytes.extend(compressed_element(&inner));
+        let error = decode_matlab_v5(&bytes, LIMITS, "matlab_v5").unwrap_err();
+        assert!(
+            matches!(error.reason, MatlabReadFailure::CompressedSize),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_file_cut_short_is_refused_rather_than_read_without_its_last_variable() {
+        let variables = [
+            variable("time", vec![0.0, 1.0]),
+            variable("a", vec![2.0, 3.0]),
+            variable("b", vec![4.0, 5.0]),
+        ];
+        for bytes in [file_of(&variables), compressed_file_of(&variables)] {
+            assert_eq!(
+                decode_matlab_v5(&bytes, LIMITS, "matlab_v5")
+                    .unwrap()
+                    .signals
+                    .len(),
+                2
+            );
+            for cut in [1, 9, 40] {
+                let error =
+                    decode_matlab_v5(&bytes[..bytes.len() - cut], LIMITS, "matlab_v5").unwrap_err();
+                assert!(
+                    matches!(error.reason, MatlabReadFailure::Truncated { variable: 3 }),
+                    "cut {cut}: {error}"
+                );
+            }
+        }
+        // A file that stops inside the tag of a fourth element.
+        let mut bytes = file_of(&variables);
+        bytes.extend_from_slice(&14_u32.to_le_bytes());
+        let error = decode_matlab_v5(&bytes, LIMITS, "matlab_v5").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "matlab_v5 import: the MATLAB file is cut short inside variable 4"
+        );
+    }
+
+    /// Byte offset of the first matrix's dimensions data in a plain file.
+    const DIMENSIONS: usize = crate::matlab::HEADER_BYTES + 8 + 16 + 8;
+
+    #[test]
+    fn dimensions_that_overflow_are_refused_before_the_parser_multiplies_them() {
+        // The parser multiplies dimensions in unchecked i32: in a debug build
+        // that panics and in a release build it wraps. Either way the walk
+        // refuses first, with checked arithmetic and no panic in any profile.
+        let plain = file_of(&[variable("time", vec![0.0, 1.0])]);
+        for compressed in [false, true] {
+            let mut bytes = plain.clone();
+            bytes[DIMENSIONS..DIMENSIONS + 4].copy_from_slice(&1_000_000_000_i32.to_le_bytes());
+            bytes[DIMENSIONS + 4..DIMENSIONS + 8].copy_from_slice(&1_000_000_000_i32.to_le_bytes());
+            if compressed {
+                let mut packed = bytes[..crate::matlab::HEADER_BYTES].to_vec();
+                packed.extend(compressed_element(&bytes[crate::matlab::HEADER_BYTES..]));
+                bytes = packed;
+            }
+            let error = decode_matlab_v5(&bytes, LIMITS, "matlab_v5").unwrap_err();
+            assert!(
+                matches!(
+                    &error.reason,
+                    MatlabReadFailure::DimensionOverflow { dimensions }
+                        if dimensions == &[1_000_000_000, 1_000_000_000]
+                ),
+                "compressed {compressed}: {error}"
+            );
+        }
+        let mut bytes = plain;
+        bytes[DIMENSIONS + 4..DIMENSIONS + 8].copy_from_slice(&(-2_i32).to_le_bytes());
+        let error = decode_matlab_v5(&bytes, LIMITS, "matlab_v5").unwrap_err();
+        assert!(
+            matches!(
+                error.reason,
+                MatlabReadFailure::NegativeDimension { dimension: -2 }
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_part_larger_than_its_matrix_is_refused() {
+        // The name tag claims nearly 4 GiB inside a matrix of a few dozen
+        // bytes; the parser would round that size up to eight in u32 and
+        // overflow.
+        let mut bytes = file_of(&[variable("time", vec![0.0, 1.0])]);
+        let name_size = DIMENSIONS + 8 + 4;
+        bytes[name_size..name_size + 4].copy_from_slice(&0xFFFF_FFFD_u32.to_le_bytes());
+        let error = decode_matlab_v5(&bytes, LIMITS, "matlab_v5").unwrap_err();
+        assert!(
+            matches!(error.reason, MatlabReadFailure::Malformed),
+            "{error}"
+        );
+    }
+
     #[test]
     fn malformed_matlab_retains_the_parser_cause() {
         use std::error::Error as _;
         let limits = MatlabReadLimits {
             max_variables: 2,
+            max_expanded_bytes: 0,
             min_rows: 1,
             coordinate_names: &["time", "t"],
         };

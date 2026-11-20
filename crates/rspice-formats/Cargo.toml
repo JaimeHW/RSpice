@@ -40,6 +40,8 @@ arrow-ipc = { version = "60", optional = true }
 arrow-schema = { version = "60", optional = true }
 bytes = { version = "1", optional = true }
 csv.workspace = true
+# Bounds what a compressed MATLAB variable expands to before the parser inflates it.
+flate2.workspace = true
 fst-reader = { version = "0.17", optional = true }
 matfile = "0.5"
 num-complex.workspace = true

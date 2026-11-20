@@ -157,6 +157,7 @@ mod tests {
                 &bytes,
                 MatlabReadLimits {
                     max_variables: 10,
+                    max_expanded_bytes: 0,
                     min_rows: 1,
                     coordinate_names: &["time", "frequency", "sweep"],
                 },

@@ -231,6 +231,7 @@ pub(super) fn parse_matlab_v5(
         bytes,
         rspice_formats::matlab::reader::MatlabReadLimits {
             max_variables: MAX_RESULT_COLUMNS.saturating_mul(2),
+            max_expanded_bytes: MAX_ARCHIVE_EXPANDED_BYTES,
             min_rows: MIN_RESULT_ROWS,
             coordinate_names: &RESULT_COORDINATE_NAMES,
         },
