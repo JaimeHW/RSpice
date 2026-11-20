@@ -399,8 +399,7 @@ impl RawExporter {
     /// and typed variable schema.
     pub fn write_xyce_ascii<W: Write + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
         self.validate_data_shape()?;
-        let forward = never_decreases(self.data.iter().filter_map(|point| point.first().copied()));
-        self.with_layout(|layout| write_raw_header(writer, layout, forward))?;
+        self.with_layout(|layout| write_raw_header(writer, layout, RawFormat::Ascii, false))?;
         writeln!(writer, "Values:")?;
         for (index, point) in self.data.iter().enumerate() {
             let Some((axis, signals)) = point.split_first() else {
@@ -499,8 +498,9 @@ pub fn write_raw_exponent(writer: &mut dyn Write, value: Value) -> io::Result<()
 /// little-endian doubles or as `re,im` in ASCII, each number spelled by
 /// `number`.
 ///
-/// `value` is read once more for every scale sample, before the header, to
-/// decide `forward`, so it must be a lookup that answers the same each time.
+/// A binary plot's `value` is read once more for every scale sample, before
+/// the header, to decide `forward`, so it must be a lookup that answers the
+/// same each time.
 pub fn write_raw_plot<W: Write + ?Sized>(
     writer: &mut W,
     layout: &RawPlotLayout<'_>,
@@ -509,9 +509,10 @@ pub fn write_raw_plot<W: Write + ?Sized>(
     mut value: impl FnMut(usize, usize) -> (Value, Value),
 ) -> io::Result<()> {
     let mut writer = writer;
-    let forward = layout.variables.is_empty()
-        || never_decreases((0..layout.points).map(|point| value(point, 0).0));
-    write_raw_header(&mut writer, layout, forward)?;
+    let forward = format == RawFormat::Binary
+        && (layout.variables.is_empty()
+            || never_decreases((0..layout.points).map(|point| value(point, 0).0)));
+    write_raw_header(&mut writer, layout, format, forward)?;
     let variables = layout.variables.len();
     match format {
         RawFormat::Binary => {
@@ -546,33 +547,36 @@ pub fn write_raw_plot<W: Write + ?Sized>(
     Ok(())
 }
 
-/// The `Flags:` a plot is written under, one rule for both encodings.
+/// The `Flags:` a plot is written under.
 ///
-/// `real` or `complex` says how many numbers each value is. LTspice's binary
-/// format stores a real plot's scale as a double and every other column as
-/// single precision unless `double` is present, and the readers built for
-/// LTspice's files (PyLTSpice, spicelib) switch to all doubles only on that
-/// flag. Every value written here is a double, so every real plot says
-/// `double`. A complex plot does not: every reader takes complex values as
-/// pairs of doubles, as LTspice writes them under `complex forward log`.
+/// `real` or `complex` says how many numbers each value is. `log` says the
+/// sweep was logarithmic and is written only when the caller knows it was
+/// ([`RawPlotLayout::logarithmic`]).
 ///
-/// `forward` says the scale never decreases, as LTspice writes on a transient
-/// or a sweep, and is written only when the scale as written never does.
-/// `log` says the sweep was logarithmic and is written only when the caller
-/// knows it was ([`RawPlotLayout::logarithmic`]).
+/// A binary plot also carries the flags LTspice's readers decode it by.
+/// LTspice's binary format stores a real plot's scale as a double and every
+/// other column as single precision unless `double` is present, and the
+/// readers built for LTspice's files (PyLTSpice, spicelib) switch to all
+/// doubles only on that flag. Every value written here is a double, so every
+/// real binary plot says `double`. A complex plot does not: every reader takes
+/// complex values as pairs of doubles, as LTspice writes them under
+/// `complex forward log`. `forward` says the scale never decreases, as LTspice
+/// writes on a transient or a sweep, and is written only when the scale as
+/// written never does.
 ///
-/// ngspice warns about each flag it does not know (`forward`, `log`,
-/// `double`) and loads the plot as it would without it, as it does LTspice's
-/// own files.
-fn raw_flags(layout: &RawPlotLayout<'_>, forward: bool) -> String {
+/// An ASCII plot carries neither: no reader decodes text by them, and ngspice
+/// warns about each flag it does not know and loads the plot as it would
+/// without it.
+fn raw_flags(layout: &RawPlotLayout<'_>, format: RawFormat, forward: bool) -> String {
+    let binary = format == RawFormat::Binary;
     let mut flags = String::from(if layout.complex { "complex" } else { "real" });
-    if forward {
+    if binary && forward {
         flags.push_str(" forward");
     }
     if layout.logarithmic {
         flags.push_str(" log");
     }
-    if !layout.complex {
+    if binary && !layout.complex {
         flags.push_str(" double");
     }
     flags
@@ -592,13 +596,14 @@ fn never_decreases(scale: impl IntoIterator<Item = Value>) -> bool {
 fn write_raw_header<W: Write + ?Sized>(
     writer: &mut W,
     layout: &RawPlotLayout<'_>,
+    format: RawFormat,
     forward: bool,
 ) -> io::Result<()> {
     writeln!(writer, "Title: {}", layout.title)?;
     writeln!(writer, "Date: {}", layout.date)?;
     writeln!(writer, "Plotname: {}", layout.plot_name)?;
     writer.write_all(layout.options)?;
-    writeln!(writer, "Flags: {}", raw_flags(layout, forward))?;
+    writeln!(writer, "Flags: {}", raw_flags(layout, format, forward))?;
     writeln!(writer, "No. Variables: {}", layout.variables.len())?;
     writeln!(writer, "No. Points: {}", layout.points)?;
     writeln!(writer, "Variables:")?;
@@ -850,7 +855,7 @@ mod export_tests {
             lines[2],
             "Plotname: Digital Events (rspice-digital-events/1)"
         );
-        assert_eq!(lines[3], "Flags: real forward double");
+        assert_eq!(lines[3], "Flags: real");
         assert_eq!(lines[4], "No. Variables: 2");
         assert_eq!(lines[5], "No. Points: 3");
         assert_eq!(lines[6], "Variables:");
@@ -1017,10 +1022,20 @@ mod export_tests {
     #[test]
     fn flags_carry_what_ltspice_readers_need_to_decode_the_values() {
         let adjacent = f64::from_bits(1.0_f64.to_bits() + 1);
-        for format in [RawFormat::Binary, RawFormat::Ascii] {
-            // Real values are doubles, which LTspice's readers decode as
-            // doubles only on `double`; a scale that never decreases, repeated
-            // samples included, is `forward`.
+        for (format, rising, falling, complex) in [
+            (
+                RawFormat::Binary,
+                "real forward double",
+                "real double",
+                ["complex forward log", "complex forward"],
+            ),
+            (RawFormat::Ascii, "real", "real", ["complex log", "complex"]),
+        ] {
+            // Real binary values are doubles, which LTspice's readers decode
+            // as doubles only on `double`; a binary scale that never
+            // decreases, repeated samples included, is `forward`. ASCII says
+            // neither, since no reader decodes text by them and ngspice warns
+            // on both, and its text keeps every bit all the same.
             let (flags, parsed) = written_plot(
                 format,
                 false,
@@ -1028,9 +1043,9 @@ mod export_tests {
                 &[0.0, 1.0e-9, 1.0e-9, 2.0e-9],
                 &[(adjacent, 0.0), (-0.0, 0.0), (1.0e-300, 0.0), (-7.5, 0.0)],
             );
-            assert_eq!(flags, "real forward double", "{format:?}");
+            assert_eq!(flags, rising, "{format:?}");
             let parsed = parsed.expect("read the plot back");
-            assert!(parsed.header.is_double);
+            assert_eq!(parsed.header.is_double, format == RawFormat::Binary);
             let bits = |values: &[f64]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
             assert_eq!(
                 bits(&parsed.waveforms[1].y),
@@ -1040,15 +1055,13 @@ mod export_tests {
             // A DC sweep stepped downward, or a scale with a NaN, is not.
             for scale in [[5.0, 2.5, 0.0], [0.0, f64::NAN, 2.0]] {
                 let (flags, _) = written_plot(format, false, false, &scale, &[(1.0, 0.0); 3]);
-                assert_eq!(flags, "real double", "{format:?} {scale:?}");
+                assert_eq!(flags, falling, "{format:?} {scale:?}");
             }
 
             // A log sweep says `log` when the caller knows it; complex values
             // are pairs of doubles to every reader and carry no `double`.
             let signal = [(1.0, -0.0), (adjacent, -2.5e-12)];
-            for (logarithmic, expected) in
-                [(true, "complex forward log"), (false, "complex forward")]
-            {
+            for (logarithmic, expected) in [true, false].into_iter().zip(complex) {
                 let (flags, parsed) =
                     written_plot(format, true, logarithmic, &[1.0, 1.0e3], &signal);
                 assert_eq!(flags, expected, "{format:?}");

@@ -373,10 +373,16 @@ pub(super) fn write_dc_op_output(
                     path: path.to_path_buf(),
                     source: e,
                 })?;
-                // The rule the shared rawfile writer follows: every value is a
-                // double, which LTspice's readers decode as doubles only on
+                // The rule the shared rawfile writer follows: every binary value
+                // is a double, which LTspice's readers decode as doubles only on
                 // `double`, and one point never decreases, so it is `forward`.
-                writeln!(file, "Flags: real forward double").map_err(|e| CliError::OutputError {
+                // ASCII says neither: no reader decodes text by them.
+                let flags = if matches!(format, OutputFormat::Raw) {
+                    "real forward double"
+                } else {
+                    "real"
+                };
+                writeln!(file, "Flags: {flags}").map_err(|e| CliError::OutputError {
                     path: path.to_path_buf(),
                     source: e,
                 })?;

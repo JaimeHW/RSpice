@@ -311,42 +311,49 @@ fn first_plot_flags(bytes: &[u8]) -> String {
 
 /// LTspice and the readers built for its files decode a real plot's binary
 /// values as single precision unless `Flags:` says `double`, and take
-/// `forward` and `log` from it as LTspice writes them. Every rawfile the run
-/// writes says what it holds, in both encodings, and still reads back.
+/// `forward` and `log` from it as LTspice writes them. Every binary rawfile
+/// the run writes says what it holds; an ASCII one says only `real` or
+/// `complex` and `log`, since no reader decodes text by `double` or
+/// `forward` and ngspice warns on both. Each still reads back.
 #[test]
 fn run_rawfiles_carry_the_flags_ltspice_readers_decode_by() {
     let dir = test_dir("raw_application_flags");
     let rc = "v1 in 0 dc 1 ac 1 pulse(0 1 0 1n 1n 5n 10n)\nr1 in out 1k\nc1 out 0 1p\n";
-    for (name, analysis, flags, coordinate) in [
-        ("tran", ".tran 5n 10n", "real forward double", None),
+    for (name, analysis, binary, ascii, coordinate) in [
+        ("op", ".op", "real forward double", "real", None),
+        ("tran", ".tran 5n 10n", "real forward double", "real", None),
         (
             "ac_dec",
             ".ac dec 1 1 100",
             "complex forward log",
+            "complex log",
             Some(vec![1.0, 10.0, 100.0]),
         ),
         (
             "ac_lin",
             ".ac lin 3 100 300",
             "complex forward",
+            "complex",
             Some(vec![100.0, 200.0, 300.0]),
         ),
         (
             "dc_down",
             ".dc v1 1 0 -0.5",
             "real double",
+            "real",
             Some(vec![1.0, 0.5, 0.0]),
         ),
         (
             "noise_dec",
             ".noise v(out) v1 dec 1 100 1k",
             "real forward log double",
+            "real log",
             Some(vec![100.0, 1000.0]),
         ),
     ] {
         let deck = dir.join(format!("{name}.cir"));
         std::fs::write(&deck, format!("* {name}\n{rc}{analysis}\n.end\n")).unwrap();
-        for format in ["raw", "ascii"] {
+        for (format, flags) in [("raw", binary), ("ascii", ascii)] {
             let output = dir.join(format!("{name}.{format}"));
             let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
                 .args(["--quiet", "run"])
