@@ -243,3 +243,70 @@ fn a_persisted_field_writes_project_json_as_a_bare_value_or_null() {
     let read: PersistedField<String> = serde_json::from_str("\"ab\"").unwrap();
     assert_eq!(read, present);
 }
+
+/// A snapshot for a reader in another memory, as a browser's hardcopy worker is, carries a stored
+/// event history's changes: a reference would name a segment that reader does not hold. A saved
+/// payload still names the segment.
+#[test]
+fn a_snapshot_for_another_memory_carries_the_changes_of_its_stored_event_histories() {
+    use rspice_results::events::RealEventPointEvidence;
+    use rspice_results::events::points::EventPoints;
+    use rspice_results::store_reader::{Segment, SegmentBytes, SegmentEvents, StoreReader};
+    use rspice_results_store::{
+        Axis, EventChange, EventValue, MemoryIo, RunMeta, RunStatus, Schema, SegmentReader,
+        SegmentWriter, Signal, SignalKind,
+    };
+
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: vec![
+            Signal::new("v(a)", "V", SignalKind::Real),
+            Signal::new("e(ctl)", "V", SignalKind::RealEvent),
+        ],
+    };
+    let mut writer =
+        SegmentWriter::create(MemoryIo::new(), &schema, &RunMeta::default()).unwrap();
+    writer.push_rows(&[0.0, 1.0], &[0.0, 1.0]).unwrap();
+    let changes: Vec<EventChange> = (0..4_u32)
+        .map(|i| EventChange {
+            signal: 1,
+            time: f64::from(i) * 0.25,
+            sequence: i,
+            value: EventValue::Real(f64::from(i)),
+            strength: 0,
+        })
+        .collect();
+    writer.push_events(&changes).unwrap();
+    let (receipt, io) = writer.finish(RunStatus::Completed).unwrap();
+    let reader = SegmentReader::open(Box::new(io) as SegmentBytes).unwrap();
+    let segment = Segment::kept(StoreReader::new(reader), std::path::PathBuf::new()).shared();
+    let history: EventPoints<RealEventPointEvidence> =
+        EventPoints::stored(SegmentEvents::new(segment, 1, "e(ctl)".to_owned()), 0.0).unwrap();
+
+    let write = |carrying: bool| {
+        let mut out = Vec::new();
+        let mut serializer = serde_json::Serializer::new(&mut out);
+        let mut payload = || stored_values::serialize_payload(&history, &mut serializer);
+        if carrying {
+            carrying_rows(payload).unwrap();
+        } else {
+            payload().unwrap();
+        }
+        String::from_utf8(out).unwrap()
+    };
+    let digest = receipt.digest.to_string();
+    let named = write(false);
+    assert!(named.contains(&digest), "{named}");
+    let carried = write(true);
+    assert!(!carried.contains(&digest), "{carried}");
+    let read: EventPoints<RealEventPointEvidence> =
+        carrying_rows(|| serde_json::from_str(&carried)).unwrap();
+    assert_eq!(read.len(), changes.len());
+    assert_eq!(
+        serde_json::to_string(&*read).unwrap(),
+        serde_json::to_string(&*history).unwrap()
+    );
+}

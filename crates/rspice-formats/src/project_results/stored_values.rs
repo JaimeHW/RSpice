@@ -153,11 +153,16 @@ pub fn deserialize_samples<'de, D: Deserializer<'de>>(
     deserializer.deserialize_any(Values { nullable: true })
 }
 
-/// An analysis's payload, its stored event histories written as references.
+/// An analysis's payload, its stored event histories written as references. A snapshot for a
+/// reader in another memory writes their changes instead, as it carries a stored window's rows:
+/// that reader holds none of the segments a reference names.
 pub fn serialize_payload<T: Serialize, S: Serializer>(
     payload: &T,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
+    if carrying() {
+        return payload.serialize(serializer);
+    }
     writing_references(|| payload.serialize(serializer))
 }
 

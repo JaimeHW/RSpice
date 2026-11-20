@@ -67,6 +67,8 @@ zip.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true
+# Stored event histories built in memory, for the snapshot a browser worker reads.
+rspice-results-store.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 fst-writer = "0.3"
