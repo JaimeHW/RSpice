@@ -189,7 +189,9 @@ fn the_add_pane_form_draws_over_the_document() {
     let (mut app, document_id) = document_fixture("two-linked-panes");
     show_document(&mut app, document_id);
     open_add_pane(&mut app.state.results_parts());
-    drive_frame(|ui| show(ui.ctx(), &mut app.state.results_parts()));
+    drive_frame(|ui| {
+        show(ui.ctx(), &mut app.state.results_parts());
+    });
     assert!(matches!(
         app.state.results.result_document_dialog,
         Some(ResultDocumentDialog::AddPane(_))
@@ -406,6 +408,7 @@ fn run_comparison(
     assert_eq!(choices.refusal, None);
     app.state.results.result_document_dialog = Some(ResultDocumentDialog::Compare(draft));
     commit_open_dialog(&mut app.state.results_parts());
+    compare::settle_comparison(&mut app.state.results_parts());
     let Some(ResultDocumentDialog::Compare(draft)) =
         app.state.results.result_document_dialog.clone()
     else {

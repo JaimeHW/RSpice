@@ -221,6 +221,30 @@ impl<W> AnalysisResult<W> {
         (!unit.is_empty()).then_some(unit)
     }
 
+    /// The waveforms `pick` takes, with the fields
+    /// [`Self::waveform_coordinate_unit`] reads and nothing else of the
+    /// analysis: what a worker that reads those waveforms owns. A retained
+    /// waveform's samples are shared, never copied.
+    pub fn picked_waveforms<V: AsRef<RetainedWaveform>>(
+        &self,
+        pick: impl FnMut(&W) -> Option<V>,
+    ) -> AnalysisResult<V> {
+        let mut picked = AnalysisResult::new(
+            self.id,
+            self.analysis_type,
+            self.label.clone(),
+            self.timestamp,
+        )
+        .with_waveforms(self.waveforms.iter().filter_map(pick).collect());
+        picked.import_source = self.import_source.clone();
+        picked.provenance = self.provenance.clone();
+        picked.result_payload = match &self.result_payload {
+            Some(payload @ AnalysisResultPayload::DcSweep { .. }) => Some(payload.clone()),
+            _ => None,
+        };
+        picked
+    }
+
     /// Change the waveform wrapper while retaining every analysis field and exact data owner.
     pub fn map_waveforms<V>(self, map: impl FnMut(W) -> V) -> AnalysisResult<V> {
         let Self {

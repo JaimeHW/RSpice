@@ -809,7 +809,7 @@ fn export_typed_result_tsv(
 /// reported under. Nothing else about publishing a table of text differs, so
 /// the dialog, the observed compare-and-exchange write and both completion
 /// messages are stated once here.
-fn publish_result_text(
+pub(crate) fn publish_result_text(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     label: &str,

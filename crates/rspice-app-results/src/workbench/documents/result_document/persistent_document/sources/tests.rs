@@ -108,9 +108,15 @@ fn compare_with(state: &mut ResultsTestHost, baseline: &SimulationRun) {
     let mut parts = state.results_parts();
     *parts.result_document_dialog = Some(ResultDocumentDialog::Compare(CompareDraft {
         baseline: Some(baseline.dataset_id),
+        signals: baseline.analyses[0]
+            .waveforms
+            .iter()
+            .map(|waveform| waveform.name.clone())
+            .collect(),
         ..CompareDraft::default()
     }));
     document_edit::commit_open_dialog(&mut parts);
+    document_edit::compare::settle_comparison(&mut parts);
     let ran = matches!(
         parts.result_document_dialog.as_ref(),
         Some(ResultDocumentDialog::Compare(draft)) if draft.outcome.is_some()

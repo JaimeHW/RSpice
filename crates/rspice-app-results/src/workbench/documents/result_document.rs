@@ -1632,6 +1632,15 @@ pub struct ResultsState {
     /// Whether Compare datasets has a baseline for a candidate analysis; see
     /// [`document_edit::compare::compare_available`].
     compare_availability: RetainedMemo<AnalysisPresentationKey, bool>,
+    /// The runs a candidate analysis can be compared with, and the signals
+    /// each shares with it; see [`document_edit::compare::choices`].
+    compare_baselines:
+        RetainedMemo<AnalysisPresentationKey, std::sync::Arc<[document_edit::compare::Baseline]>>,
+    /// The comparison running on its worker, while its form is open.
+    /// Transient.
+    compare_run: Option<std::sync::Arc<document_edit::compare::Running>>,
+    /// The comparison that last answered, until another does. Transient.
+    last_comparison: Option<std::sync::Arc<document_edit::compare::Finished>>,
     /// Source-aware statistics per selected trace; see
     /// [`trace_statistics::trace_statistics`].
     trace_statistics:

@@ -120,6 +120,7 @@ mod tests {
             baselines: Vec::new(),
             signals: vec!["V(out)".to_owned()],
             refusal: None,
+            running: None,
         };
         let mut draft = super::compare::CompareDraft::default();
         let compare = controls(|ctx| {

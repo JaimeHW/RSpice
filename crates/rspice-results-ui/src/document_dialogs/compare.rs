@@ -16,6 +16,8 @@ use super::labels_and_selection;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompareDraft {
     pub baseline: Option<DatasetId>,
+    /// The signals to compare: the plotted ones when the form opens.
+    pub signals: Vec<String>,
     pub alignment: ComparisonAlignmentDraft,
     /// The signal a threshold or correlation alignment reads.
     pub signal: String,
@@ -31,6 +33,7 @@ impl Default for CompareDraft {
     fn default() -> Self {
         Self {
             baseline: None,
+            signals: Vec::new(),
             alignment: ComparisonAlignmentDraft::AbsoluteXAxis,
             signal: String::new(),
             threshold: "0".to_owned(),
@@ -47,10 +50,14 @@ pub struct CompareChoices {
     /// The candidate: the result being compared.
     pub candidate: String,
     pub baselines: Vec<(DatasetId, String)>,
-    /// Signals an alignment can be read from.
+    /// The signals the result and the baseline share: the ones that can be
+    /// compared, and that an alignment can be read from.
     pub signals: Vec<String>,
     /// Why Compare is refused, when it is.
     pub refusal: Option<String>,
+    /// How many of its signals a running comparison has compared, of how
+    /// many; `None` when none is running.
+    pub running: Option<(usize, usize)>,
 }
 
 /// One signal's verdict. Only a failure and a pass close to its limit are
@@ -122,21 +129,33 @@ pub struct CompareOutcome {
 }
 
 /// Show the form, or the outcome once Compare has run. `Primary` on the form
-/// asks the host to run the comparison; on the outcome it closes.
+/// asks the host to run the comparison, and `Cancelled` while it runs asks
+/// the host to stop it; on the outcome `Primary` closes and `Ghost` asks for
+/// the comparison as a text report.
 pub fn show(ctx: &Context, draft: &mut CompareDraft, choices: &CompareChoices) -> DialogChoice {
     if let Some(outcome) = &draft.outcome {
         return Dialog::new("Comparison result", "Done")
             .size(DialogSize::CommandForm)
             .description("The per-signal outcome of comparing the result with its baseline.")
+            .ghost("Save report\u{2026}")
             .show(ctx, |ui| outcome_body(ui, &choices.candidate, outcome));
     }
     let refusal = choices.refusal.as_deref();
+    let progress = choices
+        .running
+        .map(|(done, total)| format!("Compared {done} of {total} signals\u{2026}"));
+    let running = progress.is_some();
     CommandForm::new("Compare datasets", "Compare")
         .describe(
             "Compare the result with a baseline dataset, signal by signal, within a tolerance.",
         )
-        .primary_enabled(refusal.is_none())
-        .status(refusal.map_or(Ok(None), Err))
+        .primary_enabled(refusal.is_none() && !running)
+        .fields_enabled(!running)
+        .cancel_label(if running { "Stop" } else { "Cancel" })
+        .status(match (&progress, refusal) {
+            (Some(progress), _) => Ok(Some(progress.as_str())),
+            (None, refusal) => refusal.map_or(Ok(None), Err),
+        })
         .show(ctx, |rows| {
             rows.value("Result", &choices.candidate);
             let (labels, current) = labels_and_selection(&choices.baselines, draft.baseline);
@@ -144,6 +163,28 @@ pub fn show(ctx: &Context, draft: &mut CompareDraft, choices: &CompareChoices) -
                 rows.select("Baseline", "rspice.compare.baseline", &current, &labels)
             {
                 draft.baseline = Some(choices.baselines[index].0);
+            }
+            if !choices.signals.is_empty() {
+                let mut chosen = choices
+                    .signals
+                    .iter()
+                    .map(|signal| draft.signals.contains(signal))
+                    .collect::<Vec<_>>();
+                let mut items = choices
+                    .signals
+                    .iter()
+                    .zip(chosen.iter_mut())
+                    .map(|(signal, on)| (signal.as_str(), on))
+                    .collect::<Vec<_>>();
+                if rows.checks("Signals", &mut items) {
+                    draft.signals = choices
+                        .signals
+                        .iter()
+                        .zip(&chosen)
+                        .filter(|(_, on)| **on)
+                        .map(|(signal, _)| signal.clone())
+                        .collect();
+                }
             }
             let alignments = [
                 ComparisonAlignmentDraft::AbsoluteXAxis,

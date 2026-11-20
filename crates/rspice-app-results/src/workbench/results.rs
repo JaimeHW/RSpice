@@ -325,7 +325,16 @@ fn render_create_result_document(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Co
 /// The open form of the result document: a pane, a comparison, a family, a
 /// measurement or the document's properties.
 fn render_result_document_dialog(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
-    crate::workbench::documents::result_document::show_document_dialog(ctx, &mut results_parts(cx));
+    use crate::workbench::documents::result_document::document_edit::{DialogRequest, compare};
+
+    let request = crate::workbench::documents::result_document::show_document_dialog(
+        ctx,
+        &mut results_parts(cx),
+    );
+    if let Some(DialogRequest::SaveComparisonReport) = request {
+        let io = cx.handles.export_io;
+        compare::save_report_with_io(&mut results_parts(cx), io);
+    }
 }
 
 /// Nothing to commit when another section shows in the inspector's place:

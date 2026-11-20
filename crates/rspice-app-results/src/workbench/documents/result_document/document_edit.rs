@@ -106,11 +106,23 @@ fn report(state: &mut ResultsParts<'_>, result: Result<(), String>) {
     }
 }
 
+/// What the open form asks of its host that only the host can do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogRequest {
+    /// Write the comparison the form shows to a text file.
+    SaveComparisonReport,
+}
+
 /// Draw the open form, if any, and commit what it asks for.
-pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
+pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) -> Option<DialogRequest> {
+    // A comparison's answer lands in its form before the form draws.
+    let comparing = compare::poll(state);
+    if comparing.is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
     let Some(dialog) = state.result_document_dialog.clone() else {
         trace_pick::arm(state, false);
-        return;
+        return None;
     };
     let (dialog, choice) = match dialog {
         ResultDocumentDialog::AddPane(mut draft) => {
@@ -119,7 +131,8 @@ pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
             (ResultDocumentDialog::AddPane(draft), choice)
         }
         ResultDocumentDialog::Compare(mut draft) => {
-            let choices = compare::choices(state.results_reads(), &mut draft);
+            let mut choices = compare::choices(state.results_reads(), &mut draft);
+            choices.running = comparing;
             let choice =
                 rspice_results_ui::document_dialogs::compare::show(ctx, &mut draft, &choices);
             (ResultDocumentDialog::Compare(draft), choice)
@@ -148,14 +161,27 @@ pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
         state,
         matches!(&dialog, ResultDocumentDialog::Measurement(draft) if draft.picking.is_some()),
     );
+    let comparison_shown =
+        matches!(&dialog, ResultDocumentDialog::Compare(draft) if draft.outcome.is_some());
     *state.result_document_dialog = Some(dialog);
     match choice {
         DialogChoice::Primary => commit_open_dialog(state),
+        // Stop, or Escape, while a comparison runs stops it and keeps its
+        // form.
+        DialogChoice::Ghost | DialogChoice::Cancelled
+            if compare::running(state.results_reads()) =>
+        {
+            compare::stop(state);
+        }
+        DialogChoice::Ghost if comparison_shown => {
+            return Some(DialogRequest::SaveComparisonReport);
+        }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             *state.result_document_dialog = None;
         }
         DialogChoice::None | DialogChoice::Secondary => {}
     }
+    None
 }
 
 /// Commit the open form's draft. The form closes when its edit lands, or
