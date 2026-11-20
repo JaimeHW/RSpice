@@ -192,16 +192,24 @@ fn rows_of_the_wrong_width_and_closed_rows_are_refused() {
 }
 
 #[test]
-fn the_digest_ignores_signed_zero_and_nan_payloads_but_not_values() {
+fn the_digest_and_the_kept_name_follow_every_stored_bit() {
     let digest_of = |values: [f64; 4]| {
         let mut writer = SegmentWriter::create(MemoryIo::new(), &mixed_schema(), &meta()).unwrap();
         writer.push_row(1.0, &values).unwrap();
         writer.finish(RunStatus::Completed).unwrap().0.digest
     };
     let base = digest_of([0.0, f64::NAN, 1.0, 2.0]);
-    assert_eq!(
-        digest_of([-0.0, f64::from_bits(0x7ff8_0000_0000_0001), 1.0, 2.0]),
-        base
-    );
-    assert_ne!(digest_of([0.0, f64::NAN, 1.0, 2.5]), base);
+    assert_eq!(digest_of([0.0, f64::NAN, 1.0, 2.0]), base);
+    for other in [
+        [-0.0, f64::NAN, 1.0, 2.0],
+        [0.0, f64::from_bits(0x7ff8_0000_0000_0001), 1.0, 2.0],
+        [0.0, f64::NAN, 1.0, 2.5],
+    ] {
+        let digest = digest_of(other);
+        assert_ne!(digest, base, "{other:?}");
+        assert_ne!(
+            crate::kept_segment_name(&digest),
+            crate::kept_segment_name(&base)
+        );
+    }
 }

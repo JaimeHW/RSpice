@@ -6,7 +6,7 @@
 //! and a summary of every 1,024 changes (time span, count, values seen).
 
 use crate::codec::{self, Codec};
-use crate::digest::{ValueHasher, canonical_bits};
+use crate::digest::ValueHasher;
 use crate::format::{Cursor, FRAME_HEADER_LEN, FrameBuf, FrameKind, canonical, fold_max, fold_min};
 use crate::{SignalKind, StoreError};
 
@@ -167,10 +167,10 @@ impl EventScratch {
     }
 }
 
-/// One change's contribution to its signal's digest stream.
+/// One change's contribution to its signal's digest stream: its time, sequence, stored value
+/// bytes and strength.
 pub(crate) fn hash_change(
     hasher: &mut ValueHasher,
-    kind: EventKind,
     time: f64,
     sequence: u32,
     value: &[u8],
@@ -178,10 +178,7 @@ pub(crate) fn hash_change(
 ) {
     hasher.value(time);
     hasher.bytes(&sequence.to_le_bytes());
-    match kind {
-        EventKind::Real => hasher.bytes(&canonical_bits(real_at(value, 0)).to_le_bytes()),
-        EventKind::Logic | EventKind::Bus { .. } => hasher.bytes(value),
-    }
+    hasher.bytes(value);
     hasher.bytes(&[strength]);
 }
 
@@ -251,7 +248,6 @@ impl EventBuffer {
         for at in 0..self.len() {
             hash_change(
                 hasher,
-                self.kind,
                 self.times[at],
                 self.sequences[at],
                 &self.values[at * stride..(at + 1) * stride],

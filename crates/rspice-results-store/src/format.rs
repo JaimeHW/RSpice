@@ -10,7 +10,7 @@ use crate::StoreError;
 
 /// Superblock: magic, format version, then the durable pointers the writer rewrites in place.
 pub(crate) const SEGMENT_MAGIC: [u8; 8] = *b"RSPSEG\r\n";
-pub(crate) const FORMAT_VERSION: u32 = 3;
+pub(crate) const FORMAT_VERSION: u32 = 4;
 pub(crate) const SUPERBLOCK_LEN: u64 = 64;
 /// Offset of the pointer block: last durable index offset u64, rows it covers u64, END offset u64,
 /// reserved u64. It is written as one aligned 32-byte write; zero means "none".
@@ -48,6 +48,38 @@ impl FrameKind {
             _ => return None,
         })
     }
+}
+
+/// A `CHUNK` payload begins with its index u64, first row u64, rows u32 and block count u32.
+pub(crate) const CHUNK_HEADER_LEN: usize = 24;
+/// A `CHUNK`'s entry for one block: its payload offset u32, length u32, codec u8, three zero bytes,
+/// and the CRC-32 of the block's bytes, so a read of one block checks it without the whole frame.
+pub(crate) const BLOCK_ENTRY_LEN: usize = 16;
+/// A `SUMMARY` payload begins with its level u8, three zero bytes, buckets u32, ordinal u64, first
+/// row u64 and rows u64.
+pub(crate) const SUMMARY_HEADER_LEN: usize = 32;
+
+/// A summary region (a chunk's level-1 buckets, or a `SUMMARY` frame's) is one column of
+/// `(first, last)` x pairs and then one column of `(min, max)` pairs per analog signal, 16 bytes a
+/// bucket. A table of one CRC-32 per column precedes it, padded to eight bytes, so a read of one
+/// signal's buckets checks them without the rest of the frame.
+pub(crate) fn summary_crcs_len(analog: usize) -> usize {
+    (4 * (1 + analog)).next_multiple_of(8)
+}
+
+/// Payload offset of a chunk's summary CRC table.
+pub(crate) fn chunk_crcs_at(blocks: usize) -> usize {
+    CHUNK_HEADER_LEN + BLOCK_ENTRY_LEN * blocks
+}
+
+/// Payload offset of a chunk's level-1 summary region.
+pub(crate) fn chunk_summaries_at(blocks: usize, analog: usize) -> usize {
+    chunk_crcs_at(blocks) + summary_crcs_len(analog)
+}
+
+/// Payload offset of a `SUMMARY` frame's bucket region; its CRC table is at `SUMMARY_HEADER_LEN`.
+pub(crate) fn summary_buckets_at(analog: usize) -> usize {
+    SUMMARY_HEADER_LEN + summary_crcs_len(analog)
 }
 
 /// Rows per level-1 summary bucket; level-1 summaries live in each `CHUNK`.
@@ -155,6 +187,27 @@ impl FrameBuf {
     /// Payload bytes written so far.
     pub(crate) fn payload_len(&self) -> usize {
         self.len - FRAME_HEADER_LEN
+    }
+
+    /// The payload written so far.
+    pub(crate) fn payload(&self) -> &[u8] {
+        &self.buf[FRAME_HEADER_LEN..self.len]
+    }
+
+    /// Write the CRC-32 of each of the `columns` columns of `column_len` bytes from payload offset
+    /// `region` into the table at payload offset `table`.
+    pub(crate) fn patch_region_crcs(
+        &mut self,
+        table: usize,
+        region: usize,
+        columns: usize,
+        column_len: usize,
+    ) {
+        for column in 0..columns {
+            let at = region + column * column_len;
+            let crc = crc32fast::hash(&self.payload()[at..at + column_len]);
+            self.patch_u32(table + 4 * column, crc);
+        }
     }
 
     #[inline]

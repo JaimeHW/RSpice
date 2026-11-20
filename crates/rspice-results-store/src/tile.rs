@@ -450,7 +450,6 @@ impl<I: SegmentIo> SegmentReader<I> {
                 }
             }
             1 => {
-                let blocks = self.slots() + 1;
                 let mut index = self.chunk_containing(r0);
                 while index < self.chunks().len() && self.chunks()[index].first_row < r1 {
                     let chunk = self.chunks()[index];
@@ -459,17 +458,13 @@ impl<I: SegmentIo> SegmentReader<I> {
                         continue;
                     }
                     let buckets = (chunk.rows as usize).div_ceil(LEVEL1_ROWS);
-                    let at = chunk.offset + 16 + 24 + 12 * blocks as u64;
+                    let region = self.chunk_region(&chunk);
                     let xs = self.cached(cache, x_key(1, chunk.first_row), |reader, out| {
-                        reader.read_f64s(at, 2 * buckets, out)
+                        reader.read_region_column(region, 0, out)
                     })?;
                     let values =
                         self.cached(cache, value_key(1, chunk.first_row), |reader, out| {
-                            reader.read_f64s(
-                                at + (16 * buckets * (1 + column.index)) as u64,
-                                2 * buckets,
-                                out,
-                            )
+                            reader.read_region_column(region, 1 + column.index, out)
                         })?;
                     for bucket in 0..buckets {
                         let first = chunk.first_row + (bucket * LEVEL1_ROWS) as u64;
@@ -506,17 +501,13 @@ impl<I: SegmentIo> SegmentReader<I> {
                         continue;
                     }
                     let buckets = frame.buckets as usize;
-                    let at = frame.offset + 16 + 32;
+                    let region = self.summary_region(&frame);
                     let xs = self.cached(cache, x_key(level, frame.first_row), |reader, out| {
-                        reader.read_f64s(at, 2 * buckets, out)
+                        reader.read_region_column(region, 0, out)
                     })?;
                     let values =
                         self.cached(cache, value_key(level, frame.first_row), |reader, out| {
-                            reader.read_f64s(
-                                at + (16 * buckets * (1 + column.index)) as u64,
-                                2 * buckets,
-                                out,
-                            )
+                            reader.read_region_column(region, 1 + column.index, out)
                         })?;
                     for bucket in 0..buckets {
                         let first = frame.first_row + bucket as u64 * width;

@@ -1,6 +1,7 @@
 //! Crate tests. Byte fixtures are built here from the format's constants; nothing is read from disk.
 
 mod events_tests;
+mod integrity_tests;
 mod manifest_tests;
 #[cfg(any(unix, windows))]
 mod place_tests;

@@ -22,9 +22,10 @@ use crate::digest::{Digest, LogicalDigest};
 mod reopen;
 use crate::events::{EventBuffer, EventChange, EventKind, EventScratch};
 use crate::format::{
-    FLAG_PARTIAL, FORMAT_VERSION, FRAME_HEADER_LEN, FrameBuf, FrameKind, INDEX_CHUNKS,
-    INDEX_ENTRY_LIMIT, LEVEL1_ROWS, POINTERS_AT, POINTERS_LEN, SEGMENT_MAGIC, SUPERBLOCK_LEN,
-    bucket_rows, canonical, chunk_rows, fold_max, fold_min, summary_frame_rows,
+    BLOCK_ENTRY_LEN, FLAG_PARTIAL, FORMAT_VERSION, FRAME_HEADER_LEN, FrameBuf, FrameKind,
+    INDEX_CHUNKS, INDEX_ENTRY_LIMIT, LEVEL1_ROWS, POINTERS_AT, POINTERS_LEN, SEGMENT_MAGIC,
+    SUPERBLOCK_LEN, bucket_rows, canonical, chunk_crcs_at, chunk_rows, chunk_summaries_at,
+    fold_max, fold_min, summary_buckets_at, summary_crcs_len, summary_frame_rows,
 };
 use crate::summary::Pyramid;
 use crate::{RunMeta, Schema, SegmentIo, StoreError, codec};
@@ -361,7 +362,8 @@ impl<I: SegmentIo> Encoder<I> {
         let block_bytes = codec::max_encoded_len(chunk_rows * 8);
         let buckets = chunk_rows.div_ceil(LEVEL1_ROWS);
         let chunk_frame = 64
-            + 12 * (layout.slots + 1)
+            + BLOCK_ENTRY_LEN * (layout.slots + 1)
+            + summary_crcs_len(layout.analog.len())
             + 16 * buckets * (layout.analog.len() + 1)
             + block_bytes * (layout.slots + 1);
         Self {
@@ -492,17 +494,26 @@ impl<I: SegmentIo> Encoder<I> {
         }
 
         let blocks = slots + 1;
+        let analog = self.layout.analog.len();
         self.frame.begin(FrameKind::Chunk, flags);
         self.frame.put_u64(chunk_index);
         self.frame.put_u64(batch.first_row);
         self.frame.put_u32(rows as u32);
         self.frame.put_u32(blocks as u32);
         let table_at = self.frame.payload_len();
-        self.frame.put_zeros(12 * blocks);
+        self.frame
+            .put_zeros(BLOCK_ENTRY_LEN * blocks + summary_crcs_len(analog));
+        debug_assert_eq!(self.frame.payload_len(), chunk_summaries_at(blocks, analog));
         for &value in self.level1_x.iter().chain(&self.level1) {
             self.frame.put_f64(value);
         }
         debug_assert_eq!(self.level1_x.len(), 2 * buckets);
+        self.frame.patch_region_crcs(
+            chunk_crcs_at(blocks),
+            chunk_summaries_at(blocks, analog),
+            1 + analog,
+            16 * buckets,
+        );
         let max_block = codec::max_encoded_len(rows * 8);
         for block in 0..blocks {
             let values: &[f64] = if block == 0 {
@@ -519,10 +530,12 @@ impl<I: SegmentIo> Encoder<I> {
                 self.compress,
             );
             self.frame.advance(len);
-            let entry = table_at + 12 * block;
+            let crc = crc32fast::hash(&self.frame.payload()[at..at + len]);
+            let entry = table_at + BLOCK_ENTRY_LEN * block;
             self.frame.patch_u32(entry, at as u32);
             self.frame.patch_u32(entry + 4, len as u32);
             self.frame.patch_u8(entry + 8, codec as u8);
+            self.frame.patch_u32(entry + 12, crc);
         }
         (x_min, x_max)
     }
@@ -535,17 +548,28 @@ impl<I: SegmentIo> Encoder<I> {
         }
         let chunk_index = self.next_chunk;
         let (x_min, x_max) = self.encode_chunk(batch, chunk_index, 0);
-        // The frame ends with the digest's row stream after this chunk, which a reopened segment
-        // continues from. A chunk the segment does not keep leaves the stream as it was.
-        let mark = self.digest.rows_mark();
+        // The frame ends with the digest's row stream and summary stream after this chunk, which
+        // a reopened segment continues from. A chunk the segment does not keep leaves the streams
+        // as they were.
+        let mark = (self.digest.rows_mark(), self.digest.summaries_mark());
         self.digest
             .rows(&batch.x, &batch.values, self.layout.slots, batch.rows);
-        let state = self.digest.rows_state();
-        self.frame.put(&state);
+        let analog = self.layout.analog.len();
+        let region = chunk_summaries_at(self.layout.slots + 1, analog);
+        let region_len = 16 * batch.rows.div_ceil(LEVEL1_ROWS) * (1 + analog);
+        self.digest.summaries(
+            &self.frame.payload()[region..region + region_len],
+            1 + analog,
+        );
+        let rows_state = self.digest.rows_state();
+        let summaries_state = self.digest.summaries_state();
+        self.frame.put(&rows_state);
+        self.frame.put(&summaries_state);
         let offset = match self.emit_real() {
             Ok(offset) => offset,
             Err(error) => {
-                self.digest.resume_rows(mark.0, mark.1);
+                self.digest.resume_rows(mark.0.0, mark.0.1);
+                self.digest.resume_summaries(mark.1);
                 return Err(error);
             }
         };
@@ -602,7 +626,19 @@ impl<I: SegmentIo> Encoder<I> {
         let rows = (self.rows - first_row).min(summary_frame_rows(level));
         debug_assert!(rows.div_ceil(bucket_rows(level)) <= 64);
         let (x_min, x_max) = self.pyramid.encode(index, first_row, rows, &mut self.frame);
-        let offset = self.emit_real()?;
+        let mark = self.digest.summaries_mark();
+        let analog = self.layout.analog.len();
+        self.digest.summaries(
+            &self.frame.payload()[summary_buckets_at(analog)..],
+            1 + analog,
+        );
+        let offset = match self.emit_real() {
+            Ok(offset) => offset,
+            Err(error) => {
+                self.digest.resume_summaries(mark);
+                return Err(error);
+            }
+        };
         self.entries.push(IndexEntry {
             kind: FrameKind::Summary,
             level,

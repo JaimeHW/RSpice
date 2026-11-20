@@ -1,13 +1,13 @@
 //! SHA-256 and the store's logical result digest.
 //!
-//! The digest is logical: it hashes decoded values in canonical order (each row's x then its value
-//! slots, rows in order; then each event signal's changes), after mapping `-0.0` to `+0.0` and every
-//! NaN to one canonical NaN, as `rspice-results`' result digest does. It therefore does not change
-//! when the codec, the chunk size or the way rows were pushed changes.
+//! The digest is logical: it hashes the decoded values' stored bits in canonical order (each row's
+//! x then its value slots, rows in order; then each event signal's changes), and the summaries a
+//! reader draws overviews from, each region's stored bytes in the order the segment holds them. A
+//! kept segment is named by its digest, so the name follows every stored bit: two runs that differ
+//! only in a signed zero or a NaN's payload are two segments. It does not change when the codec,
+//! the chunk size or the way rows were pushed changes.
 
 use std::fmt;
-
-use crate::format::CANONICAL_NAN_BITS;
 
 /// The file name of the kept segment whose logical digest is `digest`: a project, a recovery or
 /// a session keeps each segment under the name of what it holds.
@@ -34,18 +34,6 @@ impl fmt::Debug for Digest {
     }
 }
 
-/// The bits a value contributes to the digest.
-#[inline(always)]
-pub(crate) fn canonical_bits(value: f64) -> u64 {
-    if value == 0.0 {
-        0
-    } else if value.is_nan() {
-        CANONICAL_NAN_BITS
-    } else {
-        value.to_bits()
-    }
-}
-
 /// SHA-256 from the workspace's `sha2`, which uses the CPU's SHA instructions where it has them.
 #[derive(Clone, Default)]
 pub(crate) struct Sha256(sha2::Sha256);
@@ -68,9 +56,9 @@ impl Sha256 {
     }
 }
 
-const DIGEST_DOMAIN: &[u8] = b"rspice-results-store logical digest 1";
+const DIGEST_DOMAIN: &[u8] = b"rspice-results-store logical digest 2";
 
-/// Canonical bytes staged through a fixed buffer, so hashing a chunk allocates nothing.
+/// Values' bytes staged through a fixed buffer, so hashing a chunk allocates nothing.
 #[derive(Clone)]
 pub(crate) struct ValueHasher {
     hasher: Sha256,
@@ -89,6 +77,21 @@ impl Default for ValueHasher {
 }
 
 impl ValueHasher {
+    /// Hash a summary region bucket by bucket, each bucket's columns in turn, so the stream does
+    /// not depend on how the run was cut into chunks: a region stores `columns` columns, each of
+    /// the same number of 16-byte buckets.
+    pub(crate) fn region(&mut self, region: &[u8], columns: usize) {
+        let column_len = region.len() / columns;
+        debug_assert_eq!(column_len * columns, region.len());
+        debug_assert_eq!(column_len % 16, 0);
+        for bucket in (0..column_len).step_by(16) {
+            for column in 0..columns {
+                let at = column * column_len + bucket;
+                self.bytes(&region[at..at + 16]);
+            }
+        }
+    }
+
     #[inline(always)]
     pub(crate) fn bytes(&mut self, bytes: &[u8]) {
         if self.len + bytes.len() > self.buffer.len() {
@@ -107,7 +110,7 @@ impl ValueHasher {
         if self.len + 8 > self.buffer.len() {
             self.drain();
         }
-        self.buffer[self.len..self.len + 8].copy_from_slice(&canonical_bits(value).to_le_bytes());
+        self.buffer[self.len..self.len + 8].copy_from_slice(&value.to_le_bytes());
         self.len += 8;
     }
 
@@ -123,7 +126,7 @@ impl ValueHasher {
             let take = room.min(values.len());
             let out = &mut self.buffer[self.len..self.len + 8 * take];
             for (out, &value) in out.chunks_exact_mut(8).zip(&values[..take]) {
-                out.copy_from_slice(&canonical_bits(value).to_le_bytes());
+                out.copy_from_slice(&value.to_le_bytes());
             }
             self.len += 8 * take;
             values = &values[take..];
@@ -165,6 +168,11 @@ impl ValueHasher {
 pub(crate) struct LogicalDigest {
     rows: ValueHasher,
     row_count: u64,
+    /// Every summary region, in the order the segment holds them: each chunk's level-1 buckets,
+    /// and each `SUMMARY` frame's, as they follow the chunks, bucket by bucket. Chunk rows are a
+    /// power of two, so a full `SUMMARY` frame always follows the chunk its rows end with and the
+    /// stream does not depend on the chunk size.
+    summaries: ValueHasher,
     /// One stream per event signal, in signal-id order.
     events: Vec<(u32, ValueHasher, u64)>,
 }
@@ -174,6 +182,7 @@ impl LogicalDigest {
         Self {
             rows: ValueHasher::default(),
             row_count: 0,
+            summaries: ValueHasher::default(),
             events: event_signals
                 .map(|id| (id, ValueHasher::default(), 0))
                 .collect(),
@@ -203,6 +212,27 @@ impl LogicalDigest {
     /// The row stream's state after every row hashed so far.
     pub(crate) fn rows_state(&mut self) -> [u8; HASH_STATE_LEN] {
         self.rows.state()
+    }
+
+    /// Hash one summary region's stored bytes, `columns` columns of 16-byte buckets.
+    pub(crate) fn summaries(&mut self, region: &[u8], columns: usize) {
+        self.summaries.region(region, columns);
+    }
+
+    /// The summary stream's state after every region hashed so far.
+    pub(crate) fn summaries_state(&mut self) -> [u8; HASH_STATE_LEN] {
+        self.summaries.state()
+    }
+
+    /// The summary stream, to put back with [`Self::resume_summaries`] when the regions hashed
+    /// after this point are not kept.
+    pub(crate) fn summaries_mark(&self) -> ValueHasher {
+        self.summaries.clone()
+    }
+
+    /// Continue the summary stream from `stream`.
+    pub(crate) fn resume_summaries(&mut self, stream: ValueHasher) {
+        self.summaries = stream;
     }
 
     /// The row stream and its row count, to put back with [`Self::resume_rows`] when the rows
@@ -249,6 +279,7 @@ impl LogicalDigest {
         hasher.update(schema_bytes);
         hasher.update(&self.row_count.to_le_bytes());
         hasher.update(&self.rows.finish().0);
+        hasher.update(&self.summaries.finish().0);
         for (id, stream, count) in self.events {
             hasher.update(&id.to_le_bytes());
             hasher.update(&count.to_le_bytes());

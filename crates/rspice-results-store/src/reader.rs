@@ -9,13 +9,19 @@
 //! row, the next index in the chain). A provisional frame is accepted as the last data; nothing
 //! real may follow it. What a crash leaves readable is therefore always a prefix of the rows
 //! written.
+//!
+//! Reads check what they read: a block against the CRC its chunk's table gives it, a summary
+//! column against its region's CRC table, and an event frame or index against the frame's CRC. A
+//! damaged byte is refused with its offset, never decoded as a value.
 
 use crate::codec::{self, Codec};
 use crate::digest::{Digest, LogicalDigest};
 use crate::events::{EventChange, EventKind, decode_events, hash_change, parse_events_header};
 use crate::format::{
-    Cursor, FORMAT_VERSION, FRAME_HEADER_LEN, FrameHeader, FrameKind, LEVEL1_ROWS, POINTERS_AT,
-    SEGMENT_MAGIC, SUPERBLOCK_LEN, bucket_rows, fold_max, fold_min, frame_crc, summary_frame_rows,
+    BLOCK_ENTRY_LEN, CHUNK_HEADER_LEN, Cursor, FORMAT_VERSION, FRAME_HEADER_LEN, FrameHeader,
+    FrameKind, LEVEL1_ROWS, POINTERS_AT, SEGMENT_MAGIC, SUMMARY_HEADER_LEN, SUPERBLOCK_LEN,
+    bucket_rows, chunk_crcs_at, chunk_summaries_at, fold_max, fold_min, frame_crc,
+    summary_buckets_at, summary_crcs_len, summary_frame_rows,
 };
 use crate::writer::{AnalogColumn, INDEX_ENTRY_LEN, RunStatus};
 use crate::{RunMeta, Schema, SegmentIo, StoreError};
@@ -66,6 +72,14 @@ pub struct EventSpan {
     pub within: Vec<EventChange>,
     /// The first change after the window.
     pub after: Option<EventChange>,
+}
+
+/// Where a summary region's CRC table and buckets are, and how many buckets it has.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Region {
+    crcs: u64,
+    buckets_at: u64,
+    buckets: usize,
 }
 
 /// Where one `EVENTS` frame is and what it covers.
@@ -195,6 +209,8 @@ pub struct SegmentReader<I: SegmentIo> {
     state: SegmentState,
     /// What the run said of itself in `END`; none for a segment recovered without it.
     annotations: Vec<(String, Vec<u8>)>,
+    /// Why the `END` the superblock names was refused, for a segment recovered without it.
+    end_damage: Option<StoreError>,
     planes: Vec<u8>,
     block: Vec<u8>,
 }
@@ -222,7 +238,10 @@ impl<I: SegmentIo> SegmentReader<I> {
         if version != FORMAT_VERSION {
             return Err(StoreError::corrupt(
                 8,
-                format!("format version {version} is not {FORMAT_VERSION}"),
+                format!(
+                    "it was written in results format {version}, and this build reads only \
+                     format {FORMAT_VERSION}"
+                ),
             ));
         }
         let pointers = POINTERS_AT as usize;
@@ -240,6 +259,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             catalogue: Catalogue::default(),
             state: SegmentState::Recovered,
             annotations: Vec::new(),
+            end_damage: None,
             planes: Vec::new(),
             block: Vec::new(),
         };
@@ -279,10 +299,25 @@ impl<I: SegmentIo> SegmentReader<I> {
             }
         }
 
-        if end_at >= body && reader.open_complete(end_at, body).is_ok() {
-            return Ok(reader);
+        let mut end_damage = None;
+        if end_at != 0 {
+            let opened = if end_at >= body {
+                reader.open_complete(end_at, body)
+            } else {
+                Err(StoreError::corrupt(
+                    POINTERS_AT + 16,
+                    "the END pointer names no frame after the run metadata",
+                ))
+            };
+            match opened {
+                Ok(()) => return Ok(reader),
+                Err(error) => end_damage = Some(error),
+            }
         }
         reader.recover(durable_index, body);
+        if matches!(reader.state, SegmentState::Recovered) {
+            reader.end_damage = end_damage;
+        }
         Ok(reader)
     }
 
@@ -309,6 +344,13 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     pub fn state(&self) -> &SegmentState {
         &self.state
+    }
+
+    /// Why the `END` the superblock names was refused, with the byte it was refused at, for a
+    /// segment that opened [`SegmentState::Recovered`] although its run wrote `END`. `None` for a
+    /// complete segment, and for one whose run never wrote `END` (a crash, a killed run).
+    pub fn end_damage(&self) -> Option<&StoreError> {
+        self.end_damage.as_ref()
     }
 
     /// Readable rows.
@@ -738,7 +780,7 @@ impl<I: SegmentIo> SegmentReader<I> {
         if blocks != self.slots + 1 {
             return Ok(false);
         }
-        cursor.take(12 * blocks)?;
+        cursor.take(BLOCK_ENTRY_LEN * blocks + summary_crcs_len(self.analog.len()))?;
         let (mut x_min, mut x_max) = (f64::NAN, f64::NAN);
         for _ in 0..(rows as usize).div_ceil(LEVEL1_ROWS) {
             x_min = fold_min(x_min, cursor.f64()?);
@@ -769,9 +811,11 @@ impl<I: SegmentIo> SegmentReader<I> {
         let _ordinal = cursor.u64()?;
         let first_row = cursor.u64()?;
         let rows = cursor.u64()?;
-        if payload.len() != 32 + 16 * buckets as usize * (1 + self.analog.len()) {
+        let analog = self.analog.len();
+        if payload.len() != summary_buckets_at(analog) + 16 * buckets as usize * (1 + analog) {
             return Ok(false);
         }
+        cursor.take(summary_crcs_len(analog))?;
         let (mut x_min, mut x_max) = (f64::NAN, f64::NAN);
         for _ in 0..buckets {
             x_min = fold_min(x_min, cursor.f64()?);
@@ -809,21 +853,53 @@ impl<I: SegmentIo> SegmentReader<I> {
         &self.analog
     }
 
-    /// Read `count` little-endian f64 at `at`.
-    pub(crate) fn read_f64s(
+    /// The level-1 summary region of `chunk`.
+    pub(crate) fn chunk_region(&self, chunk: &ChunkRef) -> Region {
+        let payload = chunk.offset + FRAME_HEADER_LEN as u64;
+        let blocks = self.slots + 1;
+        Region {
+            crcs: payload + chunk_crcs_at(blocks) as u64,
+            buckets_at: payload + chunk_summaries_at(blocks, self.analog.len()) as u64,
+            buckets: (chunk.rows as usize).div_ceil(LEVEL1_ROWS),
+        }
+    }
+
+    /// The bucket region of the `SUMMARY` frame `frame`.
+    pub(crate) fn summary_region(&self, frame: &SummaryRef) -> Region {
+        let payload = frame.offset + FRAME_HEADER_LEN as u64;
+        Region {
+            crcs: payload + SUMMARY_HEADER_LEN as u64,
+            buckets_at: payload + summary_buckets_at(self.analog.len()) as u64,
+            buckets: frame.buckets as usize,
+        }
+    }
+
+    /// Column `column` of `region` (0: each bucket's x pair; `1 + i`: analog signal `i`'s
+    /// `(min, max)` pairs), checked against its CRC, into `out`.
+    pub(crate) fn read_region_column(
         &self,
-        at: u64,
-        count: usize,
+        region: Region,
+        column: usize,
         out: &mut Vec<f64>,
     ) -> Result<(), StoreError> {
-        let mut bytes = vec![0u8; count * 8];
-        if at + bytes.len() as u64 > self.size {
+        let len = 16 * region.buckets;
+        let at = region.buckets_at + (len * column) as u64;
+        if at + len as u64 > self.size {
             return Err(StoreError::corrupt(
                 at,
                 "a summary runs past the end of the segment",
             ));
         }
+        let mut crc = [0u8; 4];
+        self.io.read_at(region.crcs + 4 * column as u64, &mut crc)?;
+        let mut bytes = vec![0u8; len];
         self.io.read_at(at, &mut bytes)?;
+        if crc32fast::hash(&bytes) != u32::from_le_bytes(crc) {
+            return Err(StoreError::corrupt(
+                at,
+                "a summary's checksum does not match",
+            ));
+        }
         out.clear();
         out.extend(
             bytes
@@ -831,6 +907,37 @@ impl<I: SegmentIo> SegmentReader<I> {
                 .map(|b| f64::from_le_bytes(b.try_into().unwrap_or_default())),
         );
         Ok(())
+    }
+
+    /// Every column of `region` as stored, each checked against its CRC.
+    fn region_bytes(&self, region: Region) -> Result<Vec<u8>, StoreError> {
+        let columns = 1 + self.analog.len();
+        let column_len = 16 * region.buckets;
+        if region.buckets_at + (column_len * columns) as u64 > self.size {
+            return Err(StoreError::corrupt(
+                region.buckets_at,
+                "a summary runs past the end of the segment",
+            ));
+        }
+        let mut crcs = vec![0u8; 4 * columns];
+        self.io.read_at(region.crcs, &mut crcs)?;
+        let mut bytes = vec![0u8; column_len * columns];
+        self.io.read_at(region.buckets_at, &mut bytes)?;
+        for column in 0..columns {
+            let data = &bytes[column * column_len..(column + 1) * column_len];
+            let crc = u32::from_le_bytes(
+                crcs[4 * column..4 * column + 4]
+                    .try_into()
+                    .unwrap_or_default(),
+            );
+            if crc32fast::hash(data) != crc {
+                return Err(StoreError::corrupt(
+                    region.buckets_at + (column_len * column) as u64,
+                    "a summary's checksum does not match",
+                ));
+            }
+        }
+        Ok(bytes)
     }
 
     /// Decode block `block` (0 is x, `1 + slot` a value slot) of `chunk` into `out`.
@@ -841,22 +948,29 @@ impl<I: SegmentIo> SegmentReader<I> {
         out: &mut [f64],
     ) -> Result<(), StoreError> {
         let payload = chunk.offset + FRAME_HEADER_LEN as u64;
-        let mut entry = [0u8; 12];
-        self.io
-            .read_at(payload + 24 + 12 * block as u64, &mut entry)?;
+        let entry_at = payload + (CHUNK_HEADER_LEN + BLOCK_ENTRY_LEN * block) as u64;
+        let mut entry = [0u8; BLOCK_ENTRY_LEN];
+        self.io.read_at(entry_at, &mut entry)?;
         let at = u32::from_le_bytes(entry[..4].try_into().unwrap_or_default());
         let len = u32::from_le_bytes(entry[4..8].try_into().unwrap_or_default()) as usize;
         let codec = Codec::from_u8(entry[8])
-            .ok_or_else(|| StoreError::corrupt(payload, "unknown block codec"))?;
+            .ok_or_else(|| StoreError::corrupt(entry_at, "unknown block codec"))?;
+        let crc = u32::from_le_bytes(entry[12..16].try_into().unwrap_or_default());
         let block_at = payload + u64::from(at);
         if block_at + len as u64 > self.size {
             return Err(StoreError::corrupt(
-                payload,
+                entry_at,
                 "a block runs past the end of the segment",
             ));
         }
         self.block.resize(len, 0);
         self.io.read_at(block_at, &mut self.block)?;
+        if crc32fast::hash(&self.block) != crc {
+            return Err(StoreError::corrupt(
+                block_at,
+                "a block's checksum does not match",
+            ));
+        }
         codec::decode_f64(codec, &self.block, out, &mut self.planes, block_at)
     }
 
@@ -967,8 +1081,9 @@ impl<I: SegmentIo> SegmentReader<I> {
         self.decode_block(&chunk_ref, block, out)
     }
 
-    /// Recompute the logical digest from the readable data; equal to `END`'s for a complete
-    /// segment.
+    /// Recompute the logical digest from the readable data, reading every block and summary
+    /// against its CRC; equal to `END`'s for a complete segment that holds the bytes its run
+    /// wrote.
     pub fn digest(&mut self) -> Result<Digest, StoreError> {
         let mut digest = LogicalDigest::new(self.event_signals.iter().map(|&(id, _)| id));
         let mut x = Vec::new();
@@ -983,8 +1098,22 @@ impl<I: SegmentIo> SegmentReader<I> {
             }
             digest.columns(&x, &columns);
         }
+        // The summary regions in the order the segment holds them, as its writer hashed them.
+        let mut regions: Vec<(u64, Region)> = self
+            .catalogue
+            .chunks
+            .iter()
+            .map(|chunk| (chunk.offset, self.chunk_region(chunk)))
+            .collect();
+        for frame in self.catalogue.summaries.iter().flatten() {
+            regions.push((frame.offset, self.summary_region(frame)));
+        }
+        regions.sort_unstable_by_key(|&(offset, _)| offset);
+        for (_, region) in regions {
+            digest.summaries(&self.region_bytes(region)?, 1 + self.analog.len());
+        }
         for position in 0..self.event_signals.len() {
-            let (id, kind) = self.event_signals[position];
+            let id = self.event_signals[position].0;
             let changes = self.events(id as usize, f64::NEG_INFINITY, f64::INFINITY)?;
             let stream = digest.event_stream(position, changes.len() as u64);
             let mut value = Vec::new();
@@ -993,7 +1122,6 @@ impl<I: SegmentIo> SegmentReader<I> {
                 change.value.put(&mut value);
                 hash_change(
                     stream,
-                    kind,
                     change.time,
                     change.sequence,
                     &value,

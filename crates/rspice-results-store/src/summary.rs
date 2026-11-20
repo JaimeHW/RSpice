@@ -8,8 +8,8 @@
 
 use crate::StoreError;
 use crate::format::{
-    FrameBuf, FrameKind, SUMMARY_FANOUT, SUMMARY_FRAME_BUCKETS, bucket_rows, canonical, fold_max,
-    fold_min, summary_frame_rows,
+    FrameBuf, FrameKind, SUMMARY_FANOUT, SUMMARY_FRAME_BUCKETS, SUMMARY_HEADER_LEN, bucket_rows,
+    canonical, fold_max, fold_min, summary_buckets_at, summary_crcs_len, summary_frame_rows,
 };
 
 const PAIRS: usize = 2 * SUMMARY_FRAME_BUCKETS;
@@ -247,6 +247,7 @@ impl Pyramid {
         frame.put_u64(level.frames);
         frame.put_u64(first_row);
         frame.put_u64(rows);
+        frame.put_zeros(summary_crcs_len(self.signals));
         for &value in &level.x[..2 * buckets] {
             frame.put_f64(value);
         }
@@ -259,6 +260,12 @@ impl Pyramid {
                 frame.put_f64(value);
             }
         }
+        frame.patch_region_crcs(
+            SUMMARY_HEADER_LEN,
+            summary_buckets_at(self.signals),
+            1 + self.signals,
+            16 * buckets,
+        );
         level.frames += 1;
         level.buckets = 0;
         (canonical(x_min), canonical(x_max))

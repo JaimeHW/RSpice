@@ -7,8 +7,9 @@
 //! (one chunk, and the changes of about one chunk) and become the open chunk and the open event
 //! buffers again. The writer's state at the cut is rebuilt from what the segment holds before it:
 //! the digest streams from the trailers of the last chunk and of each signal's last `EVENTS`
-//! frame, the summary pyramid from at most a frame's worth of buckets per level, and the index
-//! from the frames since the last `INDEX`. Nothing before the cut is rewritten.
+//! frame (and the summary stream from the `SUMMARY` frames after that chunk), the summary pyramid
+//! from at most a frame's worth of buckets per level, and the index from the frames since the last
+//! `INDEX`. Nothing before the cut is rewritten.
 //!
 //! The kept rows and changes go back as provisional frames written over the cut point before the
 //! stale frames after them are truncated, and both steps are synced, so a crash at any point
@@ -18,7 +19,7 @@
 use super::{Batch, Encoder, IndexEntry, Layout};
 use crate::digest::{HASH_STATE_LEN, ValueHasher};
 use crate::events::{EventBuffer, EventChange, decode_events};
-use crate::format::{FrameKind, LEVEL1_ROWS};
+use crate::format::{FrameKind, LEVEL1_ROWS, chunk_summaries_at, summary_buckets_at};
 use crate::reader::{ChunkRef, EventsRef, SegmentReader};
 use crate::summary::{Pyramid, StoredBucket};
 use crate::{SegmentIo, StoreError};
@@ -140,7 +141,7 @@ impl<I: SegmentIo> Encoder<I> {
                         StoreError::corrupt(frame.offset, "an EVENTS frame without changes")
                     })?;
                     buffer.continue_after(written, change);
-                    Some((trailer(&payload, frame.offset)?, written))
+                    Some((trailer(&payload, frame.offset, 0)?, written))
                 }
                 None => None,
             };
@@ -218,14 +219,36 @@ impl<I: SegmentIo> Encoder<I> {
             })?
         };
 
-        // The digest streams at the cut.
-        let rows_stream = match k.checked_sub(1) {
+        // The digest streams at the cut: the rows' and the summaries' after the last chunk kept,
+        // and the summaries' on over the `SUMMARY` frames that followed it.
+        let (rows_stream, mut summaries_stream, since_chunk) = match k.checked_sub(1) {
             Some(previous) => {
-                let (_, payload) = reader.read_frame(chunks[previous].offset)?;
-                Some(trailer(&payload, chunks[previous].offset)?)
+                let offset = chunks[previous].offset;
+                let (_, payload) = reader.read_frame(offset)?;
+                (
+                    Some(trailer(&payload, offset, 1)?),
+                    trailer(&payload, offset, 0)?,
+                    offset,
+                )
             }
-            None => None,
+            None => (None, ValueHasher::default(), 0),
         };
+        let mut followed: Vec<_> = reader
+            .summary_refs()
+            .iter()
+            .flatten()
+            .filter(|frame| frame.offset > since_chunk && frame.offset < cut)
+            .map(|frame| frame.offset)
+            .collect();
+        followed.sort_unstable();
+        let region = summary_buckets_at(layout.analog.len());
+        for offset in followed {
+            let (_, payload) = reader.read_frame(offset)?;
+            let buckets = payload.get(region..).ok_or_else(|| {
+                StoreError::corrupt(offset, "a summary frame is shorter than its header")
+            })?;
+            summaries_stream.region(buckets, 1 + layout.analog.len());
+        }
 
         let io = reader.into_io();
         let file_end = io.size()?;
@@ -248,6 +271,7 @@ impl<I: SegmentIo> Encoder<I> {
         if let Some(stream) = rows_stream {
             encoder.digest.resume_rows(stream, rows);
         }
+        encoder.digest.resume_summaries(summaries_stream);
         for (position, stream) in streams.into_iter().enumerate() {
             if let Some((stream, count)) = stream {
                 encoder.digest.resume_events(position, stream, count);
@@ -309,12 +333,13 @@ impl<I: SegmentIo> Encoder<I> {
     }
 }
 
-/// The digest state a real `CHUNK` or `EVENTS` frame ends with.
-fn trailer(payload: &[u8], offset: u64) -> Result<ValueHasher, StoreError> {
+/// A digest state a real `CHUNK` or `EVENTS` frame ends with: `back` 0 is the last (an `EVENTS`
+/// frame's signal stream, a `CHUNK`'s summary stream), 1 the one before it (a `CHUNK`'s rows).
+fn trailer(payload: &[u8], offset: u64, back: usize) -> Result<ValueHasher, StoreError> {
     payload
         .len()
-        .checked_sub(HASH_STATE_LEN)
-        .and_then(|at| ValueHasher::resumed(&payload[at..]))
+        .checked_sub(HASH_STATE_LEN * (back + 1))
+        .and_then(|at| ValueHasher::resumed(&payload[at..at + HASH_STATE_LEN]))
         .ok_or_else(|| StoreError::corrupt(offset, "a frame's digest state does not decode"))
 }
 
@@ -382,7 +407,12 @@ fn stored_buckets<I: SegmentIo>(
                     .ok_or_else(|| StoreError::corrupt(chunk.offset, "a chunk is too short"))?,
             ) as usize;
             let count = (chunk.rows as usize).div_ceil(LEVEL1_ROWS);
-            take(&payload, chunk.offset, 24 + 12 * blocks, count)?;
+            take(
+                &payload,
+                chunk.offset,
+                chunk_summaries_at(blocks, signals),
+                count,
+            )?;
         }
     } else {
         let frames = reader
@@ -394,7 +424,12 @@ fn stored_buckets<I: SegmentIo>(
             .filter(|frame| frame.first_row >= first && frame.first_row + frame.rows <= end)
         {
             let (_, payload) = reader.read_frame(frame.offset)?;
-            take(&payload, frame.offset, 32, frame.buckets as usize)?;
+            take(
+                &payload,
+                frame.offset,
+                summary_buckets_at(signals),
+                frame.buckets as usize,
+            )?;
         }
     }
     Ok(buckets)
