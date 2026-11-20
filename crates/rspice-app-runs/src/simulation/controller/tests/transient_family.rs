@@ -70,7 +70,7 @@ fn a_step_transient_keeps_one_transient_per_point_at_the_points_value() {
             "point {index}: {ivp:e}"
         );
     }
-    assert_eq!(points[1].label, "Transient · r = 2 k");
+    assert_eq!(points[1].label, "Transient · r = 2000");
 }
 
 #[test]

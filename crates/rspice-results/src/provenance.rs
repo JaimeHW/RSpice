@@ -315,9 +315,9 @@ impl AnalysisResultFamilyMember {
     }
 
     /// The member spelled the way a legend names it: `trial 3`, or the swept
-    /// values, `r = 2k`, with engineering prefixes. A point whose values no
-    /// one stated is numbered from 1, `point 1`, as a results table numbers
-    /// its points.
+    /// values, `r = 2000`: a swept value's unit is not recorded, so it takes
+    /// no prefix. A point whose values no one stated is numbered from 1,
+    /// `point 1`, as a results table numbers its points.
     #[must_use]
     pub fn label(&self) -> String {
         match self {
@@ -341,7 +341,7 @@ impl AnalysisResultFamilyMember {
 
     /// A result of this member titled the way every route names it, solved
     /// or imported: its analysis's own title, then the member,
-    /// `Transient · r = 2 k`.
+    /// `Transient · r = 2000`.
     #[must_use]
     pub fn titled(&self, title: &str) -> String {
         format!("{title} \u{00b7} {}", self.label())
