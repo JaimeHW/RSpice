@@ -12,6 +12,7 @@
 //! geometric centre where a reader put it.
 
 use super::*;
+use crate::ui::plot::floored_span;
 
 pub(super) fn scaled_range(
     range: (f64, f64),
@@ -74,12 +75,23 @@ pub(crate) fn zoom_active_pane(state: &mut ResultsParts<'_>, t: &Tokens, factor:
     );
     let x = shared_x_view(&state.results.session, model.analysis_key, pane_count)
         .or(model.x_range)
-        .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10));
+        .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10))
+        .and_then(|range| floored_span(range, model.x_scale));
     let y = match current.y {
         Some(range) => Some(range),
         None => displayed_pane_auto_y(state, model, &pane, ordinal, t),
     }
-    .and_then(|range| scaled_range(range, factor, logarithmic_y));
+    .and_then(|range| scaled_range(range, factor, logarithmic_y))
+    .and_then(|range| {
+        floored_span(
+            range,
+            if logarithmic_y {
+                XScale::Log10
+            } else {
+                XScale::Linear
+            },
+        )
+    });
     if let Some(x) = x {
         set_shared_x_view(
             &mut state.results.session,
@@ -154,6 +166,26 @@ pub(crate) fn fit_active_strip(state: &mut ResultsParts<'_>) {
                 .reset_analysis_plot_view(viewer, analysis);
         }
         None => state.results.session.reset_all_analysis_plot_views(viewer),
+    }
+}
+
+/// Fit Y to the window in view. Every pane of the active pane's strip lets go
+/// of the Y range it was pinned to, so each refits to what the X window
+/// shows, and the window itself stays where the reader put it. With no
+/// active pane every strip of the sheet fits, the XY strips with them.
+pub(crate) fn fit_y_to_visible_x(state: &mut ResultsParts<'_>) {
+    let viewer = super::super::ResultViewer::Waves;
+    let session = &mut state.results.session;
+    match session.active_wave_pane.as_ref().map(|key| key.analysis) {
+        Some(analysis) => {
+            session.clear_analysis_plot_view_axis(viewer, analysis, super::super::PaneAxis::Y);
+        }
+        None => {
+            session.clear_every_analysis_plot_view_axis(viewer, super::super::PaneAxis::Y);
+            for strip in session.xy_strips.iter_mut() {
+                strip.y_view = None;
+            }
+        }
     }
 }
 

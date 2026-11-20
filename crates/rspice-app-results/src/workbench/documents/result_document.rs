@@ -135,7 +135,9 @@ pub fn visualization_source_dataset(
 }
 
 pub mod waves;
-pub(crate) use waves::{copy_cursor_text, cursor_jump_availability, jump_cursor};
+pub(crate) use waves::{
+    copy_cursor_text, cursor_jump_availability, fit_y_to_visible_x, jump_cursor,
+};
 
 /// Place a point marker on the trace at cursor A, opening its dialog, as the
 /// instrument bar's marker control does; says why on the status bar when

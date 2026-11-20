@@ -220,6 +220,51 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
     );
 }
 
+/// Fit Y to visible X lets go of the Y every pane of the active strip was
+/// pinned to and keeps the window the reader zoomed to. With no pane active
+/// it fits every strip.
+#[test]
+fn fitting_y_to_the_window_keeps_the_window() {
+    let mut state = bode_strip();
+    let analysis = strip_key(&mut state);
+    let units = pane_units(&mut state);
+    let viewer = super::super::super::ResultViewer::Waves;
+    let pin = |state: &mut ResultsTestHost| {
+        let session = &mut state.results.results.session;
+        set_shared_x_view(session, analysis, 2, Some((10.0, 100.0)));
+        session.analysis_plot_view_pane_mut(viewer, analysis, 0).y = Some((0.2, 0.4));
+        session.analysis_plot_view_pane_mut(viewer, analysis, 1).y = Some((-90.0, 0.0));
+    };
+    let view = |state: &ResultsTestHost, ordinal: usize| {
+        state
+            .results
+            .results
+            .session
+            .analysis_plot_view_pane(viewer, analysis, ordinal)
+    };
+
+    pin(&mut state);
+    state.results.results.session.active_wave_pane = Some(WavePanePresentationKey {
+        analysis,
+        unit: units[1].clone(),
+    });
+    fit_y_to_visible_x(&mut state.results_parts());
+    for ordinal in [0, 1] {
+        assert_eq!(view(&state, ordinal).y, None, "pane {ordinal} kept its Y");
+        assert_eq!(
+            view(&state, ordinal).x,
+            Some((10.0, 100.0)),
+            "fitting Y moved the window"
+        );
+    }
+
+    pin(&mut state);
+    state.results.results.session.active_wave_pane = None;
+    fit_y_to_visible_x(&mut state.results_parts());
+    assert_eq!((view(&state, 0).y, view(&state, 1).y), (None, None));
+    assert_eq!(view(&state, 0).x, Some((10.0, 100.0)));
+}
+
 /// "Nearest" is a claim about the screen. The painter maps a value through
 /// the pane's own scale, so a hit test that maps it linearly picks a curve
 /// the pointer is nowhere near — by most of the window, on a decade pane.

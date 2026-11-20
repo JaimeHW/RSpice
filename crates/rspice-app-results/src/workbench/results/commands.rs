@@ -65,6 +65,9 @@ pub enum ResultsCommand {
     SwitchSteppingCursor,
     /// Place a point marker on the trace at cursor A.
     MarkerAtCursor,
+    /// Let go of the Y ranges the active strip's panes were pinned to, so
+    /// each refits to the X window in view.
+    FitYToVisibleX,
 }
 
 const NONE: &[ShortcutBinding] = &[];
@@ -97,7 +100,7 @@ const PROJECT_TRANSACTION: CommandFlags =
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 51] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -148,6 +151,7 @@ impl ResultsCommand {
         Self::CursorToPreviousCrossing,
         Self::SwitchSteppingCursor,
         Self::MarkerAtCursor,
+        Self::FitYToVisibleX,
     ];
 
     /// The command `key` names, if the feature declares one.
@@ -185,6 +189,7 @@ impl ResultsCommand {
             Self::CursorToPreviousCrossing => CommandKey::new("cursor-to-previous-crossing"),
             Self::SwitchSteppingCursor => CommandKey::new("switch-stepping-cursor"),
             Self::MarkerAtCursor => CommandKey::new("marker-at-cursor"),
+            Self::FitYToVisibleX => CommandKey::new("fit-y-to-visible-x"),
         }
     }
 
@@ -336,6 +341,13 @@ impl ResultsCommand {
             Self::CursorToPreviousCrossing => cursor_command("Cursor to previous crossing"),
             Self::SwitchSteppingCursor => cursor_command("Step the other cursor"),
             Self::MarkerAtCursor => cursor_command("Place marker at cursor A"),
+            Self::FitYToVisibleX => (
+                "Fit Y to visible X",
+                "Results",
+                ANYWHERE,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
         };
         CommandSpec {
             key: self.key(),

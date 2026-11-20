@@ -1442,6 +1442,25 @@ impl ResultViewerState {
         });
     }
 
+    /// Drop one axis' override on every pane of every strip of the sheet, as
+    /// [`Self::clear_analysis_plot_view_axis`] drops it on one strip.
+    pub fn clear_every_analysis_plot_view_axis(&mut self, viewer: ResultViewer, axis: PaneAxis) {
+        if let Some(context) = self.persistent_pane_context {
+            self.clear_analysis_plot_view_axis(viewer, context.analysis, axis);
+            return;
+        }
+        self.views.retain(|(key_viewer, key_plot, _), view| {
+            if *key_viewer != viewer || !matches!(key_plot, PlotPresentationKey::Analysis(_)) {
+                return true;
+            }
+            match axis {
+                PaneAxis::X => view.x = None,
+                PaneAxis::Y => view.y = None,
+            }
+            view.is_zoomed()
+        });
+    }
+
     /// Whether any pane of one plot is zoomed away from the automatic view.
     #[cfg(any(test, feature = "test-support"))]
     pub fn strip_is_zoomed(&self, viewer: ResultViewer, index: usize) -> bool {

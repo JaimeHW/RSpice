@@ -621,6 +621,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::CursorToPreviousCrossing.key(),
     ResultsCommand::SwitchSteppingCursor.key(),
     ResultsCommand::MarkerAtCursor.key(),
+    ResultsCommand::FitYToVisibleX.key(),
     ResultsCommand::DatasetManifestBrowser.key(),
     ResultsCommand::OpenRunInResults.key(),
     ResultsCommand::OpenProducingPlan.key(),

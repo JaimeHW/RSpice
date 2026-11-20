@@ -21,10 +21,10 @@ use crate::workbench::commands::result_navigation::{
 };
 use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
-    cursor_jump_availability, family_available, fit_gesture_available, jump_cursor, linked_cursors,
-    open_create_document, open_dataset_browser, place_marker_at_cursor, request_view_gesture,
-    viewer_is_available, viewer_unavailability_reason, zoom_gesture_available, zoom_previous,
-    zoom_previous_available,
+    cursor_jump_availability, family_available, fit_gesture_available, fit_y_to_visible_x,
+    jump_cursor, linked_cursors, open_create_document, open_dataset_browser,
+    place_marker_at_cursor, request_view_gesture, viewer_is_available,
+    viewer_unavailability_reason, zoom_gesture_available, zoom_previous, zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -583,6 +583,10 @@ impl CommandSet for ResultsCommand {
                     && state.results.session.cursors.a.is_some(),
                 "place cursor A on a waveform in Results",
             ),
+            Self::FitYToVisibleX => available_or(
+                workbench.workspace == Workspace::Results && zoom_gesture_available(state),
+                "open a waveform sheet in Results",
+            ),
             Self::ResultViewer(ResultViewer::Waves) => CommandAvailability::Available,
             Self::ResultViewer(viewer) => {
                 if viewer_is_available(state, viewer) {
@@ -674,6 +678,7 @@ impl CommandSet for ResultsCommand {
             }
             Self::SwitchSteppingCursor => cx.state.results.session.switch_stepping_cursor(),
             Self::MarkerAtCursor => place_marker_at_cursor(&mut results_parts(cx)),
+            Self::FitYToVisibleX => fit_y_to_visible_x(&mut results_parts(cx)),
             Self::OpenProducingPlan => {
                 match producing_plan_hop(cx.state.reads(cx.model, cx.wb)) {
                     Ok(hop) => {

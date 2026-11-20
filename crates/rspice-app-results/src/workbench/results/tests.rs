@@ -304,3 +304,21 @@ fn the_cursor_commands_need_a_waveform_sheet() {
         CommandAvailability::Disabled("no result dataset is available")
     );
 }
+
+/// Fit Y to visible X is the waveform sheet's: it is offered on a waveform
+/// sheet in Results and says what it needs anywhere else.
+#[test]
+fn fit_y_to_visible_x_needs_a_waveform_sheet() {
+    let mut harness = harness_on(damped_run());
+    let command = ResultsCommand::FitYToVisibleX.key();
+    assert_eq!(
+        harness.availability(command),
+        CommandAvailability::Available
+    );
+    harness.execute(command);
+    harness.wb.workspace = Workspace::Design;
+    assert_eq!(
+        harness.availability(command),
+        CommandAvailability::Disabled("open a waveform sheet in Results")
+    );
+}
