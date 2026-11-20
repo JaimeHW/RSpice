@@ -253,6 +253,7 @@ impl Stored {
     }
 
     fn read(&self) -> Result<Vec<f64>, ColumnReadFailure> {
+        column_work::whole_read();
         let StoredWindow { first, rows, lead } = self.window;
         let failed = |cause: String| ColumnReadFailure {
             column: self.source.name().to_owned(),
@@ -423,6 +424,9 @@ impl Stored {
         }
         if range.is_empty() {
             return Ok(Cow::Borrowed(&[]));
+        }
+        if range.len() == self.len() {
+            column_work::whole_read();
         }
         let lead = usize::from(self.window.lead != WindowLead::None);
         let mut out = vec![0.0; range.len()];
@@ -603,6 +607,7 @@ impl WaveformValues {
 
     /// The values, read from a stored window the first time, or why it could not be read.
     pub fn try_values(&self) -> Result<&Vec<f64>, ColumnReadFailure> {
+        column_work::view(self);
         match &self.0 {
             Repr::Memory(values) => Ok(values),
             Repr::Stored(stored) => stored.try_values(),
@@ -612,6 +617,9 @@ impl WaveformValues {
     /// Samples `range`, without keeping a stored window in memory: a pass over a long window
     /// reads it a block at a time. A window something has already read gives its values.
     pub fn read_range(&self, range: Range<usize>) -> Result<Cow<'_, [f64]>, ColumnReadFailure> {
+        if range.len() == self.len() && range.len() > 1 {
+            column_work::view(self);
+        }
         match &self.0 {
             Repr::Memory(values) => Ok(Cow::Borrowed(&values[range])),
             Repr::Stored(stored) => stored.read_range(range),
@@ -662,10 +670,82 @@ impl Deref for WaveformValues {
     type Target = Vec<f64>;
 
     fn deref(&self) -> &Vec<f64> {
+        column_work::view(self);
         match &self.0 {
             Repr::Memory(values) => values,
             Repr::Stored(stored) => stored.values(),
         }
+    }
+}
+
+/// Whole-column work, counted per thread in test builds so a frame gate can tell a reader that
+/// took a column's whole values, or read a stored window whole, from one that read a tile, a few
+/// rows or the ends. In a shipped build the counting calls are empty.
+pub mod column_work {
+    use super::{Repr, WaveformValues};
+
+    /// What one thread did with whole columns.
+    #[cfg(feature = "test-support")]
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct ColumnWork {
+        /// Readers given the whole values of an in-memory column.
+        pub memory_views: u64,
+        /// Readers given the whole values of a stored window, read or already kept.
+        pub stored_views: u64,
+        /// Stored windows read whole from their store.
+        pub stored_reads: u64,
+    }
+
+    #[cfg(feature = "test-support")]
+    thread_local! {
+        static WORK: std::cell::Cell<ColumnWork> = const {
+            std::cell::Cell::new(ColumnWork {
+                memory_views: 0,
+                stored_views: 0,
+                stored_reads: 0,
+            })
+        };
+    }
+
+    #[cfg(feature = "test-support")]
+    impl ColumnWork {
+        /// The work counted so far on this thread.
+        pub fn read() -> Self {
+            WORK.with(std::cell::Cell::get)
+        }
+
+        /// The work counted since `self` was read.
+        pub fn since(self) -> Self {
+            let now = Self::read();
+            Self {
+                memory_views: now.memory_views - self.memory_views,
+                stored_views: now.stored_views - self.stored_views,
+                stored_reads: now.stored_reads - self.stored_reads,
+            }
+        }
+    }
+
+    #[inline]
+    pub(super) fn view(_values: &WaveformValues) {
+        #[cfg(feature = "test-support")]
+        WORK.with(|work| {
+            let mut counted = work.get();
+            match _values.0 {
+                Repr::Memory(_) => counted.memory_views += 1,
+                Repr::Stored(_) => counted.stored_views += 1,
+            }
+            work.set(counted);
+        });
+    }
+
+    #[inline]
+    pub(super) fn whole_read() {
+        #[cfg(feature = "test-support")]
+        WORK.with(|work| {
+            let mut counted = work.get();
+            counted.stored_reads += 1;
+            work.set(counted);
+        });
     }
 }
 

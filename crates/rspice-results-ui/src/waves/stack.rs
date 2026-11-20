@@ -20,6 +20,7 @@ use egui::Ui;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, ExprTrace, ResultViewer, WavePanePresentationKey,
 };
+use rspice_results::waveform::WaveformValues;
 use rspice_ui_kit::{
     plot::{self, CursorId, CursorPair, XScale, sample::sample_at_with_shape},
     tokens::Tokens,
@@ -860,26 +861,19 @@ pub(crate) const RULER_SHARE: f32 = 0.28;
 /// Why a strip's X axis cannot be logarithmic, when it cannot: some X it
 /// shows is negative, or none is positive. A domain that starts at zero, as
 /// time does, is shown from its first positive sample.
+///
+///
+/// It reads the bounds the model keeps ([`StripModel::x_bounds`]), never a
+/// column: the chip asks on every frame.
 pub fn log_x_refusal(model: &StripModel) -> Option<String> {
-    let (mut minimum, mut maximum) = (f64::INFINITY, f64::NEG_INFINITY);
-    for x in model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible)
-        .flat_map(|trace| trace.x.iter().copied())
-        .filter(|x| x.is_finite())
-    {
-        minimum = minimum.min(x);
-        maximum = maximum.max(x);
-    }
     let name = if model.x_label.is_empty() {
         "the X axis"
     } else {
         model.x_label.as_str()
     };
-    if !maximum.is_finite() {
+    let Some((minimum, maximum)) = model.x_bounds else {
         return Some("the strip shows no X values".to_owned());
-    }
+    };
     if minimum < 0.0 {
         return Some(format!(
             "{name} reaches {}, and a logarithmic axis shows positive values only",
@@ -887,6 +881,38 @@ pub fn log_x_refusal(model: &StripModel) -> Option<String> {
         ));
     }
     (maximum <= 0.0).then(|| format!("{name} has no positive value"))
+}
+
+/// The least and greatest finite X the strip's visible traces hold; `None`
+/// when they hold none. A stored run's time axis ascends, so its ends bound
+/// it and only they are read; other axes are read once here, as the model is
+/// built.
+pub(crate) fn visible_x_bounds(model: &StripModel) -> Option<(f64, f64)> {
+    let (mut minimum, mut maximum) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut take = |x: f64| {
+        if x.is_finite() {
+            minimum = minimum.min(x);
+            maximum = maximum.max(x);
+        }
+    };
+    let mut seen: Vec<&WaveformValues> = Vec::new();
+    for trace in model.traces.iter().filter(|trace| trace.visible) {
+        let x = &trace.x;
+        // A run's traces share its axis: read it once.
+        if seen.iter().any(|axis| WaveformValues::ptr_eq(axis, x)) {
+            continue;
+        }
+        seen.push(x);
+        if x.is_ascending_axis()
+            && let Some((first, last)) = x.ends()
+        {
+            take(first);
+            take(last);
+            continue;
+        }
+        x.iter().copied().for_each(&mut take);
+    }
+    maximum.is_finite().then_some((minimum, maximum))
 }
 
 /// Resolve source ownership, then apply the navigator's actions to the app.

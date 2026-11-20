@@ -148,6 +148,7 @@ impl ModelsCache {
         // The reader's X scale replaces the analysis' own, unless a
         // logarithmic axis cannot show the strip's domain.
         for model in &mut built {
+            model.x_bounds = super::stack::visible_x_bounds(model);
             if let Some(scale) = input.x_scales.get(&model.analysis_key)
                 && (*scale == rspice_ui_kit::plot::XScale::Linear
                     || super::stack::log_x_refusal(model).is_none())

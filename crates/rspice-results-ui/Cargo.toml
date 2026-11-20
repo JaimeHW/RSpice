@@ -11,7 +11,7 @@ workspace = true
 
 [features]
 # Fixtures and cache observations for viewer and application integration tests.
-test-support = []
+test-support = ["rspice-results/test-support"]
 
 [dependencies]
 egui = { version = "0.35.0", default-features = false }
@@ -24,4 +24,5 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+rspice-results = { workspace = true, features = ["engine-evidence", "test-support"] }
 rspice-ui-kit = { workspace = true, features = ["plot", "test-support"] }

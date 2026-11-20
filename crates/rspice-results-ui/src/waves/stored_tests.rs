@@ -362,3 +362,73 @@ fn a_stored_run_builds_fits_draws_and_reads_its_cursors_without_reading_a_column
     );
     assert!(rows_read() <= 2);
 }
+
+/// A stored run with its time axis and one signal, both counting the rows read.
+fn tiled_run(
+    rows: usize,
+) -> (
+    rspice_results::run::SimulationRun<AnalysisResult<RetainedTrace>>,
+    impl Fn() -> usize,
+) {
+    let x: Arc<Vec<f64>> = Arc::new((0..rows).map(|row| row as f64 * 1.0e-9).collect());
+    let column = |name: &'static str, values: Vec<f64>, axis: bool| {
+        Arc::new(Tiled {
+            name,
+            x: Arc::clone(&x),
+            values,
+            axis,
+            rows_read: AtomicUsize::new(0),
+        })
+    };
+    let time = column("time", x.to_vec(), true);
+    let out = column(
+        "V(out)",
+        (0..rows).map(|row| (row as f64 * 1.0e-4).sin()).collect(),
+        false,
+    );
+    let window = StoredWindow {
+        first: 0,
+        rows: rows as u64,
+        lead: WindowLead::None,
+    };
+    let stored = |column: &Arc<Tiled>| {
+        WaveformValues::stored(column.clone(), window).expect("the window fits the column")
+    };
+    let mut run = rspice_results::run::SimulationRun::new(
+        1,
+        0.0,
+        rspice_results::run::ExecutionTarget::LocalDesktop,
+    );
+    run.analyses.push(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran", 0.0).with_waveforms(vec![
+            RetainedTrace::new("V(out)", stored(&time), stored(&out), "#fff"),
+        ]),
+    );
+    let rows_read =
+        move || time.rows_read.load(Ordering::SeqCst) + out.rows_read.load(Ordering::SeqCst);
+    (run, rows_read)
+}
+
+/// The strip header asks on every frame whether its X axis can be
+/// logarithmic. On a stored run the answer reads no rows: the strip is
+/// bounded by its time axis's ends, read as it is built, and a time axis from
+/// zero is offered the decade scale.
+#[test]
+fn the_x_scale_chip_reads_no_rows_of_a_stored_axis_on_any_frame() {
+    const ROWS: usize = 100_000;
+    let (run, rows_read) = tiled_run(ROWS);
+    let models = models(&run);
+    let built = rows_read();
+    assert!(
+        built <= 2,
+        "building the strip reads the axis's ends, not {built} rows"
+    );
+    for _ in 0..10 {
+        assert_eq!(super::stack::log_x_refusal(&models[0]), None);
+    }
+    assert_eq!(
+        rows_read(),
+        built,
+        "the chip decided from the strip model, reading no rows"
+    );
+}

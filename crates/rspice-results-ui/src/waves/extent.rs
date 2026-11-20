@@ -25,6 +25,9 @@ use super::{StripModel, StripTrace, UnitPane, stable_hash};
 /// see — and would report a domain for a strip whose last trace was hidden.
 pub fn resolve_x_ranges(models: &mut [StripModel]) {
     for model in models {
+        if model.x_bounds.is_none() {
+            model.x_bounds = super::stack::visible_x_bounds(model);
+        }
         model.x_range = x_range(model);
     }
 }

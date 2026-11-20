@@ -11,6 +11,8 @@ build = "build.rs"
 workspace = true
 
 [features]
+# Counts whole-column work per thread, for the application's frame gates.
+test-support = []
 # Engine-backed evidence reuses core's canonical types and validation rules.
 engine-evidence = [
     "dep:rspice-core",

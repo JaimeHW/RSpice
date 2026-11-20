@@ -900,6 +900,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             traces,
             grid_ascending: false,
             x_range: None,
+            x_bounds: None,
             event_lanes,
             lane_traces,
             lane_hues: Vec::new(),

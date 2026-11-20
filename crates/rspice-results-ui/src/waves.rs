@@ -219,6 +219,10 @@ pub struct StripModel {
     /// the host's X-range resolution once the reader's visibility overrides have
     /// been applied — which traces are visible is not known until then.
     pub x_range: Option<(f64, f64)>,
+    /// The least and greatest finite X the visible traces hold, read once as
+    /// the model is built. Whether the X axis can be logarithmic is decided
+    /// from it on every frame.
+    pub x_bounds: Option<(f64, f64)>,
     /// The analysis' committed event history, as lanes, when it has one.
     pub event_lanes: Option<Arc<logic::EventLanes>>,
     /// The analysis' `D()` and `E()` columns drawn from that history.

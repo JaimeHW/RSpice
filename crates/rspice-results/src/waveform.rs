@@ -15,7 +15,7 @@ pub use trace::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 pub(crate) use values::report_column_read_failure;
 pub use values::{
     ColumnReadFailure, ColumnSource, ColumnTile, RowsAround, StoredWindow, ValueExtent,
-    WaveformValues, WindowLead, take_column_read_failures,
+    WaveformValues, WindowLead, column_work, take_column_read_failures,
 };
 
 //=============================================================================
