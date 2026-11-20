@@ -203,9 +203,9 @@ pub fn show(
                 .speed(1),
         );
         ui.label(format!(
-            "/ {} · {:.17e} Hz",
+            "/ {} · {}",
             grid.len() - 1,
-            grid[controls.sample]
+            fmt_si_significant(grid[controls.sample], "Hz", significant_digits)
         ));
         if ui.button("Copy exact matrix").clicked() {
             ui.ctx()
