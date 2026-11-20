@@ -546,7 +546,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "Calculator… | calculator |  | on",
             "Expression diagnostics… | expression-diagnostics |  | off: no result dataset is available",
             "Report editor… | report-page-editor |  | on",
-            "Clear result history | clear-results |  | off: no result dataset is available",
+            "Clear result history… | clear-results |  | off: no result dataset is available",
         ],
     ),
     (

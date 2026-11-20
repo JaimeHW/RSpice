@@ -267,7 +267,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         if replace_drawing {
             state.create_new_schematic();
         } else {
-            state.results_parts().clear_simulation_results();
+            state.results_parts().clear_simulation_results(true);
         }
         state
             .results

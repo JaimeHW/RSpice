@@ -4,6 +4,7 @@
 
 mod availability;
 mod calculator;
+mod clear_history;
 mod commands;
 mod create_document;
 mod document_edit;

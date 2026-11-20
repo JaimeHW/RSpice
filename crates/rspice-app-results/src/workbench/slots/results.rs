@@ -26,6 +26,8 @@ pub struct ResultsState {
     pub waveform_calculator_dialog: bool,
     /// The expression and unit diagnostics tool.
     pub expression_diagnostics_dialog: bool,
+    /// Clear result history…, while it asks what to delete.
+    pub clear_history: Option<crate::workbench::results::clear_history::ClearHistoryDialog>,
 
     /// `simulation.data_version` at the last time the Results view was shown;
     /// drives the "new results" badge on the Results tab.

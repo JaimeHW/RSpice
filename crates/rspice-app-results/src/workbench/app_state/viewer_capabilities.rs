@@ -241,13 +241,25 @@ impl AnalysisWorkspaceState {
 }
 
 impl ResultsParts<'_> {
-    /// Clear user-visible simulation result history and derived result viewers.
-    pub fn clear_simulation_results(&mut self) {
+    /// Delete retained runs from the result history, and say how many went.
+    /// Pinned golden baselines and the runs a saved result document reads are
+    /// kept unless `delete_protected` says otherwise. The specialized viewers
+    /// let go of what they drew when the run on screen goes with the rest.
+    pub fn clear_simulation_results(&mut self, delete_protected: bool) -> usize {
         if self.model.simulation.execution.has_active_execution() {
-            return;
+            return 0;
         }
-        self.model.simulation.clear_runs();
-        self.analysis.clear_specialized_viewer_data();
+        let read_by_documents = self.model.document_read_datasets();
+        let shown = self.model.simulation.active_run().map(|run| run.run_id);
+        let deleted = self.model.simulation.delete_runs(|run| {
+            !delete_protected
+                && crate::workbench::results::clear_history::is_protected(run, &read_by_documents)
+        });
+        let still_shown = self.model.simulation.active_run().map(|run| run.run_id);
+        if still_shown != shown || still_shown.is_none() {
+            self.analysis.clear_specialized_viewer_data();
+        }
+        deleted
     }
 }
 
@@ -500,7 +512,7 @@ mod tests {
         assert!(state.viewer_is_available(ActiveViewer::SmithChart));
         assert!(state.viewer_is_available(ActiveViewer::Fft));
 
-        state.results_parts().clear_simulation_results();
+        state.results_parts().clear_simulation_results(false);
 
         assert!(!state.model.simulation.retained.has_results());
         for viewer in [

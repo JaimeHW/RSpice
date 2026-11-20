@@ -9,6 +9,7 @@
 //! draws in the same context.
 
 pub mod calculator;
+pub mod clear_history;
 pub mod commands;
 mod expression_diagnostics;
 mod surface;
@@ -216,7 +217,7 @@ fn show_split(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
 }
 
 /// The dialogs the feature draws, each under the key the shell lists it by.
-/// The dialog order draws the first three at their steps. The rest hold a
+/// The dialog order draws the first four at their steps. The rest hold a
 /// modal gate the shell asks of them, and each is drawn where its work is:
 /// Export dataset… where the frame answers the export request, Run
 /// details… at its frame step, and the result document's two forms at the
@@ -236,6 +237,11 @@ const DIALOGS: &[FeatureDialog<ResultsFeature>] = &[
         key: DialogKey("results.expression_diagnostics"),
         is_open: |results| results.expression_diagnostics_dialog,
         render: expression_diagnostics::show,
+    },
+    FeatureDialog {
+        key: DialogKey("results.clear_history"),
+        is_open: |results| results.clear_history.is_some(),
+        render: clear_history::show,
     },
     FeatureDialog {
         key: DialogKey("results.dataset_export"),
@@ -599,7 +605,9 @@ impl CommandSet for ResultsCommand {
             // The File menu's export: it lands the edit typed into the
             // inspector before it asks for a format.
             Self::ExportWaveformsCsv => cx.wb.outbox().push(ExportDataset),
-            Self::ClearResults => results_parts(cx).clear_simulation_results(),
+            Self::ClearResults => {
+                cx.state.clear_history = Some(clear_history::ClearHistoryDialog::default());
+            }
             Self::ToggleLinkedCursors => {
                 crate::workbench::documents::result_document::toggle_linked_cursors(
                     &mut results_parts(cx),

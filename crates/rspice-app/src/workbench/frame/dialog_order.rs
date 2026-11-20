@@ -416,6 +416,12 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         },
     },
     DialogSpec {
+        key: DialogKey("results.clear_history"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| features::dialog_open(state, DialogKey("results.clear_history"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("results.clear_history")),
+    },
+    DialogSpec {
         key: DialogKey("shell.shortcuts_help"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.shell.shortcuts_help),

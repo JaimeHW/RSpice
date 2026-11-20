@@ -206,6 +206,9 @@ type DialogRow = (&'static str, fn(&mut AppState));
 /// the gate lists them.
 const DIALOG_GATE: &[DialogRow] = &[
     ("about", |dialogs| dialogs.shell.about = true),
+    ("clear_history", |dialogs| {
+        dialogs.results.clear_history = Some(Default::default());
+    }),
     ("shortcuts_help", |dialogs| {
         dialogs.shell.shortcuts_help = true
     }),

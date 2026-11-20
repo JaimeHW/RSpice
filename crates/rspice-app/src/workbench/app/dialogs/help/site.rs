@@ -134,6 +134,7 @@ const DIALOG_TOPICS: &[(&str, DocsTopic)] = &[
     ("simulate.workflow_dialogs", DocsTopic::SimulationSetup),
     ("simulate.jobs_manager", DocsTopic::SimulationSetup),
     ("results.result_import", DocsTopic::Results),
+    ("results.clear_history", DocsTopic::Results),
     ("results.dataset_export", DocsTopic::Results),
     ("results.run_details", DocsTopic::Results),
     ("results.create_result_document", DocsTopic::Results),

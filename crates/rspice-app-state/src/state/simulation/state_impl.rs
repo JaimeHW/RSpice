@@ -720,6 +720,39 @@ impl SimulationState {
         // Don't reset next_run_id to preserve uniqueness
     }
 
+    /// Delete every retained run `keep` does not accept, and return how many
+    /// went. The shown run stays shown when it is kept; otherwise the newest
+    /// kept run is shown. Decks, overlays and yield evidence that belonged to
+    /// a deleted run go with it. Nothing is deleted while an execution owns
+    /// the history.
+    pub fn delete_runs(&mut self, keep: impl Fn(&SimulationRun) -> bool) -> usize {
+        if self.execution.has_active_execution() {
+            return 0;
+        }
+        let shown = self.active_run().map(|run| run.run_id);
+        let before = self.retained.runs.len();
+        self.retained.runs.retain(|run| keep(run));
+        let deleted = before - self.retained.runs.len();
+        if deleted == 0 {
+            return 0;
+        }
+        self.prune_overlay_dataset_ids();
+        self.prune_executed_decks();
+        self.prune_yield_evidence_provenance();
+        match shown.and_then(|id| self.retained.runs.iter().position(|run| run.run_id == id)) {
+            Some(index) => self.view.active_run_idx = Some(index),
+            None => {
+                // The index left behind names whichever run moved into it.
+                self.view.active_run_idx = None;
+                self.view.active_analysis_idx = None;
+                if !self.select_run(0) {
+                    self.sync_selected_analysis_waveforms();
+                }
+            }
+        }
+        deleted
+    }
+
     /// Replace persisted run history and rebuild every derived selection cache.
     ///
     /// Project files persist stable run and dataset IDs plus a run-local
@@ -1352,6 +1385,37 @@ mod tests {
             2,
             "the newest and the document's run; the run between them goes"
         );
+    }
+
+    #[test]
+    fn deleting_runs_keeps_the_shown_run_or_shows_the_newest_one_left() {
+        let mut state = SimulationState::default();
+        let oldest = state.start_run().run_id;
+        state.start_run();
+        let newest = state.start_run().run_id;
+        let shown = |state: &SimulationState| state.active_run().map(|run| run.run_id);
+        let index = state
+            .retained
+            .runs
+            .iter()
+            .position(|run| run.run_id == oldest)
+            .unwrap();
+        assert!(state.select_run(index));
+
+        assert_eq!(state.delete_runs(|run| run.run_id != newest), 1);
+        assert_eq!(shown(&state), Some(oldest), "the shown run stays shown");
+
+        assert_eq!(state.delete_runs(|run| run.run_id != oldest), 1);
+        assert_eq!(state.retained.runs.len(), 1);
+        assert_eq!(
+            shown(&state),
+            state.retained.runs.first().map(|run| run.run_id),
+            "the newest run left is shown in place of the one deleted"
+        );
+
+        assert_eq!(state.delete_runs(|_| false), 1);
+        assert_eq!(shown(&state), None);
+        assert!(state.view.active_analysis_idx.is_none());
     }
 
     #[test]

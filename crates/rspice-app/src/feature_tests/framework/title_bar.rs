@@ -1151,7 +1151,7 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
             "Calculator…",
             "Expression diagnostics…",
             "Report editor…",
-            "Clear result history",
+            "Clear result history…",
         ]
     );
 }

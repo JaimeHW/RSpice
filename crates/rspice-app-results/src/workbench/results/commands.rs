@@ -207,7 +207,7 @@ impl ResultsCommand {
                 NONE,
             ),
             Self::ClearResults => (
-                "Clear result history",
+                "Clear result history…",
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,
