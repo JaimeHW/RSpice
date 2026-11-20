@@ -5,9 +5,9 @@
 //! one dialog reached from the inspector's Run section and from a run's row
 //! in the data browser.
 //!
-//! The run's manifest is projected once, when the dialog opens: the
-//! projection digests every sample the run retained, which is not work for
-//! every frame the dialog stays open.
+//! The run's manifest is projected once, when the dialog opens. Its dataset
+//! digest reads every sample the run retained, so it is computed off the
+//! frame and its row fills in when it is known: the dialog shows at once.
 
 mod executed_deck;
 
@@ -23,11 +23,41 @@ use crate::workbench::app_state::Model;
 use rspice_app_workbench::workbench::docks::inspector::engineering_readout;
 
 /// The run Run details… is open on, with its manifest taken once when the
-/// dialog opened: projecting a run digests every sample it retained.
+/// dialog opened, and its dataset digest once a background thread has read
+/// every sample the run retained.
 #[derive(Debug, Clone)]
 pub struct RunDetailsDialogState {
     pub run_id: u64,
     pub manifest: rspice_results::manifest::ManifestViewModel,
+    dataset_digest: std::sync::Arc<std::sync::OnceLock<String>>,
+}
+
+impl RunDetailsDialogState {
+    /// Run details… on `run`: its manifest at once, and its dataset digest
+    /// computed on a background thread.
+    pub fn new(run: &crate::state::SimulationRun) -> Self {
+        use crate::workbench::documents::result_document::{frame_work, manifest};
+        use rspice_results::result_digest::ResultDigestEncoding;
+
+        let dataset_digest = std::sync::Arc::<std::sync::OnceLock<String>>::default();
+        let (slot, retained) = (std::sync::Arc::clone(&dataset_digest), run.data.clone());
+        rspice_app_services::workbench::platform::spawn_or_inline(move || {
+            frame_work::note(frame_work::DatasetWalk::DatasetDigest);
+            let digest =
+                retained.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT);
+            let _ = slot.set(digest.to_string());
+        });
+        Self {
+            run_id: run.id,
+            manifest: manifest::manifest_without_digest(run),
+            dataset_digest,
+        }
+    }
+
+    /// The run's dataset digest; `None` while it is still being computed.
+    pub fn dataset_digest(&self) -> Option<&str> {
+        self.dataset_digest.get().map(String::as_str)
+    }
 }
 
 /// At most this many significant digits for the times a convergence record
@@ -47,8 +77,7 @@ pub fn open(
     let Some(run) = simulation.retained.runs.iter().find(|run| run.id == run_id) else {
         return;
     };
-    let manifest = crate::workbench::documents::result_document::manifest::manifest_for_run(run);
-    *run_details = Some(Box::new(RunDetailsDialogState { run_id, manifest }));
+    *run_details = Some(Box::new(RunDetailsDialogState::new(run)));
 }
 
 /// The routes out of Run details… the reader took this frame. Each is a
@@ -141,7 +170,14 @@ pub fn show(
                     property_row(ui, "Job ID", &job.to_string());
                 }
                 property_row(ui, "Dataset ID", &manifest.dataset_id);
-                property_row(ui, "Dataset digest", &manifest.dataset_digest);
+                let digest = dialog.dataset_digest().unwrap_or_else(|| {
+                    // The thread computing it cannot wake the frame, so the
+                    // dialog looks again shortly.
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(100));
+                    "Computing\u{2026}"
+                });
+                property_row(ui, "Dataset digest", digest);
                 property_row(ui, "Integrity", &manifest.integrity);
             });
             match &manifest.authority {

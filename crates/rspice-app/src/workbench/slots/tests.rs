@@ -316,12 +316,7 @@ const DIALOG_GATE: &[DialogRow] = &[
     }),
     ("run_details", |dialogs| {
         let run = rspice_app_state::state::SimulationRun::new(1);
-        dialogs.results.run_details = Some(Box::new(RunDetailsDialogState {
-            run_id: run.id,
-            manifest: rspice_app_results::workbench::documents::result_document::manifest::manifest_for_run(
-                &run,
-            ),
-        }));
+        dialogs.results.run_details = Some(Box::new(RunDetailsDialogState::new(&run)));
     }),
     ("command_palette", |dialogs| {
         dialogs.workbench.command_palette.open = true

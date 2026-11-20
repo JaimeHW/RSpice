@@ -234,6 +234,49 @@ fn a_stored_selected_trace_is_measured_without_a_frame_reading_its_columns() {
     );
 }
 
+/// Run details opens at once on a large run: the dataset digest, which reads
+/// every sample the run retained, is computed off the frame and fills its row
+/// when it is known.
+#[test]
+fn run_details_opens_without_reading_the_run_on_the_frame() {
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
+    use crate::workbench::documents::result_document::ResultsTestHost;
+    use rspice_results::result_digest::ResultDigestEncoding;
+    use rspice_results::waveform::column_work::ColumnWork;
+
+    let time: Vec<f64> = (0..200_000).map(|step| f64::from(step) * 1.0e-9).collect();
+    let wave: Vec<f64> = time.iter().map(|t| (t * 1.0e7).sin()).collect();
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+            .with_waveforms(vec![RetainedTrace::new("V(out)", time, wave, "#fff")]),
+    );
+    let run = host.model.simulation.active_run().expect("a run");
+    let (run_id, expected) = (
+        run.id,
+        run.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT)
+            .to_string(),
+    );
+
+    let before = ColumnWork::read();
+    let mut run_details = None;
+    super::super::run_details::open(&mut run_details, &host.model.simulation, run_id);
+    assert_eq!(
+        before.since().memory_views,
+        0,
+        "opening Run details read the run's samples on the frame"
+    );
+    let details = run_details.expect("Run details opens on a retained run");
+    assert_eq!(details.run_id, run_id);
+    for _ in 0..500 {
+        if details.dataset_digest().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(details.dataset_digest(), Some(expected.as_str()));
+}
+
 /// The Inspector's colour swatch for a selected trace is the colour the strip
 /// drew its curve in. The strip gives curves their palette places in the
 /// order they were plotted; the swatch took its column's place, so with the

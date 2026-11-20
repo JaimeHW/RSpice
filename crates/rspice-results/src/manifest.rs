@@ -62,6 +62,20 @@ impl ManifestViewModel {
         run: &SimulationRun<A>,
         is_live_partial: impl Fn(&A) -> bool,
     ) -> Self {
+        let dataset_digest = run
+            .dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT)
+            .to_string();
+        Self::with_dataset_digest(run, is_live_partial, dataset_digest)
+    }
+
+    #[must_use]
+    /// [`Self::from_run`] with the dataset digest the caller states: digesting a run reads every
+    /// sample it retained, so a caller that cannot wait for it states it once it is known.
+    pub fn with_dataset_digest<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
+        run: &SimulationRun<A>,
+        is_live_partial: impl Fn(&A) -> bool,
+        dataset_digest: String,
+    ) -> Self {
         let provenance_validation = run.validate_provenance();
         let provenance_is_valid = provenance_validation.is_ok();
         let prepared = run.prepared_receipt();
@@ -202,9 +216,7 @@ impl ManifestViewModel {
 
         Self {
             dataset_id: run.dataset_id.to_string(),
-            dataset_digest: run
-                .dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT)
-                .to_string(),
+            dataset_digest,
             run_id: run.run_id.to_string(),
             run_sequence: run.id.to_string(),
             run_label: run.label.clone(),

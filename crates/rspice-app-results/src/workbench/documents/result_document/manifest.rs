@@ -14,6 +14,16 @@ pub fn manifest_for_run(run: &SimulationRun) -> ManifestViewModel {
     frame_work::note(DatasetWalk::DatasetDigest);
     ManifestViewModel::from_run(run, |analysis| analysis.is_live_partial())
 }
+/// The manifest of `run` with its dataset digest left empty: digesting reads
+/// every sample the run retained, and Run details computes it off the frame.
+pub(crate) fn manifest_without_digest(run: &SimulationRun) -> ManifestViewModel {
+    frame_work::note(DatasetWalk::ManifestViewModel);
+    ManifestViewModel::with_dataset_digest(
+        run,
+        |analysis| analysis.is_live_partial(),
+        String::new(),
+    )
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManifestPlan {
     source: (RunHistoryRevision, u64),
