@@ -168,3 +168,57 @@ fn clearing_keeps_a_pinned_run_and_a_run_a_saved_document_reads() {
         HashSet::from([pinned.dataset_id, read.dataset_id])
     );
 }
+
+/// Cleared runs used to be gone for good. They now wait until the project
+/// closes, and Clear result history offers them back.
+#[test]
+fn clearing_then_restoring_brings_back_every_run_with_its_samples() {
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = RSpiceApp::test_instance();
+    let runs = (1..=3).rev().map(completed_run).collect::<Vec<_>>();
+    let digests: Vec<_> = runs
+        .iter()
+        .map(SimulationRun::dataset_content_digest)
+        .collect();
+    app.state.model.simulation.retained.runs = runs.into();
+    assert!(app.state.model.simulation.select_run(0));
+
+    app.execute_command_key(ResultsCommand::ClearResults.key());
+    frame(&ctx, &mut app, Vec::new());
+    frame(&ctx, &mut app, Vec::new());
+    let controls = frame(&ctx, &mut app, Vec::new());
+    assert!(
+        !controls.keys().any(|label| label.starts_with("Restore")),
+        "nothing to restore yet: {controls:?}"
+    );
+    click(&ctx, &mut app, controls["Delete 3 runs"]);
+    assert!(app.state.model.simulation.retained.runs.is_empty());
+
+    app.execute_command_key(ResultsCommand::ClearResults.key());
+    frame(&ctx, &mut app, Vec::new());
+    frame(&ctx, &mut app, Vec::new());
+    let controls = frame(&ctx, &mut app, Vec::new());
+    let restore = *controls
+        .get("Restore 3 deleted runs")
+        .unwrap_or_else(|| panic!("the dialog offers the cleared runs back: {controls:?}"));
+    click(&ctx, &mut app, restore);
+
+    assert!(app.state.results.clear_history.is_none());
+    let back: Vec<_> = app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .map(SimulationRun::dataset_content_digest)
+        .collect();
+    assert_eq!(
+        back, digests,
+        "every run is back, newest first, with its samples"
+    );
+    assert!(app.state.model.simulation.active_run().is_some());
+    assert!(app.state.model.simulation.retained.deleted_runs.is_empty());
+}

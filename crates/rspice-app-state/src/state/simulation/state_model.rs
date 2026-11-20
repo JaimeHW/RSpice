@@ -57,6 +57,11 @@ pub struct RetainedSimulationState {
     /// [`Self::retained_dataset_limit`])
     pub runs: crate::state::RunHistory,
 
+    /// The runs deleted or cleared from the history since the project
+    /// opened, each with its samples: restorable until the project closes,
+    /// which empties it with the rest of the state. Never saved.
+    pub deleted_runs: Vec<SimulationRun>,
+
     /// Imported resume inputs, preserved independently of dataset pruning.
     pub imported_monte_carlo_checkpoints: MonteCarloCheckpointLibrary,
     pub imported_transient_checkpoints:

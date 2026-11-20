@@ -56,6 +56,8 @@ impl CachedResults {
                     // Runtime: the model restates it from the saved
                     // documents before anything that may prune.
                     held_by_documents: _,
+                    // Runtime: restorable until the project closes, never saved.
+                    deleted_runs: _,
                 },
             view:
                 crate::state::SimulationViewState {

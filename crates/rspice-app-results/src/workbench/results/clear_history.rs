@@ -4,8 +4,8 @@
 //! The command used to delete every retained run on one click, with nothing
 //! to undo it. It now counts the runs first. Pinned golden baselines and the
 //! runs a saved result document reads stay unless the reader turns on
-//! deleting them as well, and the dialog says plainly that what it deletes
-//! cannot be restored.
+//! deleting them as well. What it deletes waits in a holding area until the
+//! project closes, and the dialog offers to restore it.
 
 use std::collections::HashSet;
 
@@ -89,12 +89,19 @@ pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
     let counts = ClearHistoryCounts::of(cx.model);
     let executing = cx.model.simulation.execution.has_active_execution();
     let deleted = counts.deleted(dialog.delete_protected);
-    let choice = Dialog::new(TITLE, delete_label(deleted))
+    let held = cx.model.simulation.retained.deleted_runs.len();
+    let mut question = Dialog::new(TITLE, delete_label(deleted))
         .description(
             "Delete the retained runs of this project's result history. Pinned golden baselines \
              and runs a saved result document reads are kept unless you delete them too.",
         )
-        .size(DialogSize::Confirmation)
+        .size(DialogSize::Confirmation);
+    if held > 0 {
+        question = question
+            .secondary(restore_label(held))
+            .secondary_enabled(!executing);
+    }
+    let choice = question
         .ghost("Cancel")
         .destructive()
         .primary_enabled(deleted > 0 && !executing)
@@ -107,6 +114,12 @@ pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
             let kept = cx.model.simulation.retained.runs.len();
             cx.wb
                 .prompt(format!("Deleted {deleted} {}; kept {kept}.", runs(deleted)));
+        }
+        DialogChoice::Secondary if held > 0 => {
+            cx.state.clear_history = None;
+            let restored = cx.model.simulation.restore_deleted_runs();
+            cx.wb
+                .prompt(format!("Restored {restored} {}.", runs(restored)));
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => cx.state.clear_history = None,
         DialogChoice::Secondary | DialogChoice::None => cx.state.clear_history = Some(dialog),
@@ -142,13 +155,21 @@ fn body(ui: &mut Ui, counts: ClearHistoryCounts, executing: bool, dialog: &mut C
     let note = if executing {
         "A run is in progress; the history can be cleared when it ends."
     } else {
-        "Deleted runs cannot be restored."
+        "Deleted runs can be restored until the project closes."
     };
     ui.label(
         RichText::new(note)
             .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.warn),
+            .color(if executing {
+                t.color.warn
+            } else {
+                t.color.text_dim
+            }),
     );
+}
+
+fn restore_label(held: usize) -> String {
+    format!("Restore {held} deleted {}", runs(held))
 }
 
 fn delete_label(deleted: usize) -> String {

@@ -776,7 +776,8 @@ impl SimulationState {
         if self.execution.has_active_execution() {
             return;
         }
-        self.retained.runs.clear();
+        let cleared = std::mem::take(&mut *self.retained.runs);
+        self.retained.deleted_runs.extend(cleared);
         self.retained.executed_decks = ExecutedDeckArchive::default();
         self.view.active_run_idx = None;
         self.view.active_analysis_idx = None;
@@ -796,12 +797,15 @@ impl SimulationState {
             return 0;
         }
         let shown = self.active_run().map(|run| run.run_id);
-        let before = self.retained.runs.len();
-        self.retained.runs.retain(|run| keep(run));
-        let deleted = before - self.retained.runs.len();
-        if deleted == 0 {
+        if self.retained.runs.iter().all(|run| keep(run)) {
             return 0;
         }
+        let (kept, gone): (Vec<_>, Vec<_>) = std::mem::take(&mut *self.retained.runs)
+            .into_iter()
+            .partition(|run| keep(run));
+        *self.retained.runs = kept;
+        let deleted = gone.len();
+        self.retained.deleted_runs.extend(gone);
         self.prune_overlay_dataset_ids();
         self.prune_executed_decks();
         self.prune_yield_evidence_provenance();
@@ -817,6 +821,33 @@ impl SimulationState {
             }
         }
         deleted
+    }
+
+    /// Put every run deleted or cleared since the project opened back into
+    /// the history, each where its sequence places it among the runs there,
+    /// with its samples; return how many came back. Its executed decks went
+    /// with the delete, as the archive's ceiling and storage are spent only
+    /// on the history.
+    /// Nothing is restored while an execution owns the history.
+    pub fn restore_deleted_runs(&mut self) -> usize {
+        if self.execution.has_active_execution() || self.retained.deleted_runs.is_empty() {
+            return 0;
+        }
+        let restored = std::mem::take(&mut self.retained.deleted_runs);
+        let count = restored.len();
+        for run in restored {
+            let at = self
+                .retained
+                .runs
+                .iter()
+                .position(|kept| kept.id < run.id)
+                .unwrap_or(self.retained.runs.len());
+            self.retained.runs.insert(at, run);
+        }
+        if self.active_run().is_none() && !self.select_run(0) {
+            self.sync_selected_analysis_waveforms();
+        }
+        count
     }
 
     /// Put every sample a retained run still holds in memory into results
@@ -857,6 +888,7 @@ impl SimulationState {
         overlay_dataset_ids: Vec<DatasetId>,
     ) {
         self.retained.runs = runs.into();
+        self.retained.deleted_runs.clear();
         // Loading a project must not apply the retired project-global limit to
         // a history now owned by multiple simulation plans. Each plan applies
         // its own policy when it next creates or explicitly edits retention.
@@ -1504,6 +1536,64 @@ mod tests {
         assert_eq!(state.delete_runs(|_| false), 1);
         assert_eq!(shown(&state), None);
         assert!(state.view.active_analysis_idx.is_none());
+    }
+
+    #[test]
+    fn a_deleted_run_restores_with_the_same_digest_where_its_sequence_places_it() {
+        let mut state = SimulationState::default();
+        for _ in 0..3 {
+            let run = state.start_run();
+            let id = run.id;
+            run.keep_analysis(
+                AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+                    crate::state::RetainedTrace::new(
+                        "V(out)",
+                        vec![1.0, 10.0, 100.0],
+                        vec![1.0, 0.5, id as f64],
+                        "#ffffff",
+                    ),
+                ]),
+            );
+        }
+        let order = |state: &SimulationState| {
+            state
+                .retained
+                .runs
+                .iter()
+                .map(|run| (run.id, run.dataset_content_digest()))
+                .collect::<Vec<_>>()
+        };
+        let before = order(&state);
+        let middle = state.retained.runs[1].run_id;
+
+        assert_eq!(state.delete_runs(|run| run.run_id != middle), 1);
+        assert_eq!(state.retained.runs.len(), 2);
+        assert_eq!(state.retained.deleted_runs.len(), 1);
+        assert_eq!(state.restore_deleted_runs(), 1);
+        assert_eq!(
+            order(&state),
+            before,
+            "the run is back between its neighbours"
+        );
+        let y = &state.retained.runs[1].analyses[0].waveforms[0].y;
+        assert!(y.is_stored());
+        assert_eq!(
+            y.read_range(0..3).unwrap().as_ref(),
+            [1.0, 0.5, before[1].0 as f64]
+        );
+
+        state.clear_runs();
+        assert!(state.retained.runs.is_empty());
+        assert_eq!(state.restore_deleted_runs(), 3);
+        assert_eq!(order(&state), before, "a cleared history comes back whole");
+        assert_eq!(state.restore_deleted_runs(), 0, "nothing is held twice");
+
+        state.delete_runs(|_| false);
+        state.restore_run_history(Vec::new(), 3, None, None, None, Vec::new());
+        assert!(
+            state.retained.deleted_runs.is_empty(),
+            "another history empties the holding area"
+        );
     }
 
     #[test]

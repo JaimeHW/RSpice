@@ -1046,7 +1046,18 @@ pub fn save_native(
             &mut state.lifecycle_parts().model.workspace.content.decks,
             &folders,
         );
-        let read = file_segments(&published.candidate);
+        let mut read = file_segments(&published.candidate);
+        // A run deleted since the project opened can be restored until it closes: its segments
+        // stay in the folder with the ones the file reads.
+        let deleted = &state
+            .lifecycle_parts()
+            .model
+            .simulation
+            .retained
+            .deleted_runs;
+        read.extend(deleted.iter().flat_map(|run| {
+            rspice_formats::project_results::ProjectSimulationRun::from(run).stored_segments()
+        }));
         let candidate = ProjectSnapshot {
             file: published.candidate,
             workspace_session,
