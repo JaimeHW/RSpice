@@ -61,7 +61,7 @@ use crate::{Netlist, Value};
 pub use post_results::{evaluate_transient_fourier_results, evaluate_transient_post_results};
 use std::collections::{HashMap, HashSet};
 
-use xyce_dae::{XyceOneStepOrder, XyceOneStepWorkspace};
+use xyce_dae::{XyceDaeResidualError, XyceOneStepOrder, XyceOneStepWorkspace};
 
 /// How a transient analysis establishes its initial state.
 ///
@@ -92,16 +92,16 @@ impl TransientStartupMode {
 /// Reproduce `StaticMatrix::raw_residual_norms` for an already formed direct
 /// Xyce DAE residual.  The scaled sum-of-squares recurrence and its initial
 /// value are part of the status-test arithmetic, so this is intentionally not
-/// a generic `sqrt(sum(r*r))` helper.
-fn direct_xyce_dae_norms(residual: &[Value]) -> Result<(Value, Value), SimulationError> {
+/// a generic `sqrt(sum(r*r))` helper.  A non-finite residual has infinite
+/// norms there, which no status test accepts, so the trial fails as any
+/// other unconverged iterate does rather than ending the run.
+fn direct_xyce_dae_norms(residual: &[Value]) -> (Value, Value) {
     let mut inf_norm: Value = 0.0;
     let mut l2_scale: Value = 0.0;
     let mut l2_sum_squares: Value = 1.0;
-    for (index, &value) in residual.iter().enumerate() {
+    for &value in residual {
         if !value.is_finite() {
-            return Err(SimulationError::Circuit(format!(
-                "direct Xyce DAE residual[{index}] is non-finite: {value}"
-            )));
+            return (Value::INFINITY, Value::INFINITY);
         }
         let magnitude = value.abs();
         inf_norm = inf_norm.max(magnitude);
@@ -121,7 +121,26 @@ fn direct_xyce_dae_norms(residual: &[Value]) -> Result<(Value, Value), Simulatio
     } else {
         l2_scale * l2_sum_squares.sqrt()
     };
-    Ok((inf_norm, l2_norm))
+    (inf_norm, l2_norm)
+}
+
+/// A direct Xyce DAE correction a trial could not form.
+///
+/// The trial's own Q, F and B loads, or the correction they form, leaving
+/// the finite range is the assembled system overflowing at a diverging
+/// iterate: the matrix path reports exactly that as [`SolverError::Overflow`]
+/// and the step rejects it (see `rejectable_trial_detail`), so this path does
+/// too. A malformed vector, a non-finite accepted history or an invalid step
+/// is structural and still ends the run.
+///
+/// [`SolverError::Overflow`]: crate::solver::SolverError::Overflow
+fn direct_dae_correction_error(error: XyceDaeResidualError) -> SimulationError {
+    if error.is_nonfinite_trial() {
+        log::debug!("direct Xyce DAE trial left the finite range: {error}");
+        SimulationError::Solver(crate::solver::SolverError::Overflow)
+    } else {
+        SimulationError::Circuit(error.to_string())
+    }
 }
 
 /// Choose the update quantity used by Xyce's two transient nonlinear solvers.
@@ -9586,11 +9605,11 @@ impl Engine {
                     let workspace = xyce_direct_workspace
                         .as_mut()
                         .expect("direct Xyce DAE workspace is allocated for the gated path");
-                    Some(
+                    Some(stamp_trial_or_reject!(
                         workspace
                             .form_correction_rhs(vectors, previous_q, previous_static, dt, order)
-                            .map_err(|error| SimulationError::Circuit(error.to_string()))?,
-                    )
+                            .map_err(direct_dae_correction_error)
+                    ))
                 } else if uses_direct_device_correction {
                     Some(&correction_rhs)
                 } else {
@@ -9600,7 +9619,7 @@ impl Engine {
                 if uses_xyce_damped_solver && _iter == 0 {
                     let (_, predictor_residual_l2_norm) =
                         if let Some(residual) = direct_correction_rhs {
-                            direct_xyce_dae_norms(residual)?
+                            direct_xyce_dae_norms(residual)
                         } else {
                             stamp_trial_or_reject!(
                                 matrix
@@ -9750,7 +9769,7 @@ impl Engine {
                 if let Some(status) = xyce_nox_status.as_mut() {
                     let (residual_inf_norm, residual_l2_norm) =
                         if let Some(correction) = direct_correction_rhs {
-                            direct_xyce_dae_norms(correction)?
+                            direct_xyce_dae_norms(correction)
                         } else {
                             stamp_trial_or_reject!(
                                 matrix
@@ -10094,22 +10113,24 @@ impl Engine {
                                 } else {
                                     XyceOneStepOrder::First
                                 };
-                                let direct_rhs = xyce_direct_workspace
-                                    .as_mut()
-                                    .expect(
-                                        "direct Xyce DAE workspace is allocated for the gated path",
-                                    )
-                                    .form_correction_rhs(
-                                        vectors,
-                                        previous_q,
-                                        xyce_direct_static_history.as_deref(),
-                                        dt,
-                                        order,
-                                    )
-                                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
-                                direct_xyce_dae_norms(direct_rhs)?
+                                let direct_rhs = stamp_trial_or_reject!(
+                                    xyce_direct_workspace
+                                        .as_mut()
+                                        .expect(
+                                            "direct Xyce DAE workspace is allocated for the gated path",
+                                        )
+                                        .form_correction_rhs(
+                                            vectors,
+                                            previous_q,
+                                            xyce_direct_static_history.as_deref(),
+                                            dt,
+                                            order,
+                                        )
+                                        .map_err(direct_dae_correction_error)
+                                );
+                                direct_xyce_dae_norms(direct_rhs)
                             } else if uses_direct_device_correction {
-                                direct_xyce_dae_norms(&correction_rhs)?
+                                direct_xyce_dae_norms(&correction_rhs)
                             } else {
                                 stamp_trial_or_reject!(
                                     matrix
@@ -14134,6 +14155,56 @@ mod tests {
             rescued_or_rejected_nonfinite(Err(overflow)),
             Ok(None)
         ));
+    }
+
+    /// The direct Xyce DAE path judges a diverging trial as the matrix path
+    /// does: Q, F or B loads that leave the finite range reject the trial
+    /// like an overflowing assembled system, and a non-finite residual has
+    /// the infinite norms `raw_residual_norms` gives it, which no status test
+    /// accepts. A non-finite accepted history or a malformed vector is the
+    /// circuit's and still ends the run.
+    #[test]
+    fn a_direct_dae_trial_that_leaves_the_finite_range_is_rejectable() {
+        let mut workspace = XyceOneStepWorkspace::new(2);
+        let correction = |workspace: &mut XyceOneStepWorkspace,
+                          vectors: &crate::circuit::dae::XyceDaeVectors,
+                          previous_q: &[Value]| {
+            workspace
+                .form_correction_rhs(vectors, previous_q, None, 1.0e-9, XyceOneStepOrder::First)
+                .map(<[Value]>::to_vec)
+                .map_err(direct_dae_correction_error)
+        };
+        for load in 0..3 {
+            let mut vectors = crate::circuit::dae::XyceDaeVectors::new(2);
+            let (q, f, b) = vectors.q_f_b_mut();
+            [q, f, b][load][1] = Value::INFINITY;
+            let error = correction(&mut workspace, &vectors, &[0.0, 0.0]).unwrap_err();
+            assert!(
+                rejectable_trial_detail(&error).is_some(),
+                "load {load}: {error}"
+            );
+        }
+        // Finite loads whose correction overflows are the trial's too.
+        let mut vectors = crate::circuit::dae::XyceDaeVectors::new(2);
+        vectors.q_f_b_mut().0[0] = Value::MAX;
+        let error = correction(&mut workspace, &vectors, &[0.0, 0.0]).unwrap_err();
+        assert!(rejectable_trial_detail(&error).is_some(), "{error}");
+
+        let finite = crate::circuit::dae::XyceDaeVectors::new(2);
+        for history in [&[0.0, Value::NAN][..], &[0.0][..]] {
+            let error = correction(&mut workspace, &finite, history).unwrap_err();
+            assert_eq!(rejectable_trial_detail(&error), None, "{error}");
+        }
+        assert_eq!(
+            correction(&mut workspace, &finite, &[0.0, 0.0]).unwrap(),
+            [0.0, 0.0]
+        );
+
+        assert_eq!(
+            direct_xyce_dae_norms(&[1.0, Value::NAN]),
+            (Value::INFINITY, Value::INFINITY)
+        );
+        assert_eq!(direct_xyce_dae_norms(&[3.0, -4.0]), (4.0, 5.0));
     }
 
     /// A step that ran out of retries is a convergence failure even when an

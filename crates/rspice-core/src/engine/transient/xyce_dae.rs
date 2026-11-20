@@ -66,6 +66,25 @@ pub(crate) enum XyceDaeResidualError {
     },
 }
 
+impl XyceDaeResidualError {
+    /// Whether the failure belongs to the trial rather than to the circuit:
+    /// the trial's own Q, F or B loads, or the correction formed from them,
+    /// left the finite range. Vector shapes, the accepted history and the
+    /// step size are the circuit's, and a failure there is structural.
+    pub(crate) fn is_nonfinite_trial(&self) -> bool {
+        matches!(
+            self,
+            Self::NonFiniteValue {
+                vector: XyceDaeVectorKind::Q
+                    | XyceDaeVectorKind::F
+                    | XyceDaeVectorKind::B
+                    | XyceDaeVectorKind::CorrectionRhs,
+                ..
+            }
+        )
+    }
+}
+
 /// Allocation-retaining workspace for Xyce OneStep residual construction.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct XyceOneStepWorkspace {
