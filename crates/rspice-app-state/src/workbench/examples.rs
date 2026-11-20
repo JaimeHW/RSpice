@@ -36,8 +36,11 @@
 //!   output on the right.
 
 use rspice_design::schematic::document::SchematicDocument;
+use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+use rspice_simulation_contract::drafts::{AcSetup, DcSetup, TranSetup};
 
 use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
+use crate::workbench::app_state::sim_setup::SimSetupState;
 
 // =============================================================================
 // Example Circuit Definitions
@@ -78,6 +81,76 @@ pub const EXAMPLES: [Example; 6] = [
         summary: "A gain of -10 from RF 10k over RIN 1k around a high-gain op-amp.",
     },
 ];
+
+/// Give `setup` the plan the example `name` opens with: one analysis whose
+/// first plot shows the circuit doing what its summary says, and the
+/// operating point it stands on. The Voltage Divider, and an unknown name,
+/// keep a new project's transient, which already shows it.
+pub fn load_example_plan(name: &str, setup: &mut SimSetupState) {
+    let decades = |fstop: &str| {
+        AnalysisDraft::Ac(AcSetup {
+            fstart: "1".to_owned(),
+            fstop: fstop.to_owned(),
+            points: "20".to_owned(),
+            sweep: 0,
+        })
+    };
+    let sweep = |source: &str, start: &str, stop: &str, step: &str| {
+        AnalysisDraft::DcSweep(DcSetup {
+            source: source.to_owned(),
+            start: start.to_owned(),
+            stop: stop.to_owned(),
+            step: step.to_owned(),
+            ..DcSetup::default()
+        })
+    };
+    let draft = match name {
+        // The 1 kHz corner, three decades either side.
+        "RC Lowpass Filter" => decades("1Meg"),
+        // The stage's gain, and the input coupling's low corner.
+        "Common Emitter Amplifier" => decades("100Meg"),
+        // Five periods of the 10 ns input pulse.
+        "CMOS Inverter" => AnalysisDraft::Transient(TranSetup {
+            stop: "50n".to_owned(),
+            step: "50p".to_owned(),
+            ..TranSetup::default()
+        }),
+        // The pair's transfer: the tail current steered from one side to
+        // the other across the differential input.
+        "Differential Pair" => sweep("VIN1", "-100m", "100m", "1m"),
+        // The output against the input: a line of slope -10.
+        "Opamp Inverting Amplifier" => sweep("VIN", "-1", "1", "10m"),
+        _ => return,
+    };
+    let Some(plan) = setup.analysis_plan.as_mut() else {
+        return;
+    };
+    let replaced: Vec<_> = plan
+        .instances()
+        .iter()
+        .map(|instance| instance.id())
+        .collect();
+    let Ok((analysis, _)) = plan.insert(draft.kind()) else {
+        return;
+    };
+    if plan.edit(analysis, |slot| *slot = draft).is_err() {
+        return;
+    }
+    // An analysis that stands on an operating point gets one ahead of it,
+    // bound as the plan editor binds an analysis it adds.
+    let roles = plan.required_prerequisite_roles(analysis);
+    for (position, role) in roles.iter().enumerate() {
+        if plan.insert_at(*role, position).is_err() {
+            return;
+        }
+    }
+    if !roles.is_empty() && plan.auto_bind_dependencies(analysis).is_err() {
+        return;
+    }
+    for id in replaced {
+        let _ = plan.remove(id, Vec::new());
+    }
+}
 
 // =============================================================================
 // Circuit Builders
