@@ -44,7 +44,7 @@ use rspice_app_state::workbench::app_state::model::LibraryRemoval;
 #[cfg(doc)]
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_state::workbench::app_state::model::WorkspacePruned;
-use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example, load_example_plan};
+use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::feature::ModelsPort;
 use rspice_app_workbench::workbench::framework::requests;
@@ -1743,7 +1743,6 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
     };
     state.create_new_project_with(&params)?;
     load_example(example.name, &mut state.model.schematic);
-    load_example_plan(example.name, &mut state.model.sim_setup);
     state.sync_active_schematic_to_workspace();
     Ok(())
 }

@@ -958,7 +958,6 @@ mod monte_carlo_checkpoint;
 mod transient_checkpoint;
 
 mod autonomous_periodic;
-mod examples;
 mod periodic_port_noise;
 mod run_checks;
 mod run_log;
