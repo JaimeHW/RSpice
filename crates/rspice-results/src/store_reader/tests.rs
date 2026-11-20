@@ -109,6 +109,24 @@ fn the_tile_cache_keeps_its_budget_by_dropping_the_least_recently_used_block() {
     assert!(cache.get(&key(0)).is_none());
 }
 
+/// Two open segments of one digest (two runs that solved the same rows) each serve a reader of
+/// it: the one opened second closing leaves the first found by its digest.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_digest_two_open_segments_share_is_found_while_either_is_open() {
+    let open = || Segment::kept(segment(1_234).2, std::path::PathBuf::new()).shared();
+    let first = open();
+    let digest = first
+        .reader()
+        .digest()
+        .expect("a finished segment states its digest");
+    let second = open();
+    assert!(second.reader().digest() == Some(digest));
+    drop(second);
+    let found = kept_segment(digest).expect("the first segment is still open");
+    assert!(Arc::ptr_eq(&found, &first));
+}
+
 /// A saved result names a stored run's waveform and event history by its segment's digest and
 /// reads them back from the folder that keeps the segment, the same values and the same
 /// identity. A segment no folder holds reads as unavailable and names its file, keeping the

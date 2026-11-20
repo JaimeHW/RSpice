@@ -52,9 +52,9 @@ impl Segment {
         let digest = self.reader.digest();
         let segment = Arc::new(self);
         if let Some(digest) = digest {
-            let mut kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
-            kept.open.retain(|_, open| open.strong_count() > 0);
-            kept.open.insert(digest.0, Arc::downgrade(&segment));
+            KEPT.lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .register(digest, &segment);
         }
         segment
     }
@@ -313,7 +313,30 @@ impl EventHistorySource for MissingSegment {
 /// The folders kept segments are looked for in, newest first, and the kept segments open now.
 struct KeptSegments {
     folders: Vec<PathBuf>,
-    open: BTreeMap<[u8; 32], Weak<Segment>>,
+    /// Every segment open now, by its logical digest. Two open segments can hold one digest (two
+    /// runs that solved the same rows), and either serves a reader of it, so each is listed for
+    /// as long as it is open: one closing never hides the other.
+    open: BTreeMap<[u8; 32], Vec<Weak<Segment>>>,
+}
+
+impl KeptSegments {
+    /// An open segment whose logical digest is `digest`.
+    #[cfg(any(unix, windows))]
+    fn open(&self, digest: Digest) -> Option<Arc<Segment>> {
+        self.open.get(&digest.0)?.iter().find_map(Weak::upgrade)
+    }
+
+    /// List `segment` as open under `digest`, dropping every listing that has closed.
+    fn register(&mut self, digest: Digest, segment: &Arc<Segment>) {
+        self.open.retain(|_, open| {
+            open.retain(|segment| segment.strong_count() > 0);
+            !open.is_empty()
+        });
+        self.open
+            .entry(digest.0)
+            .or_default()
+            .push(Arc::downgrade(segment));
+    }
 }
 
 static KEPT: Mutex<KeptSegments> = Mutex::new(KeptSegments {
@@ -358,7 +381,7 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
     let lock = || KEPT.lock().unwrap_or_else(|p| p.into_inner());
     let folders = {
         let kept = lock();
-        if let Some(open) = kept.open.get(&digest.0).and_then(Weak::upgrade) {
+        if let Some(open) = kept.open(digest) {
             return Some(open);
         }
         kept.folders.clone()
@@ -372,11 +395,10 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
         Some(Arc::new(Segment::kept(reader, path)))
     })?;
     let mut kept = lock();
-    if let Some(open) = kept.open.get(&digest.0).and_then(Weak::upgrade) {
+    if let Some(open) = kept.open(digest) {
         return Some(open);
     }
-    kept.open.retain(|_, open| open.strong_count() > 0);
-    kept.open.insert(digest.0, Arc::downgrade(&segment));
+    kept.register(digest, &segment);
     Some(segment)
 }
 
