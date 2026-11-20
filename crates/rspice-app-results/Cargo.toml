@@ -51,6 +51,8 @@ rspice-app-runs = { workspace = true, features = ["test-support"] }
 rspice-app-workbench = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }
 rspice-results = { workspace = true, features = ["engine-evidence", "test-support"] }
+# Writes the segments the stored-run tests draw from.
+rspice-results-store.workspace = true
 rspice-ui-kit = { workspace = true, features = ["test-support"] }
 rspice-formats = { workspace = true, features = ["result-validation-observation"] }
 csv.workspace = true

@@ -25,6 +25,7 @@ mod pane_axes;
 mod pane_legend;
 mod run_difference;
 mod source_cache;
+mod stored_run;
 mod strip_chrome;
 mod xy;
 

@@ -5416,6 +5416,7 @@ dependencies = [
  "rspice-hardcopy",
  "rspice-hardcopy-contract",
  "rspice-results",
+ "rspice-results-store",
  "rspice-results-ui",
  "rspice-schematic-editor",
  "rspice-simulation-contract",

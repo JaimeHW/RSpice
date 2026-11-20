@@ -154,19 +154,23 @@ pub(super) fn family_of_signals(
 
 /// What one frame cost.
 #[derive(Debug, Clone, Copy)]
-struct FrameCost {
-    vertices: usize,
-    work: DecimationWork,
+pub(super) struct FrameCost {
+    pub(super) vertices: usize,
+    pub(super) work: DecimationWork,
 }
 
-fn new_context() -> egui::Context {
+pub(super) fn new_context() -> egui::Context {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx
 }
 
 /// Run one frame of the waveform strip with `events` as its only input.
-fn frame(ctx: &egui::Context, state: &mut ResultsTestHost, events: Vec<egui::Event>) -> FrameCost {
+pub(super) fn frame(
+    ctx: &egui::Context,
+    state: &mut ResultsTestHost,
+    events: Vec<egui::Event>,
+) -> FrameCost {
     let before = state.results.results.session.cache.work();
     let output = ctx.run_ui(
         egui::RawInput {
