@@ -39,9 +39,7 @@ pub use cursor::{CursorId, CursorPair};
 pub use decimate::DecimationWork;
 pub use decimate::TraceView;
 pub use decimate::{BandMember, DecimationCache, SampleInterpolation, sample_at};
-pub use format::{
-    fmt_si, fmt_si_readout, fmt_si_significant, fmt_significant, si_tick_label, tick_with_unit,
-};
+pub use format::{fmt_si, fmt_si_significant, si_tick_label, tick_with_unit};
 pub use render::{
     InteractionMode, PlotResponse, ReadoutRow, ViewChange, plot_rect, set_interaction_mode, show,
     square_outer_rect, y_tick_pitch,

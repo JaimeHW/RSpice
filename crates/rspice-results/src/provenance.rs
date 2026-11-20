@@ -331,7 +331,7 @@ impl AnalysisResultFamilyMember {
                     format!(
                         "{} = {}",
                         axis.name,
-                        crate::number_format::fmt_si_readout(axis.value, "", 4)
+                        crate::number_format::fmt_si_significant(axis.value, "", 4)
                     )
                 })
                 .collect::<Vec<_>>()

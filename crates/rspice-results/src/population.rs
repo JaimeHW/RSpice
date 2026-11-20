@@ -42,7 +42,7 @@ impl PopulationLimit {
             if spec.guard_band() > 0.0 {
                 text.push_str(&format!(
                     " \u{b7} guard band {}",
-                    crate::number_format::fmt_si_bound(spec.guard_band(), &entry.unit)
+                    crate::number_format::fmt_si_significant(spec.guard_band(), &entry.unit, 4)
                 ));
             }
             PopulationLimit {

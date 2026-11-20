@@ -235,12 +235,5 @@ const COMPACT_SIGNIFICANT_DIGITS: usize = 4;
 /// `value` in engineering notation with its unit, at the precision a compact
 /// panel row reads at: `96.86 µA`, not `96.86112 µA`.
 pub fn compact_readout(value: f64, unit: &str) -> String {
-    engineering_readout(value, unit, COMPACT_SIGNIFICANT_DIGITS)
-}
-
-/// `value` in engineering notation with its unit, to the reader's chosen
-/// number of significant digits, without the zeros that only pad it out:
-/// `900 mV` and `4.1 V`, not `900.0000 mV` and `4.100000 V`.
-pub fn engineering_readout(value: f64, unit: &str, significant_digits: usize) -> String {
-    rspice_results_ui::waves::fmt_in_unit_readout(value, unit, significant_digits)
+    rspice_results::number_format::fmt_si_significant(value, unit, COMPACT_SIGNIFICANT_DIGITS)
 }

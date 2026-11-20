@@ -2,7 +2,6 @@
 
 use super::TraceKind;
 use rspice_results::analysis_type::AnalysisType;
-use rspice_ui_kit::plot::{fmt_si_readout, fmt_si_significant, fmt_significant};
 
 /// Case-insensitive prefix test for a signal-name accessor (`V(`, `i(`).
 fn starts_with_accessor(name: &str, accessor: &str) -> bool {
@@ -31,69 +30,6 @@ fn unwrap_projection(name: &str) -> &str {
 /// The noise sheet reports amplitude density in a unit that already carries
 /// its own SI prefix.
 pub const NOISE_DENSITY_UNIT: &str = "nV/√Hz";
-
-/// Format a value in a pane's unit.
-///
-/// A unit that already carries an SI prefix takes no second one: 1.79 µV/√Hz
-/// of output noise reads as `1786.13 nV/√Hz`, never as `1.78613 knV/√Hz`.
-pub fn fmt_in_unit(value: f64, unit: &str, significant_digits: usize) -> String {
-    if unit_carries_its_decade(unit) {
-        return fmt_significant(value, significant_digits, &format!(" {unit}"));
-    }
-    fmt_si_significant(value, unit, significant_digits)
-}
-
-/// The same value as a readout rather than as a table column.
-///
-/// The digit preference is a ceiling on what the reader wants to see, not a
-/// claim about what was measured: a node sitting at exactly 4.1 V reads
-/// `4.100000 V` at the default preference, which is seven digits of a number
-/// that has two. A legend chip, a cursor column and a measurement row all
-/// state the number a reader would write down; the aligned columns of the
-/// Table viewer keep the padding, because there the decimal points line up
-/// and the preference is the column's own width.
-pub fn fmt_in_unit_readout(value: f64, unit: &str, significant_digits: usize) -> String {
-    if unit_carries_its_decade(unit) {
-        return as_readout(&fmt_significant(
-            value,
-            significant_digits,
-            &format!(" {unit}"),
-        ));
-    }
-    fmt_si_readout(value, unit, significant_digits)
-}
-
-/// Drop the zeros that only pad a formatted number out to its digit
-/// preference, leaving the unit and any SI prefix alone.
-///
-/// The spelling [`fmt_si_readout`] applies to the SI ladder, for the values
-/// whose unit or angle convention is formatted somewhere else — a decibel
-/// magnitude, a phase, a frequency in the reader's own display convention.
-pub(super) fn as_readout(text: &str) -> String {
-    let (number, suffix) = text.split_once(' ').unwrap_or((text, ""));
-    // Past the ladder's end the number carries its own exponent. Only the
-    // mantissa in front of it pads out, and trimming the exponent's zeros
-    // would change the decade.
-    let (mantissa, exponent) = number
-        .find(['e', 'E'])
-        .map_or((number, ""), |at| number.split_at(at));
-    let mantissa = if mantissa.contains('.') {
-        mantissa.trim_end_matches('0').trim_end_matches('.')
-    } else {
-        mantissa
-    };
-    if suffix.is_empty() {
-        format!("{mantissa}{exponent}")
-    } else {
-        format!("{mantissa}{exponent} {suffix}")
-    }
-}
-
-/// Whether a pane's unit already names its decade, so a value in it is
-/// written as it stands and never takes an SI prefix of its own.
-pub fn unit_carries_its_decade(unit: &str) -> bool {
-    matches!(unit, NOISE_DENSITY_UNIT | "nA/√Hz" | "ns/√Hz")
-}
 
 /// The projections a trace kind performs own their own unit: a decibel
 /// magnitude, a phase, and an amplitude-density projection are all computed
@@ -196,49 +132,6 @@ pub fn browser_signal_is_current(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn a_prefixed_unit_never_takes_a_second_prefix() {
-        // Output noise of a gain-of-1000 stage is micro-volts per root hertz; in
-        // a unit that already says "nano" that must stay a plain number.
-        assert_eq!(
-            fmt_in_unit(1786.131, NOISE_DENSITY_UNIT, 6),
-            "1786.13 nV/√Hz"
-        );
-        assert_eq!(fmt_in_unit(4.07, NOISE_DENSITY_UNIT, 3), "4.07 nV/√Hz");
-        // Base units keep their SI scaling.
-        assert_eq!(fmt_in_unit(1.5e-3, "A", 3), "1.5 mA");
-    }
-
-    /// A readout states the number; it does not pad it out to the reader's
-    /// digit preference and call the padding measurement.
-    #[test]
-    fn a_readout_drops_the_zeros_that_only_pad_the_digit_preference() {
-        // The defect, at the default preference: a node sitting at exactly
-        // 4.1 V claimed seven measured digits on the strip legend.
-        assert_eq!(fmt_in_unit_readout(4.1, "V", 7), "4.1 V");
-        assert_eq!(fmt_in_unit_readout(1.5, "V", 7), "1.5 V");
-        assert_eq!(fmt_in_unit_readout(0.9, "V", 7), "900 mV");
-        assert_eq!(fmt_in_unit_readout(1.5e-3, "A", 3), "1.5 mA");
-        // A unit carrying its own decade takes no prefix and is trimmed the
-        // same way.
-        assert_eq!(
-            fmt_in_unit_readout(4.07, NOISE_DENSITY_UNIT, 6),
-            "4.07 nV/√Hz"
-        );
-        // Digits the value really has survive, and so does a zero.
-        assert_eq!(fmt_in_unit_readout(1.234_5, "V", 5), "1.2345 V");
-        assert_eq!(fmt_in_unit_readout(0.0, "V", 7), "0 V");
-        // Only fractional padding goes. A value past the top of the SI
-        // ladder keeps its exponent, and only the mantissa in front of it is
-        // trimmed — trimming an integer's or an exponent's zeros would change
-        // the number by orders of magnitude.
-        assert_eq!(fmt_in_unit(1.0e40, "V", 7), "10e39 V");
-        assert_eq!(fmt_in_unit_readout(1.0e40, "V", 7), "10e39 V");
-        assert_eq!(fmt_in_unit_readout(1.0e29, "V", 7), "100e27 V");
-        assert_eq!(fmt_in_unit_readout(1.0e30, "V", 7), "1e30 V");
-        assert_eq!(as_readout("250.000e-30"), "250e-30");
-    }
-
     #[test]
     fn a_signal_owns_its_unit_rather_than_inheriting_the_analysis_default() {
         // The accessor in the name is authoritative where the run retained no

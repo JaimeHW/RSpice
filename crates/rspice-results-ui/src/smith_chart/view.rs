@@ -4,7 +4,7 @@ use egui::Ui;
 use num_complex::Complex64;
 use rspice_results::{network_matrix::impedance_from_gamma, waveform::SharedWaveformValues};
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
@@ -13,7 +13,7 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use super::circles::{ChartCircle, CircleKind, CirclePlane, TwoPortFigures, parse_decibels};
 use super::grid::{self, GRID_VALUES, SmithGrid};
 use super::state::{ResponseReading, SmithSheetState};
-use crate::presentation::{PlotView, angle_readout, frequency_readout, plain_readout, well_hint};
+use crate::presentation::{PlotView, angle_readout, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 
 /// One trace the sheet lists, with its cached Γ-plane coordinate columns.
@@ -607,7 +607,7 @@ fn sample_rows(
             "Γ".to_owned(),
             format!(
                 "{} ∠ {}",
-                plain_readout(mag, "", digits),
+                fmt_si_significant(mag, "", digits),
                 angle_readout(quantity_policy, phase, digits)
             ),
         ),
@@ -616,7 +616,7 @@ fn sample_rows(
         rows.push(("Readout".to_owned(), "complex coefficient only".to_owned()));
         return rows;
     };
-    rows.push(("Z₀".to_owned(), fmt_si_readout(reference, "Ω", digits)));
+    rows.push(("Z₀".to_owned(), fmt_si_significant(reference, "Ω", digits)));
     if grid.draws_impedance() {
         rows.push((
             "Z".to_owned(),
@@ -638,7 +638,7 @@ fn sample_rows(
     rows.push((
         "VSWR".to_owned(),
         if mag < 1.0 {
-            plain_readout((1.0 + mag) / (1.0 - mag), "", digits)
+            fmt_si_significant((1.0 + mag) / (1.0 - mag), "", digits)
         } else {
             "∞".to_owned()
         },
@@ -951,14 +951,14 @@ pub fn right_panel(
         rows.push(("Z₀", format!("{reference} Ω"), false));
     }
     if let Some(value) = maximum_gamma {
-        rows.push(("|Γ| max", plain_readout(value, "", digits), true));
+        rows.push(("|Γ| max", fmt_si_significant(value, "", digits), true));
         if trace.reference_impedance_ohm.is_some() {
             rows.push((
                 "Max VSWR",
                 if value < 1.0 {
                     format!(
                         "{} : 1",
-                        plain_readout((1.0 + value) / (1.0 - value), "", digits)
+                        fmt_si_significant((1.0 + value) / (1.0 - value), "", digits)
                     )
                 } else {
                     "∞".to_owned()
@@ -1005,9 +1005,17 @@ fn two_port_rows(
             frequency_readout(quantity_policy, figures.frequency, digits),
             false,
         ),
-        ("K", plain_readout(device.rollett_k(), "", digits), false),
-        ("μ", plain_readout(device.mu_load(), "", digits), false),
-        ("μ′", plain_readout(device.mu_source(), "", digits), false),
+        (
+            "K",
+            fmt_si_significant(device.rollett_k(), "", digits),
+            false,
+        ),
+        ("μ", fmt_si_significant(device.mu_load(), "", digits), false),
+        (
+            "μ′",
+            fmt_si_significant(device.mu_source(), "", digits),
+            false,
+        ),
         (
             "Stability",
             if device.is_unconditionally_stable() {
@@ -1029,14 +1037,14 @@ fn two_port_rows(
         ));
         rows.push((
             "Rn",
-            fmt_si_readout(noise.noise_resistance_ohm, "Ω", digits),
+            fmt_si_significant(noise.noise_resistance_ohm, "Ω", digits),
             false,
         ));
         rows.push((
             "Γopt",
             format!(
                 "{} ∠ {}",
-                plain_readout(noise.optimum_source_reflection.norm(), "", digits),
+                fmt_si_significant(noise.optimum_source_reflection.norm(), "", digits),
                 angle_readout(
                     quantity_policy,
                     noise.optimum_source_reflection.arg(),
@@ -1059,14 +1067,14 @@ fn two_port_rows(
             centre,
             format!(
                 "{} ∠ {}",
-                plain_readout(circle.circle.center.norm(), "", digits),
+                fmt_si_significant(circle.circle.center.norm(), "", digits),
                 angle_readout(quantity_policy, circle.circle.center.arg(), digits),
             ),
             false,
         ));
         circle_rows.push((
             radius,
-            plain_readout(circle.circle.radius, "", digits),
+            fmt_si_significant(circle.circle.radius, "", digits),
             false,
         ));
         circle_rows.push((
@@ -1087,9 +1095,9 @@ fn impedance_readout(resistance: f64, reactance: f64, significant_digits: usize)
 fn complex_readout(real: f64, imaginary: f64, unit: &str, significant_digits: usize) -> String {
     format!(
         "{} {} j{}",
-        fmt_si_readout(real, unit, significant_digits),
+        fmt_si_significant(real, unit, significant_digits),
         if imaginary >= 0.0 { "+" } else { "−" },
-        fmt_si_readout(imaginary.abs(), unit, significant_digits)
+        fmt_si_significant(imaginary.abs(), unit, significant_digits)
     )
 }
 

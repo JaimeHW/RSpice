@@ -16,7 +16,7 @@ use super::logic::{
 };
 use super::pane::ResolvedExpr;
 use super::readout::{READOUT_ABSENT, ReadoutRow};
-use super::{LaneTraceKind, StripModel, UnitPane, fmt_in_unit_readout, stable_hash};
+use super::{LaneTraceKind, StripModel, UnitPane, stable_hash};
 use crate::derived::DerivedSeries;
 use rspice_ui_kit::plot::CursorPair;
 use std::collections::{BTreeMap, HashSet};
@@ -506,7 +506,7 @@ pub fn lane_readout_rows(
         let format = |value: Option<f64>| {
             value.map_or_else(
                 || READOUT_ABSENT.to_owned(),
-                |value| fmt_in_unit_readout(value, unit, significant_digits),
+                |value| rspice_ui_kit::plot::fmt_si_significant(value, unit, significant_digits),
             )
         };
         let (a, b) = (value(cursors.a), value(cursors.b));

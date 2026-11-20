@@ -421,7 +421,7 @@ fn two_horizontal_cursors_are_placed_moved_and_read_per_pane() {
             .displayed_significant_digits()
             .get(),
     );
-    let delta = rspice_results_ui::waves::fmt_in_unit_readout(kept - moved, "V", digits);
+    let delta = rspice_results::number_format::fmt_si_significant(kept - moved, "V", digits);
     assert!(
         painted.contains(&format!("\u{0394}Y {delta}")),
         "the dock reads ΔY {delta}: {painted:?}"

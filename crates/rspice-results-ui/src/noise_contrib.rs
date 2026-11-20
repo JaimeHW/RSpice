@@ -4,7 +4,7 @@ use crate::presentation::table_row_height;
 use egui::{Align2, Sense, Ui};
 use rspice_results::noise::NoiseSummary;
 use rspice_ui_kit::panels::{elide_middle, section_header};
-use rspice_ui_kit::plot::fmt_si_readout;
+use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::measurement_table;
@@ -65,7 +65,7 @@ pub fn right_panel(
             section_header(ui, "Sampling", None);
             let mut rows = vec![(
                 "Output slew",
-                fmt_si_readout(sampling.output.slew_volts_per_second, "V/s", 4),
+                fmt_si_significant(sampling.output.slew_volts_per_second, "V/s", 4),
             )];
             if let Some(reference) = &sampling.reference {
                 rows.push((
@@ -253,7 +253,7 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                             rect,
                             RANK_W + SOURCE_W,
                             POWER_W,
-                            fmt_si_readout(row.power, "", 4),
+                            fmt_si_significant(row.power, "", 4),
                             Align2::RIGHT_CENTER,
                             c.text_dim,
                         );

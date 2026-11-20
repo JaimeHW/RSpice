@@ -1,6 +1,6 @@
 //! Inspectors for qualified frequency-response and ordinary-noise results.
 
-use crate::presentation::{angle_readout, frequency_readout, plain_readout};
+use crate::presentation::{angle_readout, frequency_readout};
 use egui::Ui;
 use rspice_results::bode::AcBodeMetrics;
 use rspice_results::engine_evidence::{
@@ -8,6 +8,7 @@ use rspice_results::engine_evidence::{
 };
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// The selected response and the evidence its inspector may display.
@@ -232,7 +233,7 @@ fn margin_rows(
     let fmt_opt =
         |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
     let frequency = |v: f64| frequency_readout(quantity_policy, v, significant_digits);
-    let decibels = |v: f64| plain_readout(v, "dB", significant_digits);
+    let decibels = |v: f64| fmt_si_significant(v, "dB", significant_digits);
     [
         (
             "Phase margin",
@@ -294,7 +295,7 @@ pub fn noise_spectrum_right_panel(
             "Output integrated",
             model.total_rms.map_or_else(
                 || "—".to_owned(),
-                |value| rspice_ui_kit::plot::fmt_si_readout(value, "V rms", significant_digits),
+                |value| rspice_ui_kit::plot::fmt_si_significant(value, "V rms", significant_digits),
             ),
             model.total_rms.is_some(),
         ),
@@ -303,7 +304,7 @@ pub fn noise_spectrum_right_panel(
             model.input_rms.map_or_else(
                 || "—".to_owned(),
                 |value| {
-                    rspice_ui_kit::plot::fmt_si_readout(
+                    rspice_ui_kit::plot::fmt_si_significant(
                         value,
                         model.input_rms_unit,
                         significant_digits,

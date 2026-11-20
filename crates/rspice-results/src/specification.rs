@@ -699,7 +699,7 @@ impl SpecEntry {
     /// limit a reader has to translate before holding it against a datasheet is
     /// stated badly; two spellings of one number is worse.
     ///
-    /// [`crate::number_format::fmt_si_bound`] is the spelling, the one the
+    /// [`crate::number_format::fmt_si_significant`] at four digits is the spelling, the one the
     /// measured values beside the limit are already in: the SI prefix sits on
     /// the unit. A limit spelled `≥ 10M Hz` splits the prefix off the quantity
     /// it scales, and a reader has to reassemble `MHz` before holding the bound
@@ -707,7 +707,7 @@ impl SpecEntry {
     /// prefix, belongs in a deck and never reaches a surface either way.)
     #[must_use]
     pub fn limit_text(&self) -> String {
-        let quantity = |value: f64| crate::number_format::fmt_si_bound(value, &self.unit);
+        let quantity = |value: f64| crate::number_format::fmt_si_significant(value, &self.unit, 4);
         match (self.min, self.max) {
             (Some(minimum), Some(maximum)) => {
                 format!("{} \u{2026} {}", quantity(minimum), quantity(maximum))

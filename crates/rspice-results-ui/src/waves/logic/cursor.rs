@@ -58,7 +58,7 @@ impl EventLane<'_> {
                     })
             }
             Self::Real(lane) => lane.value_at(t).map(|value| LaneReadout {
-                text: rspice_ui_kit::plot::fmt_significant(value, significant_digits, ""),
+                text: rspice_ui_kit::plot::fmt_si_significant(value, "", significant_digits),
                 fallback: None,
             }),
         }

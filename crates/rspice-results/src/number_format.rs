@@ -216,19 +216,27 @@ pub fn fmt_si_significant(value: f64, unit: &str, significant_digits: usize) -> 
 /// Whether a value in `unit` is written with an SI prefix.
 ///
 /// A dimensionless value (no unit, a ratio stated as `/V`), a level in
-/// decibels, an angle, a temperature in degrees and a percentage are never
+/// decibels, an angle (`°`, `rad`, but not `rad/s`), a temperature in degrees and a percentage are never
 /// prefixed, and a compound unit is prefixed as its numerator is (`2 MV/s`,
 /// `−20 dB/dec`, `45 °/kHz`). Nor is a unit that already names its own
 /// decade: `1786 nV/√Hz`, never `1.786 knV/√Hz`.
 #[must_use]
 pub fn unit_takes_prefix(unit: &str) -> bool {
-    if matches!(unit, "nV/√Hz" | "nA/√Hz" | "ns/√Hz") {
+    if unit_carries_its_decade(unit) {
         return false;
     }
     let numerator = unit.split('/').next().unwrap_or_default();
     !(numerator.is_empty()
+        || unit == "rad"
         || numerator.starts_with("dB")
         || matches!(numerator, "°" | "°C" | "°F" | "deg" | "%"))
+}
+
+/// Whether a unit already names its decade, so a value in it is written as
+/// it stands: the noise densities the noise sheet reports in.
+#[must_use]
+pub fn unit_carries_its_decade(unit: &str) -> bool {
+    matches!(unit, "nV/√Hz" | "nA/√Hz" | "ns/√Hz")
 }
 
 /// The number part of a value and the prefix its unit takes.
@@ -334,55 +342,6 @@ fn round_to_significant(mantissa: f64, digits: usize, decade: i32) -> String {
     }
 }
 
-/// Format a panel readout: engineering notation to `significant_digits`,
-/// without the zeros that only pad it out.
-///
-/// [`fmt_si_significant`] resolves digits the value does not have — a node
-/// sitting at exactly 4.1 V reads `4.100000 V` at the default preference,
-/// which claims seven measured digits and is the `{:?}`-grade default an
-/// engineering instrument never prints. A side panel states the number the
-/// reader would write down; full precision belongs to copy and export.
-#[must_use]
-pub fn fmt_si_readout(value: f64, unit: &str, significant_digits: usize) -> String {
-    let text = fmt_si_significant(value, unit, significant_digits);
-    let (number, suffix) = text.split_once(' ').unwrap_or((text.as_str(), ""));
-    // Past the ladder's end the number carries its own exponent. Only the
-    // mantissa in front of it pads out, and trimming the exponent's zeros
-    // would change the decade.
-    let (mantissa, exponent) = number
-        .find(['e', 'E'])
-        .map_or((number, ""), |at| number.split_at(at));
-    let mantissa = if mantissa.contains('.') {
-        mantissa.trim_end_matches('0').trim_end_matches('.')
-    } else {
-        mantissa
-    };
-    if suffix.is_empty() {
-        format!("{mantissa}{exponent}")
-    } else {
-        format!("{mantissa}{exponent} {suffix}")
-    }
-}
-
-/// Format one bound of a limit: the notation of the measured values it is
-/// held against, without the zeros nobody wrote it with.
-///
-/// A limit is authored, not measured, so the digits past the ones its author
-/// typed are noise: `10 MHz` is the bound, `10.00 MHz` is four significant
-/// digits of a number that only ever had two. The prefix sits on the unit, as
-/// it does on every value beside it — `≥ 10 MHz`, never `≥ 10M Hz` — because a
-/// reader holds these against a datasheet.
-#[must_use]
-pub fn fmt_si_bound(value: f64, unit: &str) -> String {
-    fmt_si_readout(value, unit, 4)
-}
-
-/// Format a unitless or fixed-unit value with an exact number of significant
-/// digits. `suffix` should include its own leading space when desired.
-pub fn fmt_significant(value: f64, significant_digits: usize, suffix: &str) -> String {
-    format_with_significant_digits(value, significant_digits, suffix)
-}
-
 /// `value` placed on the ladder for `decimals` places: the mantissa and the
 /// ladder index it is printed under.
 fn scale_si(value: f64, decimals: usize) -> (f64, i32) {
@@ -392,39 +351,6 @@ fn scale_si(value: f64, decimals: usize) -> (f64, i32) {
     }
     let index = placed(magnitude, si_index(magnitude), decimals);
     (si_scaled(value, index), index)
-}
-
-fn significant_decimals(value: f64, significant_digits: usize) -> usize {
-    let significant_digits = significant_digits.max(1);
-    if !value.is_finite() || value == 0.0 {
-        return significant_digits - 1;
-    }
-    let exponent = value.abs().log10().floor() as i32;
-    (significant_digits as i32 - 1 - exponent).max(0) as usize
-}
-
-fn format_with_significant_digits(value: f64, significant_digits: usize, suffix: &str) -> String {
-    let significant_digits = significant_digits.max(1);
-    if !value.is_finite() {
-        return format!("{value}{suffix}");
-    }
-    if value == 0.0 {
-        return format!(
-            "{value:.precision$}{suffix}",
-            precision = significant_digits - 1
-        );
-    }
-    let decimals = significant_decimals(value, significant_digits);
-    // Extremely small values below the supported SI prefix range would
-    // otherwise create hundreds of zeroes. Scientific notation is exact,
-    // bounded, and still honors the significant-digit contract.
-    if decimals > 24 {
-        return format!(
-            "{value:.precision$e}{suffix}",
-            precision = significant_digits - 1
-        );
-    }
-    format!("{value:.decimals$}{suffix}")
 }
 
 /// Short tick label for an axis value: SI-prefixed, no unit, trailing zeros
@@ -604,12 +530,12 @@ mod tests {
         assert_eq!(fmt_si(2.0e-18, "F", 2), "2.00 aF");
         // Past tera and atto the ladder carries on through the prefixes the
         // reference tools print, rather than parking the value on the last.
-        assert_eq!(fmt_si_readout(2.402_879e-20, "V", 7), "24.02879 zV");
-        assert_eq!(fmt_si_readout(3.1e-24, "C", 4), "3.1 yC");
-        assert_eq!(fmt_si_readout(4.2e15, "Hz", 4), "4.2 PHz");
-        assert_eq!(fmt_si_readout(1.5e18, "Hz", 4), "1.5 EHz");
-        assert_eq!(fmt_si_readout(6.0e21, "W", 4), "6 ZW");
-        assert_eq!(fmt_si_readout(7.5e24, "W", 4), "7.5 YW");
+        assert_eq!(fmt_si_significant(2.402_879e-20, "V", 7), "24.02879 zV");
+        assert_eq!(fmt_si_significant(3.1e-24, "C", 4), "3.1 yC");
+        assert_eq!(fmt_si_significant(4.2e15, "Hz", 4), "4.2 PHz");
+        assert_eq!(fmt_si_significant(1.5e18, "Hz", 4), "1.5 EHz");
+        assert_eq!(fmt_si_significant(6.0e21, "W", 4), "6 ZW");
+        assert_eq!(fmt_si_significant(7.5e24, "W", 4), "7.5 YW");
         assert_eq!(tick_label(5.0e-21), "5z");
         assert_eq!(tick_label(-2.0e15), "−2P");
         assert_eq!(si_tick_label(1.0e-24, "s", 2), "1 ys");
@@ -621,11 +547,11 @@ mod tests {
     /// is never parked on the last prefix with a run of leading zeros.
     #[test]
     fn past_the_ladder_a_value_states_its_decade_as_an_exponent() {
-        assert_eq!(fmt_si_readout(2.402_879e-26, "V", 7), "24.02879e−27 V");
         assert_eq!(fmt_si_significant(2.402_879e-26, "V", 7), "24.02879e−27 V");
-        assert_eq!(fmt_si_readout(-5.0e-30, "A", 4), "−5e−30 A");
-        assert_eq!(fmt_si_readout(3.0e27, "Hz", 4), "3e27 Hz");
-        assert_eq!(fmt_si_readout(4.56e31, "Hz", 4), "45.6e30 Hz");
+        assert_eq!(fmt_si_significant(2.402_879e-26, "V", 7), "24.02879e−27 V");
+        assert_eq!(fmt_si_significant(-5.0e-30, "A", 4), "−5e−30 A");
+        assert_eq!(fmt_si_significant(3.0e27, "Hz", 4), "3e27 Hz");
+        assert_eq!(fmt_si_significant(4.56e31, "Hz", 4), "45.6e30 Hz");
         assert_eq!(fmt_si(2.5e-28, "F", 2), "250.00e-30 F");
         assert_eq!(fmt_si(2.5e-28, "", 2), "250.00e-30");
         // A tick signs its exponent as it signs its value.
@@ -634,13 +560,16 @@ mod tests {
         assert_eq!(tick_with_unit(&tick_label(3.0e-27), "V"), "3e−27 V");
         assert_eq!(offset_anchor_label(2.0e-27, "s", 1.0e-33), "+2e−27 s");
         // Rounding past 1000 promotes across the ladder's ends both ways.
-        assert_eq!(fmt_si_readout(999.999_99e-27, "V", 4), "1 yV");
-        assert_eq!(fmt_si_readout(999.999_99e24, "V", 4), "1e27 V");
+        assert_eq!(fmt_si_significant(999.999_99e-27, "V", 4), "1.000 yV");
+        assert_eq!(fmt_si_significant(999.999_99e24, "V", 4), "1.000e27 V");
         // The far ends of the double stay finite and bounded.
-        assert_eq!(fmt_si_readout(f64::MIN_POSITIVE, "V", 4), "22.25e−309 V");
-        assert_eq!(fmt_si_readout(5.0e-324, "V", 2), "4.9e−324 V");
-        assert_eq!(fmt_si_readout(f64::MAX, "V", 4), "179.8e306 V");
-        assert_eq!(fmt_si_readout(f64::INFINITY, "V", 4), "inf V");
+        assert_eq!(
+            fmt_si_significant(f64::MIN_POSITIVE, "V", 4),
+            "22.25e−309 V"
+        );
+        assert_eq!(fmt_si_significant(5.0e-324, "V", 2), "4.9e−324 V");
+        assert_eq!(fmt_si_significant(f64::MAX, "V", 4), "179.8e306 V");
+        assert_eq!(fmt_si_significant(f64::INFINITY, "V", 4), "inf V");
         assert_eq!(tick_label_with_step(f64::NAN, 1.0), "NaN");
     }
 
@@ -691,7 +620,6 @@ mod tests {
     fn significant_readouts_are_distinct_from_fixed_decimal_formatting() {
         assert_eq!(fmt_si_significant(12.345_678, "V", 7), "12.34568 V");
         assert_eq!(fmt_si_significant(1.234_567_8e-6, "s", 7), "1.234568 µs");
-        assert_eq!(fmt_significant(-179.999_9, 7, " °"), "-179.9999 °");
         assert_eq!(fmt_si_significant(0.0, "A", 3), "0 A");
     }
 
@@ -755,13 +683,13 @@ mod tests {
     /// preference allows: `4.100000 V` is a formatter default, not a reading.
     #[test]
     fn a_panel_readout_drops_the_zeros_that_only_pad_it_out() {
-        assert_eq!(fmt_si_readout(4.1, "V", 7), "4.1 V");
-        assert_eq!(fmt_si_readout(0.9, "V", 7), "900 mV");
-        assert_eq!(fmt_si_readout(0.0, "A", 7), "0 A");
+        assert_eq!(fmt_si_significant(4.1, "V", 7), "4.1 V");
+        assert_eq!(fmt_si_significant(0.9, "V", 7), "900 mV");
+        assert_eq!(fmt_si_significant(0.0, "A", 7), "0 A");
         // Digits the value does have are kept, to the stated precision.
-        assert_eq!(fmt_si_readout(12.345_678, "V", 7), "12.34568 V");
-        assert_eq!(fmt_si_readout(96.861_12e-6, "A", 4), "96.86 µA");
+        assert_eq!(fmt_si_significant(12.345_678, "V", 7), "12.34568 V");
+        assert_eq!(fmt_si_significant(96.861_12e-6, "A", 4), "96.86 µA");
         // A bound is the same readout at the compact precision.
-        assert_eq!(fmt_si_bound(1.0e7, "Hz"), "10 MHz");
+        assert_eq!(fmt_si_significant(1.0e7, "Hz", 4), "10 MHz");
     }
 }

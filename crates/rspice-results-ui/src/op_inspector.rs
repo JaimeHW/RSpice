@@ -21,7 +21,7 @@ use rspice_results::operating_point::{
 };
 use rspice_ui_kit::{
     panels::{WorkbenchIcon, section_block_gap, section_header},
-    plot::{fmt_si_readout, fmt_si_significant},
+    plot::fmt_si_significant,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Button, PROBLEM_MARK_SIDE, Problem, measurement_table, paint_problem_mark},
@@ -978,7 +978,7 @@ fn quantity_readout(value: f64, unit: &str) -> String {
         let text = text.trim_end_matches('0').trim_end_matches('.');
         return format!("{text} {CELSIUS}");
     }
-    fmt_si_readout(value, unit, READOUT_SIGNIFICANT_DIGITS)
+    fmt_si_significant(value, unit, READOUT_SIGNIFICANT_DIGITS)
 }
 
 fn elide_middle(text: &str, max_chars: usize) -> String {
@@ -1851,7 +1851,7 @@ pub fn right_panel(
     // dimensions and the annotation setting are not the reader's.
     if let Some(facts) = &evidence.facts {
         section_header(ui, "Conditions", None);
-        let temperature = fmt_si_readout(facts.temperature_celsius, CELSIUS, 4);
+        let temperature = fmt_si_significant(facts.temperature_celsius, CELSIUS, 4);
         let process = process_label(facts.process);
         let mut rows = vec![
             ("Process", process.to_owned()),

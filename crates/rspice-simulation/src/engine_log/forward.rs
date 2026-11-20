@@ -88,7 +88,7 @@ fn hdl_line(record: &HdlOutputRecord) -> Option<EngineLogLine> {
             format!(
                 "{} at {}",
                 if *stop { "$stop" } else { "$finish" },
-                rspice_results::number_format::fmt_si_readout(record.seconds, "s", 6)
+                rspice_results::number_format::fmt_si_significant(record.seconds, "s", 6)
             ),
         ),
         HdlStream::Stdout => (LogSeverity::Info, record.text.clone()),

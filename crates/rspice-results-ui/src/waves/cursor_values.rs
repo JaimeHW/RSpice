@@ -3,7 +3,6 @@
 //! the reader's number format, and where a search marker stands on its
 //! trace as the trace is now.
 
-use super::units::as_readout;
 use super::{StripModel, anchor_key};
 use rspice_results::feature_search;
 use rspice_results::result_presentation::{MarkerKind, WaveformPresentationKey};
@@ -71,22 +70,18 @@ pub fn x_separation(
     let dx = b - a;
     match model.x_scale {
         XScale::Linear if model.x_unit == "s" => {
-            let span = as_readout(&fmt_si_significant(dx, "s", significant_digits));
+            let span = fmt_si_significant(dx, "s", significant_digits);
             if dx == 0.0 {
                 span
             } else {
                 format!(
                     "{span}  ({})",
-                    as_readout(&frequency_text(
-                        1.0 / dx.abs(),
-                        significant_digits,
-                        quantity_policy
-                    ))
+                    frequency_text(1.0 / dx.abs(), significant_digits, quantity_policy)
                 )
             }
         }
-        XScale::Log10 => as_readout(&frequency_text(dx, significant_digits, quantity_policy)),
-        _ => as_readout(&fmt_si_significant(dx, &model.x_unit, significant_digits)),
+        XScale::Log10 => frequency_text(dx, significant_digits, quantity_policy),
+        _ => fmt_si_significant(dx, &model.x_unit, significant_digits),
     }
 }
 
@@ -101,8 +96,8 @@ pub fn x_delta(
 ) -> String {
     let dx = b - a;
     match model.x_scale {
-        XScale::Log10 => as_readout(&frequency_text(dx, significant_digits, quantity_policy)),
-        XScale::Linear => as_readout(&fmt_si_significant(dx, &model.x_unit, significant_digits)),
+        XScale::Log10 => frequency_text(dx, significant_digits, quantity_policy),
+        XScale::Linear => fmt_si_significant(dx, &model.x_unit, significant_digits),
     }
 }
 
@@ -121,11 +116,11 @@ pub fn x_reciprocal(
         return None;
     }
     let inverse = 1.0 / span;
-    Some(as_readout(&match model.x_unit.as_str() {
+    Some(match model.x_unit.as_str() {
         "s" => frequency_text(inverse, significant_digits, quantity_policy),
         "Hz" => fmt_si_significant(inverse, "s", significant_digits),
         unit => fmt_si_significant(inverse, &format!("/{unit}"), significant_digits),
-    }))
+    })
 }
 
 /// A frequency at the reader's significant digits, in the reader's frequency

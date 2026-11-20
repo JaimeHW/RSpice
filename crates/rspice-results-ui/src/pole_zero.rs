@@ -1,7 +1,7 @@
 //! Retained pole-zero map, root readouts and local plot interaction.
 
 use crate::{
-    presentation::{PlotView, frequency_readout, plain_readout, well_hint},
+    presentation::{PlotView, frequency_readout, well_hint},
     strip::{self, LegendChip},
 };
 use egui::Ui;
@@ -11,7 +11,7 @@ use rspice_results::pole_zero::{
 };
 use rspice_ui_kit::{
     panels::section_header,
-    plot::{self, Axis, PlotSpec, XScale, fmt_si_readout},
+    plot::{self, Axis, PlotSpec, XScale, fmt_si_significant},
     tokens::Tokens,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -67,8 +67,8 @@ fn format_dominant_pole(
     } else {
         format!(
             "σ {} · jω {}",
-            fmt_si_readout(root.real, "rad/s", significant_digits),
-            fmt_si_readout(root.imag, "rad/s", significant_digits)
+            fmt_si_significant(root.real, "rad/s", significant_digits),
+            fmt_si_significant(root.imag, "rad/s", significant_digits)
         )
     }
 }
@@ -249,8 +249,8 @@ pub fn show(
         let magnitude = (root.real * root.real + root.imag * root.imag).sqrt();
         let digits = significant_digits;
         let mut rows = vec![
-            ("σ".to_owned(), fmt_si_readout(root.real, "", digits)),
-            ("jω".to_owned(), fmt_si_readout(root.imag, "", digits)),
+            ("σ".to_owned(), fmt_si_significant(root.real, "", digits)),
+            ("jω".to_owned(), fmt_si_significant(root.imag, "", digits)),
             (
                 "fₙ".to_owned(),
                 frequency_readout(quantity_policy, magnitude / std::f64::consts::TAU, digits),
@@ -259,7 +259,7 @@ pub fn show(
         if root.imag.abs() > 1e-12 && root.real.abs() > 1e-12 {
             rows.push((
                 "Q".to_owned(),
-                plain_readout(magnitude / (2.0 * root.real.abs()), "", digits),
+                fmt_si_significant(magnitude / (2.0 * root.real.abs()), "", digits),
             ));
         }
         let title = if root.is_pole() { "pole" } else { "zero" };
@@ -322,13 +322,13 @@ pub fn right_panel(
             if q.is_infinite() {
                 "∞ · imaginary-axis pole".to_owned()
             } else {
-                plain_readout(q, "", digits)
+                fmt_si_significant(q, "", digits)
             },
             false,
         ));
     }
     if let Some(gain) = data.gain {
-        summary_rows.push(("Gain", fmt_si_readout(gain, "", digits), false));
+        summary_rows.push(("Gain", fmt_si_significant(gain, "", digits), false));
     }
     crate::presentation::stat_table(ui, &summary_rows);
 
@@ -355,7 +355,7 @@ pub fn right_panel(
         } else {
             format!(
                 "ζ {} · fₙ {}",
-                plain_readout(root.damping_ratio(), "", digits),
+                fmt_si_significant(root.damping_ratio(), "", digits),
                 frequency_readout(
                     quantity_policy,
                     root.natural_frequency() / std::f64::consts::TAU,

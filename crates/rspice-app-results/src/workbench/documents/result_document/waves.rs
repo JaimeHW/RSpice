@@ -23,7 +23,7 @@ use rspice_results_ui::waves::readout::append_copied_cursor;
 pub(super) use rspice_results_ui::waves::{FamilyTraceVisibilityKey, StripModel, UnitPane};
 use rspice_results_ui::waves::{StripTrace, anchor_key, family_color};
 #[cfg(test)]
-use rspice_results_ui::waves::{TraceKind, fmt_in_unit, trace_key};
+use rspice_results_ui::waves::{TraceKind, trace_key};
 pub use rspice_results_ui::waves::{
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };

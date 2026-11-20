@@ -121,7 +121,8 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
     } else {
         super::super::waves::measurement_unit(expression, analysis, &x_unit).unwrap_or_default()
     };
-    let format = |value: f64| rspice_results_ui::waves::fmt_in_unit(value, &unit, digits);
+    let format =
+        |value: f64| rspice_results::number_format::fmt_si_significant(value, &unit, digits);
     let (value, family) = match family {
         Some(noun) => {
             let measured = (!expression.is_empty())

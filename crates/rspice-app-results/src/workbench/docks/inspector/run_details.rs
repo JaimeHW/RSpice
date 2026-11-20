@@ -20,7 +20,7 @@ use super::result_authority::forced_lte_acceptances;
 use crate::state::SimulationState;
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::app_state::Model;
-use rspice_app_workbench::workbench::docks::inspector::engineering_readout;
+use rspice_results::number_format::fmt_si_significant;
 
 /// The run Run details… is open on, with its manifest taken once when the
 /// dialog opened, and its dataset digest once a background thread has read
@@ -380,7 +380,7 @@ fn convergence_report(
                     property_row(
                         ui,
                         &format!("Forced point {}", position + 1),
-                        &engineering_readout(times[position], "s", digits.min(TIME_DIGITS)),
+                        &fmt_si_significant(times[position], "s", digits.min(TIME_DIGITS)),
                     );
                 }
             });

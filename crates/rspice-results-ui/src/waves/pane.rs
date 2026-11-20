@@ -947,7 +947,11 @@ pub fn show_plot<'a>(
                 // The hover readout is a readout: the expression's value in
                 // the unit of the pane that draws it, not the reader's digit
                 // preference spelled out in zeros, nor a prefix with no unit.
-                super::units::fmt_in_unit_readout(value, pane.axis_unit(), significant_digits),
+                rspice_ui_kit::plot::fmt_si_significant(
+                    value,
+                    pane.axis_unit(),
+                    significant_digits,
+                ),
             ));
         }
         rows

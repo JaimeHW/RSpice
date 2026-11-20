@@ -1,6 +1,6 @@
 //! Retained phase-noise spectrum, exact spot marker and evidence-backed inspector.
 
-use crate::presentation::{PlotView, angle_readout, frequency_readout, plain_readout, well_hint};
+use crate::presentation::{PlotView, angle_readout, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 use crate::waves::ReadoutPolicy;
 use egui::Ui;
@@ -10,6 +10,7 @@ use rspice_results::phase_noise::{
 };
 use rspice_results::waveform::RetainedTrace;
 use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -129,7 +130,7 @@ pub fn show(
             ),
             (
                 "L(f)".to_owned(),
-                plain_readout(
+                fmt_si_significant(
                     presentation.cursor_sample(model.offset_hz, model.level_dbc_per_hz, offset),
                     "dBc/Hz",
                     digits,
@@ -180,14 +181,14 @@ pub fn right_panel(
     if let Some(seconds) = retained_measurement(analysis, "timing_jitter_rms_s") {
         rows.push((
             "Integrated timing jitter",
-            rspice_ui_kit::plot::fmt_si_readout(seconds, "s rms", digits),
+            rspice_ui_kit::plot::fmt_si_significant(seconds, "s rms", digits),
             true,
         ));
     }
     if let Some(level) = exact_retained_value_at(model.offset_hz, model.level_dbc_per_hz, 1.0e6) {
         rows.push((
             "Spot L(f) at 1 MHz",
-            plain_readout(level, "dBc/Hz", digits),
+            fmt_si_significant(level, "dBc/Hz", digits),
             true,
         ));
     }

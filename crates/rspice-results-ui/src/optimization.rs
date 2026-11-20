@@ -1,15 +1,13 @@
 //! Optimization convergence plots and exact retained candidate presentation.
 
-use crate::presentation::{
-    PlotView, fit_controls_to_rows, plain_readout, stat_table, table_row_height,
-};
+use crate::presentation::{PlotView, fit_controls_to_rows, stat_table, table_row_height};
 use crate::strip::StripHeader;
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 use rspice_results::waveform::RetainedTrace;
 use rspice_results::{analysis_result::AnalysisResult, optimization::history::OptimizationView};
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use std::collections::BTreeMap;
@@ -48,11 +46,7 @@ pub struct CandidateView<'a> {
 /// unit takes one, and none on a decibel or a percentage, which `500 mdB`
 /// would misstate. Full precision belongs to copy and export.
 fn value_text(value: f64, unit: &str, digits: usize) -> String {
-    if unit.starts_with("dB") || unit == "%" {
-        plain_readout(value, unit, digits)
-    } else {
-        fmt_si_readout(value, unit, digits)
-    }
+    fmt_si_significant(value, unit, digits)
 }
 
 /// A difference, signed so the direction reads at a glance, in the notation

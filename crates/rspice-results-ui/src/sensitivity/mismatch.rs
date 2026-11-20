@@ -89,7 +89,7 @@ fn exact_value(value: f64) -> String {
 /// The same figure in the output's own unit — a sigma is millivolts, not a
 /// bare number.
 fn quantity(value: f64, unit: &str) -> String {
-    rspice_ui_kit::plot::fmt_si_readout(value, unit, 4)
+    rspice_ui_kit::plot::fmt_si_significant(value, unit, 4)
 }
 
 fn percent(share: f64) -> String {

@@ -5,7 +5,7 @@ use rspice_results::engine_evidence::{
     QpnoiseValue, QpxfQuantity,
 };
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::fmt_si_readout;
+use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::widgets::measurement_table;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
@@ -14,7 +14,7 @@ const RANKED_CONTRIBUTORS: usize = 10;
 
 fn value(v: QpnoiseValue, unit: &str) -> String {
     match v {
-        QpnoiseValue::Finite(v) => fmt_si_readout(v, unit, 4),
+        QpnoiseValue::Finite(v) => fmt_si_significant(v, unit, 4),
         QpnoiseValue::Unavailable(why) => format!(
             "Unavailable: {}",
             match why {

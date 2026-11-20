@@ -479,15 +479,15 @@ const LOG_AXIS_DIGITS: usize = 4;
 fn at_resolution(value: f64, (low, high): (f64, f64), log: bool, unit: &str) -> String {
     let span = (high - low).abs();
     if log || !value.is_finite() || !(span.is_finite() && span > 0.0) {
-        return super::fmt_in_unit_readout(value, unit, LOG_AXIS_DIGITS);
+        return rspice_ui_kit::plot::fmt_si_significant(value, unit, LOG_AXIS_DIGITS);
     }
     let resolution = 10f64.powf(span.log10().floor() - 3.0);
     let snapped = (value / resolution).round() * resolution;
     if snapped == 0.0 {
-        return super::fmt_in_unit_readout(0.0, unit, 1);
+        return rspice_ui_kit::plot::fmt_si_significant(0.0, unit, 1);
     }
     let digits = snapped.abs().log10().floor() - resolution.log10().round() + 1.0;
-    super::fmt_in_unit_readout(snapped, unit, digits.max(1.0) as usize)
+    rspice_ui_kit::plot::fmt_si_significant(snapped, unit, digits.max(1.0) as usize)
 }
 
 /// The stroke of each member of a crowded family: the thinnest that draws.

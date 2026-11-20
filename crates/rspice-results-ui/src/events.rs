@@ -19,7 +19,7 @@ use rspice_results::{
 };
 use rspice_ui_kit::{
     panels::section_header,
-    plot::fmt_si_readout,
+    plot::fmt_si_significant,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{SegmentedWidth, chip, segmented},
@@ -42,7 +42,7 @@ pub struct EventNumbers {
 impl EventNumbers {
     /// `value` in `unit` at the reader's significant digits.
     fn shown(self, value: f64, unit: &str) -> String {
-        fmt_si_readout(value, unit, self.significant_digits)
+        fmt_si_significant(value, unit, self.significant_digits)
     }
 
     /// `value` in `unit` as Copied values writes it: every digit the double

@@ -7,9 +7,10 @@ use std::sync::Arc;
 use egui::Ui;
 
 use super::FftState;
-use crate::presentation::{PlotView, frequency_readout, plain_readout};
+use crate::presentation::{PlotView, frequency_readout};
 use crate::waves::ReadoutPolicy;
 use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -368,7 +369,7 @@ pub fn show(
             ),
             (
                 "level".to_owned(),
-                plain_readout(
+                fmt_si_significant(
                     presentation.cursor_sample(&model.frequency, &model.magnitude_db, x),
                     level_unit,
                     digits,
@@ -411,11 +412,11 @@ pub fn right_panel(
             frequency_readout(quantity_policy, v, digits)
         })
     };
-    let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| plain_readout(v, "dB", digits));
+    let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| fmt_si_significant(v, "dB", digits));
 
     let enob = analysis
         .sinad_db
-        .map(|sinad| plain_readout((sinad - 1.76) / 6.02, "bit", digits));
+        .map(|sinad| fmt_si_significant((sinad - 1.76) / 6.02, "bit", digits));
     let thd = analysis.thd_percent.map_or_else(
         || match analysis.harmonic_coverage {
             crate::fft::data::HarmonicCoverage::InsufficientBandwidth {
@@ -430,17 +431,17 @@ pub fn right_panel(
         |value| {
             format!(
                 "{} · {} harmonics",
-                plain_readout(value, "%", digits),
+                fmt_si_significant(value, "%", digits),
                 analysis.harmonics.len()
             )
         },
     );
     let amplitude = analysis.fundamental_db.map_or("—".to_owned(), |value| {
-        plain_readout(value, level_unit, digits)
+        fmt_si_significant(value, level_unit, digits)
     });
     let resolution_bandwidth = f(model.resolution_bandwidth);
     let noise_floor = match (analysis.noise_floor_db, analysis.fundamental_db) {
-        (Some(noise), Some(fundamental)) => plain_readout(noise - fundamental, "dBc", digits),
+        (Some(noise), Some(fundamental)) => fmt_si_significant(noise - fundamental, "dBc", digits),
         _ => "—".to_owned(),
     };
 
@@ -473,7 +474,7 @@ pub fn right_panel(
                         harmonic.order,
                         frequency_readout(quantity_policy, harmonic.frequency, digits)
                     ),
-                    plain_readout(harmonic.level_db - db0, "dBc", digits),
+                    fmt_si_significant(harmonic.level_db - db0, "dBc", digits),
                 )
             })
             .collect();

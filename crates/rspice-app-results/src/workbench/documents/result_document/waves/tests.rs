@@ -1004,7 +1004,10 @@ fn noise_input_units_use_current_density_without_a_second_si_prefix() {
     );
     assert_eq!(models[0].unit_panes()[0].unit, "nA/√Hz");
     assert!((models[0].traces[0].y[1] - 2.0).abs() < 1e-12);
-    assert_eq!(fmt_in_unit(2000.0, "nA/√Hz", 4), "2000 nA/√Hz");
+    assert_eq!(
+        rspice_results::number_format::fmt_si_significant(2000.0, "nA/√Hz", 4),
+        "2000 nA/√Hz"
+    );
 }
 
 #[test]

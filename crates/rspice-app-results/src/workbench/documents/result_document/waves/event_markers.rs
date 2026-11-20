@@ -55,7 +55,7 @@ pub(super) fn show_markers(
             cursor: cursors.a,
             cursor_b: cursors.b,
         },
-        &|t| rspice_results_ui::waves::fmt_in_unit_readout(t, &model.x_unit, digits),
+        &|t| rspice_results::number_format::fmt_si_significant(t, &model.x_unit, digits),
     );
     if let Some(t) = response.cursor_to {
         super::lanes::step_cursor(session, model.analysis_index, t);

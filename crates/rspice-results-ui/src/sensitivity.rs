@@ -115,7 +115,7 @@ fn exact_basis_label(result_mode: SensitivityResultMode) -> String {
         SensitivityResultMode::Ac { frequency_hz } => {
             format!(
                 "AC at {}",
-                rspice_ui_kit::plot::fmt_si_readout(frequency_hz, "Hz", 4)
+                rspice_ui_kit::plot::fmt_si_significant(frequency_hz, "Hz", 4)
             )
         }
     }
@@ -172,9 +172,9 @@ fn chart_scale(max_magnitude: f64, significant_digits: usize) -> String {
     format!("±{}", unitless(max_magnitude, significant_digits))
 }
 
-/// A unitless value in engineering notation, its prefix on the number.
+/// A unit-less value: plain digits, never a prefix.
 fn unitless(value: f64, significant_digits: usize) -> String {
-    rspice_ui_kit::plot::fmt_si_readout(value, "", significant_digits).replace(' ', "")
+    rspice_ui_kit::plot::fmt_si_significant(value, "", significant_digits)
 }
 
 /// The Value column, wide enough for any value at `significant_digits`: a

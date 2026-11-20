@@ -13,7 +13,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::panels::{
     panel_body, panel_inset, property_row_control_columns, property_row_height,
 };
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si, fmt_si_readout};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::source_revision::SourceRevision;
@@ -610,10 +610,10 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
     if let Some(moments) = model.moments {
         let mut rows = vec![
             ("N", moments.count.to_string(), false),
-            ("Mean", fmt_si_readout(moments.mean, "", 4), true),
-            ("Std dev", fmt_si_readout(moments.std_dev, "", 4), true),
-            ("Min", fmt_si_readout(moments.min, "", 4), false),
-            ("Max", fmt_si_readout(moments.max, "", 4), false),
+            ("Mean", fmt_si_significant(moments.mean, "", 4), true),
+            ("Std dev", fmt_si_significant(moments.std_dev, "", 4), true),
+            ("Min", fmt_si_significant(moments.min, "", 4), false),
+            ("Max", fmt_si_significant(moments.max, "", 4), false),
         ];
         let outside = histogram.underflow + histogram.overflow;
         if outside > 0 {
@@ -634,8 +634,8 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
                 MonteCarloMeanInterval::Available { lower, upper } => {
                     format!(
                         "{} to {}",
-                        fmt_si_readout(lower, "", 4),
-                        fmt_si_readout(upper, "", 4)
+                        fmt_si_significant(lower, "", 4),
+                        fmt_si_significant(upper, "", 4)
                     )
                 }
                 MonteCarloMeanInterval::InsufficientSamples => {

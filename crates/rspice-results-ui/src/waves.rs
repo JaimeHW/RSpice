@@ -10,7 +10,7 @@ use rspice_results::result_presentation::{
 };
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::plot::sample::SweepShape;
-use rspice_ui_kit::plot::{XScale, fmt_si_significant, fmt_significant};
+use rspice_ui_kit::plot::{XScale, fmt_si_significant};
 use std::sync::Arc;
 
 pub mod cache;
@@ -34,10 +34,10 @@ mod units;
 pub use projection::{
     AcDisplay, ProjectionOptions, build_models, family_color, matching_overlay_analysis,
 };
+pub use rspice_ui_kit::plot::format::unit_carries_its_decade;
 use units::signal_unit;
 pub use units::{
     NOISE_DENSITY_UNIT, analysis_default_unit, browser_signal_is_current, browser_signal_unit,
-    fmt_in_unit, fmt_in_unit_readout, unit_carries_its_decade,
 };
 
 /// How the host shows a result's name: the design's spelling of the name the
@@ -337,21 +337,9 @@ impl StripModel {
         &self.x_label
     }
 
-    /// An X value as a cursor column, a marker or a legend reads it: the
-    /// number a reader would write down, without the zeros that only pad it
-    /// out to the digit preference.
+    /// An X value as a cursor column, a marker, a legend and a table cell
+    /// read it.
     pub fn format_x(
-        &self,
-        x: f64,
-        significant_digits: usize,
-        quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
-    ) -> String {
-        units::as_readout(&self.format_x_exact(x, significant_digits, quantity_policy))
-    }
-
-    /// The same X value as a table column: every row padded to the same
-    /// digits, so the decimal points of a scrolling grid line up.
-    fn format_x_exact(
         &self,
         x: f64,
         significant_digits: usize,
@@ -374,29 +362,9 @@ impl StripModel {
         )
     }
 
-    /// One trace's value as a reader meets it in the chrome: the legend chip
-    /// beside its name, a cursor column, a measurement row, a marker.
-    ///
-    /// These are readouts, so they state the number and not the reader's
-    /// digit preference: `1.5 V`, never `1.500000 V`.
+    /// One trace's value as a reader meets it: the legend chip beside its
+    /// name, a cursor column, a measurement row, a marker, a table cell.
     pub fn format_trace_value(
-        &self,
-        trace: &StripTrace,
-        value: f64,
-        significant_digits: usize,
-        quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
-    ) -> String {
-        units::as_readout(&self.format_trace_sample(
-            trace,
-            value,
-            significant_digits,
-            quantity_policy,
-        ))
-    }
-
-    /// The same value as a table cell: padded to the reader's digits, which
-    /// is what keeps a column of right-aligned numbers readable.
-    fn format_trace_sample(
         &self,
         trace: &StripTrace,
         value: f64,
@@ -408,20 +376,22 @@ impl StripModel {
             // a value is named by the unit its own signal is measured in —
             // the same unit that decided which pane draws it.
             TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
-                fmt_in_unit(value, self.trace_unit(trace), significant_digits)
+                fmt_si_significant(value, self.trace_unit(trace), significant_digits)
             }
             TraceKind::MagnitudeDb => {
-                let suffix = if self.trace_unit(trace) == "dBc" {
-                    " dBc"
+                let unit = if self.trace_unit(trace) == "dBc" {
+                    "dBc"
                 } else {
-                    " dB"
+                    "dB"
                 };
-                fmt_significant(value, significant_digits, suffix)
+                fmt_si_significant(value, unit, significant_digits)
             }
             TraceKind::PhaseDeg => {
                 phase_sample(value.to_radians(), significant_digits, quantity_policy)
             }
-            TraceKind::NoiseDensity => fmt_in_unit(value, NOISE_DENSITY_UNIT, significant_digits),
+            TraceKind::NoiseDensity => {
+                fmt_si_significant(value, NOISE_DENSITY_UNIT, significant_digits)
+            }
         }
     }
 
@@ -626,7 +596,7 @@ impl StripModel {
             .and_then(|grid| grid.get(index).copied())
             .map_or_else(
                 || "—".to_owned(),
-                |x| self.format_x_exact(x, significant_digits, quantity_policy),
+                |x| self.format_x(x, significant_digits, quantity_policy),
             )
     }
 
@@ -644,7 +614,7 @@ impl StripModel {
     ) -> Option<String> {
         let trace = self.traces.get(trace_index)?;
         let value = trace.y.as_slice().get(sample).copied()?;
-        Some(self.format_trace_sample(trace, value, significant_digits, quantity_policy))
+        Some(self.format_trace_value(trace, value, significant_digits, quantity_policy))
     }
 
     /// Display name of one trace, for a column heading.
@@ -669,8 +639,8 @@ fn phase_sample(
 ) -> String {
     use rspice_vocabulary::quantity::AngleDisplay;
     match quantity_policy.angle_display {
-        AngleDisplay::Degrees => fmt_significant(radians.to_degrees(), significant_digits, " °"),
-        AngleDisplay::Radians => fmt_significant(radians, significant_digits, " rad"),
+        AngleDisplay::Degrees => fmt_si_significant(radians.to_degrees(), "°", significant_digits),
+        AngleDisplay::Radians => fmt_si_significant(radians, "rad", significant_digits),
     }
 }
 

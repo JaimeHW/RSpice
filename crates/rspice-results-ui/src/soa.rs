@@ -3,8 +3,7 @@
 use crate::{
     optimization::{mono, table_header},
     presentation::{
-        PlotView, fit_controls_to_rows, panel_note, plain_readout, stat_table, table_row_height,
-        well_hint,
+        PlotView, fit_controls_to_rows, panel_note, stat_table, table_row_height, well_hint,
     },
     strip::StripHeader,
 };
@@ -20,7 +19,7 @@ use rspice_results::{
 };
 use rspice_ui_kit::{
     panels::{elide_middle, section_header},
-    plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_readout},
+    plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_significant},
     tokens::Tokens,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -42,13 +41,13 @@ impl SoaNumbers {
     fn value(self, value: f64, unit: &str) -> String {
         if unit == "K" {
             let (scale, offset, shown) = self.quantity_policy.celsius_display_transform();
-            return plain_readout(
+            return fmt_si_significant(
                 (value - 273.15) * scale + offset,
                 shown,
                 self.significant_digits,
             );
         }
-        fmt_si_readout(value, unit, self.significant_digits)
+        fmt_si_significant(value, unit, self.significant_digits)
     }
 
     /// A difference of two values, such as a margin: a temperature
@@ -56,9 +55,9 @@ impl SoaNumbers {
     fn difference(self, value: f64, unit: &str) -> String {
         if unit == "K" {
             let (scale, _, shown) = self.quantity_policy.celsius_display_transform();
-            return plain_readout(value * scale, shown, self.significant_digits);
+            return fmt_si_significant(value * scale, shown, self.significant_digits);
         }
-        fmt_si_readout(value, unit, self.significant_digits)
+        fmt_si_significant(value, unit, self.significant_digits)
     }
 }
 

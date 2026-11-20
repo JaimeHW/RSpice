@@ -4,10 +4,10 @@ use rspice_results::{
     analysis_payload::AnalysisResultPayload, analysis_result::AnalysisResult,
     fft::spectrum::FftSpectrumEvidence,
 };
-use rspice_ui_kit::plot::{Axis, fmt_si, fmt_si_readout};
+use rspice_ui_kit::plot::{Axis, fmt_si, fmt_si_significant};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
-use crate::presentation::{frequency_readout, plain_readout};
+use crate::presentation::frequency_readout;
 
 /// Stems are one painted segment per coefficient, so they are drawn only for
 /// a spectrum short enough that the cost is bounded.
@@ -84,8 +84,8 @@ pub(super) fn inspector_rows(
             "Record",
             format!(
                 "{} … {}",
-                fmt_si_readout(spectrum.start_time_s, "s", digits),
-                fmt_si_readout(spectrum.stop_time_s, "s", digits)
+                fmt_si_significant(spectrum.start_time_s, "s", digits),
+                fmt_si_significant(spectrum.stop_time_s, "s", digits)
             ),
             false,
         ),
@@ -109,13 +109,29 @@ pub(super) fn inspector_rows(
     ));
     // A level takes no SI prefix: half a decibel is `0.5 dB`, not `500 mdB`.
     if let Some(metrics) = &spectrum.metrics {
-        rows.push(("THD", plain_readout(metrics.thd_db, "dB", digits), false));
-        rows.push(("SNDR", plain_readout(metrics.sndr_db, "dB", digits), false));
-        rows.push(("SNR", plain_readout(metrics.snr_db, "dB", digits), false));
-        rows.push(("SFDR", plain_readout(metrics.sfdr_db, "dB", digits), false));
+        rows.push((
+            "THD",
+            fmt_si_significant(metrics.thd_db, "dB", digits),
+            false,
+        ));
+        rows.push((
+            "SNDR",
+            fmt_si_significant(metrics.sndr_db, "dB", digits),
+            false,
+        ));
+        rows.push((
+            "SNR",
+            fmt_si_significant(metrics.snr_db, "dB", digits),
+            false,
+        ));
+        rows.push((
+            "SFDR",
+            fmt_si_significant(metrics.sfdr_db, "dB", digits),
+            false,
+        ));
         rows.push((
             "ENOB",
-            plain_readout(metrics.enob_bits, "bits", digits),
+            fmt_si_significant(metrics.enob_bits, "bits", digits),
             true,
         ));
     }
@@ -294,8 +310,8 @@ mod tests {
                 .map(|(_, value, _)| value)
                 .expect("row present")
         };
-        assert_eq!(value(4, "THD"), "-60.12 dB");
-        assert_eq!(value(6, "THD"), "-60.1235 dB");
+        assert_eq!(value(4, "THD"), "−60.12 dB");
+        assert_eq!(value(6, "THD"), "−60.1235 dB");
         assert_eq!(value(4, "SNDR"), "0.5 dB");
         assert_eq!(value(4, "SFDR"), "70 dB");
         assert_eq!(value(3, "ENOB"), "9.88 bits");

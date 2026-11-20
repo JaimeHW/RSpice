@@ -1138,7 +1138,7 @@ fn pane_expressions(
                 x,
                 cursor_interpolation(presentation.cursor_interpolation()),
             );
-            super::units::fmt_in_unit_readout(
+            rspice_ui_kit::plot::fmt_si_significant(
                 value,
                 pane.axis_unit(),
                 usize::from(presentation.displayed_significant_digits().get()),

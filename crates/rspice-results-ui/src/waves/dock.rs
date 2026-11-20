@@ -507,8 +507,9 @@ pub fn marker_section(
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                 .color(color)
         };
-        let format =
-            |value: f64| super::units::fmt_in_unit_readout(value, &pane.unit, significant_digits);
+        let format = |value: f64| {
+            rspice_ui_kit::plot::fmt_si_significant(value, &pane.unit, significant_digits)
+        };
         row_ui.label(mono(horizontal_pane_name(models, pane), c.text_dim));
         for (slot, color) in [(0, c.canvas_cursor_a), (1, c.canvas_cursor_b)] {
             if let Some(value) = cursors[slot] {
@@ -624,7 +625,7 @@ pub fn marker_section(
             .find(|model| model.analysis_key == entry.analysis);
         let marker_x = entry.position.unwrap_or_else(|seed| seed);
         let position = model.map_or_else(
-            || super::units::as_readout(&fmt_si_significant(marker_x, "", significant_digits)),
+            || fmt_si_significant(marker_x, "", significant_digits),
             |model| {
                 format!(
                     "{} = {}",

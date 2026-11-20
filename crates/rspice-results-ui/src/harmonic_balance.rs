@@ -6,7 +6,7 @@ use crate::waves::ReadoutPolicy;
 use egui::Ui;
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
@@ -233,7 +233,7 @@ pub fn show(
         for trace in model.traces.iter().take(3) {
             rows.push((
                 trace.name.clone(),
-                fmt_si_readout(
+                fmt_si_significant(
                     presentation.cursor_sample(&trace.frequency, &trace.magnitude, frequency),
                     "",
                     digits,
