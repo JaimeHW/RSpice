@@ -2603,10 +2603,11 @@ impl XspiceInstance {
     }
 
     /// The model call of [`Self::evaluate`] for a probe that writes only its
-    /// outputs. A failing call puts back the outputs alone, which by the
-    /// model's declaration is the whole of what it could have written; the
-    /// full-context backup an ordinary evaluation takes would restore the same
-    /// image at the cost of copying every part of the context.
+    /// outputs. A failing call puts back the outputs and drops the stamps it
+    /// queued, which by the model's declaration is the whole of what it could
+    /// have written; the full-context backup an ordinary evaluation takes
+    /// would restore the same image at the cost of copying every part of the
+    /// context.
     fn evaluate_output_only_probe(&mut self) -> CmResult<()> {
         let outputs_before_evaluate = self.context.capture_outputs();
         #[cfg(debug_assertions)]
@@ -2619,11 +2620,13 @@ impl XspiceInstance {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) => {
                 self.context.restore_outputs(outputs_before_evaluate);
+                self.context.clear_stamps();
                 self.port_context_solution_num_nodes = None;
                 Err(err)
             }
             Err(payload) => {
                 self.context.restore_outputs(outputs_before_evaluate);
+                self.context.clear_stamps();
                 Err(self.model_panic_error("evaluation", payload))
             }
         }

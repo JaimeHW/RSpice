@@ -3406,7 +3406,10 @@ impl CmContext {
     }
 
     /// Debug-build check of the [`super::CodeModel::probe_writes_only_outputs`]
-    /// contract: everything but the outputs is what `before` held.
+    /// contract: everything but the outputs and the deferred matrix stamps is
+    /// what `before` held. Those stamps are the one evaluation's scratch: every
+    /// evaluation starts them empty and the circuit drains them into its
+    /// matrix as soon as it returns.
     ///
     /// Copy-on-write maps are compared by identity: `before` shares each of
     /// them, so a write through this context would have copied the map it
@@ -3424,8 +3427,6 @@ impl CmContext {
             && self.requested_breakpoints == before.requested_breakpoints
             && self.requested_edge_completions == before.requested_edge_completions
             && self.requested_landings == before.requested_landings
-            && self.stamps == before.stamps
-            && self.rhs == before.rhs
             && self.static_stamps == before.static_stamps
             && self.static_rhs == before.static_rhs
             && same(&self.inputs, &before.inputs)

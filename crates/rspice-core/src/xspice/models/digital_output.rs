@@ -176,7 +176,14 @@ fn resistance_param(ctx: &CmContext, name: &str) -> CmResult<Value> {
     Ok(value.max(RESISTANCE_MIN))
 }
 
+/// The DIG card, read and checked once per instance setup
+/// ([`CmContext::prepared`]): every evaluation of every DIG model starts
+/// from it, so none looks its fifteen parameters up by name.
 fn dig_params(ctx: &CmContext) -> CmResult<DigParams> {
+    ctx.prepared(read_dig_params)
+}
+
+fn read_dig_params(ctx: &CmContext) -> CmResult<DigParams> {
     let params = DigParams {
         clo: capacitance_param(ctx, "clo")?,
         chi: capacitance_param(ctx, "chi")?,
@@ -1386,6 +1393,14 @@ impl CodeModel for XyceDGate {
         output_port.eq_ignore_ascii_case("out")
     }
 
+    /// A probe samples the inputs against the committed state, and every
+    /// state commit and breakpoint request it would make is held back to the
+    /// accepted evaluation; what it leaves is its matrix stamps and the
+    /// output's partial.
+    fn probe_writes_only_outputs(&self) -> bool {
+        true
+    }
+
     fn checkpoint_support(&self, _ctx: &CmContext) -> crate::xspice::XspiceCheckpointSupport {
         crate::xspice::XspiceCheckpointSupport::Serializable
     }
@@ -1845,6 +1860,12 @@ impl CodeModel for XyceDAdd {
 
     fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
         output_port.eq_ignore_ascii_case("sum") || output_port.eq_ignore_ascii_case("carry")
+    }
+
+    /// As for the gate: the probe's commits and breakpoints wait for the
+    /// accepted evaluation, so it leaves only stamps and output partials.
+    fn probe_writes_only_outputs(&self) -> bool {
+        true
     }
 
     fn checkpoint_support(&self, _ctx: &CmContext) -> crate::xspice::XspiceCheckpointSupport {

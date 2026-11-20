@@ -719,7 +719,9 @@ pub trait CodeModel: Send + Sync {
     }
 
     /// Whether a [`super::EvaluationPhase::RollbackableProbe`] evaluation of
-    /// this model writes nothing but its analog output values and partials.
+    /// this model writes nothing but its analog output values and partials
+    /// and its deferred matrix stamps, which every evaluation starts empty and
+    /// the circuit drains into its matrix as soon as the evaluation returns.
     ///
     /// Such a probe changes no state, integer state, event, breakpoint,
     /// history, transition or resource, and reads no output value the model
