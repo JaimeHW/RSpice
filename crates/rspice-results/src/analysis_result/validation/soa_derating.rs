@@ -5,12 +5,14 @@ use crate::safety::{
     soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
 
+/// The samples of the SOA trace `name`. A stored trace is read whole: the analysis holds its
+/// observation axis in memory, so a trace over it fits there too.
 pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
     analysis: &'a AnalysisResult<W>,
     name: &str,
     time: &[f64],
     unit: &str,
-) -> Result<&'a [f64], String> {
+) -> Result<std::borrow::Cow<'a, [f64]>, String> {
     if let Some(AnalysisResultPayload::Soa {
         source_history: Some(source),
         ..
@@ -26,7 +28,7 @@ pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
                 "SOA source trace '{name}' has invalid coverage or units"
             ));
         }
-        return Ok(&wave.values);
+        return Ok(std::borrow::Cow::Borrowed(&wave.values));
     }
     let wave = analysis
         .waveforms
@@ -35,7 +37,7 @@ pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
         .find(|wave| wave.name == name)
         .ok_or_else(|| format!("SOA derating is missing retained trace '{name}'"))?;
     if wave.y.len() != time.len()
-        || wave.x.as_slice() != time
+        || wave.x != *time
         || wave.unit.as_deref() != Some(unit)
         || wave.complex.is_some()
     {
@@ -43,7 +45,7 @@ pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
             "SOA derating trace '{name}' has an invalid axis, unit or sample coverage"
         ));
     }
-    Ok(&wave.y)
+    wave.y.read_whole().map_err(|failure| failure.to_string())
 }
 
 pub(super) fn validate<W: AsRef<RetainedWaveform>>(

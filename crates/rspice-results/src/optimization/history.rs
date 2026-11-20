@@ -53,9 +53,9 @@ impl OptimizationIndices {
             .enumerate()
             .find(|(_, waveform)| {
                 waveform.name == "OPT_COST"
-                    && waveform.x.as_slice() == iterations
+                    && waveform.x == *iterations
                     && waveform.y.len() == iterations.len()
-                    && waveform.y.iter().all(|value| value.is_finite())
+                    && waveform.y.samples(..).all(f64::is_finite)
             })?;
         let mut variables: Vec<_> = analysis
             .waveforms
@@ -65,9 +65,9 @@ impl OptimizationIndices {
             .filter_map(|(index, waveform)| {
                 let name = waveform.name.strip_prefix("OPT_")?;
                 (name != "COST"
-                    && waveform.x.as_slice() == iterations
+                    && waveform.x == *iterations
                     && waveform.y.len() == iterations.len()
-                    && waveform.y.iter().all(|value| value.is_finite()))
+                    && waveform.y.samples(..).all(f64::is_finite))
                 .then_some((name, index, waveform))
             })
             .collect();
@@ -84,11 +84,11 @@ impl OptimizationIndices {
             return None;
         }
         let best_index = (0..iterations.len()).find(|&index| {
-            cost.y[index].to_bits() == best_cost.to_bits()
+            cost.y.sample(index).map(f64::to_bits) == Some(best_cost.to_bits())
                 && variables.iter().all(|(name, _, waveform)| {
-                    best_variables
-                        .get(*name)
-                        .is_some_and(|best| waveform.y[index].to_bits() == best.to_bits())
+                    best_variables.get(*name).is_some_and(|best| {
+                        waveform.y.sample(index).map(f64::to_bits) == Some(best.to_bits())
+                    })
                 })
         })?;
         Some(OptimizationIndices {

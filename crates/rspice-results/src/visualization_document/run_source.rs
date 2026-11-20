@@ -476,14 +476,15 @@ pub fn figure_points(
     if let Some(tile) = y.tile_over(x, x0, x1, columns) {
         return Some(tile_points(tile, x0, x1));
     }
-    let first = x.partition_point(|&value| value < x0);
-    let end = x.partition_point(|&value| value <= x1);
-    let before = first.checked_sub(1).map(|row| (x[row], y[row]));
-    let after = (end < x.len()).then(|| (x[end], y[end]));
+    let first = x.partition_point(|value| value < x0);
+    let end = x.partition_point(|value| value <= x1);
+    let row = |row: usize| x.sample(row).zip(y.sample(row));
+    let before = first.checked_sub(1).and_then(row);
+    let after = (end < x.len()).then(|| row(end)).flatten();
     let tile = if end - first <= 2 * columns {
         crate::waveform::ColumnTile::Samples {
-            x: x[first..end].to_vec(),
-            y: y[first..end].to_vec(),
+            x: x.samples(first..end).collect(),
+            y: y.samples(first..end).collect(),
             before,
             after,
         }
@@ -492,10 +493,9 @@ pub fn figure_points(
         let mut max = vec![f64::NAN; columns];
         let mut touched = vec![false; columns];
         let scale = columns as f64 / (x1 - x0);
-        for row in first..end {
-            let column = (((x[row] - x0) * scale) as usize).min(columns - 1);
+        for (at, value) in x.samples(first..end).zip(y.samples(first..end)) {
+            let column = (((at - x0) * scale) as usize).min(columns - 1);
             touched[column] = true;
-            let value = y[row];
             if !value.is_nan() {
                 min[column] = if min[column].is_nan() {
                     value

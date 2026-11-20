@@ -33,7 +33,8 @@ impl<'a, W: OutputWaveform> Sources<'a, W> {
         evidence.validate_retained_traces(source.iter().map(|waveform| DcTraceView {
             name: &waveform.as_ref().name,
             unit: waveform.as_ref().unit.as_deref(),
-            x: &waveform.as_ref().x,
+            x: waveform.as_ref().x.in_memory(),
+            x_len: waveform.as_ref().x.len(),
             sample_count: waveform.as_ref().y.len(),
             complex: waveform.as_ref().complex.is_some(),
         }))?;

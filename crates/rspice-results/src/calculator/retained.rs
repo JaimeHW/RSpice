@@ -17,31 +17,44 @@ pub fn waveform_value(
     let invalid = |error: interpolation::InterpolationError| {
         EvaluationError::WaveformMismatch(error.to_string())
     };
-    interpolation::validate_samples(&waveform.x, &waveform.y).map_err(invalid)?;
+    let x = whole(&waveform.x)?;
     if let Some(complex) = &waveform.complex
         && !policy.is_legacy()
     {
-        interpolation::validate_samples(&waveform.x, &complex.real).map_err(invalid)?;
-        interpolation::validate_samples(&waveform.x, &complex.imag).map_err(invalid)?;
-        let y = complex
-            .real
+        let (real, imag) = (whole(&complex.real)?, whole(&complex.imag)?);
+        // The real samples are not read here: their check is of their length, which a slice of
+        // units of that length states without allocating.
+        interpolation::validate_samples(&x, &vec![(); waveform.y.len()]).map_err(invalid)?;
+        interpolation::validate_samples(&x, &real).map_err(invalid)?;
+        interpolation::validate_samples(&x, &imag).map_err(invalid)?;
+        let y = real
             .iter()
-            .zip(complex.imag.iter())
+            .zip(imag.iter())
             .map(|(&real, &imag)| hole(num_complex::Complex64::new(real, imag)))
             .collect();
         Ok(CalcValue::Complex(ComplexValue::Waveform(
-            waveform.x.to_vec(),
+            x.into_owned(),
             y,
         )))
     } else {
+        let y = whole(&waveform.y)?;
+        interpolation::validate_samples(&x, &y).map_err(invalid)?;
         if !policy.is_legacy() && waveform.name.starts_with('|') && waveform.name.ends_with('|') {
             return Err(EvaluationError::PhaseUnavailable(waveform.name.clone()));
         }
-        Ok(CalcValue::create_waveform(
-            waveform.x.to_vec(),
-            waveform.y.to_vec(),
-        ))
+        Ok(CalcValue::create_waveform(x.into_owned(), y.into_owned()))
     }
+}
+
+/// Every sample of an operand: an expression is evaluated over every sample of its operands at
+/// once, so a stored operand is read whole, and one larger than the loaded-results budget is
+/// refused with the reason.
+pub(crate) fn whole(
+    values: &crate::waveform::WaveformValues,
+) -> Result<std::borrow::Cow<'_, [f64]>, EvaluationError> {
+    values
+        .read_whole()
+        .map_err(|failure| EvaluationError::WaveformMismatch(failure.to_string()))
 }
 
 pub fn magnitude_value(
@@ -201,7 +214,7 @@ impl<'a, W: AsRef<RetainedWaveform>> WaveformsContext<'a, W> {
                         "{signal}@{dataset} has no X axis here to be read onto"
                     ))
                 })?;
-            let waveform = datasets.waveform_on(signal, dataset, &axis.x)?;
+            let waveform = datasets.waveform_on(signal, dataset, &whole(&axis.x)?)?;
             return waveform_value(&waveform, policy);
         }
         reject_unbound_dataset(dataset)?;
@@ -209,7 +222,7 @@ impl<'a, W: AsRef<RetainedWaveform>> WaveformsContext<'a, W> {
             "TIME" | "T" | "FREQ" | "FREQUENCY" => {
                 if let Some(wf) = self.waveforms.first().map(AsRef::as_ref) {
                     let wf = self.projected(wf)?;
-                    let x = wf.x.to_vec();
+                    let x = whole(&wf.x)?.into_owned();
                     let y = x.clone();
                     return Ok(CalcValue::create_waveform(x, y));
                 }
@@ -307,9 +320,16 @@ pub fn canonical_ground_value(
     }
     Some(
         axis.filter(|wave| !wave.x.is_empty())
-            .map(|wave| CalcValue::create_waveform(wave.x.to_vec(), vec![0.0; wave.x.len()]))
-            .ok_or_else(|| {
-                EvaluationError::IdentifierNotFound("V(0) has no retained analysis axis".to_owned())
+            .map(|wave| {
+                whole(&wave.x).map(|x| {
+                    let zeros = vec![0.0; x.len()];
+                    CalcValue::create_waveform(x.into_owned(), zeros)
+                })
+            })
+            .unwrap_or_else(|| {
+                Err(EvaluationError::IdentifierNotFound(
+                    "V(0) has no retained analysis axis".to_owned(),
+                ))
             }),
     )
 }

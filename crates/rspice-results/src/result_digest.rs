@@ -192,7 +192,11 @@ impl ResultDigestWriter {
             .stored_window()
             .and_then(|(source, window)| Some((source.identity()?, window)))
         else {
-            self.f64_slice(values);
+            // As `f64_slice` writes a slice, a block at a time.
+            self.sequence(values.len());
+            for value in values.samples(..) {
+                self.f64(value);
+            }
             return;
         };
         self.stored_identity(identity);

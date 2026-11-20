@@ -84,7 +84,7 @@ impl SweepShape {
         if x.is_ascending_axis() {
             Self::ascending(x.len())
         } else {
-            Self::of(x)
+            Self::of_samples(x.samples(..))
         }
     }
 
@@ -98,23 +98,71 @@ impl SweepShape {
     /// on, so no sample and no drawn segment is lost between them.
     #[must_use]
     pub fn of(x: &[f64]) -> Self {
+        Self::of_samples(x.iter().copied())
+    }
+
+    /// [`Self::of`] the samples `x` yields, in one pass that keeps none of them: a stored axis is
+    /// classified a block at a time.
+    #[must_use]
+    pub fn of_samples(x: impl IntoIterator<Item = f64>) -> Self {
+        let non_sweep = || Self {
+            class: SweepClass::NonSweep,
+            runs: Vec::new(),
+        };
         let mut runs: Vec<MonotoneRun> = Vec::new();
-        let mut index = 0usize;
-        while index < x.len() {
-            if !x[index].is_finite() {
-                index += 1;
+        // The open run of the finite segment being read: its start, its direction once a strict
+        // comparison has set it, and the sample before the current one.
+        let mut open: Option<(usize, Option<XOrientation>, f64)> = None;
+        let mut len = 0usize;
+        for (index, current) in x.into_iter().enumerate() {
+            len = index + 1;
+            if !current.is_finite() {
+                // A hole ends the segment and its open run.
+                if let Some((start, orientation, _)) = open.take()
+                    && !close_run(&mut runs, start, index, orientation)
+                {
+                    return non_sweep();
+                }
                 continue;
             }
-            let start = index;
-            while index < x.len() && x[index].is_finite() {
-                index += 1;
+            let Some((start, orientation, previous)) = open else {
+                open = Some((index, None, current));
+                continue;
+            };
+            if current == previous {
+                open = Some((start, orientation, current));
+                continue;
             }
-            if !segment_runs(x, start, index, &mut runs) {
-                return Self {
-                    class: SweepClass::NonSweep,
-                    runs: Vec::new(),
-                };
-            }
+            let direction = if current > previous {
+                XOrientation::Ascending
+            } else {
+                XOrientation::Descending
+            };
+            open = match orientation {
+                None => Some((start, Some(direction), current)),
+                Some(established) if established == direction => {
+                    Some((start, orientation, current))
+                }
+                Some(established) => {
+                    if runs.len() >= SHAPE_RUN_CAP {
+                        return non_sweep();
+                    }
+                    runs.push(MonotoneRun {
+                        start,
+                        end: index,
+                        orientation: established,
+                    });
+                    // The turnaround sample belongs to both branches: it is where one ends and
+                    // the other begins, and dropping it from either would open a gap in the
+                    // drawn curve.
+                    Some((index - 1, Some(direction), current))
+                }
+            };
+        }
+        if let Some((start, orientation, _)) = open
+            && !close_run(&mut runs, start, len, orientation)
+        {
+            return non_sweep();
         }
         let class = match runs.as_slice() {
             [] => SweepClass::Empty,
@@ -157,47 +205,20 @@ impl SweepShape {
     }
 }
 
-/// Split one all-finite segment into monotone runs, appending them to `runs`.
-/// Returns `false` once the run cap is passed, which makes the whole series a
-/// [`SweepClass::NonSweep`].
-fn segment_runs(x: &[f64], start: usize, end: usize, runs: &mut Vec<MonotoneRun>) -> bool {
-    let mut run_start = start;
-    let mut orientation: Option<XOrientation> = None;
-    for index in (start + 1)..end {
-        let (previous, current) = (x[index - 1], x[index]);
-        if current == previous {
-            continue;
-        }
-        let direction = if current > previous {
-            XOrientation::Ascending
-        } else {
-            XOrientation::Descending
-        };
-        match orientation {
-            None => orientation = Some(direction),
-            Some(established) if established == direction => {}
-            Some(established) => {
-                if runs.len() >= SHAPE_RUN_CAP {
-                    return false;
-                }
-                runs.push(MonotoneRun {
-                    start: run_start,
-                    end: index,
-                    orientation: established,
-                });
-                // The turnaround sample belongs to both branches: it is where
-                // one ends and the other begins, and dropping it from either
-                // would open a gap in the drawn curve.
-                run_start = index - 1;
-                orientation = Some(direction);
-            }
-        }
-    }
+/// Close the run `start .. end` of a finite segment, `orientation` being its direction if a
+/// strict comparison set one. Returns `false` once the run cap is passed, which makes the whole
+/// series a [`SweepClass::NonSweep`].
+fn close_run(
+    runs: &mut Vec<MonotoneRun>,
+    start: usize,
+    end: usize,
+    orientation: Option<XOrientation>,
+) -> bool {
     if runs.len() >= SHAPE_RUN_CAP {
         return false;
     }
     runs.push(MonotoneRun {
-        start: run_start,
+        start,
         end,
         // A flat segment has no direction to read; ascending is the identity
         // the rest of the engine already assumes.

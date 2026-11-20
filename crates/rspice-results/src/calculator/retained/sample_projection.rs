@@ -50,11 +50,7 @@ impl<'a> SampleProjection<'a> {
             )));
         }
         let select = |values: &SharedWaveformValues| -> SharedWaveformValues {
-            self.indices
-                .iter()
-                .map(|index| values[*index])
-                .collect::<Vec<_>>()
-                .into()
+            values.gather(&self.indices).into()
         };
         let mut projected = source.clone();
         projected.x = self
@@ -88,11 +84,11 @@ mod tests {
             .unwrap()
             .apply(&source)
             .unwrap();
-        assert_eq!(projected.x.as_slice(), &[0.0, 0.5]);
-        assert_eq!(projected.y.as_slice(), &[5.0, 25.0]);
+        assert_eq!(projected.x, [0.0, 0.5][..]);
+        assert_eq!(projected.y, [5.0, 25.0][..]);
         let complex = projected.complex.unwrap();
-        assert_eq!(complex.real.as_slice(), &[3.0, 7.0]);
-        assert_eq!(complex.imag.as_slice(), &[4.0, 24.0]);
+        assert_eq!(complex.real, [3.0, 7.0][..]);
+        assert_eq!(complex.imag, [4.0, 24.0][..]);
         assert_eq!(source, before);
     }
 

@@ -6,20 +6,16 @@ use super::*;
 fn overview_preserves_gaps_and_reuses_bounded_knots_until_source_changes() {
     let mut values = vec![1.0; 10_000];
     values[5011] = f64::NAN;
-    let wave = rspice_results::waveform::RetainedWaveform::new(
-        "gaps",
-        (0..10_000).map(f64::from).collect::<Vec<_>>(),
-        values,
-    );
+    let x = (0..10_000).map(f64::from).collect::<Vec<_>>();
     let mut cache = DerivedSeries::default();
     let mut builds = 0;
     for _ in 0..3 {
         let indices = cache.overview_indices_or(1, || {
             builds += 1;
-            wave.display_sample_indices(SHARED_X_OVERVIEW_POINTS)
+            rspice_results::waveform::display_sample_indices(&values, SHARED_X_OVERVIEW_POINTS)
         });
         assert!(indices.len() <= SHARED_X_OVERVIEW_POINTS);
-        let segments = overview_segments(&wave.x, &wave.y, &indices);
+        let segments = overview_segments(&x, &values, &indices);
         assert!(segments.len() >= 2);
         for segment in segments {
             for pair in segment.windows(2) {

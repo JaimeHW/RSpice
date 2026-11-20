@@ -219,7 +219,11 @@ fn three_pole_loop_recovers_margins_across_the_wrapped_phase_jump() {
     // to see through.
     let phase = summary.phase_deg.as_ref().expect("phase trace");
     assert!(
-        phase.windows(2).any(|w| (w[1] - w[0]).abs() > 180.0),
+        phase
+            .in_memory()
+            .unwrap()
+            .windows(2)
+            .any(|w| (w[1] - w[0]).abs() > 180.0),
         "the oracle trace must contain a wrapped jump"
     );
     let metrics = summary.metrics;
@@ -619,7 +623,7 @@ fn stb_summary_preserves_retained_decibels_without_double_conversion() {
     let summary = summary(&analysis, 4).expect("STB summary");
 
     assert_eq!(summary.signal, "Loop Gain");
-    assert_eq!(summary.gain_db.as_slice(), &[40.0, 0.0, -20.0]);
+    assert_eq!(summary.gain_db, [40.0, 0.0, -20.0][..]);
     assert_close(summary.metrics.adc_db, 40.0);
     assert_close(summary.metrics.ugf, 10.0);
     assert_close(summary.metrics.pm_deg, 45.0);
@@ -652,8 +656,8 @@ fn stb_segment_selection_never_pairs_across_an_undefined_sample() {
         assert!(summary.signal.ends_with(&suffix));
         assert_eq!(summary.frequency.len(), 1);
         assert_eq!(
-            summary.phase_deg.unwrap().as_slice(),
-            if segment == 1 { &[0.0] } else { &[-90.0] }
+            summary.phase_deg.unwrap(),
+            if segment == 1 { [0.0] } else { [-90.0] }[..]
         );
     }
     assert_eq!(

@@ -586,7 +586,8 @@ impl EngineBridge {
                 waveforms.values().map(|trace| DcTraceView {
                     name: &trace.name,
                     unit: Some(&trace.y_unit),
-                    x: &trace.x_values,
+                    x: trace.x_values.in_memory(),
+                    x_len: trace.x_values.len(),
                     sample_count: trace.y_values.len(),
                     complex: trace.is_complex || trace.y_imag.is_some(),
                 }),

@@ -1,18 +1,16 @@
 //! A waveform's samples: in memory, or a window of a column a results store holds.
 //!
-//! A transient written to a results store keeps its samples on disk. Its waveforms hold a window
-//! of each stored column instead of the values, and read the window the first time something asks
-//! for the values: every clone shares that one read, and a reader that asks only how many samples
-//! there are reads nothing. A column stored in memory is shared the same way, so a run's axis is
-//! one allocation however many waveforms share it.
-//!
-//! What a plot needs of a stored window never reads it whole: its tile of a view (per pixel, the
-//! least and greatest value of the rows in it), the rows around a cursor, its extent, and the ends
-//! of a time axis come from the store's summaries and the few rows they name.
+//! An analysis written to a results store keeps its samples on disk. Its waveforms hold a window
+//! of each stored column instead of the values, and nothing ever reads a window whole and keeps
+//! it: a reader asks for a range, a pass a block at a time, a sample, a tile of a view (per pixel,
+//! the least and greatest value of the rows in it), the rows around a cursor, its extent or its
+//! ends, which come from the store's summaries and the few rows they name. A run larger than
+//! memory is read the same way. A column held in memory is shared by its clones, so a run's axis
+//! is one allocation however many waveforms share it.
 
 use std::borrow::Cow;
 use std::fmt;
-use std::ops::{Deref, Range};
+use std::ops::{Bound, Range, RangeBounds};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// A column of samples kept outside memory and read on demand: one signal of a run in a results
@@ -218,12 +216,26 @@ pub fn take_column_read_failures() -> Vec<ColumnReadFailure> {
     )
 }
 
+/// Samples a pass over a stored window reads at a time: 64 Ki samples, half a mebibyte.
+pub const BLOCK_SAMPLES: usize = 1 << 16;
+
+/// The most bytes [`WaveformValues::read_whole`] reads of a stored window: the loaded-results
+/// budget, 1 GiB until the host sets its own.
+static WHOLE_READ_BUDGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 30);
+
+/// Refuse a whole read of a stored window larger than `bytes`: the host's loaded-results budget.
+pub fn set_whole_read_budget(bytes: u64) {
+    WHOLE_READ_BUDGET.store(bytes, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// A waveform's samples.
 ///
-/// It dereferences to the values, reading a stored window the first time; a window that cannot
-/// be read shows as unavailable samples (NaN) and its failure goes to
-/// [`take_column_read_failures`]. [`Self::try_values`] returns the failure instead, and
-/// [`Self::len`] never reads.
+/// Samples held in memory are one slice ([`Self::in_memory`]). A stored window is never read
+/// whole and kept: a reader asks for what it needs of it (a range with [`Self::read_range`], a
+/// pass a block at a time with [`Self::blocks`] or [`Self::samples`], one sample, a tile, the
+/// value at an x, its extent or its ends) and keeps what it read itself. A window that cannot be
+/// read shows as unavailable samples (NaN) to a reader that takes no failure, and its failure
+/// goes to [`take_column_read_failures`] once. [`Self::len`] never reads.
 #[derive(Clone)]
 pub struct WaveformValues(Repr);
 
@@ -236,12 +248,13 @@ enum Repr {
 struct Stored {
     source: Arc<dyn ColumnSource>,
     window: StoredWindow,
-    values: OnceLock<Vec<f64>>,
     failure: OnceLock<ColumnReadFailure>,
     /// The value an interpolated lead holds, read once.
     lead_value: OnceLock<f64>,
     /// The first and last sample, read once.
     ends: OnceLock<Option<(f64, f64)>>,
+    /// The whole window, for the transitional slice view alone.
+    kept: OnceLock<Vec<f64>>,
 }
 
 impl Stored {
@@ -250,44 +263,6 @@ impl Stored {
         // the host cannot address could not have been written by it.
         usize::try_from(self.window.rows).unwrap_or(usize::MAX)
             + usize::from(self.window.lead != WindowLead::None)
-    }
-
-    fn read(&self) -> Result<Vec<f64>, ColumnReadFailure> {
-        column_work::whole_read();
-        let StoredWindow { first, rows, lead } = self.window;
-        let failed = |cause: String| ColumnReadFailure {
-            column: self.source.name().to_owned(),
-            store: self.source.store(),
-            cause,
-        };
-        let rows = usize::try_from(rows)
-            .map_err(|_| failed("the window holds more rows than this host can address".into()))?;
-        let mut values = vec![0.0; self.len()];
-        match lead {
-            WindowLead::None => self.source.read(first, &mut values).map_err(failed)?,
-            WindowLead::Value(value) => {
-                values[0] = value;
-                self.source.read(first, &mut values[1..]).map_err(failed)?;
-            }
-            WindowLead::Interpolated(fraction) => {
-                // The row before the first sits where the lead goes; it is replaced by the value
-                // between it and the first, with the arithmetic the in-memory window uses.
-                self.source.read(first - 1, &mut values).map_err(failed)?;
-                if rows > 0 {
-                    values[0] += fraction * (values[1] - values[0]);
-                }
-            }
-        }
-        Ok(values)
-    }
-
-    fn values(&self) -> &Vec<f64> {
-        self.values.get_or_init(|| {
-            self.read().unwrap_or_else(|failure| {
-                self.fail(failure);
-                vec![f64::NAN; self.len()]
-            })
-        })
     }
 
     /// Keep the window's first failure, and hand it to diagnostics once.
@@ -319,8 +294,8 @@ impl Stored {
             WindowLead::None => None,
             WindowLead::Value(value) => Some(value),
             WindowLead::Interpolated(fraction) => Some(*self.lead_value.get_or_init(|| {
-                // As [`Self::read`] makes it: the row before the first, moved `fraction` of the
-                // way to the first.
+                // The row before the first, moved `fraction` of the way to the first, with the
+                // arithmetic the in-memory window uses.
                 let count = if self.window.rows > 0 { 2 } else { 1 };
                 let mut pair = [0.0; 2];
                 match self.source.read(self.window.first - 1, &mut pair[..count]) {
@@ -335,12 +310,37 @@ impl Stored {
         }
     }
 
+    /// Read samples `start .. start + out.len()` of the window into `out`.
+    fn read_into(&self, start: usize, out: &mut [f64]) -> Result<(), ColumnReadFailure> {
+        if let Some(failure) = self.failure.get() {
+            return Err(failure.clone());
+        }
+        if out.is_empty() {
+            return Ok(());
+        }
+        let lead = usize::from(self.window.lead != WindowLead::None);
+        let skip = usize::from(start < lead);
+        if skip == 1 {
+            out[0] = self.lead().unwrap_or(f64::NAN);
+            if let Some(failure) = self.failure.get() {
+                return Err(failure.clone());
+            }
+            if out.len() == 1 {
+                return Ok(());
+            }
+        }
+        let first = self.window.first + (start + skip - lead) as u64;
+        if let Err(cause) = self.source.read(first, &mut out[skip..]) {
+            let failure = self.failed(cause);
+            self.fail(failure.clone());
+            return Err(failure);
+        }
+        Ok(())
+    }
+
     /// The first and last sample, reading only those.
     fn ends(&self) -> Option<(f64, f64)> {
         *self.ends.get_or_init(|| {
-            if let Some(values) = self.values.get() {
-                return Some((*values.first()?, *values.last()?));
-            }
             let row = |row: u64| {
                 let mut value = [0.0];
                 match self.source.read(row, &mut value) {
@@ -407,56 +407,6 @@ impl Stored {
         let (x, y): (Vec<f64>, Vec<f64>) = rows.into_iter().unzip();
         Some(crate::sampling::sample_at_with(&x, &y, at, interpolation))
     }
-
-    /// Samples `range` of the window: from its values when something has read them, otherwise
-    /// read from the source for this caller alone and not kept.
-    fn read_range(&self, range: Range<usize>) -> Result<Cow<'_, [f64]>, ColumnReadFailure> {
-        assert!(
-            range.start <= range.end && range.end <= self.len(),
-            "samples {range:?} of a window of {}",
-            self.len()
-        );
-        if let Some(values) = self.values.get() {
-            return Ok(Cow::Borrowed(&values[range]));
-        }
-        if let Some(failure) = self.failure.get() {
-            return Err(failure.clone());
-        }
-        if range.is_empty() {
-            return Ok(Cow::Borrowed(&[]));
-        }
-        if range.len() == self.len() {
-            column_work::whole_read();
-        }
-        let lead = usize::from(self.window.lead != WindowLead::None);
-        let mut out = vec![0.0; range.len()];
-        let skip = usize::from(range.start < lead);
-        if skip == 1 {
-            out[0] = self.lead().unwrap_or(f64::NAN);
-            if let Some(failure) = self.failure.get() {
-                return Err(failure.clone());
-            }
-        }
-        let first = self.window.first + (range.start + skip - lead) as u64;
-        if let Err(cause) = self.source.read(first, &mut out[skip..]) {
-            let failure = self.failed(cause);
-            self.fail(failure.clone());
-            return Err(failure);
-        }
-        Ok(Cow::Owned(out))
-    }
-
-    fn try_values(&self) -> Result<&Vec<f64>, ColumnReadFailure> {
-        if let Some(failure) = self.failure.get() {
-            return Err(failure.clone());
-        }
-        if let Some(values) = self.values.get() {
-            return Ok(values);
-        }
-        let read = self.read()?;
-        // Another reader may have read it first; both read the same rows.
-        Ok(self.values.get_or_init(|| read))
-    }
 }
 
 impl WaveformValues {
@@ -482,10 +432,10 @@ impl WaveformValues {
         Ok(Self(Repr::Stored(Arc::new(Stored {
             source,
             window,
-            values: OnceLock::new(),
             failure: OnceLock::new(),
             lead_value: OnceLock::new(),
             ends: OnceLock::new(),
+            kept: OnceLock::new(),
         }))))
     }
 
@@ -529,6 +479,208 @@ impl WaveformValues {
         }
     }
 
+    /// The samples, when they are held in memory: one slice. A stored window has none; it is
+    /// read by range, block, sample, tile or point.
+    pub fn in_memory(&self) -> Option<&[f64]> {
+        match &self.0 {
+            Repr::Memory(values) => {
+                column_work::view(self);
+                Some(values)
+            }
+            Repr::Stored(_) => None,
+        }
+    }
+
+    /// Sample `index`: from memory, or that one row of a stored window, which reads NaN when the
+    /// window cannot be read. `None` past the last sample.
+    pub fn sample(&self, index: usize) -> Option<f64> {
+        if index >= self.len() {
+            return None;
+        }
+        Some(match &self.0 {
+            Repr::Memory(values) => values[index],
+            Repr::Stored(stored) => {
+                let mut value = [0.0];
+                match stored.read_into(index, &mut value) {
+                    Ok(()) => value[0],
+                    Err(_) => f64::NAN,
+                }
+            }
+        })
+    }
+
+    /// Samples `range`: borrowed from memory, or read from a stored window for this caller
+    /// alone and not kept. A range larger than memory can hold is refused, not aborted on; a
+    /// reader of a long window reads it a block at a time instead ([`Self::blocks`]).
+    pub fn read_range(&self, range: Range<usize>) -> Result<Cow<'_, [f64]>, ColumnReadFailure> {
+        assert!(
+            range.start <= range.end && range.end <= self.len(),
+            "samples {range:?} of a window of {}",
+            self.len()
+        );
+        match &self.0 {
+            Repr::Memory(values) => Ok(Cow::Borrowed(&values[range])),
+            Repr::Stored(stored) => {
+                if range.len() == self.len() && range.len() > 1 {
+                    column_work::whole_read();
+                }
+                let mut out = Vec::new();
+                out.try_reserve_exact(range.len()).map_err(|_| {
+                    stored.failed(format!(
+                        "{} samples do not fit in this process's memory",
+                        range.len()
+                    ))
+                })?;
+                out.resize(range.len(), 0.0);
+                stored.read_into(range.start, &mut out)?;
+                Ok(Cow::Owned(out))
+            }
+        }
+    }
+
+    /// Every sample at once, for a computation over a whole sweep that needs them together (a
+    /// network matrix, a margin search, a spectrum of a small sweep): borrowed from memory, or a
+    /// stored window read for this caller alone and kept by no one. A stored window larger than
+    /// the loaded-results budget ([`set_whole_read_budget`]) is refused with a typed failure; a
+    /// reader of a long window reads it by range, block, tile or point instead.
+    pub fn read_whole(&self) -> Result<Cow<'_, [f64]>, ColumnReadFailure> {
+        if let Repr::Stored(stored) = &self.0 {
+            let bytes = (self.len() as u64).saturating_mul(8);
+            let budget = WHOLE_READ_BUDGET.load(std::sync::atomic::Ordering::Relaxed);
+            if bytes > budget {
+                return Err(stored.failed(format!(
+                    "its {} samples ({bytes} bytes) are more than the {budget} bytes the loaded                      results may hold: read it by window",
+                    self.len()
+                )));
+            }
+        }
+        self.read_range(0..self.len())
+    }
+
+    /// Samples `range` a block at a time: one slice of memory, or blocks of at most
+    /// [`BLOCK_SAMPLES`] read from a stored window and kept by no one, so a pass over a window
+    /// of any length holds one block. A block that cannot be read ends the pass with its
+    /// failure.
+    pub fn blocks(&self, range: impl RangeBounds<usize>) -> Blocks<'_> {
+        let range = self.bounds(range);
+        assert!(
+            range.start <= range.end && range.end <= self.len(),
+            "samples {range:?} of a window of {}",
+            self.len()
+        );
+        if range.len() == self.len() && range.len() > 1 {
+            match &self.0 {
+                Repr::Memory(_) => column_work::view(self),
+                Repr::Stored(_) => column_work::pass(),
+            }
+        }
+        Blocks {
+            values: self,
+            next: range.start,
+            end: range.end,
+            failed: false,
+        }
+    }
+
+    /// Each sample of `range` in order, read as [`Self::blocks`] reads them. The samples of a
+    /// stored window that cannot be read are unavailable (NaN), and its failure goes to
+    /// [`take_column_read_failures`] once.
+    pub fn samples(&self, range: impl RangeBounds<usize>) -> Samples<'_> {
+        let range = self.bounds(range);
+        let remaining = range.len();
+        Samples {
+            blocks: self.blocks(range),
+            block: Cow::Borrowed(&[]),
+            at: 0,
+            remaining,
+        }
+    }
+
+    /// Whether both hold the same samples, an unavailable sample being the same absence as
+    /// another: compared without reading when both are the same samples, otherwise a block at a
+    /// time.
+    pub fn same_samples(&self, other: &Self) -> bool {
+        Self::ptr_eq(self, other)
+            || (self.len() == other.len()
+                && self
+                    .samples(..)
+                    .zip(other.samples(..))
+                    .all(|(left, right)| left == right || (left.is_nan() && right.is_nan())))
+    }
+
+    /// The index of the first sample for which `before` is false, the samples being partitioned
+    /// by it (every sample it holds for comes first), as [`slice::partition_point`] finds it: by
+    /// bisection, which reads one row of a stored window per step.
+    pub fn partition_point(&self, mut before: impl FnMut(f64) -> bool) -> usize {
+        if let Repr::Memory(values) = &self.0 {
+            return values.partition_point(|value| before(*value));
+        }
+        let (mut low, mut high) = (0, self.len());
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if self.sample(middle).is_some_and(&mut before) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        low
+    }
+
+    /// The samples at `indices`, in their order: from memory, or each run of consecutive
+    /// indices read as one range of a stored window, whose unreadable samples are NaN.
+    ///
+    /// # Panics
+    ///
+    /// When an index is past the last sample.
+    pub fn gather(&self, indices: &[usize]) -> Vec<f64> {
+        if let Repr::Memory(values) = &self.0 {
+            return indices.iter().map(|&index| values[index]).collect();
+        }
+        let mut out = Vec::with_capacity(indices.len());
+        let mut rest = indices;
+        while let Some(&start) = rest.first() {
+            let run = rest
+                .iter()
+                .enumerate()
+                .take_while(|&(offset, &index)| index == start + offset)
+                .count()
+                .min(BLOCK_SAMPLES);
+            match self.read_range(start..start + run) {
+                Ok(samples) => out.extend_from_slice(&samples),
+                Err(_) => out.extend(std::iter::repeat_n(f64::NAN, run)),
+            }
+            rest = &rest[run..];
+        }
+        out
+    }
+
+    /// Whether each sample is greater than the one before: a stored axis its run checked says
+    /// so without being read; anything else is passed over a block at a time.
+    pub fn ascends_strictly(&self) -> bool {
+        self.is_ascending_axis() || pairs_all(self.samples(..), |before, after| before < after)
+    }
+
+    /// Whether no sample is less than the one before, passed over a block at a time.
+    pub fn ascends(&self) -> bool {
+        self.is_ascending_axis() || pairs_all(self.samples(..), |before, after| before <= after)
+    }
+
+    /// `range` as the indices it names of these samples.
+    fn bounds(&self, range: impl RangeBounds<usize>) -> Range<usize> {
+        let start = match range.start_bound() {
+            Bound::Included(&start) => start,
+            Bound::Excluded(&start) => start + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&end) => end + 1,
+            Bound::Excluded(&end) => end,
+            Bound::Unbounded => self.len(),
+        };
+        start..end
+    }
+
     /// The stored window these samples are, and the abscissa of its lead, when `x` is the window
     /// of its run's axis over the same rows.
     fn stored_against(&self, x: &Self) -> Option<(&Stored, Option<f64>)> {
@@ -547,9 +699,8 @@ impl WaveformValues {
 
     /// The tile of these samples over x in `x0 ..= x1` at `pixels` pixels, `x` being their run's
     /// axis over the same rows: read from the store's summaries, never the whole window. `None`
-    /// when they are not such a window of a column that can tile; read the values instead. A
-    /// window that cannot be read tiles as no rows, and its failure goes to
-    /// [`take_column_read_failures`] once.
+    /// when they are not such a window of a column that can tile. A window that cannot be read
+    /// tiles as no rows, and its failure goes to [`take_column_read_failures`] once.
     pub fn tile_over(&self, x: &Self, x0: f64, x1: f64, pixels: usize) -> Option<ColumnTile> {
         if pixels == 0 || !(x0.is_finite() && x1.is_finite() && x0 <= x1) {
             return None;
@@ -558,10 +709,109 @@ impl WaveformValues {
         stored.tile(lead_x, x0, x1, pixels)
     }
 
+    /// [`Self::tile_over`] on a decade axis: `pixels` pixels evenly spaced in log10 x over
+    /// `x0 ..= x1`, both positive. An envelope's pixel `i` spans log10 x from
+    /// `log10(x0) + i * w` to `log10(x0) + (i + 1) * w`, `w` being the view's decades over
+    /// `pixels`. Each decade is read as one linear tile fine enough that no log pixel in it is
+    /// narrower than its pixels, and folded into the log pixels, so a view reads a few tiles of
+    /// the store's summaries however long the run. A view whose rows all come back as rows is
+    /// those rows. `None` when these samples cannot tile.
+    pub fn log_tile_over(&self, x: &Self, x0: f64, x1: f64, pixels: usize) -> Option<ColumnTile> {
+        if pixels == 0 || !(x0 > 0.0 && x1.is_finite() && x0 < x1) {
+            return None;
+        }
+        let (stored, lead_x) = self.stored_against(x)?;
+        let (l0, l1) = (x0.log10(), x1.log10());
+        let width = (l1 - l0) / pixels as f64;
+        let mut min = vec![f64::NAN; pixels];
+        let mut max = vec![f64::NAN; pixels];
+        let mut touched = vec![false; pixels];
+        let take = |at: f64, value: f64, touched: &mut [bool], min: &mut [f64], max: &mut [f64]| {
+            if !(at >= x0 && at <= x1) {
+                return;
+            }
+            let pixel = (((at.log10() - l0) / width) as usize).min(pixels - 1);
+            touched[pixel] = true;
+            if !value.is_nan() {
+                min[pixel] = if min[pixel] <= value {
+                    min[pixel]
+                } else {
+                    value
+                };
+                max[pixel] = if max[pixel] >= value {
+                    max[pixel]
+                } else {
+                    value
+                };
+            }
+        };
+        let mut rows: Option<(Vec<f64>, Vec<f64>)> = Some((Vec::new(), Vec::new()));
+        let (mut before, mut after) = (None, None);
+        let mut start = l0;
+        let mut first_span = true;
+        while start < l1 {
+            let end = (start.floor() + 1.0).min(l1);
+            let (a, b) = (10f64.powf(start), 10f64.powf(end));
+            // The narrowest log pixel of the span is its first; a linear tile with pixels no
+            // wider than it resolves every log pixel the span holds.
+            let narrowest = a * (10f64.powf(width) - 1.0);
+            let linear = (((b - a) / narrowest).ceil() as usize).clamp(1, 64 * pixels);
+            match stored.tile(lead_x, a, b, linear)? {
+                ColumnTile::Samples {
+                    x: xs,
+                    y: ys,
+                    before: span_before,
+                    after: span_after,
+                } => {
+                    if first_span {
+                        before = span_before;
+                    }
+                    after = span_after;
+                    for (&at, &value) in xs.iter().zip(&ys) {
+                        take(at, value, &mut touched, &mut min, &mut max);
+                    }
+                    if let Some((all_x, all_y)) = &mut rows {
+                        // Neighbouring decades share their edge row; it is kept once.
+                        let shared = xs.first().zip(ys.first()).is_some_and(|(at, value)| {
+                            all_x.last() == Some(at) && all_y.last() == Some(value)
+                        });
+                        let skip = usize::from(shared);
+                        all_x.extend_from_slice(&xs[skip..]);
+                        all_y.extend_from_slice(&ys[skip..]);
+                    }
+                }
+                ColumnTile::Envelope {
+                    min: span_min,
+                    max: span_max,
+                    touched: span_touched,
+                } => {
+                    rows = None;
+                    let linear_width = (b - a) / span_min.len() as f64;
+                    for pixel in (0..span_min.len()).filter(|&pixel| span_touched[pixel]) {
+                        let at = a + (pixel as f64 + 0.5) * linear_width;
+                        take(at, span_min[pixel], &mut touched, &mut min, &mut max);
+                        take(at, span_max[pixel], &mut touched, &mut min, &mut max);
+                    }
+                }
+            }
+            start = end;
+            first_span = false;
+        }
+        Some(match rows {
+            Some((x, y)) => ColumnTile::Samples {
+                x,
+                y,
+                before,
+                after,
+            },
+            None => ColumnTile::Envelope { min, max, touched },
+        })
+    }
+
     /// The value at `at` by `interpolation`, as [`crate::sampling::sample_at_with`] reads it
     /// from the whole series, from the few rows around `at` alone, `x` being their run's axis
-    /// over the same rows. `None` when these samples are not such a window; read the values
-    /// instead. A window that cannot be read reads NaN.
+    /// over the same rows. `None` when these samples are not such a window. A window that cannot
+    /// be read reads NaN.
     pub fn value_at(
         &self,
         x: &Self,
@@ -605,49 +855,25 @@ impl WaveformValues {
         Some(extent)
     }
 
-    /// The values, read from a stored window the first time, or why it could not be read.
-    pub fn try_values(&self) -> Result<&Vec<f64>, ColumnReadFailure> {
-        column_work::view(self);
-        match &self.0 {
-            Repr::Memory(values) => Ok(values),
-            Repr::Stored(stored) => stored.try_values(),
-        }
-    }
-
-    /// Samples `range`, without keeping a stored window in memory: a pass over a long window
-    /// reads it a block at a time. A window something has already read gives its values.
-    pub fn read_range(&self, range: Range<usize>) -> Result<Cow<'_, [f64]>, ColumnReadFailure> {
-        if range.len() == self.len() && range.len() > 1 {
-            column_work::view(self);
-        }
-        match &self.0 {
-            Repr::Memory(values) => Ok(Cow::Borrowed(&values[range])),
-            Repr::Stored(stored) => stored.read_range(range),
-        }
-    }
-
-    /// The values to change, held in memory from now on.
+    /// The values to change, held in memory from now on. A stored window is copied into memory
+    /// a block at a time, as an edit of its samples needs; its unreadable samples are NaN.
     pub fn make_mut(&mut self) -> &mut Vec<f64> {
-        if let Repr::Stored(stored) = &self.0 {
-            self.0 = Repr::Memory(Arc::new(stored.values().clone()));
+        if self.is_stored() {
+            let copied: Vec<f64> = self.samples(..).collect();
+            self.0 = Repr::Memory(Arc::new(copied));
         }
         match &mut self.0 {
             Repr::Memory(values) => Arc::make_mut(values),
-            Repr::Stored(_) => unreachable!("a stored window was just read into memory"),
+            Repr::Stored(_) => unreachable!("a stored window was just copied into memory"),
         }
     }
 
-    /// The values, moved out when nothing else shares them.
+    /// The samples, moved out when they are held in memory and nothing else shares them, copied
+    /// otherwise; a stored window is copied a block at a time, its unreadable samples NaN.
     pub fn into_vec(self) -> Vec<f64> {
         match self.0 {
             Repr::Memory(values) => Arc::unwrap_or_clone(values),
-            Repr::Stored(stored) => match Arc::try_unwrap(stored) {
-                Ok(stored) => {
-                    stored.values();
-                    stored.values.into_inner().unwrap_or_default()
-                }
-                Err(shared) => shared.values().clone(),
-            },
+            Repr::Stored(_) => self.samples(..).collect(),
         }
     }
 
@@ -660,27 +886,115 @@ impl WaveformValues {
                 Arc::ptr_eq(left, right)
                     || (std::ptr::addr_eq(Arc::as_ptr(&left.source), Arc::as_ptr(&right.source))
                         && left.window == right.window)
+                    || (left.window == right.window
+                        && left
+                            .source
+                            .identity()
+                            .is_some_and(|identity| right.source.identity() == Some(identity)))
             }
             _ => false,
         }
     }
 }
 
-impl Deref for WaveformValues {
-    type Target = Vec<f64>;
+/// Whether `holds` holds for each consecutive pair of `samples`.
+fn pairs_all(mut samples: impl Iterator<Item = f64>, holds: impl Fn(f64, f64) -> bool) -> bool {
+    let Some(mut before) = samples.next() else {
+        return true;
+    };
+    samples.all(|after| {
+        let held = holds(before, after);
+        before = after;
+        held
+    })
+}
 
-    fn deref(&self) -> &Vec<f64> {
-        column_work::view(self);
-        match &self.0 {
-            Repr::Memory(values) => values,
-            Repr::Stored(stored) => stored.values(),
+/// A pass over samples a block at a time: [`WaveformValues::blocks`].
+pub struct Blocks<'a> {
+    values: &'a WaveformValues,
+    next: usize,
+    end: usize,
+    failed: bool,
+}
+
+impl Blocks<'_> {
+    /// The index of the first sample the next block holds.
+    pub fn position(&self) -> usize {
+        self.next
+    }
+}
+
+impl<'a> Iterator for Blocks<'a> {
+    type Item = Result<Cow<'a, [f64]>, ColumnReadFailure>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed || self.next >= self.end {
+            return None;
+        }
+        match &self.values.0 {
+            Repr::Memory(values) => {
+                let block = &values[self.next..self.end];
+                self.next = self.end;
+                Some(Ok(Cow::Borrowed(block)))
+            }
+            Repr::Stored(stored) => {
+                let start = self.next;
+                let mut block = vec![0.0; (self.end - start).min(BLOCK_SAMPLES)];
+                self.next += block.len();
+                match stored.read_into(start, &mut block) {
+                    Ok(()) => Some(Ok(Cow::Owned(block))),
+                    Err(failure) => {
+                        self.failed = true;
+                        Some(Err(failure))
+                    }
+                }
+            }
         }
     }
 }
 
+/// Each sample of a range in order: [`WaveformValues::samples`].
+pub struct Samples<'a> {
+    blocks: Blocks<'a>,
+    block: Cow<'a, [f64]>,
+    at: usize,
+    remaining: usize,
+}
+
+impl Iterator for Samples<'_> {
+    type Item = f64;
+
+    fn next(&mut self) -> Option<f64> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining -= 1;
+        if self.at == self.block.len() {
+            self.at = 0;
+            self.block = match self.blocks.next() {
+                Some(Ok(block)) => block,
+                // An unreadable window's failure was kept when it failed; the rest of the
+                // range is a gap.
+                _ => Cow::Borrowed(&[]),
+            };
+            if self.block.is_empty() {
+                return Some(f64::NAN);
+            }
+        }
+        self.at += 1;
+        Some(self.block[self.at - 1])
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl ExactSizeIterator for Samples<'_> {}
+
 /// Whole-column work, counted per thread in test builds so a frame gate can tell a reader that
-/// took a column's whole values, or read a stored window whole, from one that read a tile, a few
-/// rows or the ends. In a shipped build the counting calls are empty.
+/// took a column's whole values, passed over or read a stored window whole, from one that read a
+/// tile, a few rows or the ends. In a shipped build the counting calls are empty.
 pub mod column_work {
     #[cfg(feature = "test-support")]
     use super::Repr;
@@ -692,9 +1006,9 @@ pub mod column_work {
     pub struct ColumnWork {
         /// Readers given the whole values of an in-memory column.
         pub memory_views: u64,
-        /// Readers given the whole values of a stored window, read or already kept.
+        /// Passes over the whole of a stored window, a block at a time.
         pub stored_views: u64,
-        /// Stored windows read whole from their store.
+        /// Stored windows read whole into memory from their store.
         pub stored_reads: u64,
     }
 
@@ -730,12 +1044,21 @@ pub mod column_work {
     #[inline]
     pub(super) fn view(_values: &WaveformValues) {
         #[cfg(feature = "test-support")]
+        if matches!(_values.0, Repr::Memory(_)) {
+            WORK.with(|work| {
+                let mut counted = work.get();
+                counted.memory_views += 1;
+                work.set(counted);
+            });
+        }
+    }
+
+    #[inline]
+    pub(super) fn pass() {
+        #[cfg(feature = "test-support")]
         WORK.with(|work| {
             let mut counted = work.get();
-            match _values.0 {
-                Repr::Memory(_) => counted.memory_views += 1,
-                Repr::Stored(_) => counted.stored_views += 1,
-            }
+            counted.stored_views += 1;
             work.set(counted);
         });
     }
@@ -751,9 +1074,43 @@ pub mod column_work {
     }
 }
 
+/// Transitional: the whole window as one slice, read on first touch and kept, for the consumers
+/// not yet reading by window. It goes once none is left.
+impl std::ops::Deref for WaveformValues {
+    type Target = Vec<f64>;
+
+    fn deref(&self) -> &Vec<f64> {
+        match &self.0 {
+            Repr::Memory(values) => values,
+            Repr::Stored(stored) => stored.kept.get_or_init(|| self.samples(..).collect()),
+        }
+    }
+}
+
+impl WaveformValues {
+    /// Transitional: [`std::ops::Deref`], or why the window could not be read.
+    pub fn try_values(&self) -> Result<&Vec<f64>, ColumnReadFailure> {
+        if let Repr::Stored(stored) = &self.0
+            && stored.kept.get().is_none()
+        {
+            self.read_range(0..self.len())?;
+        }
+        Ok(self)
+    }
+}
+
 impl AsRef<Vec<f64>> for WaveformValues {
     fn as_ref(&self) -> &Vec<f64> {
         self
+    }
+}
+
+impl<'a> IntoIterator for &'a WaveformValues {
+    type Item = &'a f64;
+    type IntoIter = std::slice::Iter<'a, f64>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        std::ops::Deref::deref(self).iter()
     }
 }
 
@@ -781,33 +1138,25 @@ impl FromIterator<f64> for WaveformValues {
     }
 }
 
-/// Equal samples, compared value by value as `Vec<f64>` compares them, unless both are the same
-/// samples.
+/// Equal samples, compared value by value as `Vec<f64>` compares them (a stored window a block
+/// at a time), unless both are the same samples.
 impl PartialEq for WaveformValues {
     fn eq(&self, other: &Self) -> bool {
         // Lengths first: a stored window of another length is unequal without being read.
-        Self::ptr_eq(self, other) || (self.len() == other.len() && **self == **other)
+        Self::ptr_eq(self, other)
+            || (self.len() == other.len() && self.samples(..).eq(other.samples(..)))
     }
 }
 
 impl PartialEq<Vec<f64>> for WaveformValues {
     fn eq(&self, other: &Vec<f64>) -> bool {
-        **self == *other
+        *self == other[..]
     }
 }
 
 impl PartialEq<[f64]> for WaveformValues {
     fn eq(&self, other: &[f64]) -> bool {
-        self.as_slice() == other
-    }
-}
-
-impl<'a> IntoIterator for &'a WaveformValues {
-    type Item = &'a f64;
-    type IntoIter = std::slice::Iter<'a, f64>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+        self.len() == other.len() && self.samples(..).eq(other.iter().copied())
     }
 }
 
@@ -826,8 +1175,15 @@ impl fmt::Debug for WaveformValues {
 
 impl serde::Serialize for WaveformValues {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let values = self.try_values().map_err(serde::ser::Error::custom)?;
-        serde::Serialize::serialize(values, serializer)
+        use serde::ser::{Error, SerializeSeq};
+        // A stored window is written a block at a time, never held whole.
+        let mut seq = serializer.serialize_seq(Some(self.len()))?;
+        for block in self.blocks(..) {
+            for value in block.map_err(S::Error::custom)?.iter() {
+                seq.serialize_element(value)?;
+            }
+        }
+        seq.end()
     }
 }
 

@@ -130,11 +130,15 @@ pub fn ac_bode_summary_for_analysis<W: AsRef<RetainedWaveform>>(
     let phase_deg = phase_index
         .and_then(|index| waveforms.get(index))
         .map(|waveform| waveform.as_ref().y.clone());
-    let metrics = metrics_from_curves(
-        frequency.as_slice(),
-        gain_db.as_slice(),
-        phase_deg.as_ref().map(|values| values.as_slice()),
-    );
+    // Margins and bandwidth are searched over the whole sweep at once, so a stored sweep is read
+    // whole; one larger than the loaded-results budget has no summary.
+    let frequency_samples = frequency.read_whole().ok()?;
+    let gain_samples = gain_db.read_whole().ok()?;
+    let phase_samples = match &phase_deg {
+        Some(phase) => Some(phase.read_whole().ok()?),
+        None => None,
+    };
+    let metrics = metrics_from_curves(&frequency_samples, &gain_samples, phase_samples.as_deref());
 
     Some(AcBodeSummary {
         signal,
@@ -160,8 +164,8 @@ fn select_magnitude_trace<W: AsRef<RetainedWaveform>>(
         .map(|(index, waveform)| (index, waveform.as_ref()))
 }
 
-fn magnitude_to_db(magnitude: &[f64]) -> SharedWaveformValues {
-    magnitude.iter().map(|&m| 20.0 * m.log10()).collect()
+fn magnitude_to_db(magnitude: &SharedWaveformValues) -> SharedWaveformValues {
+    magnitude.samples(..).map(|m| 20.0 * m.log10()).collect()
 }
 
 #[cfg(test)]

@@ -58,8 +58,8 @@ pub fn samples_equal(left: &[f64], right: &[f64]) -> bool {
 impl PartialEq for ComplexWaveformComponents {
     fn eq(&self, other: &Self) -> bool {
         self.source_name == other.source_name
-            && samples_equal(&self.real, &other.real)
-            && samples_equal(&self.imag, &other.imag)
+            && self.real.same_samples(&other.real)
+            && self.imag.same_samples(&other.imag)
     }
 }
 
@@ -67,7 +67,7 @@ impl PartialEq for RetainedWaveform {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
             && self.x == other.x
-            && samples_equal(&self.y, &other.y)
+            && self.y.same_samples(&other.y)
             && self.unit == other.unit
             && self.complex == other.complex
     }
@@ -88,11 +88,11 @@ impl AsMut<RetainedWaveform> for RetainedWaveform {
 impl RetainedWaveform {
     /// Read an available measured value; unavailable and out-of-range rows return None.
     pub fn sample(&self, index: usize) -> Option<f64> {
-        self.y.get(index).copied().filter(|value| value.is_finite())
+        self.y.sample(index).filter(|value| value.is_finite())
     }
 
     pub fn has_missing_samples(&self) -> bool {
-        self.y.iter().any(|value| value.is_nan())
+        self.y.samples(..).any(f64::is_nan)
     }
 
     /// Create a new waveform trace
@@ -138,78 +138,75 @@ impl RetainedWaveform {
         self
     }
 
-    /// Select exact source knots for a bounded drawing cache without changing
-    /// the retained samples. Empty input or a zero budget produces no cache.
-    pub fn display_sample_indices(&self, maximum_samples: usize) -> Vec<usize> {
-        let count = self.x.len().min(self.y.len());
-        if count == 0 || maximum_samples == 0 {
-            return Vec::new();
-        }
-        let limit = maximum_samples.max(2).min(count);
-        let mut indices = extrema_cache_indices(&self.y[..count], limit);
-        preserve_gap_separators(&self.y[..count], &mut indices);
-        indices
-    }
-
     /// A bounded live preview consists of exact source knots. Display-cache
     /// f32 coordinates cannot be promoted back into measurement inputs: they
     /// can collapse distinct abscissas or erase very small signal values.
+    /// A stored waveform keeps its window: a view reads it in tiles, and it holds no samples to
+    /// bound.
     pub fn into_bounded_preview(mut self, maximum_samples: usize) -> Result<Self, String> {
-        let count = self.x.len();
-        if count != self.y.len()
-            || self
-                .complex
-                .as_ref()
-                .is_some_and(|value| value.real.len() != count || value.imag.len() != count)
+        let (Some(x), Some(y)) = (self.x.in_memory(), self.y.in_memory()) else {
+            return Ok(self);
+        };
+        let complex = match &self.complex {
+            Some(complex) => match (complex.real.in_memory(), complex.imag.in_memory()) {
+                (Some(real), Some(imag)) => Some((real, imag)),
+                _ => return Ok(self),
+            },
+            None => None,
+        };
+        let count = x.len();
+        if count != y.len()
+            || complex.is_some_and(|(real, imag)| real.len() != count || imag.len() != count)
         {
             return Err("preview source arrays are not aligned".to_owned());
         }
         let limit = maximum_samples.max(2).min(count);
         if count > limit {
-            let mut indices = if let Some(complex) = &self.complex {
+            let mut indices = if let Some((real, imag)) = complex {
                 // Include extrema of both rectangular components even where
                 // their magnitude is constant. Each list shares endpoints.
                 let part = (limit / 3).max(2);
-                let mut indices = extrema_cache_indices(&self.y, part);
-                indices.extend(extrema_cache_indices(&complex.real, part));
-                indices.extend(extrema_cache_indices(&complex.imag, part));
+                let mut indices = extrema_cache_indices(y, part);
+                indices.extend(extrema_cache_indices(real, part));
+                indices.extend(extrema_cache_indices(imag, part));
                 indices.sort_unstable();
                 indices.dedup();
                 indices
             } else {
-                extrema_cache_indices(&self.y, limit)
+                extrema_cache_indices(y, limit)
             };
-            preserve_gap_separators(&self.y, &mut indices);
-            let selected = |values: &SharedWaveformValues| -> SharedWaveformValues {
+            preserve_gap_separators(y, &mut indices);
+            let selected = |values: &[f64]| -> SharedWaveformValues {
                 indices
                     .iter()
                     .map(|&index| values[index])
                     .collect::<Vec<_>>()
                     .into()
             };
-            self.x = selected(&self.x);
-            self.y = selected(&self.y);
-            if let Some(complex) = &mut self.complex {
-                complex.real = selected(&complex.real);
-                complex.imag = selected(&complex.imag);
+            let (x, y) = (selected(x), selected(y));
+            let complex = complex.map(|(real, imag)| (selected(real), selected(imag)));
+            self.x = x;
+            self.y = y;
+            if let (Some(components), Some((real, imag))) = (&mut self.complex, complex) {
+                components.real = real;
+                components.imag = imag;
             }
         }
         Ok(self)
     }
+}
 
-    /// Get the X range (min, max)
-    pub fn x_range(&self) -> (f64, f64) {
-        let min = self.x.iter().copied().fold(f64::INFINITY, f64::min);
-        let max = self.x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        (min, max)
+/// Exact knots of the samples `y` for a bounded drawing cache of at most
+/// `maximum_samples` (at least two) knots, extremes and gap separators kept.
+/// Empty input or a zero budget produces no cache.
+pub fn display_sample_indices(y: &[f64], maximum_samples: usize) -> Vec<usize> {
+    if y.is_empty() || maximum_samples == 0 {
+        return Vec::new();
     }
-
-    /// Get the Y range (min, max)
-    pub fn y_range(&self) -> (f64, f64) {
-        let min = self.y.iter().copied().fold(f64::INFINITY, f64::min);
-        let max = self.y.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        (min, max)
-    }
+    let limit = maximum_samples.max(2).min(y.len());
+    let mut indices = extrema_cache_indices(y, limit);
+    preserve_gap_separators(y, &mut indices);
+    indices
 }
 
 /// A bounded preview may omit source knots, but must never invent a segment
@@ -308,26 +305,31 @@ mod gap_tests {
         for index in [1, 10, 12, 19, 53, 54, 55, 77, 96, 118] {
             values[index] = f64::NAN;
         }
+        let source = values.clone();
         let waveform =
             RetainedWaveform::new("gaps", (0..120).map(f64::from).collect::<Vec<_>>(), values);
         for budget in 2..=120 {
-            let indices = waveform.display_sample_indices(budget);
+            let indices = display_sample_indices(&source, budget);
             assert!(indices.len() <= budget);
             for pair in indices.windows(2) {
                 assert!(pair[0] < pair[1]);
-                if waveform.y[pair[0]].is_finite() && waveform.y[pair[1]].is_finite() {
+                if source[pair[0]].is_finite() && source[pair[1]].is_finite() {
                     assert!(
-                        waveform.y[pair[0]..=pair[1]]
+                        source[pair[0]..=pair[1]]
                             .iter()
                             .all(|value| value.is_finite())
                     );
                 }
             }
             let preview = waveform.clone().into_bounded_preview(budget).unwrap();
-            for index in 1..preview.x.len() {
-                if preview.y[index - 1].is_finite() && preview.y[index].is_finite() {
+            let (x, y) = (
+                preview.x.in_memory().unwrap(),
+                preview.y.in_memory().unwrap(),
+            );
+            for index in 1..x.len() {
+                if y[index - 1].is_finite() && y[index].is_finite() {
                     assert!(
-                        waveform.y[preview.x[index - 1] as usize..=preview.x[index] as usize]
+                        source[x[index - 1] as usize..=x[index] as usize]
                             .iter()
                             .all(|value| value.is_finite())
                     );

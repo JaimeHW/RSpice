@@ -859,67 +859,72 @@ fn overview_miniature(
     scale: XScale,
     output: &mut SharedXAxisResponse,
 ) -> crate::derived::OverviewMiniature {
-    // A stored trace's miniature on a linear axis is its tile across the
-    // whole axis, read from the store's summaries rather than its column.
-    let stored = (scale == XScale::Linear)
-        .then(|| stored_overview(trace))
-        .flatten();
+    // A stored trace's miniature is its tile across the whole axis, by
+    // decade on a logarithmic one, read from the store's summaries rather
+    // than its column.
+    let stored = stored_overview(trace, scale);
     // The lane's vertical fit is the trace's own finite extremes, which the
     // pane axis above it already holds under this very key.
     let range = derived.range_or(trace_key(model, trace), || match &stored {
         Some((range, _)) => *range,
         None => {
             output.extrema_samples_read = trace.y.len();
-            rspice_results::measurements::finite_extremes(&trace.y)
+            trace
+                .y
+                .in_memory()
+                .and_then(rspice_results::measurements::finite_extremes)
         }
     });
-    let segments = match stored {
-        Some((_, segments)) => segments,
-        None => {
-            // A stored trace on a logarithmic axis is read once for its
-            // knots and not kept.
-            let samples = trace.x.len().min(trace.y.len());
-            let resident = |values: &rspice_results::waveform::WaveformValues| {
-                if values.is_stored() {
-                    values
-                        .read_range(0..samples)
-                        .map(|read| read.into_owned().into())
-                        .unwrap_or_else(|_| Vec::new().into())
-                } else {
-                    values.clone()
-                }
-            };
-            let (x, y) = (resident(&trace.x), resident(&trace.y));
+    let segments = match (stored, trace.x.in_memory(), trace.y.in_memory()) {
+        (Some((_, segments)), ..) => segments,
+        (None, Some(x), Some(y)) => {
+            let samples = x.len().min(y.len());
+            let (x, y) = (&x[..samples], &y[..samples]);
             let indices = derived.overview_indices_or(trace_key(model, trace), || {
                 output.overview_samples_read = samples.saturating_mul(2);
-                rspice_results::waveform::RetainedWaveform::new("overview", x.clone(), y.clone())
-                    .display_sample_indices(SHARED_X_OVERVIEW_POINTS)
+                rspice_results::waveform::display_sample_indices(y, SHARED_X_OVERVIEW_POINTS)
             });
             output.overview_samples_read += indices.len();
-            overview_segments(&x, &y, &indices)
+            overview_segments(x, y, &indices)
         }
+        // A stored trace that cannot tile, on an axis that does not ascend or
+        // a decade axis that reaches zero, has no miniature: drawing one would
+        // read its whole column.
+        (None, ..) => Vec::new(),
     };
     crate::derived::OverviewMiniature { range, segments }
 }
 
 /// The range and miniature of a trace whose samples a results store keeps: its
-/// tile across its whole axis, each pixel's least and greatest value at the
-/// pixel's middle, broken where a pixel holds no available value. `None` for a
-/// trace held in memory.
-fn stored_overview(trace: &StripTrace) -> Option<StoredOverview> {
+/// tile across its whole axis on a `scale` axis, each pixel's least and
+/// greatest value at the pixel's middle, broken where a pixel holds no
+/// available value. `None` for a trace held in memory.
+fn stored_overview(trace: &StripTrace, scale: XScale) -> Option<StoredOverview> {
     use rspice_results::waveform::ColumnTile;
     let (x0, x1) = trace.x.ends()?;
     (x1 > x0).then_some(())?;
-    let tile = trace
-        .y
-        .tile_over(&trace.x, x0, x1, SHARED_X_OVERVIEW_POINTS)?;
+    let tile = match scale {
+        XScale::Linear => trace
+            .y
+            .tile_over(&trace.x, x0, x1, SHARED_X_OVERVIEW_POINTS)?,
+        XScale::Log10 => trace
+            .y
+            .log_tile_over(&trace.x, x0, x1, SHARED_X_OVERVIEW_POINTS)?,
+    };
     let mut points: Vec<(f64, f64)> = Vec::new();
     match tile {
         ColumnTile::Samples { x, y, .. } => points.extend(x.into_iter().zip(y)),
         ColumnTile::Envelope { min, max, touched } => {
-            let width = (x1 - x0) / min.len() as f64;
+            let pixels = min.len() as f64;
+            let middle = |pixel: usize| {
+                let fraction = (pixel as f64 + 0.5) / pixels;
+                match scale {
+                    XScale::Linear => x0 + fraction * (x1 - x0),
+                    XScale::Log10 => 10f64.powf(x0.log10() + fraction * (x1 / x0).log10()),
+                }
+            };
             for pixel in (0..min.len()).filter(|&pixel| touched[pixel]) {
-                let x = x0 + (pixel as f64 + 0.5) * width;
+                let x = middle(pixel);
                 points.push((x, min[pixel]));
                 if max[pixel] != min[pixel] {
                     points.push((x, max[pixel]));

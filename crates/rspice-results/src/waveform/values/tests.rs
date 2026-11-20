@@ -51,17 +51,65 @@ fn window(first: u64, rows: u64, lead: WindowLead) -> StoredWindow {
 }
 
 #[test]
-fn a_stored_window_is_read_once_on_first_use_and_shared_by_its_clones() {
+fn a_stored_window_is_read_as_each_reader_asks_and_kept_by_none() {
     let column = Column::new("v(out)", vec![0.0, 1.0, 2.0, 3.0, 4.0]);
     let values = WaveformValues::stored(column.clone(), window(1, 3, WindowLead::None)).unwrap();
     let clone = values.clone();
     assert_eq!((values.len(), clone.is_empty()), (3, false));
     assert_eq!(column.reads.load(Ordering::SeqCst), 0, "len reads nothing");
-    assert_eq!(*clone, vec![1.0, 2.0, 3.0]);
-    assert_eq!(values[2], 3.0);
-    assert_eq!(values.try_values().unwrap(), &vec![1.0, 2.0, 3.0]);
-    assert_eq!(column.reads.load(Ordering::SeqCst), 1);
+    assert_eq!(values.in_memory(), None, "a stored window has no slice");
+    assert_eq!(clone.samples(..).collect::<Vec<_>>(), vec![1.0, 2.0, 3.0]);
+    assert_eq!(values.sample(2), Some(3.0));
+    assert_eq!(values.sample(3), None);
+    assert_eq!(values.gather(&[2, 0, 1]), vec![3.0, 1.0, 2.0]);
+    let reads = column.reads.load(Ordering::SeqCst);
+    assert_eq!(clone.samples(..).collect::<Vec<_>>(), vec![1.0, 2.0, 3.0]);
+    assert!(
+        column.reads.load(Ordering::SeqCst) > reads,
+        "a second pass reads again: nothing was kept"
+    );
     assert!(WaveformValues::ptr_eq(&values, &clone));
+}
+
+#[test]
+fn a_pass_over_a_long_window_holds_one_block_at_a_time() {
+    let rows = 2 * BLOCK_SAMPLES + 5;
+    let column = Column::new("v(long)", (0..rows).map(|row| row as f64).collect());
+    let values =
+        WaveformValues::stored(column.clone(), window(0, rows as u64, WindowLead::None)).unwrap();
+    let blocks = values
+        .blocks(3..rows)
+        .map(|block| block.unwrap().len())
+        .collect::<Vec<_>>();
+    assert_eq!(blocks, vec![BLOCK_SAMPLES, BLOCK_SAMPLES, 2]);
+    assert!(
+        values
+            .samples(..)
+            .enumerate()
+            .all(|(row, value)| value == row as f64)
+    );
+    assert_eq!(values.partition_point(|value| value < 70_000.5), 70_001);
+    assert!(values.ascends_strictly());
+    let memory = WaveformValues::from(vec![1.0, 2.0, 3.0]);
+    assert_eq!(memory.blocks(..).count(), 1, "memory is one block");
+}
+
+#[test]
+fn a_whole_read_larger_than_the_budget_is_refused_not_attempted() {
+    let column = Column::new("v(budget)", vec![1.0; 64]);
+    let values = WaveformValues::stored(column.clone(), window(0, 64, WindowLead::None)).unwrap();
+    set_whole_read_budget(8 * 63);
+    let refused = values.read_whole().unwrap_err();
+    set_whole_read_budget(1 << 30);
+    assert!(refused.cause.contains("read it by window"), "{refused}");
+    assert_eq!(column.reads.load(Ordering::SeqCst), 0, "nothing was read");
+    assert_eq!(values.read_whole().unwrap().len(), 64);
+    // Memory is never refused: it is already held.
+    let memory = WaveformValues::from(vec![1.0; 64]);
+    set_whole_read_budget(0);
+    let held = memory.read_whole().map(|samples| samples.len());
+    set_whole_read_budget(1 << 30);
+    assert_eq!(held, Ok(64));
 }
 
 #[test]
@@ -72,9 +120,10 @@ fn a_window_starting_between_rows_holds_its_start_and_the_value_there() {
     let axis = WaveformValues::stored(time, window(2, 2, WindowLead::Value(start))).unwrap();
     let values =
         WaveformValues::stored(wave, window(2, 2, WindowLead::Interpolated(fraction))).unwrap();
-    assert_eq!(*axis, vec![1.25, 2.0, 3.0]);
+    assert_eq!(axis, vec![1.25, 2.0, 3.0]);
     // The in-memory window's arithmetic: lower + fraction * (upper - lower).
-    assert_eq!(*values, vec![20.0 + fraction * (40.0 - 20.0), 40.0, 80.0]);
+    assert_eq!(values, vec![20.0 + fraction * (40.0 - 20.0), 40.0, 80.0]);
+    assert_eq!(values.sample(0), Some(20.0 + fraction * (40.0 - 20.0)));
     assert_eq!(values.len(), 3);
 }
 
@@ -88,7 +137,7 @@ fn a_range_of_a_window_reads_only_its_rows_keeps_nothing_and_matches_the_whole_r
         (&wave, WindowLead::Interpolated(0.25)),
     ] {
         let whole = WaveformValues::stored(column.clone(), window(2, 4, lead)).unwrap();
-        let expected = whole.try_values().unwrap().clone();
+        let expected = whole.samples(..).collect::<Vec<_>>();
         let ranged = WaveformValues::stored(column.clone(), window(2, 4, lead)).unwrap();
         for start in 0..=expected.len() {
             for end in start..=expected.len() {
@@ -143,12 +192,13 @@ fn an_unreadable_window_shows_a_gap_and_its_failure_is_kept_for_diagnostics() {
         fail: true,
     });
     let values = WaveformValues::stored(column, window(0, 3, WindowLead::None)).unwrap();
-    let failure = values.try_values().unwrap_err();
+    let failure = values.read_range(0..3).unwrap_err();
     assert_eq!(failure.column, "v(unreadable_window_test)");
     assert_eq!(failure.store, "run.rsr");
-    assert!(values.iter().all(|value| value.is_nan()));
+    assert!(values.samples(..).all(f64::is_nan));
+    assert_eq!(values.sample(1).map(f64::is_nan), Some(true));
     assert_eq!(values.len(), 3);
-    assert_eq!(values.try_values().unwrap_err(), failure);
+    assert_eq!(values.blocks(..).next().unwrap().unwrap_err(), failure);
     let reported = take_column_read_failures()
         .into_iter()
         .filter(|reported| reported.column == failure.column)
@@ -170,13 +220,14 @@ fn values_in_memory_are_shared_changed_and_compared_as_vectors_are() {
     assert_ne!(values, WaveformValues::from(vec![1.0, f64::NAN]));
     values.make_mut()[1] = 2.0;
     // The change copies the shared values first.
+    let shared = shared.in_memory().unwrap();
     assert!(shared[0] == 1.0 && shared[1].is_nan());
-    assert_eq!(values.clone().into_vec(), vec![1.0, 2.0]);
+    assert_eq!(values, vec![1.0, 2.0]);
     let column = Column::new("v(b)", vec![5.0, 6.0]);
     let mut stored = WaveformValues::stored(column, window(0, 2, WindowLead::None)).unwrap();
     stored.make_mut()[0] = 7.0;
     assert!(!stored.is_stored());
-    assert_eq!(*stored, vec![7.0, 6.0]);
+    assert_eq!(stored, vec![7.0, 6.0]);
     let json = serde_json::to_string(&stored).unwrap();
     assert_eq!(json, "[7.0,6.0]");
     let back: WaveformValues = serde_json::from_str(&json).unwrap();

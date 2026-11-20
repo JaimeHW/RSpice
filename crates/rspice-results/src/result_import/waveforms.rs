@@ -329,11 +329,14 @@ mod tests {
             }
             for coordinate in [vec![-1.0, -0.0, 1.0], vec![1.0, -0.0, -1.0]] {
                 let restored = import(kind, coordinate).unwrap();
-                assert_eq!(restored.waveforms[0].x[1].to_bits(), (-0.0_f64).to_bits());
+                assert_eq!(
+                    restored.waveforms[0].x.sample(1).map(f64::to_bits),
+                    Some((-0.0_f64).to_bits())
+                );
                 assert!(
                     restored.waveforms[0]
                         .y
-                        .iter()
+                        .samples(..)
                         .all(|v| v.to_bits() == (-0.0_f64).to_bits())
                 );
             }
@@ -524,14 +527,21 @@ mod tests {
         )
         .unwrap();
         let complex = imported.waveforms[0].complex.as_ref().unwrap();
-        assert_eq!(complex.real.as_ptr(), real_ptr);
-        assert_eq!(complex.imag.as_ptr(), imag_ptr);
-        assert_eq!(complex.real[0].to_bits(), (-0.0_f64).to_bits());
-        assert_eq!(complex.real[1].to_bits(), 1);
+        let (real, imag) = (
+            complex.real.in_memory().unwrap(),
+            complex.imag.in_memory().unwrap(),
+        );
+        assert_eq!(real.as_ptr(), real_ptr);
+        assert_eq!(imag.as_ptr(), imag_ptr);
+        assert_eq!(real[0].to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(real[1].to_bits(), 1);
         assert_eq!(complex.source_name, "V(out)");
         assert_eq!(imported.waveforms[0].name, "|V(out)|");
         assert_eq!(imported.waveforms[0].unit.as_deref(), Some("V"));
-        assert_eq!(imported.waveforms[1].y.as_ptr(), scalar_ptr);
+        assert_eq!(
+            imported.waveforms[1].y.in_memory().unwrap().as_ptr(),
+            scalar_ptr
+        );
         assert!(crate::waveform::WaveformValues::ptr_eq(
             &imported.waveforms[0].x,
             &imported.waveforms[1].x

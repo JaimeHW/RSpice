@@ -8,7 +8,8 @@ fn trace_view(waveform: &RetainedWaveform) -> DcTraceView<'_> {
     DcTraceView {
         name: &waveform.name,
         unit: waveform.unit.as_deref(),
-        x: &waveform.x,
+        x: waveform.x.in_memory(),
+        x_len: waveform.x.len(),
         sample_count: waveform.y.len(),
         complex: waveform.complex.is_some(),
     }

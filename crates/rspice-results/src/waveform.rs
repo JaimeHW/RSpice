@@ -5,7 +5,8 @@ pub use output::OutputWaveform;
 
 mod retained;
 pub use retained::{
-    ComplexWaveformComponents, RetainedWaveform, SharedWaveformValues, samples_equal,
+    ComplexWaveformComponents, RetainedWaveform, SharedWaveformValues, display_sample_indices,
+    samples_equal,
 };
 
 mod trace;
@@ -14,8 +15,9 @@ pub use trace::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 #[cfg(feature = "engine-evidence")]
 pub(crate) use values::report_column_read_failure;
 pub use values::{
-    ColumnReadFailure, ColumnSource, ColumnTile, RowsAround, StoredWindow, ValueExtent,
-    WaveformValues, WindowLead, column_work, take_column_read_failures,
+    BLOCK_SAMPLES, Blocks, ColumnReadFailure, ColumnSource, ColumnTile, RowsAround, Samples,
+    StoredWindow, ValueExtent, WaveformValues, WindowLead, column_work, set_whole_read_budget,
+    take_column_read_failures,
 };
 
 //=============================================================================

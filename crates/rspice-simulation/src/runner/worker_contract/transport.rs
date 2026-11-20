@@ -122,7 +122,8 @@ pub(super) fn validate_worker_response_before_transport(
                     .map(|trace| rspice_results::dc_sweep::DcTraceView {
                         name: &trace.name,
                         unit: Some(&trace.y_unit),
-                        x: &trace.x_values,
+                        x: Some(&trace.x_values),
+                        x_len: trace.x_values.len(),
                         sample_count: trace.y_values.len(),
                         complex: trace.is_complex || trace.y_imag.is_some(),
                     }),

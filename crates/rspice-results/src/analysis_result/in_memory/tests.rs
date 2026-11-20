@@ -222,8 +222,8 @@ fn a_stored_result_read_into_memory_holds_the_same_samples_and_digests_as_them()
     assert_eq!(time.reads(), 1, "the shared time axis was read once");
     assert_eq!(digest(&stored), digest(&memory));
     assert_eq!(
-        stored.waveforms[1].y.try_values().unwrap(),
-        &vec![21.0, 22.0, 23.0]
+        stored.waveforms[1].y.in_memory().unwrap(),
+        &[21.0, 22.0, 23.0][..]
     );
 
     // A result held in memory already is left as it is.

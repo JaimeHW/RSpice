@@ -62,35 +62,72 @@ pub fn measure_interval(
     let (Some(&first), Some(&last)) = (x.first(), x.last()) else {
         return Err(MeasurementError::Empty);
     };
-    if x.iter().any(|v| !v.is_finite()) {
-        return Err(MeasurementError::NonFiniteAxis);
-    }
-    let ascending = last >= first;
-    if x.windows(2).any(|pair| {
-        if ascending {
-            pair[1] < pair[0]
-        } else {
-            pair[1] > pair[0]
-        }
-    }) {
-        return Err(MeasurementError::NonMonotoneAxis);
-    }
-    let (a, b) = window.unwrap_or((first, last));
-    if !a.is_finite() || !b.is_finite() {
-        return Err(MeasurementError::NonFiniteWindow);
-    }
-    let (lo, hi) = (a.min(b), a.max(b));
-    if lo == hi {
-        return point_statistics(x, y, lo);
-    }
+    measure_pairs(
+        (first, last),
+        || x.iter().copied().zip(y.iter().copied()),
+        window,
+    )
+}
 
+/// [`measure_interval`] over samples `range` of `y` at `x`, read a block at a time: the same
+/// answer, bit for bit, holding one block of each however long the range. A stored window that
+/// cannot be read has no samples to measure.
+pub fn measure_interval_values(
+    x: &crate::waveform::WaveformValues,
+    y: &crate::waveform::WaveformValues,
+    range: std::ops::Range<usize>,
+    window: Option<(f64, f64)>,
+) -> Result<IntervalStatistics, MeasurementError> {
+    if x.len() != y.len() {
+        return Err(MeasurementError::LengthMismatch);
+    }
+    let range = range.start.min(x.len())..range.end.min(x.len());
+    let ends = x
+        .sample(range.start)
+        .zip(range.end.checked_sub(1).and_then(|end| x.sample(end)));
+    let Some(ends) = ends.filter(|_| !range.is_empty()) else {
+        return Err(MeasurementError::Empty);
+    };
+    let unread = |values: &crate::waveform::WaveformValues| {
+        values.is_stored() && values.read_range(range.start..range.start + 1).is_err()
+    };
+    if unread(x) || unread(y) {
+        return Err(MeasurementError::IncompleteCoverage { fraction: 0.0 });
+    }
+    measure_pairs(
+        ends,
+        || x.samples(range.clone()).zip(y.samples(range.clone())),
+        window,
+    )
+}
+
+/// The measurement over the samples `pairs` yields afresh for each pass, each as (x, y), the
+/// first and last x being `ends`.
+fn measure_pairs<I: Iterator<Item = (f64, f64)>>(
+    (first, last): (f64, f64),
+    pairs: impl Fn() -> I,
+    window: Option<(f64, f64)>,
+) -> Result<IntervalStatistics, MeasurementError> {
+    let (a, b) = window.unwrap_or((first, last));
+    let window_finite = a.is_finite() && b.is_finite();
+    let (lo, hi) = (a.min(b), a.max(b));
+    let spans = window_finite && lo != hi;
+
+    // One pass checks the axis and, over a window of some width, takes the extrema, coverage
+    // and scale of the samples in it.
+    let mut nonfinite_axis = false;
+    let (mut rises, mut falls) = (false, false);
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
     let mut complete = lo >= first.min(last) && hi <= first.max(last);
-    // Retained samples include both sides of a vertical edge, even when the
-    // edge lies exactly on a cursor. Do not silently discard undefined points.
-    for (&at, &value) in x.iter().zip(y) {
-        if at >= lo && at <= hi {
+    let mut scale: f64 = 0.0;
+    let mut coverage = Sum::default();
+    let mut previous: Option<(f64, f64)> = None;
+    for (at, value) in pairs() {
+        nonfinite_axis |= !at.is_finite();
+        // Retained samples include both sides of a vertical edge, even when the
+        // edge lies exactly on a cursor. Do not silently discard undefined points.
+        if spans && at >= lo && at <= hi {
             if value.is_finite() {
                 min = min.min(value);
                 max = max.max(value);
@@ -98,23 +135,36 @@ pub fn measure_interval(
                 complete = false;
             }
         }
-    }
-    let mut scale: f64 = 0.0;
-    let mut coverage = Sum::default();
-    for (xs, ys) in x.windows(2).zip(y.windows(2)) {
-        let Some((left, right)) = clipped_span(xs, lo, hi) else {
-            continue;
-        };
-        if ys.iter().all(|v| v.is_finite()) {
-            let (u, v) = clipped_values(xs, ys, left, right);
-            min = min.min(u).min(v);
-            max = max.max(u).max(v);
-            // Zero-width spikes affect extrema, not the integral's scale.
-            scale = scale.max(u.abs()).max(v.abs());
-            coverage.add(fraction(left, right, lo, hi));
-        } else {
-            complete = false;
+        if let Some((before_at, before_value)) = previous.replace((at, value)) {
+            rises |= at > before_at;
+            falls |= at < before_at;
+            let (xs, ys) = ([before_at, at], [before_value, value]);
+            if let Some((left, right)) = clipped_span(&xs, lo, hi).filter(|_| spans) {
+                if ys.iter().all(|v| v.is_finite()) {
+                    let (u, v) = clipped_values(&xs, &ys, left, right);
+                    min = min.min(u).min(v);
+                    max = max.max(u).max(v);
+                    // Zero-width spikes affect extrema, not the integral's scale.
+                    scale = scale.max(u.abs()).max(v.abs());
+                    coverage.add(fraction(left, right, lo, hi));
+                } else {
+                    complete = false;
+                }
+            }
         }
+    }
+    if nonfinite_axis {
+        return Err(MeasurementError::NonFiniteAxis);
+    }
+    // A branch that both rises and falls is no single branch, whichever way it runs overall.
+    if rises && falls {
+        return Err(MeasurementError::NonMonotoneAxis);
+    }
+    if !window_finite {
+        return Err(MeasurementError::NonFiniteWindow);
+    }
+    if lo == hi {
+        return point_statistics(pairs(), lo);
     }
     if !complete {
         return Err(MeasurementError::IncompleteCoverage {
@@ -137,11 +187,16 @@ pub fn measure_interval(
     let mut squares = Sum::default();
     let mut small_rms: f64 = 0.0;
     if scale > 0.0 {
-        for (xs, ys) in x.windows(2).zip(y.windows(2)) {
-            let Some((left, right)) = clipped_span(xs, lo, hi) else {
+        let mut previous: Option<(f64, f64)> = None;
+        for (at, value) in pairs() {
+            let Some((before_at, before_value)) = previous.replace((at, value)) else {
                 continue;
             };
-            let (u, v) = clipped_values(xs, ys, left, right);
+            let (xs, ys) = ([before_at, at], [before_value, value]);
+            let Some((left, right)) = clipped_span(&xs, lo, hi) else {
+                continue;
+            };
+            let (u, v) = clipped_values(&xs, &ys, left, right);
             let root_weight = || sqrt_span(left, right) / sqrt_span(lo, hi);
             let weight = fraction(left, right, lo, hi);
             let panel_mean = midpoint(u / mean_scale, v / mean_scale);
@@ -230,26 +285,36 @@ fn clipped_values(xs: &[f64], ys: &[f64], left: f64, right: f64) -> (f64, f64) {
     (sample(left), sample(right))
 }
 
-fn point_statistics(x: &[f64], y: &[f64], at: f64) -> Result<IntervalStatistics, MeasurementError> {
+fn point_statistics(
+    pairs: impl Iterator<Item = (f64, f64)>,
+    at: f64,
+) -> Result<IntervalStatistics, MeasurementError> {
     let mut value = None;
-    for (_, &sample) in x.iter().zip(y).filter(|(position, _)| **position == at) {
-        if !sample.is_finite() {
-            return Err(MeasurementError::IncompleteCoverage { fraction: 0.0 });
+    // The first span with `at` strictly inside it and finite ends, for when no sample sits on it.
+    let mut inside = None;
+    let mut previous: Option<(f64, f64)> = None;
+    for (position, sample) in pairs {
+        if position == at {
+            if !sample.is_finite() {
+                return Err(MeasurementError::IncompleteCoverage { fraction: 0.0 });
+            }
+            if value.is_some_and(|previous| previous != sample) {
+                return Err(MeasurementError::AmbiguousPoint);
+            }
+            value = Some(sample);
         }
-        if value.is_some_and(|previous| previous != sample) {
-            return Err(MeasurementError::AmbiguousPoint);
-        }
-        value = Some(sample);
-    }
-    if value.is_none() {
-        for (xs, ys) in x.windows(2).zip(y.windows(2)) {
+        if let Some((before_at, before_value)) = previous.replace((position, sample))
+            && inside.is_none()
+        {
+            let (xs, ys) = ([before_at, position], [before_value, sample]);
             if at > xs[0].min(xs[1]) && at < xs[0].max(xs[1]) && ys.iter().all(|v| v.is_finite()) {
-                value = Some(clipped_values(xs, ys, at, at).0);
-                break;
+                inside = Some(clipped_values(&xs, &ys, at, at).0);
             }
         }
     }
-    let value = value.ok_or(MeasurementError::IncompleteCoverage { fraction: 0.0 })?;
+    let value = value
+        .or(inside)
+        .ok_or(MeasurementError::IncompleteCoverage { fraction: 0.0 })?;
     Ok(IntervalStatistics {
         min: value,
         max: value,

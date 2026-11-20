@@ -219,7 +219,7 @@ fn a_saved_reference_reads_its_kept_segment_and_a_missing_one_names_its_file() {
     .unwrap();
     keep_segments_in(&folder);
     let read_back = column.values().unwrap();
-    assert_eq!(*read_back, *stored);
+    assert_eq!(read_back, stored);
     assert_eq!(
         read_back.stored_window().unwrap().0.identity(),
         stored.stored_window().unwrap().0.identity()
@@ -239,7 +239,7 @@ fn a_saved_reference_reads_its_kept_segment_and_a_missing_one_names_its_file() {
     .unwrap();
     assert_eq!(missing.len(), stored.len());
     let failure = missing
-        .try_values()
+        .read_range(0..missing.len())
         .expect_err("a missing segment reads nothing");
     assert!(
         failure.to_string().contains(&format!("{gone}.rsr")),

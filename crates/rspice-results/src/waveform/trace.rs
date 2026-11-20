@@ -116,18 +116,27 @@ mod preview_tests {
         let source = RetainedTrace::new("signal", x.clone(), vec![1e-120; x.len()], "#fff")
             .with_complex_components("V(out)", real.clone(), imag.clone());
         let preview = source.clone().into_bounded_preview(256).unwrap();
-        assert!(preview.x.len() <= 256);
-        assert!(preview.x.windows(2).all(|pair| pair[0] < pair[1]));
+        let (preview_x, preview_y) = (
+            preview.x.in_memory().unwrap(),
+            preview.y.in_memory().unwrap(),
+        );
+        assert!(preview_x.len() <= 256);
+        assert!(preview_x.windows(2).all(|pair| pair[0] < pair[1]));
         let complex = preview.complex.as_ref().unwrap();
-        assert!(complex.real.contains(&-1e-120));
-        assert!(complex.imag.contains(&1e-120));
-        for (index, &point) in preview.x.iter().enumerate() {
+        let (preview_real, preview_imag) = (
+            complex.real.in_memory().unwrap(),
+            complex.imag.in_memory().unwrap(),
+        );
+        assert!(preview_real.contains(&-1e-120));
+        assert!(preview_imag.contains(&1e-120));
+        let source_y = source.y.in_memory().unwrap();
+        for (index, &point) in preview_x.iter().enumerate() {
             let source_index = x
                 .binary_search_by(|candidate| candidate.total_cmp(&point))
                 .unwrap();
-            assert_eq!(preview.y[index].to_bits(), source.y[source_index].to_bits());
-            assert_eq!(complex.real[index].to_bits(), real[source_index].to_bits());
-            assert_eq!(complex.imag[index].to_bits(), imag[source_index].to_bits());
+            assert_eq!(preview_y[index].to_bits(), source_y[source_index].to_bits());
+            assert_eq!(preview_real[index].to_bits(), real[source_index].to_bits());
+            assert_eq!(preview_imag[index].to_bits(), imag[source_index].to_bits());
         }
         assert_eq!(source.x.len(), 10_000);
     }

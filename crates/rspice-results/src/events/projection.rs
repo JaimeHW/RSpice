@@ -527,10 +527,8 @@ fn event_value(waveform: &RetainedWaveform, value: f64) -> Option<EventValue> {
     }
 }
 
-fn event_time_axis_is_valid(values: &[f64]) -> bool {
-    !values.is_empty()
-        && values.iter().all(|value| value.is_finite())
-        && values.windows(2).all(|pair| pair[0] < pair[1])
+fn event_time_axis_is_valid(values: &crate::waveform::WaveformValues) -> bool {
+    !values.is_empty() && values.samples(..).all(f64::is_finite) && values.ascends_strictly()
 }
 
 pub fn waveform_is_event(waveform: &RetainedWaveform, on_sample_scan: impl FnOnce()) -> bool {
@@ -544,11 +542,10 @@ pub fn waveform_is_event(waveform: &RetainedWaveform, on_sample_scan: impl FnOnc
     if digital {
         waveform
             .y
-            .iter()
-            .copied()
+            .samples(..)
             .all(|value| logic_code(value).is_some())
     } else {
-        waveform.y.iter().all(|value| value.is_finite())
+        waveform.y.samples(..).all(f64::is_finite)
     }
 }
 
@@ -708,8 +705,11 @@ pub fn build_event_order<W: AsRef<RetainedWaveform>>(
             continue;
         }
         let mut previous = None;
-        for (sample_index, (&time_s, &raw_value)) in
-            waveform.x.iter().zip(waveform.y.iter()).enumerate()
+        for (sample_index, (time_s, raw_value)) in waveform
+            .x
+            .samples(..)
+            .zip(waveform.y.samples(..))
+            .enumerate()
         {
             let Some(value) = event_value(waveform, raw_value) else {
                 continue;
@@ -847,10 +847,10 @@ pub fn event_row_from_entry<'a, W: AsRef<RetainedWaveform>>(
         EventSelectionSource::ProjectedDigital | EventSelectionSource::ProjectedReal => {
             let waveform = analysis.waveforms.get(entry.trace_index)?.as_ref();
             let (signal_name, _) = event_signal_name(&waveform.name)?;
-            let (&time_s, &raw_value) = waveform
+            let (time_s, raw_value) = waveform
                 .x
-                .get(entry.point_index)
-                .zip(waveform.y.get(entry.point_index))?;
+                .sample(entry.point_index)
+                .zip(waveform.y.sample(entry.point_index))?;
             Some(EventRow {
                 source: entry.source,
                 trace_name: &waveform.name,
@@ -934,10 +934,10 @@ pub fn event_row_at_name<'a, W: AsRef<RetainedWaveform>>(
                 .enumerate()
                 .find(|(_, waveform)| waveform.as_ref().name == trace_name)?;
             let waveform = waveform.as_ref();
-            let (&time_s, &raw_value) = waveform
+            let (time_s, raw_value) = waveform
                 .x
-                .get(point_index)
-                .zip(waveform.y.get(point_index))?;
+                .sample(point_index)
+                .zip(waveform.y.sample(point_index))?;
             let current = event_value(waveform, raw_value)?;
             let expected_source = if matches!(current, EventValue::Digital { .. }) {
                 EventSelectionSource::ProjectedDigital
@@ -949,8 +949,8 @@ pub fn event_row_at_name<'a, W: AsRef<RetainedWaveform>>(
             }
             let previous = point_index
                 .checked_sub(1)
-                .and_then(|index| waveform.y.get(index))
-                .and_then(|value| event_value(waveform, *value))
+                .and_then(|index| waveform.y.sample(index))
+                .and_then(|value| event_value(waveform, value))
                 .map(|value| value.identity());
             if previous == Some(current.identity()) {
                 return None;

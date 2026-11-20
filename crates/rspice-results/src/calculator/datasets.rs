@@ -42,9 +42,12 @@ fn quantity(unit: Option<&str>) -> String {
     }
 }
 
+/// Every sample of `values`: an expression is evaluated over every sample of its operands at
+/// once, so a stored operand is read whole, and one larger than the loaded-results budget is
+/// refused.
 fn read(values: &crate::waveform::WaveformValues, what: &str) -> Result<Vec<f64>, EvaluationError> {
     values
-        .read_range(0..values.len())
+        .read_whole()
         .map(std::borrow::Cow::into_owned)
         .map_err(|failure| EvaluationError::WaveformMismatch(format!("{what}: {failure}")))
 }

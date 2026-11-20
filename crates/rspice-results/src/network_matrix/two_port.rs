@@ -337,7 +337,10 @@ impl TwoPortSweep {
             .iter()
             .map(|index| analysis.waveforms.get(*index).map(AsRef::as_ref))
             .collect::<Option<Vec<_>>>()?;
-        let grid = cells.first()?.x.as_ref();
+        // The network is solved at every frequency of the sweep at once, so a stored sweep is
+        // read whole; one larger than the loaded-results budget has no two-port view.
+        let grid = cells.first()?.x.read_whole().ok()?;
+        let grid = &grid[..];
         if grid.is_empty()
             || grid.iter().any(|frequency| !frequency.is_finite())
             || !grid.windows(2).all(|pair| pair[0] < pair[1])
@@ -347,19 +350,21 @@ impl TwoPortSweep {
         let mut columns = Vec::with_capacity(4);
         for waveform in &cells {
             let complex = waveform.complex.as_ref()?;
-            if waveform.x.as_ref() != grid
+            if waveform.x != *grid
                 || complex.real.len() != grid.len()
                 || complex.imag.len() != grid.len()
             {
                 return None;
             }
-            columns.push(complex);
+            columns.push((
+                complex.real.read_whole().ok()?,
+                complex.imag.read_whole().ok()?,
+            ));
         }
         let scattering = (0..grid.len())
             .map(|index| {
-                let at = |cell: usize| {
-                    Complex64::new(columns[cell].real[index], columns[cell].imag[index])
-                };
+                let at =
+                    |cell: usize| Complex64::new(columns[cell].0[index], columns[cell].1[index]);
                 TwoPortScattering {
                     s11: at(0),
                     s12: at(1),
@@ -406,7 +411,7 @@ fn retained_noise<W: AsRef<RetainedWaveform>>(
             .waveforms
             .iter()
             .map(AsRef::as_ref)
-            .find(|waveform| waveform.name == name && waveform.x.as_ref() == grid)
+            .find(|waveform| waveform.name == name && waveform.x == *grid)
     };
     let resistance = named("Rn")?;
     let minimum = named("Fmin")?;
@@ -418,11 +423,16 @@ fn retained_noise<W: AsRef<RetainedWaveform>>(
     {
         return None;
     }
+    fn whole(values: &crate::waveform::WaveformValues) -> Option<std::borrow::Cow<'_, [f64]>> {
+        values.read_whole().ok()
+    }
+    let (resistance, minimum) = (whole(&resistance.y)?, whole(&minimum.y)?);
+    let (optimum_real, optimum_imag) = (whole(&optimum.real)?, whole(&optimum.imag)?);
     let parameters = (0..grid.len())
         .map(|index| TwoPortNoiseParameters {
-            minimum_noise_factor: minimum.y[index],
-            noise_resistance_ohm: resistance.y[index],
-            optimum_source_reflection: Complex64::new(optimum.real[index], optimum.imag[index]),
+            minimum_noise_factor: minimum[index],
+            noise_resistance_ohm: resistance[index],
+            optimum_source_reflection: Complex64::new(optimum_real[index], optimum_imag[index]),
             reference_impedance_ohm,
         })
         .collect::<Vec<_>>();

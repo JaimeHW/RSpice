@@ -10,18 +10,32 @@ pub(super) fn validate_report<W: AsRef<RetainedWaveform>>(
     if source.time != time {
         return Err("SOA source history contradicts its retained observation axis".into());
     }
-    let reporting_time = &waves
-        .first()
-        .ok_or("SOA reporting view has no traces")?
-        .as_ref()
-        .x;
+    // The reporting view is read whole: the history holds every observation in memory, so a
+    // view of it fits there too.
+    fn whole(
+        values: &crate::waveform::WaveformValues,
+    ) -> Result<std::borrow::Cow<'_, [f64]>, String> {
+        values.read_whole().map_err(|failure| failure.to_string())
+    }
+    let reporting_time = whole(
+        &waves
+            .first()
+            .ok_or("SOA reporting view has no traces")?
+            .as_ref()
+            .x,
+    )?;
+    let columns = waves
+        .iter()
+        .map(AsRef::as_ref)
+        .map(|wave| Ok((wave, whole(&wave.x)?, whole(&wave.y)?)))
+        .collect::<Result<Vec<_>, String>>()?;
     source.validate_report_columns(
-        reporting_time,
-        waves.iter().map(AsRef::as_ref).map(|wave| {
+        &reporting_time,
+        columns.iter().map(|(wave, x, y)| {
             (
                 wave.name.as_str(),
-                wave.x.as_slice(),
-                wave.y.as_slice(),
+                &x[..],
+                &y[..],
                 wave.unit.as_deref(),
                 wave.complex.is_some(),
             )

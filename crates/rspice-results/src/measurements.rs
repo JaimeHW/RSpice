@@ -6,7 +6,9 @@
 
 mod interval;
 
-pub use interval::{IntervalStatistics, MeasurementError, measure_interval};
+pub use interval::{
+    IntervalStatistics, MeasurementError, measure_interval, measure_interval_values,
+};
 
 /// Finite (minimum, maximum) of retained samples, or `None` without finite values.
 pub fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {

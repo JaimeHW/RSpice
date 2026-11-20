@@ -94,7 +94,7 @@ pub fn resolve_noise_spectrum_shape<W: AsRef<RetainedWaveform>>(
                         == Some(RetainedNoiseReference::Output)
                         || retained_noise_contributor(&waveform.name))
                     && noise_waveform_is_renderable(waveform, &mut note_scan)
-                    && waveform.x.as_slice() == frequency.as_slice()
+                    && waveform.x == *frequency
             })
             .count()
     };
@@ -111,14 +111,14 @@ fn noise_waveform_is_renderable(waveform: &RetainedWaveform, note_scan: &mut imp
     note_scan();
     if waveform
         .y
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0)
+        .samples(..)
+        .any(|value| !value.is_finite() || value < 0.0)
     {
         return false;
     }
     let mut previous = None;
     let mut positive_count = 0_usize;
-    for frequency in waveform.x.iter().copied() {
+    for frequency in waveform.x.samples(..) {
         if !frequency.is_finite() || frequency <= 0.0 {
             return false;
         }

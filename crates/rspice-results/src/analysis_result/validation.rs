@@ -79,9 +79,9 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             // A stored run's rows were checked as its run ended; reading them here would read
             // the whole run, and a segment deleted outside RSpice reads none.
             let stored = waveform.x.is_stored() || waveform.y.is_stored();
-            if !stored
-                && (waveform.x.iter().any(|value| !value.is_finite())
-                    || waveform.y.iter().any(|value| value.is_infinite()))
+            if let (Some(x), Some(y)) = (waveform.x.in_memory(), waveform.y.in_memory())
+                && (x.iter().any(|value| !value.is_finite())
+                    || y.iter().any(|value| value.is_infinite()))
             {
                 return Err(format!(
                     "retained waveform '{}' contains a non-finite coordinate or infinite value",
@@ -128,24 +128,18 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         waveform.x.len()
                     ));
                 }
-                if !(complex.real.is_stored() || complex.imag.is_stored())
-                    && complex
-                        .real
-                        .iter()
-                        .chain(complex.imag.iter())
-                        .any(|value| value.is_infinite())
+                // Stored components were checked as their run ended, as stored samples are.
+                let components = complex.real.in_memory().zip(complex.imag.in_memory());
+                if let Some((real, imag)) = components
+                    && real.iter().chain(imag).any(|value| value.is_infinite())
                 {
                     return Err(format!(
                         "retained waveform '{}' contains a non-finite complex component",
                         waveform.name
                     ));
                 }
-                if complex
-                    .real
-                    .iter()
-                    .zip(complex.imag.iter())
-                    .zip(waveform.y.iter())
-                    .any(|((real, imag), value)| {
+                if let (Some((real, imag)), Some(y)) = (components, waveform.y.in_memory())
+                    && real.iter().zip(imag).zip(y).any(|((real, imag), value)| {
                         real.is_nan() != imag.is_nan() || real.is_nan() != value.is_nan()
                     })
                 {
@@ -259,10 +253,11 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     );
                 }
                 if self.waveforms.is_empty()
-                    || self.waveforms.iter().map(AsRef::as_ref).any(|wave| {
-                        wave.x.first().copied() != Some(noise.band.0)
-                            || wave.x.last().copied() != Some(noise.band.1)
-                    })
+                    || self
+                        .waveforms
+                        .iter()
+                        .map(AsRef::as_ref)
+                        .any(|wave| wave.x.ends() != Some(noise.band))
                 {
                     return Err(
                         "Periodic-noise curves must cover their retained offset band".into(),
@@ -278,8 +273,8 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     .filter(|wave| wave.name == "Noise figure (SSB)");
                 let matches = curves.next().is_some_and(|wave| {
                     wave.unit.as_deref() == Some("dB")
-                        && wave.x.as_slice() == figure.frequencies.as_slice()
-                        && wave.y.as_slice() == figure.decibels.as_slice()
+                        && wave.x == figure.frequencies
+                        && wave.y == figure.decibels
                 });
                 if self.analysis_type != AnalysisType::Hbnoise
                     || !matches
@@ -395,7 +390,8 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                 |trace| crate::dc_sweep::DcTraceView {
                     name: &trace.name,
                     unit: trace.unit.as_deref(),
-                    x: &trace.x,
+                    x: trace.x.in_memory(),
+                    x_len: trace.x.len(),
                     sample_count: trace.y.len(),
                     complex: trace.complex.is_some(),
                 },
@@ -509,7 +505,9 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                             );
                         }
                         *derating_event_counts.entry(key).or_default() += 1;
-                        limits.map_or(evaluation.limit_value, |values| values[index])
+                        limits
+                            .as_ref()
+                            .map_or(evaluation.limit_value, |values| values[index])
                     } else {
                         evaluation.limit_value
                     };

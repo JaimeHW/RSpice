@@ -42,25 +42,29 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
         unit,
     )?;
     let limits = if evaluation.envelope.is_some() {
-        SoaLimitTrace::Samples(super::soa_derating::trace(
+        Some(super::soa_derating::trace(
             analysis,
             &crate::safety::soa_envelope_limit_waveform_name(&evaluation.device_id, parameter),
             time,
             "A",
         )?)
     } else if evaluation.derating.is_some() {
-        SoaLimitTrace::Samples(super::soa_derating::trace(
+        Some(super::soa_derating::trace(
             analysis,
             &soa_power_limit_waveform_name(&evaluation.device_id),
             time,
             "W",
         )?)
     } else {
-        SoaLimitTrace::Constant(evaluation.limit_value)
+        None
+    };
+    let limits = match &limits {
+        Some(samples) => SoaLimitTrace::Samples(samples),
+        None => SoaLimitTrace::Constant(evaluation.limit_value),
     };
     let scan = scan_soa_duration_with_mode(
         time,
-        stress,
+        &stress,
         limits,
         duration.minimum_duration_s,
         duration.mode(),

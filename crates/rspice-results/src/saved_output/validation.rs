@@ -94,7 +94,7 @@ where
                 let waveform = waveforms.get(name).ok_or_else(|| {
                     format!("saved-output receipt names absent materialized waveform '{name}'")
                 })?;
-                if usize::try_from(count).ok() != Some(waveform.x.len()) {
+                if usize::try_from(count).ok() != Some(waveform.x_len) {
                     return Err(format!(
                         "saved-output sample count does not match waveform '{name}'"
                     ));
@@ -138,16 +138,19 @@ where
                                         .to_owned(),
                                 );
                             }
+                            let Some(x) = waveform.x else {
+                                continue;
+                            };
                             if let Some(axis) = raw_dc_axis {
-                                if !std::ptr::eq(axis, waveform.x) && axis != waveform.x {
+                                if !std::ptr::eq(axis, x) && axis != x {
                                     return Err(
                                         "saved-output DC raw members have different primary axes"
                                             .to_owned(),
                                     );
                                 }
                             } else {
-                                evidence.validate_axis(waveform.x)?;
-                                raw_dc_axis = Some(waveform.x);
+                                evidence.validate_axis(x)?;
+                                raw_dc_axis = Some(x);
                             }
                         }
                     }
@@ -189,8 +192,9 @@ where
                     .trace_name(&evidence.quantities[curve.quantity], curve.member)
                     .as_str(),
             )
-            && !std::ptr::eq(axis, source.x)
-            && axis != source.x
+            && let Some(x) = source.x
+            && !std::ptr::eq(axis, x)
+            && axis != x
         {
             return Err(
                 "saved-output DC raw members differ from the retained solved primary axis"

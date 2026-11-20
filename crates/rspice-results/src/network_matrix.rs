@@ -294,19 +294,22 @@ impl NetworkLayout {
             };
             let grid = &first.as_ref().x;
             !grid.is_empty()
-                && grid.iter().all(|x| x.is_finite() && *x >= 0.0)
-                && grid.windows(2).all(|pair| pair[0] < pair[1])
+                && grid.samples(..).all(|x| x.is_finite() && x >= 0.0)
+                && grid.ascends_strictly()
                 && block.cells.iter().enumerate().all(|(cell, &index)| {
                     let Some(waveform) = analysis.waveforms.get(index).map(AsRef::as_ref) else {
                         return false;
                     };
                     term(coefficient_name(waveform), ports)
                         == Some((block.key.clone(), cell / ports, cell % ports))
-                        && waveform.x.as_ref() == grid.as_ref()
+                        && waveform.x == *grid
                         && waveform.complex.as_ref().is_some_and(|c| {
                             c.real.len() == grid.len()
                                 && c.imag.len() == grid.len()
-                                && c.real.iter().chain(c.imag.iter()).all(|v| v.is_finite())
+                                && c.real
+                                    .samples(..)
+                                    .chain(c.imag.samples(..))
+                                    .all(f64::is_finite)
                         })
                 })
         })
@@ -336,9 +339,9 @@ impl NetworkLayout {
                 {
                     return None;
                 }
-                let frequency = waveform.x.get(sample)?;
-                let real = complex.real.get(sample)?;
-                let imaginary = complex.imag.get(sample)?;
+                let frequency = waveform.x.sample(sample)?;
+                let real = complex.real.sample(sample)?;
+                let imaginary = complex.imag.sample(sample)?;
                 Some(vec![
                     complex.source_name.clone(),
                     format!("{:.17e}", frequency),

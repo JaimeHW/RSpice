@@ -50,9 +50,9 @@ pub fn phase_noise_waveform_is_renderable(
 
     waveform
         .x
-        .iter()
-        .zip(waveform.y.iter())
-        .try_fold(None, |previous, (&offset, &level)| {
+        .samples(..)
+        .zip(waveform.y.samples(..))
+        .try_fold(None, |previous, (offset, level)| {
             (offset.is_finite()
                 && offset > 0.0
                 && level.is_finite()
@@ -145,10 +145,8 @@ mod tests {
         assert!(!phase_noise_waveform_is_renderable(&invalid, || {}));
 
         let trace = waveform("phase_noise");
-        assert_eq!(
-            exact_retained_value_at(&trace.x, &trace.y, 1.0e6),
-            Some(-132.0)
-        );
-        assert_eq!(exact_retained_value_at(&trace.x, &trace.y, 10.0), None);
+        let (x, y) = (trace.x.in_memory().unwrap(), trace.y.in_memory().unwrap());
+        assert_eq!(exact_retained_value_at(x, y, 1.0e6), Some(-132.0));
+        assert_eq!(exact_retained_value_at(x, y, 10.0), None);
     }
 }

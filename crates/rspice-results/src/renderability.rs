@@ -170,10 +170,10 @@ fn raw_frequency_curve_is_renderable(
     note(EvidenceScan::RawFrequencyCurve);
     waveform
         .x
-        .iter()
-        .zip(waveform.y.iter())
-        .all(|(&x, &y)| x.is_finite() && x > 0.0 && y.is_finite())
-        && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
+        .samples(..)
+        .zip(waveform.y.samples(..))
+        .all(|(x, y)| x.is_finite() && x > 0.0 && y.is_finite())
+        && waveform.x.ascends_strictly()
 }
 
 /// Whether one QPNOISE analysis carries a spectrum a reader may see.
@@ -275,14 +275,14 @@ fn s_parameter_trace_is_well_formed(
     note(EvidenceScan::SParameterTrace);
     waveform
         .x
-        .iter()
-        .all(|frequency| frequency.is_finite() && *frequency > 0.0)
-        && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
+        .samples(..)
+        .all(|frequency| frequency.is_finite() && frequency > 0.0)
+        && waveform.x.ascends_strictly()
         && complex
             .real
-            .iter()
-            .chain(complex.imag.iter())
-            .all(|value| value.is_finite())
+            .samples(..)
+            .chain(complex.imag.samples(..))
+            .all(f64::is_finite)
 }
 
 /// Whether the Smith sheet can draw one analysis, its retained evidence

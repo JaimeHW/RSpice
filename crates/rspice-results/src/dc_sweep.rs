@@ -103,7 +103,11 @@ pub enum DcCurveSelection {
 pub struct DcTraceView<'a> {
     pub name: &'a str,
     pub unit: Option<&'a str>,
-    pub x: &'a [f64],
+    /// The axis when its samples are in memory. A stored axis has none here: its rows were
+    /// checked as its run ended, and a check reads no store.
+    pub x: Option<&'a [f64]>,
+    /// The samples the axis holds.
+    pub x_len: usize,
     pub sample_count: usize,
     pub complex: bool,
 }
@@ -300,18 +304,21 @@ impl DcSweepEvidence {
                     "DC sweep curve '{name}' has an inconsistent quantity"
                 ));
             }
-            if trace.x.is_empty() || trace.x.len() != trace.sample_count {
+            if trace.x_len == 0 || trace.x_len != trace.sample_count {
                 return Err(format!(
                     "DC sweep curve '{name}' has an invalid sample shape"
                 ));
             }
+            let Some(x) = trace.x else {
+                continue;
+            };
             if let Some(reference) = reference_axis {
-                if !std::ptr::eq(reference, trace.x) && reference != trace.x {
+                if !std::ptr::eq(reference, x) && reference != x {
                     return Err("DC sweep curves have different primary axes".to_owned());
                 }
             } else {
-                self.validate_axis(trace.x)?;
-                reference_axis = Some(trace.x);
+                self.validate_axis(x)?;
+                reference_axis = Some(x);
             }
         }
         Ok(())

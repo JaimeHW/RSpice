@@ -12,12 +12,12 @@ pub fn spectrum_trace_is_renderable(
     note_scan();
     waveform
         .x
-        .iter()
-        .zip(waveform.y.iter())
-        .all(|(&frequency, &magnitude)| {
+        .samples(..)
+        .zip(waveform.y.samples(..))
+        .all(|(frequency, magnitude)| {
             frequency.is_finite() && frequency >= 0.0 && magnitude.is_finite()
         })
-        && waveform.x.windows(2).all(|window| window[0] <= window[1])
+        && waveform.x.ascends()
 }
 
 pub fn analysis_is_renderable<W: AsRef<RetainedWaveform>>(

@@ -68,7 +68,7 @@ fn values_in_memory(
     let samples = match read.get(&key) {
         Some(samples) => Arc::clone(samples),
         None => {
-            let samples = Arc::new(values.try_values()?.clone());
+            let samples = Arc::new(values.read_whole()?.into_owned());
             read.insert(key, Arc::clone(&samples));
             samples
         }

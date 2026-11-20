@@ -113,7 +113,7 @@ fn a_monte_carlo_transient_keeps_one_transient_per_trial_as_drawn() {
 fn peak_to_peak(analysis: &AnalysisResult, name: &str, start: f64, stop: f64) -> f64 {
     let waveform = signal(analysis, name);
     let at = |time: f64| {
-        let right = waveform.x.partition_point(|t| *t < time);
+        let right = waveform.x.partition_point(|t| t < time);
         let left = right.saturating_sub(1);
         let (t0, t1) = (waveform.x[left], waveform.x[right]);
         let (y0, y1) = (waveform.y[left], waveform.y[right]);
