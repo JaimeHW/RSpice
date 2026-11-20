@@ -328,3 +328,103 @@ fn locate_results_reads_runs_from_the_folder_it_is_given() {
     drop(restored);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The sample at `row` of seeded signal `signal`: a SplitMix64 draw in [-0.5, 0.5), so every
+/// sample differs and a test regenerates it instead of holding it.
+fn seeded_sample(signal: u64, row: u64) -> f64 {
+    let mut z = ((signal << 40) ^ row).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    (z >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+}
+
+/// A run of four seeded signals holding `bytes` of samples, time axis included, saves beside a
+/// project file, closes, and reopens with every sample equal, read back a block at a time.
+fn a_seeded_run_round_trips(bytes: u64, name: &str) {
+    const SIGNALS: u64 = 4;
+    let rows = usize::try_from(bytes / (8 * (SIGNALS + 1))).unwrap();
+    let mut libraries = crate::state::LibraryManager::with_primitives();
+    let workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let mut simulation = SimulationState::default();
+    {
+        let time: Vec<f64> = (0..rows).map(|row| row as f64 * 1.0e-9).collect();
+        let waveforms = (0..SIGNALS)
+            .map(|signal| {
+                let values = (0..rows as u64)
+                    .map(|row| seeded_sample(signal, row))
+                    .collect::<Vec<f64>>();
+                RetainedTrace::new(format!("V(n{signal})"), time.clone(), values, "#ffffff")
+            })
+            .collect();
+        let mut run = SimulationRun::new(1);
+        run.keep_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(waveforms),
+        );
+        super::seal_legacy_unattributed(&mut run);
+        run.mark_running().unwrap();
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .unwrap();
+        assert!(run.analyses[0].waveforms.iter().all(|w| w.y.is_stored()));
+        simulation.retained.runs = vec![run].into();
+        simulation.retained.next_run_id = 1;
+    }
+    let root = scratch_folder(name);
+    let file = root.join(format!("{name}.rspiceproj"));
+    let results = crate::io::capture_simulation_results(&simulation);
+    crate::io::result_segments::keep_segments_now(results.stored_segments(), &file)
+        .expect("the run's segment is kept beside the project");
+    let project = ProjectSnapshot::new_with_simulation_results(workspace, libraries, results);
+    let json = serialize_project_file(&project).expect("the project serializes");
+    assert!(
+        json.len() < 1 << 20,
+        "the project file holds {} bytes",
+        json.len()
+    );
+    std::fs::write(&file, &json).unwrap();
+    drop((project, simulation, json));
+
+    let text = std::fs::read_to_string(&file).unwrap();
+    let loaded = load_project_text(&text, Some(&file)).expect("the project opens");
+    assert_eq!(loaded.file.simulation_results_warning, None);
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
+        .expect("its run restores");
+    let analysis = &restored.retained.runs[0].analyses[0];
+    assert_eq!(analysis.waveforms.len(), SIGNALS as usize);
+    const BLOCK: usize = 1 << 20;
+    for (signal, waveform) in analysis.waveforms.iter().enumerate() {
+        assert_eq!(waveform.y.len(), rows);
+        let mut first = 0;
+        while first < rows {
+            let last = (first + BLOCK).min(rows);
+            let x = waveform.x.read_range(first..last).unwrap();
+            let y = waveform.y.read_range(first..last).unwrap();
+            for (offset, (x, y)) in x.iter().zip(y.iter()).enumerate() {
+                let row = first + offset;
+                assert_eq!(x.to_bits(), (row as f64 * 1.0e-9).to_bits(), "x at {row}");
+                assert_eq!(
+                    y.to_bits(),
+                    seeded_sample(signal as u64, row as u64).to_bits(),
+                    "{} at {row}",
+                    waveform.name
+                );
+            }
+            first = last;
+        }
+    }
+    drop(restored);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_seeded_run_of_64_mib_saves_closes_and_reopens_with_every_sample() {
+    a_seeded_run_round_trips(64 << 20, "seeded-64-mib");
+}
+
+/// Writes 2 GiB to the temporary folder; run it on its own, pointing the temporary folder at a
+/// volume with room.
+#[test]
+#[ignore = "writes 2 GiB"]
+fn a_seeded_run_of_2_gib_saves_closes_and_reopens_with_every_sample() {
+    a_seeded_run_round_trips(2 << 30, "seeded-2-gib");
+}
