@@ -7,8 +7,8 @@
 
 use rspice_results::number_format::fmt_si_significant;
 use rspice_results::waveform_comparison::{
-    ComparisonAlignmentDraft, ComparisonOptions, comparison_signal_names, execute_comparison,
-    matching_comparison_analysis,
+    ComparisonAlignmentDraft, ComparisonOptions, ComparisonSide, comparison_signal_names,
+    execute_comparison, matching_comparison_analysis,
 };
 use rspice_results_ui::document_dialogs::compare::{
     CompareChoices, CompareDraft, CompareOutcome, SignalOutcome, Verdict,
@@ -261,10 +261,17 @@ pub(super) fn commit(
         let baseline_analysis = matching_comparison_analysis(analysis, baseline)
             .ok_or_else(|| "The baseline holds no matching analysis.".to_owned())?;
         let signal_names = comparison_signal_names(analysis, baseline_analysis)?;
-        let receipt = execute_comparison(
-            run,
+        let side = |run: &SimulationRun, analysis| ComparisonSide {
+            binding: DatasetBinding::new(
+                run.dataset_id,
+                super::super::retained_dataset_digest(state.results_reads(), run),
+            ),
             analysis,
-            baseline,
+        };
+        let receipt = execute_comparison(
+            side(run, &analysis.data),
+            side(baseline, &baseline_analysis.data),
+            &signal_names,
             ComparisonOptions {
                 alignment: draft.alignment,
                 alignment_signal: &draft.signal,
@@ -273,7 +280,9 @@ pub(super) fn commit(
                 absolute_tolerance: numbers.absolute_tolerance,
                 relative_tolerance: numbers.relative_tolerance,
             },
-        )?;
+            &mut |_, _| true,
+        )?
+        .receipt;
         let outcome = outcome(
             state.results_reads(),
             analysis,

@@ -551,9 +551,7 @@ pub fn compare_source_datasets(
                 candidate: candidate_column.unit.clone(),
             });
         }
-        let mut failed_rows = 0;
-        let mut maximum_absolute_error = 0.0_f64;
-        let mut maximum_relative_error = 0.0_f64;
+        let mut tally = ErrorTally::default();
         for (baseline_row, candidate_row) in &row_pairs {
             let (TypedValue::Real(baseline_value), TypedValue::Real(candidate_value)) = (
                 &baseline_row.values[baseline_index],
@@ -566,26 +564,9 @@ pub fn compare_source_datasets(
                     ),
                 });
             };
-            let absolute_error = (candidate_value - baseline_value).abs();
-            let scale = baseline_value.abs().max(candidate_value.abs());
-            let relative_error = if scale == 0.0 {
-                0.0
-            } else {
-                absolute_error / scale
-            };
-            maximum_absolute_error = maximum_absolute_error.max(absolute_error);
-            maximum_relative_error = maximum_relative_error.max(relative_error);
-            let allowed = request.policy.tolerance.absolute
-                + request.policy.tolerance.relative * baseline_value.abs();
-            failed_rows += usize::from(absolute_error > allowed);
+            tally.add(*baseline_value, *candidate_value, request.policy.tolerance);
         }
-        signal_receipts.push(SignalComparison {
-            signal_key: signal_key.clone(),
-            compared_rows: row_pairs.len(),
-            failed_rows,
-            maximum_absolute_error,
-            maximum_relative_error,
-        });
+        signal_receipts.push(tally.into_signal(signal_key.clone()));
     }
     let disposition = if signal_receipts.iter().any(|signal| signal.failed_rows > 0) {
         ComparisonDisposition::Failed

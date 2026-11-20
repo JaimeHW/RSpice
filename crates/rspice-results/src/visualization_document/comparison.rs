@@ -32,6 +32,56 @@ impl NumericTolerance {
         }
         Ok(Self { absolute, relative })
     }
+
+    /// The error a sample may have against its baseline value: the absolute
+    /// tolerance plus the relative one's share of the baseline's magnitude.
+    #[must_use]
+    pub fn allowed(&self, baseline: f64) -> f64 {
+        self.absolute + self.relative * baseline.abs()
+    }
+}
+
+/// One signal's errors against its baseline, counted row by row: how many
+/// rows are outside the tolerance, and the worst absolute and relative error.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ErrorTally {
+    pub rows: usize,
+    pub failed_rows: usize,
+    pub maximum_absolute_error: f64,
+    pub maximum_relative_error: f64,
+}
+
+impl ErrorTally {
+    /// Count one row, and say whether it is outside the tolerance. The
+    /// relative error is taken against the larger magnitude of the two, so it
+    /// is symmetric; the tolerance is taken against the baseline.
+    pub fn add(&mut self, baseline: f64, candidate: f64, tolerance: NumericTolerance) -> bool {
+        let absolute_error = (candidate - baseline).abs();
+        let scale = baseline.abs().max(candidate.abs());
+        let relative_error = if scale == 0.0 {
+            0.0
+        } else {
+            absolute_error / scale
+        };
+        self.maximum_absolute_error = self.maximum_absolute_error.max(absolute_error);
+        self.maximum_relative_error = self.maximum_relative_error.max(relative_error);
+        let failed = absolute_error > tolerance.allowed(baseline);
+        self.rows += 1;
+        self.failed_rows += usize::from(failed);
+        failed
+    }
+
+    /// The tally as a receipt records it.
+    #[must_use]
+    pub fn into_signal(self, signal_key: String) -> SignalComparison {
+        SignalComparison {
+            signal_key,
+            compared_rows: self.rows,
+            failed_rows: self.failed_rows,
+            maximum_absolute_error: self.maximum_absolute_error,
+            maximum_relative_error: self.maximum_relative_error,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
