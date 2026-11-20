@@ -19,42 +19,45 @@ pub(crate) fn open(wb: &mut WorkbenchSession) {
     }
 }
 
-pub(crate) fn can_save_document(
-    editor: &ReportAuthoringState,
-    model: &Model,
-    wb: &WorkbenchSession,
-    platform: &PlatformState,
-) -> bool {
-    wb.working_route().surface_id() == SurfaceId::ReportAuthoring
-        && mutation_allowed(model, platform)
-        && active_document(editor, model).is_some()
-        && model.workspace.content.report_documents_dirty
+/// What a report toolbar action acts on beyond an open report it may change.
+#[derive(Clone, Copy)]
+pub(crate) enum ReportNeed {
+    Report,
+    UnsavedChanges,
+    SelectedPage,
 }
 
-pub(crate) fn can_add_page(
+/// Why a report toolbar action cannot run now, or `None` when it can.
+pub(crate) fn action_block(
     editor: &ReportAuthoringState,
     model: &Model,
     wb: &WorkbenchSession,
     platform: &PlatformState,
-) -> bool {
-    wb.working_route().surface_id() == SurfaceId::ReportAuthoring
-        && mutation_allowed(model, platform)
-        && active_document(editor, model).is_some()
-}
-
-pub(crate) fn can_edit_page_properties(
-    editor: &ReportAuthoringState,
-    model: &Model,
-    wb: &WorkbenchSession,
-    platform: &PlatformState,
-) -> bool {
-    if wb.working_route().surface_id() != SurfaceId::ReportAuthoring
-        || !mutation_allowed(model, platform)
-    {
-        return false;
+    need: ReportNeed,
+) -> Option<&'static str> {
+    if wb.working_route().surface_id() != SurfaceId::ReportAuthoring {
+        return Some("the report editor is not open");
     }
-    active_document(editor, model)
-        .is_some_and(|document| selected_page_id(editor, document).is_some())
+    if !platform.project_lifecycle.is_open() {
+        return Some("no project is open");
+    }
+    if model.safe_mode.project_read_only() {
+        return Some("the project is read-only");
+    }
+    if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(platform) {
+        return Some("a project operation is in progress");
+    }
+    let Some(document) = active_document(editor, model) else {
+        return Some("no report is open");
+    };
+    match need {
+        ReportNeed::Report => None,
+        ReportNeed::UnsavedChanges => (!model.workspace.content.report_documents_dirty)
+            .then_some("the report has no unsaved changes"),
+        ReportNeed::SelectedPage => selected_page_id(editor, document)
+            .is_none()
+            .then_some("no report page is selected"),
+    }
 }
 
 /// Whether the report documents may be saved with the project now. When

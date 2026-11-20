@@ -29,14 +29,16 @@ pub use format_picker::{
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 
-/// Headers and container metadata also count against the receiving workflow's
-/// byte limit. Refuse an oversized artifact before selecting a destination.
+/// An exported file is one RSpice can read back, so it is held to the size
+/// a result dataset may be, headers and container metadata counted. An
+/// oversized file is refused before a destination is chosen.
 fn admit_result_export_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
     let limit = crate::io::file_exchange::MAX_RESULT_DATASET_BYTES;
     if bytes.len() as u64 > limit {
         return Err(format!(
-            "The encoded result is {} bytes; the import limit is {limit} bytes. Hide traces or export a smaller selection.",
-            bytes.len()
+            "The file would be {} bytes, more than the {} MiB ({limit} bytes) a result dataset may hold. Hide traces or export a smaller selection.",
+            bytes.len(),
+            limit / (1024 * 1024)
         ));
     }
     Ok(bytes)
@@ -45,7 +47,7 @@ fn admit_result_export_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
 /// from one that wrote the dataset, so the hidden traces are named as the
 /// reason rather than reported as an absence of samples.
 const ALL_TRACES_HIDDEN_MESSAGE: &str = "Every trace in the displayed analysis is hidden, so there is nothing to export. \
-     Show at least one trace, or choose All signals in Export dataset\u{2026}.";
+     Show at least one trace, or choose All signals in Export result dataset\u{2026}.";
 
 // Touchstone carries an S-parameter network on a frequency axis and nothing
 // else, so each table route names what it holds instead of the reader being
@@ -56,7 +58,7 @@ const RESULTS_SHEET_TOUCHSTONE_REFUSAL: &str =
     "Touchstone export is not compatible with this Results sheet; select CSV export.";
 const TYPED_RESULT_TOUCHSTONE_REFUSAL: &str =
     "Touchstone export is not compatible with the active typed result; select CSV export.";
-const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one analysis; choose it in Export dataset\u{2026} or select CSV export.";
+const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one analysis; choose it in Export result dataset\u{2026} or select CSV export.";
 
 fn note_result_export_failure(state: &mut ResultsParts<'_>, detail: impl Into<String>) {
     let data_version = state.model.simulation.view.data_version;
@@ -172,7 +174,7 @@ pub fn action_export_result_selection_with_io(
     keys: &[rspice_results_ui::selection::ResultBrowserSelectionKey],
 ) {
     if keys.is_empty() {
-        state.prompt("Select quantities in the Data Browser to export.");
+        state.prompt("Select quantities in the Data browser to export.");
         return;
     }
     let contents =
@@ -326,7 +328,7 @@ pub fn action_export_dataset_with_io(
     if single_analysis_export && displayed.analysis_indices.len() > 1 {
         state.prompt(
             "This export supports one analysis, and this view shows several. Choose the \
-             analysis in Export dataset\u{2026}, or choose CSV/TSV to export the displayed stack.",
+             analysis in Export result dataset\u{2026}, or choose CSV/TSV to export the displayed stack.",
         );
         return;
     }

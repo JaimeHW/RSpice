@@ -248,7 +248,7 @@ fn binary_waveform_exports_count_container_bytes_at_the_sample_budget_boundary()
         assert!(io.byte_files.borrow().is_empty());
         let message = last_log_message(&state);
         assert!(
-            message.contains("encoded result") && message.contains("67108864 bytes"),
+            message.contains("more than the 64 MiB") && message.contains("67108864 bytes"),
             "{message}"
         );
     }

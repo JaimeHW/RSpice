@@ -200,7 +200,7 @@ impl ResultsCommand {
                 NONE,
             ),
             Self::ExportWaveformsCsv => (
-                "Export dataset…",
+                "Export result dataset…",
                 "Results",
                 PROJECT,
                 ShortcutContext::Global,
@@ -214,7 +214,7 @@ impl ResultsCommand {
                 NONE,
             ),
             Self::ToggleLinkedCursors => (
-                "Linked A/B cursors",
+                "Link A/B cursors",
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,
@@ -228,7 +228,7 @@ impl ResultsCommand {
                 TOGGLE_RESULTS_SPLIT,
             ),
             Self::DatasetManifestBrowser => (
-                "Results browser",
+                "Data browser",
                 "Results",
                 PROJECT,
                 ShortcutContext::ResultsWorkspace,

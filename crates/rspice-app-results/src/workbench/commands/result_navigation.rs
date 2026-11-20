@@ -62,7 +62,7 @@ pub(crate) fn ticked_result_quantities(
     ticked
 }
 
-/// Whether "Export dataset…" has a displayed view to write.
+/// Whether "Export result dataset…" has a displayed view to write.
 ///
 /// The export writes the *displayed* result view, and that resolution starts
 /// at the active Results document. Offering the command whenever any dataset
@@ -270,8 +270,8 @@ pub(crate) fn producer_log_hop(state: ResultsReads<'_>) -> Result<u64, &'static 
                 .collect::<HashSet<_>>();
             match (datasets.len(), datasets.into_iter().next()) {
                 (1, Some(dataset)) => dataset,
-                (0, _) => return Err("check-mark the Data Browser quantity whose run log to open"),
-                _ => return Err("check-mark exactly one Data Browser quantity"),
+                (0, _) => return Err("check-mark the Data browser quantity whose run log to open"),
+                _ => return Err("check-mark exactly one Data browser quantity"),
             }
         }
         1 => checked
@@ -279,7 +279,7 @@ pub(crate) fn producer_log_hop(state: ResultsReads<'_>) -> Result<u64, &'static 
             .next()
             .expect("one check-marked quantity")
             .dataset_id(),
-        _ => return Err("check-mark exactly one Data Browser quantity"),
+        _ => return Err("check-mark exactly one Data browser quantity"),
     };
     producing_run(&state.model.simulation.retained.runs, dataset)
         .ok_or("the run that produced the check-marked quantity is no longer held")

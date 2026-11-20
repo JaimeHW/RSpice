@@ -1139,7 +1139,7 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
         [
             // No result is selected, so View as offers no viewer and is
             // left out rather than opening on nothing.
-            "Results browser",
+            "Data browser",
             "Waveforms",
             "New result document…",
             "Add pane…",

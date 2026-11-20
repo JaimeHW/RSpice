@@ -154,58 +154,42 @@ impl CommandSet for HardcopyCommand {
     /// actions need the report route and a report the project lets change.
     fn availability(self, reads: &Reads<'_, HardcopyFeature>) -> CommandAvailability {
         let editor = &reads.state.report_authoring;
-        let available = match self {
-            Self::CopyAsImage if !clipboard_takes_pictures() => {
-                return CommandAvailability::Disabled(
-                    "the browser shares its clipboard only with a page served over HTTPS",
-                );
-            }
-            Self::CopyAsImage => {
-                if !active_app_hardcopy_source_available(
-                    &reads.state.report_authoring,
-                    reads.model,
-                    reads.wb,
-                    reads.results,
-                ) {
-                    return CommandAvailability::Disabled("the view has nothing to draw");
-                }
-                true
-            }
-            Self::ReportAuthoring => true,
-            Self::PrintHardcopy => {
-                cfg!(any(
-                    target_os = "windows",
-                    target_os = "macos",
-                    target_os = "linux",
-                    target_arch = "wasm32"
-                )) && active_app_hardcopy_source_available(
-                    &reads.state.report_authoring,
-                    reads.model,
-                    reads.wb,
-                    reads.results,
-                )
-            }
-            Self::ExportActiveView => active_app_hardcopy_source_available(
+        let empty_view = || {
+            !active_app_hardcopy_source_available(
                 &reads.state.report_authoring,
                 reads.model,
                 reads.wb,
                 reads.results,
-            ),
-            Self::SaveReportDocument => {
-                report::can_save_document(editor, reads.model, reads.wb, reads.platform)
-            }
-            Self::AddReportPage => {
-                report::can_add_page(editor, reads.model, reads.wb, reads.platform)
-            }
-            Self::ReportPageProperties => {
-                report::can_edit_page_properties(editor, reads.model, reads.wb, reads.platform)
-            }
+            )
         };
-        if available {
-            CommandAvailability::Available
-        } else {
-            CommandAvailability::Disabled("command is unavailable in this context")
-        }
+        let report_block =
+            |need| report::action_block(editor, reads.model, reads.wb, reads.platform, need);
+        let reason = match self {
+            Self::CopyAsImage if !clipboard_takes_pictures() => {
+                Some("the browser shares its clipboard only with a page served over HTTPS")
+            }
+            Self::CopyAsImage => empty_view().then_some("the view has nothing to draw"),
+            Self::ReportAuthoring => None,
+            Self::PrintHardcopy
+                if !cfg!(any(
+                    target_os = "windows",
+                    target_os = "macos",
+                    target_os = "linux",
+                    target_arch = "wasm32"
+                )) =>
+            {
+                Some("this platform cannot print")
+            }
+            Self::PrintHardcopy => empty_view().then_some("the view has nothing to print"),
+            Self::ExportActiveView => empty_view().then_some("the view has nothing to export"),
+            Self::SaveReportDocument => report_block(report::ReportNeed::UnsavedChanges),
+            Self::AddReportPage => report_block(report::ReportNeed::Report),
+            Self::ReportPageProperties => report_block(report::ReportNeed::SelectedPage),
+        };
+        reason.map_or(
+            CommandAvailability::Available,
+            CommandAvailability::Disabled,
+        )
     }
 
     fn execute(self, cx: &mut Cx<'_, HardcopyFeature>) {

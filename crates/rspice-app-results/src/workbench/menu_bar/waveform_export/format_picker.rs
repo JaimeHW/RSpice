@@ -1,4 +1,4 @@
-//! The form "Export dataset…" asks before it writes anything.
+//! The form "Export result dataset…" asks before it writes anything.
 //!
 //! The format used to be a Preferences setting and nothing else, so the only
 //! way to export a TSV after a CSV was to leave the export, open Preferences,
@@ -18,7 +18,7 @@ use crate::workbench::ChoicePreference;
 use crate::workbench::documents::result_document::ResultsReads;
 use crate::workbench::preferences::UserPreferences;
 
-/// The open "Export dataset…" form: the format chosen so far, by its stored
+/// The open "Export result dataset…" form: the format chosen so far, by its stored
 /// index, and whether the view it exports shows more than one analysis, so
 /// that the form asks which.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -299,7 +299,7 @@ pub fn show_dataset_export_picker(
     };
     // Each question stands on the label/value grid every form uses, its
     // control across the control column.
-    let choice = CommandForm::new("Export dataset", "Export\u{2026}")
+    let choice = CommandForm::new("Export result dataset", "Export\u{2026}")
         .wide()
         .describe("Choose the file format for the displayed result.")
         .primary_enabled(refusal.is_none())

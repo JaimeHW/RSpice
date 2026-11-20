@@ -348,7 +348,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     assert_eq!(
         app.command_availability(ResultsCommand::RevealProducerLog.key()),
-        CommandAvailability::Disabled("check-mark the Data Browser quantity whose run log to open"),
+        CommandAvailability::Disabled("check-mark the Data browser quantity whose run log to open"),
     );
 
     // A typed artifact the retained analysis actually holds, so the resolved
@@ -392,7 +392,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
         .insert(second);
     assert_eq!(
         app.command_availability(ResultsCommand::RevealProducerLog.key()),
-        CommandAvailability::Disabled("check-mark exactly one Data Browser quantity"),
+        CommandAvailability::Disabled("check-mark exactly one Data browser quantity"),
         "two check-marks are two destinations, and the command must not pick one"
     );
 

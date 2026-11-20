@@ -691,7 +691,7 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
                         let valid = parsed_result_from_draft(&draft).is_ok()
                             && result_import_block_reason(state.model, state.platform).is_none();
                         commit = ui
-                            .add_enabled(valid, egui::Button::new("Import dataset"))
+                            .add_enabled(valid, egui::Button::new("Import"))
                             .clicked();
                         go_back = ui.button("Back").clicked();
                     }

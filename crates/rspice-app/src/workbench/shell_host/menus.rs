@@ -225,7 +225,11 @@ const EXPORT_MENU: &[MenuEntry] = &[
     )
     .access('I'),
     MenuEntry::command_as(CodeCommand::ExportNetlist.key(), "SPICE netlist\u{2026}").access('S'),
-    MenuEntry::command_as(ResultsCommand::ExportWaveformsCsv.key(), "Dataset\u{2026}").access('D'),
+    MenuEntry::command_as(
+        ResultsCommand::ExportWaveformsCsv.key(),
+        "Result dataset\u{2026}",
+    )
+    .access('D'),
     MenuEntry::command_as(
         CodeCommand::ExportBillOfMaterials.key(),
         "Bill of materials (CSV)\u{2026}",
@@ -663,11 +667,7 @@ const RESULTS_MENU: &[MenuEntry] = &[
     results(ResultsCommand::MeasurementLibrary).access('M'),
     results(ResultsCommand::FamilySlicing).access('F'),
     Separator,
-    MenuEntry::command_as(
-        ResultsCommand::ToggleLinkedCursors.key(),
-        "Link A/B cursors",
-    )
-    .access('L'),
+    results(ResultsCommand::ToggleLinkedCursors).access('L'),
     results(ResultsCommand::VisualizationDocumentProperties).access('P'),
     results(ResultsCommand::WaveformCalculator).access('C'),
     results(ResultsCommand::ExpressionDiagnostics).access('E'),

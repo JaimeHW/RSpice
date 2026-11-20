@@ -1,4 +1,4 @@
-//! The Export dataset… form read the way a reader meets it: the format list
+//! The Export result dataset… form read the way a reader meets it: the format list
 //! in stored order, the analysis question a view of several strips asks, the
 //! Plotted or All choice and the trace a PWL source asks for, each checked
 //! through the AccessKit tree of a whole rendered frame.
@@ -149,8 +149,8 @@ fn the_format_list_stands_on_the_form_grid() {
         .values()
         .find(|node| {
             node.role() == egui::accesskit::Role::Label
-                && (node.label() == Some("Export dataset")
-                    || node.value() == Some("Export dataset"))
+                && (node.label() == Some("Export result dataset")
+                    || node.value() == Some("Export result dataset"))
         })
         .and_then(egui::accesskit::Node::bounds)
         .expect("the title is published");
