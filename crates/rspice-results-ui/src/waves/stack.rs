@@ -836,7 +836,9 @@ fn expression_conversions(
             .find(|resolved| resolved.slot == slot)
             .map(|resolved| resolved.y)
             .unwrap_or_default();
-        if let Some(text) = super::logic::convert::digital_form_of(ui, &expr.text, &values) {
+        if let Some(text) = super::logic::convert::digital_form_of(ui, &expr.text, || {
+            super::logic::convert::mid_range(&values)
+        }) {
             host.add_expression(model, text);
         }
     });

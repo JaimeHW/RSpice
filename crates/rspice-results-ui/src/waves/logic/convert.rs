@@ -56,19 +56,28 @@ struct Draft {
 /// The `digital()` form of a trace's menu: a threshold, starting at the
 /// middle of the trace's range; a low threshold, which gives the band its
 /// hysteresis; and a time to X, past which a signal held in the band is X.
-/// Returns the expression once the reader adds it.
-pub fn digital_form(ui: &mut Ui, signal: &str, values: &[f64]) -> Option<String> {
-    digital_form_of(ui, &signal_reference(signal), values)
+/// Returns the expression once the reader adds it. `middle` is asked for the
+/// starting threshold only when the form opens.
+pub fn digital_form(
+    ui: &mut Ui,
+    signal: &str,
+    middle: impl FnOnce() -> Option<f64>,
+) -> Option<String> {
+    digital_form_of(ui, &signal_reference(signal), middle)
 }
 
 /// The same form for a value the strip already spells as an expression,
 /// which `digital()` reads as it is typed.
-pub fn digital_form_of(ui: &mut Ui, reference: &str, values: &[f64]) -> Option<String> {
+pub fn digital_form_of(
+    ui: &mut Ui,
+    reference: &str,
+    middle: impl FnOnce() -> Option<f64>,
+) -> Option<String> {
     let id = ui.id().with(("digital-form", reference));
     let mut draft = ui
         .data(|data| data.get_temp::<Draft>(id))
         .unwrap_or_else(|| Draft {
-            threshold: mid_range(values).map(threshold_text).unwrap_or_default(),
+            threshold: middle().map(threshold_text).unwrap_or_default(),
             ..Draft::default()
         });
     let parse = |text: &str| rspice_results::spice_value::parse_spice_value_checked(text.trim());

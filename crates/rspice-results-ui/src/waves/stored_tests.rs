@@ -551,3 +551,17 @@ fn a_peak_marker_on_a_stored_trace_is_searched_for_once() {
     );
     assert_eq!(work.since(), ColumnWork::default());
 }
+
+/// The Digital submenu starts its threshold at the middle of the trace's
+/// range. On a stored trace that comes from the store's summaries: no row of
+/// the column is read.
+#[test]
+fn the_digital_submenu_starts_its_threshold_without_reading_a_stored_column() {
+    const ROWS: usize = 100_000;
+    let (run, rows_read) = tiled_run(ROWS);
+    let models = models(&run);
+    let before = rows_read();
+    let middle = super::header::trace_middle(&models[0].traces[0]).expect("the trace has a range");
+    assert_eq!(rows_read(), before, "the threshold read the stored column");
+    assert!(middle.abs() < 1.0e-6, "sin swings about zero: {middle}");
+}

@@ -629,11 +629,9 @@ fn expression_chip(
     }
     label.context_menu(|ui| {
         rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
-            if let Some(text) = super::logic::convert::digital_form_of(
-                ui,
-                &expression.text,
-                expression.values.as_slice(),
-            ) {
+            if let Some(text) = super::logic::convert::digital_form_of(ui, &expression.text, || {
+                super::logic::convert::mid_range(expression.values.as_slice())
+            }) {
                 host.add_expression(text);
             }
         });
@@ -803,15 +801,25 @@ fn legend_chip(
     }
     label.context_menu(|ui| {
         rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
-            if let Some(text) = super::logic::convert::digital_form(
-                ui,
-                &trace.source_waveform_name,
-                trace.y.as_slice(),
-            ) {
+            if let Some(text) =
+                super::logic::convert::digital_form(ui, &trace.source_waveform_name, || {
+                    trace_middle(trace)
+                })
+            {
                 host.add_expression(text);
             }
         });
     });
+}
+
+/// The middle of `trace`'s range, where its `digital()` threshold starts. A
+/// stored trace's comes from the store's summaries, without reading its column.
+pub(super) fn trace_middle(trace: &StripTrace) -> Option<f64> {
+    match trace.y.extent_over(&trace.x, None) {
+        Some(extent) if extent.min <= extent.max => Some(0.5 * (extent.min + extent.max)),
+        Some(_) => None,
+        None => super::logic::convert::mid_range(&trace.y),
+    }
 }
 
 #[cfg(test)]
