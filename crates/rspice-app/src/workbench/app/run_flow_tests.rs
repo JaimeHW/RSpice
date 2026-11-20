@@ -484,7 +484,19 @@ fn a_click_selects_a_signal_and_a_double_click_plots_and_inspects_it() {
     assert!(plotted(&user, &name), "a double click plots it");
     assert_eq!(selected_signal(&user).as_deref(), Some(name.as_str()));
     assert!(user.app.state.workbench.inspector_visible);
-    assert!(user.find("Mean").is_some(), "with its statistics");
+    // A stored trace's statistics are read off the frame and arrive a few frames later.
+    let measured = (0..400).any(|_| {
+        user.frame(Vec::new());
+        let computing = user.find("Computing\u{2026}").is_some();
+        if computing {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        !computing
+    });
+    assert!(
+        measured && user.find("Average").is_some(),
+        "with its statistics"
+    );
     assert_eq!(user.ticked(&tick), Some(true));
 
     user.click("Hide trace");
