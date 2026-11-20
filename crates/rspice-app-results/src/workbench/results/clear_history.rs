@@ -98,7 +98,7 @@ pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
         .ghost("Cancel")
         .destructive()
         .primary_enabled(deleted > 0 && !executing)
-        .show(ctx, |ui| body(ui, counts, &mut dialog));
+        .show(ctx, |ui| body(ui, counts, executing, &mut dialog));
     match choice {
         DialogChoice::Primary => {
             cx.state.clear_history = None;
@@ -113,7 +113,7 @@ pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
     }
 }
 
-fn body(ui: &mut Ui, counts: ClearHistoryCounts, dialog: &mut ClearHistoryDialog) {
+fn body(ui: &mut Ui, counts: ClearHistoryCounts, executing: bool, dialog: &mut ClearHistoryDialog) {
     let delete_protected = dialog.delete_protected;
     let fate = |count: usize| {
         if delete_protected {
@@ -139,8 +139,13 @@ fn body(ui: &mut Ui, counts: ClearHistoryCounts, dialog: &mut ClearHistoryDialog
     }
     ui.add_space(8.0);
     let t = Tokens::get(ui.ctx());
+    let note = if executing {
+        "A run is in progress; the history can be cleared when it ends."
+    } else {
+        "Deleted runs cannot be restored."
+    };
     ui.label(
-        RichText::new("Deleted runs cannot be restored.")
+        RichText::new(note)
             .font(theme::sans(tokens::FS_0, FontWeight::Medium))
             .color(t.color.warn),
     );

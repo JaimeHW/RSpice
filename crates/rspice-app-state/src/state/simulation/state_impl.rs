@@ -714,7 +714,6 @@ impl SimulationState {
         out
     }
 
-    /// Drop overlay IDs whose runs have left the history.
     /// Forget the view's references to runs that left the history: the
     /// overlays, and the analysis each run was last shown on.
     fn prune_overlay_dataset_ids(&mut self) {
