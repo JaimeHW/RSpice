@@ -2,8 +2,8 @@
 //!
 //! A saved file names each stored run's segment by its logical digest and holds none of its
 //! samples. Before the file is written, every segment it names goes into its folder
-//! ([`segment_folder`]): a clone where the volume can share blocks, else a hard link, else a
-//! copy, so the file never names a segment its folder lacks. After it is written, the folder
+//! ([`segment_folder`]): a clone where the volume can share blocks, else a copy, so the file
+//! never names a segment its folder lacks. After it is written, the folder
 //! lets go of the segments the file no longer names.
 
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use rspice_formats::project_results::{ProjectSimulationResults, StoredSegment, segment_folder};
 use rspice_results::store_reader::{
     PlaceError, PlaceWays, SegmentDigest, kept_segment, kept_segment_name, parse_digest,
-    place_segment, remove_unkept_segments,
+    place_segment, remove_unkept_segments, segment_verified,
 };
 use rspice_results::visualization_document::VisualizationDocument;
 
@@ -65,7 +65,12 @@ pub fn segments_to_keep(segments: Vec<StoredSegment>, file: &Path) -> SegmentsTo
 fn segments_to_keep_in(segments: Vec<StoredSegment>, folder: PathBuf) -> SegmentsToKeep {
     let segments: Vec<_> = segments
         .into_iter()
-        .filter(|segment| !folder.join(kept_segment_name(&segment.digest)).is_file())
+        .filter(|segment| {
+            !segment_verified(
+                &folder.join(kept_segment_name(&segment.digest)),
+                &segment.digest,
+            )
+        })
         .filter_map(|segment| Some((segment.digest, segment.source?)))
         .collect();
     let bytes = segments
@@ -533,7 +538,7 @@ pub fn release_unread_session_segments(segments: &[StoredSegment]) {
 pub enum SessionResultsAtClose {
     /// The session's folder holds them: closing goes on.
     Kept,
-    /// They are linked or cloned into it, which takes a moment.
+    /// They are cloned into it or checked there, which takes a moment.
     Placing,
     /// They are copied to the volume named, the bytes copied and the bytes to copy so far.
     Copying {

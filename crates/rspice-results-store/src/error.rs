@@ -23,6 +23,12 @@ pub enum StoreError {
     },
     /// Bytes that do not decode as the format says they must.
     Corrupt { offset: u64, reason: String },
+    /// A finished segment whose stored bits hash to `held`, not to `expected`: the digest its
+    /// `END` records, or the one a kept file's name promises.
+    DigestMismatch {
+        expected: crate::Digest,
+        held: crate::Digest,
+    },
     /// A row carried a different number of values than the schema has value slots.
     RowWidth { expected: usize, found: usize },
     /// An amendment named a row that is no longer in the open chunk, or a slot outside the row.
@@ -122,6 +128,11 @@ impl fmt::Display for StoreError {
             Self::Corrupt { offset, reason } => {
                 write!(f, "results segment is damaged at byte {offset}: {reason}")
             }
+            Self::DigestMismatch { expected, held } => write!(
+                f,
+                "results segment's stored bits hash to {held}, not to the digest {expected} it \
+                 is kept as"
+            ),
             Self::RowWidth { expected, found } => {
                 write!(
                     f,

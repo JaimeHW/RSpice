@@ -2,10 +2,13 @@
 //!
 //! A kept segment is named by its logical digest ([`kept_segment_name`]), so a folder holds each
 //! run once whoever saved it, and a reader finds a run by its digest alone. It gets there as a
-//! clone of the file where the volume can share its blocks (APFS), else as a hard link, else as a
-//! copy. The first two cost no time and no disk. A copy is written as `<name>.partial`, made
-//! durable and only then renamed, so a crash or a cancel never leaves a file under the name that
-//! is not the whole segment.
+//! clone of the file where the volume can share its blocks copy-on-write (APFS), else as a copy;
+//! never as a hard link, which would let a later write to the source (a resumed run appending to
+//! it) change the kept file under its digest's name. The new file is written as `<name>.partial`,
+//! made durable, checked against the digest and only then renamed, so a crash, a cancel or a
+//! damaged source never leaves a file under the name that is not the whole segment. A file the
+//! folder already holds under the name is checked too, once ([`verify_segment`]), and one that
+//! does not hold the digest is replaced from the source.
 
 use std::collections::HashSet;
 use std::fs::{self, File};
@@ -13,7 +16,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::{Digest, kept_segment_name};
+use crate::{Digest, kept_segment_name, verify_segment};
 
 /// The bytes a copy moves between checks for a cancel.
 const COPY_BLOCK: usize = 8 << 20;
@@ -23,10 +26,8 @@ const COPY_BLOCK: usize = 8 << 20;
 pub enum Placed {
     /// The folder already held it.
     Present,
-    /// A clone sharing the source's blocks.
+    /// A clone sharing the source's blocks until either is written.
     Cloned,
-    /// A hard link to the source's file.
-    Linked,
     /// A copy of every byte.
     Copied,
 }
@@ -35,20 +36,13 @@ pub enum Placed {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlaceWays {
     pub clone: bool,
-    pub link: bool,
 }
 
 impl PlaceWays {
-    /// A clone, then a hard link, then a copy.
-    pub const ALL: Self = Self {
-        clone: true,
-        link: true,
-    };
+    /// A clone, then a copy.
+    pub const ALL: Self = Self { clone: true };
     /// A copy only: what a folder on another volume gets.
-    pub const COPY: Self = Self {
-        clone: false,
-        link: false,
-    };
+    pub const COPY: Self = Self { clone: false };
 }
 
 /// Why a segment was not placed.
@@ -73,7 +67,9 @@ impl std::error::Error for PlaceError {}
 
 /// Put the finished segment at `source`, whose logical digest is `digest`, into `folder`, by
 /// the first of `ways` that works and else by a copy. `copied` is told the bytes a copy has
-/// written so far; `cancel` stops a copy between blocks and deletes what it wrote.
+/// written so far; `cancel` stops a copy between blocks and deletes what it wrote. A file already
+/// under the name stays when it holds `digest` and is replaced when it does not; a source whose
+/// bits do not hash to `digest` is refused and leaves the folder as it was.
 pub fn place_segment(
     source: &Path,
     folder: &Path,
@@ -84,7 +80,7 @@ pub fn place_segment(
 ) -> Result<Placed, PlaceError> {
     let name = kept_segment_name(digest);
     let target = folder.join(&name);
-    if target.is_file() {
+    if target.is_file() && verify_segment(&target, digest).is_ok() {
         return Ok(Placed::Present);
     }
     let io = |what: &str, path: &Path, error: std::io::Error| {
@@ -95,25 +91,38 @@ pub fn place_segment(
     let _ = fs::remove_file(&partial);
     let placed = if ways.clone && clone_file(source, &partial) {
         Placed::Cloned
-    } else if ways.link && fs::hard_link(source, &partial).is_ok() {
-        Placed::Linked
     } else {
         copy_file(source, &partial, cancel, copied).inspect_err(|_| {
             let _ = fs::remove_file(&partial);
         })?;
         Placed::Copied
     };
-    // A clone or a link of a run's own segment shares bytes that were never made durable.
-    // Flushing needs a handle that may write: Windows refuses it on a read-only one.
+    // A clone of a run's own segment shares bytes that were never made durable. Flushing needs
+    // a handle that may write: Windows refuses it on a read-only one.
     let durable = fs::OpenOptions::new()
         .write(true)
         .open(&partial)
-        .and_then(|file| file.sync_all())
-        .and_then(|()| fs::rename(&partial, &target));
+        .and_then(|file| file.sync_all());
     if let Err(error) = durable {
         let _ = fs::remove_file(&partial);
         return Err(io("could not keep", &target, error));
     }
+    // What goes under the name is what was written, checked: a source that does not hold the
+    // digest, or a copy the volume damaged, is never kept.
+    if let Err(error) = verify_segment(&partial, digest) {
+        let _ = fs::remove_file(&partial);
+        return Err(PlaceError::Io(format!(
+            "could not keep {}: {error}",
+            target.display()
+        )));
+    }
+    if let Err(error) = fs::rename(&partial, &target) {
+        let _ = fs::remove_file(&partial);
+        return Err(io("could not keep", &target, error));
+    }
+    // Remembered as checked under its kept name, so the next save and the next read of it do not
+    // read it all again.
+    crate::verify::renamed(&partial, &target);
     sync_folder(folder);
     Ok(placed)
 }

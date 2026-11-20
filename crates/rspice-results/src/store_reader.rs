@@ -20,7 +20,7 @@ use rspice_results_store::{
 pub use rspice_results_store::{Digest as SegmentDigest, kept_segment_name};
 #[cfg(any(unix, windows))]
 pub use rspice_results_store::{
-    PlaceError, PlaceWays, Placed, place_segment, remove_unkept_segments,
+    PlaceError, PlaceWays, Placed, place_segment, remove_unkept_segments, segment_verified,
 };
 mod references;
 pub use references::parse_digest;

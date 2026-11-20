@@ -349,19 +349,32 @@ pub fn keep_segments_in(folder: &Path) {
 /// The kept segment whose logical digest is `digest`, opened from the first folder that holds
 /// it, or shared with the readers that already have it open. `None` when no folder holds a
 /// segment of that digest.
+///
+/// A file under the digest's name is the segment only when its stored bits hash to the digest
+/// ([`rspice_results_store::verify_segment`]): the first time a file is opened that reads all of
+/// it, on the calling thread.
 #[cfg(any(unix, windows))]
 pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
-    let mut kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
+    let lock = || KEPT.lock().unwrap_or_else(|p| p.into_inner());
+    let folders = {
+        let kept = lock();
+        if let Some(open) = kept.open.get(&digest.0).and_then(Weak::upgrade) {
+            return Some(open);
+        }
+        kept.folders.clone()
+    };
+    let name = rspice_results_store::kept_segment_name(&digest);
+    // Checked without holding the lock, so a long first check does not stall other reads.
+    let segment = folders.iter().find_map(|folder| {
+        let path = folder.join(&name);
+        rspice_results_store::verify_segment(&path, &digest).ok()?;
+        let reader = StoreReader::open_file(&path).ok()?;
+        Some(Arc::new(Segment::kept(reader, path)))
+    })?;
+    let mut kept = lock();
     if let Some(open) = kept.open.get(&digest.0).and_then(Weak::upgrade) {
         return Some(open);
     }
-    let name = rspice_results_store::kept_segment_name(&digest);
-    let segment = kept.folders.iter().find_map(|folder| {
-        let path = folder.join(&name);
-        let reader = StoreReader::open_file(&path).ok()?;
-        // A file under the name whose rows are not the digest's is not the segment.
-        (reader.digest() == Some(digest)).then(|| Arc::new(Segment::kept(reader, path)))
-    })?;
     kept.open.retain(|_, open| open.strong_count() > 0);
     kept.open.insert(digest.0, Arc::downgrade(&segment));
     Some(segment)

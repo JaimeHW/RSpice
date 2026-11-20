@@ -239,3 +239,55 @@ fn a_saved_reference_reads_its_kept_segment_and_a_missing_one_names_its_file() {
     );
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+/// A file under a kept segment's name is the segment only when its stored bits hash to the
+/// digest: a damaged one reads as missing, never as the run's numbers, and the intact file put
+/// back is found again.
+#[test]
+fn a_kept_file_that_does_not_hold_its_digest_reads_as_missing() {
+    use std::time::{Duration, SystemTime};
+
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: vec![Signal::new("v(kept)", "V", SignalKind::Real)],
+    };
+    let x: Vec<f64> = (0..3_000).map(|row| row as f64 * 1e-6 + 0.25).collect();
+    let values: Vec<f64> = x.iter().map(|&t| (t * 11.0).sin()).collect();
+    let mut writer = SegmentWriter::create(MemoryIo::new(), &schema, &RunMeta::default()).unwrap();
+    writer.push_rows(&x, &values).unwrap();
+    let (receipt, io) = writer.finish(RunStatus::Completed).unwrap();
+    let bytes = io.into_bytes();
+
+    let folder =
+        std::env::temp_dir().join(format!("rspice-results-damaged-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join(kept_segment_name(&receipt.digest));
+    let put = |bytes: &[u8], seconds: u64| {
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000 + seconds))
+            .unwrap();
+    };
+    let mut damaged = bytes.clone();
+    damaged[bytes.len() / 2] ^= 0x01;
+    put(&damaged, 0);
+    assert!(rspice_results_store::verify_segment(&path, &receipt.digest).is_err());
+    keep_segments_in(&folder);
+    assert!(
+        kept_segment(receipt.digest).is_none(),
+        "a damaged file is not the segment"
+    );
+
+    put(&bytes, 1);
+    let segment = kept_segment(receipt.digest).expect("the intact file is the segment");
+    assert_eq!(segment.path(), path.as_path());
+    drop(segment);
+    std::fs::remove_dir_all(&folder).unwrap();
+}
