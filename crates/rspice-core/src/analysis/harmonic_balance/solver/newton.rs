@@ -1099,6 +1099,7 @@ impl HbSolver {
         let solved = self.solve_newton_orbit(state, abort, dc_seed_policy);
         // The limiting history belongs to the Newton solve alone.
         state.junction_bias = None;
+        state.opening_junction_load = false;
         solved?;
         #[cfg(feature = "veriloga")]
         if state.converged {
@@ -1435,8 +1436,11 @@ impl HbSolver {
                 // The starting point is evaluated at its own junction bias,
                 // the history its first step is limited against, as Xyce's
                 // first HB iteration limits against the initial-condition
-                // state (N_DEV_BJT.C:2938-2950).
-                state.junction_bias = self.own_junction_bias(state).ok().flatten();
+                // state (N_DEV_BJT.C:2938-2950). A zero spectrum has no such
+                // state, and the solve's first iteration opens at each
+                // device's first Newton load instead.
+                let opening = std::mem::take(&mut state.opening_junction_load);
+                state.junction_bias = self.own_junction_bias(state, opening).ok().flatten();
                 match self.compute_full_residual_with_gmin(state, gmin, source_scale) {
                     Ok(()) => {}
                     // A starting state some device cannot evaluate leaves this
@@ -4610,6 +4614,25 @@ mod junction_limiting_tests {
              .options hbint tahb=2\n.end\n",
             1e6,
             40,
+        );
+        assert!(corrections <= 30, "{corrections} Newton corrections");
+    }
+
+    /// From the zero spectrum (TAHB=0) every junction opens at its device's
+    /// first Newton load, as Xyce's operating-point start does, so a pulsed
+    /// switch converges in tens of corrections. Opening at the cut-off zero
+    /// bias took over eighty, and a node-voltage limiter crawling the 5 V
+    /// supply up from zero about a hundred.
+    #[test]
+    fn hb_newton_opens_a_zero_spectrum_at_each_junction_s_first_load() {
+        let corrections = newton_corrections(
+            "Pulsed RTL inverter\n\
+             VCC vcc 0 5\nVIN in 0 PULSE(0 5 2n 2n 2n 30n 100n)\n\
+             RB in b 8.2k\nRC vcc c 1.2k\nQ1 c b 0 QS\n\
+             .model QS NPN(BF=20 RB=100 TF=0.1n CJC=2p)\n\
+             .options hbint tahb=0\n.end\n",
+            1e7,
+            50,
         );
         assert!(corrections <= 30, "{corrections} Newton corrections");
     }

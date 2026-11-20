@@ -23,6 +23,9 @@ pub(crate) struct PeriodicJunctionBias {
     evaluated: Vec<BjtSampleBias>,
     /// Whether limiting held any sample off its own bias.
     limited: bool,
+    /// Whether `evaluated` is each device's opening load, assigned outright
+    /// rather than limited against `reference`.
+    opening: bool,
 }
 
 impl PeriodicJunctionBias {
@@ -32,6 +35,7 @@ impl PeriodicJunctionBias {
             reference: self.evaluated.clone(),
             evaluated: self.evaluated.clone(),
             limited: false,
+            opening: false,
         }
     }
 
@@ -555,13 +559,14 @@ impl HbSolver {
         )
     }
 
-    /// Each native BJT's own bias in every time sample of `state`. None
-    /// where the devices do not limit: without native BJTs, or on an
-    /// oversampled grid, where a sample's limited bias is not held to its
-    /// own KCL.
+    /// Each native BJT's own bias in every time sample of `state`, or with
+    /// `opening` the bias its first Newton load assigns there. None where
+    /// the devices do not limit: without native BJTs, or on an oversampled
+    /// grid, where a sample's limited bias is not held to its own KCL.
     pub(super) fn own_junction_bias(
         &mut self,
         state: &HbSolverState,
+        opening: bool,
     ) -> Result<Option<PeriodicJunctionBias>, HbError> {
         if self.native_bjts.is_empty() || !self.every_sample_is_an_equation() {
             return Ok(None);
@@ -569,20 +574,26 @@ impl HbSolver {
         let waves = self.native_state_waveforms(state)?;
         let mut solution = vec![0.0; waves.len()];
         let mut evaluated = Vec::with_capacity(self.fft.size() * self.native_bjts.len());
+        let mut limited = false;
         for time in 0..self.fft.size() {
             for (value, wave) in solution.iter_mut().zip(&waves) {
                 *value = wave[time];
             }
-            evaluated.extend(
-                self.native_bjts
-                    .iter()
-                    .map(|bjt| bjt.periodic_bias(&solution)),
-            );
+            evaluated.extend(self.native_bjts.iter().map(|bjt| {
+                let own = bjt.periodic_bias(&solution);
+                if !opening {
+                    return own;
+                }
+                let bias = bjt.initial_periodic_bias(&solution);
+                limited |= bias != own;
+                bias
+            }));
         }
         Ok(Some(PeriodicJunctionBias {
             reference: evaluated.clone(),
             evaluated,
-            limited: false,
+            limited,
+            opening,
         }))
     }
 
@@ -1105,8 +1116,11 @@ impl HbSolver {
         let mut q_time = Vec::new();
         let integral_start = self.num_nodes + self.physical_branch_count();
         // The bias is the state's; it goes back whatever the samples return.
+        // An opening load is evaluated as assigned.
         let mut junctions = state.junction_bias.take();
-        if let Some(bias) = &mut junctions {
+        if let Some(bias) = &mut junctions
+            && !bias.opening
+        {
             bias.limited = false;
         }
         let sampled = (0..times).try_for_each(|time| {
@@ -1118,6 +1132,9 @@ impl HbSolver {
                 .as_mut()
                 .and_then(|bias| Some((self.sample_junction_range(bias, time)?, bias)))
             {
+                Some((range, bias)) if bias.opening => {
+                    JunctionBias::Recorded(&bias.evaluated[range])
+                }
                 Some((range, bias)) => JunctionBias::Limit {
                     reference: &bias.reference[range.clone()],
                     evaluated: &mut bias.evaluated[range],

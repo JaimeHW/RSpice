@@ -2347,7 +2347,10 @@ impl Engine {
                     }
                 }
             }
-            HbInitialStateStrategy::DefaultDcSeed | HbInitialStateStrategy::Direct => {}
+            // The zero spectrum opens every junction at its first Newton load,
+            // as Xyce's TAHB=0 operating-point start raises initJct.
+            HbInitialStateStrategy::Direct => state.opening_junction_load = true,
+            HbInitialStateStrategy::DefaultDcSeed => {}
         }
 
         if has_supported_nonlinear {

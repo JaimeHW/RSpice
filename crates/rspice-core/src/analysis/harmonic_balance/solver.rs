@@ -296,6 +296,10 @@ pub struct HbSolverState {
     /// The junction bias each native BJT was evaluated at in each time
     /// sample, while a Newton solve limits them.
     pub(crate) junction_bias: Option<native_bjt::PeriodicJunctionBias>,
+    /// Whether the next Newton solve's first iteration evaluates each native
+    /// BJT at its own first Newton load rather than at the state's bias: a
+    /// zero spectrum carries no junction history to limit against.
+    pub(crate) opening_junction_load: bool,
 }
 
 impl HbSolverState {
@@ -325,6 +329,7 @@ impl HbSolverState {
             capacitor_rate_branch_start: None,
             current_equation_branches: Vec::new(),
             junction_bias: None,
+            opening_junction_load: false,
         }
     }
 

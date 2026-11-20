@@ -1838,6 +1838,35 @@ impl Bjt {
         })
     }
 
+    /// The bias one periodic time sample of `solution` opens a Newton solve
+    /// at, with no previous iterate to limit against: this device's own
+    /// first Newton load (MODEINITJCT), the Gummel-Poon base-emitter
+    /// junction at tVcrit or every junction off for an OFF instance, and the
+    /// VBIC startup state, as `update_mna_from_solution` loads an iterate
+    /// without history. Xyce's first HB iteration from a zero spectrum loads
+    /// every time point so: TAHB=0 runs as an operating point
+    /// (N_ANP_HB.C:253-268), whose first Newton step raises initJctFlag
+    /// (N_DEV_SolverState.C:387-389), and the BJT then assigns vBE = tVCrit
+    /// (N_DEV_BJT.C:2868-2905). Without such a load, [`Self::periodic_bias`].
+    #[doc(hidden)]
+    pub fn initial_periodic_bias(&self, solution: &[Value]) -> [Value; BJT_PERIODIC_BIAS_DIM] {
+        self.periodic_bias_with(solution, |raw| {
+            if !self.uses_legacy_gummel_poon() {
+                return self.vbic_startup_load_internal_state(raw);
+            }
+            (self.uses_legacy_junction_limiting() || self.initial_off).then(|| {
+                let state = self.limit_legacy_terminal_state_against_iterate(
+                    self.intrinsic_state_from_internal_vector(raw),
+                    false,
+                );
+                [
+                    state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
+                    state.vrth,
+                ]
+            })
+        })
+    }
+
     /// One periodic time sample's internal bias with `load` in place of the
     /// raw internal state wherever it returns one. Collapsed terminal
     /// coordinates share a Gummel-Poon load's bias, as in the Newton load,
