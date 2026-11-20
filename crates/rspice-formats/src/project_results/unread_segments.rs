@@ -1,6 +1,7 @@
 //! A kept segment a saved result names but cannot read: gone from every folder, or there and
 //! damaged. A damaged one says what is wrong with it instead of reading as deleted, and only its
-//! own run goes without samples: the rest of the history opens.
+//! own run goes without samples: the rest of the history opens. The browser keeps its segments
+//! in the page's memory, so a result read after the page was left says that is where they were.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -48,6 +49,12 @@ pub(super) fn values(reference: &ColumnReference) -> Result<WaveformValues, Stri
     }
 }
 
+/// Why the browser cannot read a result a session or project names: it kept the samples in the
+/// page's memory, which leaving or reloading the page empties.
+#[cfg(not(any(unix, windows)))]
+const LEFT_WITH_THE_PAGE: &str = "this browser kept these results in the page's memory, and reloading or leaving the page \
+     emptied it";
+
 /// The kept segment file `name` that a folder holds, and what is wrong with it; `None` when no
 /// folder holds one.
 #[cfg(any(unix, windows))]
@@ -67,10 +74,11 @@ fn damage(name: &str) -> Option<(PathBuf, String)> {
     Some((path, reason))
 }
 
-/// A build without files has no folder to hold a segment.
+/// A build without files has no folder to hold a segment: every segment it names was in the
+/// memory of a page since left.
 #[cfg(not(any(unix, windows)))]
-fn damage(_name: &str) -> Option<(PathBuf, String)> {
-    None
+fn damage(name: &str) -> Option<(PathBuf, String)> {
+    Some((PathBuf::from(name), LEFT_WITH_THE_PAGE.to_owned()))
 }
 
 fn damaged(
@@ -88,10 +96,14 @@ fn damaged(
             Some(LeadReference::Interpolated(fraction)) => WindowLead::Interpolated(fraction),
         },
     };
+    #[cfg(any(unix, windows))]
+    let failure = format!("its results store {} is damaged: {reason}", path.display());
+    #[cfg(not(any(unix, windows)))]
+    let failure = reason;
     let source = DamagedSegment {
-        name: format!("column {} of a damaged results store", reference.column),
+        name: format!("column {} of a results store", reference.column),
         path,
-        reason,
+        failure,
         digest: digest.0,
         column: reference.column,
         rows: reference.column_rows,
@@ -103,7 +115,8 @@ fn damaged(
 struct DamagedSegment {
     name: String,
     path: PathBuf,
-    reason: String,
+    /// What reading it says.
+    failure: String,
     digest: [u8; 32],
     column: u64,
     /// The rows the saved result stated.
@@ -127,11 +140,7 @@ impl ColumnSource for DamagedSegment {
     }
 
     fn read(&self, _first: u64, _out: &mut [f64]) -> Result<(), String> {
-        Err(format!(
-            "its results store {} is damaged: {}",
-            self.path.display(),
-            self.reason
-        ))
+        Err(self.failure.clone())
     }
 
     fn identity(&self) -> Option<([u8; 32], u64)> {

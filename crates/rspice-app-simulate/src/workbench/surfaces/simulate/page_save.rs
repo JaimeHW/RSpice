@@ -533,9 +533,17 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         simulation.retained.runs.iter(),
         crate::state::run_reader::run_reader(),
     );
+    #[cfg(not(target_arch = "wasm32"))]
     let results_storage = format!(
         "{} on disk \u{b7} {} of {} loaded in memory",
         format_bytes(storage.disk_bytes),
+        format_bytes(storage.loaded_bytes),
+        format_bytes(storage.budget)
+    );
+    // The browser keeps every result in the page's memory, and says what that costs.
+    #[cfg(target_arch = "wasm32")]
+    let results_storage = format!(
+        "{} of {} in this page's memory \u{b7} results do not survive a reload",
         format_bytes(storage.loaded_bytes),
         format_bytes(storage.budget)
     );
