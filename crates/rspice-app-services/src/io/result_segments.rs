@@ -349,3 +349,70 @@ pub fn release_unread_session_segments(segments: &[StoredSegment]) {
         release_unread_segments_in(segments, &folder);
     }
 }
+
+/// Locate results: look for kept segments in `folder` too, and read again every run of the
+/// history that could not read its samples, its signals sharing one axis as on a fresh run. The
+/// runs that now read every sample; a run whose segment `folder` does not hold stays as it was.
+/// A save keeps the segments found beside the project, so they are found there from then on.
+pub fn locate_results(simulation: &mut crate::state::SimulationState, folder: &Path) -> usize {
+    use rspice_formats::project_results::{read_again, read_events_again};
+    use rspice_results::store_reader::ColumnReference;
+    rspice_formats::project_results::keep_segments_in(folder);
+    let unread: Vec<usize> = (0..simulation.retained.runs.len())
+        .filter(|&index| simulation.retained.runs[index].unread_results().is_some())
+        .collect();
+    let mut located = 0;
+    for index in unread {
+        let run = &mut simulation.retained.runs[index];
+        let mut axes: Vec<(ColumnReference, rspice_results::waveform::WaveformValues)> = Vec::new();
+        for analysis in &mut run.data.analyses {
+            for waveform in &mut analysis.data.waveforms {
+                let x = &mut waveform.data.x;
+                if let Some(reference) = ColumnReference::of(x) {
+                    match axes.iter().find(|(met, _)| *met == reference) {
+                        Some((_, axis)) => *x = axis.clone(),
+                        None => {
+                            if let Some(axis) = read_again(x) {
+                                *x = axis;
+                            }
+                            axes.push((reference, x.clone()));
+                        }
+                    }
+                }
+                let complex = waveform
+                    .data
+                    .complex
+                    .iter_mut()
+                    .flat_map(|complex| [&mut complex.real, &mut complex.imag]);
+                for values in std::iter::once(&mut waveform.data.y).chain(complex) {
+                    if let Some(again) = read_again(values) {
+                        *values = again;
+                    }
+                }
+            }
+            if let Some(
+                rspice_results::analysis_payload::AnalysisResultPayload::TransientEvents {
+                    digital_traces,
+                    real_traces,
+                    ..
+                },
+            ) = analysis.data.result_payload.as_mut()
+            {
+                for trace in digital_traces {
+                    if let Some(again) = read_events_again(&trace.points) {
+                        trace.points = again;
+                    }
+                }
+                for trace in real_traces {
+                    if let Some(again) = read_events_again(&trace.points) {
+                        trace.points = again;
+                    }
+                }
+            }
+        }
+        if run.unread_results().is_none() {
+            located += 1;
+        }
+    }
+    located
+}

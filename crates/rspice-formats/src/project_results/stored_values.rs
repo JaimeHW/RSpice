@@ -105,7 +105,7 @@ fn referenced_values(reference: ColumnReference) -> Result<SharedWaveformValues,
     if axis && let Some(values) = met() {
         return Ok(values);
     }
-    let values = reference.values()?;
+    let values = super::unread_segments::values(&reference)?;
     if axis {
         RUN_AXES.with(|axes| {
             if let Some(axes) = axes.borrow_mut().as_mut() {
@@ -230,6 +230,40 @@ fn segments_of<'a>(
     segments
 }
 
+/// Why the first waveform or event history of `analyses` that cannot be read cannot be.
+fn unread_reason(analyses: &[super::ProjectAnalysisResult]) -> Option<String> {
+    use rspice_results::analysis_payload::AnalysisResultPayload;
+    for analysis in analyses {
+        for waveform in &analysis.waveforms {
+            let complex = waveform.complex.iter().flat_map(|c| [&c.real, &c.imag]);
+            for values in [&waveform.x, &waveform.y].into_iter().chain(complex) {
+                if let Some((source, _)) = values.stored_window()
+                    && let Err(reason) = source.read(0, &mut [])
+                {
+                    return Some(reason);
+                }
+            }
+        }
+        if let Some(AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+            ..
+        }) = analysis.result_payload.as_ref()
+        {
+            let digital = digital_traces
+                .iter()
+                .map(|trace| trace.points.stored_source());
+            let real = real_traces.iter().map(|trace| trace.points.stored_source());
+            for source in digital.chain(real).flatten() {
+                if let Err(reason) = source.before(f64::NEG_INFINITY) {
+                    return Some(reason);
+                }
+            }
+        }
+    }
+    None
+}
+
 impl super::ProjectSimulationRun {
     /// Each segment this run reads, once.
     pub fn stored_segments(&self) -> Vec<StoredSegment> {
@@ -243,17 +277,14 @@ impl super::ProjectSimulationResultsData {
         segments_of(self.runs.iter().flat_map(|run| &run.analyses))
     }
 
-    /// The labels of the runs that read a segment no store folder holds: results deleted or
-    /// moved outside RSpice.
-    pub fn runs_missing_results(&self) -> Vec<String> {
+    /// The runs whose results cannot be read, each with why: a kept segment gone from every
+    /// folder, or one a folder holds damaged. Every other run reads its samples.
+    pub fn runs_without_results(&self) -> Vec<(String, String)> {
         self.runs
             .iter()
-            .filter(|run| {
-                segments_of(run.analyses.iter())
-                    .iter()
-                    .any(|segment| segment.source.is_none())
+            .filter_map(|run| {
+                unread_reason(&run.analyses).map(|reason| (run.label.clone(), reason))
             })
-            .map(|run| run.label.clone())
             .collect()
     }
 }

@@ -1714,11 +1714,33 @@ pub fn decode_project_text(
 }
 
 /// A stored run's results are read from the segments the project keeps
-/// beside its file, so the folder is named before the file is parsed.
+/// beside its file, so the folders are named before the file is parsed: its
+/// own, `results/<file stem>`, first, then every other folder of `results`
+/// beside it, where a project renamed or copied outside RSpice left them. A
+/// segment is read from a folder only when its rows are the digest its run
+/// names, so another project's folder never stands in for this one's.
 pub(crate) fn keep_segments_beside(source_path: Option<&Path>) {
-    if let Some(path) = source_path {
-        rspice_results::store_reader::keep_segments_in(&crate::results::segment_folder(path));
+    use rspice_formats::project_results::keep_segments_in;
+    let Some(path) = source_path else {
+        return;
+    };
+    let own = crate::results::segment_folder(path);
+    if let Some(results) = own.parent()
+        && let Ok(entries) = std::fs::read_dir(results)
+    {
+        let mut others: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|folder| folder.is_dir() && *folder != own)
+            .collect();
+        others.sort();
+        // Each folder named goes before the ones named earlier.
+        others
+            .iter()
+            .rev()
+            .for_each(|folder| keep_segments_in(folder));
     }
+    keep_segments_in(&own);
 }
 
 /// Restore, repair and check a project just parsed from its file.
@@ -1796,11 +1818,15 @@ pub(crate) fn finish_decoding(
             "Simulation results were not restored because their persisted data is invalid: {error}. Cleared {cleared} regression baseline reference(s) that could no longer be authenticated."
         ));
     } else {
-        let missing = project.simulation_results.runs_missing_results();
-        if !missing.is_empty() {
+        let unread = project.simulation_results.runs_without_results();
+        if !unread.is_empty() {
+            let runs: Vec<_> = unread
+                .iter()
+                .map(|(run, reason)| format!("{run} ({reason})"))
+                .collect();
             project.simulation_results_warning = Some(format!(
-                "The results of {} are missing: their results store was deleted or moved outside RSpice. Those runs show no samples.",
-                missing.join(", ")
+                "The results of {} cannot be read. Those runs show no samples until Locate results finds their results store; the other runs opened.",
+                runs.join("; ")
             ));
         }
         project.pin_regression_baseline_references();

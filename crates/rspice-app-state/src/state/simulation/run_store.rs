@@ -73,6 +73,47 @@ fn holds_memory(waveform: &RetainedWaveform) -> bool {
         .any(|values| !named_by_store(values))
 }
 
+/// Why the first waveform or event history of `analyses` that cannot be read cannot be: its
+/// segment gone from every folder, or there and damaged. `None` when every one reads.
+pub fn unread_reason<'a, W: AsRef<RetainedWaveform> + 'a>(
+    analyses: impl IntoIterator<Item = &'a RetainedAnalysisResult<W>>,
+) -> Option<String> {
+    use rspice_results::analysis_payload::AnalysisResultPayload;
+    for analysis in analyses {
+        for waveform in &analysis.waveforms {
+            let waveform = waveform.as_ref();
+            let complex = waveform
+                .complex
+                .iter()
+                .flat_map(|complex| [&complex.real, &complex.imag]);
+            for values in [&waveform.x, &waveform.y].into_iter().chain(complex) {
+                if let Some((source, _)) = values.stored_window()
+                    && let Err(reason) = source.read(0, &mut [])
+                {
+                    return Some(reason);
+                }
+            }
+        }
+        if let Some(AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+            ..
+        }) = analysis.result_payload.as_ref()
+        {
+            let digital = digital_traces
+                .iter()
+                .map(|trace| trace.points.stored_source());
+            let real = real_traces.iter().map(|trace| trace.points.stored_source());
+            for source in digital.chain(real).flatten() {
+                if let Err(reason) = source.before(f64::NEG_INFINITY) {
+                    return Some(reason);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Whether any waveform of `analysis` holds a series in memory, or in a segment that states no
 /// digest: one a saved file cannot name.
 pub fn holds_samples_in_memory<W: AsRef<RetainedWaveform>>(

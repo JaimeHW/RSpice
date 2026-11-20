@@ -242,6 +242,12 @@ impl SimulationRun {
         }
     }
 
+    /// Why this run cannot read its samples: its results store gone from every
+    /// folder, or there and damaged. `None` when every sample reads.
+    pub fn unread_results(&self) -> Option<String> {
+        super::run_store::unread_reason(self.analyses.iter().map(|analysis| &analysis.data))
+    }
+
     /// Append a finished analysis that no prepared task produced (an imported
     /// dataset), its samples kept in a results store segment first as
     /// [`Self::replace_live_or_add_analysis`] keeps them.

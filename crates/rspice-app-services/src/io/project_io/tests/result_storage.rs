@@ -97,7 +97,7 @@ fn large_ac_run(id: u64, points: usize, signals: usize) -> SimulationRun {
         .map(|k| {
             let y: Vec<f64> = frequencies
                 .iter()
-                .map(|f| (f * (k + 1) as f64 * 1.0e-4).sin())
+                .map(|f| (f * (k + 1) as f64 * 1.0e-4).sin() + id as f64)
                 .collect();
             RetainedTrace::new(format!("V(n{k})"), frequencies.clone(), y, "#ffffff")
         })
@@ -186,4 +186,145 @@ fn a_saved_file_refuses_samples_held_in_memory_and_other_writers_keep_them() {
         .expect("a captured run is written by reference");
     assert!(!saved.contains("[1.0,2.0]"), "{saved}");
     assert_eq!(captured.stored_segments().len(), 1);
+}
+
+/// Each sample of each waveform of `run`'s first analysis, bit for bit.
+fn run_bits(run: &SimulationRun) -> Vec<Vec<u64>> {
+    run.analyses[0]
+        .waveforms
+        .iter()
+        .flat_map(|waveform| [&waveform.x, &waveform.y])
+        .map(|values| values.iter().map(|value| value.to_bits()).collect())
+        .collect()
+}
+
+/// A project of `runs` stored runs saved as `file` with its segments beside it, then closed: no
+/// reader holds any of its segments open. Its text and each run's samples.
+fn saved_and_closed(file: &Path, runs: &[u64]) -> (String, Vec<Vec<Vec<u64>>>) {
+    let mut libraries = crate::state::LibraryManager::with_primitives();
+    let workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let mut simulation = SimulationState::default();
+    simulation.retained.runs = runs
+        .iter()
+        .map(|&id| large_ac_run(id, 3_000, 2))
+        .collect::<Vec<_>>()
+        .into();
+    simulation.retained.next_run_id = runs.iter().copied().max().unwrap_or(0);
+    let samples = simulation.retained.runs.iter().map(run_bits).collect();
+    let results = crate::io::capture_simulation_results(&simulation);
+    crate::io::result_segments::keep_segments_now(results.stored_segments(), file)
+        .expect("every run's segment is kept beside the project");
+    let project = ProjectSnapshot::new_with_simulation_results(workspace, libraries, results);
+    let json = serialize_project_file(&project).expect("the project serializes");
+    drop((project, simulation));
+    (json, samples)
+}
+
+fn scratch_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("rspice-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
+#[test]
+fn a_project_renamed_outside_rspice_opens_its_runs() {
+    let root = scratch_folder("renamed-project");
+    let saved = root.join("amp.rspiceproj");
+    let (json, samples) = saved_and_closed(&saved, &[101]);
+    std::fs::write(&saved, &json).unwrap();
+    let renamed = root.join("amp-renamed.rspiceproj");
+    std::fs::rename(&saved, &renamed).unwrap();
+    assert!(root.join("results").join("amp").is_dir());
+
+    let text = std::fs::read_to_string(&renamed).unwrap();
+    let loaded = load_project_text(&text, Some(&renamed)).expect("the renamed project opens");
+    assert_eq!(loaded.file.simulation_results_warning, None);
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
+        .expect("its runs restore");
+    let run = &restored.retained.runs[0];
+    assert_eq!(run.unread_results(), None);
+    assert_eq!(run_bits(run), samples[0]);
+    drop(restored);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_damaged_run_names_its_damage_and_leaves_the_others_readable() {
+    let root = scratch_folder("damaged-run");
+    let file = root.join("pair.rspiceproj");
+    let (json, samples) = saved_and_closed(&file, &[201, 202]);
+    let project: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let damaged_digest =
+        project["simulation_results"]["runs"][1]["analyses"][0]["waveforms"][0]["y"]["segment"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let damaged = rspice_formats::project_results::segment_folder(&file)
+        .join(format!("{damaged_digest}.rsr"));
+    let mut bytes = std::fs::read(&damaged).unwrap();
+    bytes[..64].fill(0xa5);
+    std::fs::write(&damaged, bytes).unwrap();
+
+    let loaded = load_project_text(&json, Some(&file)).expect("the project opens");
+    let warning = loaded.file.simulation_results_warning.clone().unwrap();
+    let labels: Vec<_> = loaded
+        .file
+        .simulation_results
+        .runs
+        .iter()
+        .map(|run| run.label.clone())
+        .collect();
+    assert!(warning.contains(&labels[1]), "{warning}");
+    assert!(!warning.contains(&format!("{} (", labels[0])), "{warning}");
+    assert!(warning.contains("is damaged"), "{warning}");
+    assert!(!warning.contains("deleted or moved"), "{warning}");
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
+        .expect("the history opens");
+    let [good, bad] = [&restored.retained.runs[0], &restored.retained.runs[1]];
+    assert_eq!(good.unread_results(), None);
+    assert_eq!(run_bits(good), samples[0]);
+    let reason = bad
+        .unread_results()
+        .expect("the damaged run cannot read its samples");
+    assert!(reason.contains("is damaged"), "{reason}");
+    let y = &bad.analyses[0].waveforms[0].y;
+    let failure = y.read_range(0..y.len()).unwrap_err().to_string();
+    assert!(failure.contains("is damaged"), "{failure}");
+    drop(restored);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn locate_results_reads_runs_from_the_folder_it_is_given() {
+    let root = scratch_folder("locate-results");
+    let file = root.join("moved.rspiceproj");
+    let (json, samples) = saved_and_closed(&file, &[301]);
+    let elsewhere = root.join("elsewhere");
+    std::fs::rename(root.join("results"), &elsewhere).unwrap();
+
+    let loaded = load_project_text(&json, Some(&file)).expect("the project opens");
+    let warning = loaded.file.simulation_results_warning.clone().unwrap();
+    assert!(warning.contains("deleted or moved"), "{warning}");
+    let mut restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
+        .expect("the history opens");
+    assert!(restored.retained.runs[0].unread_results().is_some());
+
+    assert_eq!(
+        crate::io::result_segments::locate_results(&mut restored, &root.join("nowhere")),
+        0
+    );
+    let located =
+        crate::io::result_segments::locate_results(&mut restored, &elsewhere.join("moved"));
+    assert_eq!(located, 1);
+    let run = &restored.retained.runs[0];
+    assert_eq!(run.unread_results(), None);
+    assert_eq!(run_bits(run), samples[0]);
+    let waveforms = &run.analyses[0].waveforms;
+    assert!(
+        rspice_results::waveform::WaveformValues::ptr_eq(&waveforms[0].x, &waveforms[1].x),
+        "its signals share one axis"
+    );
+    drop(restored);
+    let _ = std::fs::remove_dir_all(&root);
 }

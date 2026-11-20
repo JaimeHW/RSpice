@@ -24,7 +24,7 @@ impl AppState {
         // A stored run's results are read from the folder the session kept them in.
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(folder) = rspice_app_services::io::result_segments::session_segment_folder() {
-            rspice_results::store_reader::keep_segments_in(&folder);
+            rspice_formats::project_results::keep_segments_in(&folder);
         }
         Some(serde_json::from_str(&text).unwrap_or_else(|error| {
             log::warn!("the stored session did not decode: {error}");

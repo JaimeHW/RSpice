@@ -859,7 +859,20 @@ pub(in crate::workbench) fn results(
                 }
                 for run in runs.iter() {
                     let run_active = active_run == Some(run.run_index);
-                    let run_meta = data_state_meta(run.data_state);
+                    // A run whose results store no folder holds, or holds damaged, says so
+                    // before anything about its data.
+                    let unread = state
+                        .model
+                        .simulation
+                        .retained
+                        .runs
+                        .get(run.run_index)
+                        .and_then(crate::state::SimulationRun::unread_results);
+                    let run_meta = if unread.is_some() {
+                        "results not found"
+                    } else {
+                        data_state_meta(run.data_state)
+                    };
                     let overlaid = state.model.simulation.is_dataset_overlaid(run.dataset_id);
                     let responses = result_dataset_row(
                         ui,
@@ -876,9 +889,20 @@ pub(in crate::workbench) fn results(
                     if responses.selection.clicked() {
                         select_result_dataset(state, run.run_index);
                     }
+                    if let Some(reason) = &unread {
+                        responses.selection.clone().on_hover_text(format!(
+                            "The results of {} cannot be read: {reason}",
+                            run.label
+                        ));
+                    }
                     let mut details = false;
                     let mut log = false;
+                    let mut locate = false;
                     responses.selection.context_menu(|ui| {
+                        if unread.is_some() && ui.button("Locate results\u{2026}").clicked() {
+                            locate = true;
+                            ui.close();
+                        }
                         if ui.button("Run details\u{2026}").clicked() {
                             details = true;
                             ui.close();
@@ -888,6 +912,9 @@ pub(in crate::workbench) fn results(
                             ui.close();
                         }
                     });
+                    if locate {
+                        locate_results(state);
+                    }
                     if let Some(run_id) = state
                         .model
                         .simulation
@@ -1864,6 +1891,40 @@ pub(super) struct ResultRun {
 struct ResultDatasetRowResponses {
     selection: Response,
     overlay: Option<Response>,
+}
+
+/// Locate results: the folder the reader picks is searched for the results store of every run
+/// that cannot read its samples.
+fn locate_results(state: &mut ResultsParts<'_>) {
+    let Some(folder) = pick_results_folder() else {
+        return;
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let located =
+            crate::io::result_segments::locate_results(&mut state.model.simulation, &folder);
+        state.workbench.prompt(match located {
+            0 => format!("{} holds no results store of these runs.", folder.display()),
+            1 => "The results of 1 run were found.".to_owned(),
+            runs => format!("The results of {runs} runs were found."),
+        });
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (state, folder);
+}
+
+/// The folder Locate results searches: none in a test, which never opens a dialog, nor in the
+/// browser, which has no folders.
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
+fn pick_results_folder() -> Option<std::path::PathBuf> {
+    None
+}
+
+#[cfg(not(any(test, feature = "test-support", target_arch = "wasm32")))]
+fn pick_results_folder() -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Locate results")
+        .pick_folder()
 }
 
 fn result_dataset_row(

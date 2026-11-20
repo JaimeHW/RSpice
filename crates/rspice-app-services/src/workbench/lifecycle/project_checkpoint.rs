@@ -831,7 +831,7 @@ pub fn list(model: &Model) -> Result<ProjectCheckpointCatalog, String> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load(summary: &ProjectCheckpointSummary) -> Result<ProjectSnapshot, String> {
     let (_, snapshot) = summary.locator.files().ok_or(KEPT_IN_THE_BROWSER)?;
-    rspice_results::store_reader::keep_segments_in(&segment_folder(snapshot));
+    rspice_formats::project_results::keep_segments_in(&segment_folder(snapshot));
     let bytes = read_snapshot_bytes(summary)?;
     validate_snapshot_bytes(summary, &bytes)
 }
