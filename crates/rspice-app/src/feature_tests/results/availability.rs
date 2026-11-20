@@ -578,7 +578,7 @@ fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
         x_unit: None,
         analysis: None,
         scale: None,
-        limit_mask: "none bound",
+        limit_mask: "off",
         x_extent: None,
         y_extent: None,
     };

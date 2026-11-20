@@ -275,7 +275,7 @@ pub struct StripHeaderResponse {
     pub close_clicked: bool,
     /// The FIT action (shown while zoomed) was clicked.
     pub fit_clicked: bool,
-    /// The "+ expr" action was clicked.
+    /// The "+ Expression" action was clicked.
     pub add_expr_clicked: bool,
     /// Where the header left room for the caller's own field, when it asked
     /// for one.
@@ -401,7 +401,7 @@ impl<'a> StripHeader<'a> {
         self
     }
 
-    /// Show the "+ expr" action after the legend.
+    /// Show the "+ Expression" action after the legend.
     pub fn expr_action(mut self, on: bool) -> Self {
         self.expr_action = on;
         self
@@ -780,7 +780,7 @@ fn action_chip_width(ui: &mut Ui, label: &str) -> f32 {
     })
 }
 
-/// A small mono action chip ("FIT", "+ expr") in the strip header.
+/// A small mono action chip ("Fit", "+ Expression") in the strip header.
 fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;

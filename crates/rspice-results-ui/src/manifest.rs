@@ -23,7 +23,7 @@ const COLUMN_TITLES: [&str; 7] = [
 
 pub fn show(ui: &mut Ui, manifest: Option<&ManifestViewModel>) {
     let Some(manifest) = manifest else {
-        well_hint(ui, "No retained dataset is selected");
+        well_hint(ui, "No results yet — run a simulation");
         return;
     };
     let t = Tokens::get(ui.ctx());
