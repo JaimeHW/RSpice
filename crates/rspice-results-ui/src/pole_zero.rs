@@ -190,6 +190,7 @@ pub fn show(
         Axis::linear(y0, y1, "jω"),
     )
     .accessible_name("Pole-zero plot")
+    .pinch_zooms_both_axes()
     .accessible_detail(&accessible_detail);
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
     // Stable left half-plane.

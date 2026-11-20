@@ -618,7 +618,8 @@ pub fn show_plot<'a>(
         .accessible_name("Waveform plot")
         .without_x_axis_chrome()
         .with_y_caption_row(y_caption_row(pane))
-        .with_right_margin(WAVE_SHARED_RIGHT_MARGIN);
+        .with_right_margin(WAVE_SHARED_RIGHT_MARGIN)
+        .with_significant_digits(significant_digits);
     if !detail.is_empty() {
         spec = spec.accessible_detail(&detail);
     }

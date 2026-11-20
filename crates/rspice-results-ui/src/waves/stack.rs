@@ -1767,6 +1767,15 @@ fn show_unit_pane(
             results.stepping_cursor = placed;
         }
     }
+    // A cursor dragged by its line moves as one dragged by its ruler box.
+    if let Some((cursor, x)) = response.cursor_drag {
+        let session = host.session_mut();
+        session.cursors.set(cursor, x);
+        if cursor == CursorId::A {
+            session.cursor_a_anchor = None;
+        }
+        session.stepping_cursor = cursor;
+    }
 
     if response.view.reset {
         set_shared_x_view(host.session_mut(), model.analysis_key, pane_count, None);

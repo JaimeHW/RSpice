@@ -740,6 +740,7 @@ pub fn show(
         Axis::linear(y0, y1, "Im Γ"),
     )
     .accessible_name("Smith chart")
+    .pinch_zooms_both_axes()
     .accessible_detail(&accessible_detail)
     .without_x_axis_chrome()
     .without_frame();

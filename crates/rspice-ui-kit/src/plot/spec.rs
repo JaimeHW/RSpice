@@ -519,6 +519,13 @@ pub struct PlotSpec<'a> {
     /// column, where the top tick label gives way to it, or a row of its own
     /// above the column, where every tick label is drawn.
     pub y_caption_row: Option<YCaptionRow>,
+    /// Whether a trackpad pinch zooms both axes about the pointer, as on a
+    /// chart read on its own grid (Smith, Nyquist, pole-zero, scatter),
+    /// rather than X alone, as on a waveform read against time.
+    pub pinch_zooms_both_axes: bool,
+    /// The significant digits a value the plot prints itself (a horizontal
+    /// cursor's level, the difference between two) is stated in.
+    pub significant_digits: usize,
 }
 
 /// The row above the Y tick column that states the axis' unit.
@@ -554,6 +561,8 @@ impl<'a> PlotSpec<'a> {
             x_axis_chrome: true,
             frame: true,
             y_caption_row: None,
+            pinch_zooms_both_axes: false,
+            significant_digits: 4,
         }
     }
 
@@ -596,6 +605,21 @@ impl<'a> PlotSpec<'a> {
     #[must_use]
     pub fn with_y_caption_row(mut self, row: YCaptionRow) -> Self {
         self.y_caption_row = Some(row);
+        self
+    }
+
+    /// Let a trackpad pinch zoom both axes about the pointer.
+    #[must_use]
+    pub fn pinch_zooms_both_axes(mut self) -> Self {
+        self.pinch_zooms_both_axes = true;
+        self
+    }
+
+    /// State the values the plot prints itself in `digits` significant
+    /// digits.
+    #[must_use]
+    pub fn with_significant_digits(mut self, digits: usize) -> Self {
+        self.significant_digits = digits.max(1);
         self
     }
 

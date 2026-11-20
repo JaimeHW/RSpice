@@ -151,7 +151,8 @@ pub fn show(
         XScale::Linear,
         Axis::linear(y0, y1, "Im"),
     )
-    .accessible_name("Nyquist plot");
+    .accessible_name("Nyquist plot")
+    .pinch_zooms_both_axes();
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
     spec.traces.push(
         // Re L(jω) is a coordinate, not an ordering — the locus encircles.

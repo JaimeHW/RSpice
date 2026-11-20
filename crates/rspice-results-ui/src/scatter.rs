@@ -40,6 +40,9 @@ pub struct ScatterSheetState {
     pub fit: bool,
     /// The brush rectangle in data space: x0, y0, x1, y1.
     pub brush: Option<[f64; 4]>,
+    /// The window a pinch zoomed to, X and Y; none fits the cloud. It
+    /// belongs to the pair of columns it was zoomed on.
+    pub zoom: Option<((f64, f64), (f64, f64))>,
 }
 
 impl Default for ScatterSheetState {
@@ -50,6 +53,7 @@ impl Default for ScatterSheetState {
             color_by_status: true,
             fit: true,
             brush: None,
+            zoom: None,
         }
     }
 }
@@ -177,6 +181,7 @@ pub fn domain_bar(
     ) {
         state.x = x_options.get(picked).cloned();
         state.brush = None;
+        state.zoom = None;
     }
     if let Some(picked) = select(
         ui,
@@ -188,6 +193,7 @@ pub fn domain_bar(
     ) {
         state.y = y_options.get(picked).cloned();
         state.brush = None;
+        state.zoom = None;
     }
 
     let mut colour = usize::from(!state.color_by_status);
@@ -232,6 +238,7 @@ pub fn domain_bar(
             scatter.y = Some(names[pair.x].clone());
         }
         state.brush = None;
+        state.zoom = None;
     }
 
     let t = Tokens::get(ui.ctx());
@@ -355,8 +362,9 @@ pub fn show(
 
     let xs = points.iter().map(|(_, x, _)| *x).collect::<Vec<_>>();
     let ys = points.iter().map(|(_, _, y)| *y).collect::<Vec<_>>();
-    let (x0, x1) = axis_range(&xs, x_column);
-    let (y0, y1) = axis_range(&ys, y_column);
+    let ((x0, x1), (y0, y1)) = state
+        .zoom
+        .unwrap_or_else(|| (axis_range(&xs, x_column), axis_range(&ys, y_column)));
 
     let accessible = format!(
         "{} against {}; {} trials, {failing} failing. \
@@ -371,7 +379,8 @@ pub fn show(
         Axis::linear(y0, y1, y_column.unit.clone()).with_label(y_column.name.clone()),
     )
     .accessible_name("Monte Carlo correlation")
-    .accessible_detail(&accessible);
+    .accessible_detail(&accessible)
+    .pinch_zooms_both_axes();
     spec.left_margin = 68.0;
 
     let fit = sheet
@@ -405,6 +414,14 @@ pub fn show(
     // pan under it.
     plot::set_interaction_mode(ui.ctx(), InteractionMode::Select);
     let response = plot::show(ui, &spec, cache, None, None);
+    if response.view.reset {
+        state.zoom = None;
+    } else if response.view.any() {
+        state.zoom = Some((
+            response.view.x.unwrap_or((x0, x1)),
+            response.view.y.unwrap_or((y0, y1)),
+        ));
+    }
 
     apply_input(ui, state, members, &points, &response, ((x0, x1), (y0, y1)));
     paint_hover_card(

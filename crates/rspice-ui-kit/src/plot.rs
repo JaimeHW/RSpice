@@ -41,8 +41,8 @@ pub use decimate::TraceView;
 pub use decimate::{BandMember, DecimationCache, SampleInterpolation, sample_at};
 pub use format::{fmt_si_signed, fmt_si_significant, si_tick_label, tick_with_unit};
 pub use render::{
-    InteractionMode, PlotResponse, ReadoutRow, ViewChange, plot_rect, set_interaction_mode, show,
-    square_outer_rect, y_tick_pitch,
+    InteractionMode, PlotResponse, ReadoutRow, ViewChange, floored_span, plot_rect,
+    set_interaction_mode, show, square_outer_rect, y_tick_pitch,
 };
 pub use render::{TraceLook, TraceMarkerShape, paint_min_max_band, paint_trace_swatch};
 pub use scale::{MAX_AXIS_TICKS, XScale, anchor_label, linear_ticks};

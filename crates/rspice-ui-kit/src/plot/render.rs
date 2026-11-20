@@ -8,8 +8,9 @@ use egui::{
 use crate::theme::{self, FontWeight};
 use crate::tokens::Tokens;
 
-use super::cursor::CursorPair;
+use super::cursor::{CursorId, CursorPair};
 use super::decimate::DecimationCache;
+use super::format::{fmt_si_signed, fmt_si_significant};
 use super::scale::XScale;
 use super::spec::{Axis, MarkerShape, PlotSpec, Trace};
 use crate::palette::TRACE_HUES;
@@ -71,11 +72,17 @@ pub struct PlotResponse {
     /// A horizontal cursor a click or drag placed or moved: its slot (0 is
     /// H1, 1 is H2) and its new left-axis value.
     pub horizontal_cursor: Option<(usize, f64)>,
+    /// A vertical cursor dragged by its line this frame, and where to.
+    pub cursor_drag: Option<(CursorId, f64)>,
     /// The inner plot rectangle (inside margins), for overlays.
     pub plot_rect: Rect,
-    /// Zoom/pan/fit gesture result: wheel zooms X about the cursor
-    /// (Ctrl+wheel zooms Y), drag pans, Shift- or right-drag draws a
-    /// zoom box, double-click fits.
+    /// Zoom/pan/fit gesture result. The wheel zooms X about the pointer,
+    /// Ctrl+wheel Y, Ctrl+Shift+wheel both, Shift+wheel pans X, and a
+    /// trackpad pinch zooms X (both axes on a chart that asks for it). Over
+    /// the Y gutter the wheel zooms Y and a drag pans it. A drag pans, a
+    /// Shift- or right-drag draws a zoom box whose shape picks its axes,
+    /// double-click fits; with the plot focused the arrows pan and plus and
+    /// minus zoom.
     pub view: ViewChange,
     /// The X and Y intervals this frame actually drew, whether they came
     /// from a pinned viewport or from fitting the data. A surface offering
@@ -446,6 +453,44 @@ fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
     points
         .split(|point| !(point.x.is_finite() && point.y.is_finite()))
         .filter(|run| !run.is_empty())
+}
+
+/// Whether a run of points covers no more than a pixel either way: one
+/// sample, or a dense column whose minimum and maximum coincide.
+fn run_is_a_point(run: &[Pos2]) -> bool {
+    let first = run[0];
+    run.iter()
+        .all(|point| (point.x - first.x).abs() < 1.0 && (point.y - first.y).abs() < 1.0)
+}
+
+/// Whether a run never steps back along X by more than a pixel, as the
+/// envelope of a curve against time or frequency does and a locus need not.
+fn runs_forward(run: &[Pos2]) -> bool {
+    run.windows(2).all(|pair| pair[1].x >= pair[0].x - 1.0)
+}
+
+/// The stretches of a forward run that a dash of `dash` points with a gap of
+/// `gap` points keeps, measured along X from the run's first point.
+fn column_dashes(run: &[Pos2], dash: f32, gap: f32) -> Vec<&[Pos2]> {
+    let period = dash + gap;
+    let origin = run[0].x;
+    let mut stretches = Vec::new();
+    let mut start = None;
+    for (index, point) in run.iter().enumerate() {
+        let drawn = (point.x - origin).rem_euclid(period) < dash;
+        match (drawn, start) {
+            (true, None) => start = Some(index),
+            (false, Some(from)) => {
+                stretches.push(&run[from..index]);
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(from) = start {
+        stretches.push(&run[from..]);
+    }
+    stretches
 }
 
 /// The distance between one trace's markers along X, in points: about an
@@ -982,6 +1027,7 @@ pub fn show(
         response,
         clicked_x: None,
         horizontal_cursor: None,
+        cursor_drag: None,
         plot_rect,
         view: ViewChange::default(),
         axes: ((spec.x.min, spec.x.max), (spec.y.min, spec.y.max)),
@@ -1005,7 +1051,18 @@ pub fn show(
         // pane: every zoom and pan is stated against the span it is handed,
         // and a double-click to fit was being swallowed with them.
         let painter = ui.painter_at(rect);
-        handle_navigation(ui, spec, &painter, plot_rect, &mut out, &t);
+        handle_navigation(
+            ui,
+            spec,
+            &painter,
+            plot_rect,
+            &mut out,
+            &t,
+            Navigation {
+                cursors: cursors.copied(),
+                cursor_grabbed: false,
+            },
+        );
         theme::paint_focus_ring(ui, &out.response, rect);
         return out;
     }
@@ -1232,26 +1289,41 @@ pub fn show(
                     .collect(),
             };
             let look = trace.look(trace_index, t.color_safe_traces);
-            let dash = look.dash;
-            // Dashing a dense min/max envelope would emit one shape per
-            // dash along a path that zig-zags every column — thousands of
-            // segments reading as noise. Sparse curves dash normally.
-            if points.len() >= 2 {
-                let dash = dash.filter(|_| points.len() < columns);
-                for run in finite_runs(&points) {
-                    if run.len() < 2 {
-                        continue;
+            let marker = look.marker.or_else(|| {
+                (trace.show_single_point && points.len() == 1).then_some(TraceMarkerShape::Circle)
+            });
+            let dense = points.len() >= columns;
+            for run in finite_runs(&points) {
+                // A sample with a hole either side, or a run that folds into
+                // one pixel, has no length to stroke; it is still data, so it
+                // draws as a dot the width of the curve. A lone sample that
+                // carries a marker already has its mark.
+                if run_is_a_point(run) {
+                    if !(points.len() == 1 && marker.is_some()) {
+                        clipped.circle_filled(run[0], (trace.width * 0.5).max(1.25), trace.color);
                     }
-                    if let Some((dash_length, gap_length)) = dash {
-                        clipped.extend(Shape::dashed_line(run, stroke, dash_length, gap_length));
-                    } else {
+                    continue;
+                }
+                match look.dash {
+                    // A dense envelope zig-zags through every column, so
+                    // dashing it along its length would cut it into
+                    // thousands of slivers reading as noise. It is dashed
+                    // across: drawn over stretches of X and left out
+                    // between them, which keeps the dash a curve is told
+                    // apart by.
+                    Some((dash, gap)) if dense && runs_forward(run) => {
+                        for stretch in column_dashes(run, dash, gap) {
+                            clipped.add(Shape::line(stretch.to_vec(), stroke));
+                        }
+                    }
+                    Some((dash, gap)) if !dense => {
+                        clipped.extend(Shape::dashed_line(run, stroke, dash, gap));
+                    }
+                    _ => {
                         clipped.add(Shape::line(run.to_vec(), stroke));
                     }
                 }
             }
-            let marker = look.marker.or_else(|| {
-                (trace.show_single_point && points.len() == 1).then_some(TraceMarkerShape::Circle)
-            });
             if let Some(marker) = marker {
                 if points.len() == 1 {
                     let source_point = points[0];
@@ -1403,12 +1475,37 @@ pub fn show(
         );
     }
 
-    // ---- A/B cursors
+    // ---- A/B cursors: a line and a lettered flag where a cursor stands in
+    // the window, and a chevron on the edge it left by where it does not.
+    let flag_font = theme::mono(9.0, FontWeight::Medium);
+    let mut cursor_lines: Vec<(CursorId, f32)> = Vec::new();
+    let mut chevrons: Vec<(CursorId, f64, Rect, Color32)> = Vec::new();
     if let Some(pair) = cursors {
-        let flag_font = theme::mono(9.0, FontWeight::Medium);
-        let draw_cursor = |x: f64, letter: &str, color: Color32| {
+        for (id, color) in [
+            (CursorId::A, c.canvas_cursor_a),
+            (CursorId::B, c.canvas_cursor_b),
+        ] {
+            let Some(x) = pair.get(id).filter(|x| x.is_finite()) else {
+                continue;
+            };
             if x < spec.x.min || x > spec.x.max {
-                return;
+                let before = x < spec.x.min;
+                let beside = chevrons
+                    .iter()
+                    .filter(|(_, other, ..)| (*other < spec.x.min) == before)
+                    .count() as f32;
+                let offset = beside * (CHEVRON_WIDTH + 2.0);
+                let left = if before {
+                    plot_rect.left() + offset
+                } else {
+                    plot_rect.right() - CHEVRON_WIDTH - offset
+                };
+                let chevron = Rect::from_min_size(
+                    pos2(left, plot_rect.top() - 1.0),
+                    vec2(CHEVRON_WIDTH, 13.0),
+                );
+                chevrons.push((id, x, chevron, color));
+                continue;
             }
             let px = mx(x);
             painter.vline(px, plot_rect.y_range(), Stroke::new(1.0, color));
@@ -1417,21 +1514,108 @@ pub fn show(
             painter.text(
                 flag.center(),
                 Align2::CENTER_CENTER,
-                letter,
+                id.letter(),
                 flag_font.clone(),
                 c.canvas_bg,
             );
-        };
-        if let Some(a) = pair.a {
-            draw_cursor(a, "A", c.canvas_cursor_a);
+            cursor_lines.push((id, px));
         }
-        if let Some(b) = pair.b {
-            draw_cursor(b, "B", c.canvas_cursor_b);
+    }
+    for &(id, x, chevron, color) in &chevrons {
+        let before = x < spec.x.min;
+        painter.rect_filled(chevron, 1.0, color);
+        painter.text(
+            chevron.center(),
+            Align2::CENTER_CENTER,
+            if before {
+                format!("\u{2039}{}", id.letter())
+            } else {
+                format!("{}\u{203a}", id.letter())
+            },
+            flag_font.clone(),
+            c.canvas_bg,
+        );
+        let handle = ui.interact(
+            chevron,
+            out.response.id.with(("cursor-chevron", id.letter())),
+            Sense::click(),
+        );
+        handle.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Button,
+                ui.is_enabled(),
+                format!("Bring cursor {} into view", id.letter()),
+            )
+        });
+        theme::paint_focus_ring(ui, &handle, chevron);
+        if handle.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
+        // The window keeps its width and centres on the cursor.
+        if handle.clicked() {
+            let at = spec.x_scale.normalize(x, spec.x.min, spec.x.max);
+            out.view.x = floored_span(
+                (
+                    spec.x_scale.denormalize(at - 0.5, spec.x.min, spec.x.max),
+                    spec.x_scale.denormalize(at + 0.5, spec.x.min, spec.x.max),
+                ),
+                spec.x_scale,
+            );
+        }
+        handle.on_hover_text(format!(
+            "Cursor {} is {} the window: click to centre on it",
+            id.letter(),
+            if before { "before" } else { "after" }
+        ));
+    }
+
+    // A cursor line is a handle along its whole height: a press within reach
+    // of it moves that cursor, and the drag neither pans nor draws a box.
+    let grab_id = out.response.id.with("plot.cursor-grab");
+    let line_near = |x: f32| {
+        cursor_lines
+            .iter()
+            .map(|&(id, px)| (id, (px - x).abs()))
+            .filter(|&(_, distance)| distance <= CURSOR_GRAB)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(id, _)| id)
+    };
+    let shift_held = ui.input(|input| input.modifiers.shift);
+    if out.response.drag_started_by(egui::PointerButton::Primary)
+        && !shift_held
+        && let Some(origin) = ui.input(|input| input.pointer.press_origin())
+        && plot_rect.expand(2.0).contains(origin)
+        && let Some(id) = line_near(origin.x)
+    {
+        ui.data_mut(|data| data.insert_temp(grab_id, id));
+    }
+    let grabbed = ui.data(|data| data.get_temp::<CursorId>(grab_id));
+    if let Some(id) = grabbed {
+        if out.response.dragged_by(egui::PointerButton::Primary)
+            && let Some(pointer) = out.response.interact_pointer_pos()
+        {
+            let fraction = ((pointer.x.clamp(plot_rect.left(), plot_rect.right())
+                - plot_rect.left())
+                / plot_rect.width()) as f64;
+            out.cursor_drag = Some((
+                id,
+                spec.x_scale.denormalize(fraction, spec.x.min, spec.x.max),
+            ));
+        }
+        if !out.response.dragged() {
+            ui.data_mut(|data| data.remove::<CursorId>(grab_id));
+        }
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    } else if let Some(pointer) = out.response.hover_pos()
+        && plot_rect.expand(2.0).contains(pointer)
+        && line_near(pointer.x).is_some()
+    {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
 
     // ---- horizontal cursors: H1 in A's colour, H2 in B's, and the ΔY
-    // between them dimensioned at the right edge when both are placed.
+    // between them dimensioned at the right edge when both are placed. Each
+    // level is read in the axis' unit, as the readout strip reads it.
     let horizontal_colors = [c.canvas_cursor_a, c.canvas_cursor_b];
     let in_view = |y: f64| y.is_finite() && y >= spec.y.min && y <= spec.y.max;
     for (slot, y) in spec.horizontal_cursors.iter().enumerate() {
@@ -1444,7 +1628,15 @@ pub fn show(
         painter.text(
             pos2(plot_rect.left() + 4.0, py - 3.0),
             Align2::LEFT_BOTTOM,
-            format!("H{} {}", slot + 1, spec.y.format_display_value(y)),
+            format!(
+                "H{} {}",
+                slot + 1,
+                fmt_si_significant(
+                    spec.y.display_value(y),
+                    &spec.y.unit,
+                    spec.significant_digits
+                )
+            ),
             theme::mono(9.0, FontWeight::Medium),
             color,
         );
@@ -1464,7 +1656,14 @@ pub fn show(
         painter.text(
             pos2(px - 5.0, (top + bottom) * 0.5),
             Align2::RIGHT_CENTER,
-            format!("\u{0394}Y {}", spec.y.format_display_delta(h2 - h1)),
+            format!(
+                "\u{0394}Y {}",
+                fmt_si_signed(
+                    (h2 - h1) * spec.y.display_scale,
+                    &spec.y.unit,
+                    spec.significant_digits
+                )
+            ),
             theme::mono(9.0, FontWeight::Medium),
             c.canvas_text,
         );
@@ -1492,7 +1691,7 @@ pub fn show(
         if out.response.clicked() {
             out.clicked_x = Some(data_x);
         }
-        if spec.horizontal_cursor_interactive {
+        if spec.horizontal_cursor_interactive && grabbed.is_none() {
             // The slot is chosen where the gesture starts and kept for the
             // whole drag, so dragging H2 across H1 keeps moving H2.
             let grab = out.response.id.with("horizontal-cursor-slot");
@@ -1519,8 +1718,19 @@ pub fn show(
         }
     }
 
-    // ---- navigation gestures: wheel zoom, drag pan, zoom box, fit
-    handle_navigation(ui, spec, &painter, plot_rect, &mut out, &t);
+    // ---- navigation gestures: wheel, pinch, keys, drag pan, zoom box, fit
+    handle_navigation(
+        ui,
+        spec,
+        &painter,
+        plot_rect,
+        &mut out,
+        &t,
+        Navigation {
+            cursors: cursors.copied(),
+            cursor_grabbed: grabbed.is_some(),
+        },
+    );
 
     theme::paint_focus_ring(ui, &out.response, rect);
 
@@ -1553,14 +1763,16 @@ fn horizontal_cursor_slot(
     }
 }
 
-/// A range wide enough to still be a view, or nothing.
+/// A range wide enough to still be a view, or nothing. This is the one
+/// floor every zoom in the results workspace stops at: a plot's wheel, box
+/// and keys, and a ruler's wheel and handles.
 ///
 /// Screen coordinates are `f32`, so a window narrower than about a billionth
 /// of its own magnitude is already finer than the projection that draws it.
 /// A window of exactly zero is worse than useless: every gesture states its
 /// result as a fraction of the span it was handed, so a stored zero span is a
 /// viewport nothing but a fit can ever widen again.
-fn floored_span(range: (f64, f64), scale: XScale) -> Option<(f64, f64)> {
+pub fn floored_span(range: (f64, f64), scale: XScale) -> Option<(f64, f64)> {
     const RELATIVE_FLOOR: f64 = 1.0e-9;
     let (low, high) = range;
     if !(low.is_finite() && high.is_finite()) {
@@ -1592,10 +1804,164 @@ fn floored_span(range: (f64, f64), scale: XScale) -> Option<(f64, f64)> {
     }
 }
 
-/// Interpret wheel/drag gestures against the spec's current ranges and
+/// How near a cursor line, in points, a press takes hold of it.
+const CURSOR_GRAB: f32 = 5.0;
+
+/// The width of the chevron that stands for a cursor outside the window.
+const CHEVRON_WIDTH: f32 = 20.0;
+
+/// A zoom band thinner than this along one axis, in points, zooms the other
+/// axis alone: a flat band is a stretch of X, a tall one a stretch of Y.
+const ONE_AXIS_BAND: f32 = 12.0;
+
+/// The least extent, in points, a band needs along an axis it zooms.
+const LEAST_BAND: f32 = 6.0;
+
+/// The share of the window one arrow key pans, and the factor plus zooms
+/// the window by (minus by its reciprocal).
+const KEY_PAN: f64 = 0.1;
+const KEY_ZOOM_IN: f64 = 0.8;
+
+/// How fast the wheel zooms: the window's span changes by `exp(-rate × d)`
+/// for `d` points of wheel travel.
+const WHEEL_ZOOM_RATE: f64 = 0.002;
+
+/// The axes one zoom gesture changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ZoomAxes {
+    X,
+    Y,
+    Both,
+}
+
+impl ZoomAxes {
+    const fn x(self) -> bool {
+        matches!(self, Self::X | Self::Both)
+    }
+
+    const fn y(self) -> bool {
+        matches!(self, Self::Y | Self::Both)
+    }
+}
+
+/// The axes a box zoom over `band` changes: the one the reader armed with X
+/// or Y if any, else what the band's shape says, as EZwave reads a drag.
+fn band_axes(band: Rect, armed: Option<ZoomAxes>) -> Option<ZoomAxes> {
+    let (wide, tall) = (band.width(), band.height());
+    match armed {
+        Some(ZoomAxes::X) => (wide > LEAST_BAND).then_some(ZoomAxes::X),
+        Some(ZoomAxes::Y) => (tall > LEAST_BAND).then_some(ZoomAxes::Y),
+        Some(ZoomAxes::Both) | None => match (wide >= ONE_AXIS_BAND, tall >= ONE_AXIS_BAND) {
+            (true, true) => Some(ZoomAxes::Both),
+            (true, false) => Some(ZoomAxes::X),
+            (false, true) => Some(ZoomAxes::Y),
+            (false, false) => None,
+        },
+    }
+}
+
+/// Remember the axis the reader armed for the next zoom, or forget it.
+fn keep_armed(ui: &Ui, id: egui::Id, armed: Option<ZoomAxes>) {
+    ui.data_mut(|data| {
+        if let Some(axis) = armed {
+            data.insert_temp(id, axis);
+        } else {
+            data.remove::<ZoomAxes>(id);
+        }
+    });
+}
+
+/// What the plot needs besides its spec to read a gesture.
+struct Navigation {
+    cursors: Option<CursorPair>,
+    /// A cursor line has the drag, which therefore is not a pan.
+    cursor_grabbed: bool,
+}
+
+/// What the wheel and the trackpad did this frame, told apart.
+///
+/// egui folds a wheel turned with Ctrl held into the same zoom factor a
+/// pinch arrives in, and reports no scroll for it, so a plot that read only
+/// the scroll never saw Ctrl+wheel at all. A pinch reaches egui as a zoom
+/// event (the browser turns a trackpad pinch, which it reports as a wheel
+/// with a Ctrl it did not press, into one; macOS hands over its pinch
+/// gesture) or as a two-finger touch. What the pinch does not explain of the
+/// zoom factor is the wheel.
+#[derive(Debug, Clone, Copy)]
+struct WheelInput {
+    /// The span factor a pinch asks for, 1 when there was none.
+    pinch: f64,
+    /// The span factor a Ctrl-held wheel asks for, at the rate the plain
+    /// wheel zooms, 1 when there was none.
+    ctrl_wheel: f64,
+    /// Plain wheel travel, in points: Y from the wheel, X from a horizontal
+    /// swipe or from the wheel with Shift held.
+    scroll: egui::Vec2,
+    shift: bool,
+}
+
+impl WheelInput {
+    fn read(ui: &Ui) -> Self {
+        let zoom_speed = ui
+            .ctx()
+            .options(|options| f64::from(options.input_options.scroll_zoom_speed));
+        ui.input(|input| {
+            let zoom_events: f32 = input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Zoom(factor) => Some(*factor),
+                    _ => None,
+                })
+                .product();
+            let (pinch, wheel) = match input.multi_touch() {
+                Some(touch) => (touch.zoom_delta, 1.0),
+                None => (zoom_events, input.zoom_delta() / zoom_events),
+            };
+            let span = |zoom: f32| f64::from(zoom).recip().clamp(0.05, 20.0);
+            // Dividing the pinch back out leaves rounding behind; a wheel
+            // that turned changes the factor by far more than that.
+            let ctrl_wheel = if (wheel - 1.0).abs() > 1.0e-4 && zoom_speed > 0.0 {
+                let travel = f64::from(wheel).ln() / zoom_speed;
+                (-travel * WHEEL_ZOOM_RATE).exp().clamp(0.05, 20.0)
+            } else {
+                1.0
+            };
+            Self {
+                pinch: span(pinch),
+                ctrl_wheel,
+                scroll: input.smooth_scroll_delta,
+                shift: input.modifiers.shift,
+            }
+        })
+    }
+}
+
+/// One axis' window as fractions of the span handed in: `(0, 1)` is the
+/// window as it stands.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Window(f64, f64);
+
+impl Window {
+    const SAME: Self = Self(0.0, 1.0);
+
+    /// Zoom by `factor` about the fraction `anchor`, which keeps its place.
+    fn zoom(self, anchor: f64, factor: f64) -> Self {
+        let at = self.0 + (self.1 - self.0) * anchor;
+        Self(at + (self.0 - at) * factor, at + (self.1 - at) * factor)
+    }
+
+    /// Move by `delta` of the span handed in.
+    fn pan(self, delta: f64) -> Self {
+        Self(self.0 + delta, self.1 + delta)
+    }
+}
+
+/// Interpret the frame's gestures against the spec's current ranges and
 /// fill `out.view` with the resulting data-space ranges. The caller owns
-/// the view state (this engine is stateless across frames except for the
-/// zoom-box anchor, which lives in egui memory keyed by the widget id).
+/// the view state; the engine keeps only a gesture's own state between
+/// frames (the zoom band's anchor, the armed axis) in egui memory keyed by
+/// the widget id.
 fn handle_navigation(
     ui: &mut Ui,
     spec: &PlotSpec<'_>,
@@ -1603,9 +1969,16 @@ fn handle_navigation(
     plot_rect: Rect,
     out: &mut PlotResponse,
     t: &Tokens,
+    navigation: Navigation,
 ) {
     let c = t.color;
     let interaction = interaction_mode(ui.ctx());
+    let rect = out.response.rect;
+    // The Y axis' gutter: the tick column beside the plot area.
+    let gutter = Rect::from_min_max(
+        pos2(rect.left(), plot_rect.top()),
+        pos2(plot_rect.left(), plot_rect.bottom()),
+    );
 
     // Fraction coordinates: fx in 0..1 left→right, fy in 0..1 bottom→top.
     let fx_of = |px: f32| ((px - plot_rect.left()) / plot_rect.width()) as f64;
@@ -1615,36 +1988,168 @@ fn handle_navigation(
     // Every range this reports is about to become the next frame's view, so
     // none of them may be degenerate: a stored zero span is a viewport no
     // later gesture can widen, because every gesture is relative to it.
-    let store_x = |range: (f64, f64)| floored_span(range, spec.x_scale);
-    let store_y = |range: (f64, f64)| floored_span(range, spec.y_scale);
+    let store_x = |w: Window| floored_span((denorm_x(w.0), denorm_x(w.1)), spec.x_scale);
+    let store_y = |w: Window| floored_span((denorm_y(w.0), denorm_y(w.1)), spec.y_scale);
 
     // Double-click restores the automatic fit.
-    if interaction != InteractionMode::Select && out.response.double_clicked() {
+    if out.response.double_clicked() {
         out.view.reset = true;
         return;
     }
+    if navigation.cursor_grabbed {
+        return;
+    }
+    // Select's contract is that the pointer selects and the view stays: no
+    // zoom box, no pan, no wheel. A modifier held for a selection gesture was
+    // rescaling the plot underneath the selection being made. A pinch selects
+    // nothing, so it still zooms there, and a double-click still fits.
+    if interaction == InteractionMode::Select {
+        if let Some(pointer) = out.response.hover_pos()
+            && plot_rect.contains(pointer)
+        {
+            let pinch = WheelInput::read(ui).pinch;
+            if pinch != 1.0 {
+                out.view.x = store_x(Window::SAME.zoom(fx_of(pointer.x).clamp(0.0, 1.0), pinch));
+                if spec.pinch_zooms_both_axes {
+                    out.view.y =
+                        store_y(Window::SAME.zoom(fy_of(pointer.y).clamp(0.0, 1.0), pinch));
+                }
+            }
+        }
+        return;
+    }
 
-    let shift = ui.input(|i| i.modifiers.shift);
-    let ctrl = ui.input(|i| i.modifiers.ctrl);
-    let box_id = out.response.id.with("plot.zoombox");
+    let id = out.response.id;
+    let armed_id = id.with("plot.armed-axis");
+    let mut armed = ui.data(|data| data.get_temp::<ZoomAxes>(armed_id));
+    let focused = out.response.has_focus();
+    // The plot's keys are its own while it holds the focus. X and Y, which
+    // arm a one-axis zoom, and Enter, which zooms the band between the
+    // cursors on the armed axis, are also taken while the pointer is over
+    // it, so long as no other widget is taking keys.
+    let keys_free = ui.memory(|memory| memory.focused().is_none_or(|focus| focus == id));
+    if keys_free && (focused || out.response.contains_pointer()) {
+        let plain = ui.input(|input| input.modifiers.is_none());
+        let (x, y, enter, escape) = ui.input_mut(|input| {
+            (
+                plain && input.consume_key(egui::Modifiers::NONE, egui::Key::X),
+                plain && input.consume_key(egui::Modifiers::NONE, egui::Key::Y),
+                armed.is_some()
+                    && plain
+                    && input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                armed.is_some() && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+            )
+        });
+        for (pressed, axis) in [(x, ZoomAxes::X), (y, ZoomAxes::Y)] {
+            if pressed {
+                armed = (armed != Some(axis)).then_some(axis);
+            }
+        }
+        if escape {
+            armed = None;
+        }
+        if enter && let Some(axis) = armed.take() {
+            let band = match axis {
+                ZoomAxes::X => navigation
+                    .cursors
+                    .and_then(|pair| pair.a.zip(pair.b))
+                    .map(|(a, b)| (a.min(b), a.max(b))),
+                ZoomAxes::Y | ZoomAxes::Both => {
+                    if let [Some(h1), Some(h2)] = spec.horizontal_cursors {
+                        Some((h1.min(h2), h1.max(h2)))
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(band) = band {
+                match axis {
+                    ZoomAxes::X => out.view.x = floored_span(band, spec.x_scale),
+                    ZoomAxes::Y | ZoomAxes::Both => {
+                        out.view.y = floored_span(band, spec.y_scale);
+                    }
+                }
+            }
+        }
+    }
+    if focused {
+        // The arrows pan the plot; egui must not also move the focus on
+        // them.
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        let mut x = Window::SAME;
+        let mut y = Window::SAME;
+        let mut fit = false;
+        ui.input_mut(|input| {
+            let mut pressed = |modifiers, key| input.consume_key(modifiers, key);
+            let command = egui::Modifiers::COMMAND;
+            let none = egui::Modifiers::NONE;
+            for (key, delta) in [
+                (egui::Key::ArrowLeft, -KEY_PAN),
+                (egui::Key::ArrowRight, KEY_PAN),
+            ] {
+                if pressed(none, key) {
+                    x = x.pan(delta);
+                }
+            }
+            for (key, delta) in [
+                (egui::Key::ArrowDown, -KEY_PAN),
+                (egui::Key::ArrowUp, KEY_PAN),
+            ] {
+                if pressed(none, key) {
+                    y = y.pan(delta);
+                }
+            }
+            for (key, factor) in [
+                (egui::Key::Plus, KEY_ZOOM_IN),
+                (egui::Key::Equals, KEY_ZOOM_IN),
+                (egui::Key::Minus, KEY_ZOOM_IN.recip()),
+            ] {
+                // Ctrl is asked first: a bare pattern does not match a key
+                // pressed with Ctrl, but the order states which wins.
+                if pressed(command, key) {
+                    y = y.zoom(0.5, factor);
+                } else if pressed(none, key) {
+                    x = x.zoom(0.5, factor);
+                }
+            }
+            fit = pressed(none, egui::Key::F) || pressed(none, egui::Key::Home);
+        });
+        if fit {
+            out.view.reset = true;
+            return;
+        }
+        if x != Window::SAME {
+            out.view.x = store_x(x);
+        }
+        if y != Window::SAME {
+            out.view.y = store_y(y);
+        }
+    }
 
     // Zoom box: Shift+primary drag or right drag. The anchor survives
-    // across frames in egui memory; the box zooms both axes on release.
-    //
-    // Select mode arms none of it. Its contract is that the view does not
-    // move, and a modifier held for a selection gesture was rescaling the
-    // plot underneath the selection being made.
-    let box_drag_started = interaction != InteractionMode::Select
-        && ((out.response.drag_started_by(egui::PointerButton::Primary)
-            && (shift || interaction == InteractionMode::Zoom))
-            || out.response.drag_started_by(egui::PointerButton::Secondary));
+    // across frames in egui memory; the box zooms on release, along the
+    // axes its shape (or the armed axis) picks.
+    let shift = ui.input(|i| i.modifiers.shift);
+    let box_id = id.with("plot.zoombox");
+    let box_drag_started = (out.response.drag_started_by(egui::PointerButton::Primary)
+        && (shift || interaction == InteractionMode::Zoom))
+        || out.response.drag_started_by(egui::PointerButton::Secondary);
     if box_drag_started
         && let Some(pos) = out.response.interact_pointer_pos()
         && plot_rect.contains(pos)
     {
-        ui.memory_mut(|m| m.data.insert_temp(box_id, pos));
+        ui.data_mut(|data| data.insert_temp(box_id, pos));
     }
-    let anchor = ui.memory(|m| m.data.get_temp::<Pos2>(box_id));
+    let anchor = ui.data(|data| data.get_temp::<Pos2>(box_id));
     if let Some(anchor) = anchor {
         let dragging = out.response.dragged_by(egui::PointerButton::Primary)
             || out.response.dragged_by(egui::PointerButton::Secondary);
@@ -1656,79 +2161,159 @@ fn handle_navigation(
             .map(|p| plot_rect.clamp(p));
 
         if dragging && let Some(corner) = corner {
+            // The band shows what it will zoom: a stretch of X spans the
+            // plot's height, a stretch of Y its width.
             let band = Rect::from_two_pos(anchor, corner);
+            let (shown, ink) = match band_axes(band, armed) {
+                Some(ZoomAxes::X) => (
+                    Rect::from_x_y_ranges(band.x_range(), plot_rect.y_range()),
+                    c.canvas_cursor_a,
+                ),
+                Some(ZoomAxes::Y) => (
+                    Rect::from_x_y_ranges(plot_rect.x_range(), band.y_range()),
+                    c.canvas_cursor_a,
+                ),
+                Some(ZoomAxes::Both) => (band, c.canvas_cursor_a),
+                None => (band, c.canvas_text_faint),
+            };
             painter.rect(
-                band,
+                shown,
                 0.0,
-                c.canvas_cursor_a.gamma_multiply(0.08),
-                Stroke::new(1.0, c.canvas_cursor_a),
+                ink.gamma_multiply(0.08),
+                Stroke::new(1.0, ink),
                 egui::StrokeKind::Inside,
             );
         }
         if stopped {
-            ui.memory_mut(|m| m.data.remove::<Pos2>(box_id));
+            ui.data_mut(|data| data.remove::<Pos2>(box_id));
             if let Some(corner) = corner {
                 let band = Rect::from_two_pos(anchor, corner);
-                if band.width() > 6.0 && band.height() > 6.0 {
-                    let (fx0, fx1) = (fx_of(band.left()).max(0.0), fx_of(band.right()).min(1.0));
-                    out.view.x = store_x((denorm_x(fx0), denorm_x(fx1)));
-                    let (fy0, fy1) = (fy_of(band.bottom()).max(0.0), fy_of(band.top()).min(1.0));
-                    out.view.y = store_y((denorm_y(fy0), denorm_y(fy1)));
+                if let Some(axes) = band_axes(band, armed) {
+                    if axes.x() {
+                        let window =
+                            Window(fx_of(band.left()).max(0.0), fx_of(band.right()).min(1.0));
+                        out.view.x = store_x(window);
+                    }
+                    if axes.y() {
+                        let window =
+                            Window(fy_of(band.bottom()).max(0.0), fy_of(band.top()).min(1.0));
+                        out.view.y = store_y(window);
+                    }
+                    armed = None;
                 }
             }
         }
+        keep_armed(ui, armed_id, armed);
         return;
+    }
+    keep_armed(ui, armed_id, armed);
+    if let Some(axis) = armed {
+        // The armed axis is stated on the plot until a band or Enter uses
+        // it, so the key that armed it is not a silent mode.
+        painter.text(
+            pos2(plot_rect.right() - 4.0, plot_rect.top() + 14.0),
+            Align2::RIGHT_TOP,
+            match axis {
+                ZoomAxes::X => "zoom X",
+                ZoomAxes::Y | ZoomAxes::Both => "zoom Y",
+            },
+            theme::mono(9.0, FontWeight::Medium),
+            c.canvas_cursor_a,
+        );
     }
 
     // Drag pan (primary, unmodified): the content follows the pointer, along
     // each axis once the drag has travelled past a dead zone on it. A pan in
     // time wobbles by a pixel or two; moving Y by that pinned an axis that
     // was following the data in view, and a fit the reader never asked to
-    // leave stopped refitting.
+    // leave stopped refitting. A drag that starts in the Y gutter pans Y
+    // alone.
     if out.response.dragged_by(egui::PointerButton::Primary)
         && !shift
         && matches!(interaction, InteractionMode::All | InteractionMode::Pan)
     {
         let delta = out.response.drag_delta();
-        let travelled = ui
-            .input(|input| Some(input.pointer.interact_pos()? - input.pointer.press_origin()?))
-            .unwrap_or(egui::Vec2::INFINITY);
+        let (origin, travelled) = ui.input(|input| {
+            let origin = input.pointer.press_origin();
+            let travelled = input
+                .pointer
+                .interact_pos()
+                .zip(origin)
+                .map_or(egui::Vec2::INFINITY, |(now, from)| now - from);
+            (origin, travelled)
+        });
+        let in_gutter = origin.is_some_and(|origin| gutter.contains(origin));
         if delta != egui::Vec2::ZERO {
             let dfx = -f64::from(delta.x) / f64::from(plot_rect.width());
-            if dfx != 0.0 && travelled.x.abs() > PAN_DEAD_ZONE {
-                out.view.x = store_x((denorm_x(dfx), denorm_x(1.0 + dfx)));
+            if dfx != 0.0 && travelled.x.abs() > PAN_DEAD_ZONE && !in_gutter {
+                out.view.x = store_x(Window::SAME.pan(dfx));
             }
-            let dy = f64::from(delta.y) / f64::from(plot_rect.height());
-            if dy != 0.0 && travelled.y.abs() > PAN_DEAD_ZONE {
-                out.view.y = store_y((denorm_y(dy), denorm_y(1.0 + dy)));
+            let dfy = f64::from(delta.y) / f64::from(plot_rect.height());
+            if dfy != 0.0 && travelled.y.abs() > PAN_DEAD_ZONE {
+                out.view.y = store_y(Window::SAME.pan(dfy));
             }
         }
         return;
     }
 
-    // Wheel zoom about the cursor: X by default, Y with Ctrl held.
-    if interaction != InteractionMode::Select
-        && let Some(pointer) = out.response.hover_pos()
-        && plot_rect.contains(pointer)
-    {
-        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll != 0.0 {
-            // Consume the wheel so an enclosing ScrollArea doesn't also
-            // scroll the strip list while the user zooms a plot.
-            ui.input_mut(|i| {
-                i.smooth_scroll_delta = egui::Vec2::ZERO;
-            });
-            let factor = (f64::from(-scroll) * 0.002).exp().clamp(0.05, 20.0);
-            if ctrl {
-                let fy = fy_of(pointer.y);
-                let (f0, f1) = (fy * (1.0 - factor), fy + (1.0 - fy) * factor);
-                out.view.y = store_y((denorm_y(f0), denorm_y(f1)));
-            } else {
-                let fx = fx_of(pointer.x);
-                let (f0, f1) = (fx * (1.0 - factor), fx + (1.0 - fx) * factor);
-                out.view.x = store_x((denorm_x(f0), denorm_x(f1)));
+    // Wheel and pinch about the pointer.
+    let Some(pointer) = out.response.hover_pos() else {
+        return;
+    };
+    let over_plot = plot_rect.contains(pointer);
+    let over_gutter = gutter.contains(pointer);
+    if !(over_plot || over_gutter) {
+        return;
+    }
+    let wheel = WheelInput::read(ui);
+    let (fx, fy) = (
+        fx_of(pointer.x).clamp(0.0, 1.0),
+        fy_of(pointer.y).clamp(0.0, 1.0),
+    );
+    let plain_zoom = (f64::from(-wheel.scroll.y) * WHEEL_ZOOM_RATE)
+        .exp()
+        .clamp(0.05, 20.0);
+    let mut x = Window::SAME;
+    let mut y = Window::SAME;
+    if over_gutter {
+        // Over the gutter every zoom is the Y axis'.
+        let factor = plain_zoom * wheel.ctrl_wheel * wheel.pinch;
+        if factor != 1.0 {
+            y = y.zoom(fy, factor);
+        }
+    } else {
+        if wheel.pinch != 1.0 {
+            x = x.zoom(fx, wheel.pinch);
+            if spec.pinch_zooms_both_axes {
+                y = y.zoom(fy, wheel.pinch);
             }
         }
+        // Ctrl+wheel zooms Y, as in ViVA; with Shift as well, both axes.
+        if wheel.ctrl_wheel != 1.0 {
+            y = y.zoom(fy, wheel.ctrl_wheel);
+            if wheel.shift {
+                x = x.zoom(fx, wheel.ctrl_wheel);
+            }
+        }
+        if wheel.scroll.y != 0.0 {
+            x = x.zoom(fx, plain_zoom);
+        }
+        // A horizontal swipe, or the wheel with Shift held, which egui
+        // turns into one, pans X; the content follows the swipe.
+        if wheel.scroll.x != 0.0 {
+            x = x.pan(-f64::from(wheel.scroll.x) / f64::from(plot_rect.width()));
+        }
+    }
+    if wheel.scroll != egui::Vec2::ZERO {
+        // Consume the wheel so an enclosing ScrollArea doesn't also scroll
+        // the strip list while the user zooms a plot.
+        ui.input_mut(|input| input.smooth_scroll_delta = egui::Vec2::ZERO);
+    }
+    if x != Window::SAME {
+        out.view.x = store_x(x);
+    }
+    if y != Window::SAME {
+        out.view.y = store_y(y);
     }
 }
 
@@ -1791,6 +2376,9 @@ fn draw_readout(
         );
     }
 }
+
+#[cfg(test)]
+mod gesture_tests;
 
 #[cfg(test)]
 mod tests {
