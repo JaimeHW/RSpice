@@ -1023,8 +1023,8 @@ mod bus_tests {
     }
 
     /// The plots written from a source as it is read are the plots of the projected timelines,
-    /// byte for byte but the wall-clock `Date:` lines, in both encodings, with an empty trace,
-    /// an HDL-observed one, a real one and a bus.
+    /// byte for byte, in both encodings, with an empty trace, an HDL-observed one, a real one and
+    /// a bus.
     #[test]
     fn plots_written_from_their_source_are_the_projected_plots() {
         let (mut traces, buses) = two_bit_fixture();
@@ -1048,13 +1048,6 @@ mod bus_tests {
                 },
             ],
         }];
-        let undated = |bytes: Vec<u8>| -> Vec<u8> {
-            bytes
-                .split(|&byte| byte == b'\n')
-                .filter(|line| !line.starts_with(b"Date: "))
-                .collect::<Vec<_>>()
-                .join(&b'\n')
-        };
         for format in [RawFormat::Ascii, RawFormat::Binary] {
             let mut projected = Vec::new();
             write_event_plots(
@@ -1071,7 +1064,7 @@ mod bus_tests {
             };
             write_transient_event_plots(&mut streamed, &traces, &real, &buses, &source, format)
                 .unwrap();
-            assert!(undated(streamed) == undated(projected), "{format:?}");
+            assert!(streamed == projected, "{format:?}");
         }
     }
 
