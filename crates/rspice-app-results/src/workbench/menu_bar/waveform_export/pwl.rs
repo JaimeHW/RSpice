@@ -52,19 +52,40 @@ pub(super) fn pwl_traces(analysis: &AnalysisResult) -> impl Iterator<Item = &Ret
 /// One encoded source file.
 pub(super) struct PwlSource {
     pub text: String,
+    /// The name the file is offered under, without its extension.
+    pub file_stem: String,
     pub subcircuit: String,
     pub source: char,
     pub points: usize,
 }
 
 /// The subcircuit name: the trace's name in the characters every SPICE
-/// accepts in one.
-fn subcircuit_name(trace: &str) -> String {
-    let mut name = String::from("PWL_");
+/// accepts in one. A name that had to lose characters to fit carries a digest
+/// of the name it was made from, so two traces whose names read alike, `v(a)`
+/// and `v_a`, never give two files one subcircuit name.
+pub(super) fn subcircuit_name(trace: &str) -> String {
+    let mut name = format!("PWL_{}", readable_name(trace));
+    if !trace
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric())
+    {
+        // FNV-1a over the exact name: stable across builds and platforms.
+        let digest = trace.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+            (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+        });
+        name.push_str(&format!("_{digest:08x}"));
+    }
+    name
+}
+
+/// The trace's name in the characters every SPICE and every file system accept: what the
+/// subcircuit is named after and the file is offered as.
+fn readable_name(trace: &str) -> String {
+    let mut name = String::new();
     let mut gap = false;
     for character in trace.chars() {
         if character.is_ascii_alphanumeric() {
-            if gap && !name.ends_with('_') {
+            if gap && !name.is_empty() && !name.ends_with('_') {
                 name.push('_');
             }
             name.push(character);
@@ -73,10 +94,20 @@ fn subcircuit_name(trace: &str) -> String {
             gap = true;
         }
     }
-    if name.len() == 4 {
+    if name.is_empty() {
         name.push_str("TRACE");
     }
     name
+}
+
+/// Whether a trace of no stated unit is named as a current: `I(R1)`, or a
+/// device's pin current as LTspice names one, `Ix(U1:a)`, `Ib(Q1)`.
+fn named_as_current(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(['I', 'i']) else {
+        return false;
+    };
+    rest.trim_start_matches(|character: char| character.is_ascii_alphabetic())
+        .starts_with('(')
 }
 
 /// Write `trace` of `analysis` as a PWL source subcircuit.
@@ -87,9 +118,7 @@ pub(super) fn encode_pwl(
     use std::fmt::Write as _;
 
     let current = trace.unit.as_deref() == Some("A")
-        || (trace.unit.is_none()
-            && trace.name.starts_with(['I', 'i'])
-            && trace.name[1..].starts_with('('));
+        || (trace.unit.is_none() && named_as_current(&trace.name));
     let source = if current { 'I' } else { 'V' };
     let unit = if current { "A" } else { "V" };
     if trace.x.len() != trace.y.len() {
@@ -157,6 +186,7 @@ pub(super) fn encode_pwl(
     writeln!(text, ".ends {subcircuit}").expect("writing to a String cannot fail");
     Ok(PwlSource {
         text,
+        file_stem: readable_name(&trace.name),
         subcircuit,
         source,
         points: points.len(),
@@ -208,10 +238,7 @@ pub(super) fn export_pwl(
         }
     };
 
-    let default_name = format!(
-        "{}.{EXTENSION}",
-        prepared.subcircuit.trim_start_matches("PWL_")
-    );
+    let default_name = format!("{}.{EXTENSION}", prepared.file_stem);
     let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
         title: "Export SPICE PWL Source",
         default_name: &default_name,

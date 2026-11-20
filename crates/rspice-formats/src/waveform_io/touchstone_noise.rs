@@ -129,6 +129,7 @@ pub(super) fn noise_records_for_write(
             let re = real.data[i];
             let im = imag.data[i];
             validate_parameters(factor, resistance, re, im)?;
+            let (magnitude, angle) = polar_for_write(re, im);
             // F(T0)-1 = (F(T)-1)*T/T0. Rn is also proportional to the
             // normalized noise covariance; Gamma_opt is invariant under scaling.
             let excess_290 = (factor - 1.0) * ratio;
@@ -149,15 +150,49 @@ pub(super) fn noise_records_for_write(
             }
             Ok([
                 *frequency,
-                // ln_1p retains a noise figure below one ULP of a linear
-                // factor; forming 1 + excess first would round it to zero dB.
-                (10.0 / std::f64::consts::LN_10) * excess_290.ln_1p(),
-                re.hypot(im),
-                im.atan2(re).to_degrees(),
+                noise_figure_for_write(excess_290, (ratio == 1.0).then_some(factor)),
+                magnitude,
+                angle,
                 wire_resistance,
             ])
         })
         .collect()
+}
+
+/// The minimum noise figure in dB a noise record states for an excess noise `excess` at 290 K.
+/// A factor held at 290 K is written as the shortest decimal that reads back as exactly that
+/// `factor`, so a stated 3 dB is written 3 again. `ln_1p` keeps a figure below one ulp of a
+/// linear factor, which forming 1 + excess first would round to zero dB.
+fn noise_figure_for_write(excess: f64, factor: Option<f64>) -> f64 {
+    let figure = (10.0 / std::f64::consts::LN_10) * excess.ln_1p();
+    let Some(factor) = factor else {
+        return figure;
+    };
+    (1..=17)
+        .filter_map(|digits| format!("{figure:.*e}", digits - 1).parse::<f64>().ok())
+        .find(|figure| 10.0_f64.powf(figure / 10.0).to_bits() == factor.to_bits())
+        .unwrap_or(figure)
+}
+
+/// The magnitude and angle in degrees a noise record states for the optimum reflection
+/// `re` + j`im`: the shortest decimals that read back as exactly these parts, the way a noise
+/// record is read, so a stated 60 degrees is written 60 again and not as the 59.999999999999993
+/// the parts' arctangent spells. Parts no shorter pair reproduces are written as their
+/// arctangent and modulus.
+fn polar_for_write(re: f64, im: f64) -> (f64, f64) {
+    let magnitude = re.hypot(im);
+    let angle = im.atan2(re).to_degrees();
+    let reads_back = |magnitude: f64, angle: f64| {
+        let (sin, cos) = angle.to_radians().sin_cos();
+        (magnitude * cos).to_bits() == re.to_bits() && (magnitude * sin).to_bits() == im.to_bits()
+    };
+    let shortest = |value: f64| {
+        (1..=17).filter_map(move |digits| format!("{value:.*e}", digits - 1).parse::<f64>().ok())
+    };
+    shortest(magnitude)
+        .flat_map(|magnitude| shortest(angle).map(move |angle| (magnitude, angle)))
+        .find(|&(magnitude, angle)| reads_back(magnitude, angle))
+        .unwrap_or((magnitude, angle))
 }
 
 fn validate_parameters(
@@ -280,6 +315,51 @@ mod tests {
             format!(
                 "[Version] 2.0\n# MHz S RI R 75\n[Number of Ports] 2\n[Two-Port Data Order] 21_12\n[Number of Frequencies] 2\n[Number of Noise Frequencies] 3\n{reference}[Network Data]\n{network}[Noise Data]\n{noise}[End]\n"
             )
+        }
+    }
+
+    /// A noise record's optimum reflection is written as the magnitude and angle it was read
+    /// as, to the last digit: a stated 60 degrees comes back 60, not 59.999999999999993.
+    #[test]
+    fn a_touchstone_noise_angle_round_trips_exactly() {
+        for version in [1, 2] {
+            let noise = "1.5 3 0.45 60 0.2\n2 2 0.3 -137.25 0.2\n4 1 0.7 179.9 0.2\n";
+            let source = fixture(version, "", noise);
+            let dataset = read_touchstone_bytes("noise.s2p", source.as_bytes()).unwrap();
+            let mut written = dataset.clone();
+            written
+                .metadata
+                .insert("touchstone_version".to_owned(), version.to_string());
+            let text = WaveformWriter::new(WaveformFormat::Touchstone)
+                .write_text(&written)
+                .unwrap();
+            let records: Vec<Vec<f64>> = text
+                .lines()
+                .filter_map(|line| {
+                    line.split_whitespace()
+                        .map(|value| value.parse().ok())
+                        .collect::<Option<Vec<f64>>>()
+                })
+                .filter(|record| record.len() == 5)
+                .collect();
+            let angles: Vec<f64> = records.iter().map(|record| record[3]).collect();
+            let magnitudes: Vec<f64> = records.iter().map(|record| record[2]).collect();
+            assert_eq!(angles, [60.0, -137.25, 179.9], "v{version}: {text}");
+            assert_eq!(magnitudes, [0.45, 0.3, 0.7], "v{version}: {text}");
+            let again = read_touchstone_bytes("again.s2p", text.as_bytes()).unwrap();
+            for (name, original) in dataset
+                .signals
+                .iter()
+                .map(|signal| (&signal.name, &signal.data))
+            {
+                let back = again
+                    .signals
+                    .iter()
+                    .find(|signal| &signal.name == name)
+                    .unwrap();
+                let bits = |values: &[f64]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+                assert_eq!(bits(&back.data), bits(original), "v{version} {name}");
+            }
         }
     }
 

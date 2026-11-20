@@ -138,7 +138,7 @@ impl fmt::Display for MatWriteError {
     }
 }
 
-/// Whether `name` is a name MATLAB will accept back.
+/// Whether `name` is a name MATLAB will accept back: not a reserved word either.
 ///
 /// Length is checked separately so the refusal can say which rule was broken.
 pub fn is_matlab_identifier(name: &str) -> bool {
@@ -147,6 +147,7 @@ pub fn is_matlab_identifier(name: &str) -> bool {
         .next()
         .is_some_and(|first| first.is_ascii_alphabetic())
         && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+        && !publication::MATLAB_KEYWORDS.contains(&name)
 }
 
 /// Serialize a Level 5 MAT-file.

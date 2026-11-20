@@ -7,10 +7,37 @@ use super::{HEADER_SIGNATURE, HEADER_TEXT_BYTES, MAX_NAME_CHARS};
 /// What a header text says when it is cut to fit its field.
 pub const ELLIPSIS: &str = "...";
 
+/// The words MATLAB reserves (`iskeyword`), which no variable may be named, in its own case:
+/// `end` is reserved and `End` is not.
+pub const MATLAB_KEYWORDS: [&str; 20] = [
+    "break",
+    "case",
+    "catch",
+    "classdef",
+    "continue",
+    "else",
+    "elseif",
+    "end",
+    "for",
+    "function",
+    "global",
+    "if",
+    "otherwise",
+    "parfor",
+    "persistent",
+    "return",
+    "spmd",
+    "switch",
+    "try",
+    "while",
+];
+
 /// A MATLAB identifier built from a source name.
 ///
 /// A letter first, then letters, digits and underscores, at most
-/// `namelengthmax` characters. Everything else becomes an underscore.
+/// `namelengthmax` characters, and not a reserved word. Everything else becomes an
+/// underscore, and a name that does not start with a letter or is a reserved word is
+/// prefixed with `x`, as `1st` becomes `x1st` and `end` becomes `xend`.
 pub fn matlab_identifier(source: &str) -> String {
     let mut name = String::with_capacity(source.len());
     for character in source.chars() {
@@ -20,7 +47,9 @@ pub fn matlab_identifier(source: &str) -> String {
             name.push('_');
         }
     }
-    if !name.starts_with(|character: char| character.is_ascii_alphabetic()) {
+    if !name.starts_with(|character: char| character.is_ascii_alphabetic())
+        || MATLAB_KEYWORDS.contains(&name.as_str())
+    {
         name.insert(0, 'x');
     }
     // Every character is ASCII by now, so this is a character count.

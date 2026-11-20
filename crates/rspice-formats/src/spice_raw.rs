@@ -256,6 +256,19 @@ fn decode_plot(
                 };
                 units[0] = unit.map(str::to_owned);
             }
+            // A signal's declared quantity is its unit, so a `voltage` keeps saying so however
+            // it is named, and is declared a voltage again when it is written out.
+            for (unit, variable) in units
+                .iter_mut()
+                .zip(&parsed.variables)
+                .skip(usize::from(!ordinal))
+            {
+                *unit = match variable.var_type.trim().to_ascii_lowercase().as_str() {
+                    "voltage" => Some("V".to_owned()),
+                    "current" | "device_current" | "subckt_current" => Some("A".to_owned()),
+                    _ => None,
+                };
+            }
             units
         });
     let mut waveforms = parsed.waveforms.into_iter().zip(units).peekable();
@@ -425,7 +438,7 @@ mod tests {
             assert_eq!(decoded.signals.len(), 1);
             assert_eq!(decoded.signals[0].name, "V(out)");
             assert_eq!(decoded.signals[0].real[0].to_bits(), 1.0_f64.to_bits() + 1);
-            assert!(decoded.signals[0].unit.is_none());
+            assert_eq!(decoded.signals[0].unit.as_deref(), Some("V"));
             if complex {
                 assert_eq!(
                     decoded.signals[0].imag.as_ref().unwrap()[0].to_bits(),

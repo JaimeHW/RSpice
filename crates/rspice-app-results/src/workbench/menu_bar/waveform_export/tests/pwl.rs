@@ -116,12 +116,37 @@ fn a_current_trace_is_a_current_source_and_no_name_takes_the_first_plotted() {
     );
     let (path, source) = exported_pwl(&mut state, None);
     assert_eq!(path, PathBuf::from("I_R1.inc"));
+    let subcircuit = super::super::pwl::subcircuit_name("I(R1)");
+    assert!(subcircuit.starts_with("PWL_I_R1_"), "{subcircuit}");
     assert!(
-        source.contains(
-            ".subckt PWL_I_R1 p n\nI1 p n PWL(\n+ 0e0 0e0\n+ 1e-9 1e-3\n+ 2e-9 -2.5e-4\n+ )\n"
-        ),
+        source.contains(&format!(
+            ".subckt {subcircuit} p n\nI1 p n PWL(\n+ 0e0 0e0\n+ 1e-9 1e-3\n+ 2e-9 -2.5e-4\n+ )\n"
+        )),
         "{source}"
     );
+}
+
+/// Two traces whose names read alike give two subcircuit names, so both files can be included
+/// in one deck, and a device pin current LTspice names `Ix(U1:a)` drives a current source.
+#[test]
+fn pwl_names_stay_distinct_and_a_pin_current_is_a_current_source() {
+    let mut names = std::collections::HashSet::new();
+    for trace in ["v(a)", "v_a", "v(a_)", "V(A)", "OUT", "v a"] {
+        assert!(
+            names.insert(super::super::pwl::subcircuit_name(trace)),
+            "{trace} shares a subcircuit name"
+        );
+    }
+    let mut state = state_with_typed_result(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            waveform("Ix(U1:a)", vec![0.0, 1e-9], vec![0.0, 2e-3]),
+            waveform("Vx(n1)", vec![0.0, 1e-9], vec![0.0, 1.0]),
+        ]),
+    );
+    let (_, source) = exported_pwl(&mut state, Some("Ix(U1:a)"));
+    assert!(source.contains("\nI1 p n PWL(\n"), "{source}");
+    let (_, source) = exported_pwl(&mut state, Some("Vx(n1)"));
+    assert!(source.contains("\nV1 p n PWL(\n"), "{source}");
 }
 
 /// A sample that repeats its predecessor exactly is dropped; two values at
