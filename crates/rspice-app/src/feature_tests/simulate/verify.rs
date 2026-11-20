@@ -340,9 +340,9 @@ fn the_console_spells_a_corner_run_as_verify_and_names_each_point() {
         ),
         (
             "gain",
-            "39.40 dB",
+            "39.4 dB",
             "\u{2265} 40 dB",
-            "-0.60 dB",
+            "\u{2212}0.6 dB",
             "SS 1.62 V 125 \u{b0}C"
         ),
         "the row reads as Verify's Specifications states it"
