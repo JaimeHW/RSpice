@@ -347,7 +347,7 @@ pub fn show(
             x: f0,
             y: db0,
             color: c.accent,
-            label: format!("f₀ {}", fmt_si_significant(db0, &level_unit, digits)),
+            label: format!("f₀ {}", fmt_si_significant(db0, level_unit, digits)),
             drop_line: false,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,

@@ -485,10 +485,9 @@ pub const NO_VISIBLE_TRACE: &str = "Nothing plotted — show a trace in the lege
 /// What a strip says when its analysis holds no samples to plot.
 const NO_SAMPLES: &str = "Nothing plotted — the analysis has no samples";
 
+/// A complex expression is drawn as its magnitude, and says so.
 pub fn expression_label(expr: &ExprTrace, complex: bool) -> String {
-    if expr.complex_policy.is_legacy() {
-        format!("mag({})", elide(&expr.text, 24))
-    } else if complex {
+    if complex || expr.complex_policy.is_legacy() {
         format!("mag({})", elide(&expr.text, 24))
     } else {
         elide(&expr.text, 24)

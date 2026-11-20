@@ -614,8 +614,10 @@ pub fn show(
         rule,
         samples,
         sheet,
-        policy,
-        significant_digits,
+        Readings {
+            policy,
+            significant_digits,
+        },
     );
     response.removed_overlay = header
         .legend_removed
@@ -689,6 +691,13 @@ struct Loci<'a> {
     overlays: &'a [PolarLocus],
 }
 
+/// How the canvas states a value: the reader's units and digits.
+#[derive(Clone, Copy)]
+struct Readings<'a> {
+    policy: &'a rspice_vocabulary::quantity::QuantityPresentationPolicy,
+    significant_digits: usize,
+}
+
 fn paint_canvas(
     ui: &mut Ui,
     t: &Tokens,
@@ -696,13 +705,16 @@ fn paint_canvas(
     rule: RadiusRule,
     samples: CursorSamples,
     sheet: &PolarSheetState,
-    policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
-    significant_digits: usize,
+    readings: Readings<'_>,
 ) -> CanvasResponse {
     let Loci {
         primary: locus,
         overlays,
     } = loci;
+    let Readings {
+        policy,
+        significant_digits,
+    } = readings;
     let c = &t.color;
     let area = ui.available_rect_before_wrap();
     let (rect, response) = ui.allocate_exact_size(area.size(), Sense::click_and_drag());
