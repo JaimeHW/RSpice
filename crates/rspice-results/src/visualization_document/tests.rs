@@ -267,7 +267,7 @@ fn result_document_tracking_is_revisioned_and_requires_exact_plan_authority() {
 }
 
 #[test]
-fn latest_retarget_is_atomic_and_keeps_the_prior_immutable_snapshot() {
+fn latest_retarget_moves_the_document_onto_the_newer_run_and_drops_the_one_it_left() {
     let (mut document, previous) = document();
     let plan_id = SimulationPlanId::new();
     let authored_analysis = AnalysisInstanceId::new();
@@ -306,18 +306,14 @@ fn latest_retarget_is_atomic_and_keeps_the_prior_immutable_snapshot() {
             }],
         )
         .unwrap();
-    assert_eq!(document.datasets().len(), 2);
-    assert!(
+    assert_eq!(
         document
             .datasets()
             .iter()
-            .any(|source| source.binding() == previous)
-    );
-    assert!(
-        document
-            .datasets()
-            .iter()
-            .any(|source| source.binding() == next)
+            .map(SourceDataset::binding)
+            .collect::<Vec<_>>(),
+        [next],
+        "nothing reads the run left behind"
     );
     assert_eq!(
         document.panes()[0].binding,
@@ -351,7 +347,59 @@ fn latest_retarget_is_atomic_and_keeps_the_prior_immutable_snapshot() {
         .expect_err("pinned documents cannot advance");
     assert!(error.to_string().contains("latest-bound"));
     assert_eq!(document.revision(), revision);
-    assert_eq!(document.datasets().len(), 2);
+    assert_eq!(document.datasets().len(), 1);
+}
+
+#[test]
+fn a_latest_document_follows_three_hundred_reruns() {
+    // Each re-run used to leave its predecessor attached, so the document
+    // refused to follow once it held MAX_VISUALIZATION_DATASETS of them.
+    let (mut document, mut previous) = document();
+    let plan_id = SimulationPlanId::new();
+    let pane_id = document.panes()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::SetTracking(ResultDocumentTracking::for_plan(
+                    ResultDocumentTrackingMode::Latest,
+                    plan_id,
+                    AnalysisInstanceId::new(),
+                )),
+                DocumentEdit::SetPaneSource {
+                    pane_id,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id: AnalysisInstanceId::new(),
+                        dataset: previous,
+                    }),
+                },
+            ],
+        )
+        .unwrap();
+    for rerun in 0..300 {
+        let next = binding((rerun % 250) as u8 + 2);
+        let analysis_id = AnalysisInstanceId::new();
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::RetargetTrackedDataset {
+                    previous,
+                    next: dataset(next, f64::from(rerun)),
+                    analysis_id,
+                }],
+            )
+            .unwrap_or_else(|error| panic!("re-run {rerun} was not followed: {error}"));
+        assert_eq!(
+            document.panes()[0].binding,
+            Some(PaneDataBinding {
+                analysis_id,
+                dataset: next,
+            })
+        );
+        previous = next;
+    }
+    assert_eq!(document.datasets().len(), 1);
 }
 
 #[test]

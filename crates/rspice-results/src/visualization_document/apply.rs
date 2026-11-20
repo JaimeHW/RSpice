@@ -1331,7 +1331,23 @@ impl VisualizationDocument {
             next_binding,
             |_| Some(analysis_id),
             "newer tracked",
-        )
+        )?;
+        // Nothing reads the run left behind once its panes and traces have
+        // moved, so it goes as it does on a re-point: a document that follows
+        // the latest run holds one run, not one per run it has ever followed.
+        self.drop_unreferenced_dataset(previous);
+        Ok(())
+    }
+
+    /// Drop `binding` unless a comparison receipt still names it.
+    fn drop_unreferenced_dataset(&mut self, binding: DatasetBinding) {
+        if !self
+            .comparisons
+            .iter()
+            .any(|receipt| receipt.baseline == binding || receipt.candidate == binding)
+        {
+            self.datasets.retain(|dataset| dataset.binding != binding);
+        }
     }
 
     /// Read another retained run with the same signals in place of one this
@@ -1375,13 +1391,7 @@ impl VisualizationDocument {
                 .map(|mapping| mapping.next)
         };
         self.rebind_consumers(previous, next_binding, mapped, "chosen")?;
-        if !self
-            .comparisons
-            .iter()
-            .any(|receipt| receipt.baseline == previous || receipt.candidate == previous)
-        {
-            self.datasets.retain(|dataset| dataset.binding != previous);
-        }
+        self.drop_unreferenced_dataset(previous);
         Ok(())
     }
 
