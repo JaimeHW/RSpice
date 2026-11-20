@@ -265,6 +265,148 @@ fn fitting_y_to_the_window_keeps_the_window() {
     assert_eq!(view(&state, 0).x, Some((10.0, 100.0)));
 }
 
+/// Draw the result document once at 1200 x 760 with `modifiers` held.
+fn document_frame(
+    ctx: &egui::Context,
+    state: &mut ResultsTestHost,
+    modifiers: egui::Modifiers,
+    events: Vec<egui::Event>,
+) {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1200.0, 760.0),
+        )),
+        time: Some(ctx.input(|input| input.time) + 1.0 / 60.0),
+        modifiers,
+        events,
+        ..Default::default()
+    };
+    let mut controller = crate::simulation::SimulationController::new();
+    let mut parts = state.results_parts();
+    let _ = ctx.run_ui(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            super::super::super::show(ui, &mut parts, &mut controller);
+        });
+    });
+}
+
+/// A finished transient run whose one strip draws a volts pane over an amps
+/// pane.
+fn volts_over_amps() -> ResultsTestHost {
+    let time: Vec<f64> = (0..200).map(|index| f64::from(index) * 1.0e-6).collect();
+    let volts: Vec<f64> = time.iter().map(|t| (t * 2.0e4).sin()).collect();
+    let amps: Vec<f64> = time.iter().map(|t| 1.0e-3 * (t * 2.0e4).cos()).collect();
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = rspice_results::run::SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", time.clone(), volts, "").with_unit("V"),
+            RetainedTrace::new("I(R1)", time, amps, "").with_unit("A"),
+        ]),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state
+}
+
+/// Ctrl+wheel over one pane of a strip zooms that pane's Y and nothing else:
+/// the companion pane keeps its own fit and the strip keeps its window.
+#[test]
+fn ctrl_wheel_over_a_pane_zooms_its_y_and_nothing_else() {
+    let mut state = volts_over_amps();
+    let analysis = strip_key(&mut state);
+    let units = pane_units(&mut state);
+    assert_eq!(units.len(), 2, "the fixture is a volts/amps pair");
+    let viewer = super::super::super::ResultViewer::Waves;
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let none = egui::Modifiers::NONE;
+    // With the cursor tool down a click places nothing, so no readout opens
+    // under the strip and moves the panes between the click and the wheel.
+    state.results.results.session.toggle_cursor_tool();
+    assert!(!state.results.results.session.cursor_tool.is_armed());
+    for _ in 0..3 {
+        document_frame(&ctx, &mut state, none, Vec::new());
+    }
+    // A point on a plot is one whose click makes its pane the active one.
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let over = [0.3f32, 0.4, 0.5, 0.6, 0.7]
+        .into_iter()
+        .map(|down| egui::pos2(600.0, 760.0 * down))
+        .find(|&at| {
+            document_frame(&ctx, &mut state, none, vec![egui::Event::PointerMoved(at)]);
+            document_frame(&ctx, &mut state, none, vec![press(at, true)]);
+            document_frame(&ctx, &mut state, none, vec![press(at, false)]);
+            state.results.results.session.active_wave_pane.is_some()
+        })
+        .expect("a click somewhere down the middle lands on a pane");
+    let under = state
+        .results
+        .results
+        .session
+        .active_wave_pane
+        .as_ref()
+        .and_then(|key| units.iter().position(|unit| *unit == key.unit))
+        .expect("the active pane is one of the strip's");
+    let ctrl = egui::Modifiers {
+        ctrl: true,
+        command: true,
+        ..Default::default()
+    };
+    document_frame(
+        &ctx,
+        &mut state,
+        ctrl,
+        vec![egui::Event::PointerMoved(over)],
+    );
+    document_frame(
+        &ctx,
+        &mut state,
+        ctrl,
+        vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 1.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: ctrl,
+        }],
+    );
+    // egui spreads a wheel notch over the frames that follow it.
+    for _ in 0..30 {
+        document_frame(&ctx, &mut state, ctrl, Vec::new());
+    }
+    let views: Vec<_> = (0..2)
+        .map(|ordinal| {
+            state
+                .results
+                .results
+                .session
+                .analysis_plot_view_pane(viewer, analysis, ordinal)
+        })
+        .collect();
+    let zoomed: Vec<usize> = (0..2).filter(|&o| views[o].y.is_some()).collect();
+    assert_eq!(
+        zoomed,
+        vec![under],
+        "Ctrl+wheel should zoom the Y of the one pane under the pointer: {views:?}"
+    );
+    assert!(
+        views.iter().all(|view| view.x.is_none()),
+        "Ctrl+wheel moved the strip's window: {views:?}"
+    );
+    assert_eq!(
+        shared_x_view(&state.results.results.session, analysis, 2),
+        None,
+        "Ctrl+wheel moved the strip's window"
+    );
+}
+
 /// "Nearest" is a claim about the screen. The painter maps a value through
 /// the pane's own scale, so a hit test that maps it linearly picks a curve
 /// the pointer is nowhere near — by most of the window, on a decade pane.
