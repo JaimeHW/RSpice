@@ -233,16 +233,16 @@ pub fn write_finished_segment(
         let _ = fs::remove_file(&path);
         format!("{}: {error}", path.display())
     };
-    let mut writer = rspice_results_store::SegmentWriter::create(io, schema, meta)
-        .map_err(|error| failed(error))?;
-    write(&mut writer).map_err(|error| failed(error))?;
+    let mut writer =
+        rspice_results_store::SegmentWriter::create(io, schema, meta).map_err(&failed)?;
+    write(&mut writer).map_err(&failed)?;
     let (_, io) = writer
         .finish(rspice_results_store::RunStatus::Completed)
-        .map_err(|error| failed(error))?;
+        .map_err(&failed)?;
     let reader = rspice_results_store::SegmentReader::open(
         Box::new(io.into_file()) as rspice_results::store_reader::SegmentBytes
     )
-    .map_err(|error| failed(error))?;
+    .map_err(&failed)?;
     Ok(StoredRun::temporary(rspice_results::store_reader::StoreReader::new(reader), path).shared())
 }
 

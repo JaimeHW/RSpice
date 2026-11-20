@@ -797,7 +797,7 @@ impl SimulationState {
             return 0;
         }
         let shown = self.active_run().map(|run| run.run_id);
-        if self.retained.runs.iter().all(|run| keep(run)) {
+        if self.retained.runs.iter().all(&keep) {
             return 0;
         }
         let (kept, gone): (Vec<_>, Vec<_>) = std::mem::take(&mut *self.retained.runs)
