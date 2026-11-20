@@ -123,6 +123,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ui,
         active_sensitivity(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
+        significant_digits(state.results_reads()),
     );
 }
 

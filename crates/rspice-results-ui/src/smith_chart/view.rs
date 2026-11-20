@@ -13,7 +13,7 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use super::circles::{ChartCircle, CircleKind, CirclePlane, TwoPortFigures, parse_decibels};
 use super::grid::{self, GRID_VALUES, SmithGrid};
 use super::state::{ResponseReading, SmithSheetState};
-use crate::presentation::{PlotView, angle_readout, frequency_readout, well_hint};
+use crate::presentation::{PlotView, angle_readout, complex_readout, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 
 /// One trace the sheet lists, with its cached Γ-plane coordinate columns.
@@ -1020,13 +1020,13 @@ fn two_port_rows(
             true,
         ),
     ];
-    if let Some((label, value)) = figures.maximum_gain_text() {
+    if let Some((label, value)) = figures.maximum_gain_text(digits) {
         rows.push((label, value, false));
     }
     if let Some(noise) = figures.noise {
         rows.push((
             "NFmin",
-            format!("{:.3} dB", 10.0 * noise.minimum_noise_factor.log10()),
+            fmt_si_significant(10.0 * noise.minimum_noise_factor.log10(), "dB", digits),
             false,
         ));
         rows.push((
@@ -1084,15 +1084,6 @@ fn two_port_rows(
 /// `R ± jX` at the reader's significant digits: `50.12 Ω + j12.35 Ω`.
 fn impedance_readout(resistance: f64, reactance: f64, significant_digits: usize) -> String {
     complex_readout(resistance, reactance, "Ω", significant_digits)
-}
-
-fn complex_readout(real: f64, imaginary: f64, unit: &str, significant_digits: usize) -> String {
-    format!(
-        "{} {} j{}",
-        fmt_si_significant(real, unit, significant_digits),
-        if imaginary >= 0.0 { "+" } else { "−" },
-        fmt_si_significant(imaginary.abs(), unit, significant_digits)
-    )
 }
 
 #[cfg(test)]

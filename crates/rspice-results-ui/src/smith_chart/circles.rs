@@ -47,12 +47,10 @@ impl ChartCircle {
     }
 }
 
-/// `12 dB`, `1.5 dB`: as few digits as the value needs, up to two.
+/// `12 dB`, `1.5 dB`, `−3 dB`: as few decimals as the value needs, up to two.
 pub fn decibel_text(decibels: f64) -> String {
     let rounded = (decibels * 100.0).round() / 100.0;
-    let text = format!("{rounded:.2}");
-    let text = text.trim_end_matches('0').trim_end_matches('.');
-    format!("{text} dB")
+    rspice_ui_kit::plot::fmt_si_significant(rounded, "dB", 6)
 }
 
 /// The two-port figures at the circles' frequency.
@@ -177,13 +175,14 @@ impl TwoPortFigures {
         circles
     }
 
-    /// `MAG 14.6 dB` or `MSG 16.7 dB`.
-    pub fn maximum_gain_text(&self) -> Option<(&'static str, String)> {
+    /// `MAG 14.6 dB` or `MSG 16.7 dB`, at `significant_digits`.
+    pub fn maximum_gain_text(&self, significant_digits: usize) -> Option<(&'static str, String)> {
         let maximum = self.scattering.maximum_gain()?;
         let decibels = 10.0 * maximum.linear().log10();
+        let text = rspice_ui_kit::plot::fmt_si_significant(decibels, "dB", significant_digits);
         Some(match maximum {
-            MaximumGain::Available(_) => ("MAG", format!("{decibels:.2} dB")),
-            MaximumGain::Stable(_) => ("MSG", format!("{decibels:.2} dB")),
+            MaximumGain::Available(_) => ("MAG", text),
+            MaximumGain::Stable(_) => ("MSG", text),
         })
     }
 }

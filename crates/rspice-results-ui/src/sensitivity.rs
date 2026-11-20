@@ -115,8 +115,8 @@ fn exact_basis_label(result_mode: SensitivityResultMode) -> String {
 /// a ranked list is read at, its prefix on the number as every unitless value
 /// in the product reads (`1.23457n`, never `1.23457 n`). The CSV export
 /// carries the retained f64.
-fn exact_value(value: f64) -> String {
-    unitless(value, 6)
+fn exact_value(value: f64, significant_digits: usize) -> String {
+    unitless(value, significant_digits)
 }
 
 fn unavailable_reason(reason: SensitivityUnavailability) -> &'static str {
@@ -130,9 +130,9 @@ fn unavailable_reason(reason: SensitivityUnavailability) -> &'static str {
     }
 }
 
-fn exact_sensitivity(value: SensitivityValue<f64>) -> String {
+fn exact_sensitivity(value: SensitivityValue<f64>, significant_digits: usize) -> String {
     match value {
-        SensitivityValue::Available(value) => exact_value(value),
+        SensitivityValue::Available(value) => exact_value(value, significant_digits),
         SensitivityValue::Unavailable { unavailable } => {
             format!("Unavailable ({})", unavailable_reason(unavailable))
         }
@@ -362,8 +362,8 @@ pub fn show(
                         "Unranked".to_owned()
                     },
                     row.parameter,
-                    exact_sensitivity(row.normalized),
-                    exact_sensitivity(row.raw),
+                    exact_sensitivity(row.normalized, significant_digits),
+                    exact_sensitivity(row.raw, significant_digits),
                 );
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(
@@ -383,9 +383,12 @@ pub fn show(
                     );
                     ui.label(format!(
                         "Normalized sensitivity: {}",
-                        exact_sensitivity(row.normalized)
+                        exact_sensitivity(row.normalized, significant_digits)
                     ));
-                    ui.label(format!("Raw: {}", exact_sensitivity(row.raw)));
+                    ui.label(format!(
+                        "Raw: {}",
+                        exact_sensitivity(row.raw, significant_digits)
+                    ));
                     ui.label(format!("Output: {}", view.output));
                     ui.label(format!("Basis: {}", exact_basis_label(view.result_mode)));
                 });
@@ -483,7 +486,12 @@ pub fn show(
             ui.allocate_space(egui::vec2(width, rows.trailing * row_height));
         });
 }
-pub fn right_panel(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&SensitivityPlan>) {
+pub fn right_panel(
+    ui: &mut Ui,
+    source: ActiveSensitivity<'_>,
+    plan: Option<&SensitivityPlan>,
+    significant_digits: usize,
+) {
     let view = match source {
         ActiveSensitivity::Ready(view) => view,
         ActiveSensitivity::Missing => {
@@ -567,11 +575,14 @@ pub fn right_panel(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sen
                                     .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
                             );
                             ui.label(
-                                egui::RichText::new(exact_sensitivity(row.normalized))
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                                egui::RichText::new(exact_sensitivity(
+                                    row.normalized,
+                                    significant_digits,
+                                ))
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
                             );
                             ui.label(
-                                egui::RichText::new(exact_sensitivity(row.raw))
+                                egui::RichText::new(exact_sensitivity(row.raw, significant_digits))
                                     .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
                             );
                             ui.end_row();
@@ -634,7 +645,7 @@ mod tests {
         assert_eq!(plan.order(), &[2, 1, 0]);
         assert_eq!(plan.max_magnitude, 3.0);
         assert_eq!(chart_value(rows[0].normalized, 7), "Unavailable");
-        assert!(exact_sensitivity(rows[0].normalized).contains("zero output"));
+        assert!(exact_sensitivity(rows[0].normalized, 6).contains("zero output"));
         assert_eq!(chart_value(rows[1].normalized, 7), "0");
     }
 
@@ -657,9 +668,12 @@ mod tests {
     /// seventeen digits.
     #[test]
     fn panel_values_read_in_engineering_notation() {
-        assert_eq!(exact_value(1.234_567_890_123_456_7e-9), "1.23457e\u{2212}9");
-        assert_eq!(exact_value(-2.5e3), "\u{2212}2500");
-        assert_eq!(exact_value(0.75), "0.75");
+        assert_eq!(
+            exact_value(1.234_567_890_123_456_7e-9, 6),
+            "1.23457e\u{2212}9"
+        );
+        assert_eq!(exact_value(-2.5e3, 6), "\u{2212}2500");
+        assert_eq!(exact_value(0.75, 6), "0.75");
         assert_eq!(
             exact_basis_label(SensitivityResultMode::Ac {
                 frequency_hz: 2.5e6,

@@ -383,9 +383,11 @@ impl RadiusRule {
             // The head note states the unit once, so a ring is a plain
             // number with no prefix of its own: 0.4, never 400 m beside 1.
             PolarRadius::Magnitude => fmt_si_significant(self.ceiling * fraction, "", 3),
-            PolarRadius::Decibels => {
-                format!("{:.0}", self.ceiling_db - DECIBEL_SPAN * (1.0 - fraction))
-            }
+            PolarRadius::Decibels => fmt_si_significant(
+                (self.ceiling_db - DECIBEL_SPAN * (1.0 - fraction)).round(),
+                "",
+                6,
+            ),
         }
     }
 
@@ -402,9 +404,9 @@ impl RadiusRule {
                 fmt_si_significant(self.ceiling, unit, 3)
             ),
             PolarRadius::Decibels => format!(
-                "radius dB \u{b7} {:.0} \u{2026} {:.0} dB{normalized}",
-                self.ceiling_db,
-                self.ceiling_db - DECIBEL_SPAN
+                "radius dB \u{b7} {} \u{2026} {}{normalized}",
+                fmt_si_significant(self.ceiling_db.round(), "", 6),
+                fmt_si_significant((self.ceiling_db - DECIBEL_SPAN).round(), "dB", 6)
             ),
         }
     }
@@ -796,7 +798,7 @@ fn paint_canvas(
         painter.text(
             label_at,
             egui::Align2::CENTER_CENTER,
-            format!("{signed:.0}\u{b0}"),
+            format!("{}\u{b0}", fmt_si_significant(signed.round(), "", 6)),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             c.canvas_text_faint,
         );
@@ -1512,7 +1514,7 @@ mod tests {
         assert!((half - 0.5).abs() < 1.0e-9, "{half}");
         assert_eq!(
             rule.head_note("", false),
-            "radius dB \u{b7} 0 \u{2026} -50 dB"
+            "radius dB \u{b7} 0 \u{2026} \u{2212}50 dB"
         );
     }
 

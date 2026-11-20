@@ -112,6 +112,7 @@ pub(super) fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ui,
         active_study(state.results_reads()),
         plan.as_deref().map(|plan| &plan.display),
+        super::significant_digits(state.results_reads()),
     );
 }
 

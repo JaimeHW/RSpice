@@ -1001,7 +1001,7 @@ fn statistics_rows(
             "Cpk",
             capability.map_or_else(
                 || "Not defined for this requirement".to_owned(),
-                |value| format!("{value:.2}"),
+                |value| rspice_ui_kit::plot::fmt_si_significant(value, "", 3),
             ),
             false,
         ),

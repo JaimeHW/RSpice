@@ -10,6 +10,7 @@ use rspice_results::{
     analysis_type::AnalysisType,
     network_matrix::{NetworkLayout, channel_label, channel_reference},
 };
+use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_vocabulary::quantity::AngleDisplay;
 
 /// Disposable local controls for one source-qualified matrix session.
@@ -60,7 +61,9 @@ pub fn formatted(
     imaginary: f64,
     representation: usize,
     angle_display: AngleDisplay,
+    significant_digits: usize,
 ) -> String {
+    let digits = significant_digits;
     if real == 0.0 && imaginary == 0.0 && representation != 0 {
         return if representation == 2 {
             "−∞ dB · phase undefined"
@@ -72,21 +75,29 @@ pub fn formatted(
     let phase = || {
         let radians = imaginary.atan2(real);
         match angle_display {
-            AngleDisplay::Degrees => format!("{:.6}°", radians.to_degrees()),
-            AngleDisplay::Radians => format!("{radians:.6} rad"),
+            AngleDisplay::Degrees => fmt_si_significant(radians.to_degrees(), "°", digits),
+            AngleDisplay::Radians => fmt_si_significant(radians, "rad", digits),
         }
     };
     match representation {
-        1 => format!("{:.8e} ∠ {}", real.hypot(imaginary), phase()),
+        1 => format!(
+            "{} ∠ {}",
+            fmt_si_significant(real.hypot(imaginary), "", digits),
+            phase()
+        ),
         2 => {
             let magnitude = real.hypot(imaginary);
             if magnitude == 0.0 {
                 "−∞ dB · phase undefined".to_owned()
             } else {
-                format!("{:.6} dB ∠ {}", magnitude_db(real, imaginary), phase())
+                format!(
+                    "{} ∠ {}",
+                    fmt_si_significant(magnitude_db(real, imaginary), "dB", digits),
+                    phase()
+                )
             }
         }
-        _ => format!("{real:.8e} {imaginary:+.8e}j"),
+        _ => crate::presentation::complex_readout(real, imaginary, "", digits),
     }
 }
 
@@ -154,6 +165,7 @@ pub fn show(
     matrix: &NetworkLayout,
     controls: &mut NetworkMatrixControls,
     angle_display: AngleDisplay,
+    significant_digits: usize,
     mut copy_exact: impl FnMut(usize, usize) -> String,
 ) -> Option<OpenCoefficient> {
     let mut open_coefficient = None;
@@ -264,11 +276,11 @@ pub fn show(
             .header(row_height, |mut header| {
                 header.col(|ui| { ui.strong("Wave channel / reference"); });
                 for column in 0..ports {
-                    header.col(|ui| { ui.strong(format!("{} · {:.8e} Ω", channel_label(column, ports, block.is_mixed()), channel_reference(column, matrix.references(), block.is_mixed()))); });
+                    header.col(|ui| { ui.strong(format!("{} · {}", channel_label(column, ports, block.is_mixed()), fmt_si_significant(channel_reference(column, matrix.references(), block.is_mixed()), "Ω", significant_digits))); });
                 }
             }).body(|body| body.rows(row_height, ports, |mut table_row| {
                 let row = table_row.index();
-                table_row.col(|ui| { ui.strong(format!("{} · {:.8e} Ω", channel_label(row, ports, block.is_mixed()), channel_reference(row, matrix.references(), block.is_mixed()))); });
+                table_row.col(|ui| { ui.strong(format!("{} · {}", channel_label(row, ports, block.is_mixed()), fmt_si_significant(channel_reference(row, matrix.references(), block.is_mixed()), "Ω", significant_digits))); });
                 for column in 0..ports {
                     table_row.col(|ui| {
                     let (out, input) = if controls.transpose { (column, row) } else { (row, column) };
@@ -276,7 +288,7 @@ pub fn show(
                     let complex = waveform.complex.as_ref().expect("resolved complex coefficient");
                     let real = complex.real[controls.sample];
                     let imaginary = complex.imag[controls.sample];
-                    let label = formatted(real, imaginary, controls.representation, angle_display);
+                    let label = formatted(real, imaginary, controls.representation, angle_display, significant_digits);
                     if controls.heatmap {
                         let color = heat_color(magnitude_db(real, imaginary), controls.floor_db, &tokens.color);
                         let rect = ui.max_rect().shrink(2.0);

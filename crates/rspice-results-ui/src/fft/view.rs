@@ -347,7 +347,7 @@ pub fn show(
             x: f0,
             y: db0,
             color: c.accent,
-            label: format!("f₀ {:.1} {level_unit}", db0),
+            label: format!("f₀ {}", fmt_si_significant(db0, &level_unit, digits)),
             drop_line: false,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,
@@ -359,7 +359,7 @@ pub fn show(
             x: f,
             y: level,
             color: c.traces[2],
-            label: format!("HD{order} {dbc:.1} dBc"),
+            label: format!("HD{order} {}", fmt_si_significant(dbc, "dBc", digits)),
             drop_line: false,
             // Stagger alternating tags so neighbours never collide.
             label_dy: if i % 2 == 0 { -14.0 } else { 26.0 },

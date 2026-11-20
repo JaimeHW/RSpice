@@ -501,8 +501,8 @@ pub fn show(
                         "Unranked".to_owned()
                     },
                     row.parameter,
-                    exact_sensitivity(normalized),
-                    exact_sensitivity(raw),
+                    exact_sensitivity(normalized, significant_digits),
+                    exact_sensitivity(raw, significant_digits),
                 );
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(
@@ -523,13 +523,22 @@ pub fn show(
                     );
                     ui.label(format!(
                         "Normalized sensitivity: {}",
-                        exact_sensitivity(normalized)
+                        exact_sensitivity(normalized, significant_digits)
                     ));
-                    ui.label(format!("Raw: {}", exact_sensitivity(raw)));
+                    ui.label(format!(
+                        "Raw: {}",
+                        exact_sensitivity(raw, significant_digits)
+                    ));
                     if let Some(phase) = phase {
-                        ui.label(format!("Phase, rad: {}", exact_sensitivity(phase)));
+                        ui.label(format!(
+                            "Phase, rad: {}",
+                            exact_sensitivity(phase, significant_digits)
+                        ));
                     }
-                    ui.label(format!("Nominal: {}", exact_value(row.nominal_value)));
+                    ui.label(format!(
+                        "Nominal: {}",
+                        exact_value(row.nominal_value, significant_digits)
+                    ));
                     ui.label(format!("Output: {}", view.evidence.output));
                     ui.label(format!(
                         "Read at: {}",
@@ -641,7 +650,12 @@ pub fn show(
             ui.allocate_space(egui::vec2(width, rows.trailing * row_height));
         });
 }
-pub fn right_panel(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
+pub fn right_panel(
+    ui: &mut Ui,
+    source: ActiveStudy<'_>,
+    plan: Option<&StudyPlan>,
+    significant_digits: usize,
+) {
     let view = match source {
         ActiveStudy::Ready(view) => view,
         ActiveStudy::Missing => {
@@ -735,10 +749,16 @@ pub fn right_panel(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan
                                 "—".to_owned()
                             }));
                             ui.label(cell(row.parameter.clone()));
-                            ui.label(cell(exact_sensitivity(normalized)));
-                            ui.label(cell(exact_sensitivity(column_at(&row.raw, index))));
+                            ui.label(cell(exact_sensitivity(normalized, significant_digits)));
+                            ui.label(cell(exact_sensitivity(
+                                column_at(&row.raw, index),
+                                significant_digits,
+                            )));
                             if has_phase {
-                                ui.label(cell(exact_sensitivity(column_at(&row.phase, index))));
+                                ui.label(cell(exact_sensitivity(
+                                    column_at(&row.phase, index),
+                                    significant_digits,
+                                )));
                             }
                             ui.end_row();
                         }

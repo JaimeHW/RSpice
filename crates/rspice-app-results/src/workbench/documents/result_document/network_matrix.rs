@@ -149,6 +149,7 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         &matrix,
         &mut controls.controls,
         context.policy.angle_display,
+        context.significant_digits,
         |block, sample| matrix_csv(&matrix, analysis, block, sample),
     ) {
         context.results.session.polar.quantity = Some(coefficient.waveform_name);
@@ -307,22 +308,28 @@ pub(crate) mod tests {
             );
         }
         use crate::quantity::AngleDisplay;
-        assert!(formatted(0.0, 0.0, 2, AngleDisplay::Degrees).contains("phase undefined"));
-        // The phase reads in the unit Angle display chose.
+        assert!(formatted(0.0, 0.0, 2, AngleDisplay::Degrees, 7).contains("phase undefined"));
+        // The phase reads in the unit Angle display chose, at the reader's
+        // digits, and a negative part with a true minus.
+        assert_eq!(formatted(0.0, 1.0, 1, AngleDisplay::Degrees, 7), "1 ∠ 90 °");
         assert_eq!(
-            formatted(0.0, 1.0, 1, AngleDisplay::Degrees),
-            "1.00000000e0 ∠ 90.000000°"
+            formatted(0.0, 1.0, 1, AngleDisplay::Radians, 7),
+            "1 ∠ 1.570796 rad"
         );
         assert_eq!(
-            formatted(0.0, 1.0, 1, AngleDisplay::Radians),
-            "1.00000000e0 ∠ 1.570796 rad"
+            formatted(0.5, -0.25, 0, AngleDisplay::Degrees, 7),
+            "0.5 \u{2212} j0.25"
+        );
+        assert_eq!(
+            formatted(0.1, 0.0, 2, AngleDisplay::Degrees, 4),
+            "\u{2212}20 dB ∠ 0 °"
         );
         assert!((magnitude_db(1e308, 1e308) - (6160.0 + 10.0 * 2.0_f64.log10())).abs() < 1e-10);
     }
 
     fn cell_text_rect(shape: &egui::Shape) -> Option<egui::Rect> {
         match shape {
-            egui::Shape::Text(text) if text.galley.text().starts_with("2.50000000e-1") => {
+            egui::Shape::Text(text) if text.galley.text().starts_with("0.25 ") => {
                 Some(shape.visual_bounding_rect())
             }
             egui::Shape::Vec(shapes) => shapes.iter().find_map(cell_text_rect),

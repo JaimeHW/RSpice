@@ -890,7 +890,13 @@ fn register_rows(
             "Pearson r",
             correlation.map_or_else(
                 || "Not defined \u{2014} a column has no spread".to_owned(),
-                |r| format!("{r:+.3} \u{b7} R\u{b2} {:.3}", r * r),
+                |r| {
+                    format!(
+                        "{} \u{b7} R\u{b2} {}",
+                        rspice_ui_kit::plot::fmt_si_signed(r, "", 3),
+                        fmt_si_significant(r * r, "", 3)
+                    )
+                },
             ),
             true,
         ),
@@ -1106,7 +1112,7 @@ mod tests {
 
         assert_eq!(by_name("Trials"), "101 measured \u{b7} 38 failing");
         assert!(
-            by_name("Pearson r").starts_with("+1.000 \u{b7} R\u{b2} 1.000"),
+            by_name("Pearson r") == "+1 \u{b7} R\u{b2} 1",
             "{}",
             by_name("Pearson r")
         );

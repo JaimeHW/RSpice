@@ -684,7 +684,7 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
         let cpk = yield_result
             .stats
             .cpk
-            .map_or("—".to_owned(), |v| format!("{v:.2}"));
+            .map_or("—".to_owned(), |v| fmt_si_significant(v, "", 3));
         let rows = [
             ("Yield", yield_label(yield_result, mc), true),
             ("Cpk", cpk, false),

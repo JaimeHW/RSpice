@@ -291,6 +291,17 @@ pub fn frequency_readout(
 
 /// An angle readout at `significant_digits`, in the unit Units ▸ Angle
 /// display chose. The stored value is radians either way.
+/// A complex value as `a + jb`, each part in `unit` at `significant_digits`
+/// with a true minus sign.
+pub fn complex_readout(real: f64, imaginary: f64, unit: &str, significant_digits: usize) -> String {
+    format!(
+        "{} {} j{}",
+        rspice_ui_kit::plot::fmt_si_significant(real, unit, significant_digits),
+        if imaginary >= 0.0 { "+" } else { "\u{2212}" },
+        rspice_ui_kit::plot::fmt_si_significant(imaginary.abs(), unit, significant_digits)
+    )
+}
+
 pub fn angle_readout(
     quantity_policy: &QuantityPresentationPolicy,
     radians: f64,
