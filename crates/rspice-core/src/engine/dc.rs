@@ -31,16 +31,22 @@ pub(in crate::engine) type DcOperatingPointLinearization<'a> =
     ) -> Result<(), SimulationError>;
 
 /// A converged DC sweep point as a [`DcSweepLinearization`] is shown it: the
-/// resolved engine and the deck that solved it, and whether the sweep built
-/// the point's circuit from that deck. Every point a sweep solves as its own
-/// operating point is built so (a temperature, parameter or `RESTART=YES`
-/// point), as is the first point of each source sweep; every later point of a
-/// source sweep continues the previous point's circuit with only the swept
-/// source's value moved, a value the deck does not carry.
+/// resolved engine and the deck that solved it, and whether that deck may
+/// differ from the last one shown in more than the sources `moved` names.
+/// Every point solved from a deck read for it may (a temperature, replayed
+/// parameter or `RESTART=YES` point), as may the first point of each sweep.
+/// Every later point of a source sweep continues the previous point's
+/// circuit with only the swept source's value moved, a value the deck does
+/// not carry; every later point of a parameter sweep whose parameter reaches
+/// only root voltage sources is the first point's deck with those sources
+/// read again at the point's value.
 pub(in crate::engine) struct DcSweepPoint<'a> {
     pub engine: &'a Engine,
     pub deck: &'a Netlist,
     pub rebuilt: bool,
+    /// The root sources this point's deck reads at its own value, where the
+    /// last rebuilt deck read them at that deck's; empty for a rebuilt point.
+    pub moved: &'a [String],
 }
 
 /// [`DcOperatingPointLinearization`] for each converged point of a DC sweep,
@@ -330,11 +336,13 @@ fn dc_event_only_nodes(
 }
 
 /// The operating-point linearization of a sweep point the sweep solves as its
-/// own operating point: the sweep's, shown that point's deck as rebuilt.
+/// own operating point: the sweep's, shown that point's deck as rebuilt or,
+/// given `moved`, as the last rebuilt deck with those sources moved.
 #[allow(clippy::type_complexity)]
 fn rebuilt_point<'a>(
     linearize: &'a mut Option<DcSweepLinearization<'_, '_>>,
     deck: &'a Netlist,
+    moved: Option<&'a [String]>,
 ) -> Option<
     impl FnMut(&Engine, &mut CircuitData, &mut StaticMatrix, &[Value]) -> Result<(), SimulationError>
     + 'a,
@@ -349,7 +357,8 @@ fn rebuilt_point<'a>(
                 DcSweepPoint {
                     engine,
                     deck,
-                    rebuilt: true,
+                    rebuilt: moved.is_none(),
+                    moved: moved.unwrap_or_default(),
                 },
                 circuit,
                 matrix,
@@ -1990,7 +1999,7 @@ impl Engine {
                             use_hints: lifecycle.next_public_point == 0,
                         },
                         Some(&mut *lifecycle),
-                        rebuilt_point(&mut linearize, &swept)
+                        rebuilt_point(&mut linearize, &swept, None)
                             .as_mut()
                             .map(|point| point as _),
                         abort,
@@ -2266,6 +2275,7 @@ impl Engine {
                             engine: &engine,
                             deck: netlist,
                             rebuilt,
+                            moved: &[],
                         },
                         &mut circuit,
                         &mut matrix,
@@ -2366,7 +2376,7 @@ impl Engine {
                     &swept,
                     DcOpStartup::Automatic { use_hints: true },
                     None,
-                    rebuilt_point(&mut linearize, &swept)
+                    rebuilt_point(&mut linearize, &swept, None)
                         .as_mut()
                         .map(|point| point as _),
                     abort,
@@ -2487,6 +2497,12 @@ impl Engine {
                 )?,
             };
             any_binding |= bindings > 0;
+            // A moved current source enters the equations the `.sens`
+            // residuals are assembled from, so its point counts as rebuilt.
+            let moved = plan
+                .as_ref()
+                .filter(|plan| index > 0 && !plan.moves_current_source())
+                .map(|plan| plan.moved());
             lifecycle.sweep_value = sweep_value;
             let (result, device_op_report) = self
                 .run_dc_op_with_startup_and_lifecycle_report_and_abort(
@@ -2495,7 +2511,7 @@ impl Engine {
                         use_hints: lifecycle.next_public_point == 0,
                     },
                     Some(&mut *lifecycle),
-                    rebuilt_point(&mut linearize, &swept)
+                    rebuilt_point(&mut linearize, &swept, moved)
                         .as_mut()
                         .map(|point| point as _),
                     abort,

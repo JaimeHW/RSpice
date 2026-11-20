@@ -5,11 +5,11 @@
 use super::super::dc::{DcSweepPoint, DcSweepResult, DcSweepVariable};
 use super::{
     AcSensitivityLocation, AcSensitivityTarget, DcSensitivityDeck, DcSensitivityPointDeck, Engine,
-    ResidualProbeCache, SimulationError,
+    MovedNominals, ResidualProbeCache, SimulationError,
 };
 use crate::abort_signal::AbortSignal;
 use crate::analysis::sensitivity::{AcSensitivityOutput, ElementType, SensitivityResult};
-use crate::netlist::{AnalysisCommand, DcSecondSweep, DcSweepSpec};
+use crate::netlist::{AnalysisCommand, DcSecondSweep, DcSweepSpec, ElementKind};
 use crate::solver::{SimulationResult, StaticMatrix};
 use crate::{CircuitData, Netlist, Value};
 
@@ -316,6 +316,9 @@ impl Engine {
         let mut decks = Vec::new();
         let mut cache = ResidualProbeCache::default();
         let mut tangents = Vec::new();
+        // For each point read from a deck its rows were not, the DC value of
+        // every source the point moved.
+        let mut moves = Vec::new();
         let mut refused = None;
         let poll = |_: usize| {
             if abort.is_aborted() {
@@ -358,6 +361,32 @@ impl Engine {
                     Vec::new()
                 };
                 tangents.push((index, point_tangents));
+                moves.push((!point.rebuilt).then(|| {
+                    point
+                        .moved
+                        .iter()
+                        .filter_map(|name| {
+                            let element = point
+                                .deck
+                                .elements
+                                .iter()
+                                .find(|element| element.name.eq_ignore_ascii_case(name))?;
+                            let (ElementKind::VoltageSource(spec)
+                            | ElementKind::CurrentSource(spec)) = &element.kind
+                            else {
+                                return None;
+                            };
+                            Some((
+                                name.clone(),
+                                crate::engine::extract_dc_value_with_limits(
+                                    spec,
+                                    point.engine.config.spice_dialect,
+                                    point.engine.config.resource_limits,
+                                ),
+                            ))
+                        })
+                        .collect::<Vec<_>>()
+                }));
                 Ok(())
             };
             match study() {
@@ -403,6 +432,10 @@ impl Engine {
                 DcSweepVariable::Source(name) => Some(name.as_str()),
                 _ => None,
             };
+            let swept_parameter = match &inner_variable {
+                DcSweepVariable::Parameter(name) => Some(name.as_str()),
+                _ => None,
+            };
             result
                 .points
                 .iter()
@@ -411,6 +444,14 @@ impl Engine {
                 .map(|(index, (point, (deck, point_tangents)))| {
                     let deck = &decks[*deck];
                     let sweep_value = point.sweep_value;
+                    let moved = MovedNominals {
+                        swept_source: swept_source.map(|name| (name, sweep_value)),
+                        sources: moves[index].as_deref().unwrap_or_default(),
+                        parameter: moves[index]
+                            .as_ref()
+                            .and(swept_parameter)
+                            .map(|name| (name, sweep_value)),
+                    };
                     let outer_value = outer_variable
                         .as_ref()
                         .map(|variable| (variable, result.axes[0].values[index / inner_count]));
@@ -447,7 +488,7 @@ impl Engine {
                                 objective,
                                 point_tangents.get(objective),
                                 &mut point_deck,
-                                swept_source.map(|name| (name, sweep_value)),
+                                moved,
                                 &point.result,
                                 output,
                                 None,
@@ -652,6 +693,25 @@ mod tests {
         assert_eq!(netlist.options.sensitivity_output_scaled, Some(true));
         assert_eq!(netlist.options.sensitivity_output_unscaled, None);
         let points = study(&netlist).expect("the .SENS study runs at every .DC point");
+        assert_npn_stage_sensitivities(&points);
+    }
+
+    /// The stage swept through a `.GLOBAL_PARAM` its supply reads: every
+    /// point after the first moves only that source, so the rows are read
+    /// from the first point's deck, at each point's supply value.
+    #[test]
+    fn a_xyce_sens_card_over_a_supply_parameter_reads_each_point_at_its_value() {
+        let netlist = xyce(
+            "* bias\n.global_param supply=5\nVCC 4 0 DC {supply}\nRB1 4 1 40k\nRB2 1 0 10k\n\
+             RE 2 0 1K\nRC 4 3 6K\nQ1 3 1 2 QN\n.model QN NPN(BF=100 IS=1e-14 VA=100)\n\
+             .DC supply 4 6 1\n.SENS objfunc={V(3)} param=RB1:R,VCC:DCV0,\n+ QN:bf,QN:nf,QN:vaf\n\
+             .options SENSITIVITY direct=1 adjoint=0\n.end\n",
+        );
+        let points = study(&netlist).expect("the .SENS study runs at every .DC point");
+        assert_npn_stage_sensitivities(&points);
+    }
+
+    fn assert_npn_stage_sensitivities(points: &[DcSweepSensitivityPoint]) {
         let expected: [(Value, Value, [Value; 4]); 3] = [
             (
                 4.0,

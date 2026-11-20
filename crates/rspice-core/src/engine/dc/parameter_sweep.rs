@@ -24,6 +24,7 @@ struct ReachedSource {
     element: usize,
     text: String,
     scope: ParamContext,
+    current: bool,
 }
 
 /// How each point of a `.DC` parameter sweep after the first gets its deck:
@@ -34,6 +35,7 @@ pub(super) struct DcParameterSweepPlan {
     parameter: String,
     global: bool,
     sources: Vec<ReachedSource>,
+    moved: Vec<String>,
 }
 
 impl DcParameterSweepPlan {
@@ -95,16 +97,16 @@ impl DcParameterSweepPlan {
             let (Some((index, found)), None) = (named.next(), named.next()) else {
                 return None;
             };
-            if !matches!(
-                found.kind,
-                ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_)
-            ) {
-                return None;
-            }
+            let current = match &found.kind {
+                ElementKind::VoltageSource(_) => false,
+                ElementKind::CurrentSource(_) => true,
+                _ => return None,
+            };
             sources.push(ReachedSource {
                 element: index,
                 text: spec.text.clone(),
                 scope: spec.scope.clone(),
+                current,
             });
         }
         // A retained device override is applied over the replayed deck,
@@ -119,11 +121,16 @@ impl DcParameterSweepPlan {
         }) {
             return None;
         }
+        let moved = sources
+            .iter()
+            .map(|source| deck.elements[source.element].name.clone())
+            .collect();
         let plan = Self {
             base: deck.clone(),
             parameter,
             global,
             sources,
+            moved,
         };
         // Read again at the observed value, every source must come back as
         // the deck read it (as cloned, so without the ended observation).
@@ -176,6 +183,18 @@ impl DcParameterSweepPlan {
         parameters.insert(self.parameter.clone(), value);
         deck.retain_overlay_parameters(parameters);
         Ok(deck)
+    }
+
+    /// The root sources each point moves.
+    pub(super) fn moved(&self) -> &[String] {
+        &self.moved
+    }
+
+    /// Whether a point moves a current source, whose value enters the
+    /// node equations every residual is assembled from; a voltage source's
+    /// enters only its own branch equation, identically in each.
+    pub(super) fn moves_current_source(&self) -> bool {
+        self.sources.iter().any(|source| source.current)
     }
 }
 
@@ -262,6 +281,7 @@ D1 out 0 dmod
 ";
         let (netlist, plan) = first_point(deck, "VIN");
         let plan = plan.expect("the parameter reaches only V1");
+        assert_eq!(plan.moved(), ["V1"]);
         for value in [0.5, 1.25, 2.0] {
             let derived = plan.point(value).expect("the point reads");
             let (replayed, _) = Engine::create_perturbed_netlist_with_limits_and_abort(

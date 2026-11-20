@@ -236,6 +236,19 @@ struct AcSensitivityTarget {
     location: AcSensitivityLocation,
 }
 
+/// The nominal values a sweep point holds apart from the deck its
+/// [`DcSensitivityDeck`] rows were read from.
+#[derive(Clone, Copy, Default)]
+pub(super) struct MovedNominals<'a> {
+    /// The source the sweep moves, and the value it moved it to.
+    pub(super) swept_source: Option<(&'a str, Value)>,
+    /// The root sources a swept parameter moved, and the DC value each
+    /// holds at this point.
+    pub(super) sources: &'a [(String, Value)],
+    /// The swept parameter, and its value at this point.
+    pub(super) parameter: Option<(&'a str, Value)>,
+}
+
 /// Which override of a replay is followed through the deck, and how: its
 /// direction (the derivative every reader carries) or its reach (the cards
 /// and elements that read it).
@@ -3293,7 +3306,7 @@ impl Engine {
                     objective,
                     tangents.get(objective),
                     &mut point,
-                    None,
+                    MovedNominals::default(),
                     &nominal_result,
                     output,
                     Some(&progress),
@@ -3373,9 +3386,8 @@ impl Engine {
 
     /// One objective's result at one converged point: each row read from
     /// the point's tangents where one answers it, otherwise taken as
-    /// [`Self::run_sensitivity_dc_complete_with_abort`] describes.
-    /// `swept_source` names the source a sweep moved without moving the
-    /// deck's value, and the value it moved it to.
+    /// [`Self::run_sensitivity_dc_complete_with_abort`] describes. `moved`
+    /// holds the nominal values the point moved without moving the deck's.
     #[allow(clippy::too_many_arguments)]
     fn dc_sensitivity_objective(
         &self,
@@ -3383,7 +3395,7 @@ impl Engine {
         objective: usize,
         tangents: Option<&ObjectiveTangents>,
         point: &mut DcSensitivityPointDeck<'_>,
-        swept_source: Option<(&str, Value)>,
+        moved: MovedNominals<'_>,
         nominal_result: &SimulationResult,
         output: &AcSensitivityOutput,
         progress: Option<&StudyProgress<'_>>,
@@ -3414,18 +3426,35 @@ impl Engine {
                 None => abort,
             };
             let mut target = deck.rows[row].clone();
-            if let (Some((source, value)), AcSensitivityLocation::SourceDc { element_index }) =
-                (swept_source, &target.location)
-                && let element = &deck.flat.elements[*element_index]
-                && element.name.eq_ignore_ascii_case(source)
-                && let ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) =
-                    &element.kind
-            {
-                target.nominal_value = crate::engine::extract_dc_value_with_limits(
-                    &spec.clone().with_dc_value(value),
-                    self.config.spice_dialect,
-                    self.config.resource_limits,
-                );
+            match &target.location {
+                AcSensitivityLocation::SourceDc { element_index } => {
+                    let element = &deck.flat.elements[*element_index];
+                    if let Some((source, value)) = moved.swept_source
+                        && element.name.eq_ignore_ascii_case(source)
+                        && let ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) =
+                            &element.kind
+                    {
+                        target.nominal_value = crate::engine::extract_dc_value_with_limits(
+                            &spec.clone().with_dc_value(value),
+                            self.config.spice_dialect,
+                            self.config.resource_limits,
+                        );
+                    } else if let Some((_, value)) = moved
+                        .sources
+                        .iter()
+                        .find(|(source, _)| element.name.eq_ignore_ascii_case(source))
+                    {
+                        target.nominal_value = *value;
+                    }
+                }
+                AcSensitivityLocation::DesignParameter { name } => {
+                    if let Some((parameter, value)) = moved.parameter
+                        && name.eq_ignore_ascii_case(parameter)
+                    {
+                        target.nominal_value = value;
+                    }
+                }
+                _ => {}
             }
             // Only a passive value of a linear deck, never a design or
             // source row, is differentiated exactly on the deck.
