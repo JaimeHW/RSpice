@@ -168,8 +168,17 @@ fn next_pattern_id() -> Result<u64, SolverError> {
         })
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Column searches [`find_csc_offset`] has made on this thread, so a test
+    /// can show an operation reaches its positions without searching for them.
+    static COLUMN_SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[inline]
 fn find_csc_offset(csc: &SymbolicSparseColMat<usize>, row: usize, col: usize) -> Option<usize> {
+    #[cfg(test)]
+    COLUMN_SEARCHES.with(|searches| searches.set(searches.get() + 1));
     if row >= csc.nrows() || col >= csc.ncols() {
         return None;
     }
@@ -7940,6 +7949,54 @@ mod tests {
                 .zip(&row_scale)
                 .all(|(&value, &scale)| (value * scale).is_finite())
         );
+    }
+
+    #[test]
+    fn a_startup_voltage_clamp_walks_its_own_row_without_column_searches() {
+        // A 400-node resistive ladder whose last node also carries the branch
+        // current of a voltage source, in the final column.
+        let nodes = 400;
+        let last = nodes - 1;
+        let stiff = 1.0e9;
+        let mut triplets = Vec::new();
+        for node in 0..nodes {
+            triplets.push((node, node, 2.0));
+            if node < last {
+                triplets.push((node, node + 1, -1.0));
+                triplets.push((node + 1, node, -1.0));
+            }
+        }
+        triplets.push((last, nodes, 1.0));
+        triplets.push((nodes, last, 1.0));
+        let mut matrix = StaticMatrix::from_triplets(nodes + 1, nodes + 1, &triplets).unwrap();
+
+        let searches = || COLUMN_SEARCHES.with(std::cell::Cell::get);
+        let before = searches();
+        assert!(!matrix.row_has_position_from(200, nodes));
+        assert!(matrix.row_has_position_from(last, nodes));
+        let middle_diagonal = matrix.force_voltage_clamp_row(200, nodes, stiff);
+        let last_diagonal = matrix.force_voltage_clamp_row(last, nodes, stiff);
+        // Searching every column for a row's positions costs each clamp the
+        // matrix order; a startup card that clamps most nodes then costs the
+        // node count squared at every Newton iterate.
+        assert_eq!(searches() - before, 0, "the clamps searched columns");
+        assert_eq!(middle_diagonal.unwrap(), 1.0);
+        assert_eq!(last_diagonal.unwrap(), stiff);
+
+        let dense = matrix.to_dense_real();
+        for (col, &value) in dense[200].iter().enumerate() {
+            let expected = if col == 200 { 1.0 } else { 0.0 };
+            assert_eq!(value, expected, "row 200, column {col}");
+        }
+        for (col, &value) in dense[last].iter().enumerate() {
+            let expected = match col {
+                col if col == last => stiff,
+                col if col == nodes => 1.0,
+                _ => 0.0,
+            };
+            assert_eq!(value, expected, "row {last}, column {col}");
+        }
+        assert_eq!(dense[199][200], -1.0, "the clamp leaves other rows alone");
     }
 
     #[test]
