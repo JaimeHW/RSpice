@@ -135,3 +135,53 @@ fn latest_tracking_digests_its_netlist_and_runs_once_per_change() {
     }
     assert_eq!(work.since().get(DatasetWalk::NetlistDigest), 1);
 }
+
+/// The measurement form is drawn on every frame it is open. Its preview
+/// measures the expression once, and again only when the expression changes.
+#[test]
+fn the_measurement_form_measures_its_expression_once_per_edit() {
+    use crate::workbench::documents::result_document::document_edit::measurement;
+    use rspice_results_ui::document_dialogs::measurement::MeasurementDraft;
+
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs = vec![{
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(transient(20_000));
+        run
+    }]
+    .into();
+    assert!(state.model.simulation.select_run(0));
+    assert!(state.model.simulation.select_analysis(0));
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
+    let mut draft = MeasurementDraft {
+        expression: "max(V(out))".to_owned(),
+        ..MeasurementDraft::default()
+    };
+    let first = measurement::preview(state.results_reads(), &draft);
+    assert!(
+        matches!(&first.value, Ok(Some(_))),
+        "the expression measures: {:?}",
+        first.value
+    );
+
+    let (work, columns) = (WorkCounts::reset(), ColumnWork::read());
+    for _ in 0..10 {
+        let preview = measurement::preview(state.results_reads(), &draft);
+        assert_eq!(preview.value, first.value);
+    }
+    assert_eq!(work.since().get(DatasetWalk::MeasurementPreview), 0);
+    assert_eq!(
+        columns.since().memory_views,
+        0,
+        "an unchanged draft is not measured again"
+    );
+
+    draft.expression = "min(V(out))".to_owned();
+    let work = WorkCounts::reset();
+    for _ in 0..3 {
+        let _ = measurement::preview(state.results_reads(), &draft);
+    }
+    assert_eq!(work.since().get(DatasetWalk::MeasurementPreview), 1);
+}

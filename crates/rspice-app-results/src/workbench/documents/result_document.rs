@@ -1614,6 +1614,9 @@ pub struct ResultsState {
     /// [`trace_statistics::trace_statistics`].
     trace_statistics:
         RetainedMemo<(AnalysisPresentationKey, usize), trace_statistics::PendingStatistics>,
+    /// What the measurement form's expression last measured; see
+    /// [`document_edit::measurement::preview`].
+    measurement_preview: document_edit::measurement::PreviewMemo,
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
     /// The views each waveform sheet showed, for Zoom previous. Transient.

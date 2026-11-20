@@ -32,6 +32,44 @@ pub fn open_measurement(state: &mut ResultsParts<'_>) {
     ));
 }
 
+/// What the measurement form's expression last measured, and over what. The
+/// form is drawn on every frame, and measuring reads every sample the
+/// expression names, so it measures again only when the expression or the
+/// retained results change.
+#[derive(Debug, Clone, Default)]
+pub struct PreviewMemo {
+    value: std::cell::RefCell<Option<(PreviewSource, Result<f64, String>)>>,
+    family: std::cell::RefCell<Option<(PreviewSource, Result<FamilyMeasurement, String>)>>,
+}
+
+/// The retained runs' revision and data version, the analysis measured and
+/// the expression.
+type PreviewSource = (
+    crate::state::RunHistoryRevision,
+    u64,
+    super::super::AnalysisPresentationKey,
+    String,
+);
+
+/// The value `slot` holds for `source`, measured by `measure` when it holds
+/// one for anything else.
+fn remembered<T: Clone>(
+    slot: &std::cell::RefCell<Option<(PreviewSource, T)>>,
+    source: PreviewSource,
+    measure: impl FnOnce() -> T,
+) -> T {
+    let mut slot = slot.borrow_mut();
+    if let Some((held, value)) = slot.as_ref()
+        && *held == source
+    {
+        return value.clone();
+    }
+    super::super::frame_work::note(super::super::frame_work::DatasetWalk::MeasurementPreview);
+    let value = measure();
+    *slot = Some((source, value.clone()));
+    value
+}
+
 /// What the form shows for `draft` on this frame.
 pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> MeasurementPreview {
     let (run, analysis) = match reading_analysis(state) {
@@ -67,6 +105,13 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
     );
     let family = family_of(run, analysis);
     let x_unit = x_unit(state, run, analysis);
+    let source = (
+        state.model.simulation.retained.runs.revision(),
+        state.model.simulation.view.data_version,
+        super::super::AnalysisPresentationKey::new(run.dataset_id, analysis),
+        expression.to_owned(),
+    );
+    let memo = &state.results.measurement_preview;
     // The value reads in the expression's unit as the calculator infers it
     // from the waveforms the expression reads, `rms(V(out))` in volts, and a
     // family's statistics in the same; one whose unit cannot be stated is a
@@ -80,7 +125,11 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
     let (value, family) = match family {
         Some(noun) => {
             let measured = (!expression.is_empty())
-                .then(|| measure_family(run, analysis, expression))
+                .then(|| {
+                    remembered(&memo.family, source, || {
+                        measure_family(run, analysis, expression)
+                    })
+                })
                 .transpose();
             let summary = measured
                 .as_ref()
@@ -114,7 +163,8 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
             if expression.is_empty() {
                 Ok(None)
             } else {
-                evaluate(analysis, expression).map(|value| Some(format(value)))
+                remembered(&memo.value, source, || evaluate(analysis, expression))
+                    .map(|value| Some(format(value)))
             },
             None,
         ),
