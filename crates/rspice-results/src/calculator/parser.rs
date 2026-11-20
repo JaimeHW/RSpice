@@ -62,6 +62,8 @@ pub enum Token {
     LParen,
     RParen,
     Comma,
+    /// `@`, which names the run a signal is read from.
+    At,
     // End of input
     Eof,
 }
@@ -238,6 +240,10 @@ impl<'a> Lexer<'a> {
                 ',' => {
                     self.chars.next();
                     Token::Comma
+                }
+                '@' => {
+                    self.chars.next();
+                    Token::At
                 }
                 _ => {
                     return Err(ParseError::new(
@@ -481,7 +487,7 @@ impl<'a> Parser<'a> {
 
             // Construct signal name: e.g. "V(out)" or "I(R1)"
             let signal_name = format!("{}({})", upper_name, arg);
-            return Ok(CalculatorExpr::wave(&signal_name));
+            return self.signal_of_run(signal_name);
         }
 
         // A digital net or bus, `D(q[3:0])`: its name is read literally, as
@@ -499,7 +505,7 @@ impl<'a> Parser<'a> {
             }
             self.advance()?;
             self.expect_rparen(start)?;
-            return Ok(CalculatorExpr::wave(&format!("D({arg})")));
+            return self.signal_of_run(format!("D({arg})"));
         }
 
         // 2. Constants — but only where the name stands alone. `freq` is the
@@ -538,7 +544,37 @@ impl<'a> Parser<'a> {
         // Or maybe a named parameter/variable in future.
         // For now, treat as Waveform Reference (e.g. "out" implies "V(out)"? No, be strict)
         // Actually, maybe it's a variable or alias. Let's treat as WaveformRef for flexibility
-        Ok(CalculatorExpr::wave(name))
+        self.signal_of_run(name.to_owned())
+    }
+
+    /// A signal, and the run it is read from when `@` names one: the pinned
+    /// baseline, `V(out)@baseline`, or a retained run by its name,
+    /// `V(out)@"Run 3"`. Without `@` it is read from the result evaluated.
+    fn signal_of_run(&mut self, signal: String) -> Result<CalculatorExpr, ParseError> {
+        if !matches!(self.current.token, Token::At) {
+            return Ok(CalculatorExpr::WaveformRef {
+                signal,
+                dataset: None,
+            });
+        }
+        let at = self.current.position;
+        self.advance()?;
+        match self.current.token.clone() {
+            Token::Ident(run) | Token::Keyword(run) if !run.trim().is_empty() => {
+                self.advance()?;
+                Ok(CalculatorExpr::WaveformRef {
+                    signal,
+                    dataset: Some(run),
+                })
+            }
+            token => Err(ParseError::new(
+                at,
+                format!(
+                    "expected a run after '@', such as baseline or \"Run 3\", found {}",
+                    describe_token(&token)
+                ),
+            )),
+        }
     }
 }
 
@@ -555,6 +591,7 @@ fn describe_token(token: &Token) -> String {
         Token::LParen => "'('".to_string(),
         Token::RParen => "')'".to_string(),
         Token::Comma => "','".to_string(),
+        Token::At => "'@'".to_string(),
         Token::Eof => "end of expression".to_string(),
     }
 }

@@ -60,10 +60,23 @@ pub fn magnitude_value(
 pub fn reject_unbound_dataset(dataset: Option<&str>) -> Result<(), EvaluationError> {
     if let Some(dataset) = dataset {
         return Err(EvaluationError::IdentifierNotFound(format!(
-            "dataset '{dataset}' is not bound in this evaluation context"
+            "@{dataset} names another run, and only a result's own signals can be read here"
         )));
     }
     Ok(())
+}
+
+/// The other runs an expression names with `@`: `V(out)@baseline`,
+/// `V(out)@"Run 3"`.
+pub trait DatasetSource {
+    /// `signal` of the run `dataset` names, resampled onto `axis`, the X
+    /// axis the expression is evaluated on; or why it cannot be.
+    fn waveform_on(
+        &self,
+        signal: &str,
+        dataset: &str,
+        axis: &[f64],
+    ) -> Result<RetainedWaveform, EvaluationError>;
 }
 
 /// Retain expression output in the same rectangular form used by solved AC
@@ -110,6 +123,7 @@ pub struct WaveformsContext<'a, W = RetainedWaveform> {
     waveforms: &'a [W],
     complex_policy: ComplexExpressionPolicy,
     projection: Option<sample_projection::SampleProjection<'a>>,
+    datasets: Option<&'a dyn DatasetSource>,
 }
 
 impl<'a, W: AsRef<RetainedWaveform>> WaveformsContext<'a, W> {
@@ -123,7 +137,16 @@ impl<'a, W: AsRef<RetainedWaveform>> WaveformsContext<'a, W> {
             waveforms,
             complex_policy,
             projection: None,
+            datasets: None,
         }
+    }
+
+    /// Read a signal another run holds, `V(out)@baseline`, from `datasets`,
+    /// on this analysis' own X axis.
+    #[must_use]
+    pub fn with_datasets(mut self, datasets: &'a dyn DatasetSource) -> Self {
+        self.datasets = Some(datasets);
+        self
     }
 
     /// Bind exact source rows and, when supplied, their authoritative family
@@ -167,6 +190,20 @@ impl<'a, W: AsRef<RetainedWaveform>> WaveformsContext<'a, W> {
         dataset: Option<&str>,
         policy: ComplexExpressionPolicy,
     ) -> Result<CalcValue, EvaluationError> {
+        if let (Some(dataset), Some(datasets)) = (dataset, self.datasets) {
+            let axis = self
+                .waveforms
+                .first()
+                .map(|waveform| self.projected(waveform.as_ref()))
+                .transpose()?
+                .ok_or_else(|| {
+                    EvaluationError::IdentifierNotFound(format!(
+                        "{signal}@{dataset} has no X axis here to be read onto"
+                    ))
+                })?;
+            let waveform = datasets.waveform_on(signal, dataset, &axis.x)?;
+            return waveform_value(&waveform, policy);
+        }
         reject_unbound_dataset(dataset)?;
         match signal.to_uppercase().as_str() {
             "TIME" | "T" | "FREQ" | "FREQUENCY" => {

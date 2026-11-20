@@ -303,6 +303,26 @@ impl Bracket {
         }
     }
 
+    /// [`Self::value`] drawn under `warp`: straight in X, or straight in
+    /// log X between two samples of a sweep spaced by a constant ratio.
+    fn value_warped(self, warp: AxisWarp, axis: &[f64], values: &[f64]) -> Result<f64, String> {
+        match (self, warp) {
+            (Self::Between { lower, target }, AxisWarp::Log) => {
+                let value = linear_between(
+                    axis[lower].ln(),
+                    axis[lower + 1].ln(),
+                    values[lower],
+                    values[lower + 1],
+                    target.ln(),
+                );
+                value.is_finite().then_some(value).ok_or_else(|| {
+                    "Monotone log-X interpolation produced a non-finite value.".to_owned()
+                })
+            }
+            _ => self.value(axis, values),
+        }
+    }
+
     /// Where on the axis this is.
     fn x(self, axis: &[f64]) -> f64 {
         match self {
@@ -310,6 +330,72 @@ impl Bracket {
             Self::Between { target, .. } => target,
         }
     }
+}
+
+/// How a resampled signal runs between two of its samples: straight in X, or
+/// straight in log X on a sweep spaced by a constant ratio, as a decade sweep
+/// is, where a straight line in X would bow between the points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisWarp {
+    Linear,
+    Log,
+}
+
+impl AxisWarp {
+    /// The warp `axis` is spaced by: log when every X is positive and each
+    /// sample is the same ratio past the one before, rather than the same
+    /// step.
+    #[must_use]
+    pub fn of(axis: &[f64]) -> Self {
+        let count = axis.len();
+        if count < 3 || axis.iter().any(|x| !(x.is_finite() && *x > 0.0)) {
+            return Self::Linear;
+        }
+        let (first_ratio, last_ratio) = (axis[1] / axis[0], axis[count - 1] / axis[count - 2]);
+        let (first_step, last_step) = (axis[1] - axis[0], axis[count - 1] - axis[count - 2]);
+        let geometric =
+            (first_ratio - last_ratio).abs() <= 1e-6 * first_ratio && first_ratio > 1.0 + 1e-9;
+        let arithmetic = (first_step - last_step).abs() <= 1e-6 * first_step.abs();
+        if geometric && !arithmetic {
+            Self::Log
+        } else {
+            Self::Linear
+        }
+    }
+
+    /// What a trace says of it.
+    #[must_use]
+    pub const fn words(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Log => "log X",
+        }
+    }
+}
+
+/// `values`, sampled on `source`, at each X of `target`, by the comparison's
+/// own monotone interpolation under `warp`. A target outside `source`, or
+/// beside a missing sample, is a missing sample: nothing is extrapolated.
+/// `source` must ascend strictly; see [`check_resampling_axis`].
+#[must_use]
+pub fn resample_onto(source: &[f64], values: &[f64], target: &[f64], warp: AxisWarp) -> Vec<f64> {
+    if source.len() != values.len() {
+        return vec![f64::NAN; target.len()];
+    }
+    target
+        .iter()
+        .map(|&x| {
+            bracket(source, x)
+                .and_then(|at| at.value_warped(warp, source, values))
+                .unwrap_or(f64::NAN)
+        })
+        .collect()
+}
+
+/// Whether `axis` can be resampled from: it holds samples, every one
+/// present, each past the one before. `name` names it in the refusal.
+pub fn check_resampling_axis(name: &str, axis: &[f64]) -> Result<(), String> {
+    validate_strict_axis(name, axis)
 }
 
 #[cfg(test)]

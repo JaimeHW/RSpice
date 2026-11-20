@@ -7,6 +7,8 @@ pub mod ast;
 pub mod catalogue;
 mod complex_functions;
 mod complex_ops;
+#[cfg(feature = "engine-evidence")]
+pub mod datasets;
 pub mod evaluator;
 mod frequency_measures;
 pub mod functions;

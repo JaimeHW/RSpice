@@ -1,0 +1,142 @@
+//! Signals of other runs an expression names with `@`.
+//!
+//! `V(out) - V(out)@baseline` is the difference between a result and the run
+//! it is compared with. The other run's signal is read onto the evaluated
+//! result's own X axis by the comparison's monotone interpolation, straight in
+//! X or, on a sweep spaced by a constant ratio, straight in log X, and nothing
+//! is extrapolated. It is refused where the difference would mean nothing:
+//! another X quantity, another unit, or no X the two runs share.
+
+use super::evaluator::EvaluationError;
+use super::retained::{DatasetSource, find_waveform};
+use crate::number_format::fmt_si_significant;
+use crate::waveform::RetainedWaveform;
+use crate::waveform_comparison::{AxisWarp, check_resampling_axis, resample_onto};
+
+/// The name `@` reads the pinned baseline by.
+pub const BASELINE: &str = "baseline";
+
+/// A retained run an expression can read a signal of: its analysis that
+/// matches the one evaluated.
+pub struct NamedRun<'a, W> {
+    /// The names `@` reads it by, matched without regard to case: `Run 3`,
+    /// and [`BASELINE`] for the pinned one.
+    pub names: Vec<String>,
+    pub waveforms: &'a [W],
+    pub coordinate_unit: Option<&'a str>,
+}
+
+/// The runs an expression evaluated over one result can name.
+pub struct RunDatasets<'a, W> {
+    /// The result evaluated: its signals and the unit of its X axis.
+    pub own: &'a [W],
+    pub coordinate_unit: Option<&'a str>,
+    pub runs: Vec<NamedRun<'a, W>>,
+}
+
+fn quantity(unit: Option<&str>) -> String {
+    match unit {
+        Some(unit) if !unit.is_empty() => unit.to_owned(),
+        _ => "an unstated unit".to_owned(),
+    }
+}
+
+fn read(values: &crate::waveform::WaveformValues, what: &str) -> Result<Vec<f64>, EvaluationError> {
+    values
+        .read_range(0..values.len())
+        .map(std::borrow::Cow::into_owned)
+        .map_err(|failure| EvaluationError::WaveformMismatch(format!("{what}: {failure}")))
+}
+
+impl<W: AsRef<RetainedWaveform>> DatasetSource for RunDatasets<'_, W> {
+    fn waveform_on(
+        &self,
+        signal: &str,
+        dataset: &str,
+        axis: &[f64],
+    ) -> Result<RetainedWaveform, EvaluationError> {
+        let named = format!("{signal}@{dataset}");
+        let run = self
+            .runs
+            .iter()
+            .find(|run| {
+                run.names
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(dataset))
+            })
+            .ok_or_else(|| {
+                EvaluationError::IdentifierNotFound(if dataset.eq_ignore_ascii_case(BASELINE) {
+                    format!(
+                        "{named}: no baseline is pinned here; compare this result with another \
+                         run first, or name a run, as in {signal}@\"Run 2\""
+                    )
+                } else {
+                    format!("{named}: no retained run named {dataset} holds this analysis")
+                })
+            })?;
+        if run.coordinate_unit != self.coordinate_unit {
+            return Err(EvaluationError::WaveformMismatch(format!(
+                "{named} sweeps X in {} and this result sweeps it in {}, so the two cannot be \
+                 read on one axis",
+                quantity(run.coordinate_unit),
+                quantity(self.coordinate_unit),
+            )));
+        }
+        let source = find_waveform(run.waveforms, signal).ok_or_else(|| {
+            EvaluationError::IdentifierNotFound(format!("{named}: {dataset} holds no {signal}"))
+        })?;
+        if let Some(own) = find_waveform(self.own, signal)
+            && own.unit != source.unit
+        {
+            return Err(EvaluationError::WaveformMismatch(format!(
+                "{signal} is in {} here and in {} in {dataset}",
+                quantity(own.unit.as_deref()),
+                quantity(source.unit.as_deref()),
+            )));
+        }
+        let x = read(&source.x, &named)?;
+        check_resampling_axis(&named, &x).map_err(EvaluationError::WaveformMismatch)?;
+        let (first, last) = (x[0], x[x.len() - 1]);
+        if !axis.iter().any(|value| (first..=last).contains(value)) {
+            let here = axis.iter().copied().filter(|value| value.is_finite()).fold(
+                None,
+                |range: Option<(f64, f64)>, value| {
+                    Some(range.map_or((value, value), |(low, high)| {
+                        (low.min(value), high.max(value))
+                    }))
+                },
+            );
+            let unit = self.coordinate_unit.unwrap_or("");
+            let span = |(low, high): (f64, f64)| {
+                format!(
+                    "{} to {}",
+                    fmt_si_significant(low, unit, 4),
+                    fmt_si_significant(high, unit, 4)
+                )
+            };
+            return Err(EvaluationError::WaveformMismatch(format!(
+                "{named} covers {}, which no X of this result ({}) falls in",
+                span((first, last)),
+                here.map_or_else(|| "no samples".to_owned(), span),
+            )));
+        }
+        let warp = AxisWarp::of(&x);
+        let resample = |values: &crate::waveform::WaveformValues| {
+            read(values, &named).map(|values| resample_onto(&x, &values, axis, warp))
+        };
+        let mut waveform =
+            RetainedWaveform::new(named.as_str(), axis.to_vec(), resample(&source.y)?);
+        waveform.unit.clone_from(&source.unit);
+        if let Some(complex) = &source.complex {
+            waveform = waveform.with_complex_components(
+                named.as_str(),
+                resample(&complex.real)?,
+                resample(&complex.imag)?,
+            );
+        }
+        Ok(waveform)
+    }
+}
+
+#[cfg(test)]
+mod tests;

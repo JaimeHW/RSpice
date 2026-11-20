@@ -11,9 +11,7 @@
 pub(crate) use rspice_results::calculator::spice_parser as parser;
 pub(crate) use rspice_results::calculator::{ast, catalogue, evaluator, functions, value};
 
-use rspice_results::calculator::retained::{
-    canonical_ground_value, find_waveform, reject_unbound_dataset,
-};
+use rspice_results::calculator::retained::{canonical_ground_value, find_waveform};
 pub use rspice_results::calculator::retained::{magnitude_value, waveform_value};
 use rspice_results::waveform::RetainedWaveform;
 
@@ -81,6 +79,54 @@ impl<'a> SimulationContext<'a> {
     fn find_waveform(&self, signal: &str) -> Option<&RetainedWaveform> {
         find_waveform(&self.simulation.view.waveforms, signal)
     }
+
+    /// `signal` of the retained run `dataset` names (`V(out)@"Run 2"`), read
+    /// onto the active analysis' own X axis. Nothing pins a baseline here, so
+    /// `@baseline` is refused with how to name a run instead.
+    fn waveform_of_run(&self, signal: &str, dataset: &str) -> Result<CalcValue, EvaluationError> {
+        use rspice_results::calculator::datasets::{NamedRun, RunDatasets};
+        use rspice_results::calculator::retained::DatasetSource;
+        use rspice_results::waveform_comparison::matching_comparison_analysis;
+
+        let simulation = self.simulation;
+        let (Some(run), Some(analysis)) = (simulation.active_run(), simulation.active_analysis())
+        else {
+            return Err(EvaluationError::IdentifierNotFound(format!(
+                "{signal}@{dataset}: no result is shown to read it onto"
+            )));
+        };
+        let runs = simulation
+            .retained
+            .runs
+            .iter()
+            .filter(|other| other.dataset_id != run.dataset_id)
+            .filter_map(|other| {
+                let matching = matching_comparison_analysis(analysis, other)?;
+                Some(NamedRun {
+                    names: vec![format!("Run {}", other.id)],
+                    waveforms: matching.waveforms.as_slice(),
+                    coordinate_unit: matching.waveform_coordinate_unit(),
+                })
+            })
+            .collect();
+        let datasets = RunDatasets {
+            own: simulation.view.waveforms.as_slice(),
+            coordinate_unit: analysis.waveform_coordinate_unit(),
+            runs,
+        };
+        let axis = simulation
+            .view
+            .waveforms
+            .first()
+            .map(|waveform| waveform.x.to_vec())
+            .ok_or_else(|| {
+                EvaluationError::IdentifierNotFound(format!(
+                    "{signal}@{dataset} has no X axis here to be read onto"
+                ))
+            })?;
+        let waveform = datasets.waveform_on(signal, dataset, &axis)?;
+        waveform_value(&waveform, self.complex_policy)
+    }
 }
 
 impl<'a> EvaluationContext for SimulationContext<'a> {
@@ -100,7 +146,9 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
         signal: &str,
         dataset: Option<&str>,
     ) -> Result<CalcValue, EvaluationError> {
-        reject_unbound_dataset(dataset)?;
+        if let Some(dataset) = dataset {
+            return self.waveform_of_run(signal, dataset);
+        }
 
         // Handle special constants
         match signal.to_uppercase().as_str() {
