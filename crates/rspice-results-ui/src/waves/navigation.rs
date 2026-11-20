@@ -356,42 +356,22 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
             // Folding them again here was a second full pass over the
             // retained samples on every frame, for a curve fourteen pixels
             // tall.
-            // A stored trace's miniature is its tile across the whole axis,
-            // read from the store's summaries rather than its column.
-            let stored = (scale == XScale::Linear)
-                .then(|| stored_overview(trace))
-                .flatten();
-            let (minimum, maximum) = derived
-                .range_or(trace_key(model, trace), || match &stored {
-                    Some((range, _)) => *range,
-                    None => {
-                        output.extrema_samples_read = trace.y.len();
-                        rspice_results::measurements::finite_extremes(&trace.y)
-                    }
-                })
-                .unwrap_or((0.0, 1.0));
-            let span = (maximum - minimum).max(f64::EPSILON);
-            // Cache bounded source knots with explicit gap separators. Both
-            // extrema and gap discovery happen only when the source changes.
-            let segments = match stored {
-                Some((_, segments)) => segments,
+            // The miniature, fit and segments both, is read once per data
+            // version and scale: the lane is drawn on every frame.
+            let key = super::stable_hash(&(trace_key(model, trace), scale == XScale::Log10));
+            let miniature = match derived.overview(key) {
+                Some(held) => held,
                 None => {
-                    let indices = derived.overview_indices_or(trace_key(model, trace), || {
-                        output.overview_samples_read = trace.y.len().saturating_mul(2);
-                        rspice_results::waveform::RetainedWaveform::new(
-                            "overview",
-                            trace.x.clone(),
-                            trace.y.clone(),
-                        )
-                        .display_sample_indices(SHARED_X_OVERVIEW_POINTS)
-                    });
-                    output.overview_samples_read += indices.len();
-                    overview_segments(&trace.x, &trace.y, &indices)
+                    let miniature = overview_miniature(derived, model, trace, scale, &mut output);
+                    derived.keep_overview(key, miniature)
                 }
             };
-            for segment in segments {
+            let (minimum, maximum) = miniature.range.unwrap_or((0.0, 1.0));
+            let span = (maximum - minimum).max(f64::EPSILON);
+            for segment in &miniature.segments {
                 let points = segment
-                    .into_iter()
+                    .iter()
+                    .copied()
                     // t = 0 has no place on a logarithmic axis: the miniature
                     // starts at the first positive sample, as the panes do.
                     .filter(|(x, _)| scale == XScale::Linear || *x > 0.0)
@@ -861,6 +841,57 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
 
 /// A stored trace's range, and its miniature as unbroken runs of points.
 type StoredOverview = (Option<(f64, f64)>, Vec<Vec<(f64, f64)>>);
+
+/// Read the overview miniature of `trace` on a `scale` axis.
+fn overview_miniature(
+    derived: &mut DerivedSeries,
+    model: &StripModel,
+    trace: &StripTrace,
+    scale: XScale,
+    output: &mut SharedXAxisResponse,
+) -> crate::derived::OverviewMiniature {
+    // A stored trace's miniature on a linear axis is its tile across the
+    // whole axis, read from the store's summaries rather than its column.
+    let stored = (scale == XScale::Linear)
+        .then(|| stored_overview(trace))
+        .flatten();
+    // The lane's vertical fit is the trace's own finite extremes, which the
+    // pane axis above it already holds under this very key.
+    let range = derived.range_or(trace_key(model, trace), || match &stored {
+        Some((range, _)) => *range,
+        None => {
+            output.extrema_samples_read = trace.y.len();
+            rspice_results::measurements::finite_extremes(&trace.y)
+        }
+    });
+    let segments = match stored {
+        Some((_, segments)) => segments,
+        None => {
+            // A stored trace on a logarithmic axis is read once for its
+            // knots and not kept.
+            let samples = trace.x.len().min(trace.y.len());
+            let resident = |values: &rspice_results::waveform::WaveformValues| {
+                if values.is_stored() {
+                    values
+                        .read_range(0..samples)
+                        .map(|read| read.into_owned().into())
+                        .unwrap_or_else(|_| Vec::new().into())
+                } else {
+                    values.clone()
+                }
+            };
+            let (x, y) = (resident(&trace.x), resident(&trace.y));
+            let indices = derived.overview_indices_or(trace_key(model, trace), || {
+                output.overview_samples_read = samples.saturating_mul(2);
+                rspice_results::waveform::RetainedWaveform::new("overview", x.clone(), y.clone())
+                    .display_sample_indices(SHARED_X_OVERVIEW_POINTS)
+            });
+            output.overview_samples_read += indices.len();
+            overview_segments(&x, &y, &indices)
+        }
+    };
+    crate::derived::OverviewMiniature { range, segments }
+}
 
 /// The range and miniature of a trace whose samples a results store keeps: its
 /// tile across its whole axis, each pixel's least and greatest value at the

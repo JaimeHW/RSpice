@@ -30,6 +30,9 @@ pub struct DerivedSeries {
     extrema: std::collections::HashMap<u64, std::sync::Arc<ExtremaIndex>>,
     /// Gap-aware overview knots, bounded by the caller's drawing budget.
     overview_indices: std::collections::HashMap<u64, std::sync::Arc<Vec<usize>>>,
+    /// A strip's overview miniature per trace and scale, read once per data
+    /// version rather than on every frame the lane is drawn.
+    overviews: std::collections::HashMap<u64, std::sync::Arc<OverviewMiniature>>,
     /// Cached windowed (min, max, rms) measurements, keyed by
     /// (series key, window-start bits, window-end bits).
     stats: std::collections::HashMap<(u64, usize), CachedWindowStats>,
@@ -63,6 +66,14 @@ type StoredExtentMemo = (
     Option<rspice_results::waveform::ValueExtent>,
 );
 
+/// What a strip's overview lane draws of its trace: the vertical fit and the
+/// gap-separated segments of the miniature.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OverviewMiniature {
+    pub range: Option<(f64, f64)>,
+    pub segments: Vec<Vec<(f64, f64)>>,
+}
+
 type XyCurveMemo = Result<std::sync::Arc<crate::waves::xy::XyCurve>, crate::waves::xy::XyRefusal>;
 
 impl DerivedSeries {
@@ -79,6 +90,7 @@ impl DerivedSeries {
             self.ranges.clear();
             self.extrema.clear();
             self.overview_indices.clear();
+            self.overviews.clear();
             self.stats.clear();
             self.shapes.clear();
             self.event_lanes.clear();
@@ -99,6 +111,23 @@ impl DerivedSeries {
                 .entry(key)
                 .or_insert_with(|| std::sync::Arc::new(build())),
         )
+    }
+
+    /// The overview miniature held under `key`, if one was kept.
+    pub fn overview(&self, key: u64) -> Option<std::sync::Arc<OverviewMiniature>> {
+        self.overviews.get(&key).cloned()
+    }
+
+    /// Keep `miniature` under `key` until the data version changes.
+    pub fn keep_overview(
+        &mut self,
+        key: u64,
+        miniature: OverviewMiniature,
+    ) -> std::sync::Arc<OverviewMiniature> {
+        let miniature = std::sync::Arc::new(miniature);
+        self.overviews
+            .insert(key, std::sync::Arc::clone(&miniature));
+        miniature
     }
 
     /// Fetch or classify the monotone structure of a series' X column.

@@ -836,38 +836,27 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
 // table, read through `--nocapture`. Routing it through `log` would put the
 // table behind a logger no test installs. The allow is per-function so the
 // rule keeps holding for every other test in the crate.
-/// Retained samples one surface may read across [`IDLE_FRAMES`] steady frames.
-///
-/// What is drawn sets it. The only surface that legitimately reads the dataset
-/// on a steady frame is the overview lane under a Waves strip, which draws a
-/// fixed 160 points (plus the partial last stride) per strip; this fixture has
-/// two time-domain strips, so 3 280 over ten frames. Four thousand leaves room
-/// for a third strip and is still three orders of magnitude under the
-/// 5 050 000 an unmemoized lane read.
-const STEADY_SAMPLE_CEILING_PER_SURFACE: u64 = 4_000;
-
-/// The second gate: a steady frame may read the dataset, but only as much of
-/// it as it draws.
+/// The second gate: a steady frame reads no retained sample.
 ///
 /// The walk gate above cannot see this. Nothing here walks a *complete*
 /// dataset — an overview lane reads one trace of several, an axis fit reads
 /// one series — so it counted zero while the Waves sheet spent most of its
 /// frame reading a quarter of a million samples to place a hundred and sixty
-/// points. What makes the difference visible is counting the samples.
+/// points. What makes the difference visible is counting the samples. The
+/// overview lane keeps the points it draws, so not even those are read again.
 #[test]
-fn no_steady_frame_reads_more_of_the_dataset_than_it_draws() {
+fn no_steady_frame_reads_a_retained_sample() {
     let mut reads = BTreeMap::new();
     for (name, viewer) in surfaces() {
         let mut state = state_for(viewer);
         let work = steady_state_work(&mut state, |ui, state| show_surface(viewer, ui, state));
-        if work.total_samples() > STEADY_SAMPLE_CEILING_PER_SURFACE {
+        if work.total_samples() > 0 {
             reads.insert(name, (work.total_samples(), work.nonzero_samples()));
         }
     }
     assert!(
         reads.is_empty(),
-        "over {IDLE_FRAMES} idle frames these surfaces read more than \
-         {STEADY_SAMPLE_CEILING_PER_SURFACE} retained samples, which is more than they draw \
+        "over {IDLE_FRAMES} idle frames these surfaces read retained samples \
          (surface -> (samples, [(class, samples)])):\n{reads:#?}"
     );
 }
