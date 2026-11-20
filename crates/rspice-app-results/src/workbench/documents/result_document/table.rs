@@ -309,9 +309,10 @@ mod tests {
         assert_eq!(state.results.results.session.cursors.a, Some(1.25e-6));
         assert_eq!(state.results.results.session.cursors.b, Some(8.5e-6));
 
+        // A third activation deletes nothing: both cursors stay.
         place_table_cursor(&mut state.results.results, 3, 4.0e-6);
-        assert_eq!(state.results.results.session.cursors.a, Some(4.0e-6));
-        assert_eq!(state.results.results.session.cursors.b, None);
+        assert_eq!(state.results.results.session.cursors.a, Some(1.25e-6));
+        assert_eq!(state.results.results.session.cursors.b, Some(8.5e-6));
     }
 
     #[test]
