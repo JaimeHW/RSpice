@@ -428,6 +428,76 @@ fn xyce_nlnearconv_accepts_the_mos2_nand_near_converged_edge() {
     assert_eq!(engine.convergence_quality().force_accepted_points, 0);
 }
 
+/// A latch of a CMOS inverter and a resistor-load NMOS inverter, with a PMOS
+/// strike device that pulls Q high from 10 ns to 15 ns. Xyce's DCOP Newton
+/// starts from zero and takes its full limited step, which leaves the
+/// sources' 0..5 V box on the way, and settles with Q low. Projecting each
+/// iterate onto that box settled on the metastable point instead (QB 3.48 V,
+/// Q 2.25 V), and a transient started there failed to converge at the
+/// strike's edge, just after 10 ns.
+const STRUCK_LATCH: &str = "struck latch
+.model nch nmos level=3 vto=1.2 uo=700 nsub=1.1e17 nfs=1.8e12 kappa=0.02 phi=0.81
++ theta=0.06 gamma=1.74 vmax=1.9e5 eta=0.4 tox=31.5n xj=0.3u tpg=1 js=1e-7
++ cj=9.8e-4 pb=0.97 rsh=41
+.model pch pmos level=3 vto=-1.17 uo=350 nsub=5.5e15 nfs=1.7e12 kappa=0.02 phi=1.2
++ theta=0.15 gamma=0.62 vmax=2.8e5 eta=1.58 tox=31.5n xj=0.3u tpg=-1 js=1e-7
++ cj=2.3e-4 pb=0.89 rsh=150
+vdd vdd 0 5
+vstrike g 0 pwl(0 5 10n 5 10.1n 0 15n 0 15.1n 5)
+mp1 q qb vdd vdd pch w=30u l=2u as=25p ad=50p nrs=0.22 nrd=0.22
+mn1 q qb 0 0 nch w=3u l=2u as=25p ad=50p nrs=0.22 nrd=0.22
+mn2 qb fb 0 0 nch w=9u l=2u as=25p ad=12p nrs=0.22 nrd=0.22
+rload qb vdd 10k
+rfb q fb 200k
+mstrike vdd g q vdd pch w=100u l=2u as=0.01p ad=0.01p
+.tran 0.1n 25n
+.end
+";
+
+#[test]
+fn the_xyce_zero_start_settles_a_latch_where_xyce_does_and_crosses_its_strike() {
+    let netlist = Netlist::parse(STRUCK_LATCH).unwrap();
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    // Xyce 7.10, `Xyce latch.cir` with `.print tran precision=12 v(qb) v(q) v(fb)`.
+    let xyce_start = [("qb", 4.999997925822), ("q", 3.637040550404e-4)];
+    let xyce_end = [
+        ("qb", 5.110108178196e-1),
+        ("q", 4.999466602576),
+        ("fb", 4.897405720226),
+    ];
+
+    let op = engine
+        .run_dc_op(&netlist)
+        .expect("the latch's operating point converges");
+    for (node, xyce) in xyce_start {
+        let voltage = op.try_voltage_named(node).unwrap();
+        assert!(
+            (voltage - xyce).abs() <= 1e-6,
+            "DC V({node}) = {voltage} V, Xyce {xyce} V"
+        );
+    }
+
+    let result = engine
+        .run_tran(&netlist, 25.0e-9, 2.5e-9)
+        .expect("the transient crosses the strike");
+    assert_eq!(result.time.last().copied(), Some(25.0e-9));
+    for (node, xyce) in xyce_start {
+        let voltage = node_series(&result, node)[0];
+        assert!(
+            (voltage - xyce).abs() <= 1e-6,
+            "initial V({node}) = {voltage} V, Xyce {xyce} V"
+        );
+    }
+    // The strike flips the latch, and it holds Q high once the strike ends.
+    for (node, xyce) in xyce_end {
+        let voltage = *node_series(&result, node).last().unwrap();
+        assert!(
+            (voltage - xyce).abs() <= 1e-4,
+            "final V({node}) = {voltage} V, Xyce {xyce} V"
+        );
+    }
+}
+
 /// Run a Xyce regression deck in the Xyce dialect under its own options, at
 /// Xyce's default ceiling of a tenth of the window.
 fn run_xyce_regression_deck(
