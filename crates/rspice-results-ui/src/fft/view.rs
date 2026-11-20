@@ -159,8 +159,10 @@ fn spectrum_level_unit(
 /// twice and told the reader nothing about which of the two they had. They
 /// have different causes and different remedies.
 const NO_FREQUENCY_SPAN: &str = "No frequency span — the transform produced no positive bin";
-/// Every level in view is non-finite, so there is no ordinate to rule.
-const NO_FINITE_LEVEL: &str = "No finite level in view — every magnitude in this band is NaN";
+/// No level in view is a number, so there is no ordinate to rule.
+const NO_FINITE_LEVEL: &str = "No level to plot — the spectrum in this band is undefined";
+/// Every bin in view is exactly zero: the record itself is a flat zero.
+const ZERO_SIGNAL: &str = "The signal is zero — its spectrum has no level to plot";
 
 /// The strip subtitle: what was transformed, how, and at what length.
 ///
@@ -314,7 +316,11 @@ pub fn show(
         None => None,
     };
     let Some((lo, hi)) = extremes else {
-        well_hint(ui, NO_FINITE_LEVEL);
+        let end = model.frequency.partition_point(|&f| f <= x1).max(1);
+        let silent = model.magnitude_db[..end.min(model.magnitude_db.len())]
+            .iter()
+            .all(|level| *level == f64::NEG_INFINITY);
+        well_hint(ui, if silent { ZERO_SIGNAL } else { NO_FINITE_LEVEL });
         return out;
     };
     let (y_lo, y_hi) = view.y.unwrap_or(((lo - 8.0).max(-200.0), hi + 12.0));
@@ -725,6 +731,28 @@ mod tests {
         assert!(
             !no_level.iter().any(|label| label == NO_FREQUENCY_SPAN),
             "the ordinate's fault was reported as the abscissa's: {no_level:?}"
+        );
+
+        // A record that is zero throughout says so, not that its levels
+        // are undefined.
+        let silent = announced(
+            vec![
+                crate::fft::data::FftPoint {
+                    frequency: 1.0,
+                    magnitude: 0.0,
+                    phase: 0.0,
+                },
+                crate::fft::data::FftPoint {
+                    frequency: 2.0,
+                    magnitude: 0.0,
+                    phase: 0.0,
+                },
+            ],
+            "V(net1)",
+        );
+        assert!(
+            silent.iter().any(|label| label == ZERO_SIGNAL),
+            "{silent:?}"
         );
     }
 }

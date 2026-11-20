@@ -102,110 +102,76 @@ impl ResultOperationalState {
         match self {
             Self::Complete => "Complete",
             Self::NoProject => "No project",
-            Self::NoDataset => "No compatible dataset",
-            Self::Loading => "Loading metadata",
-            Self::Streaming => "Streaming",
+            Self::NoDataset => "No results yet",
+            Self::Loading => "Working",
+            Self::Streaming => "Running",
             Self::Partial => "Partial result",
-            Self::Stale => "Stale source",
-            Self::Failed => "Result operation failed",
-            Self::Corrupted => "Integrity failure",
-            Self::Unsupported => "Unsupported viewer contract",
+            Self::Stale => "Out of date",
+            Self::Failed => "Failed",
+            Self::Corrupted => "Damaged result",
+            Self::Unsupported => "Not shown on this sheet",
             Self::Offline => "Offline",
-            Self::StorageDenied => "Storage unavailable",
-            Self::LowMemory => "Memory pressure",
-            Self::RendererLoss => "Renderer unavailable",
-            Self::InterruptedOperation => "Operation interrupted",
+            Self::StorageDenied => "Cannot store",
+            Self::LowMemory => "Low memory",
+            Self::RendererLoss => "Display lost",
+            Self::InterruptedOperation => "Interrupted",
             Self::Recovered => "Recovered",
         }
     }
 
     pub const fn message(self) -> &'static str {
         match self {
-            Self::Complete => {
-                "All declared source scopes are available and exact-data consumers resolve normally."
-            }
-            Self::NoProject => "No project owns a result document or dataset binding.",
-            Self::NoDataset => {
-                "The viewer document exists but has no compatible immutable dataset binding."
-            }
-            Self::Loading => {
-                "Manifest and schema metadata are loading; numeric access has not been claimed."
-            }
+            Self::Complete => "Every result of this run is here.",
+            Self::NoProject => "No project is open.",
+            Self::NoDataset => "This sheet has no results to show.",
+            Self::Loading => "Results appear here when they are ready.",
             Self::Streaming => {
-                "Verified chunks are arriving progressively; unavailable ranges remain explicit."
+                "The simulation is still running; the sheet shows the results so far."
             }
             Self::Partial => {
-                "Only the disclosed verified scope is available; absent scope is not inferred or interpolated."
+                "Only part of this run was saved; the rest is neither shown nor estimated."
             }
-            Self::Stale => "A dependency changed after this immutable result revision was created.",
+            Self::Stale => "The design changed after this run.",
             Self::Failed => {
-                "The requested viewer operation failed without replacing the prior valid state."
+                "The run or the last action on this sheet failed; what the sheet showed before is kept."
             }
             Self::Corrupted => {
-                "Dataset bytes or structure failed verification and numeric access is quarantined."
+                "This result failed its check when it was read, so none of its values are shown."
             }
-            Self::Unsupported => {
-                "The required analysis, producer, transform, or representation is unavailable."
-            }
+            Self::Unsupported => "This sheet cannot show the selected analysis.",
             Self::Offline => {
-                "Remote-only source chunks or services are unavailable; cached verified scope remains identified."
+                "Part of this result is stored online and cannot be reached; what is stored here is shown."
             }
-            Self::StorageDenied => {
-                "Quota, permission, or durable storage policy blocked the requested operation."
-            }
+            Self::StorageDenied => "There is no room, or no permission, to store this.",
             Self::LowMemory => {
-                "Rendering detail was reduced under policy; exact engineering queries remain source-backed."
+                "Plots are drawn with less detail to save memory; values you read and export are exact."
             }
-            Self::RendererLoss => {
-                "The visual renderer was lost; source data and exact structured access remain intact."
-            }
-            Self::InterruptedOperation => {
-                "An import, comparison, derivation, or publication operation stopped before commit."
-            }
-            Self::Recovered => {
-                "The viewer was reconstructed from verified document and dataset state after a recorded failure."
-            }
+            Self::RendererLoss => "The graphics display stopped; the results are safe.",
+            Self::InterruptedOperation => "The run or operation stopped before it finished.",
+            Self::Recovered => "This sheet was rebuilt from the saved project after a failure.",
         }
     }
 
     pub const fn recovery(self) -> &'static str {
         match self {
-            Self::Complete => "No recovery is required.",
-            Self::NoProject => {
-                "Open or create a project, then return to the preserved viewer route."
-            }
-            Self::NoDataset => {
-                "Bind a compatible dataset or choose another viewer without fabricating values."
-            }
-            Self::Loading => "Cancel or retry while retaining the document and source identities.",
-            Self::Streaming => "Pause, cancel, or resume from the last verified chunk.",
-            Self::Partial => "Continue acquisition or inspect the exact available-scope table.",
-            Self::Stale => {
-                "Keep historical review, compare revisions, or run again from a reviewed current plan."
-            }
-            Self::Failed => "Inspect diagnostics and retry the exact failed boundary.",
-            Self::Corrupted => {
-                "Verify another retained copy, restore from a trusted artifact, or keep quarantined diagnostics."
-            }
-            Self::Unsupported => {
-                "Install or select an exact compatible capability; no fallback viewer is substituted."
-            }
-            Self::Offline => {
-                "Reconnect or continue with the exact cached scope without implying completeness."
-            }
+            Self::Complete => "Nothing to do.",
+            Self::NoProject => "Open or create a project to see its results.",
+            Self::NoDataset => "Run a simulation, or choose another sheet.",
+            Self::Loading => "The sheet updates by itself.",
+            Self::Streaming => "The sheet updates as results arrive.",
+            Self::Partial => "Run again for the whole result, or read the part that is here.",
+            Self::Stale => "Read it as a past result, compare it with a new run, or run again.",
+            Self::Failed => "Read the message, fix the cause and try again.",
+            Self::Corrupted => "Open another saved copy, or run the simulation again.",
+            Self::Unsupported => "Choose another sheet, or an analysis this sheet shows.",
+            Self::Offline => "Reconnect to see the rest.",
             Self::StorageDenied => {
-                "Choose an authorized destination, free scoped storage, or cancel without source mutation."
+                "Choose another place, free some space, or cancel; the result itself is unchanged."
             }
-            Self::LowMemory => {
-                "Release cached views, reduce visible scope, or retry after pressure clears."
-            }
-            Self::RendererLoss => {
-                "Restart the renderer and restore viewport, selection, and presentation from the document revision."
-            }
-            Self::InterruptedOperation => {
-                "Resume from the retained checkpoint or remove the incomplete candidate."
-            }
-            Self::Recovered => "Review the recovery receipt before continuing or publishing.",
+            Self::LowMemory => "Close other sheets or narrow the view to draw in full detail.",
+            Self::RendererLoss => "Restart the display; the view comes back as it was.",
+            Self::InterruptedOperation => "Run it again, or keep what it produced.",
+            Self::Recovered => "Check it before you continue or publish.",
         }
     }
 }

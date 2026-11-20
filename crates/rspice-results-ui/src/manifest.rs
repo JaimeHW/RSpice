@@ -116,7 +116,7 @@ pub fn show(ui: &mut Ui, manifest: Option<&ManifestViewModel>) {
     ui.add_space(tokens::SP_3);
     ui.label(
         egui::RichText::new(format!(
-            "Bound to dataset content digest {} · this view does not execute or recompute analyses.",
+            "Fingerprint {} · shown as saved; nothing is run again here.",
             manifest.dataset_digest
         ))
         .font(theme::mono(tokens::FS_0, FontWeight::Regular))

@@ -399,21 +399,26 @@ pub(crate) fn classify_viewer(
 
     match run.lifecycle {
         SimulationRunLifecycle::Preparing => {
-            return ResultOperationalStatus::canonical(ResultOperationalState::Loading, true);
+            return ResultOperationalStatus {
+                detail: Some("The run is being prepared.".to_owned()),
+                ..ResultOperationalStatus::canonical(ResultOperationalState::Loading, true)
+            };
         }
         SimulationRunLifecycle::Running => {
-            return ResultOperationalStatus::canonical(
-                if run
-                    .analyses
-                    .iter()
-                    .any(|analysis| analysis.is_live_partial())
-                {
-                    ResultOperationalState::Streaming
-                } else {
-                    ResultOperationalState::Loading
-                },
-                !run_has_data,
-            );
+            if run
+                .analyses
+                .iter()
+                .any(|analysis| analysis.is_live_partial())
+            {
+                return ResultOperationalStatus::canonical(
+                    ResultOperationalState::Streaming,
+                    !run_has_data,
+                );
+            }
+            return ResultOperationalStatus {
+                detail: Some("The simulation is running.".to_owned()),
+                ..ResultOperationalStatus::canonical(ResultOperationalState::Loading, !run_has_data)
+            };
         }
         SimulationRunLifecycle::Cancelling => {
             return ResultOperationalStatus::canonical(
