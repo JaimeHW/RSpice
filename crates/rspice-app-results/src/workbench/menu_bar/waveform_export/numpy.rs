@@ -34,7 +34,7 @@ use super::{
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use crate::workbench::workflows::result_import_workflow::waveform_import_limits;
+use crate::workbench::workflows::result_import_workflow::exported_waveform_limits;
 
 use rspice_formats::numpy::result::{NumpyExport, encode_npy, encode_npz, prepare_numpy};
 
@@ -132,7 +132,7 @@ pub(super) fn export_numpy(
                     ALL_TRACES_HIDDEN_MESSAGE.to_owned()
                 })
             } else {
-                prepare_numpy(analysis, &waveforms, waveform_import_limits())
+                prepare_numpy(analysis, &waveforms, exported_waveform_limits())
                     .map_err(|error| error.to_string())
             }
         }
@@ -152,7 +152,6 @@ pub(super) fn export_numpy(
         NumpyKind::Archive => encode_npz(&prepared),
     }
     .map_err(|error| error.to_string())
-    .and_then(super::admit_result_export_bytes)
     {
         Ok(bytes) => bytes,
         Err(error) => {
@@ -263,7 +262,7 @@ mod tests {
     ) -> Result<NumpyExport, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_numpy(&analysis, &borrowed, waveform_import_limits())
+        prepare_numpy(&analysis, &borrowed, exported_waveform_limits())
             .map_err(|error| error.to_string())
     }
 

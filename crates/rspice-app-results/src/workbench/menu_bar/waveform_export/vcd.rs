@@ -39,12 +39,7 @@ pub(super) fn export_vcd(
     displayed: &ResolvedResultView,
 ) {
     let prepared = match displayed.primary_analysis(state.results_reads()) {
-        Some(analysis) => encode_result_vcd(analysis)
-            .map_err(|error| error.to_string())
-            .and_then(|mut prepared| {
-                prepared.bytes = super::admit_result_export_bytes(prepared.bytes)?;
-                Ok(prepared)
-            }),
+        Some(analysis) => encode_result_vcd(analysis).map_err(|error| error.to_string()),
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
     };
     let prepared = match prepared {

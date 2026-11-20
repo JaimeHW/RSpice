@@ -48,6 +48,89 @@ pub struct ResultImportDialogState {
     pub plots: Option<std::sync::Arc<ResultImportPlots>>,
     pub selected_signals: Vec<bool>,
     pub validation_error: Option<String>,
+    /// The work running for the draft, which the dialog shows with its
+    /// progress and Cancel in place of the review pages.
+    pub job: Option<ResultImportJob>,
+    /// What the review pages show of the parsed samples, read by the job
+    /// that parsed them, so no frame of the dialog reads a sample.
+    pub sample_facts: std::sync::Arc<ResultImportSampleFacts>,
+}
+
+/// The work an import runs off the UI thread.
+#[derive(Debug, Clone)]
+pub enum ResultImportJob {
+    /// Reading and parsing the source, and keeping its samples.
+    Reading(
+        crate::workbench::results_job::ResultsJob<
+            crate::workbench::workflows::result_import_workflow::StagedResultImport,
+        >,
+    ),
+    /// Building and checking the reviewed analyses before the run is added.
+    Committing(
+        crate::workbench::results_job::ResultsJob<
+            crate::workbench::workflows::result_import_workflow::KeptResultImport,
+        >,
+    ),
+}
+
+impl ResultImportJob {
+    /// What a frame shows of the job.
+    #[must_use]
+    pub fn state(&self) -> crate::workbench::results_job::JobState {
+        match self {
+            Self::Reading(job) => job.state(),
+            Self::Committing(job) => job.state(),
+        }
+    }
+
+    /// Ask the job to stop; what it kept is deleted as it ends.
+    pub fn cancel(&self) {
+        match self {
+            Self::Reading(job) => job.cancel(),
+            Self::Committing(job) => job.cancel(),
+        }
+    }
+}
+
+/// Rows of each parsed signal the review preview shows.
+pub const RESULT_IMPORT_PREVIEW_ROWS: usize = 8;
+
+/// What the review pages need of the parsed samples, read once.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ResultImportSampleFacts {
+    /// Per parsed signal: whether its coordinate is non-empty, finite,
+    /// positive and strictly ascending, as a frequency grid must be.
+    pub frequency_grid: Vec<bool>,
+    /// Per parsed signal: its first rows as (coordinate, sample), the sample
+    /// `None` where the source marked it unavailable.
+    pub first_rows: Vec<Vec<(f64, Option<f64>)>>,
+}
+
+impl ResultImportSampleFacts {
+    /// The facts of `waveforms`, read from their samples.
+    #[must_use]
+    pub fn read(waveforms: &[crate::state::RetainedTrace]) -> Self {
+        Self {
+            frequency_grid: waveforms
+                .iter()
+                .map(|waveform| {
+                    let x = &waveform.x;
+                    !x.is_empty()
+                        && x.iter()
+                            .all(|frequency| frequency.is_finite() && *frequency > 0.0)
+                        && x.windows(2).all(|pair| pair[0] < pair[1])
+                })
+                .collect(),
+            first_rows: waveforms
+                .iter()
+                .map(|waveform| {
+                    (0..waveform.x.len().min(RESULT_IMPORT_PREVIEW_ROWS))
+                        .map(|row| (waveform.x[row], waveform.sample(row)))
+                        .collect()
+                })
+                .collect(),
+        }
+    }
 }
 
 /// The analyses of a source that holds more than one.
@@ -97,6 +180,8 @@ impl Default for ResultImportDialogState {
             plots: None,
             selected_signals: Vec::new(),
             validation_error: None,
+            job: None,
+            sample_facts: std::sync::Arc::default(),
         }
     }
 }

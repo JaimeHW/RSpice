@@ -47,7 +47,7 @@ impl BrowserTextImportKind {
         match self {
             Self::ShortcutProfile => crate::io::file_exchange::MAX_SHORTCUT_PROFILE_BYTES,
             Self::EngineeringTableView => 512 * 1024,
-            Self::ResultDataset => crate::io::file_exchange::MAX_RESULT_DATASET_BYTES,
+            Self::ResultDataset => crate::io::file_exchange::BROWSER_PAGE_BYTES,
             Self::SymbolDefinition => crate::io::file_exchange::MAX_SYMBOL_DEFINITION_IMPORT_BYTES,
             Self::Netlist | Self::Project | Self::Schematic | Self::VerilogA => {
                 crate::io::project_io::BROWSER_FILE_BYTES

@@ -21,7 +21,7 @@ use super::{
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use crate::workbench::workflows::result_import_workflow::waveform_import_limits;
+use crate::workbench::workflows::result_import_workflow::exported_waveform_limits;
 
 use rspice_core::io::RawFormat;
 use rspice_formats::spice_raw::result::{RawExport, encode_result_raw};
@@ -99,13 +99,9 @@ pub(super) fn export_raw(
                     &waveforms,
                     &lanes,
                     format,
-                    waveform_import_limits(),
+                    exported_waveform_limits(),
                 )
                 .map_err(|error| error.to_string())
-                .and_then(|mut export| {
-                    export.bytes = super::admit_result_export_bytes(export.bytes)?;
-                    Ok(export)
-                })
             }
         }
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),

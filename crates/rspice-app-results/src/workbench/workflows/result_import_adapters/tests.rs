@@ -47,6 +47,9 @@ fn native_bundle(format: ResultImportFormat) -> Vec<u8> {
     ])
 }
 
+/// A size no small test source can hold: a declaration of it is damage, as a bomb's is.
+const DECLARED_PAST_THE_SOURCE: u64 = 64 * 1024 * 1024;
+
 #[test]
 fn native_result_and_dataset_bundles_verify_digest_and_complex_samples() {
     for format in [
@@ -507,6 +510,32 @@ fn vcd_imports_initialized_digital_events() {
     assert_basic(parsed, ResultImportFormat::Vcd);
 }
 
+/// A dump of more ticks than the million rows an import once stopped at
+/// imports whole: the size of real data is never a reason to refuse it.
+#[test]
+fn a_vcd_of_more_than_a_million_ticks_imports_every_tick() {
+    const TICKS: usize = 1_000_003;
+    let mut vcd = String::from(
+        "$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! clk $end
+         $upscope $end
+$enddefinitions $end
+",
+    );
+    for tick in 0..TICKS {
+        vcd.push_str(&format!("#{tick}
+{}!
+", tick % 2));
+    }
+    let parsed = parse_vcd(vcd.as_bytes(), ResultImportFormat::Vcd).expect("a long dump imports");
+    assert_eq!(parsed.sample_count, TICKS);
+    let clock = &parsed.waveforms[0];
+    assert_eq!(clock.x.len(), TICKS);
+    assert_eq!(clock.x.read_range(TICKS - 1..TICKS).unwrap()[0], (TICKS - 1) as f64 * 1.0e-9);
+    assert_eq!(clock.y.read_range(TICKS - 2..TICKS).unwrap().as_ref(), &[1.0, 0.0]);
+}
+
 /// A vector no `f64` sample can hold used to be refused outright, taking the
 /// rest of the file with it. It imports: the word is retained whole as a
 /// declared bus, and the grid — which is where the f64 limit lives — carries
@@ -602,7 +631,7 @@ fn fst_with_packed_signal(pack_type: u8, expanded_size: u64) -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(&0_u64.to_be_bytes()); // start
     data.extend_from_slice(&1_u64.to_be_bytes()); // end
-    data.extend_from_slice(&MAX_RESULT_DATASET_BYTES.to_be_bytes());
+    data.extend_from_slice(&1_024_u64.to_be_bytes()); // an allocation the source can hold
     data.extend([1, 1, 1, b'0']); // direct one-byte frame, one handle
     data.push(1); // value-change handle count
     data.push(pack_type);
@@ -649,7 +678,7 @@ fn fst_preflight_rejects_huge_fixed_allocation_declarations() {
     ))
     .unwrap();
     let offset_table_length = data.2 - 24 - time_compressed - 8;
-    let too_large = MAX_RESULT_DATASET_BYTES + 1;
+    let too_large = DECLARED_PAST_THE_SOURCE + 1;
 
     for (label, offset) in [
         ("header signal count", 1 + 8 + 48),
@@ -679,7 +708,7 @@ fn fst_preflight_rejects_huge_frame_and_signal_count_varints() {
         .into_iter()
         .find(|block| matches!(block.0, 1 | 5 | 8))
         .unwrap();
-    let oversized = test_uleb(MAX_RESULT_DATASET_BYTES + 1);
+    let oversized = test_uleb(DECLARED_PAST_THE_SOURCE + 1);
     for (label, offset) in [
         ("initial-frame expanded", data.1 + 33),
         ("initial-frame compressed", data.1 + 34),
@@ -757,7 +786,7 @@ fn fst_preflight_rejects_compressed_geometry_and_duo_intermediate_bombs() {
 
     let mut duo = Vec::new();
     duo.extend_from_slice(&1_u64.to_be_bytes());
-    duo.extend(test_uleb(MAX_RESULT_DATASET_BYTES + 1));
+    duo.extend(test_uleb(DECLARED_PAST_THE_SOURCE + 1));
     let duo = fst_test_block(7, &duo);
     let error = preflight_fst(&duo, ResultImportFormat::Fst).expect_err("LZ4 duo bomb");
     assert!(error.contains("LZ4-duo"), "{error}");
@@ -766,7 +795,7 @@ fn fst_preflight_rejects_compressed_geometry_and_duo_intermediate_bombs() {
 #[test]
 fn fst_preflight_bounds_lz4_fastlz_and_zlib_signal_expansion() {
     for (name, pack_type) in [("LZ4", b'4'), ("FastLZ", b'F'), ("zlib", b'Z')] {
-        let bytes = fst_with_packed_signal(pack_type, MAX_RESULT_DATASET_BYTES + 1);
+        let bytes = fst_with_packed_signal(pack_type, DECLARED_PAST_THE_SOURCE + 1);
         let error = preflight_fst(&bytes, ResultImportFormat::Fst)
             .expect_err("packed FST signal bomb must reject");
         assert!(error.contains(name), "{name}: {error}");

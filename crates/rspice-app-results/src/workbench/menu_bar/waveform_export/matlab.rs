@@ -43,7 +43,7 @@ use super::{
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use crate::workbench::workflows::result_import_workflow::waveform_import_limits;
+use crate::workbench::workflows::result_import_workflow::exported_waveform_limits;
 use writer::result::{MatlabExport, prepare_matlab};
 use writer::write_mat_v5;
 
@@ -75,7 +75,6 @@ fn event_only_refusal(analysis: &crate::state::AnalysisResult) -> Option<String>
 pub(super) fn encode_matlab(export: &MatlabExport) -> Result<Vec<u8>, String> {
     write_mat_v5(&export.header_text, &export.variables)
         .map_err(|error| format!("the MATLAB v5 file could not be written: {error}"))
-        .and_then(super::admit_result_export_bytes)
 }
 
 pub(super) fn export_matlab(
@@ -101,7 +100,7 @@ pub(super) fn export_matlab(
                     }
                 }))
             } else {
-                prepare_matlab(analysis, &waveforms, waveform_import_limits())
+                prepare_matlab(analysis, &waveforms, exported_waveform_limits())
                     .map_err(|error| error.to_string())
             }
         }
@@ -207,7 +206,7 @@ mod tests {
     ) -> Result<MatlabExport, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_matlab(&analysis, &borrowed, waveform_import_limits())
+        prepare_matlab(&analysis, &borrowed, exported_waveform_limits())
             .map_err(|error| error.to_string())
     }
 
@@ -475,6 +474,9 @@ mod tests {
             ("V(out)", "V_out_"),
             ("I(R1)", "I_R1_"),
             ("1st", "x1st"),
+            ("end", "xend"),
+            ("function", "xfunction"),
+            ("End", "End"),
             ("_leading", "x_leading"),
             ("with space", "with_space"),
             ("v.out", "v_out"),

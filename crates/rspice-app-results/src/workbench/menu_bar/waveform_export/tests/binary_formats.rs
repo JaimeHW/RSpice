@@ -2,9 +2,8 @@
 //! HDF5 and MATLAB files.
 //!
 //! Each picker index reaches its own encoder and writes bytes that reopen
-//! through the result importer. A result the container cannot carry, or one
-//! whose file would exceed the re-import budget, is refused before a
-//! destination is chosen, so nothing is written.
+//! through the result importer. A result the container cannot carry is
+//! refused before a destination is chosen, so nothing is written.
 
 use super::*;
 
@@ -159,10 +158,12 @@ fn native_bundle_preserves_saved_output_alias_units_in_real_and_complex_samples(
     }
 }
 
+/// A result wider than the 64 MiB budget exports once refused is written
+/// whole by every binary container, and reads back with every signal and
+/// every sample.
 #[test]
-fn binary_waveform_exports_enforce_reimport_budget_before_destination_selection() {
-    // Shared source arrays keep the fixture small, while a clone-per-column
-    // projection would allocate more than the application's 64 MiB admission limit.
+fn binary_waveform_exports_write_a_result_past_the_former_size_budget() {
+    // 840 signals of 10,000 samples are 8.4 million values, 67 MB of samples.
     let prototype = waveform(
         "prototype",
         (0..10_000).map(f64::from).collect(),
@@ -193,64 +194,22 @@ fn binary_waveform_exports_enforce_reimport_budget_before_destination_selection(
             &io,
             &DatasetExportChoice::default(),
         );
-        assert!(
-            io.dialog_titles.borrow().is_empty(),
-            "preference {preference}"
+        let files = io.byte_files.borrow();
+        assert_eq!(
+            files.len(),
+            1,
+            "preference {preference}: {}",
+            last_log_message(&state)
         );
-        assert!(io.byte_files.borrow().is_empty());
-        let message = refusal(&state);
-        assert!(
-            message.contains("retains 8410000 numeric values") && message.contains("8388608"),
-            "{message}"
-        );
-    }
-}
-
-#[test]
-fn binary_waveform_exports_count_container_bytes_at_the_sample_budget_boundary() {
-    // Exactly 64 MiB of f64 samples fits the admission budget, but every
-    // supported container adds headers that put its file over the byte limit.
-    let rows = 524_288;
-    let prototype = waveform(
-        "prototype",
-        (0..rows).map(f64::from).collect(),
-        vec![1.0; rows as usize],
-    );
-    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "Byte boundary").with_waveforms(
-        (0..15)
-            .map(|index| {
-                let mut trace = prototype.clone();
-                trace.data.name = format!("signal{index}");
-                trace
-            })
-            .collect(),
-    );
-    for preference in [6, 7, 8, 9] {
-        let mut state = state_with_typed_result(analysis.clone());
-        state
-            .model
-            .preferences
-            .set_choice(
-                crate::workbench::ChoicePreference::EngineeringExport,
-                preference,
-            )
-            .unwrap();
-        let io = MockExportWorkflowIo::default();
-        action_export_dataset_with_io(
-            &mut state.results_parts(),
-            &io,
-            &DatasetExportChoice::default(),
-        );
-        assert!(
-            io.dialog_titles.borrow().is_empty(),
-            "preference {preference}"
-        );
-        assert!(io.byte_files.borrow().is_empty());
-        let message = last_log_message(&state);
-        assert!(
-            message.contains("more than the 64 MiB") && message.contains("67108864 bytes"),
-            "{message}"
-        );
+        let reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+            files[0].0.to_str().unwrap(),
+            &files[0].1,
+        )
+        .unwrap_or_else(|error| panic!("preference {preference}: {error}"));
+        assert_eq!(reopened.waveforms.len(), 840, "preference {preference}");
+        assert_eq!(reopened.sample_count, 10_000, "preference {preference}");
+        assert_eq!(reopened.waveforms[839].x, prototype.x);
+        assert_eq!(reopened.waveforms[839].y, prototype.y);
     }
 }
 

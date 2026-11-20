@@ -421,6 +421,8 @@ pub struct MockExportWorkflowIo {
     pub saved_paths_are_reopenable: bool,
     /// Why the save dialog could not open, when it cannot.
     pub dialog_error: Option<String>,
+    /// The name the reader types in the save dialog; its default name when `None`.
+    pub typed_name: Option<PathBuf>,
 }
 
 impl Default for MockExportWorkflowIo {
@@ -433,6 +435,7 @@ impl Default for MockExportWorkflowIo {
             dialog_titles: RefCell::default(),
             saved_paths_are_reopenable: true,
             dialog_error: None,
+            typed_name: None,
         }
     }
 }
@@ -445,7 +448,11 @@ impl ExportWorkflowIo for MockExportWorkflowIo {
         if let Some(error) = &self.dialog_error {
             return Err(error.clone());
         }
-        Ok(Some(PathBuf::from(config.default_name)))
+        Ok(Some(
+            self.typed_name
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(config.default_name)),
+        ))
     }
 
     fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {

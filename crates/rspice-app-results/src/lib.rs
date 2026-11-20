@@ -42,6 +42,7 @@ pub mod workbench {
     //! `crate::workbench::`.
 
     pub(crate) use documents::result_document::ResultViewer;
+    pub(crate) use rspice_app_services::workbench::results_job;
     pub(crate) use rspice_app_state::workbench::preferences;
     pub(crate) use rspice_app_state::workbench::preferences::{
         ChoicePreference, ComplexNumberDisplay, EngineeringExportFormat, ScalarPreference,

@@ -974,3 +974,5 @@ fn a_reset_snapshot_measures_only_work_that_follows_it() {
 mod contrast;
 /// The workspace around the sheet: Latest tracking, the toolbar and the docks.
 mod idle_workspace;
+/// The import, export, pack and verify jobs: flat frames while they work.
+mod results_jobs;

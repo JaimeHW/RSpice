@@ -61,6 +61,50 @@ fn bits(values: &[f64]) -> Vec<u64> {
     values.iter().map(|value| value.to_bits()).collect()
 }
 
+/// A rawfile's variables keep the quantity they declare through an import and an export,
+/// however they are named: a `voltage` named `end` is written as a voltage again.
+#[test]
+fn a_rawfile_keeps_the_types_its_variables_declare() {
+    let source = b"Title: odd\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 5\n\
+No. Points: 2\nVariables:\n\t0\ttime\ttime\n\t1\tv_a_\tvoltage\n\t2\t#x\tvoltage\n\
+\t3\t1st\tcurrent\n\t4\tend\tvoltage\nValues:\n0\t0\t1\t2\t3\t4\n1\t1e-9\t5\t6\t7\t8\n";
+    let parsed = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+        "odd.raw", source,
+    )
+    .expect("the rawfile imports");
+    let units: Vec<_> = parsed
+        .waveforms
+        .iter()
+        .map(|waveform| waveform.unit.as_deref())
+        .collect();
+    assert_eq!(units, [Some("V"), Some("V"), Some("A"), Some("V")]);
+    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "odd")
+        .with_waveforms(parsed.waveforms.clone());
+    let waveforms: Vec<_> = analysis.waveforms.iter().collect();
+    for format in [
+        rspice_core::io::RawFormat::Ascii,
+        rspice_core::io::RawFormat::Binary,
+    ] {
+        let export = rspice_formats::spice_raw::result::encode_result_raw(
+            &analysis,
+            &waveforms,
+            &|_| false,
+            format,
+            crate::workbench::workflows::result_import_workflow::exported_waveform_limits(),
+        )
+        .expect("the analysis writes as a rawfile");
+        let header = String::from_utf8_lossy(&export.bytes);
+        for declared in [
+            "\t1\tv_a_\tvoltage",
+            "\t2\t#x\tvoltage",
+            "\t3\t1st\tcurrent",
+            "\t4\tend\tvoltage",
+        ] {
+            assert!(header.contains(declared), "{format:?}: {header}");
+        }
+    }
+}
+
 /// A transient exported as a rawfile, binary or ASCII, reopens in RSpice with
 /// every retained sample bit for bit, under its own name and unit.
 #[test]

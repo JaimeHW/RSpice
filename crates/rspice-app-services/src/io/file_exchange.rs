@@ -66,10 +66,9 @@ use egui::{Context, Id};
 mod binary;
 pub use binary::{open_binary_file, take_opened_binary};
 
-/// Largest result dataset an import reads. The result importers bound their
-/// decoding by it, and the browser picker refuses a larger file before it
-/// reads one.
-pub const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
+/// The largest file the browser page can hold to read: the whole of a wasm32 address space. A
+/// result dataset is read whatever its size; this is the page's own reach.
+pub const BROWSER_PAGE_BYTES: u64 = u32::MAX as u64;
 
 /// Maximum UTF-8 source accepted by the symbol-definition importer.
 ///

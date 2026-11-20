@@ -1540,11 +1540,83 @@ fn engineering_export_preference_dispatches_compatible_touchstone() {
     assert_eq!(io.dialog_titles.borrow().as_slice(), &["Export Touchstone"]);
     let text_files = io.text_files.borrow();
     assert_eq!(text_files.len(), 1);
-    assert_eq!(text_files[0].0, PathBuf::from("waveforms.snp"));
+    // Ports of different references need version 2, which a `.s2p` may hold.
+    assert_eq!(text_files[0].0, PathBuf::from("waveforms.s2p"));
     assert!(text_files[0].1.contains("[Version] 2.0"));
     assert!(text_files[0].1.contains("[Reference] 5e1 7.5e1"));
     assert!(text_files[0].1.contains("# Hz S RI R 50"));
     assert!(text_files[0].1.contains("1e6"));
+}
+
+/// A Touchstone export keeps the name the reader typed: `amp.s2p` stays `amp.s2p` and holds
+/// version 1, which every reader of that name expects, and `amp.ts` holds version 2. A name of
+/// neither kind gains the network's own extension.
+#[test]
+fn a_touchstone_export_keeps_the_name_the_reader_typed() {
+    let frequency = vec![1.0e6, 2.0e6];
+    let waveforms = ["S11", "S12", "S21", "S22"]
+        .into_iter()
+        .map(|name| {
+            complex_waveform(
+                &format!("|{name}|"),
+                name,
+                frequency.clone(),
+                vec![0.5, 0.5],
+                vec![0.3, 0.4],
+                vec![0.4, 0.3],
+            )
+        })
+        .collect::<Vec<_>>();
+    let network = AnalysisResult::new(1, AnalysisType::SParameter, "S-parameters")
+        .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+            noise_reference_temperature_kelvin: None,
+            reference_impedances_ohm: vec![50.0, 50.0],
+        })
+        .with_waveforms(waveforms);
+    for (typed, written, version_two) in [
+        ("amp.s2p", "amp.s2p", false),
+        ("AMP.S2P", "AMP.S2P", false),
+        ("amp.ts", "amp.ts", true),
+        ("amp", "amp.s2p", false),
+        ("amp.s4p", "amp.s2p", false),
+    ] {
+        let mut run = SimulationRun::new(7);
+        run.add_analysis(network.clone());
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Smith);
+        state
+            .model
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 1)
+            .unwrap();
+        let io = MockExportWorkflowIo {
+            typed_name: Some(PathBuf::from(typed)),
+            ..MockExportWorkflowIo::default()
+        };
+        action_export_dataset_with_io(
+            &mut state.results_parts(),
+            &io,
+            &DatasetExportChoice::default(),
+        );
+        let text_files = io.text_files.borrow();
+        assert_eq!(text_files.len(), 1, "{typed}");
+        let (path, text) = &text_files[0];
+        assert_eq!(path, &PathBuf::from(written), "{typed}");
+        assert_eq!(
+            text.contains("[Version] 2.0"),
+            version_two,
+            "{typed}: {text}"
+        );
+        let reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+            written,
+            text.as_bytes(),
+        )
+        .unwrap_or_else(|error| panic!("{typed}: the export reads back: {error}"));
+        assert_eq!(reopened.analysis_type, AnalysisType::SParameter);
+    }
 }
 
 #[test]

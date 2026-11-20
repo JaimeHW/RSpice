@@ -7,8 +7,18 @@
 use super::*;
 use rspice_results::result_import::waveforms::ImportedSignal;
 
-const MAX_ARCHIVE_MEMBERS: usize = 1_024;
-const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;
+/// The fewest bytes an archive member takes: its local header (30) and its directory entry (46).
+const LEAST_ARCHIVE_MEMBER_BYTES: usize = 76;
+
+/// The most members the archive being read can hold.
+fn archive_members() -> usize {
+    (source_capacity() / MOST_VALUES_PER_SOURCE_BYTE / LEAST_ARCHIVE_MEMBER_BYTES).max(1)
+}
+
+/// The most bytes the archive being read can expand to.
+fn archive_expanded_bytes() -> u64 {
+    u64::try_from(source_capacity()).unwrap_or(u64::MAX)
+}
 
 fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
     format!("{} import: {detail}", format.canonical_id())
@@ -67,6 +77,7 @@ pub(super) fn parse_native_bundle(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     use rspice_formats::native_bundle::{
         NativeBundleKind, NativeBundleReadLimits, decode_native_bundle,
     };
@@ -80,12 +91,12 @@ pub(super) fn parse_native_bundle(
         bytes,
         kind,
         NativeBundleReadLimits {
-            max_members: MAX_ARCHIVE_MEMBERS,
-            max_expanded_bytes: MAX_ARCHIVE_EXPANDED_BYTES,
-            max_member_bytes: MAX_RESULT_DATASET_BYTES,
-            max_rows: MAX_RESULT_ROWS,
-            max_columns: MAX_RESULT_COLUMNS,
-            max_numeric_values: MAX_RESULT_VALUES,
+            max_members: archive_members(),
+            max_expanded_bytes: archive_expanded_bytes(),
+            max_member_bytes: archive_expanded_bytes(),
+            max_rows: source_capacity(),
+            max_columns: source_capacity(),
+            max_numeric_values: source_capacity(),
         },
     )
     .map_err(|error| adapter_error(format, error))?;
@@ -99,6 +110,7 @@ pub(super) fn parse_hdf5(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     let decoded = rspice_formats::hdf5::decode_hdf5(bytes, hdf5_limits(), format.canonical_id())
         .map_err(|error| error.to_string())?;
     finish_numeric_dataset(format, decoded)
@@ -108,6 +120,7 @@ pub(super) fn parse_matlab_v73(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     let decoded =
         rspice_formats::hdf5::decode_matlab_v73(bytes, hdf5_limits(), format.canonical_id())
             .map_err(|error| error.to_string())?;
@@ -116,8 +129,8 @@ pub(super) fn parse_matlab_v73(
 
 fn hdf5_limits() -> rspice_formats::hdf5::Hdf5Limits<'static> {
     rspice_formats::hdf5::Hdf5Limits {
-        max_columns: MAX_RESULT_COLUMNS,
-        max_values: MAX_RESULT_VALUES,
+        max_columns: source_capacity(),
+        max_values: source_capacity(),
         coordinate_names: &RESULT_COORDINATE_NAMES,
     }
 }
@@ -129,6 +142,7 @@ pub(super) fn parse_arrow_ipc(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     let table =
         rspice_formats::columnar::decode_arrow_ipc(bytes, columnar_limits(), format.canonical_id())
             .map_err(|error| error.to_string())?;
@@ -139,6 +153,7 @@ pub(super) fn parse_parquet(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     let table =
         rspice_formats::columnar::decode_parquet(bytes, columnar_limits(), format.canonical_id())
             .map_err(|error| error.to_string())?;
@@ -147,9 +162,9 @@ pub(super) fn parse_parquet(
 
 fn columnar_limits() -> rspice_formats::columnar::ColumnarLimits {
     rspice_formats::columnar::ColumnarLimits {
-        max_columns: MAX_RESULT_COLUMNS,
-        max_rows: MAX_RESULT_ROWS,
-        max_values: MAX_RESULT_VALUES,
+        max_columns: source_capacity(),
+        max_rows: source_capacity(),
+        max_values: source_capacity(),
     }
 }
 
@@ -174,13 +189,14 @@ pub(super) fn parse_npy(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     let array =
-        rspice_formats::numpy::reader::decode_npy(bytes, MAX_RESULT_VALUES, format.canonical_id())
+        rspice_formats::numpy::reader::decode_npy(bytes, source_capacity(), format.canonical_id())
             .map_err(|error| error.to_string())?;
     let decoded = rspice_formats::numpy::reader::npy_matrix_to_dataset(
         array,
-        MAX_RESULT_ROWS,
-        MAX_RESULT_COLUMNS,
+        source_capacity(),
+        source_capacity(),
         format.canonical_id(),
     )
     .map_err(|error| error.to_string())?;
@@ -191,12 +207,13 @@ pub(super) fn parse_npz(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     let decoded = rspice_formats::numpy::archive::decode_npz(
         bytes,
         rspice_formats::numpy::archive::NpzReadLimits {
-            max_members: MAX_ARCHIVE_MEMBERS,
-            max_expanded_bytes: MAX_ARCHIVE_EXPANDED_BYTES,
-            max_numeric_values: MAX_RESULT_VALUES,
+            max_members: archive_members(),
+            max_expanded_bytes: archive_expanded_bytes(),
+            max_numeric_values: source_capacity(),
         },
         &RESULT_COORDINATE_NAMES,
         format.canonical_id(),
@@ -227,11 +244,12 @@ pub(super) fn parse_matlab_v5(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     let decoded = rspice_formats::matlab::reader::decode_matlab_v5(
         bytes,
         rspice_formats::matlab::reader::MatlabReadLimits {
-            max_variables: MAX_RESULT_COLUMNS.saturating_mul(2),
-            max_expanded_bytes: MAX_ARCHIVE_EXPANDED_BYTES,
+            max_variables: source_capacity(),
+            max_expanded_bytes: archive_expanded_bytes(),
             min_rows: MIN_RESULT_ROWS,
             coordinate_names: &RESULT_COORDINATE_NAMES,
         },
@@ -252,9 +270,11 @@ pub(super) fn parse_spice_raw(
     log: Option<&[u8]>,
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     let mut limits = rspice_core::ResourceLimits::default();
-    limits.max_external_data_bytes = MAX_RESULT_DATASET_BYTES as usize;
-    limits.max_external_data_values = MAX_RESULT_VALUES;
+    limits.max_external_data_bytes = usize::MAX;
+    limits.max_external_data_values = source_capacity();
+    limits.max_result_values = source_capacity();
     let decoded = rspice_formats::spice_raw::decode_spice_raw_plots_with_log(bytes, log, limits)
         .map_err(|error| adapter_error(format, error))?;
     // A rawfile holds one plot per analysis. The reader reviews the first one
@@ -339,13 +359,14 @@ pub(super) fn parse_psf_ascii(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
     use rspice_formats::psf::{PsfReadLimits, decode_psf_ascii};
 
     let decoded = decode_psf_ascii(
         bytes,
         PsfReadLimits {
-            max_columns: MAX_RESULT_COLUMNS,
-            max_rows: MAX_RESULT_ROWS,
+            max_columns: source_capacity(),
+            max_rows: source_capacity(),
         },
     )
     .map_err(|error| adapter_error(format, error))?;

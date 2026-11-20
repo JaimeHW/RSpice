@@ -5,7 +5,6 @@
 //! but never claim native-solver provenance or prepared-plan authority.
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::io::file_exchange::MAX_RESULT_DATASET_BYTES;
 pub(crate) use crate::state::ResultImportFormat;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
@@ -15,8 +14,10 @@ use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::import::{
-    ResultImportDialogState, ResultImportPlots, ResultImportStage,
+    RESULT_IMPORT_PREVIEW_ROWS, ResultImportDialogState, ResultImportJob, ResultImportPlots,
+    ResultImportSampleFacts, ResultImportStage,
 };
+use crate::workbench::results_job::{JobContext, JobOutcome, JobState, JobStop, ResultsJob};
 use rspice_formats::result_import::identify_result_import_format;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
@@ -53,19 +54,65 @@ pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
         "fst",
     ],
 );
-pub const MAX_RESULT_COLUMNS: usize = 1_024;
-pub const MAX_RESULT_ROWS: usize = 1_000_000;
+/// A signal name longer than this is a damaged file: no simulator or instrument writes one.
 const MAX_SIGNAL_NAME_BYTES: usize = 1_024;
-pub const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
 
-/// Shared admission policy for imports and exports intended to reopen here.
+/// The most values one byte of a source can stand for: what DEFLATE, the widest compression
+/// any reader here accepts, expands one byte to at most. A source that states more rows,
+/// columns or values than its bytes can hold is damaged, and is refused as such; how much
+/// real data a source holds is never a reason to refuse it.
+const MOST_VALUES_PER_SOURCE_BYTE: usize = 1_032;
+
+thread_local! {
+    /// The size of the source being read on this thread, which bounds what it can state.
+    static SOURCE_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Read a source of `bytes` bytes on this thread until dropped.
+struct ReadingSource(usize);
+
+impl ReadingSource {
+    fn of(bytes: usize) -> Self {
+        Self(SOURCE_BYTES.with(|cell| cell.replace(bytes)))
+    }
+}
+
+impl Drop for ReadingSource {
+    fn drop(&mut self) {
+        SOURCE_BYTES.with(|cell| cell.set(self.0));
+    }
+}
+
+/// The most rows, columns or values the source being read can hold.
+pub(crate) fn source_capacity() -> usize {
+    SOURCE_BYTES
+        .with(std::cell::Cell::get)
+        .max(1)
+        .saturating_mul(MOST_VALUES_PER_SOURCE_BYTE)
+}
+
+/// What a source being read may state before it is damaged: as many rows, columns and values
+/// as its bytes can hold, and names of a length a real file uses.
 pub(crate) fn waveform_import_limits()
 -> rspice_results::result_import::waveforms::WaveformImportLimits {
     rspice_results::result_import::waveforms::WaveformImportLimits {
         min_rows: MIN_RESULT_ROWS,
-        max_rows: MAX_RESULT_ROWS,
-        max_columns: MAX_RESULT_COLUMNS,
-        max_values: MAX_RESULT_VALUES,
+        max_rows: source_capacity(),
+        max_columns: source_capacity(),
+        max_values: source_capacity(),
+        max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
+    }
+}
+
+/// What an export of a retained run admits: every row and value the run holds, with names this
+/// product reads back.
+pub(crate) fn exported_waveform_limits()
+-> rspice_results::result_import::waveforms::WaveformImportLimits {
+    rspice_results::result_import::waveforms::WaveformImportLimits {
+        min_rows: MIN_RESULT_ROWS,
+        max_rows: usize::MAX,
+        max_columns: usize::MAX,
+        max_values: usize::MAX,
         max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
     }
 }
@@ -164,28 +211,43 @@ pub(crate) fn import_result_dataset(state: &mut ResultsParts<'_>) -> bool {
     }
 }
 
-/// Stage the result dataset at `path`, the file the reader picked, or say
-/// why it was refused.
+/// Start reading the result dataset at `path`, the file the reader picked:
+/// the dialog opens on the read's progress and its Cancel, and moves to
+/// review when the source is parsed and its samples are kept. Refused at
+/// once, with the reason, when no result can be imported now.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn import_result_dataset_from_path(state: &mut ResultsParts<'_>, path: &Path) -> bool {
-    match read_native_file_bounded(path).and_then(|bytes| {
-        let display_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string());
-        stage_imported_result_dataset_beside(
-            state,
-            &display_name,
-            &bytes,
-            companion_log(path).as_deref(),
-        )
-    }) {
-        Ok(()) => true,
-        Err(error) => {
-            record_import_failure(state, &error);
-            false
-        }
+    if let Some(reason) = result_import_block_reason(state.model, state.platform) {
+        record_import_failure(state, &reason);
+        return false;
     }
+    let display_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    let source = path.to_path_buf();
+    let source_name = display_name.clone();
+    let job = ResultsJob::start("result-import", move |job| {
+        let bytes = read_native_file(&source, job)?;
+        let log = companion_log(&source, job)?;
+        stage_source(job, &source_name, &bytes, log.as_deref())
+    });
+    open_reading_draft(state, display_name, job);
+    true
+}
+
+/// The dialog, open on a source being read.
+fn open_reading_draft(
+    state: &mut ResultsParts<'_>,
+    source_name: String,
+    job: ResultsJob<StagedResultImport>,
+) {
+    *state.result_import = ResultImportDialogState {
+        open: true,
+        source_name,
+        job: Some(ResultImportJob::Reading(job)),
+        ..ResultImportDialogState::default()
+    };
 }
 
 /// A refused import raises a notice with the reason, which offers the
@@ -215,50 +277,153 @@ fn result_import_block_reason(model: &Model, platform: &PlatformState) -> Option
 /// LTspice writes `deck.log` beside `deck.raw`, and it names the runs of a
 /// `stepped` rawfile. Any other source has no use for it.
 #[cfg(not(target_arch = "wasm32"))]
-fn companion_log(path: &Path) -> Option<Vec<u8>> {
+fn companion_log(path: &Path, job: &JobContext) -> Result<Option<Vec<u8>>, JobStop> {
     let raw = path
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("raw"));
-    raw.then(|| read_native_file_bounded(&path.with_extension("log")).ok())
-        .flatten()
+    let log = path.with_extension("log");
+    if !raw || !log.is_file() {
+        return Ok(None);
+    }
+    match read_native_file(&log, job) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(JobStop::Cancelled) => Err(JobStop::Cancelled),
+        Err(JobStop::Failed(_)) => Ok(None),
+    }
 }
 
+/// Bytes read between two reports of a read's progress and two looks at its
+/// Cancel.
 #[cfg(not(target_arch = "wasm32"))]
-fn read_native_file_bounded(path: &Path) -> Result<Vec<u8>, String> {
-    let file = std::fs::File::open(path)
+const READ_CHUNK_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The whole of the file at `path`, read in chunks that report progress and
+/// stop at Cancel. A file larger than this computer can hold is refused
+/// before a byte is read, in those words.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_native_file(path: &Path, job: &JobContext) -> Result<Vec<u8>, JobStop> {
+    let mut file = std::fs::File::open(path)
         .map_err(|error| format!("could not open {}: {error}", path.display()))?;
     let size = file
         .metadata()
         .map_err(|error| format!("could not inspect {}: {error}", path.display()))?
         .len();
-    if size > MAX_RESULT_DATASET_BYTES {
-        return Err(format!(
-            "{} is {} bytes; the import limit is {} bytes",
-            path.display(),
-            size,
-            MAX_RESULT_DATASET_BYTES
-        ));
+    let mut bytes = Vec::new();
+    usize::try_from(size)
+        .ok()
+        .and_then(|size| bytes.try_reserve_exact(size).ok())
+        .ok_or_else(|| {
+            format!(
+                "{} is {size} bytes, more than this computer has memory to read",
+                path.display()
+            )
+        })?;
+    job.step("Reading", size);
+    loop {
+        job.check()?;
+        let read = (&mut file)
+            .take(READ_CHUNK_BYTES)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        if read == 0 {
+            return Ok(bytes);
+        }
+        job.done(bytes.len() as u64);
     }
+}
 
-    let mut bytes = Vec::with_capacity(
-        usize::try_from(size.min(MAX_RESULT_DATASET_BYTES))
-            .unwrap_or(MAX_RESULT_DATASET_BYTES as usize),
-    );
-    file.take(MAX_RESULT_DATASET_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    if bytes.len() as u64 > MAX_RESULT_DATASET_BYTES {
-        return Err(format!(
-            "{} exceeds the {}-byte import limit",
-            path.display(),
-            MAX_RESULT_DATASET_BYTES
-        ));
+/// Parse `bytes`, keep their samples in results store segments, and read
+/// what the review pages show of them: the work an import's job does once
+/// the source is read. Stops at Cancel between its steps; what it kept by
+/// then is deleted as it is dropped.
+fn stage_source(
+    job: &JobContext,
+    source_name: &str,
+    bytes: &[u8],
+    companion_log: Option<&[u8]>,
+) -> Result<StagedResultImport, JobStop> {
+    job.step("Parsing", 0);
+    job.check()?;
+    let mut parsed = parse_result_dataset_beside(source_name, bytes, companion_log)?;
+    job.check()?;
+    let facts = ResultImportSampleFacts::read(&parsed.waveforms);
+    keep_parsed_samples(job, source_name, &mut parsed)?;
+    Ok(StagedResultImport {
+        source_name: source_name.to_owned(),
+        parsed,
+        facts,
+    })
+}
+
+/// Put the samples of every analysis `parsed` holds into results store
+/// segments, so the draft under review and the run it becomes hold none in
+/// memory. An analysis the store refuses keeps its samples in memory, as a
+/// finished run's does, and the review notes why.
+fn keep_parsed_samples(
+    job: &JobContext,
+    source_name: &str,
+    parsed: &mut ParsedResultDataset,
+) -> Result<(), JobStop> {
+    let further = parsed.plots.as_ref().map_or(0, |plots| plots.further.len());
+    job.step("Keeping samples", 1 + further as u64);
+    let format = parsed.source_format;
+    let keep = |analysis_type: AnalysisType,
+                coordinate: (&str, &Option<String>),
+                waveforms: &mut Vec<RetainedTrace>| {
+        let mut analysis =
+            AnalysisResult::new(1, analysis_type, format!("Imported \u{00b7} {source_name}"))
+                .with_waveforms(std::mem::take(waveforms));
+        analysis.import_source = Some(ResultImportSource {
+            source_name: source_name.to_owned(),
+            format,
+            coordinate: Some(rspice_results::result_import::ResultImportCoordinate {
+                name: coordinate.0.to_owned(),
+                unit: coordinate.1.clone(),
+            }),
+            family_member: None,
+        });
+        let kept = crate::state::run_store::store_analysis(&mut analysis.data);
+        *waveforms = std::mem::take(&mut analysis.data.waveforms);
+        kept.err()
+    };
+    let mut refused = Vec::new();
+    refused.extend(keep(
+        parsed.analysis_type,
+        (&parsed.coordinate_name, &parsed.coordinate_unit),
+        &mut parsed.waveforms,
+    ));
+    job.done(1);
+    if let Some(plots) = parsed.plots.as_mut() {
+        let plots = Arc::make_mut(plots);
+        for (index, plot) in plots.further.iter_mut().enumerate() {
+            job.check()?;
+            refused.extend(keep(
+                plot.analysis_type,
+                (&plot.coordinate_name, &plot.coordinate_unit),
+                &mut plot.waveforms,
+            ));
+            job.done(2 + index as u64);
+        }
     }
-    Ok(bytes)
+    parsed.notes.extend(
+        refused
+            .into_iter()
+            .map(|reason| format!("its samples stay in memory: {reason}")),
+    );
+    job.check()
+}
+
+/// A source parsed off the UI thread, its samples kept, with what the review
+/// pages show of them.
+#[derive(Debug)]
+pub struct StagedResultImport {
+    source_name: String,
+    parsed: ParsedResultDataset,
+    facts: ResultImportSampleFacts,
 }
 
 /// Parse a selected file into a reviewable draft without mutating retained
-/// simulation history.
+/// simulation history. The work an import's job does, done here and now.
 pub fn stage_imported_result_dataset(
     state: &mut ResultsParts<'_>,
     source_name: &str,
@@ -278,12 +443,28 @@ fn stage_imported_result_dataset_beside(
     if let Some(reason) = result_import_block_reason(state.model, state.platform) {
         return Err(reason);
     }
-    let parsed = parse_result_dataset_beside(source_name, bytes, companion_log)?;
+    match stage_source(&JobContext::detached(), source_name, bytes, companion_log) {
+        Ok(staged) => {
+            open_review_draft(state, staged);
+            Ok(())
+        }
+        Err(JobStop::Failed(reason)) => Err(reason),
+        Err(JobStop::Cancelled) => Err("the import was cancelled".to_owned()),
+    }
+}
+
+/// The dialog, open on the review of a staged source.
+fn open_review_draft(state: &mut ResultsParts<'_>, staged: StagedResultImport) {
+    let StagedResultImport {
+        source_name,
+        parsed,
+        facts,
+    } = staged;
     let signal_count = parsed.waveforms.len();
     *state.result_import = ResultImportDialogState {
         open: true,
         stage: ResultImportStage::Detect,
-        source_name: source_name.to_owned(),
+        source_name,
         source_format_id: parsed.source_format.canonical_id().to_owned(),
         delimiter: parsed.delimiter,
         analysis_type: parsed.analysis_type,
@@ -297,8 +478,9 @@ fn stage_imported_result_dataset_beside(
         plots: parsed.plots,
         selected_signals: vec![true; signal_count],
         validation_error: None,
+        job: None,
+        sample_facts: Arc::new(facts),
     };
-    Ok(())
 }
 
 fn parsed_result_from_draft(
@@ -363,15 +545,16 @@ fn parsed_result_from_draft(
     if matches!(
         draft.analysis_type,
         AnalysisType::Ac | AnalysisType::SParameter
-    ) && waveforms.iter().any(|waveform| {
-        waveform.x.is_empty()
-            || waveform
-                .x
-                .iter()
-                .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
-            || waveform.x.windows(2).any(|pair| pair[0] >= pair[1])
-    }) {
-        return Err("Frequency coordinates must all be greater than zero.".to_owned());
+    ) {
+        let facts = sample_facts_of(draft);
+        let off_grid = facts
+            .frequency_grid
+            .iter()
+            .zip(&draft.selected_signals)
+            .any(|(grid, selected)| *selected && !grid);
+        if off_grid {
+            return Err("Frequency coordinates must all be greater than zero.".to_owned());
+        }
     }
     if draft.analysis_type == AnalysisType::SParameter {
         let Some(AnalysisResultFamilyMetadata::SParameter {
@@ -406,6 +589,18 @@ fn parsed_result_from_draft(
     })
 }
 
+/// The draft's sample facts: those its job read, or, for a draft made
+/// without one, read now.
+fn sample_facts_of(
+    draft: &ResultImportDialogState,
+) -> std::borrow::Cow<'_, ResultImportSampleFacts> {
+    if draft.sample_facts.frequency_grid.len() == draft.waveforms.len() {
+        std::borrow::Cow::Borrowed(&draft.sample_facts)
+    } else {
+        std::borrow::Cow::Owned(ResultImportSampleFacts::read(&draft.waveforms))
+    }
+}
+
 /// Atomically commit the currently reviewed draft into retained result
 /// history. Any failure restores the simulation and workbench selections that
 /// existed before the transaction.
@@ -423,11 +618,52 @@ pub fn commit_result_import_draft(state: &mut ResultsParts<'_>) -> Result<(), St
     Ok(())
 }
 
+/// Start committing the reviewed draft: its analyses are built and checked
+/// off the UI thread while the dialog shows the work and its Cancel, and the
+/// run is added when they are ready. Cancel returns to the review.
+pub(crate) fn start_result_import_commit(state: &mut ResultsParts<'_>) -> Result<(), String> {
+    if let Some(reason) = result_import_block_reason(state.model, state.platform) {
+        return Err(reason);
+    }
+    let parsed = parsed_result_from_draft(state.result_import)?;
+    let source_name = state.result_import.source_name.clone();
+    let job = ResultsJob::start("result-import-commit", move |job| {
+        job.step("Checking", 0);
+        job.check()?;
+        Ok(keep_reviewed_draft(&source_name, parsed)?)
+    });
+    state.result_import.job = Some(ResultImportJob::Committing(job));
+    Ok(())
+}
+
 fn commit_parsed_result_dataset(
     state: &mut ResultsParts<'_>,
     source_name: &str,
     parsed: ParsedResultDataset,
 ) -> Result<(), String> {
+    let kept = keep_reviewed_draft(source_name, parsed)?;
+    insert_kept_import(state, kept)
+}
+
+/// The analyses a reviewed draft becomes, built and checked, before the run
+/// that holds them is added.
+#[derive(Debug)]
+pub struct KeptResultImport {
+    source_name: String,
+    analyses: Vec<AnalysisResult>,
+    analysis_type: AnalysisType,
+    signal_count: usize,
+    sample_count: usize,
+    bus_count: usize,
+    notes: Vec<String>,
+}
+
+/// Build and check the analyses `parsed` becomes. Reads no history, so it
+/// runs off the UI thread.
+fn keep_reviewed_draft(
+    source_name: &str,
+    parsed: ParsedResultDataset,
+) -> Result<KeptResultImport, String> {
     let analysis_type = parsed.analysis_type;
     let sample_count = parsed.sample_count;
     let signal_count = parsed.waveforms.len();
@@ -469,6 +705,30 @@ fn commit_parsed_result_dataset(
         further.validate_retained_evidence()?;
         analyses.push(further);
     }
+    Ok(KeptResultImport {
+        source_name: source_name.to_owned(),
+        analyses,
+        analysis_type,
+        signal_count,
+        sample_count,
+        bus_count,
+        notes,
+    })
+}
+
+/// Add the run that holds `kept`, as one change the reader can undo by
+/// deleting the run, and show it.
+fn insert_kept_import(state: &mut ResultsParts<'_>, kept: KeptResultImport) -> Result<(), String> {
+    let KeptResultImport {
+        source_name,
+        analyses,
+        analysis_type,
+        signal_count,
+        sample_count,
+        bus_count,
+        notes,
+    } = kept;
+    let source_name = source_name.as_str();
     let further_count = analyses.len() - 1;
 
     let previous_simulation = state.model.simulation.clone();
@@ -620,6 +880,10 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
     if !state.result_import.open {
         return;
     }
+    if let Some(job) = state.result_import.job.clone() {
+        show_result_import_job(ctx, state, &job);
+        return;
+    }
 
     let mut draft = state.result_import.clone();
     let mut window_open = true;
@@ -720,11 +984,60 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
     }
 
     *state.result_import = draft;
-    if let Some(Err(error)) = commit.then(|| commit_result_import_draft(state)) {
+    if let Some(Err(error)) = commit.then(|| start_result_import_commit(state)) {
         state.result_import.open = true;
         state.result_import.stage = ResultImportStage::Validate;
         state.result_import.validation_error = Some(error);
     }
+}
+
+/// The dialog while its job runs: what it is doing, how far it is, and
+/// Cancel; and, when the job ends, what follows from how it ended. Reads the
+/// job's progress and nothing it works on.
+fn show_result_import_job(
+    ctx: &egui::Context,
+    state: &mut ResultsParts<'_>,
+    job: &ResultImportJob,
+) {
+    if !poll_result_import_job(state, job) {
+        return;
+    }
+    let progress = job.state();
+    let tokens = Tokens::get(ctx);
+    let mut cancel = false;
+    egui::Window::new("Import result dataset")
+        .id(egui::Id::new("rspice.result-import"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new(&state.result_import.source_name)
+                    .monospace()
+                    .color(tokens.color.text_dim),
+            );
+            let step = match &progress {
+                JobState::Running { step, .. } if !step.is_empty() => step.as_str(),
+                _ => "Starting",
+            };
+            ui.add(
+                egui::ProgressBar::new(progress.fraction().unwrap_or(0.0))
+                    .desired_width(360.0)
+                    .text(step),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+    if cancel {
+        job.cancel();
+        match job {
+            ResultImportJob::Reading(_) => discard_result_import_draft(state),
+            ResultImportJob::Committing(_) => state.result_import.job = None,
+        }
+        return;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(100));
 }
 
 fn result_import_dialog_geometry(available: egui::Vec2) -> (egui::Vec2, f32) {
@@ -736,7 +1049,59 @@ fn result_import_dialog_geometry(available: egui::Vec2) -> (egui::Vec2, f32) {
     (maximum, body_height)
 }
 
+/// Act on how the draft's job ended, once it has: review the staged source,
+/// add the committed run, or say why it failed. Whether the job still runs.
+fn poll_result_import_job(state: &mut ResultsParts<'_>, job: &ResultImportJob) -> bool {
+    match job {
+        ResultImportJob::Reading(reading) => match reading.take_outcome() {
+            None => return true,
+            Some(JobOutcome::Done(staged)) => open_review_draft(state, staged),
+            Some(JobOutcome::Failed(reason)) => {
+                discard_result_import_draft(state);
+                record_import_failure(state, &reason);
+            }
+            Some(JobOutcome::Cancelled) => discard_result_import_draft(state),
+        },
+        ResultImportJob::Committing(committing) => {
+            let Some(outcome) = committing.take_outcome() else {
+                return true;
+            };
+            state.result_import.job = None;
+            match outcome {
+                JobOutcome::Done(kept) => match insert_kept_import(state, kept) {
+                    Ok(()) => *state.result_import = ResultImportDialogState::default(),
+                    Err(error) => state.result_import.validation_error = Some(error),
+                },
+                JobOutcome::Failed(error) => state.result_import.validation_error = Some(error),
+                JobOutcome::Cancelled => {}
+            }
+        }
+    }
+    false
+}
+
+/// Wait for the draft's job and act on how it ended, as the dialog's next
+/// frame would.
+#[cfg(test)]
+pub(crate) fn finish_result_import_job(state: &mut ResultsParts<'_>) {
+    if let Some(job) = state.result_import.job.clone() {
+        let ended = match &job {
+            ResultImportJob::Reading(reading) => reading.wait(std::time::Duration::from_secs(600)),
+            ResultImportJob::Committing(committing) => {
+                committing.wait(std::time::Duration::from_secs(600))
+            }
+        };
+        assert!(ended, "the import job ends");
+        assert!(!poll_result_import_job(state, &job));
+    }
+}
+
+/// Close the dialog and drop its draft, stopping any work it runs: what the
+/// work kept is deleted with it.
 pub fn discard_result_import_draft(state: &mut ResultsParts<'_>) {
+    if let Some(job) = &state.result_import.job {
+        job.cancel();
+    }
     *state.result_import = ResultImportDialogState::default();
 }
 
@@ -984,12 +1349,14 @@ fn result_import_signal_label(waveform: &RetainedTrace) -> String {
 }
 
 fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
-    const MAX_PREVIEW_ROWS: usize = 8;
+    const MAX_PREVIEW_ROWS: usize = RESULT_IMPORT_PREVIEW_ROWS;
     const MAX_PREVIEW_SIGNALS: usize = 8;
 
+    let facts = sample_facts_of(draft);
     let included = draft
         .waveforms
         .iter()
+        .zip(&facts.first_rows)
         .zip(&draft.selected_signals)
         .filter_map(|(waveform, selected)| selected.then_some(waveform))
         .take(MAX_PREVIEW_SIGNALS)
@@ -1011,16 +1378,18 @@ fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
                 .min_col_width(100.0)
                 .show(ui, |ui| {
                     ui.strong(&draft.coordinate_name);
-                    for waveform in &included {
+                    for (waveform, _) in &included {
                         ui.strong(result_import_signal_label(waveform));
                     }
                     ui.end_row();
-                    for row in 0..draft.sample_count.min(MAX_PREVIEW_ROWS) {
-                        ui.monospace(format!("{:.6e}", included[0].x[row]));
-                        for waveform in &included {
+                    let rows = included[0].1.len().min(draft.sample_count.max(1));
+                    for row in 0..rows.min(MAX_PREVIEW_ROWS) {
+                        ui.monospace(format!("{:.6e}", included[0].1[row].0));
+                        for (_, first_rows) in &included {
                             ui.monospace(
-                                waveform
-                                    .sample(row)
+                                first_rows
+                                    .get(row)
+                                    .and_then(|(_, sample)| *sample)
                                     .map(|value| format!("{value:.6e}"))
                                     .unwrap_or_else(|| "Unavailable".into()),
                             );
@@ -1067,12 +1436,7 @@ fn parse_result_dataset_beside(
     if bytes.is_empty() {
         return Err("the selected file is empty".to_owned());
     }
-    if bytes.len() as u64 > MAX_RESULT_DATASET_BYTES {
-        return Err(format!(
-            "the selected file exceeds the {}-byte import limit",
-            MAX_RESULT_DATASET_BYTES
-        ));
-    }
+    let _source = ReadingSource::of(bytes.len());
     let format =
         identify_result_import_format(source_name, bytes).map_err(|error| error.to_string())?;
     match format {
@@ -1149,8 +1513,8 @@ fn parse_delimited_result_dataset(
         text,
         delimiter,
         DelimitedReadLimits {
-            max_columns: MAX_RESULT_COLUMNS,
-            max_rows: MAX_RESULT_ROWS,
+            max_columns: source_capacity(),
+            max_rows: source_capacity(),
             max_header_bytes: MAX_HEADER_BYTES,
             min_rows: MIN_RESULT_ROWS,
         },
@@ -1309,9 +1673,14 @@ mod tests {
             crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
 
         let imported = import_result_dataset_from_path(&mut state.results_parts(), &path);
+        finish_result_import_job(&mut state.results_parts());
         std::fs::remove_dir_all(&folder).unwrap();
 
-        assert!(!imported);
+        assert!(imported, "the read starts");
+        assert!(
+            !state.results_parts().result_import.open,
+            "a refused source closes the dialog"
+        );
         let notices = state.model.notices.take();
         assert_eq!(notices.len(), 1, "{notices:?}");
         assert_eq!(notices[0].title, "Result dataset import failed");

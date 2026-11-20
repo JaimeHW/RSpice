@@ -5,7 +5,6 @@ use super::result_import_adapters::apply_imported_result_dataset;
 use crate::workbench::app_state::AppState;
 use rspice_app_results::workbench::documents::result_document::import::ResultImportStage;
 use rspice_app_results::workbench::workflows::result_import_workflow::*;
-use rspice_app_services::io::file_exchange::MAX_RESULT_DATASET_BYTES;
 use rspice_app_state::state::AnalysisResultFamilyMetadata;
 use rspice_app_state::state::AnalysisType;
 use rspice_app_state::state::SimulationRunLifecycle;
@@ -63,8 +62,7 @@ fn assert_nullable_import_round_trip(name: &str, bytes: &[u8]) {
         rspice_formats::WaveformDomain::Transient,
     )
     .unwrap();
-    let bytes =
-        encode_native_bundle(NativeBundleKind::Dataset, &native, MAX_RESULT_DATASET_BYTES).unwrap();
+    let bytes = encode_native_bundle(NativeBundleKind::Dataset, &native, u64::MAX).unwrap();
     let parsed = parse_result_dataset("gaps.rspicedata", &bytes).unwrap();
     assert_eq!(parsed.waveforms[0].sample(1), None);
     assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
@@ -179,19 +177,17 @@ fn raw_coordinate_units_survive_import_review_project_reload_and_waveform_projec
             result::project_native_bundle,
         };
         let bundle = project_native_bundle(restored, &[&restored.waveforms[0]], domain).unwrap();
-        let bytes =
-            encode_native_bundle(NativeBundleKind::Dataset, &bundle, MAX_RESULT_DATASET_BYTES)
-                .unwrap();
+        let bytes = encode_native_bundle(NativeBundleKind::Dataset, &bundle, u64::MAX).unwrap();
         let reimported = decode_native_bundle(
             &bytes,
             NativeBundleKind::Dataset,
             NativeBundleReadLimits {
                 max_members: 2,
-                max_expanded_bytes: MAX_RESULT_DATASET_BYTES,
-                max_member_bytes: MAX_RESULT_DATASET_BYTES,
-                max_rows: MAX_RESULT_ROWS,
-                max_columns: MAX_RESULT_COLUMNS,
-                max_numeric_values: MAX_RESULT_VALUES,
+                max_expanded_bytes: u64::MAX,
+                max_member_bytes: u64::MAX,
+                max_rows: usize::MAX,
+                max_columns: usize::MAX,
+                max_numeric_values: usize::MAX,
             },
         )
         .unwrap();

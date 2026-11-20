@@ -3,9 +3,10 @@
 use super::*;
 use rspice_formats::digital::{DecodedDigital, DigitalImportLimits};
 
+/// A dump expands to at most what its bytes can hold; a declaration past that is damaged.
 fn digital_import_limits() -> DigitalImportLimits {
     DigitalImportLimits {
-        max_bytes: MAX_RESULT_DATASET_BYTES,
+        max_bytes: u64::try_from(source_capacity()).unwrap_or(u64::MAX),
         samples: waveform_import_limits(),
     }
 }
@@ -22,6 +23,7 @@ pub(in crate::workbench::workflows) fn parse_vcd(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::super::ReadingSource::of(bytes.len());
     rspice_formats::digital::decode_vcd(bytes, format, digital_import_limits())
         .map(|decoded| present_digital(format, decoded))
         .map_err(|error| error.to_string())
@@ -31,6 +33,7 @@ pub(in crate::workbench::workflows) fn parse_fst(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
+    let _source = super::super::ReadingSource::of(bytes.len());
     rspice_formats::digital::decode_fst(bytes, format, digital_import_limits())
         .map(|decoded| present_digital(format, decoded))
         .map_err(|error| error.to_string())
@@ -41,13 +44,14 @@ pub(super) fn preflight_fst_for_test(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<(), String> {
+    let _source = super::super::ReadingSource::of(bytes.len());
     rspice_formats::fst::preflight_fst(
         bytes,
         rspice_formats::fst::FstLimits {
-            max_bytes: MAX_RESULT_DATASET_BYTES,
-            max_columns: MAX_RESULT_COLUMNS,
-            max_rows: MAX_RESULT_ROWS,
-            max_values: MAX_RESULT_VALUES,
+            max_bytes: u64::try_from(source_capacity()).unwrap_or(u64::MAX),
+            max_columns: source_capacity(),
+            max_rows: source_capacity(),
+            max_values: source_capacity(),
             max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
         },
         format.canonical_id(),

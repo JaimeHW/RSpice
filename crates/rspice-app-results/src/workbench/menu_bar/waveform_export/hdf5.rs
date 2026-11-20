@@ -31,7 +31,7 @@ use super::{
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use crate::workbench::workflows::result_import_workflow::waveform_import_limits;
+use crate::workbench::workflows::result_import_workflow::exported_waveform_limits;
 
 use rspice_core::io::write_hdf5;
 use rspice_formats::hdf5::result::{Hdf5Export, prepare_hdf5};
@@ -50,7 +50,7 @@ pub(super) fn encode_hdf5(export: &Hdf5Export) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     write_hdf5(&mut bytes, &export.document)
         .map_err(|error| format!("the HDF5 document could not be written: {error}"))?;
-    super::admit_result_export_bytes(bytes)
+    Ok(bytes)
 }
 
 pub(super) fn export_hdf5(
@@ -74,7 +74,7 @@ pub(super) fn export_hdf5(
                     ALL_TRACES_HIDDEN_MESSAGE.to_owned()
                 })
             } else {
-                prepare_hdf5(analysis, &waveforms, waveform_import_limits())
+                prepare_hdf5(analysis, &waveforms, exported_waveform_limits())
                     .map_err(|error| error.to_string())
             }
         }
@@ -190,7 +190,7 @@ mod tests {
     ) -> Result<Hdf5Export, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_hdf5(&analysis, &borrowed, waveform_import_limits())
+        prepare_hdf5(&analysis, &borrowed, exported_waveform_limits())
             .map_err(|error| error.to_string())
     }
 

@@ -29,20 +29,6 @@ pub use format_picker::{
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 
-/// An exported file is one RSpice can read back, so it is held to the size
-/// a result dataset may be, headers and container metadata counted. An
-/// oversized file is refused before a destination is chosen.
-fn admit_result_export_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
-    let limit = crate::io::file_exchange::MAX_RESULT_DATASET_BYTES;
-    if bytes.len() as u64 > limit {
-        return Err(format!(
-            "The file would be {} bytes, more than the {} MiB ({limit} bytes) a result dataset may hold. Hide traces or export a smaller selection.",
-            bytes.len(),
-            limit / (1024 * 1024)
-        ));
-    }
-    Ok(bytes)
-}
 /// An export that silently wrote an empty file would be indistinguishable
 /// from one that wrote the dataset, so the hidden traces are named as the
 /// reason rather than reported as an absence of samples.
@@ -919,11 +905,7 @@ fn export_native_result_bundle(
             return;
         }
     };
-    let bytes = match encode_native_bundle(
-        kind,
-        &native_dataset,
-        crate::io::file_exchange::MAX_RESULT_DATASET_BYTES,
-    ) {
+    let bytes = match encode_native_bundle(kind, &native_dataset, u64::MAX) {
         Ok(bytes) => bytes,
         Err(error) => {
             note_result_export_failure(
@@ -1125,16 +1107,18 @@ fn export_touchstone(
     };
     let port_count = crate::io::WaveformWriter::touchstone_port_count(&dataset)
         .expect("successful Touchstone validation always identifies a port matrix");
-    let default_name = "waveforms.snp";
+    let network_extension = format!("s{port_count}p");
+    let default_name = format!("waveforms.{network_extension}");
 
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export Touchstone",
-        default_name,
-        filter_name: "Touchstone v2 Files",
-        filter_extensions: &["snp", "ts"],
+        default_name: &default_name,
+        filter_name: "Touchstone Files",
+        filter_extensions: &[network_extension.as_str(), "ts"],
     }) {
         Ok(Some(mut path)) => {
-            crate::io::file_exchange::ensure_file_extension(&mut path, "snp");
+            let contents = touchstone_contents_for(&mut path, &network_extension, &dataset)
+                .unwrap_or(contents);
             let export = io
                 .observe_destination(&path)
                 .and_then(|destination| io.write_text_file_observed(&destination, &contents));
@@ -1169,6 +1153,36 @@ fn export_touchstone(
             state.report_failure("Touchstone export failed", error.to_string());
         }
     }
+}
+
+/// The file a Touchstone export writes to `path`, keeping the name the reader typed: a `.ts` file
+/// holds version 2, which states each port's reference; an `.sNp` file for this many ports holds
+/// version 1, which every reader of that name expects, when the network fits it (one reference
+/// for every port), and version 2 otherwise, which that name may also hold. A name with neither
+/// gains the `.sNp` of the network. `None` keeps the version 2 contents already written.
+fn touchstone_contents_for(
+    path: &mut std::path::PathBuf,
+    network_extension: &str,
+    dataset: &crate::io::WaveformDataset,
+) -> Option<String> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    match extension.as_deref() {
+        Some("ts") => return None,
+        Some(extension) if extension == network_extension => {}
+        _ => {
+            path.set_extension(network_extension);
+        }
+    }
+    let mut version_one = dataset.clone();
+    version_one
+        .metadata
+        .insert("touchstone_version".to_owned(), "1".to_owned());
+    crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
+        .write_text(&version_one)
+        .ok()
 }
 
 /// The traces an export of this analysis carries.
