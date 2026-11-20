@@ -679,8 +679,11 @@ impl<'a> Flattener<'a> {
         global_scope.adopt_random(&self.random);
 
         // Set global parameters from netlist
-        for (name, value) in netlist.params.all_params() {
-            self.param_resolver.set_global(&name, value);
+        {
+            let _metadata = netlist.params.suspend_parameter_reach();
+            for (name, value) in netlist.params.all_params() {
+                self.param_resolver.set_global(&name, value);
+            }
         }
 
         let root_path = HierarchyPath::root_with_separator(self.config.hierarchy_separator);
@@ -746,8 +749,29 @@ impl<'a> Flattener<'a> {
         Ok(flat_elements)
     }
 
-    /// Flatten a single element, recursively expanding subcircuits
+    /// Flatten a single element, recursively expanding subcircuits. Under a
+    /// parameter-reach observation the element is one statement: an
+    /// instance that read the parameter stands for all it expands to.
     fn flatten_element(
+        &mut self,
+        element: &Element,
+        scope: FlattenScope<'_>,
+        output: &mut Vec<Element>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        let Some(statement) = scope.scope.reach_statement_begin() else {
+            return self.flatten_element_in_scope(element, scope, output, abort);
+        };
+        let path = self.qualify_hierarchy_name(scope.prefix, &element.name);
+        let flattened = self.flatten_element_in_scope(element, scope, output, abort);
+        if let Some(read) = statement.end() {
+            let names = read.names.clone();
+            read.record(super::expr::ParameterReachSite::Element { path, names });
+        }
+        flattened
+    }
+
+    fn flatten_element_in_scope(
         &mut self,
         element: &Element,
         scope: FlattenScope<'_>,
@@ -1544,6 +1568,7 @@ impl<'a> Flattener<'a> {
                 .child(self.qualify_hierarchy_name("", &instance.name))
         });
         let instance_metadata = if let (Some(parent), Some(path)) = (metadata, &instance_path) {
+            let _metadata = param_scope.suspend_parameter_reach();
             let values = param_scope
                 .all_params()
                 .into_iter()

@@ -152,6 +152,7 @@ mod tests {
             value: 2e3,
             global: false,
             direction: false,
+            reach: false,
         }];
         for _ in 0..2 {
             let replayed = netlist
@@ -186,6 +187,7 @@ mod tests {
             value: 2e3,
             global: false,
             direction: false,
+            reach: false,
         }];
         let replay = |input: &str| {
             netlist

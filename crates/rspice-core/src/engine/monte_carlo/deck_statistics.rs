@@ -44,6 +44,7 @@ impl Engine {
                 global: !netlist.params.has_parameter_binding(name)
                     && netlist.params.has_any_parameter_binding(name),
                 direction: false,
+                reach: false,
             })
             .collect::<Vec<_>>();
         let parse_options = NetlistParseOptions {

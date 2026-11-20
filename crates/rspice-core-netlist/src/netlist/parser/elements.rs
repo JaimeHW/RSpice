@@ -1697,6 +1697,7 @@ pub(super) fn parse_voltage_source(
             },
         );
     }
+    params.reach_note_source_spec(&name, &raw_spec);
 
     elements.push(Element {
         name,
@@ -1838,6 +1839,7 @@ fn parse_current_source_kind(
             },
         );
     }
+    params.reach_note_source_spec(name, &raw_spec);
     Ok(ElementKind::CurrentSource(source_spec))
 }
 

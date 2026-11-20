@@ -311,7 +311,7 @@ fn resolve_level2_thermal_resistor_state(
         reported_resistance: 0.0,
         output_resistance: 0.0,
         output_conductance: 0.0,
-        base_context: netlist.params.clone(),
+        base_context: netlist.params.retained_runtime_scope(),
         gmin: netlist.options.gmin.unwrap_or(crate::constants::GMIN),
         tnom_celsius: model_tnom,
         model_params: model_def.params.clone(),

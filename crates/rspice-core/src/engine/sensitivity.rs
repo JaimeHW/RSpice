@@ -592,6 +592,7 @@ impl Engine {
                 global: !netlist.params.has_parameter_binding(name)
                     && netlist.params.has_any_parameter_binding(name),
                 direction: direction.is_some_and(|target| name.eq_ignore_ascii_case(target)),
+                reach: false,
             })
             .collect();
         // A netlist with its source is replayed from it, and a copy with the

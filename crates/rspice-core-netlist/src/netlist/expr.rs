@@ -83,6 +83,8 @@ pub use context::{
     DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, ParameterRedefinitionDiagnosticPolicy,
     ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,
 };
+#[doc(hidden)]
+pub use context::{ParameterReach, ParameterReachSite, ReachedSourceSpec};
 pub use error::ExprError;
 pub(crate) use eval::PreparedProgress;
 #[doc(hidden)]

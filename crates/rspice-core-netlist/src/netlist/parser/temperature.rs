@@ -333,7 +333,7 @@ mod tests {
             let netlist = parse_netlist_with_parameter_overrides_and_abort(
                 &format!("Startup coordinate\nR1 out 0 1k\nC1 out 0 1u\n{card}={{58/(TEMP-27)}}\n.temp 27\n.end\n"),
                 NetlistParseOptions::default(),
-                &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false }],
+                &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false, reach: false }],
                 &NoAbort,
             ).unwrap();
             assert_eq!(netlist.options.temp, Some(85.0));
@@ -358,7 +358,7 @@ mod tests {
         let netlist = parse_netlist_with_parameter_overrides_and_abort(
             "Header coordinate\n.subckt cell p params: gain={58/(TEMP-27)}\n.ends\n.temp 27\n.end\n",
             NetlistParseOptions::default(),
-            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false }],
+            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false, reach: false }],
             &NoAbort,
         ).unwrap();
         assert_eq!(netlist.options.temp, Some(85.0));
@@ -387,7 +387,7 @@ mod tests {
         let netlist = parse_netlist_with_parameter_overrides_and_abort(
             "Conditional coordinate\n.if (1/(TEMP-27)>0)\n.param selected=1\n.else\n.param selected=2\n.endif\n.temp 27\n.end\n",
             NetlistParseOptions::default(),
-            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false }],
+            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false, reach: false }],
             &NoAbort,
         ).unwrap();
         assert_eq!(netlist.options.temp, Some(85.0));
@@ -454,7 +454,7 @@ mod tests {
         let netlist = parse_netlist_with_parameter_overrides_and_abort(
             "Physical pending group\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1 nominal=55 observed={TEMP}\n.end\n",
             NetlistParseOptions::default(),
-            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false }],
+            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false, reach: false }],
             &NoAbort,
         ).unwrap();
         assert_eq!(netlist.options.temp, Some(85.0));
@@ -473,6 +473,7 @@ mod tests {
                 value: 85.0,
                 global: false,
                 direction: false,
+                reach: false,
             }],
             &NoAbort,
         )
@@ -658,6 +659,7 @@ mod tests {
                 value: 55.0,
                 global: false,
                 direction: false,
+                reach: false,
             }],
             &NoAbort,
         )

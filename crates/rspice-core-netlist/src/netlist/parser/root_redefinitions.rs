@@ -195,7 +195,7 @@ impl RootRedefinitions {
     }
 
     /// The names this pass saw defined more than once.
-    fn redefined_names(&self) -> usize {
+    pub(super) fn redefined_names(&self) -> usize {
         self.definitions
             .values()
             .filter(|&&count| count > 1)

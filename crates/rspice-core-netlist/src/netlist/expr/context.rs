@@ -15,8 +15,11 @@
 use super::*;
 
 mod lexical;
+mod reach;
 use crate::config::ExpressionDialect;
+pub use reach::{ParameterReach, ParameterReachSite, ReachedSourceSpec};
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -360,6 +363,8 @@ pub struct ParamContext {
     statistical_captures: HashMap<String, Arc<CapturedStatisticalParameter>>,
     /// Allocated only for an explicitly requested parameter direction.
     parameter_directions: Option<Box<ParameterDirections>>,
+    /// Allocated only while a sweep observes what its parameter reaches.
+    reach: reach::ReachSlot,
     /// Numeric projections owned by the independent `.GLOBAL_PARAM`
     /// namespace. Xyce resolves an ordinary binding first, regardless of
     /// directive order, and consults this namespace only when no ordinary
@@ -424,6 +429,7 @@ impl ParamContext {
         if let Some(directions) = &mut self.parameter_directions {
             directions.ordinary.remove(&key);
         }
+        self.reach_write(&key, false);
     }
 
     /// Set a parameter value while preserving its imaginary component.
@@ -440,8 +446,9 @@ impl ParamContext {
         if is_real(value) {
             self.complex_params.remove(&key);
         } else {
-            self.complex_params.insert(key, value);
+            self.complex_params.insert(key.clone(), value);
         }
+        self.reach_write(&key, false);
     }
 
     /// Drop the numeric, complex or string binding of `name`, as a control
@@ -451,6 +458,7 @@ impl ParamContext {
         self.params.remove(&key);
         self.complex_params.remove(&key);
         self.string_params.remove(&key);
+        self.reach_write(&key, false);
     }
 
     /// Set a string parameter value.
@@ -465,6 +473,7 @@ impl ParamContext {
         if let Some(directions) = &mut self.parameter_directions {
             directions.ordinary.remove(&key);
         }
+        self.reach_write(&key, false);
     }
 
     /// Define an ordinary scoped parameter expression with an optional static
@@ -492,7 +501,9 @@ impl ParamContext {
                 self.complex_params.insert(key.clone(), value);
             }
         }
-        self.parameter_expressions.insert(key, expression.into());
+        self.parameter_expressions
+            .insert(key.clone(), expression.into());
+        self.reach_write(&key, false);
     }
 
     pub(crate) fn retain_expression_origin(
@@ -533,15 +544,18 @@ impl ParamContext {
     }
 
     /// Return a retained ordinary scoped parameter expression.
+    #[track_caller]
     pub fn get_parameter_expression(&self, name: &str) -> Option<&str> {
-        self.parameter_expressions
-            .get(&name.to_uppercase())
-            .map(String::as_str)
+        let key = name.to_uppercase();
+        self.reach_read_binding(&key, false);
+        self.parameter_expressions.get(&key).map(String::as_str)
     }
 
     /// Return all retained ordinary parameter expressions for deterministic
     /// validation and scope propagation.
+    #[track_caller]
     pub fn all_parameter_expressions(&self) -> Vec<(String, String)> {
+        self.reach_read_keys(self.parameter_expressions.keys(), false);
         self.parameter_expressions
             .iter()
             .map(|(name, expression)| (name.clone(), expression.clone()))
@@ -571,7 +585,9 @@ impl ParamContext {
                 self.global_complex_params.insert(key.clone(), value);
             }
         }
-        self.global_expressions.insert(key, expression.into());
+        self.global_expressions
+            .insert(key.clone(), expression.into());
+        self.reach_write(&key, true);
     }
 
     /// Set a numeric `.GLOBAL_PARAM` value without disturbing a same-name
@@ -586,6 +602,7 @@ impl ParamContext {
         self.global_complex_params.remove(&key);
         self.global_string_params.remove(&key);
         self.global_expressions.remove(&key);
+        self.reach_write(&key, true);
     }
 
     /// Set a complex `.GLOBAL_PARAM` value without crossing namespaces.
@@ -601,8 +618,9 @@ impl ParamContext {
         if is_real(value) {
             self.global_complex_params.remove(&key);
         } else {
-            self.global_complex_params.insert(key, value);
+            self.global_complex_params.insert(key.clone(), value);
         }
+        self.reach_write(&key, true);
     }
 
     /// Set a string `.GLOBAL_PARAM` value without crossing namespaces.
@@ -616,19 +634,23 @@ impl ParamContext {
         self.global_params.remove(&key);
         self.global_complex_params.remove(&key);
         self.global_expressions.remove(&key);
+        self.reach_write(&key, true);
     }
 
     /// Return the retained `.GLOBAL_PARAM` expression, if this name denotes
     /// an expression-valued global definition.
+    #[track_caller]
     pub fn get_global_expression(&self, name: &str) -> Option<&str> {
-        self.global_expressions
-            .get(&name.to_uppercase())
-            .map(String::as_str)
+        let key = name.to_uppercase();
+        self.reach_read_binding(&key, true);
+        self.global_expressions.get(&key).map(String::as_str)
     }
 
     /// Read a global projection without selecting a same-name ordinary binding.
+    #[track_caller]
     pub(crate) fn get_global_complex(&self, name: &str) -> Option<ComplexValue> {
         let key = name.to_uppercase();
+        self.reach_read_binding(&key, true);
         self.global_complex_params.get(&key).copied().or_else(|| {
             self.global_params
                 .get(&key)
@@ -639,7 +661,9 @@ impl ParamContext {
 
     /// Return all retained global expressions for deterministic inspection
     /// and propagation into derived parameter scopes.
+    #[track_caller]
     pub fn all_global_expressions(&self) -> Vec<(String, String)> {
+        self.reach_read_keys(self.global_expressions.keys(), true);
         self.global_expressions
             .iter()
             .map(|(name, expression)| (name.clone(), expression.clone()))
@@ -691,12 +715,17 @@ impl ParamContext {
     }
 
     /// Get a parameter value
+    #[track_caller]
     pub fn get(&self, name: &str) -> Option<Value> {
         let key = uppercase_key(name);
         if self.has_any_parameter_binding(&key) {
+            self.reach_read(&key);
             return self.effective_numeric_without_builtin(&key);
         }
         builtin_numeric_param(&key, || {
+            // A builtin reads the effective temperature.
+            self.reach_read("TEMP");
+            self.reach_read("TEMPER");
             self.effective_numeric_without_builtin("TEMP")
                 .or_else(|| self.effective_numeric_without_builtin("TEMPER"))
                 .unwrap_or(DEFAULT_TEMPERATURE_C)
@@ -704,9 +733,13 @@ impl ParamContext {
     }
 
     /// Get a parameter value, preserving any imaginary component.
+    #[track_caller]
     pub fn get_complex(&self, name: &str) -> Option<ComplexValue> {
         let key = uppercase_key(name);
         let key = &*key;
+        if self.has_any_parameter_binding(key) {
+            self.reach_read(key);
+        }
         if self.has_parameter_binding(key) {
             return self
                 .complex_params
@@ -846,9 +879,11 @@ impl ParamContext {
     }
 
     /// Get a string parameter value.
+    #[track_caller]
     pub fn get_string(&self, name: &str) -> Option<&str> {
         let key = uppercase_key(name);
         let key = &*key;
+        self.reach_read(key);
         if self.has_parameter_binding(key) {
             return self.string_params.get(key).map(String::as_str);
         }
@@ -862,12 +897,15 @@ impl ParamContext {
     pub fn merge(&mut self, other: &ParamContext) {
         for (k, v) in &other.params {
             self.set(k, *v);
+            self.reach_copy(k, false, other);
         }
         for (k, v) in &other.complex_params {
             self.set_complex(k, *v);
+            self.reach_copy(k, false, other);
         }
         for (k, v) in &other.string_params {
             self.set_string(k, v.clone());
+            self.reach_copy(k, false, other);
         }
         for (k, expression) in &other.parameter_expressions {
             let value = other
@@ -876,15 +914,19 @@ impl ParamContext {
                 .copied()
                 .or_else(|| other.params.get(k).copied().map(ComplexValue::from));
             self.define_parameter_expression(k, expression.clone(), value);
+            self.reach_copy(k, false, other);
         }
         for (k, v) in &other.global_params {
             self.set_global(k, *v);
+            self.reach_copy(k, true, other);
         }
         for (k, v) in &other.global_complex_params {
             self.set_global_complex(k, *v);
+            self.reach_copy(k, true, other);
         }
         for (k, v) in &other.global_string_params {
             self.set_global_string(k, v.clone());
+            self.reach_copy(k, true, other);
         }
         for (k, expression) in &other.global_expressions {
             let value = other
@@ -893,6 +935,7 @@ impl ParamContext {
                 .copied()
                 .or_else(|| other.global_params.get(k).copied().map(ComplexValue::from));
             self.define_global_expression(k, expression.clone(), value);
+            self.reach_copy(k, true, other);
         }
         self.retained_expression_origins.extend(
             other
@@ -1190,8 +1233,10 @@ impl ParamContext {
             if is_real(value) {
                 self.complex_params.remove(&name);
             } else {
-                self.complex_params.insert(name, value);
+                self.complex_params.insert(name.clone(), value);
             }
+            // The value is the capture's: the binding keeps what it carried.
+            self.reach_keep(&name, false);
         }
         Ok(())
     }
@@ -1301,7 +1346,10 @@ impl ParamContext {
     }
 
     /// Get all parameters as a vector of (name, value) tuples
+    #[track_caller]
     pub fn all_params(&self) -> Vec<(String, Value)> {
+        self.reach_read_keys(self.params.keys(), false);
+        self.reach_read_keys(self.global_params.keys(), true);
         let mut values = self.global_params.clone();
         for name in self
             .string_params
@@ -1319,7 +1367,10 @@ impl ParamContext {
     }
 
     /// Get all string parameters as a vector of (name, value) tuples.
+    #[track_caller]
     pub fn all_string_params(&self) -> Vec<(String, String)> {
+        self.reach_read_keys(self.string_params.keys(), false);
+        self.reach_read_keys(self.global_string_params.keys(), true);
         let mut values = self.global_string_params.clone();
         for name in self
             .params
@@ -1367,6 +1418,7 @@ impl ParamContext {
     ///
     /// This is used by analyses whose parameter context can vary at every
     /// accepted point, such as Xyce `.DC DATA` table rows.
+    #[track_caller]
     pub fn numeric_parameters(&self) -> Vec<(String, Value)> {
         let mut values = self.all_params();
         values.sort_unstable_by(|left, right| left.0.cmp(&right.0));
@@ -1377,7 +1429,10 @@ impl ParamContext {
     /// retained expressions or consuming random samples. Names shadowed across
     /// scopes may occur more than once, with their effective resolved value.
     #[doc(hidden)]
+    #[track_caller]
     pub fn resolved_numeric_parameters(&self) -> impl Iterator<Item = (&str, ComplexValue)> {
+        self.reach_read_keys(self.params.keys(), false);
+        self.reach_read_keys(self.global_params.keys(), true);
         self.params
             .keys()
             .chain(self.complex_params.keys())
@@ -1390,7 +1445,9 @@ impl ParamContext {
     /// the elaborated parameter environment. Map iteration order and runtime
     /// allocation addresses are deliberately excluded.
     #[doc(hidden)]
+    #[track_caller]
     pub fn checkpoint_semantic_snapshot(&self) -> String {
+        self.reach_read_all();
         let mut numeric = self
             .params
             .iter()

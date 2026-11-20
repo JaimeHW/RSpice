@@ -87,6 +87,8 @@ pub use expr::{
     ParamContext, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy, RandomState,
     StatisticalParamMode,
 };
+#[doc(hidden)]
+pub use expr::{ParameterReach, ParameterReachSite, ReachedSourceSpec};
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub use flattener::flattenings_on_this_thread;
@@ -2581,6 +2583,7 @@ impl Netlist {
                 value: *value,
                 global: false,
                 direction: false,
+                reach: false,
             })
             .collect();
         if search_paths.is_empty() {

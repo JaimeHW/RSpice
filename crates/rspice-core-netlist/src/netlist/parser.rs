@@ -411,6 +411,8 @@ pub struct ParameterOverride {
     pub value: Value,
     pub global: bool,
     pub direction: bool,
+    /// Observe what this binding reaches through the scopes it is read in.
+    pub reach: bool,
 }
 
 #[derive(Debug)]
@@ -906,6 +908,11 @@ fn parse_netlist_impl(
                 .params
                 .seed_parameter_direction(&parameter.name, parameter.global);
         }
+        if parameter.reach {
+            state
+                .params
+                .observe_parameter_reach(&parameter.name, parameter.global);
+        }
     }
     state.parameter_overrides = overrides.to_vec();
     state.allow_unmatched_subckt_ends = options.expression_dialect == ExpressionDialect::Xyce;
@@ -1171,6 +1178,13 @@ fn parse_netlist_impl(
 
     ensure_parse_not_aborted(abort)?;
     let root_redefinitions = std::mem::take(&mut state.root_redefinitions);
+    if root_redefinitions.redefined_names() > 0 {
+        // A redefinition pass binds earlier readers to a value the last
+        // definition computed, which no statement of this pass read.
+        state
+            .params
+            .reach_refuse("a root parameter or function is defined more than once");
+    }
     let spice_dialect = state.spice_dialect;
     let mut netlist = state.into_netlist(
         title,
@@ -4896,6 +4910,54 @@ fn for_each_card_line_with_abort(
 /// directives update the block stack, lines inside false branches are
 /// skipped, and everything else flows to `process_line`.
 fn process_line_gated(
+    line: &str,
+    line_num: usize,
+    origin: &NetlistSourceLocation,
+    state: &mut ParseState,
+    source_is_included: bool,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    let Some(statement) = state.params.reach_statement_begin() else {
+        return process_card(line, line_num, origin, state, source_is_included, abort);
+    };
+    let in_subcircuit = !state.subckt_stack.is_empty();
+    let first_element = state.elements.len();
+    let processed = process_card(line, line_num, origin, state, source_is_included, abort);
+    if let Some(read) = statement.end() {
+        let sources = read
+            .sources
+            .iter()
+            .map(|(element, text)| crate::netlist::expr::ReachedSourceSpec {
+                element: element.clone(),
+                text: text.clone(),
+                scope: state.params.without_parameter_reach(),
+            })
+            .collect();
+        let site = crate::netlist::expr::ParameterReachSite::Card {
+            line: line_num,
+            head: line
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_ascii_uppercase(),
+            in_subcircuit,
+            elements: state
+                .elements
+                .get(first_element..)
+                .unwrap_or_default()
+                .iter()
+                .map(|element| element.name.clone())
+                .collect(),
+            names: read.names.clone(),
+            sources,
+        };
+        read.record(site);
+    }
+    processed
+}
+
+/// One logical card through the conditional gate.
+fn process_card(
     line: &str,
     line_num: usize,
     origin: &NetlistSourceLocation,

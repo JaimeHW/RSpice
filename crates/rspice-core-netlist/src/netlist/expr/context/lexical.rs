@@ -87,7 +87,10 @@ impl ParamContext {
                     } else {
                         self.set_string(name, value.clone());
                     }
+                } else {
+                    continue;
                 }
+                self.reach_copy(name, global, parent);
             }
         }
         for (name, function) in &parent.functions {

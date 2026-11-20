@@ -642,6 +642,7 @@ fn parsed_parameter_directions_preserve_definition_order_and_namespaces() {
                 value: 0.0,
                 global: false,
                 direction: true,
+                reach: false,
             }],
             &crate::abort_signal::NoAbort,
         )
@@ -669,6 +670,7 @@ fn parsed_parameter_directions_preserve_definition_order_and_namespaces() {
             value: 0.0,
             global: true,
             direction: true,
+            reach: false,
         }],
         &crate::abort_signal::NoAbort,
     )
@@ -3281,5 +3283,57 @@ fn an_expression_string_keeps_its_backslashes() {
             Ok(Expr::StringLiteral(value)) => assert_eq!(value, expected, "{source}"),
             other => panic!("{source} parsed as {other:?}"),
         }
+    }
+}
+
+#[test]
+fn an_observed_parameter_reaches_the_cards_and_instances_that_read_it() {
+    use crate::netlist::NetlistParseOptions;
+    use crate::netlist::parser::{
+        ParameterOverride, parse_netlist_with_parameter_overrides_and_abort,
+    };
+    let source = "reach\n.param a=1 c=3\n.param b={a*2}\nV1 1 0 {a}\nR1 1 0 {b}\nR2 1 0 {c}\n\
+        .subckt load n r=1\nR1 n 0 {r}\n.ends\nX1 1 load r={a}\nX2 1 load r={c}\n.end\n";
+    let mut parsed = parse_netlist_with_parameter_overrides_and_abort(
+        source,
+        NetlistParseOptions::default(),
+        &[ParameterOverride {
+            name: "A".to_owned(),
+            value: 1.0,
+            global: false,
+            direction: false,
+            reach: true,
+        }],
+        &crate::abort_signal::NoAbort,
+    )
+    .unwrap();
+    crate::netlist::flatten_netlist(&parsed).unwrap();
+    let reach = parsed.params.end_parameter_reach().expect("observed");
+    assert!(
+        reach.is_complete(),
+        "{:?} {:?}",
+        reach.unattributed,
+        reach.refusals
+    );
+    let mut cards = Vec::new();
+    let mut elements = Vec::new();
+    for site in &reach.sites {
+        match site {
+            ParameterReachSite::Card { head, .. } => cards.push(head.as_str()),
+            ParameterReachSite::Element { path, .. } => elements.push(path.as_str()),
+        }
+    }
+    for card in [".PARAM", "V1", "R1"] {
+        assert!(
+            cards.contains(&card),
+            "{card} read the parameter: {cards:?}"
+        );
+    }
+    assert!(elements.contains(&"X1"), "X1 reads it: {elements:?}");
+    for unreached in ["R2", "X2"] {
+        assert!(
+            !cards.contains(&unreached) && !elements.contains(&unreached),
+            "{unreached} reads no carrying binding: {cards:?} {elements:?}"
+        );
     }
 }
