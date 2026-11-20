@@ -682,7 +682,9 @@ impl Deref for WaveformValues {
 /// took a column's whole values, or read a stored window whole, from one that read a tile, a few
 /// rows or the ends. In a shipped build the counting calls are empty.
 pub mod column_work {
-    use super::{Repr, WaveformValues};
+    #[cfg(feature = "test-support")]
+    use super::Repr;
+    use super::WaveformValues;
 
     /// What one thread did with whole columns.
     #[cfg(feature = "test-support")]
