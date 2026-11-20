@@ -1447,15 +1447,11 @@ pub fn select_pane_binding(state: &mut ResultsParts<'_>, pane: &Pane) -> Result<
         .binding
         .ok_or_else(|| "This result pane is not bound to a run.".to_owned())?;
     let (run_index, analysis_index) = resolve_binding(state.results_reads(), binding)?;
-    if state.model.simulation.view.active_run_idx == Some(run_index)
-        && state.model.simulation.view.active_analysis_idx == Some(analysis_index)
+    if !state
+        .model
+        .simulation
+        .select_run_analysis(run_index, analysis_index)
     {
-        return Ok(());
-    }
-    if !state.model.simulation.select_run(run_index) {
-        return Err("The retained dataset could not be selected.".to_owned());
-    }
-    if !state.model.simulation.select_analysis(analysis_index) {
         return Err("The retained analysis could not be selected.".to_owned());
     }
     Ok(())

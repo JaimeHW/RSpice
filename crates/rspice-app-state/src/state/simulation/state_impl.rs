@@ -480,14 +480,21 @@ impl SimulationState {
     ///
     /// This syncs the new run-based results with the legacy flat waveforms list
     /// so existing waveform viewer code continues to work.
+    ///
+    /// The analysis already shown stays shown: the reader may have chosen it
+    /// while the run streamed. A run with none shown yet shows its first.
     pub fn complete_run(&mut self) {
         if let Some(run_idx) = self.view.active_run_idx
             && let Some(run) = self.retained.runs.get(run_idx)
+            && !run.analyses.is_empty()
         {
-            // Auto-select first analysis if available - this will sync only that analysis's waveforms
-            if !run.analyses.is_empty() {
-                // Use select_analysis to properly load only the selected analysis's waveforms
-                self.select_analysis(0);
+            match self.view.active_analysis_idx {
+                Some(index) if index < run.analyses.len() => {
+                    self.sync_selected_analysis_waveforms();
+                }
+                _ => {
+                    self.select_analysis(0);
+                }
             }
         }
     }
@@ -495,28 +502,71 @@ impl SimulationState {
     /// Select a run by index
     ///
     /// Returns true if the run exists and was selected.
+    ///
+    /// Selecting the run already shown, on an analysis it holds, changes
+    /// nothing: a window or document that is already on its run is drawn on
+    /// every frame, and re-selecting it reset the analysis to the first and
+    /// moved the data version each time. Another run shows the analysis it
+    /// showed when it was last left, else its first. A run with no analyses
+    /// clears the displayed waveforms so the viewer cannot show stale traces.
     pub fn select_run(&mut self, run_idx: usize) -> bool {
-        if run_idx < self.retained.runs.len() {
-            self.view.active_run_idx = Some(run_idx);
-            self.view.active_analysis_idx = None;
+        let Some(run) = self.retained.runs.get(run_idx) else {
+            return false;
+        };
+        let analyses = run.analyses.len();
+        if self.view.active_run_idx == Some(run_idx)
+            && self
+                .view
+                .active_analysis_idx
+                .is_some_and(|index| index < analyses)
+        {
+            return true;
+        }
+        let analysis = self
+            .view
+            .remembered_analyses
+            .get(&run.run_id)
+            .copied()
+            .filter(|index| *index < analyses)
+            .or_else(|| (analyses > 0).then_some(0));
+        self.remember_shown_analysis();
+        self.view.active_run_idx = Some(run_idx);
+        self.view.active_analysis_idx = analysis;
+        self.sync_selected_analysis_waveforms();
+        true
+    }
 
-            let has_analyses = self
-                .retained
-                .runs
-                .get(run_idx)
-                .map(|run| !run.analyses.is_empty())
-                .unwrap_or(false);
+    /// Show one analysis of one run, moving the data version once. Selecting
+    /// the run and then the analysis moved it twice and showed the run's
+    /// first analysis in between.
+    pub fn select_run_analysis(&mut self, run_idx: usize, analysis_idx: usize) -> bool {
+        let Some(run) = self.retained.runs.get(run_idx) else {
+            return false;
+        };
+        if analysis_idx >= run.analyses.len() {
+            return false;
+        }
+        if self.view.active_run_idx == Some(run_idx)
+            && self.view.active_analysis_idx == Some(analysis_idx)
+        {
+            return true;
+        }
+        if self.view.active_run_idx != Some(run_idx) {
+            self.remember_shown_analysis();
+        }
+        self.view.active_run_idx = Some(run_idx);
+        self.view.active_analysis_idx = Some(analysis_idx);
+        self.sync_selected_analysis_waveforms();
+        true
+    }
 
-            // Auto-select first analysis in this run (this will sync only that analysis's waveforms).
-            // If the run has no analyses, clear displayed waveform data so the viewer cannot show stale traces.
-            if has_analyses {
-                self.select_analysis(0);
-            } else {
-                self.sync_selected_analysis_waveforms();
-            }
-            true
-        } else {
-            false
+    /// Note the analysis the shown run is on, for when it is shown again.
+    fn remember_shown_analysis(&mut self) {
+        if let Some(run) = self.active_run()
+            && let Some(analysis) = self.view.active_analysis_idx
+        {
+            let run_id = run.run_id;
+            self.view.remembered_analyses.insert(run_id, analysis);
         }
     }
 
@@ -577,26 +627,37 @@ impl SimulationState {
         self.select_run(run_idx)
     }
 
-    /// Select the latest analysis in a run addressed by display sequence.
-    pub fn select_latest_analysis_in_run_sequence(&mut self, run_sequence: u64) -> bool {
-        let Some(run_idx) = self
+    /// New samples arrived for a run addressed by display sequence: redraw
+    /// them if the run is shown, and select nothing.
+    ///
+    /// Every live update, checkpoint and finished analysis used to select
+    /// the run's newest analysis, so while a run streamed no other run could
+    /// stay on screen and the reader's choice of analysis was undone each
+    /// time. A shown run with no analysis shown yet shows its first, so a run
+    /// that has just started shows what it streams. A run that is not shown
+    /// only moves the data version, for whatever reads it elsewhere.
+    pub fn refresh_run_samples(&mut self, run_sequence: u64) -> bool {
+        let shown = self
             .retained
             .runs
             .iter()
             .position(|run| run.id == run_sequence)
-        else {
+            .filter(|index| self.view.active_run_idx == Some(*index));
+        let Some(run_idx) = shown else {
+            self.view.data_version = self.view.data_version.wrapping_add(1);
             return false;
         };
-        let Some(last_idx) = self
-            .retained
-            .runs
-            .get(run_idx)
-            .and_then(|run| run.analyses.len().checked_sub(1))
-        else {
+        let analyses = self.retained.runs[run_idx].analyses.len();
+        if analyses == 0 {
             return false;
-        };
-        self.view.active_run_idx = Some(run_idx);
-        self.view.active_analysis_idx = Some(last_idx);
+        }
+        if self
+            .view
+            .active_analysis_idx
+            .is_none_or(|index| index >= analyses)
+        {
+            self.view.active_analysis_idx = Some(0);
+        }
         self.sync_selected_analysis_waveforms();
         true
     }
@@ -654,10 +715,16 @@ impl SimulationState {
     }
 
     /// Drop overlay IDs whose runs have left the history.
+    /// Forget the view's references to runs that left the history: the
+    /// overlays, and the analysis each run was last shown on.
     fn prune_overlay_dataset_ids(&mut self) {
+        let runs = &self.retained.runs;
         self.view
             .overlay_dataset_ids
-            .retain(|id| self.retained.runs.iter().any(|run| run.dataset_id == *id));
+            .retain(|id| runs.iter().any(|run| run.dataset_id == *id));
+        self.view
+            .remembered_analyses
+            .retain(|id, _| runs.iter().any(|run| run.run_id == *id));
     }
 
     /// Get the currently active analysis (if any)

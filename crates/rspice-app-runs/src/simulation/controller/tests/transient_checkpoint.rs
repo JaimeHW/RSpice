@@ -205,6 +205,55 @@ fn fixture() -> (SimulationController, RunTestHost) {
     (controller, state)
 }
 
+/// A live update draws what it brings and selects nothing. Every update put
+/// the running run's newest analysis back on screen, so the reader could not
+/// look at another run while this one streamed.
+#[test]
+fn live_transient_updates_leave_the_run_the_reader_chose_on_screen() {
+    let (controller, mut state) = fixture();
+    let running = controller.current_run_id.unwrap();
+    let mut earlier = crate::state::SimulationRun::new(running + 100);
+    earlier.lifecycle = crate::state::SimulationRunLifecycle::Completed;
+    earlier.analyses.push(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", vec![0.0, 1e-9], vec![0.0, 0.5], "#fff"),
+        ]),
+    );
+    state.model.simulation.retained.runs.push(earlier);
+    let update = |controller: &SimulationController, state: &mut RunTestHost, samples: usize| {
+        let time = (0..samples)
+            .map(|index| index as f64 * 1e-10)
+            .collect::<Vec<_>>();
+        let values: Vec<f64> = time.iter().map(|time| time * 1e7).collect();
+        let partial = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
+            .with_provenance(controller.current_provenance.clone().unwrap())
+            .with_waveforms(vec![RetainedTrace::new("V(out)", time, values, "#fff")]);
+        controller
+            .retain_live_transient_analysis(&mut state.model, running, partial)
+            .unwrap();
+    };
+    update(&controller, &mut state, 2);
+    assert!(
+        state.model.simulation.select_run(1),
+        "the reader turns to the earlier run"
+    );
+
+    for samples in 3..103 {
+        update(&controller, &mut state, samples);
+        assert_eq!(state.model.simulation.view.active_run_idx, Some(1));
+    }
+
+    assert!(state.model.simulation.select_run(0));
+    let version = state.model.simulation.view.data_version;
+    update(&controller, &mut state, 103);
+    assert_eq!(state.model.simulation.view.active_analysis_idx, Some(0));
+    assert_ne!(
+        state.model.simulation.view.data_version, version,
+        "the shown run draws the samples it was sent"
+    );
+    assert_eq!(state.model.simulation.view.waveforms[0].y.len(), 103);
+}
+
 #[test]
 fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_results() {
     let bytes = images();

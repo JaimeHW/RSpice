@@ -268,10 +268,7 @@ impl SimulationController {
 
                 // Display the just-completed analysis without rebuilding waveform buffers.
                 if let Some(run_id) = target_run_id {
-                    state
-                        .model_mut()
-                        .simulation
-                        .select_latest_analysis_in_run_sequence(run_id);
+                    state.model_mut().simulation.refresh_run_samples(run_id);
                 }
 
                 // The run reached its plan's storage budget: the analyses it

@@ -1185,9 +1185,7 @@ impl SimulationController {
             self.report_seal_errors(model, errors);
         }
         if let Some(run_id) = target_run_id {
-            model
-                .simulation
-                .select_latest_analysis_in_run_sequence(run_id);
+            model.simulation.refresh_run_samples(run_id);
         }
 
         if self.pending_analyses.is_empty() {
@@ -1586,9 +1584,7 @@ impl SimulationController {
                 self.validate_analysis_retention(run, &partial)?;
                 run.upsert_live_analysis(partial)
             })?;
-        model
-            .simulation
-            .select_latest_analysis_in_run_sequence(run_id);
+        model.simulation.refresh_run_samples(run_id);
         Ok(())
     }
 

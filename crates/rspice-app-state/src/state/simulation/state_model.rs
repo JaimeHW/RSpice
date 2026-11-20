@@ -141,6 +141,11 @@ pub struct SimulationViewState {
     /// strength and overlaid runs at reduced alpha/stroke. IDs that leave
     /// the history are pruned automatically.
     pub overlay_dataset_ids: Vec<DatasetId>,
+
+    /// The analysis each run showed when another run was selected, so that
+    /// going back to a run goes back to its analysis rather than its first.
+    /// Runtime only: two windows on two runs select each in turn every frame.
+    pub remembered_analyses: HashMap<RunId, usize>,
 }
 
 impl SimulationState {

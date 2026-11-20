@@ -62,6 +62,8 @@ impl CachedResults {
                     active_run_idx,
                     active_analysis_idx,
                     overlay_dataset_ids,
+                    // Runtime: the analysis each run was last left on.
+                    remembered_analyses: _,
                     waveforms: _,
                     data_version: _,
                     node_to_waveform: _,

@@ -96,9 +96,7 @@ impl SimulationController {
         partial.transient_checkpoint = Some(checkpoint);
         self.validate_analysis_retention(run, &partial)?;
         run.upsert_live_analysis(partial)?;
-        model
-            .simulation
-            .select_latest_analysis_in_run_sequence(run_id);
+        model.simulation.refresh_run_samples(run_id);
         Ok(())
     }
 }
