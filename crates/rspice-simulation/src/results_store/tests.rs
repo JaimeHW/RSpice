@@ -285,7 +285,21 @@ fn a_segment_left_without_its_end_closes_again_on_its_rows_and_states_its_digest
     );
     let kept = recovered.rows();
     assert!(kept > 0, "whole chunks were kept");
-    let read = recovered.digest().unwrap();
+    // The digest of exactly those rows: a run that wrote them and ended there. (The summaries are
+    // part of the digest, so the recovered segment, which lacks the summaries its close writes,
+    // does not state it.)
+    let (x, values) = (
+        recovered.read_x(0, kept as usize).unwrap(),
+        recovered.read_slot(0, 0, kept as usize).unwrap(),
+    );
+    let mut fresh = rspice_results_store::SegmentWriter::create(
+        rspice_results_store::MemoryIo::new(),
+        &schema,
+        &RunMeta::default(),
+    )
+    .unwrap();
+    fresh.push_rows(&x, &values).unwrap();
+    let read = fresh.finish(RunStatus::Completed).unwrap().0.digest;
     drop(recovered);
 
     let closed = close_recovered_segment(
