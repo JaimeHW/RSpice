@@ -16,9 +16,10 @@ mod tests;
 /// Where a marker sits on its trace as the trace is now.
 ///
 /// A peak, valley or crossing marker is found again from where it was put
-/// every time it is read, so a result that changes under it moves it with
-/// its feature; `Err` carries where it was put when its trace no longer has
-/// that feature there. Any other marker stays where it was put.
+/// whenever the strip is built again, so a result that changes under it moves
+/// it with its feature; `Err` carries where it was put when its trace no
+/// longer has that feature there. Any other marker stays where it was put.
+/// The search is made once per placement and kept on the strip model.
 pub fn marker_position(
     model: &StripModel,
     anchor: &WaveformPresentationKey,
@@ -28,13 +29,31 @@ pub fn marker_position(
     let Some(search) = kind.search() else {
         return Ok(x);
     };
-    model
+    let mut positions = model
+        .marker_positions
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((.., found)) = positions
+        .iter()
+        .find(|(key, bits, held, _)| key == anchor && *bits == x.to_bits() && *held == kind)
+    {
+        return *found;
+    }
+    let found = model
         .traces
         .iter()
         .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)
-        .and_then(|trace| feature_search::nearest(&trace.x, &trace.y, x, search))
+        .and_then(|trace| {
+            // A stored trace is read for the search and not kept.
+            let samples = trace.x.len().min(trace.y.len());
+            let along = trace.x.read_range(0..samples).ok()?;
+            let values = trace.y.read_range(0..samples).ok()?;
+            feature_search::nearest(&along, &values, x, search)
+        })
         .map(|found| found.x)
-        .ok_or(x)
+        .ok_or(x);
+    positions.push((anchor.clone(), x.to_bits(), kind, found));
+    found
 }
 
 /// The separation between the cursors, named the way the X axis reads: a

@@ -505,3 +505,49 @@ fn the_marker_dialog_reads_a_stored_trace_s_level_from_the_rows_around_the_marke
         "{level}"
     );
 }
+
+/// A peak marker is found once where it was put, not on every frame the
+/// canvas and the readout ask where it stands: a stored trace searched for it
+/// is read once.
+#[test]
+fn a_peak_marker_on_a_stored_trace_is_searched_for_once() {
+    use rspice_results::result_presentation::MarkerKind;
+    use rspice_results::waveform::column_work::ColumnWork;
+
+    const ROWS: usize = 100_000;
+    let (run, rows_read) = tiled_run(ROWS);
+    let models = models(&run);
+    let model = &models[0];
+    let anchor = anchor_key(model, &model.traces[0]);
+    let put = 10_000.0e-9;
+    let (before, work) = (rows_read(), ColumnWork::read());
+    let found = super::cursor_values::marker_position(model, &anchor, put, MarkerKind::Peak)
+        .expect("the trace climbs to a peak");
+    // sin(row / 10^4) peaks at row 10^4 * pi / 2.
+    let peak = (1.0e4 * std::f64::consts::FRAC_PI_2).round() * 1.0e-9;
+    assert!(
+        (found - peak).abs() <= 1.0e-9,
+        "{found} where the peak is {peak}"
+    );
+    let searched = rows_read() - before;
+    assert!(searched <= 2 * ROWS, "the search read {searched} rows");
+    assert_eq!(
+        work.since().stored_reads,
+        2,
+        "the search read the axis and the trace once each"
+    );
+
+    let (before, work) = (rows_read(), ColumnWork::read());
+    for _ in 0..10 {
+        assert_eq!(
+            super::cursor_values::marker_position(model, &anchor, put, MarkerKind::Peak),
+            Ok(found)
+        );
+    }
+    assert_eq!(
+        rows_read(),
+        before,
+        "a placed marker is not searched for again"
+    );
+    assert_eq!(work.since(), ColumnWork::default());
+}

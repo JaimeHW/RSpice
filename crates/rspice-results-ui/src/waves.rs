@@ -182,6 +182,17 @@ pub struct LaneTrace {
     pub visible: bool,
 }
 
+/// The search markers found on a strip: each placement's trace, X bits and kind, with where
+/// the search found it, or `Err` with where it was put.
+pub type MarkerPositions = std::sync::Mutex<
+    Vec<(
+        WaveformPresentationKey,
+        u64,
+        rspice_results::result_presentation::MarkerKind,
+        Result<f64, f64>,
+    )>,
+>;
+
 /// One strip (== one analysis of the active run).
 pub struct StripModel {
     pub analysis_index: usize,
@@ -223,6 +234,10 @@ pub struct StripModel {
     /// the model is built. Whether the X axis can be logarithmic is decided
     /// from it on every frame.
     pub x_bounds: Option<(f64, f64)>,
+    /// Where each peak, valley and crossing marker on this strip stands: a search walks its
+    /// trace, and the canvas and the readout ask on every frame. Kept as long as the model,
+    /// which is built again when the data under it changes.
+    pub marker_positions: MarkerPositions,
     /// The analysis' committed event history, as lanes, when it has one.
     pub event_lanes: Option<Arc<logic::EventLanes>>,
     /// The analysis' `D()` and `E()` columns drawn from that history.
