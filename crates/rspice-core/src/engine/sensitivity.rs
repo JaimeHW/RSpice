@@ -236,6 +236,15 @@ struct AcSensitivityTarget {
     location: AcSensitivityLocation,
 }
 
+/// Which override of a replay is followed through the deck, and how: its
+/// direction (the derivative every reader carries) or its reach (the cards
+/// and elements that read it).
+#[derive(Clone, Copy, Default)]
+pub(super) struct ReplayCapture<'a> {
+    pub(super) direction: Option<&'a str>,
+    pub(super) reach: Option<&'a str>,
+}
+
 impl Engine {
     pub(in crate::engine) fn collect_sensitivity_elements(
         circuit: &CircuitData,
@@ -533,7 +542,34 @@ impl Engine {
         Self::replay_parameter_overrides_with_seed(
             netlist,
             overrides,
-            direction,
+            ReplayCapture {
+                direction,
+                reach: None,
+            },
+            None,
+            resource_limits,
+            abort,
+        )
+    }
+
+    /// The deck with `param_name` set to `param_value`, read while observing
+    /// what that binding reaches: the replayed netlist's parameter scope
+    /// holds the observation until [`crate::netlist::ParamContext::end_parameter_reach`].
+    pub(super) fn replay_parameter_reach(
+        netlist: &Netlist,
+        param_name: &str,
+        param_value: Value,
+        resource_limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, usize), SimulationError> {
+        let name = param_name.to_ascii_uppercase();
+        Self::replay_parameter_overrides_with_seed(
+            netlist,
+            &[(name.clone(), param_value)],
+            ReplayCapture {
+                direction: None,
+                reach: Some(&name),
+            },
             None,
             resource_limits,
             abort,
@@ -545,11 +581,12 @@ impl Engine {
     pub(super) fn replay_parameter_overrides_with_seed(
         netlist: &Netlist,
         overrides: &[(String, Value)],
-        direction: Option<&str>,
+        capture: ReplayCapture<'_>,
         statistical_seed: Option<u64>,
         resource_limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
+        let ReplayCapture { direction, reach } = capture;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -592,7 +629,7 @@ impl Engine {
                 global: !netlist.params.has_parameter_binding(name)
                     && netlist.params.has_any_parameter_binding(name),
                 direction: direction.is_some_and(|target| name.eq_ignore_ascii_case(target)),
-                reach: false,
+                reach: reach.is_some_and(|target| name.eq_ignore_ascii_case(target)),
             })
             .collect();
         // A netlist with its source is replayed from it, and a copy with the

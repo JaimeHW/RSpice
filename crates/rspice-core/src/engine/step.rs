@@ -282,7 +282,7 @@ impl Engine {
         Self::replay_parameter_overrides_with_seed(
             netlist,
             overrides,
-            None,
+            super::sensitivity::ReplayCapture::default(),
             Some(seed),
             resource_limits,
             abort,

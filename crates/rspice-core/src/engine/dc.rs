@@ -12,6 +12,7 @@ use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::solver::{SimulationResult, StaticMatrix};
 use crate::{CircuitData, Netlist, Value};
 
+mod parameter_sweep;
 mod result;
 pub use result::{DcSweepAxis, DcSweepResult};
 
@@ -2450,18 +2451,41 @@ impl Engine {
             Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
         let mut any_binding = false;
         let mut retained_values = 0usize;
+        // The first point reads the deck while observing what the parameter
+        // reaches; a plan it proves gives every later point's deck.
+        let mut plan = None;
 
-        for &sweep_value in sweep_points {
+        for (index, &sweep_value) in sweep_points.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let (swept, bindings) = Self::create_perturbed_netlist_with_limits_and_abort(
-                netlist,
-                param_name,
-                sweep_value,
-                self.config.resource_limits,
-                abort,
-            )?;
+            let planned = if index == 0 {
+                let (deck, bindings, found) =
+                    self.dc_parameter_sweep_start(netlist, param_name, sweep_value, abort)?;
+                plan = found;
+                Some((deck, bindings))
+            } else {
+                // A point the plan cannot read is read from the deck, as is
+                // every point after it.
+                match plan.as_ref().map(|plan| plan.point(sweep_value)) {
+                    Some(Ok(deck)) => Some((deck, 0)),
+                    Some(Err(_)) => {
+                        plan = None;
+                        None
+                    }
+                    None => None,
+                }
+            };
+            let (swept, bindings) = match planned {
+                Some(planned) => planned,
+                None => Self::create_perturbed_netlist_with_limits_and_abort(
+                    netlist,
+                    param_name,
+                    sweep_value,
+                    self.config.resource_limits,
+                    abort,
+                )?,
+            };
             any_binding |= bindings > 0;
             lifecycle.sweep_value = sweep_value;
             let (result, device_op_report) = self
