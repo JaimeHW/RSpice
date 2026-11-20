@@ -1,6 +1,9 @@
-//! Bound allocation growth for long startup cards, without timing assumptions.
+//! Bound allocation growth for long and many-instance startup cards, without
+//! timing assumptions.
 
 use std::fmt::Write;
+
+use rspice_core::netlist::{StartupDirectiveRecord, StartupDirectiveScope};
 
 use super::allocations;
 
@@ -55,5 +58,58 @@ fn four_times_more_startup_entries_use_near_linear_allocation_volume() {
             large <= 6 * small,
             "{directive} scoped={scoped}: {small} -> {large}"
         );
+    }
+}
+
+fn instanced_source(count: usize, directive: &str) -> String {
+    let mut source = String::from("Instanced startup card\n.subckt cell p\nR1 p x 1k\nR2 x 0 1k\n");
+    writeln!(source, "{directive} V(x)=1\n.ends").unwrap();
+    for index in 0..count {
+        writeln!(source, "X{index:04} N{index:04} cell").unwrap();
+    }
+    source.push_str(".end\n");
+    source
+}
+
+fn instance_count(record: &StartupDirectiveRecord) -> usize {
+    match record.scope() {
+        StartupDirectiveScope::Subcircuit {
+            qualified_instances,
+            ..
+        } => qualified_instances.len(),
+        StartupDirectiveScope::TopLevel => panic!("the card is scoped to its subcircuit"),
+    }
+}
+
+/// Bytes the elaboration of a subcircuit card over `count` instances
+/// allocates once parsing has merged every instance's target into the card.
+fn elaborated(count: usize, directive: &str) -> usize {
+    let parsed = rspice_core::Netlist::parse(&instanced_source(count, directive)).unwrap();
+    let card = &parsed.startup_directives()[0];
+    assert_eq!(instance_count(card), count);
+    assert_eq!(card.entries()[0].qualified_nodes().len(), count);
+    let (flattened, bytes) =
+        allocations::measured(|| rspice_core::netlist::flatten_netlist_with_models(&parsed));
+    let elaborated = flattened.unwrap().scoped_startup_directives;
+    assert_eq!(elaborated.len(), count);
+    for record in &elaborated {
+        assert_eq!(instance_count(record), 1);
+        assert_eq!(record.entries()[0].qualified_nodes().len(), 1);
+        assert_eq!(record.entries()[0].voltage(), 1.0);
+    }
+    bytes
+}
+
+#[test]
+fn four_times_more_instances_of_a_startup_card_use_near_linear_allocation_volume() {
+    for directive in [".IC", ".NODESET"] {
+        let small = elaborated(64, directive);
+        let large = elaborated(256, directive);
+        println!("{directive}: bytes64={small} bytes256={large}");
+        // Each instance's card names one instance and one node. Building it
+        // by copying the merged card, which names all of them, makes the
+        // elaboration quadratic (approaching 16x); the 6x ceiling is the one
+        // above.
+        assert!(large <= 6 * small, "{directive}: {small} -> {large}");
     }
 }
