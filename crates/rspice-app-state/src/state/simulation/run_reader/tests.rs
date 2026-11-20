@@ -39,7 +39,10 @@ fn the_memory_budget_holds_with_twenty_retained_runs_and_runs_on_screen_go_last(
     let reader = RunReader::new(BUDGET);
     let arrived = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&arrived);
+    // A waker that takes its time, as a busy frame loop does: a read that settled has had its
+    // frame asked for all the same.
     reader.set_waker(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2));
         counted.fetch_add(1, Ordering::Relaxed);
     });
     reader.show([19]);

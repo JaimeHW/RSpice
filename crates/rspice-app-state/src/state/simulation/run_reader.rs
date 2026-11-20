@@ -442,12 +442,15 @@ fn serve(shared: std::sync::Weak<Shared>) {
             let mut cache = strong.lock();
             cache.queued.remove(&job.key);
             cache.keep(job.key, value);
-            cache.reading = false;
-            if cache.jobs.is_empty() {
-                strong.idle.notify_all();
-            }
         }
+        // A read has arrived once its frame is asked for: whoever waits for the reads to
+        // settle sees both, never the read without its frame.
         strong.wake();
+        let mut cache = strong.lock();
+        cache.reading = false;
+        if cache.jobs.is_empty() {
+            strong.idle.notify_all();
+        }
     }
 }
 
