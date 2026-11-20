@@ -180,8 +180,8 @@ fn a_selected_trace_states_its_average_over_time() {
 }
 
 /// A selected trace whose samples a results store keeps is measured off the
-/// frame: no frame reads its columns, its rows say they are computing until
-/// the measurement is in, and then they state it.
+/// frame, once, streaming its columns: no frame reads them, its rows say they
+/// are computing until the measurement is in, and then they state it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_stored_selected_trace_is_measured_without_a_frame_reading_its_columns() {
@@ -228,14 +228,22 @@ fn a_stored_selected_trace_is_measured_without_a_frame_reading_its_columns() {
     // The ramp runs from 0 to 10 V over 10 ms: its average is 5 V.
     assert_eq!(rows.get("Average").map(String::as_str), Some("5 V"));
     assert_eq!(rows.get("Maximum").map(String::as_str), Some("10 V"));
-    assert_eq!(
+    // Each pass reads the column a block at a time; this column is one block long.
+    let passes = || {
         columns
             .iter()
             .map(|column| column.whole_reads())
-            .sum::<u64>(),
-        2,
-        "the background measurement read the axis and the trace once each"
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        passes(),
+        [2, 3],
+        "the background measurement passed over the axis twice and the trace three times"
     );
+    for _ in 0..10 {
+        let _ = inspector_rows(&ctx, &mut host);
+    }
+    assert_eq!(passes(), [2, 3], "later frames measure nothing again");
 }
 
 /// Run details opens at once on a large run: the dataset digest, which reads
