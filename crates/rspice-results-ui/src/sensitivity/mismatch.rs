@@ -10,7 +10,6 @@ use egui::{Sense, Ui};
 use rspice_results::dc_mismatch::DcMismatchEvidence;
 use rspice_ui_kit::{
     panels::{panel_body, section_header},
-    plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::measurement_table,
@@ -38,6 +37,8 @@ const TABLE_MIN_WIDTH: f32 = FIXED_WIDTH + BAR_MIN_WIDTH;
 pub struct MismatchView<'a> {
     pub analysis_label: &'a str,
     pub evidence: &'a DcMismatchEvidence,
+    /// The reader's significant digits, which every figure reads at.
+    pub significant_digits: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,21 +80,20 @@ impl MismatchPlan {
         }
     }
 }
-/// A mismatch figure as the panel reads it: engineering notation at the
-/// precision a budget is read at, its prefix on the number. The CSV export
+/// A mismatch figure at the reader's digits, a plain number. The CSV export
 /// carries the retained f64.
-fn exact_value(value: f64) -> String {
-    super::unitless(value, 6)
+fn exact_value(value: f64, digits: usize) -> String {
+    super::unitless(value, digits)
 }
 
 /// The same figure in the output's own unit — a sigma is millivolts, not a
 /// bare number.
-fn quantity(value: f64, unit: &str) -> String {
-    rspice_ui_kit::plot::fmt_si_significant(value, unit, 4)
+fn quantity(value: f64, unit: &str, digits: usize) -> String {
+    rspice_ui_kit::plot::fmt_si_significant(value, unit, digits)
 }
 
-fn percent(share: f64) -> String {
-    format!("{:.2} %", share * 100.0)
+fn percent(share: f64, digits: usize) -> String {
+    rspice_ui_kit::plot::fmt_si_significant(share * 100.0, "%", digits)
 }
 
 pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>) {
@@ -112,6 +112,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
         }
     };
     let evidence = view.evidence;
+    let digits = view.significant_digits;
     if evidence.contributors.is_empty() {
         well_hint(
             ui,
@@ -129,12 +130,12 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
 
     let unit = evidence.output_unit.as_str();
     let subtitle = format!(
-        "{} - nominal {} - sigma {} - {} sigma {} - {} of {} contributors",
+        "{} \u{b7} nominal {} \u{b7} \u{3c3} {} \u{b7} {}\u{3c3} {} \u{b7} {} of {} contributors",
         evidence.output,
-        fmt_si(evidence.nominal_value, unit, 4),
-        fmt_si(evidence.sigma_total, unit, 4),
+        quantity(evidence.nominal_value, unit, digits),
+        quantity(evidence.sigma_total, unit, digits),
         evidence.sigma_multiplier,
-        fmt_si(evidence.quoted_sigma(), unit, 4),
+        quantity(evidence.quoted_sigma(), unit, digits),
         evidence.retained_contributors(),
         evidence.evaluated_contributors,
     );
@@ -248,11 +249,11 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                     c.text_faint,
                 );
             } else {
-                let scale = fmt_si(max_contribution, unit, 4);
+                let scale = quantity(max_contribution, unit, digits);
                 ui.painter().text(
                     egui::pos2(bar_cell.left(), header.center().y),
                     egui::Align2::LEFT_CENTER,
-                    format!("-{scale}"),
+                    format!("\u{2212}{scale}"),
                     scale_font.clone(),
                     c.text_faint,
                 );
@@ -293,7 +294,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                     row.instance,
                     row.parameter,
                     row.scope.tag(),
-                    exact_value(row.contribution),
+                    exact_value(row.contribution, digits),
                     row.share * 100.0,
                     running * 100.0,
                 );
@@ -316,12 +317,18 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                     ui.label(format!("Scope: {}", row.scope.tag()));
                     ui.label(format!(
                         "Parameter sigma: {}",
-                        exact_value(row.sigma_parameter)
+                        exact_value(row.sigma_parameter, digits)
                     ));
-                    ui.label(format!("Sensitivity: {}", exact_value(row.sensitivity)));
-                    ui.label(format!("Contribution: {}", exact_value(row.contribution)));
-                    ui.label(format!("Share: {}", exact_value(row.share)));
-                    ui.label(format!("Cumulative: {}", exact_value(running)));
+                    ui.label(format!(
+                        "Sensitivity: {}",
+                        exact_value(row.sensitivity, digits)
+                    ));
+                    ui.label(format!(
+                        "Contribution: {}",
+                        exact_value(row.contribution, digits)
+                    ));
+                    ui.label(format!("Share: {}", percent(row.share, digits)));
+                    ui.label(format!("Cumulative: {}", percent(running, digits)));
                     if row.share < 0.0 {
                         ui.label("Reduces the variance through its declared correlation");
                     }
@@ -375,7 +382,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                     (
                         contribution_offset,
                         CONTRIBUTION_WIDTH,
-                        fmt_si(row.contribution, unit, 4),
+                        quantity(row.contribution, unit, digits),
                         egui::Align2::RIGHT_CENTER,
                         theme::mono(tokens::FS_1, FontWeight::Regular),
                         c.text,
@@ -383,7 +390,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                     (
                         share_offset,
                         SHARE_WIDTH,
-                        percent(row.share),
+                        percent(row.share, digits),
                         egui::Align2::RIGHT_CENTER,
                         theme::mono(tokens::FS_1, FontWeight::Regular),
                         c.text,
@@ -391,7 +398,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                     (
                         cumulative_offset,
                         CUMULATIVE_WIDTH,
-                        percent(running),
+                        percent(running, digits),
                         egui::Align2::RIGHT_CENTER,
                         theme::mono(tokens::FS_0, FontWeight::Regular),
                         c.text_faint,
@@ -490,22 +497,23 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
         }
     };
     let evidence = view.evidence;
+    let digits = view.significant_digits;
 
     section_header(ui, "DC mismatch", None);
     let output_unit = evidence.output_unit.as_str();
-    let nominal = quantity(evidence.nominal_value, output_unit);
-    let sigma_total = quantity(evidence.sigma_total, output_unit);
-    let sigma_mismatch = quantity(evidence.sigma_mismatch, output_unit);
-    let sigma_process = quantity(evidence.sigma_process, output_unit);
+    let nominal = quantity(evidence.nominal_value, output_unit, digits);
+    let sigma_total = quantity(evidence.sigma_total, output_unit, digits);
+    let sigma_mismatch = quantity(evidence.sigma_mismatch, output_unit, digits);
+    let sigma_process = quantity(evidence.sigma_process, output_unit, digits);
     let quoted = format!(
         "{}σ: {}",
         evidence.sigma_multiplier,
-        quantity(evidence.quoted_sigma(), output_unit)
+        quantity(evidence.quoted_sigma(), output_unit, digits)
     );
     let remainder = evidence.unlisted_share().map(|share| {
         format!(
             "{} of variance in {} unlisted contributors",
-            percent(share),
+            percent(share, digits),
             evidence
                 .evaluated_contributors
                 .saturating_sub(evidence.retained_contributors()),
@@ -614,12 +622,12 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
                                 ui.label(cell(row.instance.clone()));
                                 ui.label(cell(row.parameter.clone()));
                                 ui.label(cell(row.scope.tag().to_owned()));
-                                ui.label(cell(exact_value(row.sigma_parameter)));
-                                ui.label(cell(exact_value(row.sensitivity)));
-                                ui.label(cell(quantity(row.contribution, output_unit)));
+                                ui.label(cell(exact_value(row.sigma_parameter, digits)));
+                                ui.label(cell(exact_value(row.sensitivity, digits)));
+                                ui.label(cell(quantity(row.contribution, output_unit, digits)));
                                 // SHARE is a share: it printed as
                                 // "6.00000000000000000e-1".
-                                ui.label(cell(percent(row.share)));
+                                ui.label(cell(percent(row.share, digits)));
                                 ui.end_row();
                             }
                         });
@@ -681,7 +689,7 @@ mod tests {
             .unlisted_share()
             .expect("a trimmed list has a remainder");
         assert!((remainder - 0.2).abs() < 1.0e-12, "{remainder}");
-        assert_eq!(percent(remainder), "20.00 %");
+        assert_eq!(percent(remainder, 4), "20 %");
     }
     #[test]
     fn a_trimmed_contributor_list_states_how_many_were_evaluated() {
@@ -705,6 +713,6 @@ mod tests {
         let cumulative = plan.cumulative();
         assert!(cumulative[0] > 1.0, "{cumulative:?}");
         assert!((cumulative[1] - 1.0).abs() < 1.0e-12, "{cumulative:?}");
-        assert_eq!(percent(-0.2), "-20.00 %");
+        assert_eq!(percent(-0.2, 4), "\u{2212}20 %");
     }
 }

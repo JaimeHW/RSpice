@@ -12,12 +12,28 @@ use rspice_results_ui::eye_diagram::view;
 pub fn inline_actions(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let owner = state.model.active_specialized_viewer_cache_provenance();
     let timebase = owner.map(|owner| state.results.eye_timebase_for(owner));
-    let requested = view::inline_actions(ui, &mut state.analysis.eye_diagram_state, timebase);
+    let significant_digits = significant_digits(state.results_reads());
+    let requested = view::inline_actions(
+        ui,
+        &mut state.analysis.eye_diagram_state,
+        timebase,
+        significant_digits,
+    );
     if let Some(owner) = owner
         && let Some(timebase) = requested
     {
         state.results.set_eye_timebase(owner, timebase);
     }
+}
+
+/// The reader's significant digits, which the eye's figures read at.
+fn significant_digits(state: ResultsReads<'_>) -> usize {
+    usize::from(
+        state
+            .presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    )
 }
 
 fn selected_source(state: ResultsReads<'_>) -> &str {
@@ -41,6 +57,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .as_deref()
         .unwrap_or("the active trace");
     let plot_view = state.results.session.plot_view(ResultViewer::Eye, 0);
+    let significant_digits = significant_digits(state.results_reads());
     let out = view::show(
         ui,
         &state.analysis.eye_diagram_state,
@@ -48,6 +65,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         plot_view,
         &mut state.results.session.eye_texture,
         &mut state.results.session.cache,
+        significant_digits,
     );
     if out.density_baked {
         frame_work::note(DatasetWalk::EyeRaster);
@@ -69,6 +87,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ui,
         &state.analysis.eye_diagram_state,
         selected_source(state.results_reads()),
+        significant_digits(state.results_reads()),
     );
 }
 

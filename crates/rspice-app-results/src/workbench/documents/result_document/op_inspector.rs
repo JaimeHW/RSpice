@@ -234,6 +234,7 @@ struct OpPlanKey {
     filter: String,
     sort: viewer::OpSort,
     collapsed: BTreeSet<String>,
+    significant_digits: usize,
 }
 impl OpPlanKey {
     fn controls(&self) -> viewer::OpControls<'_> {
@@ -241,6 +242,7 @@ impl OpPlanKey {
             filter: &self.filter,
             sort: &self.sort,
             collapsed: &self.collapsed,
+            significant_digits: self.significant_digits,
         }
     }
 }
@@ -259,6 +261,13 @@ fn op_plan(state: &mut ResultsParts<'_>, analysis: AnalysisPresentationKey) -> O
         filter: state.results.session.op_filter.clone(),
         sort: state.results.session.op_sort.clone(),
         collapsed: state.results.session.op_collapsed.clone(),
+        significant_digits: usize::from(
+            state
+                .results_reads()
+                .presentation_policy()
+                .displayed_significant_digits()
+                .get(),
+        ),
     };
     if let Some(plan) = state.results.plans.op.as_ref()
         && plan.key == key
@@ -432,6 +441,12 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                     &reads.model.schematic,
                 )),
             },
+            usize::from(
+                reads
+                    .presentation_policy()
+                    .displayed_significant_digits()
+                    .get(),
+            ),
         )
     });
     let action = viewer::right_panel(
@@ -529,6 +544,7 @@ mod tests {
                     filter: "out",
                     sort: &viewer::OpSort::new(),
                     collapsed: &BTreeSet::new(),
+                    significant_digits: 7,
                 },
                 Some(dc),
                 None,

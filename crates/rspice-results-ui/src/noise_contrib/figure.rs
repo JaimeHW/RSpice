@@ -17,14 +17,14 @@ const STANDARD_REFERENCE_KELVIN: f64 = 290.0;
 /// waveform sheet draws at full width, so the inspector does not draw a
 /// second 190 px copy of it beside the rows, and the exact samples belong to
 /// the table viewer and the CSV export.
-pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>) {
+pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, digits: usize) {
     section_header(ui, "Noise figure", Some("SSB · dB"));
     let mut rows = vec![
         ("Input generator", figure.input_source.clone()),
         ("Source resistor", figure.source_resistor.clone()),
         (
             "Effective resistance",
-            fmt_si_significant(figure.source_resistance_ohm, "Ω", 4),
+            fmt_si_significant(figure.source_resistance_ohm, "Ω", digits),
         ),
     ];
     if (figure.source_temperature_kelvin - STANDARD_REFERENCE_KELVIN).abs() > f64::EPSILON

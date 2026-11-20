@@ -40,8 +40,9 @@ pub fn right_panel(
     ui: &mut Ui,
     evidence: ContributorEvidence<'_>,
     quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
 ) {
-    let frequency = |hertz| crate::presentation::frequency_readout(quantity_policy, hertz, 4);
+    let frequency = |hertz| crate::presentation::frequency_readout(quantity_policy, hertz, digits);
     let summary = match evidence {
         ContributorEvidence::Retained { summary, .. } => summary,
         _ => {
@@ -65,7 +66,7 @@ pub fn right_panel(
             section_header(ui, "Sampling", None);
             let mut rows = vec![(
                 "Output slew",
-                fmt_si_significant(sampling.output.slew_volts_per_second, "V/s", 4),
+                fmt_si_significant(sampling.output.slew_volts_per_second, "V/s", digits),
             )];
             if let Some(reference) = &sampling.reference {
                 rows.push((
@@ -138,7 +139,7 @@ pub fn right_panel(
         );
     }
     if let Some(figure) = &summary.noise_figure {
-        figure::show(ui, figure);
+        figure::show(ui, figure, digits);
     }
 
     if summary.rows.is_empty() {
@@ -154,10 +155,10 @@ pub fn right_panel(
         "Ranked contributors",
         Some(&format!("integrated {}", summary.power_unit())),
     );
-    contributor_table(ui, summary);
+    contributor_table(ui, summary, digits);
 }
 
-fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
+fn contributor_table(ui: &mut Ui, summary: &NoiseSummary, digits: usize) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let viewport_width = ui.available_width().max(1.0);
@@ -253,7 +254,7 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                             rect,
                             RANK_W + SOURCE_W,
                             POWER_W,
-                            fmt_si_significant(row.power, "", 4),
+                            fmt_si_significant(row.power, summary.power_unit(), digits),
                             Align2::RIGHT_CENTER,
                             c.text_dim,
                         );
@@ -276,7 +277,7 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                             rect,
                             share_offset,
                             width - share_offset,
-                            format!("{:.1}%", row.share_pct),
+                            fmt_si_significant(row.share_pct, "%", digits),
                             Align2::RIGHT_CENTER,
                             c.text,
                         );

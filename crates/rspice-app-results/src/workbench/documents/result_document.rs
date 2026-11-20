@@ -586,11 +586,21 @@ pub(super) struct SheetContext<'a> {
     pub(super) workspace: &'a crate::state::ProjectWorkspace,
     pub(super) results: &'a mut ResultsState,
     pub(super) policy: crate::quantity::QuantityPresentationPolicy,
+    /// The reader's significant digits, which the sheet's values read at.
+    pub(super) significant_digits: usize,
 }
 
 impl<'a> SheetContext<'a> {
     fn of(state: &'a mut ResultsParts<'_>) -> Self {
+        let significant_digits = usize::from(
+            state
+                .results_reads()
+                .presentation_policy()
+                .displayed_significant_digits()
+                .get(),
+        );
         Self {
+            significant_digits,
             policy: state.model.preferences.quantity_presentation_policy(),
             simulation: &state.model.simulation,
             workspace: &state.model.workspace,
@@ -2930,7 +2940,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             &analysis.result_payload
     {
         let quantity_policy = state.model.preferences.quantity_presentation_policy();
-        rspice_results_ui::qpnoise::summary(ui, response, &quantity_policy);
+        let digits = usize::from(
+            state
+                .results_reads()
+                .presentation_policy()
+                .displayed_significant_digits()
+                .get(),
+        );
+        rspice_results_ui::qpnoise::summary(ui, response, &quantity_policy, digits);
         if view.viewer == ResultViewer::NoiseContrib {
             waves::right_panel(ui, state);
             return;

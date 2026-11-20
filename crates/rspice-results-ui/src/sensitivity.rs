@@ -12,7 +12,6 @@ use rspice_results::sensitivity::{
 };
 use rspice_ui_kit::{
     panels::{panel_body, section_header},
-    plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::measurement_table,
@@ -100,15 +99,6 @@ fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<usize> {
     });
     ranked
 }
-fn basis_label(result_mode: SensitivityResultMode) -> String {
-    match result_mode {
-        SensitivityResultMode::Dc => "DC operating point".to_owned(),
-        SensitivityResultMode::Ac { frequency_hz } => {
-            format!("AC at {}", fmt_si(frequency_hz, "Hz", 4))
-        }
-    }
-}
-
 fn exact_basis_label(result_mode: SensitivityResultMode) -> String {
     match result_mode {
         SensitivityResultMode::Dc => "DC operating point".to_owned(),
@@ -263,9 +253,9 @@ pub fn show(
     }
 
     let subtitle = format!(
-        "{} - {} - {} parameters",
+        "{} \u{b7} {} \u{b7} {} parameters",
         view.output,
-        basis_label(view.result_mode),
+        exact_basis_label(view.result_mode),
         ranked.len()
     );
     StripHeader::new("SENS", &subtitle, &[]).show(ui);

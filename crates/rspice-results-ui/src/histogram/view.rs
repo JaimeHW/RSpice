@@ -13,7 +13,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::panels::{
     panel_body, panel_inset, property_row_control_columns, property_row_height,
 };
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::source_revision::SourceRevision;
@@ -34,6 +34,8 @@ pub struct HistogramPlot<'a> {
     pub source: &'a SourceRevision,
     /// The values of the members the reader picked, drawn over the bars.
     pub selected: &'a [f64],
+    /// The reader's significant digits, which every value on the plot reads at.
+    pub significant_digits: usize,
 }
 
 /// Retained method facts for the population selected by the host.
@@ -52,6 +54,8 @@ pub struct HistogramInspector<'a> {
     pub moments: Option<SampleMoments>,
     pub method: Option<MonteCarloMethod>,
     pub yield_result: Option<&'a YieldResult>,
+    /// The reader's significant digits, which every statistic reads at.
+    pub significant_digits: usize,
 }
 
 /// What a click on the histogram asked of the member selection.
@@ -208,6 +212,7 @@ pub fn show(
         }
     };
     let histogram = model.histogram;
+    let digits = model.significant_digits;
     if histogram.bins.is_empty() || histogram.total_count == 0 {
         well_hint(ui, "The selected distribution is empty");
         return out;
@@ -299,7 +304,7 @@ pub fn show(
             x: moments.mean,
             y: y1 * 0.86,
             color: c.accent,
-            label: format!("µ {}", fmt_si(moments.mean, "", 2)),
+            label: format!("µ {}", fmt_si_significant(moments.mean, "", digits)),
             drop_line: true,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,
@@ -316,7 +321,7 @@ pub fn show(
                 x: lsl,
                 y: y1 * 0.72,
                 color: c.err,
-                label: format!("LSL {}", fmt_si(lsl, "", 2)),
+                label: format!("LSL {}", fmt_si_significant(lsl, "", digits)),
                 drop_line: true,
                 label_dy: 0.0,
                 shape: plot::MarkerShape::Point,
@@ -330,7 +335,7 @@ pub fn show(
                 x: usl,
                 y: y1 * 0.72,
                 color: c.err,
-                label: format!("USL {}", fmt_si(usl, "", 2)),
+                label: format!("USL {}", fmt_si_significant(usl, "", digits)),
                 drop_line: true,
                 label_dy: 0.0,
                 shape: plot::MarkerShape::Point,
@@ -348,7 +353,7 @@ pub fn show(
             label: format!(
                 "all {} samples at {}",
                 histogram.total_count,
-                fmt_si(value, "", 3)
+                fmt_si_significant(value, "", digits)
             ),
             drop_line: false,
             label_dy: 0.0,
@@ -479,13 +484,13 @@ pub fn show(
     let readout = |x: f64| -> Vec<(String, String)> {
         let value = display.value_at(histogram, x);
         vec![
-            ("x".to_owned(), fmt_si(x, "", 3)),
+            ("x".to_owned(), fmt_si_significant(x, "", digits)),
             (
                 mode.label().to_owned(),
                 if mode == HistogramDisplayMode::Count {
                     format!("{value:.0}")
                 } else {
-                    fmt_si(value, mode.unit(), 4)
+                    fmt_si_significant(value, mode.unit(), digits)
                 },
             ),
         ]
@@ -603,6 +608,7 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
         }
     };
     let histogram = model.histogram;
+    let digits = model.significant_digits;
     section_header(ui, "Distribution", None);
     // The strip header above already names the measure, and the two
     // out-of-range counts are zero on an autoscaled histogram: one row, and
@@ -610,10 +616,14 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
     if let Some(moments) = model.moments {
         let mut rows = vec![
             ("N", moments.count.to_string(), false),
-            ("Mean", fmt_si_significant(moments.mean, "", 4), true),
-            ("Std dev", fmt_si_significant(moments.std_dev, "", 4), true),
-            ("Min", fmt_si_significant(moments.min, "", 4), false),
-            ("Max", fmt_si_significant(moments.max, "", 4), false),
+            ("Mean", fmt_si_significant(moments.mean, "", digits), true),
+            (
+                "Std dev",
+                fmt_si_significant(moments.std_dev, "", digits),
+                true,
+            ),
+            ("Min", fmt_si_significant(moments.min, "", digits), false),
+            ("Max", fmt_si_significant(moments.max, "", digits), false),
         ];
         let outside = histogram.underflow + histogram.overflow;
         if outside > 0 {
@@ -634,8 +644,8 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
                 MonteCarloMeanInterval::Available { lower, upper } => {
                     format!(
                         "{} to {}",
-                        fmt_si_significant(lower, "", 4),
-                        fmt_si_significant(upper, "", 4)
+                        fmt_si_significant(lower, "", digits),
+                        fmt_si_significant(upper, "", digits)
                     )
                 }
                 MonteCarloMeanInterval::InsufficientSamples => {
@@ -766,8 +776,8 @@ mod tests {
             "the window is narrower than the value's own resolution: {axis:?}"
         );
         assert_ne!(
-            fmt_si(axis.x0, "", 3),
-            fmt_si(axis.x1, "", 3),
+            fmt_si_significant(axis.x0, "", 4),
+            fmt_si_significant(axis.x1, "", 4),
             "both ends of the axis print the same number"
         );
     }
@@ -884,6 +894,7 @@ mod tests {
                                 spec_limits,
                                 source: &source,
                                 selected: &selected,
+                                significant_digits: 4,
                             }),
                             PlotView::default(),
                             &mut cache,

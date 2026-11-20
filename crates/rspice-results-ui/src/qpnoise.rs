@@ -12,9 +12,9 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 /// The contributors a reader acts on. Below this the shares are rounding.
 const RANKED_CONTRIBUTORS: usize = 10;
 
-fn value(v: QpnoiseValue, unit: &str) -> String {
+fn value(v: QpnoiseValue, unit: &str, digits: usize) -> String {
     match v {
-        QpnoiseValue::Finite(v) => fmt_si_significant(v, unit, 4),
+        QpnoiseValue::Finite(v) => fmt_si_significant(v, unit, digits),
         QpnoiseValue::Unavailable(why) => format!(
             "Unavailable: {}",
             match why {
@@ -41,6 +41,7 @@ pub fn summary(
     ui: &mut egui::Ui,
     response: &QpnoiseAnalysisResult,
     quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
 ) {
     section_header(ui, "Noise", None);
     let request = &response.metadata.request;
@@ -48,8 +49,8 @@ pub fn summary(
         let band = match integration.band_hz {
             Some([low, high]) => format!(
                 "{} – {}",
-                frequency_readout(quantity_policy, low, 4),
-                frequency_readout(quantity_policy, high, 4)
+                frequency_readout(quantity_policy, low, digits),
+                frequency_readout(quantity_policy, high, digits)
             ),
             None => "full output band".into(),
         };
@@ -71,7 +72,10 @@ pub fn summary(
         section_header(ui, &format!("Output {}: {name}", index + 1), None);
         let mut rows: Vec<(String, String)> = Vec::new();
         if let Some(integral) = &spectrum.integrated {
-            rows.push(("Output RMS".into(), value(integral.output_rms, unit)));
+            rows.push((
+                "Output RMS".into(),
+                value(integral.output_rms, unit, digits),
+            ));
             if let Some(input) = integral.input_rms {
                 let unit = if response
                     .metadata
@@ -83,7 +87,7 @@ pub fn summary(
                 } else {
                     "V"
                 };
-                rows.push(("Input RMS".into(), value(input, unit)));
+                rows.push(("Input RMS".into(), value(input, unit, digits)));
             }
         }
         // Without a ranking there is no order to truncate to, and listing
@@ -100,7 +104,7 @@ pub fn summary(
             let share = spectrum
                 .ranking
                 .as_ref()
-                .map(|r| format!("{:.1}%", r[rank].percentage));
+                .map(|r| fmt_si_significant(r[rank].percentage, "%", digits));
             // "RMS" names the quantity, so it goes on the measurement and
             // never on the sentence that says why there is none.
             let rms = spectrum
@@ -108,9 +112,9 @@ pub fn summary(
                 .as_ref()
                 .map(|i| match i.contributor_rms[source] {
                     QpnoiseValue::Finite(_) => {
-                        format!("{} rms", value(i.contributor_rms[source], unit))
+                        format!("{} rms", value(i.contributor_rms[source], unit, digits))
                     }
-                    QpnoiseValue::Unavailable(_) => value(i.contributor_rms[source], unit),
+                    QpnoiseValue::Unavailable(_) => value(i.contributor_rms[source], unit, digits),
                 });
             let reading = [share, rms].into_iter().flatten().collect::<Vec<_>>();
             if reading.is_empty() {

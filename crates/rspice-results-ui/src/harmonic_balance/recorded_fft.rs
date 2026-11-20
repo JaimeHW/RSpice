@@ -4,7 +4,7 @@ use rspice_results::{
     analysis_payload::AnalysisResultPayload, analysis_result::AnalysisResult,
     fft::spectrum::FftSpectrumEvidence,
 };
-use rspice_ui_kit::plot::{Axis, fmt_si, fmt_si_significant};
+use rspice_ui_kit::plot::{Axis, fmt_si_significant};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use crate::presentation::frequency_readout;
@@ -37,9 +37,9 @@ pub fn incomplete_history_sentence<W>(analysis: &AnalysisResult<W>) -> Option<St
     Some(format!(
         "FFT history is incomplete — the transient retained {} … {}; the transform needs \
          samples through {}",
-        fmt_si(available_start_s, "s", 4),
-        fmt_si(available_stop_s, "s", 4),
-        fmt_si(spectrum.last_sample_time_s(), "s", 4)
+        fmt_si_significant(available_start_s, "s", 4),
+        fmt_si_significant(available_stop_s, "s", 4),
+        fmt_si_significant(spectrum.last_sample_time_s(), "s", 4)
     ))
 }
 

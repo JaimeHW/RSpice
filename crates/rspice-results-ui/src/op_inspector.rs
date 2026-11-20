@@ -55,9 +55,8 @@ const CHEVRON_CENTER: f32 = 11.0;
 const CHEVRON_SIDE: f32 = 11.0;
 const TITLE_COUNT_GAP: f32 = 7.0;
 const PROBLEM_ROW_H: f32 = 24.0;
-/// A retained value on the sheet reads to this many significant digits; the
-/// inspector carries the rest.
-const TABLE_SIGNIFICANT_DIGITS: usize = 6;
+/// The inspector reads a picked value to at least this many significant
+/// digits, more than the sheet's, the last one a double's noise cannot reach.
 const READOUT_SIGNIFICANT_DIGITS: usize = 9;
 const CELSIUS: &str = "\u{b0}C";
 const REGION_HEADER: &str = "Region";
@@ -107,6 +106,8 @@ pub struct OpControls<'a> {
     pub filter: &'a str,
     pub sort: &'a OpSort,
     pub collapsed: &'a BTreeSet<String>,
+    /// The reader's significant digits, which every value on the sheet reads at.
+    pub significant_digits: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,6 +477,9 @@ struct PlanSection {
     collapsed: bool,
     /// The most characters a value's prefix and unit can take in this section.
     longest_unit: usize,
+    /// The most characters a value's number can take: its digits, a sign and
+    /// a decimal point.
+    longest_mantissa: usize,
     /// Why the section holds no rows; it stands in for them.
     note: Option<String>,
     /// Sheet offset of the title row.
@@ -496,7 +500,9 @@ impl PlanSection {
     /// One of this section's value columns: the sheet's own width, grown by
     /// whatever its units need so the mantissas keep their room.
     fn value_w(&self, advance: f32) -> f32 {
-        VALUE_W + self.unit_slot(advance) - UNIT_SLOT_W
+        let mantissa = (self.longest_mantissa as f32 * advance).ceil();
+        let narrowest = CELL_INSET + mantissa + MANTISSA_GAP + UNIT_SLOT_W;
+        VALUE_W.max(narrowest) + self.unit_slot(advance) - UNIT_SLOT_W
     }
     fn has_rows(&self) -> bool {
         !self.collapsed && self.note.is_none()
@@ -591,6 +597,7 @@ impl PlanBuilder<'_> {
             sort: self.controls.sort.get(key).cloned(),
             collapsed: self.controls.collapsed.contains(key),
             longest_unit,
+            longest_mantissa: self.controls.significant_digits + 2,
             note: None,
             top: 0.0,
             bottom: 0.0,
@@ -746,6 +753,8 @@ impl PlanBuilder<'_> {
 #[derive(Debug, Clone)]
 pub struct OpPlan {
     sections: Vec<PlanSection>,
+    /// The reader's significant digits, which every value reads at.
+    significant_digits: usize,
     rows: Vec<PlanRow>,
     offsets: RowOffsets,
     longest_name: usize,
@@ -782,6 +791,7 @@ impl OpPlan {
         OpPlan {
             offsets: RowOffsets::from_heights(builder.rows.iter().map(|row| row.height())),
             longest_name: builder.longest_name,
+            significant_digits: controls.significant_digits,
             sections: builder.sections,
             rows: builder.rows,
             node_shown,
@@ -903,10 +913,10 @@ impl<'a> RowSource<'a> {
         }
     }
 
-    fn cell(self, column: &PlanColumn) -> CellValue {
+    fn cell(self, column: &PlanColumn, significant_digits: usize) -> CellValue {
         match self.quantity(column) {
             Some((value, unit)) if value.is_finite() => {
-                let (mantissa, unit) = value_parts(value, &unit);
+                let (mantissa, unit) = value_parts(value, &unit, significant_digits);
                 CellValue::Number { mantissa, unit }
             }
             Some(_) => CellValue::Refused,
@@ -915,13 +925,17 @@ impl<'a> RowSource<'a> {
     }
 
     /// The name a screen reader announces with every value on the row.
-    fn spoken(self, section: &PlanSection) -> String {
+    fn spoken(self, section: &PlanSection, significant_digits: usize) -> String {
         let values = section
             .columns
             .iter()
             .map(|column| match self.quantity(column) {
                 Some((value, unit)) => {
-                    format!("{} {}", column.label, quantity_readout(value, &unit))
+                    format!(
+                        "{} {}",
+                        column.label,
+                        quantity_readout(value, &unit, significant_digits)
+                    )
                 }
                 None => format!("{} not reported", column.label),
             })
@@ -934,51 +948,27 @@ impl<'a> RowSource<'a> {
     }
 }
 
-/// A finite value as a mantissa to `TABLE_SIGNIFICANT_DIGITS` and the prefix
-/// and unit that belong after it.
-fn value_parts(value: f64, unit: &str) -> (String, String) {
-    if unit == CELSIUS {
-        let digits = TABLE_SIGNIFICANT_DIGITS as i32;
-        let decimals = if value == 0.0 {
-            digits - 1
-        } else {
-            (digits - 1 - value.abs().log10().floor() as i32).clamp(0, digits)
-        };
-        return (
-            format!("{:.*}", decimals as usize, value),
-            CELSIUS.to_owned(),
-        );
-    }
-    // Rounded first, so a value on the edge of a decade carries into the next
-    // prefix at the same digit count instead of one digit longer.
-    let rounded = format!("{value:.*e}", TABLE_SIGNIFICANT_DIGITS - 1)
-        .parse()
-        .unwrap_or(value);
-    let text = fmt_si_significant(rounded, unit, TABLE_SIGNIFICANT_DIGITS);
+/// A finite value as a mantissa to `significant_digits` and the prefix and
+/// unit that belong after it.
+fn value_parts(value: f64, unit: &str, significant_digits: usize) -> (String, String) {
+    let text = fmt_si_significant(value, unit, significant_digits);
     match text.split_once(' ') {
         Some((mantissa, suffix)) => (mantissa.to_owned(), suffix.to_owned()),
         None => (text, String::new()),
     }
 }
 
-/// A retained value to nine digits, the last one a double's noise cannot
-/// reach: the inspector's form.
-fn quantity_readout(value: f64, unit: &str) -> String {
+/// A retained value as the inspector reads it: the reader's digits, and never
+/// fewer than nine.
+fn quantity_readout(value: f64, unit: &str, significant_digits: usize) -> String {
     if !value.is_finite() {
         return NON_FINITE.to_owned();
     }
-    if unit == CELSIUS {
-        let whole_digits = if value == 0.0 {
-            1
-        } else {
-            value.abs().log10().floor() as i32 + 1
-        };
-        let decimals = (READOUT_SIGNIFICANT_DIGITS as i32 - whole_digits).max(1) as usize;
-        let text = format!("{value:.decimals$}");
-        let text = text.trim_end_matches('0').trim_end_matches('.');
-        return format!("{text} {CELSIUS}");
-    }
-    fmt_si_significant(value, unit, READOUT_SIGNIFICANT_DIGITS)
+    fmt_si_significant(
+        value,
+        unit,
+        significant_digits.max(READOUT_SIGNIFICANT_DIGITS),
+    )
 }
 
 fn elide_middle(text: &str, max_chars: usize) -> String {
@@ -1516,14 +1506,19 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             let cell = self.grid.value_cell(left, y, ROW_H, slot, width);
             slot += 1;
             if self.grid.shows_whole(cell) {
-                self.paint_value(&values, cell, unit_slot, row.cell(column));
+                self.paint_value(
+                    &values,
+                    cell,
+                    unit_slot,
+                    row.cell(column, self.plan.significant_digits),
+                );
             }
         }
         describe(
             self.ui,
             &response,
             egui::accesskit::Role::Row,
-            &row.spoken(section),
+            &row.spoken(section, self.plan.significant_digits),
         );
         theme::paint_focus_ring(self.ui, &response, rect);
         if response.clicked() {
@@ -1768,6 +1763,7 @@ pub fn selection_detail(
     dc: Option<&DcOpResult>,
     devices: Option<&DeviceOpReport>,
     mapping: &impl SchematicMapping,
+    significant_digits: usize,
 ) -> Option<OpDetail> {
     let row = RowSource::of(selection.kind, selection.index, dc, devices)?;
     let (parent, leaf) = name_parts(row.name());
@@ -1784,7 +1780,10 @@ pub fn selection_detail(
                 OpRowKind::Node => NODES.value_header,
                 _ => BRANCHES.value_header,
             };
-            rows.push((label.to_owned(), quantity_readout(value.value, &value.unit)));
+            rows.push((
+                label.to_owned(),
+                quantity_readout(value.value, &value.unit, significant_digits),
+            ));
         }
         RowSource::Device(entry) => {
             let (_, quantities) = device_reading(entry);
@@ -1795,11 +1794,12 @@ pub fn selection_detail(
             }
             let mut quantities: Vec<_> = quantities.collect();
             quantities.sort_by_key(|(name, _, _)| quantity_rank(family, name));
-            rows.extend(
-                quantities
-                    .into_iter()
-                    .map(|(name, value, unit)| (name.to_owned(), quantity_readout(value, unit))),
-            );
+            rows.extend(quantities.into_iter().map(|(name, value, unit)| {
+                (
+                    name.to_owned(),
+                    quantity_readout(value, unit, significant_digits),
+                )
+            }));
         }
     }
     rows.push(("Identity".to_owned(), row.name().to_owned()));

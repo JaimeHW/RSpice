@@ -35,6 +35,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
         ui,
         plan.as_deref().map(|plan| &**plan),
         &mut context.results.session.box_violin,
+        context.significant_digits,
     );
 }
 
@@ -138,6 +139,9 @@ mod tests {
             workspace,
             results,
             policy: crate::quantity::QuantityPresentationPolicy::default(),
+            significant_digits: usize::from(
+                rspice_results::display_preferences::DisplayedSignificantDigits::DEFAULT,
+            ),
         }
     }
     fn rendered_columns(context: &mut SheetContext<'_>) -> Vec<String> {

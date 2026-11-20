@@ -57,6 +57,7 @@ fn plan_with<'a>(
             filter,
             sort,
             collapsed,
+            significant_digits: 6,
         },
         dc,
         devices,
@@ -508,16 +509,16 @@ fn values_share_one_mantissa_edge_and_one_unit_edge() {
         (0.751_626_9, "V", "751.627", "mV"),
         (0.0, "A", "0", "A"),
         (-41.7321e-3, "A", "−41.7321", "mA"),
-        (999.9996e-3, "V", "1", "V"),
+        (999.9996e-3, "V", "1.00000", "V"),
         (2.0e6, "Hz", "2", "MHz"),
         (123.456, "", "123.456", ""),
         (1234.56, "", "1234.56", ""),
-        (27.0, CELSIUS, "27.0000", CELSIUS),
-        (0.5, CELSIUS, "0.500000", CELSIUS),
-        (-273.15, CELSIUS, "-273.150", CELSIUS),
+        (27.0, CELSIUS, "27", CELSIUS),
+        (0.5, CELSIUS, "0.5", CELSIUS),
+        (-273.15, CELSIUS, "\u{2212}273.15", CELSIUS),
     ] {
         assert_eq!(
-            value_parts(value, unit),
+            value_parts(value, unit, 6),
             (mantissa.to_owned(), suffix.to_owned()),
             "{value} {unit}"
         );
@@ -526,13 +527,31 @@ fn values_share_one_mantissa_edge_and_one_unit_edge() {
 
 #[test]
 fn the_readout_keeps_the_precision_the_table_drops() {
-    assert_eq!(quantity_readout(0.751_626_903, "V"), "751.626903 mV");
-    assert_eq!(quantity_readout(5.0, "V"), "5 V");
-    assert_eq!(quantity_readout(26.85, CELSIUS), "26.85 \u{b0}C");
-    assert_eq!(quantity_readout(27.000000000001, CELSIUS), "27 \u{b0}C");
-    assert_eq!(quantity_readout(100.0, CELSIUS), "100 \u{b0}C");
-    assert_eq!(quantity_readout(0.0, CELSIUS), "0 \u{b0}C");
-    assert_eq!(quantity_readout(f64::NAN, "V"), NON_FINITE);
+    assert_eq!(quantity_readout(0.751_626_903, "V", 7), "751.626903 mV");
+    assert_eq!(quantity_readout(5.0, "V", 7), "5 V");
+    assert_eq!(quantity_readout(26.85, CELSIUS, 7), "26.85 \u{b0}C");
+    assert_eq!(quantity_readout(27.000000000001, CELSIUS, 7), "27 \u{b0}C");
+    assert_eq!(quantity_readout(100.0, CELSIUS, 7), "100 \u{b0}C");
+    assert_eq!(quantity_readout(0.0, CELSIUS, 7), "0 \u{b0}C");
+    assert_eq!(quantity_readout(f64::NAN, "V", 7), NON_FINITE);
+    // A reader who asks for more digits than nine gets them.
+    assert_eq!(
+        quantity_readout(0.751_626_903_123_4, "V", 12),
+        "751.626903123 mV"
+    );
+}
+
+/// The sheet reads at the reader's digits, not at a count of its own.
+#[test]
+fn the_digits_preference_sets_the_sheet_values() {
+    assert_eq!(
+        value_parts(0.751_626_9, "V", 4),
+        ("751.6".to_owned(), "mV".to_owned())
+    );
+    assert_eq!(
+        value_parts(0.751_626_9, "V", 7),
+        ("751.6269".to_owned(), "mV".to_owned())
+    );
 }
 
 #[test]
@@ -545,7 +564,7 @@ fn a_non_finite_value_stays_a_row_and_is_refused_in_its_cell() {
     let plan = plan_of(Some(&dc), None);
     assert_eq!(plan.node_shown(), 1);
     assert!(matches!(
-        RowSource::Scalar(&failed).cell(&plan.sections[0].columns[0]),
+        RowSource::Scalar(&failed).cell(&plan.sections[0].columns[0], 6),
         CellValue::Refused
     ));
 }
@@ -574,7 +593,7 @@ fn a_family_leads_with_the_quantities_a_designer_reads() {
             device: None,
         };
         let detail =
-            selection_detail(&selection, None, Some(&report), &mapped).expect("the row exists");
+            selection_detail(&selection, None, Some(&report), &mapped, 7).expect("the row exists");
         let inspector: Vec<String> = detail
             .rows
             .iter()
@@ -738,7 +757,7 @@ fn the_inspector_states_every_quantity_to_nine_digits_with_the_deck_name() {
         device: None,
     };
     let detail =
-        selection_detail(&selection, None, Some(&report), &mapped).expect("the row exists");
+        selection_detail(&selection, None, Some(&report), &mapped, 7).expect("the row exists");
     assert_eq!(detail.title, "X1.M1");
     assert_eq!(
         detail.rows,
@@ -786,7 +805,8 @@ fn a_device_is_titled_as_drawn_and_identified_by_its_deck_name() {
         index: 0,
         name: "X1.M1".to_owned(),
     };
-    let detail = selection_detail(&selection, None, Some(&report), &Drawn).expect("the row exists");
+    let detail =
+        selection_detail(&selection, None, Some(&report), &Drawn, 7).expect("the row exists");
     assert_eq!(detail.title, "xAmp.Mn");
     assert!(
         detail
@@ -955,7 +975,7 @@ fn the_inspector_gives_a_module_by_name_in_its_own_order_and_units() {
         device: None,
     };
     let detail =
-        selection_detail(&selection, None, Some(&report), &mapping).expect("the row exists");
+        selection_detail(&selection, None, Some(&report), &mapping, 7).expect("the row exists");
     assert_eq!(
         detail.rows,
         [
@@ -1021,6 +1041,7 @@ fn the_save_policy_is_mentioned_only_when_it_kept_a_device_off_the_sheet() {
                 filter: "",
                 sort: &sort,
                 collapsed: &collapsed,
+                significant_digits: 6,
             },
             None,
             Some(&report),
@@ -1056,7 +1077,7 @@ fn the_save_policy_is_mentioned_only_when_it_kept_a_device_off_the_sheet() {
 
 #[test]
 fn the_readout_stops_short_of_floating_point_noise() {
-    assert_eq!(quantity_readout(768.000000000001e-9, "S"), "768 nS");
+    assert_eq!(quantity_readout(768.000000000001e-9, "S", 7), "768 nS");
 }
 
 #[test]
@@ -1073,7 +1094,8 @@ fn a_stale_schematic_greys_the_one_cross_probe_button_and_says_why_once() {
         node: false,
         device: None,
     };
-    let detail = selection_detail(&selection, None, Some(&report), &stale).expect("the row exists");
+    let detail =
+        selection_detail(&selection, None, Some(&report), &stale, 7).expect("the row exists");
 
     let ctx = egui::Context::default();
     rspice_ui_kit::Theme::default().apply(&ctx);

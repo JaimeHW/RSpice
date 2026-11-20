@@ -2,12 +2,12 @@
 
 use egui::Ui;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use super::{EncirclementCount, NyquistData, NyquistMargin};
-use crate::presentation::{PlotView, well_hint};
+use crate::presentation::{PlotView, angle_readout, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 
 /// Measurements from the retained locus, cached by the host data version.
@@ -109,6 +109,7 @@ pub fn show(
     pin: &mut Option<(usize, usize)>,
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> Option<plot::PlotResponse> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -199,7 +200,10 @@ pub fn show(
         if let Some(s) = stats_for_readout {
             rows.push(("N".to_owned(), encirclement_row(s.encirclements)));
             if let Some(d) = s.min_distance {
-                rows.push(("min |1+L|".to_owned(), fmt_si(d, "", 2)));
+                rows.push((
+                    "min |1+L|".to_owned(),
+                    fmt_si_significant(d, "", significant_digits),
+                ));
             }
         }
         rows
@@ -264,15 +268,22 @@ pub fn show(
         let rows = [
             (
                 "f".to_owned(),
-                quantity_policy.format_frequency(frequency, 2),
+                frequency_readout(quantity_policy, frequency, significant_digits),
             ),
-            ("Re".to_owned(), fmt_si(re[i], "", 3)),
-            ("Im".to_owned(), fmt_si(im[i], "", 3)),
+            (
+                "Re".to_owned(),
+                fmt_si_significant(re[i], "", significant_digits),
+            ),
+            (
+                "Im".to_owned(),
+                fmt_si_significant(im[i], "", significant_digits),
+            ),
             (
                 "|L| ∠".to_owned(),
                 format!(
-                    "{magnitude:.3} ∠ {}",
-                    quantity_policy.format_angle(phase_radians, 1)
+                    "{} ∠ {}",
+                    fmt_si_significant(magnitude, "", significant_digits),
+                    angle_readout(quantity_policy, phase_radians, significant_digits)
                 ),
             ),
         ];
@@ -293,6 +304,7 @@ pub fn right_panel(
     ui: &mut Ui,
     stability: Option<NyquistStability>,
     quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
     section_header(ui, "Stability", None);
     let Some(s) = stability else {
@@ -307,7 +319,7 @@ pub fn right_panel(
                 format!(
                     "{} at {}",
                     render(margin.value),
-                    quantity_policy.format_frequency(margin.frequency, 3)
+                    frequency_readout(quantity_policy, margin.frequency, significant_digits)
                 )
             },
         )
@@ -320,21 +332,23 @@ pub fn right_panel(
         ),
         (
             "Min distance to −1",
-            s.min_distance
-                .map_or_else(|| "—".to_owned(), |v| fmt_si(v, "", 3)),
+            s.min_distance.map_or_else(
+                || "—".to_owned(),
+                |v| fmt_si_significant(v, "", significant_digits),
+            ),
             false,
         ),
         (
             "Gain margin",
             margin(s.gain_margin, &|ratio| {
-                format!("{:.2} dB", 20.0 * ratio.log10())
+                fmt_si_significant(20.0 * ratio.log10(), "dB", significant_digits)
             }),
             false,
         ),
         (
             "Phase margin",
             margin(s.phase_margin, &|degrees| {
-                quantity_policy.format_angle(degrees.to_radians(), 1)
+                angle_readout(quantity_policy, degrees.to_radians(), significant_digits)
             }),
             false,
         ),

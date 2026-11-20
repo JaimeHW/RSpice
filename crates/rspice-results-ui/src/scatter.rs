@@ -10,7 +10,7 @@
 use egui::Ui;
 
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si};
+use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
@@ -275,6 +275,7 @@ pub fn show(
     members: &mut Vec<usize>,
     show_limits: bool,
     cache: &mut plot::DecimationCache,
+    significant_digits: usize,
 ) -> Option<PlotWithRequirements> {
     let Some(plan) = population else {
         well_hint(ui, ABSENT_STATE);
@@ -406,7 +407,15 @@ pub fn show(
     let response = plot::show(ui, &spec, cache, None, None);
 
     apply_input(ui, state, members, &points, &response, ((x0, x1), (y0, y1)));
-    paint_hover_card(ui, plan, &points, &response, ((x0, x1), (y0, y1)));
+    paint_hover_card(
+        ui,
+        plan,
+        &points,
+        &response,
+        ((x0, x1), (y0, y1)),
+        (&x_column.unit, &y_column.unit),
+        significant_digits,
+    );
     let mut lines = Vec::new();
     if show_limits {
         let bounds = |column: &PopulationColumn| {
@@ -722,6 +731,8 @@ fn paint_hover_card(
     points: &[(usize, f64, f64)],
     response: &plot::PlotResponse,
     ranges: ((f64, f64), (f64, f64)),
+    (x_unit, y_unit): (&str, &str),
+    significant_digits: usize,
 ) {
     let Some(at) = response.response.hover_pos() else {
         return;
@@ -754,8 +765,14 @@ fn paint_hover_card(
         &title,
         color,
         &[
-            ("x".to_owned(), fmt_si(x, "", 4)),
-            ("y".to_owned(), fmt_si(y, "", 4)),
+            (
+                "x".to_owned(),
+                fmt_si_significant(x, x_unit, significant_digits),
+            ),
+            (
+                "y".to_owned(),
+                fmt_si_significant(y, y_unit, significant_digits),
+            ),
             ("status".to_owned(), status.to_owned()),
         ],
     );
@@ -771,6 +788,7 @@ pub fn right_panel(
     population: Option<&PopulationData>,
     state: &mut ScatterSheetState,
     members: &mut Vec<usize>,
+    significant_digits: usize,
 ) {
     section_header(ui, "Correlation", None);
     let Some(plan) = population else {
@@ -792,7 +810,7 @@ pub fn right_panel(
         return;
     }
     let points = paired_points(plan, &pair);
-    let rows = register_rows(plan, &points, x_column, y_column);
+    let rows = register_rows(plan, &points, x_column, y_column, significant_digits);
     crate::presentation::stat_table(ui, &rows);
 
     let selection = members.clone();
@@ -820,8 +838,8 @@ pub fn right_panel(
             label,
             format!(
                 "{} \u{b7} {} \u{b7} {status}",
-                fmt_si(x, &x_column.unit, 3),
-                fmt_si(y, &y_column.unit, 3)
+                fmt_si_significant(x, &x_column.unit, significant_digits),
+                fmt_si_significant(y, &y_column.unit, significant_digits)
             ),
         ));
     }
@@ -843,6 +861,7 @@ fn register_rows(
     points: &[(usize, f64, f64)],
     x_column: &PopulationColumn,
     y_column: &PopulationColumn,
+    significant_digits: usize,
 ) -> Vec<(&'static str, String, bool)> {
     let xs = points.iter().map(|(_, x, _)| *x).collect::<Vec<_>>();
     let ys = points.iter().map(|(_, _, y)| *y).collect::<Vec<_>>();
@@ -886,10 +905,14 @@ fn register_rows(
                     format!(
                         "{} = {} \u{b7} {} {} {}",
                         y_column.name,
-                        fmt_si(slope, &slope_unit(x_column, y_column), 4),
+                        fmt_si_significant(
+                            slope,
+                            &slope_unit(x_column, y_column),
+                            significant_digits
+                        ),
                         x_column.name,
-                        if intercept < 0.0 { "-" } else { "+" },
-                        fmt_si(intercept.abs(), &y_column.unit, 4)
+                        if intercept < 0.0 { "\u{2212}" } else { "+" },
+                        fmt_si_significant(intercept.abs(), &y_column.unit, significant_digits)
                     )
                 },
             ),
@@ -899,7 +922,7 @@ fn register_rows(
             "Mean X",
             population::mean(&xs).map_or_else(
                 || "\u{2014}".to_owned(),
-                |mean| fmt_si(mean, &x_column.unit, 4),
+                |mean| fmt_si_significant(mean, &x_column.unit, significant_digits),
             ),
             false,
         ),
@@ -907,13 +930,21 @@ fn register_rows(
             "Mean Y",
             population::mean(&ys).map_or_else(
                 || "\u{2014}".to_owned(),
-                |mean| fmt_si(mean, &y_column.unit, 4),
+                |mean| fmt_si_significant(mean, &y_column.unit, significant_digits),
             ),
             false,
         ),
     ];
-    rows.push(("Y requirement", requirement_row(y_column, &ys), false));
-    rows.push(("X requirement", requirement_row(x_column, &xs), false));
+    rows.push((
+        "Y requirement",
+        requirement_row(y_column, &ys, significant_digits),
+        false,
+    ));
+    rows.push((
+        "X requirement",
+        requirement_row(x_column, &xs, significant_digits),
+        false,
+    ));
     rows
 }
 
@@ -929,7 +960,7 @@ fn slope_unit(x_column: &PopulationColumn, y_column: &PopulationColumn) -> Strin
 
 /// What the register says about one axis' requirement, or about the sampled
 /// variable that has none.
-fn requirement_row(column: &PopulationColumn, values: &[f64]) -> String {
+fn requirement_row(column: &PopulationColumn, values: &[f64], significant_digits: usize) -> String {
     match column.limit.as_ref() {
         Some(limit) => {
             let beyond = values.iter().filter(|value| !limit.passes(**value)).count();
@@ -941,7 +972,7 @@ fn requirement_row(column: &PopulationColumn, values: &[f64]) -> String {
                 |sigma| {
                     format!(
                         "sampled variable \u{b7} std dev {}",
-                        fmt_si(sigma, &column.unit, 3)
+                        fmt_si_significant(sigma, &column.unit, significant_digits)
                     )
                 },
             ),
@@ -1059,7 +1090,13 @@ mod tests {
         let points = paired_points(&plan, &pair);
         assert_eq!(points.len(), 101);
 
-        let rows = register_rows(&plan, &points, &plan.columns[pair.x], &plan.columns[pair.y]);
+        let rows = register_rows(
+            &plan,
+            &points,
+            &plan.columns[pair.x],
+            &plan.columns[pair.y],
+            4,
+        );
         let by_name = |needle: &str| {
             rows.iter()
                 .find(|row| row.0 == needle)
@@ -1077,7 +1114,7 @@ mod tests {
         // intercept is 40 dB.
         assert_eq!(
             by_name("Fit"),
-            "gain_dc = 2.0000 dB \u{b7} XBRIDGE.dR + 40.0000 dB",
+            "gain_dc = 2 dB \u{b7} XBRIDGE.dR + 40 dB",
             "the fit states the equation the reader holds against a datasheet"
         );
         assert_eq!(
@@ -1103,7 +1140,7 @@ mod tests {
         let points = (0..plan.trial_count())
             .map(|row| (row, 1.0, row as f64))
             .collect::<Vec<_>>();
-        let rows = register_rows(&plan, &points, &flat, &plan.columns[1]);
+        let rows = register_rows(&plan, &points, &flat, &plan.columns[1], 4);
         assert_eq!(
             rows.iter()
                 .find(|row| row.0 == "Pearson r")

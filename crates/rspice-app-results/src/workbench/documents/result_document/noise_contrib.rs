@@ -34,7 +34,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let index = bode::selected_noise_analysis_index(state.results_reads());
     let evidence = selected_evidence(&state.model.simulation, index);
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    view::right_panel(ui, evidence, &quantity_policy);
+    let digits = usize::from(
+        state
+            .results_reads()
+            .presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    );
+    view::right_panel(ui, evidence, &quantity_policy, digits);
 }
 
 #[cfg(test)]
@@ -214,6 +221,7 @@ mod tests {
                 label: "NOISE",
             },
             &rspice_vocabulary::quantity::QuantityPresentationPolicy::default(),
+            4,
         );
     }
 

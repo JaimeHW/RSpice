@@ -419,6 +419,16 @@ fn histogram_names(state: ResultsReads<'_>) -> Vec<&str> {
         .collect()
 }
 
+/// The reader's significant digits, which the histogram's values read at.
+fn significant_digits(state: ResultsReads<'_>) -> usize {
+    usize::from(
+        state
+            .presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    )
+}
+
 pub(super) fn histogram_is_available(state: ResultsReads<'_>) -> bool {
     let names = histogram_names(state);
     names.iter().any(|name| {
@@ -565,6 +575,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let kept_limits = name
         .as_deref()
         .and_then(|name| kept_yield_limits(state.results_reads(), name));
+    let significant_digits = significant_digits(state.results_reads());
     let model = match &plan {
         None => Err(HistogramUnavailable::NoSelection {
             has_measurements: !names.is_empty(),
@@ -590,6 +601,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 .or(kept_limits),
                 source: &plan.display_source,
                 selected: &selected,
+                significant_digits,
             }),
     };
     let plot_view = state
@@ -669,6 +681,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 &histogram.name,
                 plan.yield_is_consistent,
             ),
+            significant_digits: significant_digits(state.results_reads()),
         });
     view::right_panel(ui, model);
 }

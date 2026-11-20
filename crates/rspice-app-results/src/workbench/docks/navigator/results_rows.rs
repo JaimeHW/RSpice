@@ -193,7 +193,7 @@ pub fn retained_result_artifacts(
                     ResultArtifactKind::Scalar,
                     1,
                     "V",
-                    Some(crate::ui::plot::fmt_si(value, "V", 3)),
+                    Some(crate::ui::plot::fmt_si_significant(value, "V", 4)),
                     ResultViewer::NoiseContrib,
                 );
             }
@@ -318,8 +318,10 @@ pub fn retained_result_artifacts(
                 poles.len() + zeros.len() + 3,
                 Some(format!(
                     "{} · poles {} · zeros {}",
-                    gain.map(|gain| format!("gain {}", crate::ui::plot::fmt_si(gain, "", 4)))
-                        .unwrap_or_else(|| "gain unavailable".to_owned()),
+                    gain.map(|gain| {
+                        format!("gain {}", crate::ui::plot::fmt_si_significant(gain, "", 4))
+                    })
+                    .unwrap_or_else(|| "gain unavailable".to_owned()),
                     pole_evidence.label(),
                     zero_evidence.label()
                 )),
@@ -581,7 +583,7 @@ pub fn retained_result_artifacts(
             "",
             measurement
                 .value
-                .map(|value| crate::ui::plot::fmt_si(value, "", 4)),
+                .map(|value| crate::ui::plot::fmt_si_significant(value, "", 4)),
             ResultViewer::Table,
         );
     }

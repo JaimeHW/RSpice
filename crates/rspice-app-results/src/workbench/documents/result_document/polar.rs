@@ -44,6 +44,7 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         &context.results.session.polar,
         samples,
         &context.policy,
+        context.significant_digits,
     ) {
         if let Some(removed) = response
             .removed_overlay
@@ -72,7 +73,13 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
         .as_ref()
         .map(|locus| cursor_samples(context, locus))
         .unwrap_or_default();
-    view::right_panel(ui, locus.as_ref(), samples, &context.policy);
+    view::right_panel(
+        ui,
+        locus.as_ref(),
+        samples,
+        &context.policy,
+        context.significant_digits,
+    );
 }
 
 fn seed_cursors(context: &mut SheetContext<'_>, locus: &PolarLocus) {
@@ -265,6 +272,9 @@ mod tests {
             workspace,
             results,
             policy: crate::quantity::QuantityPresentationPolicy::default(),
+            significant_digits: usize::from(
+                rspice_results::display_preferences::DisplayedSignificantDigits::DEFAULT,
+            ),
         }
     }
 

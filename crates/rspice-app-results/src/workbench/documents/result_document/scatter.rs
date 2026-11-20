@@ -30,6 +30,7 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) -> Option<String> {
         members,
         session.show_spec_limits,
         &mut session.cache,
+        context.significant_digits,
     )?;
     super::record_drawn_axes(context.results, super::ResultViewer::Scatter, &drawn.plot);
     drawn.open_specification
@@ -47,6 +48,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
         plan.as_deref().map(|plan| &**plan),
         &mut session.scatter,
         members,
+        context.significant_digits,
     );
 }
 
@@ -144,6 +146,9 @@ mod tests {
             workspace,
             results,
             policy: crate::quantity::QuantityPresentationPolicy::default(),
+            significant_digits: usize::from(
+                rspice_results::display_preferences::DisplayedSignificantDigits::DEFAULT,
+            ),
         }
     }
 

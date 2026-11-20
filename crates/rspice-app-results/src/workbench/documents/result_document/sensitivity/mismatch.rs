@@ -26,6 +26,12 @@ pub(super) fn active_mismatch(state: ResultsReads<'_>) -> ActiveMismatch<'_> {
     ActiveMismatch::Ready(MismatchView {
         analysis_label: analysis.label.as_str(),
         evidence: evidence.as_ref(),
+        significant_digits: usize::from(
+            state
+                .presentation_policy()
+                .displayed_significant_digits()
+                .get(),
+        ),
     })
 }
 pub(super) fn serves_active_analysis(state: ResultsReads<'_>) -> bool {

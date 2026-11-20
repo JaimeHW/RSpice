@@ -16,7 +16,6 @@ use rspice_results::sensitivity::{
 };
 use rspice_ui_kit::{
     panels::{panel_body, section_header},
-    plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::measurement_table,
@@ -35,8 +34,7 @@ pub struct StudyView<'a> {
 
 /// A swept frequency, in the unit Frequency display chose.
 fn frequency_label(hertz: f64, quantity_policy: &QuantityPresentationPolicy) -> String {
-    let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
-    fmt_si(hertz * scale + offset, unit, 4)
+    crate::presentation::frequency_readout(quantity_policy, hertz, 4)
 }
 
 #[derive(Debug, Clone, Copy)]

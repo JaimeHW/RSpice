@@ -12,7 +12,7 @@
 use egui::Ui;
 
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si};
+use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select, select_with_disabled};
 
@@ -100,17 +100,11 @@ struct Column {
 }
 
 impl Column {
-    /// One exact value on this column's ordinate.
-    ///
-    /// A normalized ordinate is a count of standard deviations or a
-    /// percentage, and an engineering prefix on either spells nonsense:
-    /// `fmt_si` turned a median of 0.4266 sigma into "426.6187 msigma".
-    fn format(&self, value: f64) -> String {
-        if self.normalized {
-            format!("{value:.3} {}", self.unit)
-        } else {
-            fmt_si(value, &self.unit, 4)
-        }
+    /// One value on this column's ordinate at the reader's digits. A
+    /// normalized ordinate is a count of standard deviations or a percentage,
+    /// which the formatter never prefixes: 0.4266 sigma, not 426.6 msigma.
+    fn format(&self, value: f64, significant_digits: usize) -> String {
+        fmt_si_significant(value, &self.unit, significant_digits)
     }
 
     fn yield_percent(&self) -> Option<f64> {
@@ -871,6 +865,7 @@ pub fn right_panel(
     ui: &mut Ui,
     population: Option<&PopulationData>,
     state: &mut BoxViolinSheetState,
+    significant_digits: usize,
 ) {
     section_header(ui, "Distribution", None);
     let Some(plan) = population else {
@@ -928,13 +923,17 @@ pub fn right_panel(
     }
 
     let column = &columns[chosen.min(columns.len() - 1)];
-    let rows = statistics_rows(column, plan);
+    let rows = statistics_rows(column, plan, significant_digits);
     crate::presentation::stat_table(ui, &rows);
 }
 
-fn statistics_rows(column: &Column, plan: &PopulationData) -> Vec<(&'static str, String, bool)> {
+fn statistics_rows(
+    column: &Column,
+    plan: &PopulationData,
+    significant_digits: usize,
+) -> Vec<(&'static str, String, bool)> {
     let statistics = column.statistics;
-    let value = |value: f64| column.format(value);
+    let value = |value: f64| column.format(value, significant_digits);
     let outliers = column
         .sorted
         .iter()
@@ -950,7 +949,7 @@ fn statistics_rows(column: &Column, plan: &PopulationData) -> Vec<(&'static str,
         },
     );
     let capability = column.capability;
-    let worst = worst_trial(column, plan);
+    let worst = worst_trial(column, plan, significant_digits);
 
     let mut run = format!(
         "{} of {} completed \u{b7} seed 0x{:X}",
@@ -1015,7 +1014,11 @@ fn statistics_rows(column: &Column, plan: &PopulationData) -> Vec<(&'static str,
 }
 
 /// The trial furthest into the violating side, named the way it is reproduced.
-fn worst_trial(column: &Column, plan: &PopulationData) -> Option<String> {
+fn worst_trial(
+    column: &Column,
+    plan: &PopulationData,
+    significant_digits: usize,
+) -> Option<String> {
     let (row, value) = column
         .values
         .iter()
@@ -1036,7 +1039,10 @@ fn worst_trial(column: &Column, plan: &PopulationData) -> Option<String> {
         .trials
         .get(row)
         .map_or_else(|| format!("Trial {row}"), |trial| trial.label.clone());
-    Some(format!("{label} \u{b7} {}", column.format(value)))
+    Some(format!(
+        "{label} \u{b7} {}",
+        column.format(value, significant_digits)
+    ))
 }
 
 #[cfg(test)]
@@ -1144,7 +1150,7 @@ mod tests {
         let measured = &plan.columns[plan.column_index("gain_dc").unwrap()];
         let column = engineering_column(measured, Whiskers::Tukey).unwrap();
         assert!((column.yield_percent().unwrap() - 200.0 / 3.0).abs() < 1e-12);
-        let rows = statistics_rows(&column, &plan);
+        let rows = statistics_rows(&column, &plan, 4);
         assert!(
             rows.iter()
                 .any(|row| row.0 == "Yield" && row.1 == "66.67 % · 95 % CI 20.77–93.85")
@@ -1177,7 +1183,7 @@ mod tests {
         assert!((raw.capability.unwrap() - 0.25).abs() < 1e-12);
         assert_eq!(normalized.capability, raw.capability);
         assert!(
-            statistics_rows(&normalized, &plan)
+            statistics_rows(&normalized, &plan, 4)
                 .iter()
                 .any(|row| row.0 == "Cpk" && row.1 == "0.25")
         );
@@ -1288,7 +1294,7 @@ mod tests {
 
         assert_eq!(columns[0].name, "RGAIN.r");
         assert_eq!(columns[0].yield_percent(), None);
-        let rows = statistics_rows(&columns[0], &plan);
+        let rows = statistics_rows(&columns[0], &plan, 4);
         let by_name = |needle: &str| {
             rows.iter()
                 .find(|row| row.0 == needle)
@@ -1310,7 +1316,7 @@ mod tests {
         )
         .expect("a population");
         let columns = drawn_columns(&plan, &sheet).expect("one column");
-        let rows = statistics_rows(&columns[0], &plan);
+        let rows = statistics_rows(&columns[0], &plan, 4);
         let by_name = |needle: &str| {
             rows.iter()
                 .find(|row| row.0 == needle)
@@ -1326,5 +1332,29 @@ mod tests {
         );
         assert_eq!(by_name("Requirement"), "\u{2265} 39.5 dB");
         assert_eq!(by_name("Trials"), "101 measured of 101");
+    }
+
+    /// The column's statistics read at the reader's digits.
+    #[test]
+    fn the_statistics_follow_the_digits_preference() {
+        let (analysis, specs, mut sheet) = fixture(101);
+        sheet.grouping = BoxGrouping::OneMeasurement;
+        sheet.measurement = Some("gain_dc".to_owned());
+        let plan = population::build(
+            &analysis,
+            population::PopulationRequirements::Legacy(&specs),
+        )
+        .expect("a population");
+        let columns = drawn_columns(&plan, &sheet).expect("one column");
+        let median = |digits: usize| {
+            statistics_rows(&columns[0], &plan, digits)
+                .into_iter()
+                .find(|row| row.0 == "Median")
+                .map(|row| row.1)
+                .expect("a median row")
+        };
+        let (short, long) = (median(3), median(9));
+        assert_ne!(short, long);
+        assert!(short.len() < long.len(), "{short} against {long}");
     }
 }

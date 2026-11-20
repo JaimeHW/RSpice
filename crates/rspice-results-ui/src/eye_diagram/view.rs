@@ -15,7 +15,7 @@ use crate::eye_diagram::{
 };
 use crate::presentation::PlotView;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_signed, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::chip;
@@ -63,6 +63,7 @@ pub fn inline_actions(
     ui: &mut Ui,
     eye: &mut EyeDiagramState,
     timebase: Option<EyeTimebase>,
+    significant_digits: usize,
 ) -> Option<EyeTimebase> {
     let mut requested = None;
     let mask_on = eye.show_mask;
@@ -86,7 +87,9 @@ pub fn inline_actions(
     let editing = eye.rate_editor.is_some();
     let label = match timebase {
         EyeTimebase::Auto => "auto".to_owned(),
-        EyeTimebase::Explicit { unit_interval } => fmt_si(unit_interval, "s", 2),
+        EyeTimebase::Explicit { unit_interval } => {
+            fmt_si_significant(unit_interval, "s", significant_digits)
+        }
     };
     let rate_response = chip(ui, &label, editing).on_hover_text(match timebase {
         EyeTimebase::Auto => "Bit period recovered from the waveform — click to set it",
@@ -102,7 +105,9 @@ pub fn inline_actions(
             Some(EyeRateEditor {
                 text: match timebase {
                     EyeTimebase::Auto => String::new(),
-                    EyeTimebase::Explicit { unit_interval } => fmt_si(unit_interval, "s", 3),
+                    EyeTimebase::Explicit { unit_interval } => {
+                        fmt_si_significant(unit_interval, "s", significant_digits)
+                    }
                 },
                 error: None,
                 needs_focus: true,
@@ -197,7 +202,9 @@ fn timebase_is_incoherent(eye: &EyeDiagramState) -> bool {
 }
 
 /// One line describing what is on screen and where its bit period came from.
-fn timebase_summary(eye: &EyeDiagramState) -> String {
+fn timebase_summary(eye: &EyeDiagramState, significant_digits: usize) -> String {
+    let period = |seconds: f64| fmt_si_significant(seconds, "s", significant_digits);
+    let rate = |bits: f64| fmt_si_significant(bits, "b/s", significant_digits);
     match eye.timebase_provenance() {
         Some(EyeTimebaseProvenance::Auto {
             unit_interval,
@@ -211,18 +218,18 @@ fn timebase_summary(eye: &EyeDiagramState) -> String {
             } else {
                 "auto"
             },
-            fmt_si(*unit_interval, "s", 3),
+            period(*unit_interval),
         ),
         Some(EyeTimebaseProvenance::Explicit {
             unit_interval,
             incoherent,
         }) => format!(
             "set · {} · {}{}",
-            fmt_si(*unit_interval, "s", 3),
-            fmt_si(1.0 / unit_interval, "b/s", 2),
+            period(*unit_interval),
+            rate(1.0 / unit_interval),
             if *incoherent { INCOHERENT_NOTE } else { "" },
         ),
-        Some(EyeTimebaseProvenance::AutoRejected(_)) | None => fmt_si(eye.data.data_rate, "b/s", 1),
+        Some(EyeTimebaseProvenance::AutoRejected(_)) | None => rate(eye.data.data_rate),
     }
 }
 
@@ -238,6 +245,7 @@ pub fn show(
     view: PlotView,
     texture: &mut Option<EyeTexture>,
     cache: &mut plot::DecimationCache,
+    significant_digits: usize,
 ) -> EyeViewResponse {
     let mut out = EyeViewResponse::default();
     let t = Tokens::get(ui.ctx());
@@ -250,7 +258,7 @@ pub fn show(
         well_hint(ui, &hint);
         return out;
     }
-    let summary = timebase_summary(eye);
+    let summary = timebase_summary(eye, significant_digits);
     // Words alone would sit in the same faint grey as the rest of the
     // provenance line, and the reader is being told the picture is not of
     // their signal. The tag carries the tone and the reason behind it.
@@ -551,7 +559,7 @@ fn accumulate_line(
 // ---------------------------------------------------------------------------
 
 /// Eye metrics + mask verdict.
-pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str) {
+pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str, significant_digits: usize) {
     if eye.data.traces.is_empty() {
         section_header(ui, "Eye", None);
         crate::presentation::panel_note(
@@ -563,52 +571,8 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str) {
         return;
     }
 
-    let m = &eye.measurements;
-
     section_header(ui, "Eye", None);
-    let rows = [
-        (
-            "Unit interval",
-            format!(
-                "{} ({})",
-                fmt_si(m.unit_interval, "s", 3),
-                fmt_si(m.data_rate, "b/s", 2)
-            ),
-            true,
-        ),
-        ("Eye height", fmt_si(m.eye_height, "V", 0), true),
-        ("Eye width", format!("{:.2} UI", m.eye_width), true),
-        ("Jitter rms", fmt_si(m.jitter_rms, "s", 1), false),
-        ("Jitter p-p", fmt_si(m.jitter_pp, "s", 1), false),
-        (
-            "Crossing",
-            or_unmeasured(m.crossing_percentage, |value| {
-                format!("{:.1} %", value * 100.0)
-            }),
-            false,
-        ),
-        (
-            "Rise 20–80",
-            or_unmeasured(m.rise_time, |value| fmt_si(value, "s", 0)),
-            false,
-        ),
-        (
-            "Fall 80–20",
-            or_unmeasured(m.fall_time, |value| fmt_si(value, "s", 0)),
-            false,
-        ),
-        (
-            "Q factor",
-            or_unmeasured(m.q_factor, |value| {
-                if value.is_infinite() {
-                    "∞".to_owned()
-                } else {
-                    format!("{value:.1}")
-                }
-            }),
-            false,
-        ),
-    ];
+    let rows = metric_rows(&eye.measurements, significant_digits);
     crate::presentation::stat_table(ui, &rows);
 
     if eye.mask.enabled {
@@ -623,7 +587,9 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str) {
             ),
             (
                 "Margin",
-                or_unmeasured(mask.margin, |value| format!("{:+.0} %", value * 100.0)),
+                or_unmeasured(mask.margin, |value| {
+                    fmt_si_signed(value * 100.0, "%", significant_digits)
+                }),
                 true,
             ),
         ];
@@ -638,11 +604,63 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str) {
                 ui,
                 &format!(
                     "Mask authored at {} — time scaled to the current UI.",
-                    fmt_si(reference, "b/s", 1)
+                    fmt_si_significant(reference, "b/s", significant_digits)
                 ),
             );
         }
     }
+}
+
+/// The eye's figures at the reader's significant digits: a 1.49 V opening
+/// reads `1.49 V` and a 9.6 ps edge `9.6 ps`, never `1 V` and `10 ps`.
+fn metric_rows(
+    m: &super::EyeMeasurements,
+    significant_digits: usize,
+) -> [(&'static str, String, bool); 9] {
+    let value = |value: f64, unit: &str| fmt_si_significant(value, unit, significant_digits);
+    [
+        (
+            "Unit interval",
+            format!(
+                "{} ({})",
+                value(m.unit_interval, "s"),
+                value(m.data_rate, "b/s")
+            ),
+            true,
+        ),
+        ("Eye height", value(m.eye_height, "V"), true),
+        ("Eye width", value(m.eye_width, "UI"), true),
+        ("Jitter rms", value(m.jitter_rms, "s"), false),
+        ("Jitter p-p", value(m.jitter_pp, "s"), false),
+        (
+            "Crossing",
+            or_unmeasured(m.crossing_percentage, |crossing| {
+                value(crossing * 100.0, "%")
+            }),
+            false,
+        ),
+        (
+            "Rise 20–80",
+            or_unmeasured(m.rise_time, |rise| value(rise, "s")),
+            false,
+        ),
+        (
+            "Fall 80–20",
+            or_unmeasured(m.fall_time, |fall| value(fall, "s")),
+            false,
+        ),
+        (
+            "Q factor",
+            or_unmeasured(m.q_factor, |q| {
+                if q.is_infinite() {
+                    "∞".to_owned()
+                } else {
+                    value(q, "")
+                }
+            }),
+            false,
+        ),
+    ]
 }
 
 /// An em dash where the data could not support a figure.
@@ -657,6 +675,30 @@ fn or_unmeasured(value: Option<f64>, format: impl FnOnce(f64) -> String) -> Stri
 mod tests {
     use super::*;
     use crate::eye_diagram::EyeTrace;
+
+    /// The opening and the edges keep the digits the reader asked for.
+    #[test]
+    fn the_eye_figures_read_at_significant_digits() {
+        let measurements = super::super::EyeMeasurements {
+            eye_height: 1.49,
+            rise_time: Some(9.6e-12),
+            ..Default::default()
+        };
+        let rows = metric_rows(&measurements, 4);
+        let row = |name: &str| {
+            rows.iter()
+                .find(|row| row.0 == name)
+                .map(|row| row.1.clone())
+                .expect("the row is listed")
+        };
+        assert_eq!(row("Eye height"), "1.49 V");
+        assert_eq!(row("Rise 20–80"), "9.6 ps");
+        assert_eq!(
+            metric_rows(&measurements, 3)[1].1,
+            "1.49 V",
+            "three digits keep all three"
+        );
+    }
 
     #[test]
     fn density_raster_respects_the_current_viewport() {
@@ -689,7 +731,7 @@ mod tests {
                 }),
             );
 
-            let summary = timebase_summary(&eye);
+            let summary = timebase_summary(&eye, 4);
             assert!(summary.starts_with("set · "), "{summary}");
             assert_eq!(
                 summary.contains("crossings incoherent at this rate"),
@@ -718,7 +760,7 @@ mod tests {
             }),
         );
 
-        let summary = timebase_summary(&eye);
+        let summary = timebase_summary(&eye, 4);
         assert!(summary.starts_with("auto · "), "{summary}");
         assert!(!summary.contains("incoherent"), "{summary}");
         assert!(!timebase_is_incoherent(&eye));

@@ -148,16 +148,6 @@ fn trimmed(mut text: String) -> String {
     text.replace('-', "−")
 }
 
-/// Format `value` with an SI prefix and unit: `fmt_si(2.0e-6, "s", 3)` →
-/// `"2.000 µs"`. Zero renders without a prefix.
-pub fn fmt_si(value: f64, unit: &str, digits: usize) -> String {
-    let (scaled, index) = scale_si(value, digits);
-    let (exponent, prefix) = (si_exponent(index), si_prefix(index));
-    format!("{scaled:.digits$}{exponent} {prefix}{unit}")
-        .trim_end()
-        .to_owned()
-}
-
 /// An axis tick that carries its own unit: `si_tick_label(5e-4, "s", 2)` →
 /// `"500 µs"`, `si_tick_label(-3e-3, "V", 2)` → `"−3 mV"`.
 ///
@@ -166,10 +156,6 @@ pub fn fmt_si(value: f64, unit: &str, digits: usize) -> String {
 /// waveform strip has no caption track, so its ticks carry the unit
 /// themselves — and they have to be trimmed and signed exactly as every other
 /// tick in the product is, or the same number reads two ways on two surfaces.
-///
-/// [`fmt_si`] is the readout form of the same value and deliberately keeps its
-/// trailing zeros: a measured `1.00 ms` says three digits were resolved, which
-/// is a claim an axis label never makes.
 pub fn si_tick_label(value: f64, unit: &str, digits: usize) -> String {
     let (scaled, index) = scale_si(value, digits);
     let mantissa = trimmed(format!("{scaled:.digits$}"));
@@ -215,11 +201,12 @@ pub fn fmt_si_significant(value: f64, unit: &str, significant_digits: usize) -> 
 
 /// Whether a value in `unit` is written with an SI prefix.
 ///
-/// A dimensionless value (no unit, a ratio stated as `/V`), a level in
-/// decibels, an angle (`°`, `rad`, but not `rad/s`), a temperature in degrees and a percentage are never
-/// prefixed, and a compound unit is prefixed as its numerator is (`2 MV/s`,
-/// `−20 dB/dec`, `45 °/kHz`). Nor is a unit that already names its own
-/// decade: `1786 nV/√Hz`, never `1.786 knV/√Hz`.
+/// A dimensionless value (no unit, a ratio stated as `/V` or `1/V`, a count
+/// of standard deviations, a fraction of a unit interval), a level in
+/// decibels, an angle (`°`, `rad`, but not `rad/s`), a temperature in degrees
+/// and a percentage are never prefixed, and a compound unit is prefixed as
+/// its numerator is (`2 MV/s`, `−20 dB/dec`, `45 °/kHz`). Nor is a unit that
+/// already names its own decade: `1786 nV/√Hz`, never `1.786 knV/√Hz`.
 #[must_use]
 pub fn unit_takes_prefix(unit: &str) -> bool {
     if unit_carries_its_decade(unit) {
@@ -229,7 +216,10 @@ pub fn unit_takes_prefix(unit: &str) -> bool {
     !(numerator.is_empty()
         || unit == "rad"
         || numerator.starts_with("dB")
-        || matches!(numerator, "°" | "°C" | "°F" | "deg" | "%"))
+        || matches!(
+            numerator,
+            "1" | "°" | "°C" | "°F" | "deg" | "%" | "σ" | "sigma" | "UI"
+        ))
 }
 
 /// Whether a unit already names its decade, so a value in it is written as
@@ -237,6 +227,17 @@ pub fn unit_takes_prefix(unit: &str) -> bool {
 #[must_use]
 pub fn unit_carries_its_decade(unit: &str) -> bool {
     matches!(unit, "nV/√Hz" | "nA/√Hz" | "ns/√Hz")
+}
+
+/// [`fmt_si_significant`] with an explicit sign on a positive value, for a
+/// change or a margin: `+1.5 dB`, `−0.6 dB`, and zero unsigned.
+pub fn fmt_si_signed(value: f64, unit: &str, significant_digits: usize) -> String {
+    let text = fmt_si_significant(value, unit, significant_digits);
+    if value > 0.0 && !text.starts_with('0') {
+        format!("+{text}")
+    } else {
+        text
+    }
 }
 
 /// The number part of a value and the prefix its unit takes.
@@ -322,9 +323,11 @@ fn significant_mantissa(mantissa: f64, digits: usize) -> String {
         text.as_str()
     };
     // The zeros go when the value is the shorter number to well within the
-    // last printed digit: they would claim a resolution it does not need.
+    // last printed digit, or to within the arithmetic noise of a double (a
+    // kelvin-to-celsius subtraction leaves 27.000000000001): they would claim
+    // a resolution the value does not need.
     let resolution = 10f64.powi(-decimals) * 1.0e-6;
-    let tolerance = resolution.max(mantissa * 8.0 * f64::EPSILON);
+    let tolerance = resolution.max(mantissa * 1.0e-12);
     match trimmed.parse::<f64>() {
         Ok(short) if (short - mantissa).abs() <= tolerance => trimmed.to_owned(),
         _ => text,
@@ -506,9 +509,12 @@ mod tests {
 
     #[test]
     fn si_formatting() {
-        assert_eq!(fmt_si(2.0e-6, "s", 3), "2.000 µs");
-        assert_eq!(fmt_si(10.4e6, "Hz", 1), "10.4 MHz");
-        assert_eq!(fmt_si(0.0, "V", 2), "0.00 V");
+        assert_eq!(fmt_si_significant(2.0e-6, "s", 4), "2 µs");
+        assert_eq!(fmt_si_significant(10.4e6, "Hz", 3), "10.4 MHz");
+        assert_eq!(fmt_si_significant(0.0, "V", 3), "0 V");
+        assert_eq!(fmt_si_signed(1.5, "dB", 4), "+1.5 dB");
+        assert_eq!(fmt_si_signed(-0.6, "dB", 4), "\u{2212}0.6 dB");
+        assert_eq!(fmt_si_signed(0.0, "dB", 4), "0 dB");
     }
 
     #[test]
@@ -526,8 +532,8 @@ mod tests {
         assert_eq!(tick_label(2.5e12), "2.5T");
         assert_eq!(tick_label(1.0e-15), "1f");
         assert_eq!(tick_label(4.7e-18), "4.7a");
-        assert_eq!(fmt_si(3.3e12, "Hz", 1), "3.3 THz");
-        assert_eq!(fmt_si(2.0e-18, "F", 2), "2.00 aF");
+        assert_eq!(fmt_si_significant(3.3e12, "Hz", 4), "3.3 THz");
+        assert_eq!(fmt_si_significant(2.0e-18, "F", 4), "2 aF");
         // Past tera and atto the ladder carries on through the prefixes the
         // reference tools print, rather than parking the value on the last.
         assert_eq!(fmt_si_significant(2.402_879e-20, "V", 7), "24.02879 zV");
@@ -552,8 +558,8 @@ mod tests {
         assert_eq!(fmt_si_significant(-5.0e-30, "A", 4), "−5e−30 A");
         assert_eq!(fmt_si_significant(3.0e27, "Hz", 4), "3e27 Hz");
         assert_eq!(fmt_si_significant(4.56e31, "Hz", 4), "45.6e30 Hz");
-        assert_eq!(fmt_si(2.5e-28, "F", 2), "250.00e-30 F");
-        assert_eq!(fmt_si(2.5e-28, "", 2), "250.00e-30");
+        assert_eq!(fmt_si_significant(2.5e-28, "F", 4), "250e−30 F");
+        assert_eq!(fmt_si_significant(2.5e-28, "", 4), "250e−30");
         // A tick signs its exponent as it signs its value.
         assert_eq!(tick_label(-3.0e-27), "−3e−27");
         assert_eq!(si_tick_label(3.0e-27, "V", 2), "3e−27 V");
@@ -580,7 +586,7 @@ mod tests {
         assert_eq!(tick_label(999_999.9), "1M");
         assert_eq!(tick_label(0.999_999_5), "1");
         assert_eq!(tick_label(999.999_9e-6), "1m");
-        assert_eq!(fmt_si(999_999.9, "Hz", 3), "1.000 MHz");
+        assert_eq!(fmt_si_significant(999_999.9, "Hz", 4), "1.000 MHz");
         assert_eq!(fmt_si_significant(999.999_99, "V", 4), "1.000 kV");
     }
 
@@ -654,6 +660,9 @@ mod tests {
     /// and nor is a unit that already names its decade.
     #[test]
     fn a_dimensionless_value_takes_no_prefix() {
+        assert_eq!(fmt_si_significant(0.4266, "sigma", 4), "0.4266 sigma");
+        assert_eq!(fmt_si_significant(0.62, "UI", 4), "0.62 UI");
+        assert_eq!(fmt_si_significant(0.002, "1/V", 4), "0.002 1/V");
         assert_eq!(fmt_si_significant(0.316_227_8, "", 5), "0.31623");
         assert_eq!(fmt_si_significant(0.707, "", 4), "0.707");
         assert_eq!(fmt_si_significant(12.5, "%", 4), "12.5 %");

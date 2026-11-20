@@ -21,8 +21,9 @@ use rspice_results::renderability::{
 };
 use rspice_results::waveform::RetainedTrace;
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
+use crate::presentation::{angle_readout, frequency_readout};
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::fmt_si;
+use rspice_ui_kit::plot::{fmt_si_signed, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight, paint_focus_ring};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
@@ -379,14 +380,9 @@ impl RadiusRule {
     /// What the ring at `fraction` of the radius stands for.
     fn ring_label(self, fraction: f64) -> String {
         match self.mode {
-            // A plain decimal reads better than an SI prefix on a pure
-            // ratio: 0.4, not 400.00 m.
-            PolarRadius::Magnitude if (0.01..1.0e4).contains(&self.ceiling) => {
-                let value = self.ceiling * fraction;
-                let text = format!("{value:.3}");
-                text.trim_end_matches('0').trim_end_matches('.').to_owned()
-            }
-            PolarRadius::Magnitude => fmt_si(self.ceiling * fraction, "", 2),
+            // The head note states the unit once, so a ring is a plain
+            // number with no prefix of its own: 0.4, never 400 m beside 1.
+            PolarRadius::Magnitude => fmt_si_significant(self.ceiling * fraction, "", 3),
             PolarRadius::Decibels => {
                 format!("{:.0}", self.ceiling_db - DECIBEL_SPAN * (1.0 - fraction))
             }
@@ -403,7 +399,7 @@ impl RadiusRule {
         match self.mode {
             PolarRadius::Magnitude => format!(
                 "radius linear \u{b7} outer {}{normalized}",
-                fmt_si(self.ceiling, unit, 3)
+                fmt_si_significant(self.ceiling, unit, 3)
             ),
             PolarRadius::Decibels => format!(
                 "radius dB \u{b7} {:.0} \u{2026} {:.0} dB{normalized}",
@@ -553,6 +549,7 @@ pub fn show(
     sheet: &PolarSheetState,
     samples: CursorSamples,
     policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> Option<CanvasResponse> {
     let Some(locus) = locus else {
         well_hint(ui, ABSENT_STATE);
@@ -608,7 +605,16 @@ pub fn show(
         primary: locus,
         overlays,
     };
-    let mut response = paint_canvas(ui, &t, loci, rule, samples, sheet, policy);
+    let mut response = paint_canvas(
+        ui,
+        &t,
+        loci,
+        rule,
+        samples,
+        sheet,
+        policy,
+        significant_digits,
+    );
     response.removed_overlay = header
         .legend_removed
         .and_then(|chip| chip.checked_sub(1))
@@ -689,6 +695,7 @@ fn paint_canvas(
     samples: CursorSamples,
     sheet: &PolarSheetState,
     policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> CanvasResponse {
     let Loci {
         primary: locus,
@@ -906,7 +913,7 @@ fn paint_canvas(
             point,
             &hit.label,
             color,
-            &sample_card_rows(hit, index, policy),
+            &sample_card_rows(hit, index, policy, significant_digits),
         );
     }
 
@@ -987,15 +994,26 @@ fn sample_card_rows(
     locus: &PolarLocus,
     index: usize,
     policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
+    significant_digits: usize,
 ) -> Vec<crate::presentation::CardRow> {
     let magnitude = locus.magnitude(index);
     vec![
-        ("f".to_owned(), policy.format_frequency(locus.x[index], 2)),
-        ("|\u{b7}|".to_owned(), fmt_si(magnitude, &locus.unit, 3)),
+        (
+            "f".to_owned(),
+            frequency_readout(policy, locus.x[index], significant_digits),
+        ),
+        (
+            "|\u{b7}|".to_owned(),
+            fmt_si_significant(magnitude, &locus.unit, significant_digits),
+        ),
         (
             // Not "∠": that sign is in none of the bundled faces.
             "phase".to_owned(),
-            policy.format_angle(locus.imag[index].atan2(locus.real[index]), 1),
+            angle_readout(
+                policy,
+                locus.imag[index].atan2(locus.real[index]),
+                significant_digits,
+            ),
         ),
     ]
 }
@@ -1083,7 +1101,7 @@ fn paint_decade_marks(
         painter.text(
             point + outward * 7.0,
             egui::Align2([side(outward.x), side(outward.y)]),
-            policy.format_frequency(frequency, 0),
+            frequency_readout(policy, frequency, 3),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.canvas_text_dim,
         );
@@ -1103,6 +1121,7 @@ pub fn right_panel(
     locus: Option<&PolarLocus>,
     samples: CursorSamples,
     policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
+    significant_digits: usize,
 ) {
     section_header(ui, "Cursors", None);
     let Some(locus) = locus else {
@@ -1112,7 +1131,7 @@ pub fn right_panel(
         );
         return;
     };
-    let rows = register_rows(locus, samples, policy);
+    let rows = register_rows(locus, samples, policy, significant_digits);
     register_table(ui, &rows);
 }
 
@@ -1130,48 +1149,51 @@ fn register_rows(
     locus: &PolarLocus,
     samples: CursorSamples,
     policy: &rspice_vocabulary::quantity::QuantityPresentationPolicy,
+    digits: usize,
 ) -> Vec<RegisterRow> {
     let dash = || "\u{2014}".to_owned();
     let at = |sample: Option<usize>, read: &dyn Fn(usize) -> String| sample.map_or_else(dash, read);
-    let frequency = |index: usize| policy.format_frequency(locus.x[index], 2);
-    let magnitude = |index: usize| fmt_si(locus.magnitude(index), &locus.unit, 2);
+    let frequency = |index: usize| frequency_readout(policy, locus.x[index], digits);
+    let magnitude = |index: usize| fmt_si_significant(locus.magnitude(index), &locus.unit, digits);
     let decibels = |index: usize| {
         let value = locus.magnitude(index);
         if value > 0.0 {
-            format!("{:.2}", 20.0 * value.log10())
+            fmt_si_significant(20.0 * value.log10(), "", digits)
         } else {
             "\u{2212}\u{221e}".to_owned()
         }
     };
-    let phase = |index: usize| policy.format_angle(locus.imag[index].atan2(locus.real[index]), 1);
-    let real = |index: usize| fmt_si(locus.real[index], "", 2);
-    let imaginary = |index: usize| fmt_si(locus.imag[index], "", 2);
+    let phase =
+        |index: usize| angle_readout(policy, locus.imag[index].atan2(locus.real[index]), digits);
+    let real = |index: usize| fmt_si_significant(locus.real[index], "", digits);
+    let imaginary = |index: usize| fmt_si_significant(locus.imag[index], "", digits);
 
     let pair = samples.a.zip(samples.b);
     let decades = pair.map_or_else(dash, |(a, b)| {
         let (from, to) = (locus.x[a], locus.x[b]);
         if from > 0.0 && to > 0.0 {
-            format!("{:+.2} dec", (to / from).log10())
+            fmt_si_signed((to / from).log10(), "dec", digits)
         } else {
             dash()
         }
     });
     let magnitude_delta = pair.map_or_else(dash, |(a, b)| {
-        fmt_si(locus.magnitude(b) - locus.magnitude(a), &locus.unit, 2)
+        fmt_si_significant(locus.magnitude(b) - locus.magnitude(a), &locus.unit, digits)
     });
     let decibel_delta = pair.map_or_else(dash, |(a, b)| {
         let (first, second) = (locus.magnitude(a), locus.magnitude(b));
         if first > 0.0 && second > 0.0 {
-            format!("{:+.2}", 20.0 * (second / first).log10())
+            fmt_si_signed(20.0 * (second / first).log10(), "", digits)
         } else {
             dash()
         }
     });
     let phase_delta = pair.map_or_else(dash, |(a, b)| {
-        policy.format_angle(unwrapped_phase_delta(locus, a, b), 1)
+        angle_readout(policy, unwrapped_phase_delta(locus, a, b), digits)
     });
     let group_delay = pair.map_or_else(dash, |(a, b)| {
-        group_delay_seconds(locus, a, b).map_or_else(dash, |value| fmt_si(value, "s", 2))
+        group_delay_seconds(locus, a, b)
+            .map_or_else(dash, |value| fmt_si_significant(value, "s", digits))
     });
 
     vec![
@@ -1203,13 +1225,17 @@ fn register_rows(
             "Re",
             at(samples.a, &real),
             at(samples.b, &real),
-            pair.map_or_else(dash, |(a, b)| fmt_si(locus.real[b] - locus.real[a], "", 2)),
+            pair.map_or_else(dash, |(a, b)| {
+                fmt_si_significant(locus.real[b] - locus.real[a], "", digits)
+            }),
         ),
         (
             "Im",
             at(samples.a, &imaginary),
             at(samples.b, &imaginary),
-            pair.map_or_else(dash, |(a, b)| fmt_si(locus.imag[b] - locus.imag[a], "", 2)),
+            pair.map_or_else(dash, |(a, b)| {
+                fmt_si_significant(locus.imag[b] - locus.imag[a], "", digits)
+            }),
         ),
         ("Group delay", dash(), dash(), group_delay),
     ]
@@ -1577,6 +1603,7 @@ mod tests {
                 b: None,
             },
             &policy,
+            4,
         );
         assert_eq!(
             rows.iter().map(|row| row.0).collect::<Vec<_>>(),
@@ -1592,7 +1619,7 @@ mod tests {
         );
         assert!(rows.iter().all(|row| row.2 == "\u{2014}"));
         assert!(rows.iter().all(|row| row.3 == "\u{2014}"));
-        assert_eq!(rows[2].1, "0.00", "a unit-magnitude sample is 0 dB");
+        assert_eq!(rows[2].1, "0", "a unit-magnitude sample is 0 dB");
     }
 
     /// The Δ frequency column is stated in decades, which is what a swept
@@ -1608,8 +1635,9 @@ mod tests {
                 b: Some(2),
             },
             &policy,
+            4,
         );
-        let expected = format!("{:+.2} dec", (locus.x[2] / locus.x[0]).log10());
+        let expected = fmt_si_signed((locus.x[2] / locus.x[0]).log10(), "dec", 4);
         assert_eq!(rows[0].3, expected);
     }
 
@@ -1658,6 +1686,7 @@ mod tests {
                 sheet,
                 samples,
                 &rspice_vocabulary::quantity::QuantityPresentationPolicy::default(),
+                4,
             );
         });
         (canvas, tokens.expect("the pass ran"))
@@ -1774,6 +1803,7 @@ mod tests {
                         &sheet,
                         samples,
                         &rspice_vocabulary::quantity::QuantityPresentationPolicy::default(),
+                        4,
                     );
                 },
             ));

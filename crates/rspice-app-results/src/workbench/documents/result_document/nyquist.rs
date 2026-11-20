@@ -50,9 +50,20 @@ fn derived(state: &mut ResultsParts<'_>) -> Option<NyquistDerived> {
     Some(computed)
 }
 
+/// The reader's significant digits, which the stability figures read at.
+fn significant_digits(state: ResultsReads<'_>) -> usize {
+    usize::from(
+        state
+            .presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    )
+}
+
 /// Present the active retained loop gain and apply local viewer outcomes.
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
+    let significant_digits = significant_digits(state.results_reads());
     // Component arrays for the plot engine, cached per data version.
     //
     // The cache and the locus live in disjoint halves of the session, so the
@@ -102,6 +113,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &mut pin,
         &mut results.session.cache,
         &quantity_policy,
+        significant_digits,
     ) {
         super::record_drawn_axes(results, viewer, &response);
         if response.view.any() {
@@ -123,10 +135,12 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 /// Read the cached stability of the selected source into the inspector.
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
+    let significant_digits = significant_digits(state.results_reads());
     view::right_panel(
         ui,
         derived(state).map(|cached| cached.stability),
         &quantity_policy,
+        significant_digits,
     );
 }
 

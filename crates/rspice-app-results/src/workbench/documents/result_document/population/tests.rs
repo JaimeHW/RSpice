@@ -97,6 +97,9 @@ fn cached_population(
         workspace,
         results,
         policy: crate::quantity::QuantityPresentationPolicy::default(),
+        significant_digits: usize::from(
+            rspice_results::display_preferences::DisplayedSignificantDigits::DEFAULT,
+        ),
     })
 }
 

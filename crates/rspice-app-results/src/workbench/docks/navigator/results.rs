@@ -320,13 +320,7 @@ pub(in crate::workbench) fn results(
                                     .then(|| waveform.y.iter().copied().find(|v| v.is_finite()))
                                     .flatten()
                                     .map(|value| {
-                                        // Degrees carry no SI prefix; a
-                                        // near-zero phase as "f°" misreads.
-                                        if unit == "°" {
-                                            format!("{value:.3} °")
-                                        } else {
-                                            crate::ui::plot::fmt_si(value, unit, 3)
-                                        }
+                                        crate::ui::plot::fmt_si_significant(value, unit, 4)
                                     }),
                             })
                         })
