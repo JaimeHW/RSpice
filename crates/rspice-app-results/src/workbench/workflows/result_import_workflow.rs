@@ -149,24 +149,7 @@ pub(crate) fn import_result_dataset(state: &mut ResultsParts<'_>) -> bool {
         else {
             return false;
         };
-        match read_native_file_bounded(&path).and_then(|bytes| {
-            let display_name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.display().to_string());
-            stage_imported_result_dataset_beside(
-                state,
-                &display_name,
-                &bytes,
-                companion_log(&path).as_deref(),
-            )
-        }) {
-            Ok(()) => true,
-            Err(error) => {
-                record_import_failure(state, &error);
-                false
-            }
-        }
+        import_result_dataset_from_path(state, &path)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -181,12 +164,35 @@ pub(crate) fn import_result_dataset(state: &mut ResultsParts<'_>) -> bool {
     }
 }
 
+/// Stage the result dataset at `path`, the file the reader picked, or say
+/// why it was refused.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn import_result_dataset_from_path(state: &mut ResultsParts<'_>, path: &Path) -> bool {
+    match read_native_file_bounded(path).and_then(|bytes| {
+        let display_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        stage_imported_result_dataset_beside(
+            state,
+            &display_name,
+            &bytes,
+            companion_log(path).as_deref(),
+        )
+    }) {
+        Ok(()) => true,
+        Err(error) => {
+            record_import_failure(state, &error);
+            false
+        }
+    }
+}
+
+/// A refused import raises a notice with the reason, which offers the
+/// Console line it wrote, as a failed export does. It was a Console line
+/// alone, so a refused file looked like nothing had happened.
 fn record_import_failure(state: &mut ResultsParts<'_>, error: &str) {
-    state.record(
-        LogSeverity::Error,
-        LogSource::Studio,
-        format!("Result dataset import failed: {error}"),
-    );
+    state.report_failure("Result dataset import failed", error);
 }
 
 fn result_import_block_reason(model: &Model, platform: &PlatformState) -> Option<String> {
@@ -1273,6 +1279,31 @@ pub fn poll_browser_result_dataset_import(state: &mut ResultsParts<'_>) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A refused file says why in a notice that offers its Console line, as
+    /// a failed export does. The reason went to the Console alone, so the
+    /// import looked as if nothing had happened.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_refused_result_import_raises_a_notice_with_the_reason() {
+        let folder =
+            std::env::temp_dir().join(format!("rspice-refused-import-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("scope.csv");
+        std::fs::write(&path, b"").unwrap();
+        let mut state =
+            crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
+
+        let imported = import_result_dataset_from_path(&mut state.results_parts(), &path);
+        std::fs::remove_dir_all(&folder).unwrap();
+
+        assert!(!imported);
+        let notices = state.model.notices.take();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(notices[0].title, "Result dataset import failed");
+        assert_eq!(notices[0].detail, "the selected file is empty");
+        assert!(state.model.simulation.retained.runs.is_empty());
+    }
 
     #[test]
     fn import_dialog_reserves_a_visible_footer_inside_desktop_viewports() {
