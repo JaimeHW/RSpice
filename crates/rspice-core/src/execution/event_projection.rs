@@ -657,7 +657,8 @@ pub fn vcd_event_histories(
             .signals
             .iter()
             .find_map(|signal| signal.variables.first())
-            .map(|variable| variable.scope[..shared].to_vec())
+            .and_then(|variable| variable.scope.get(..shared))
+            .map(<[String]>::to_vec)
             .unwrap_or_default(),
         ..VcdEventHistories::default()
     };
