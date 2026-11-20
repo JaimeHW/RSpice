@@ -375,7 +375,9 @@ pub fn keep_segments_in(folder: &Path) {
 ///
 /// A file under the digest's name is the segment only when its stored bits hash to the digest
 /// ([`rspice_results_store::verify_segment`]): the first time a file is opened that reads all of
-/// it, on the calling thread.
+/// it, on the calling thread, unless the caller is [`super::opening_unchecked`]. Then a file not
+/// checked yet is left for a check of its own, and reads as missing until it has had it, as does
+/// every file already left for one.
 #[cfg(any(unix, windows))]
 pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
     let lock = || KEPT.lock().unwrap_or_else(|p| p.into_inner());
@@ -387,13 +389,35 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
         kept.folders.clone()
     };
     let name = rspice_results_store::kept_segment_name(&digest);
+    let deferring = super::checks::deferring();
+    let mut unchecked = None;
     // Checked without holding the lock, so a long first check does not stall other reads.
     let segment = folders.iter().find_map(|folder| {
         let path = folder.join(&name);
+        // A job of its own reads it whole; reading it here too would read it twice.
+        if super::checks::awaiting_check(&path) {
+            return None;
+        }
+        if deferring && !rspice_results_store::segment_verified(&path, &digest) {
+            if unchecked.is_none() && path.is_file() {
+                unchecked = Some(path);
+            }
+            return None;
+        }
         rspice_results_store::verify_segment(&path, &digest).ok()?;
         let reader = StoreReader::open_file(&path).ok()?;
         Some(Arc::new(Segment::kept(reader, path)))
-    })?;
+    });
+    let Some(segment) = segment else {
+        if let Some(path) = unchecked {
+            super::checks::defer_check(super::checks::UncheckedSegment {
+                digest,
+                path,
+                replace_from: None,
+            });
+        }
+        return None;
+    };
     let mut kept = lock();
     if let Some(open) = kept.open(digest) {
         return Some(open);

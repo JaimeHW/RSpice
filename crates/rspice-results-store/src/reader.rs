@@ -1095,10 +1095,26 @@ impl<I: SegmentIo> SegmentReader<I> {
     /// against its CRC; equal to `END`'s for a complete segment that holds the bytes its run
     /// wrote.
     pub fn digest(&mut self) -> Result<Digest, StoreError> {
+        Ok(self
+            .digest_with(&mut |_, _| true)?
+            .expect("a digest nobody stops runs to its end"))
+    }
+
+    /// [`Self::digest`], telling `progress` the chunks and event signals read of all of them
+    /// after each one. `None` when `progress` answered `false`: it stopped the read.
+    pub fn digest_with(
+        &mut self,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<Option<Digest>, StoreError> {
         let mut digest = LogicalDigest::new(self.event_signals.iter().map(|&(id, _)| id));
         let mut x = Vec::new();
         let mut columns = vec![Vec::new(); self.slots];
+        let chunks = self.catalogue.chunks.len() as u64;
+        let total = chunks + self.event_signals.len() as u64;
         for index in 0..self.catalogue.chunks.len() {
+            if !progress(index as u64, total) {
+                return Ok(None);
+            }
             let chunk = self.catalogue.chunks[index];
             x.resize(chunk.rows as usize, 0.0);
             self.decode_block(&chunk, 0, &mut x)?;
@@ -1123,6 +1139,9 @@ impl<I: SegmentIo> SegmentReader<I> {
             digest.summaries(&self.region_bytes(region)?, 1 + self.analog.len());
         }
         for position in 0..self.event_signals.len() {
+            if !progress(chunks + position as u64, total) {
+                return Ok(None);
+            }
             let id = self.event_signals[position].0;
             let changes = self.events(id as usize, f64::NEG_INFINITY, f64::INFINITY)?;
             let stream = digest.event_stream(position, changes.len() as u64);
@@ -1139,9 +1158,10 @@ impl<I: SegmentIo> SegmentReader<I> {
                 );
             }
         }
+        progress(total, total);
         let mut schema_bytes = Vec::new();
         self.schema.encode(&mut schema_bytes);
-        Ok(digest.finish(&schema_bytes))
+        Ok(Some(digest.finish(&schema_bytes)))
     }
 
     /// Changes of event signal `signal` read so far.

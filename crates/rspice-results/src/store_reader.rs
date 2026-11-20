@@ -22,6 +22,13 @@ pub use rspice_results_store::{Digest as SegmentDigest, kept_segment_name};
 pub use rspice_results_store::{
     PlaceError, PlaceWays, Placed, place_segment, remove_unkept_segments, segment_verified,
 };
+mod checks;
+#[cfg(any(unix, windows))]
+pub use checks::check;
+pub use checks::{
+    UncheckedSegment, awaiting_check, check_progress, checking, defer_check, opening_unchecked,
+    take_unchecked_segments,
+};
 mod references;
 pub use references::parse_digest;
 pub(crate) use references::references_written;

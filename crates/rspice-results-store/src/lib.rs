@@ -59,7 +59,7 @@ pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};
 pub use sink::{StoreSink, sink_stop};
 pub use tile::{BlockCache, BlockKey, NoBlockCache, Tile, pixel_of};
 #[cfg(any(unix, windows))]
-pub use verify::{segment_verified, verify_segment};
+pub use verify::{check_segment, segment_verified, verify_segment};
 #[cfg(any(unix, windows))]
 pub use watch::volume_free_space;
 pub use watch::{

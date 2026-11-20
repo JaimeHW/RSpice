@@ -74,7 +74,8 @@ fn holds_memory(waveform: &RetainedWaveform) -> bool {
 }
 
 /// Why the first waveform or event history of `analyses` that cannot be read cannot be: its
-/// segment gone from every folder, or there and damaged. `None` when every one reads.
+/// segment gone from every folder, or there and damaged. `None` when every one reads, or waits
+/// only for its segment's first check ([`checking_progress`]).
 pub fn unread_reason<'a, W: AsRef<RetainedWaveform> + 'a>(
     analyses: impl IntoIterator<Item = &'a RetainedAnalysisResult<W>>,
 ) -> Option<String> {
@@ -88,6 +89,7 @@ pub fn unread_reason<'a, W: AsRef<RetainedWaveform> + 'a>(
                 .flat_map(|complex| [&complex.real, &complex.imag]);
             for values in [&waveform.x, &waveform.y].into_iter().chain(complex) {
                 if let Some((source, _)) = values.stored_window()
+                    && !being_checked(source.identity())
                     && let Err(reason) = source.read(0, &mut [])
                 {
                     return Some(reason);
@@ -105,13 +107,56 @@ pub fn unread_reason<'a, W: AsRef<RetainedWaveform> + 'a>(
                 .map(|trace| trace.points.stored_source());
             let real = real_traces.iter().map(|trace| trace.points.stored_source());
             for source in digital.chain(real).flatten() {
-                if let Err(reason) = source.before(f64::NEG_INFINITY) {
+                if !being_checked(source.identity())
+                    && let Err(reason) = source.before(f64::NEG_INFINITY)
+                {
                     return Some(reason);
                 }
             }
         }
     }
     None
+}
+
+/// Whether the samples of a source with `identity` are in a kept segment still waiting for its
+/// first check.
+fn being_checked(identity: Option<([u8; 32], u64)>) -> bool {
+    identity.is_some_and(|(digest, _)| rspice_results::store_reader::checking(digest))
+}
+
+/// How far the checks of the kept segments `analyses` read and still wait for got, together, as
+/// work done of work known: what a run shows while it is being checked. `None` when none waits.
+pub fn checking_progress<'a, W: AsRef<RetainedWaveform> + 'a>(
+    analyses: impl IntoIterator<Item = &'a RetainedAnalysisResult<W>>,
+) -> Option<(u64, u64)> {
+    let mut digests = Vec::new();
+    for analysis in analyses {
+        for waveform in &analysis.waveforms {
+            let waveform = waveform.as_ref();
+            let complex = waveform
+                .complex
+                .iter()
+                .flat_map(|complex| [&complex.real, &complex.imag]);
+            for values in [&waveform.x, &waveform.y].into_iter().chain(complex) {
+                if let Some((digest, _)) = values
+                    .stored_window()
+                    .and_then(|(source, _)| source.identity())
+                    && !digests.contains(&digest)
+                {
+                    digests.push(digest);
+                }
+            }
+        }
+    }
+    let checks: Vec<_> = digests
+        .into_iter()
+        .filter_map(rspice_results::store_reader::check_progress)
+        .collect();
+    (!checks.is_empty()).then(|| {
+        checks.iter().fold((0, 0), |(done, total), check| {
+            (done + check.0, total + check.1)
+        })
+    })
 }
 
 /// Whether any waveform of `analysis` holds a series in memory, or in a segment that states no

@@ -862,7 +862,21 @@ pub(in crate::workbench) fn results(
                         .runs
                         .get(run.run_index)
                         .and_then(crate::state::SimulationRun::unread_results);
-                    let run_meta = if unread.is_some() {
+                    let checking = state
+                        .model
+                        .simulation
+                        .retained
+                        .runs
+                        .get(run.run_index)
+                        .and_then(crate::state::SimulationRun::checking_results);
+                    let checking_meta;
+                    let run_meta = if let Some((done, total)) = checking {
+                        checking_meta = match done.saturating_mul(100).checked_div(total) {
+                            Some(percent) => format!("checking {percent}%"),
+                            None => "checking".to_owned(),
+                        };
+                        checking_meta.as_str()
+                    } else if unread.is_some() {
                         "results not found"
                     } else {
                         data_state_meta(run.data_state)

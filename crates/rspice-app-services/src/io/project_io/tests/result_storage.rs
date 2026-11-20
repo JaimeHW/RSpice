@@ -473,3 +473,122 @@ fn a_seeded_run_of_64_mib_saves_closes_and_reopens_with_every_sample() {
 fn a_seeded_run_of_2_gib_saves_closes_and_reopens_with_every_sample() {
     a_seeded_run_round_trips(2 << 30, "seeded-2-gib");
 }
+
+/// Run every check this thread left for one, as the frames after an open or a save do, until
+/// none runs.
+fn run_segment_checks(simulation: &mut SimulationState) {
+    let mut checks = Vec::new();
+    crate::io::result_segments::poll_segment_checks(simulation, &mut checks);
+    assert!(!checks.is_empty(), "a check was left to run");
+    for check in &checks {
+        assert!(check.wait(std::time::Duration::from_secs(60)));
+    }
+    assert!(!crate::io::result_segments::poll_segment_checks(
+        simulation,
+        &mut checks
+    ));
+}
+
+/// Opening a project reads none of its kept segments whole first: each one not checked yet is
+/// checked by a job of its own after the project opens. Meanwhile its run says it is being
+/// checked, not that its results are missing or damaged, and the open names no run as
+/// unreadable. The check's end reads the run as the segment, or as what is wrong with it.
+#[test]
+fn a_project_opens_before_its_results_are_checked_and_reads_them_once_they_are() {
+    let root = scratch_folder("checked-after-open");
+    let saved = root.join("pair.rspiceproj");
+    let (json, samples) = saved_and_closed(&saved, &[401, 402]);
+    // Renamed, so no file of the folder is one this process has checked.
+    let file = root.join("moved.rspiceproj");
+    std::fs::rename(
+        root.join("results").join("pair"),
+        root.join("results").join("moved"),
+    )
+    .unwrap();
+    let project: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let digest_of = |run: usize| {
+        project["simulation_results"]["runs"][run]["analyses"][0]["waveforms"][0]["y"]["segment"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let kept = |run: usize| {
+        rspice_formats::project_results::segment_folder(&file)
+            .join(format!("{}.rsr", digest_of(run)))
+    };
+    let mut bytes = std::fs::read(kept(1)).unwrap();
+    bytes[..64].fill(0xa5);
+    std::fs::write(kept(1), bytes).unwrap();
+
+    let loaded =
+        rspice_results::store_reader::opening_unchecked(|| load_project_text(&json, Some(&file)))
+            .expect("the project opens");
+    assert_eq!(loaded.file.simulation_results_warning, None);
+    let good_digest = rspice_results::store_reader::parse_digest(&digest_of(0)).unwrap();
+    assert!(
+        !rspice_results::store_reader::segment_verified(&kept(0), &good_digest),
+        "the open read no segment whole"
+    );
+    let mut restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
+        .expect("the history opens");
+    for run in restored.retained.runs.iter() {
+        assert_eq!(run.unread_results(), None);
+        assert!(
+            run.checking_results().is_some(),
+            "{} is being checked",
+            run.label
+        );
+    }
+
+    run_segment_checks(&mut restored);
+    let [good, bad] = [&restored.retained.runs[0], &restored.retained.runs[1]];
+    assert_eq!(good.checking_results(), None);
+    assert_eq!(good.unread_results(), None);
+    assert_eq!(run_bits(good), samples[0]);
+    let waveforms = &good.analyses[0].waveforms;
+    assert!(
+        rspice_results::waveform::WaveformValues::ptr_eq(&waveforms[0].x, &waveforms[1].x),
+        "its signals share one axis"
+    );
+    assert_eq!(bad.checking_results(), None);
+    let reason = bad.unread_results().expect("the damaged run cannot read");
+    assert!(reason.contains("is damaged"), "{reason}");
+    drop(restored);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A save into a folder that already holds a file under a run's segment name, not checked yet,
+/// goes on without reading it: the file is checked by a job of its own, which puts the run's own
+/// segment in its place when the file is not the segment.
+#[test]
+fn a_save_goes_on_while_what_its_folder_holds_is_checked() {
+    let root = scratch_folder("save-checks-its-folder");
+    let file = root.join("amp.rspiceproj");
+    let mut simulation = SimulationState::default();
+    simulation.retained.runs = vec![large_ac_run(501, 3_000, 2)].into();
+    let results = crate::io::capture_simulation_results(&simulation);
+    let segments = results.stored_segments();
+    let source = segments[0].source.clone().expect("the run's own segment");
+    let folder = rspice_formats::project_results::segment_folder(&file);
+    std::fs::create_dir_all(&folder).unwrap();
+    let target = folder.join(rspice_results::store_reader::kept_segment_name(
+        &segments[0].digest,
+    ));
+    // The same segment, damaged between its header and its end.
+    let mut bytes = std::fs::read(&source).unwrap();
+    let middle = bytes.len() / 4;
+    bytes[middle] ^= 0xff;
+    std::fs::write(&target, bytes).unwrap();
+
+    let plan = crate::io::result_segments::segments_to_keep(segments.clone(), &file);
+    assert!(plan.is_empty(), "the save waits on no check: {plan:?}");
+    assert!(rspice_results::store_reader::awaiting_check(&target));
+    run_segment_checks(&mut simulation);
+    assert!(!rspice_results::store_reader::awaiting_check(&target));
+    assert!(
+        std::fs::read(&target).unwrap() == std::fs::read(&source).unwrap(),
+        "the check put the run's segment in the damaged file's place"
+    );
+    drop(simulation);
+    let _ = std::fs::remove_dir_all(&root);
+}

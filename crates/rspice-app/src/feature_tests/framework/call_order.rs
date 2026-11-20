@@ -139,6 +139,7 @@ const PREPARE_FRAME: &[Step] = &[
             "self.handle_save_continuation_event(event)",
             "self.state.poll_results_save(ctx)",
             "self.handle_save_continuation_event(event)",
+            "self.state.poll_segment_checks(ctx)",
         ],
     ),
     (

@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 
 use rspice_formats::project_results::{ProjectSimulationResults, StoredSegment, segment_folder};
 use rspice_results::store_reader::{
-    PlaceError, PlaceWays, SegmentDigest, kept_segment, kept_segment_name, parse_digest,
-    place_segment, remove_unkept_segments, segment_verified,
+    PlaceError, PlaceWays, SegmentDigest, StoreReader, UncheckedSegment, awaiting_check,
+    defer_check, kept_segment, kept_segment_name, parse_digest, place_segment,
+    remove_unkept_segments, segment_verified,
 };
 use rspice_results::visualization_document::VisualizationDocument;
 
@@ -57,19 +58,45 @@ pub fn file_segments(
 
 /// What saving a file that reads `segments` to `file` has to keep that its folder does not
 /// hold yet. A segment no file holds any more (deleted outside RSpice) stays named, and missing.
+///
+/// A file the folder holds under a segment's name, ending as that segment ends but not checked
+/// yet, is kept as it is and left for a check of its own ([`defer_check`]), which puts the
+/// segment's own copy in its place if it is not the segment. The save goes on meanwhile, and
+/// never reads the file whole first.
 pub fn segments_to_keep(segments: Vec<StoredSegment>, file: &Path) -> SegmentsToKeep {
-    segments_to_keep_in(segments, segment_folder(file))
+    segments_to_keep_in(segments, segment_folder(file), true)
 }
 
-/// What keeping `segments` in `folder` has to place that it does not hold yet.
-fn segments_to_keep_in(segments: Vec<StoredSegment>, folder: PathBuf) -> SegmentsToKeep {
+/// What keeping `segments` in `folder` has to place that it does not hold yet. A file a check of
+/// its own already reads is not read again. With `check_later`, a file the folder holds unchecked
+/// is left for one too, as [`segments_to_keep`] says; without, it is placed, which checks it.
+fn segments_to_keep_in(
+    segments: Vec<StoredSegment>,
+    folder: PathBuf,
+    check_later: bool,
+) -> SegmentsToKeep {
     let segments: Vec<_> = segments
         .into_iter()
         .filter(|segment| {
-            !segment_verified(
-                &folder.join(kept_segment_name(&segment.digest)),
-                &segment.digest,
-            )
+            let target = folder.join(kept_segment_name(&segment.digest));
+            if segment_verified(&target, &segment.digest) || awaiting_check(&target) {
+                return false;
+            }
+            let ends_as_the_segment = || {
+                StoreReader::open_file(&target)
+                    .is_ok_and(|reader| reader.digest() == Some(segment.digest))
+            };
+            match &segment.source {
+                Some(source) if check_later && *source != target && ends_as_the_segment() => {
+                    defer_check(UncheckedSegment {
+                        digest: segment.digest,
+                        path: target,
+                        replace_from: Some(source.clone()),
+                    });
+                    false
+                }
+                _ => true,
+            }
         })
         .filter_map(|segment| Some((segment.digest, segment.source?)))
         .collect();
@@ -325,7 +352,7 @@ pub fn keep_segments_now(segments: Vec<StoredSegment>, file: &Path) -> Result<()
 }
 
 fn keep_segments_now_in(segments: Vec<StoredSegment>, folder: PathBuf) -> Result<(), String> {
-    let plan = segments_to_keep_in(segments, folder);
+    let plan = segments_to_keep_in(segments, folder, false);
     if plan.is_empty() {
         return Ok(());
     }
@@ -559,7 +586,7 @@ pub fn place_session_segments_for_close(segments: Vec<StoredSegment>) -> Session
             let Some(folder) = own_session_folder(session) else {
                 return SessionResultsAtClose::Kept;
             };
-            let plan = segments_to_keep_in(segments, folder);
+            let plan = segments_to_keep_in(segments, folder, false);
             if plan.is_empty() {
                 return SessionResultsAtClose::Kept;
             }
@@ -627,19 +654,104 @@ pub fn as_another_instance<T>(act: impl FnOnce() -> T) -> T {
     acted
 }
 
+/// The first check of a kept segment, run as a Results job: a project open or a save left it to
+/// run beside them.
+pub type SegmentCheck = crate::workbench::results_job::ResultsJob<SegmentDigest>;
+
+/// Start a job for each kept segment this thread left for a check since it last asked.
+pub fn start_segment_checks(checks: &mut Vec<SegmentCheck>) {
+    use crate::workbench::results_job::{JobStop, ResultsJob};
+    for segment in rspice_results::store_reader::take_unchecked_segments() {
+        checks.push(ResultsJob::start("segment-check", move |job| {
+            job.step("Checking results", 0);
+            let mut known = 0;
+            let checked = rspice_results::store_reader::check(&segment, &mut |done, total| {
+                if total != known {
+                    job.step("Checking results", total);
+                    known = total;
+                }
+                job.done(done);
+                !job.cancelled()
+            });
+            match checked {
+                None => Err(JobStop::Cancelled),
+                Some(Ok(())) => Ok(segment.digest),
+                Some(Err(reason)) => Err(JobStop::Failed(format!(
+                    "{} is not the results it is named for: {reason}",
+                    segment.path.display()
+                ))),
+            }
+        }));
+    }
+}
+
+/// The checks that ended since the last frame: each run that reads a segment one of them
+/// checked reads it again, as the segment or as what is wrong with it. Starts the checks left
+/// since the last frame first. Returns whether any check still runs.
+pub fn poll_segment_checks(
+    simulation: &mut crate::state::SimulationState,
+    checks: &mut Vec<SegmentCheck>,
+) -> bool {
+    use crate::workbench::results_job::JobOutcome;
+    start_segment_checks(checks);
+    let mut ended = false;
+    checks.retain(|check| {
+        if !check.is_finished() {
+            return true;
+        }
+        match check.take_outcome() {
+            Some(JobOutcome::Failed(reason)) => log::warn!("{reason}"),
+            Some(JobOutcome::Done(_) | JobOutcome::Cancelled) | None => {}
+        }
+        ended = true;
+        false
+    });
+    if ended {
+        let runs = (0..simulation.retained.runs.len()).collect();
+        read_runs_again(simulation, runs, &|values| {
+            if rspice_formats::project_results::readable(values) {
+                return None;
+            }
+            let digest = values.stored_window()?.0.identity()?.0;
+            if rspice_results::store_reader::checking(digest) {
+                return None;
+            }
+            rspice_formats::project_results::read_checked(values)
+        });
+    }
+    !checks.is_empty()
+}
+
 /// Locate results: look for kept segments in `folder` too, and read again every run of the
 /// history that could not read its samples, its signals sharing one axis as on a fresh run. The
 /// runs that now read every sample; a run whose segment `folder` does not hold stays as it was.
 /// A save keeps the segments found beside the project, so they are found there from then on.
 pub fn locate_results(simulation: &mut crate::state::SimulationState, folder: &Path) -> usize {
-    use rspice_formats::project_results::{read_again, read_events_again};
-    use rspice_results::store_reader::ColumnReference;
     rspice_formats::project_results::keep_segments_in(folder);
     let unread: Vec<usize> = (0..simulation.retained.runs.len())
         .filter(|&index| simulation.retained.runs[index].unread_results().is_some())
         .collect();
-    let mut located = 0;
-    for index in unread {
+    let read = &rspice_formats::project_results::read_again;
+    read_runs_again(simulation, unread.clone(), read);
+    unread
+        .into_iter()
+        .filter(|&index| simulation.retained.runs[index].unread_results().is_none())
+        .count()
+}
+
+/// Read again each of `runs` through `read`, which says what a waveform reads now (`None`: as
+/// it was), its signals sharing one axis as on a fresh run. An event history reads again where it
+/// reads now.
+fn read_runs_again(
+    simulation: &mut crate::state::SimulationState,
+    runs: Vec<usize>,
+    read: &dyn Fn(
+        &rspice_results::waveform::WaveformValues,
+    ) -> Option<rspice_results::waveform::WaveformValues>,
+) {
+    use rspice_formats::project_results::read_events_again;
+    use rspice_results::store_reader::ColumnReference;
+    for index in runs {
         let run = &mut simulation.retained.runs[index];
         let mut axes: Vec<(ColumnReference, rspice_results::waveform::WaveformValues)> = Vec::new();
         for analysis in &mut run.data.analyses {
@@ -649,7 +761,7 @@ pub fn locate_results(simulation: &mut crate::state::SimulationState, folder: &P
                     match axes.iter().find(|(met, _)| *met == reference) {
                         Some((_, axis)) => *x = axis.clone(),
                         None => {
-                            if let Some(axis) = read_again(x) {
+                            if let Some(axis) = read(x) {
                                 *x = axis;
                             }
                             axes.push((reference, x.clone()));
@@ -662,7 +774,7 @@ pub fn locate_results(simulation: &mut crate::state::SimulationState, folder: &P
                     .iter_mut()
                     .flat_map(|complex| [&mut complex.real, &mut complex.imag]);
                 for values in std::iter::once(&mut waveform.data.y).chain(complex) {
-                    if let Some(again) = read_again(values) {
+                    if let Some(again) = read(values) {
                         *values = again;
                     }
                 }
@@ -687,9 +799,5 @@ pub fn locate_results(simulation: &mut crate::state::SimulationState, folder: &P
                 }
             }
         }
-        if run.unread_results().is_none() {
-            located += 1;
-        }
     }
-    located
 }

@@ -566,6 +566,8 @@ impl RSpiceApp {
         if let Some(event) = self.state.poll_results_save(ctx) {
             self.handle_save_continuation_event(event);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.state.poll_segment_checks(ctx);
         // A checkpoint the Recovery page read back goes into the project
         // before anything draws it.
         crate::workbench::app_state::services_access::apply_restored_checkpoint(&mut self.state);

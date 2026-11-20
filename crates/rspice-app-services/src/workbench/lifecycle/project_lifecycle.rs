@@ -978,11 +978,16 @@ pub fn normalize_native_path(path: &Path) -> Result<PathBuf, ProjectLifecycleErr
     persistence::normalize_native_path(path).map_err(ProjectLifecycleError::from)
 }
 
+/// Read the project at `path` to open it. Its kept results are not read whole first: each one
+/// not checked yet is checked by a job of its own after the project opens
+/// ([`crate::io::result_segments::poll_segment_checks`]), and its run reads as being checked
+/// meanwhile.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_native_binding(
     path: &Path,
 ) -> Result<(ProjectSnapshot, PersistenceBinding), ProjectLifecycleError> {
-    persistence::read_native_binding(path).map_err(ProjectLifecycleError::from)
+    rspice_results::store_reader::opening_unchecked(|| persistence::read_native_binding(path))
+        .map_err(ProjectLifecycleError::from)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

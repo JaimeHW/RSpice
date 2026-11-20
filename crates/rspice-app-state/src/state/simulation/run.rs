@@ -248,6 +248,12 @@ impl SimulationRun {
         super::run_store::unread_reason(self.analyses.iter().map(|analysis| &analysis.data))
     }
 
+    /// How far the first checks of the kept segments this run reads got, as
+    /// work done of work known, while any is still being checked.
+    pub fn checking_results(&self) -> Option<(u64, u64)> {
+        super::run_store::checking_progress(self.analyses.iter().map(|analysis| &analysis.data))
+    }
+
     /// Append a finished analysis that no prepared task produced (an imported
     /// dataset), its samples kept in a results store segment first as
     /// [`Self::replace_live_or_add_analysis`] keeps them.

@@ -1155,6 +1155,17 @@ impl AppState {
 /// A save whose results are kept beside its file before the file is written.
 #[cfg(not(target_arch = "wasm32"))]
 impl AppState {
+    /// Run the first checks of the kept results a project open or a save left, and read again
+    /// each run whose check ended. While any runs, asks for the frames that show how far it got.
+    pub(crate) fn poll_segment_checks(&mut self, ctx: &egui::Context) {
+        if rspice_app_services::io::result_segments::poll_segment_checks(
+            &mut self.model.simulation,
+            &mut self.platform.segment_checks,
+        ) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+
     /// Finish the save whose results have been kept since the last frame, if one has: write
     /// its file, or say why it was not written. Returns what the save continues with. While
     /// the results are still being kept, asks for the frame that shows how far it got.

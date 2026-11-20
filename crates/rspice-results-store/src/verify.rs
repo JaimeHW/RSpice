@@ -62,7 +62,21 @@ fn checked() -> std::sync::MutexGuard<'static, Checked> {
 /// The first check of a file reads all of it; later ones, while the file is unchanged, read only
 /// its metadata.
 pub fn verify_segment(path: &Path, digest: &Digest) -> Result<(), StoreError> {
-    let before = Identity::of(path)?;
+    check_segment(path, digest, &mut |_, _| true).expect("a check nobody stops runs to its end")
+}
+
+/// [`verify_segment`], telling `progress` the work read of all of it as a first check reads the
+/// file. `None` when `progress` answered `false`: the check stopped, and nothing of it is
+/// remembered.
+pub fn check_segment(
+    path: &Path,
+    digest: &Digest,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Option<Result<(), StoreError>> {
+    let before = match Identity::of(path) {
+        Ok(identity) => identity,
+        Err(error) => return Some(Err(error)),
+    };
     let remembered = checked()
         .get(path)
         .filter(|(identity, _)| *identity == before)
@@ -70,7 +84,7 @@ pub fn verify_segment(path: &Path, digest: &Digest) -> Result<(), StoreError> {
     let outcome = match remembered {
         Some(outcome) => outcome,
         None => {
-            let outcome = held_digest(path);
+            let outcome = held_digest(path, progress)?;
             // A file that changed while it was read is checked again next time.
             if Identity::of(path).is_ok_and(|after| after == before) {
                 checked().insert(path.to_path_buf(), (before, outcome.clone()));
@@ -78,13 +92,14 @@ pub fn verify_segment(path: &Path, digest: &Digest) -> Result<(), StoreError> {
             outcome
         }
     };
-    match outcome? {
-        held if held == *digest => Ok(()),
-        held => Err(StoreError::DigestMismatch {
+    Some(match outcome {
+        Ok(held) if held == *digest => Ok(()),
+        Ok(held) => Err(StoreError::DigestMismatch {
             expected: *digest,
             held,
         }),
-    }
+        Err(error) => Err(error),
+    })
 }
 
 /// Carry what [`verify_segment`] found of the file at `from` over to `to`, which it was just
@@ -117,27 +132,39 @@ pub fn segment_verified(path: &Path, digest: &Digest) -> bool {
 }
 
 /// The digest the stored bits of the finished segment at `path` hash to, when it is the one its
-/// `END` records.
-fn held_digest(path: &Path) -> Result<Digest, StoreError> {
-    let mut reader = SegmentReader::open(FileIo::open(path)?)?;
+/// `END` records. `None` when `progress` stopped the read.
+fn held_digest(
+    path: &Path,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Option<Result<Digest, StoreError>> {
+    let mut reader = match FileIo::open(path)
+        .map_err(StoreError::from)
+        .and_then(SegmentReader::open)
+    {
+        Ok(reader) => reader,
+        Err(error) => return Some(Err(error)),
+    };
     let SegmentState::Complete {
         digest: recorded, ..
     } = reader.state().clone()
     else {
-        return Err(reader.end_damage().cloned().unwrap_or_else(|| {
+        return Some(Err(reader.end_damage().cloned().unwrap_or_else(|| {
             StoreError::corrupt(
                 POINTERS_AT + 16,
                 "the segment has no END: the run that wrote it never finished",
             )
-        }));
+        })));
     };
-    let held = reader.digest()?;
-    if held == recorded {
+    let held = match reader.digest_with(progress) {
+        Ok(held) => held?,
+        Err(error) => return Some(Err(error)),
+    };
+    Some(if held == recorded {
         Ok(held)
     } else {
         Err(StoreError::DigestMismatch {
             expected: recorded,
             held,
         })
-    }
+    })
 }

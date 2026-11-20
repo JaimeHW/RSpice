@@ -56,7 +56,7 @@ const LEFT_WITH_THE_PAGE: &str = "this browser kept these results in the page's 
      emptied it";
 
 /// The kept segment file `name` that a folder holds, and what is wrong with it; `None` when no
-/// folder holds one.
+/// folder holds one, or the one it holds is still waiting for its first check.
 #[cfg(any(unix, windows))]
 fn damage(name: &str) -> Option<(PathBuf, String)> {
     let folders = FOLDERS.lock().unwrap_or_else(|p| p.into_inner()).clone();
@@ -64,6 +64,9 @@ fn damage(name: &str) -> Option<(PathBuf, String)> {
         .iter()
         .map(|folder| folder.join(name))
         .find(|path| path.is_file())?;
+    if rspice_results::store_reader::awaiting_check(&path) {
+        return None;
+    }
     let reason = match rspice_results::store_reader::StoreReader::open_file(&path) {
         Err(error) => error.to_string(),
         Ok(reader) if reader.digest().is_none() => {
@@ -156,6 +159,12 @@ pub fn read_again(values: &WaveformValues) -> Option<WaveformValues> {
     }
     let again = self::values(&ColumnReference::of(values)?).ok()?;
     readable(&again).then_some(again)
+}
+
+/// The waveform `values` reads now that the check of its segment ended: the segment, or what is
+/// wrong with it. `None` when `values` is not a window of a kept segment.
+pub fn read_checked(values: &WaveformValues) -> Option<WaveformValues> {
+    self::values(&ColumnReference::of(values)?).ok()
 }
 
 /// The event history `points` reads now that more folders may hold its segment: `None` when it

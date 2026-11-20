@@ -263,7 +263,14 @@ fn segments_of<'a>(
     segments
 }
 
-/// Why the first waveform or event history of `analyses` that cannot be read cannot be.
+/// Whether the samples of a source with `identity` are in a kept segment still waiting for its
+/// first check: not read yet, rather than unreadable.
+fn being_checked(identity: Option<([u8; 32], u64)>) -> bool {
+    identity.is_some_and(|(digest, _)| rspice_results::store_reader::checking(digest))
+}
+
+/// Why the first waveform or event history of `analyses` that cannot be read cannot be. One
+/// still being checked is not unreadable.
 fn unread_reason(analyses: &[super::ProjectAnalysisResult]) -> Option<String> {
     use rspice_results::analysis_payload::AnalysisResultPayload;
     for analysis in analyses {
@@ -271,6 +278,7 @@ fn unread_reason(analyses: &[super::ProjectAnalysisResult]) -> Option<String> {
             let complex = waveform.complex.iter().flat_map(|c| [&c.real, &c.imag]);
             for values in [&waveform.x, &waveform.y].into_iter().chain(complex) {
                 if let Some((source, _)) = values.stored_window()
+                    && !being_checked(source.identity())
                     && let Err(reason) = source.read(0, &mut [])
                 {
                     return Some(reason);
@@ -288,7 +296,9 @@ fn unread_reason(analyses: &[super::ProjectAnalysisResult]) -> Option<String> {
                 .map(|trace| trace.points.stored_source());
             let real = real_traces.iter().map(|trace| trace.points.stored_source());
             for source in digital.chain(real).flatten() {
-                if let Err(reason) = source.before(f64::NEG_INFINITY) {
+                if !being_checked(source.identity())
+                    && let Err(reason) = source.before(f64::NEG_INFINITY)
+                {
                     return Some(reason);
                 }
             }
