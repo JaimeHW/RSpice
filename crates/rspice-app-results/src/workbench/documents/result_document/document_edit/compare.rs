@@ -741,12 +741,7 @@ fn report(finished: &Finished) -> String {
             signal.name.clone(),
             format!("{} of {}", signal.failed_rows, signal.compared_rows),
             signal.maximum_error.clone(),
-            match signal.verdict {
-                Verdict::Pass => "pass",
-                Verdict::NearLimit => "near limit",
-                Verdict::Fail => "FAIL",
-            }
-            .to_owned(),
+            signal.verdict.label().to_owned(),
         ]
     }));
     write_table(&mut text, &table);

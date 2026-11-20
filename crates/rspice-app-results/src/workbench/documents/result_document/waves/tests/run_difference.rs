@@ -58,7 +58,7 @@ fn a_difference_from_the_baseline_states_its_run_and_carries_its_tolerance() {
         )
         .unwrap();
     let tokens = Tokens::default();
-    let models = build_models(
+    let mut models = build_models(
         &state.model.simulation,
         &mut DerivedSeries::default(),
         &tokens,
@@ -77,27 +77,55 @@ fn a_difference_from_the_baseline_states_its_run_and_carries_its_tolerance() {
         curves[0].label
     );
 
-    // The volt pane, which draws V(out) and, in the stack, its difference.
-    let panes = models[0].unit_panes();
-    let pane = panes
-        .iter()
-        .find(|pane| pane.unit == "V")
-        .expect("V(out) has a pane");
-    let marks = comparison_marks(
-        &mut state.results_parts(),
-        &models[0],
-        pane,
-        &curves,
-        &tokens,
+    // The difference is drawn apart, on a volt pane of its own directly
+    // below the pane of V(out), which keeps its own axis.
+    let session = &state.results.results.session;
+    route_expressions(
+        &mut models,
+        &state.model.simulation,
+        &session.analysis_exprs,
+        &session.expression_units,
+        |_, _| false,
     );
-    let places: Vec<(f64, f64)> = marks
-        .places
+    let panes = models[0].unit_panes();
+    let shape: Vec<(&str, usize, Vec<usize>)> = panes
         .iter()
-        .flat_map(|places| places.iter().copied())
+        .map(|pane| {
+            (
+                pane.axis_unit(),
+                pane.traces.len(),
+                pane.expressions.clone(),
+            )
+        })
         .collect();
-    assert_eq!(places, [(1.0e-3, 2.0e-3), (5.0e-3, 5.0e-3)]);
-    // 100 mV, and a tenth of the 1 V baseline.
-    let band = marks.tolerance.expect("the difference carries its band");
+    assert_eq!(shape, [("V", 1, vec![]), ("V", 0, vec![curves[0].slot])]);
+
+    // Each pane is asked with the expressions it draws, as the stack asks.
+    let mut marks = |pane, expressions: &[rspice_results_ui::waves::pane::ResolvedExpr]| {
+        comparison_marks(
+            &mut state.results_parts(),
+            &models[0],
+            pane,
+            expressions,
+            &tokens,
+        )
+    };
+    let (signals, difference) = (marks(&panes[0], &[]), marks(&panes[1], &curves));
+    let places = |marks: &rspice_results_ui::waves::pane::ComparisonMarks| -> Vec<(f64, f64)> {
+        marks
+            .places
+            .iter()
+            .flat_map(|places| places.iter().copied())
+            .collect()
+    };
+    // The places the runs part are shaded on both panes.
+    assert_eq!(places(&signals), [(1.0e-3, 2.0e-3), (5.0e-3, 5.0e-3)]);
+    assert_eq!(places(&difference), places(&signals));
+    // The band is the difference's: 100 mV, and a tenth of the 1 V baseline.
+    assert!(signals.tolerance.is_none());
+    let band = difference
+        .tolerance
+        .expect("the difference carries its band");
     assert_eq!(band.x, curves[0].x.as_slice());
     assert!(
         band.half_width

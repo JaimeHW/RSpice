@@ -261,7 +261,8 @@ pub struct StripModel {
 ///
 /// An expression joins the pane of its unit, or opens one. One whose unit
 /// cannot be stated gets an unlabeled pane of its own: it never borrows
-/// another unit's axis.
+/// another unit's axis. A difference from another run is drawn apart, on a
+/// pane of its own directly below the pane of its unit.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExpressionPane {
     /// The expression's place in the strip's expression list.
@@ -274,6 +275,11 @@ pub struct ExpressionPane {
     /// Whether the reader shows it. A hidden expression is drawn nowhere and
     /// waits in the legend of the pane of its unit.
     pub visible: bool,
+    /// The identity of the pane of its own it is drawn on, directly below the
+    /// pane of its unit, whose axis reads in `unit`: a difference from another
+    /// run, whose Y axis fits the difference rather than the signals it is
+    /// taken from. `None` for one that joins the pane of its unit.
+    pub apart: Option<String>,
 }
 
 impl ExpressionPane {
@@ -285,6 +291,7 @@ impl ExpressionPane {
             unit: format!("{text} \u{2014} no unit"),
             unknown: Some(reason),
             visible: true,
+            apart: None,
         }
     }
 }
@@ -474,6 +481,7 @@ impl StripModel {
                 None => {
                     panes.push(UnitPane {
                         unit,
+                        axis: unit,
                         traces: trace.visible.then_some(index).into_iter().collect(),
                         expressions: Vec::new(),
                         hidden_expressions: Vec::new(),
@@ -496,6 +504,7 @@ impl StripModel {
                 None => {
                     panes.push(UnitPane {
                         unit,
+                        axis: unit,
                         traces: Vec::new(),
                         expressions: Vec::new(),
                         hidden_expressions: Vec::new(),
@@ -524,6 +533,30 @@ impl StripModel {
             })
         };
         for expression in self.expression_panes.iter().filter(|e| e.visible) {
+            if let Some(identity) = &expression.apart {
+                // Below the pane of its unit and any difference already
+                // drawn apart under it.
+                let at = owner(&panes, expression).map_or(panes.len(), |owner| {
+                    let mut at = owner + 1;
+                    while panes.get(at).is_some_and(|pane| pane.axis != pane.unit) {
+                        at += 1;
+                    }
+                    at
+                });
+                panes.insert(
+                    at,
+                    UnitPane {
+                        unit: identity.as_str(),
+                        axis: expression.unit.as_str(),
+                        traces: Vec::new(),
+                        expressions: vec![expression.slot],
+                        hidden_expressions: Vec::new(),
+                        unlabeled: false,
+                    },
+                );
+                drawn.insert(at, true);
+                continue;
+            }
             match owner(&panes, expression) {
                 Some(owner) => {
                     panes[owner].expressions.push(expression.slot);
@@ -532,6 +565,7 @@ impl StripModel {
                 None => {
                     panes.push(UnitPane {
                         unit: expression.unit.as_str(),
+                        axis: expression.unit.as_str(),
                         traces: Vec::new(),
                         expressions: vec![expression.slot],
                         hidden_expressions: Vec::new(),
@@ -550,7 +584,7 @@ impl StripModel {
             .into_iter()
             .zip(drawn)
             .filter_map(|(pane, drawn)| drawn.then_some(pane))
-            .partition(|pane| !matches!(pane.unit, "°" | "rad"));
+            .partition(|pane| !matches!(pane.axis, "°" | "rad"));
         quantity.into_iter().chain(phase).collect()
     }
 
@@ -684,8 +718,11 @@ pub fn anchor_key(model: &StripModel, trace: &StripTrace) -> WaveformPresentatio
 pub struct UnitPane<'a> {
     /// The unit every trace on this pane's axis is measured in. Borrowed from
     /// the strip model, because a retained unit is data rather than one of a
-    /// closed set of names the viewer knows in advance.
+    /// closed set of names the viewer knows in advance. On a pane apart it
+    /// is only the pane's identity, and [`Self::axis`] is its unit.
     pub unit: &'a str,
+    /// The unit the axis reads in: `unit` itself, except on a pane apart.
+    pub axis: &'a str,
     /// Trace indices on this pane's axis.
     pub traces: Vec<usize>,
     /// The expressions drawn on this pane's axis, by their place in the
@@ -702,7 +739,7 @@ pub struct UnitPane<'a> {
 impl UnitPane<'_> {
     /// The unit this pane's axis reads in: none on an unlabeled pane.
     pub fn axis_unit(&self) -> &str {
-        if self.unlabeled { "" } else { self.unit }
+        if self.unlabeled { "" } else { self.axis }
     }
 }
 

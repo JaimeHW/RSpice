@@ -102,11 +102,14 @@ impl Verdict {
         }
     }
 
-    const fn label(self) -> &'static str {
+    /// The word the verdict column states, as Verify states a verdict: the
+    /// colour carries a failure or a near miss, not the casing.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
         match self {
-            Self::Pass => "pass",
-            Self::NearLimit => "near limit",
-            Self::Fail => "FAIL",
+            Self::Pass => "Pass",
+            Self::NearLimit => "Near",
+            Self::Fail => "Fail",
         }
     }
 }

@@ -245,3 +245,16 @@ fn complex_samples_are_subtracted_before_they_are_projected() {
         "{samples:?}"
     );
 }
+
+#[test]
+fn a_difference_from_another_run_is_told_from_other_expressions() {
+    for (text, difference) in [
+        ("V(out) - V(out)@baseline", true),
+        ("V(out)@\"Run 2\" - V(out)", true),
+        ("V(out)@baseline", false),
+        ("V(out) - V(in)", false),
+        ("V(out) + V(out)@baseline", false),
+    ] {
+        assert_eq!(is_run_difference(&parse(text)), difference, "{text}");
+    }
+}

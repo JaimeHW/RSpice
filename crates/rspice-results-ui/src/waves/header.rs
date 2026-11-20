@@ -448,10 +448,10 @@ pub fn show_header(
 fn pane_name<'a>(pane: &UnitPane<'a>) -> &'a str {
     if pane.unlabeled {
         crate::waves::pane::UNKNOWN_UNIT
-    } else if pane.unit.is_empty() {
+    } else if pane.axis.is_empty() {
         crate::waves::pane::NO_UNIT
     } else {
-        pane.unit
+        pane.axis
     }
 }
 

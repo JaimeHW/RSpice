@@ -553,7 +553,8 @@ pub(crate) fn measurement_unit(
 
 /// Send each strip's expressions to the pane of their unit: the unit the
 /// reader declared, else the one unit algebra states. One whose unit cannot
-/// be stated gets an unlabeled pane of its own. A hidden one is routed too,
+/// be stated gets an unlabeled pane of its own, and a difference from
+/// another run a pane of its own below the pane of its unit. A hidden one is routed too,
 /// so the pane of its unit can offer it again. An expression that failed to
 /// evaluate draws nothing, so it opens no pane, and a `digital()` conversion
 /// is a logic lane, not a value on any pane.
@@ -588,6 +589,11 @@ pub(super) fn route_expressions(
                 ) {
                     Ok(unit) => rspice_results_ui::waves::ExpressionPane {
                         slot,
+                        apart: calculator::parser::try_parse(&expr.text)
+                            .is_ok_and(|parsed| {
+                                rspice_results::calculator::datasets::is_run_difference(&parsed)
+                            })
+                            .then(|| format!("{unit} \u{2014} {}", expr.text)),
                         unit,
                         unknown: None,
                         visible: expr.visible,

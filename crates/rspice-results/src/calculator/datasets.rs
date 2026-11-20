@@ -82,6 +82,17 @@ pub fn named_runs(expr: &CalculatorExpr) -> Vec<(String, String)> {
     named
 }
 
+/// Whether `expr` is a difference from another run: a subtraction one side
+/// of which reads a signal of another run, as `V(out) - V(out)@baseline`.
+#[must_use]
+pub fn is_run_difference(expr: &CalculatorExpr) -> bool {
+    matches!(
+        expr,
+        CalculatorExpr::BinaryOp { op: super::ast::BinaryOp::Sub, left, right }
+            if !named_runs(left).is_empty() || !named_runs(right).is_empty()
+    )
+}
+
 impl<W: AsRef<RetainedWaveform>> RunDatasets<'_, W> {
     fn run(&self, dataset: &str) -> Option<&NamedRun<'_, W>> {
         self.runs.iter().find(|run| {
