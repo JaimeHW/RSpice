@@ -1094,11 +1094,13 @@ impl JsonNode {
     }
 }
 
+/// The sample of a JSON document's array at a row.
+type JsonSample<'s> = dyn FnMut(JsonArray, usize) -> Result<Option<f64>, CliError> + 's;
+
 /// Where a document's sample arrays come from, and the error that stopped one.
 struct JsonSource<'s> {
     rows: usize,
-    sample:
-        std::cell::RefCell<&'s mut dyn FnMut(JsonArray, usize) -> Result<Option<f64>, CliError>>,
+    sample: std::cell::RefCell<&'s mut JsonSample<'s>>,
     failure: std::cell::RefCell<Option<CliError>>,
 }
 
