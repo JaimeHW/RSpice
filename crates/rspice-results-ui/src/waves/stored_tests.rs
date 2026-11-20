@@ -475,3 +475,33 @@ fn window_statistics_over_a_stored_trace_read_only_the_window() {
         );
     }
 }
+
+/// Choosing Crossing in the marker dialog sets the level the curve has where
+/// the marker is. On a stored trace that reads the rows around the marker, as
+/// the cursor readout does, not the column.
+#[test]
+fn the_marker_dialog_reads_a_stored_trace_s_level_from_the_rows_around_the_marker() {
+    const ROWS: usize = 100_000;
+    let (run, rows_read) = tiled_run(ROWS);
+    let models = models(&run);
+    let model = &models[0];
+    let anchor = anchor_key(model, &model.traces[0]);
+    let before = rows_read();
+    let row = 40_000;
+    let level = super::marker_dialog::level_at(
+        Some(model),
+        &anchor,
+        row as f64 * 1.0e-9,
+        ReadoutPolicy::default(),
+    )
+    .expect("the marker sits on the trace");
+    let read = rows_read() - before;
+    assert!(
+        read <= 4,
+        "the level read {read} rows of a {ROWS}-row trace"
+    );
+    assert!(
+        (level - (row as f64 * 1.0e-4).sin()).abs() < 1.0e-9,
+        "{level}"
+    );
+}

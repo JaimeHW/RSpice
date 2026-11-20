@@ -12,7 +12,6 @@ use crate::session::{MarkerEditDraft, MarkerSelector, ResultViewerState};
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, CrossingLevel, MarkerKind, WaveformPresentationKey,
 };
-use rspice_ui_kit::plot::sample::sample_at_with_shape;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -185,7 +184,7 @@ pub fn show(
                         // A crossing marker finds the level the curve has
                         // where it was put.
                         MarkerKind::Crossing(_) => MarkerKind::Crossing(CrossingLevel(
-                            level_at(strip, &marker, presentation).unwrap_or(0.0),
+                            level_at(strip, &marker.anchor, marker.x, presentation).unwrap_or(0.0),
                         )),
                         kind => kind,
                     };
@@ -250,23 +249,22 @@ pub fn show(
     }
 }
 
-/// The value the marker's trace takes where the marker is, read the way the
-/// cursor readout reads it.
-fn level_at(
+/// The value the trace `anchor` takes at the marker's `x`, read the way the
+/// cursor readout reads it: a stored trace reads only the rows around `x`.
+pub(super) fn level_at(
     strip: Option<&StripModel>,
-    marker: &MarkerFacts,
+    anchor: &WaveformPresentationKey,
+    x: f64,
     presentation: ReadoutPolicy,
 ) -> Option<f64> {
     let model = strip?;
     let trace = model
         .traces
         .iter()
-        .find(|trace| !trace.overlay && anchor_key(model, trace) == marker.anchor)?;
-    let value = sample_at_with_shape(
-        &trace.x,
-        &trace.y,
-        &trace.shape,
-        marker.x,
+        .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)?;
+    let value = super::trace_value_at(
+        trace,
+        x,
         cursor_interpolation(presentation.cursor_interpolation()),
     );
     value.is_finite().then_some(value)
