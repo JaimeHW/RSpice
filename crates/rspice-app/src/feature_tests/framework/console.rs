@@ -1391,10 +1391,7 @@ fn measurement_units_keep_console_project_and_authored_contracts_distinct() {
     );
     // The project's room is 50 in the sheet's millivolts; the goal's is 0.01
     // in the measurement's own volts, which reads 10 mV, never 0.01 mV.
-    assert_eq!(
-        row.margin,
-        "PROJECT +50 mV; GOAL +10 mV; FAILVALUE +250 mV"
-    );
+    assert_eq!(row.margin, "PROJECT +50 mV; GOAL +10 mV; FAILVALUE +250 mV");
     spec.unit = "mA".into();
     let row = measurement_table_row(&measured, "TRAN", Some(&spec));
     assert_eq!(row.status, "ERROR");
