@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::{MeasureResult, TranMeasureStream};
 use rspice_core::engine::TransientResult;
-use rspice_results::stored_transient::{SlotTarget, fill_rows};
+use rspice_results::stored_transient::{SlotTarget, fill_event_traces, fill_rows};
 use rspice_results_store::{SegmentIo, SegmentReader, StoreError};
 
 use super::{OutputWindow, StoredTransient, store_failure};
@@ -163,6 +163,9 @@ fn measure_window<I: SegmentIo>(
     abort: &dyn AbortSignal,
 ) -> Result<Result<Option<Vec<MeasureResult>>, rspice_core::SimulationError>, StoreError> {
     let aborted = || Ok(Err(rspice_core::SimulationError::Aborted));
+    // A statement on a digital or real event node reads its history as the in-memory run holds
+    // it: the histories are the run's sparse record, read back whole, never its rows.
+    fill_event_traces(reader, shell)?;
     let lead = LeadRow::read(reader, targets, shell, window)?;
     let spans: Vec<(u64, usize)> = reader.chunk_spans().collect();
     let chunks: Vec<Option<ChunkWindow>> = spans
