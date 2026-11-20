@@ -560,6 +560,16 @@ fn a_conversion_refuses_a_table_the_importer_would_refuse() {
         ),
     )
     .unwrap();
+    // The importer compares names ignoring case.
+    let cased = dir.join("cased.raw");
+    std::fs::write(
+        &cased,
+        ascii_rawfile(
+            &["V(out)", "v(OUT)"],
+            &[(0.0, vec![1.0, 2.0]), (1.0e-6, vec![3.0, 4.0])],
+        ),
+    )
+    .unwrap();
     let falling = dir.join("falling.raw");
     std::fs::write(
         &falling,
@@ -571,6 +581,7 @@ fn a_conversion_refuses_a_table_the_importer_would_refuse() {
     .unwrap();
     for (source, reason) in [
         (&duplicated, "two columns are named 'V(out)'"),
+        (&cased, "two columns are named 'v(OUT)'"),
         (&falling, "falls from 0.000002 to 0.000001 at point 3"),
     ] {
         for to in ["csv", "tsv", "json"] {

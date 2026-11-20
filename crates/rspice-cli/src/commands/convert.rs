@@ -138,9 +138,12 @@ pub fn execute(args: ConvertArgs, config: &Config, quiet: bool) -> Result<(), Cl
 }
 
 /// A table the application's importer would refuse, or read back as another result, is not
-/// written: two columns of one name cannot be told apart, and a scale that falls is not one
-/// sweep. A rawfile holds the runs of a stepped plot as they are, its scale restarting for
-/// each, so only a table is held to one sweep. The reason names the column or the point.
+/// written: two columns of one name cannot be told apart, and a time that falls is not one run.
+/// Names are compared as the importer compares them, ignoring case, and an unnamed scale is told
+/// apart by its place. A frequency list or a DC sweep may run in any order its analysis asked
+/// for, so only a time is held to rising. A rawfile holds the runs of a stepped plot as they
+/// are, its time restarting for each, so only a table is held to one run. The reason names the
+/// column or the point.
 fn refuse_what_readers_refuse(
     path: &std::path::Path,
     table: &crate::commands::export_table::ExportTable,
@@ -148,8 +151,9 @@ fn refuse_what_readers_refuse(
 ) -> Result<(), CliError> {
     let mut names = std::collections::HashSet::new();
     let columns = table.columns.iter().map(|column| column.name.as_str());
-    for name in std::iter::once(table.scale_name.as_str()).chain(columns) {
-        if !names.insert(name) {
+    let scale = (!table.scale_name.is_empty()).then_some(table.scale_name.as_str());
+    for name in scale.into_iter().chain(columns) {
+        if !names.insert(name.to_lowercase()) {
             return Err(CliError::ConversionError {
                 message: format!(
                     "{}: two columns are named '{name}', and a reader cannot tell them apart",
@@ -158,13 +162,13 @@ fn refuse_what_readers_refuse(
             });
         }
     }
-    let falls = (!rawfile)
+    let falls = (!rawfile && table.scale_type == "time")
         .then(|| table.scale.windows(2).position(|pair| pair[1] < pair[0]))
         .flatten();
     if let Some(point) = falls {
         return Err(CliError::ConversionError {
             message: format!(
-                "{}: the '{}' scale falls from {} to {} at point {}, so it is not one sweep",
+                "{}: the '{}' scale falls from {} to {} at point {}, so it is not one run",
                 path.display(),
                 table.scale_name,
                 table.scale[point],
