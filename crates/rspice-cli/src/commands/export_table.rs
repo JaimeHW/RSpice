@@ -939,58 +939,209 @@ impl ExportTable {
     }
 
     fn write_json<W: Write + ?Sized>(&self, writer: &mut W, path: &Path) -> Result<(), CliError> {
-        let signals: Vec<serde_json::Value> = self
-            .columns
-            .iter()
-            .map(|column| {
-                let mut value = match &column.data {
-                    ColumnData::NullableReal(values) => serde_json::json!({
-                        "name": column.name, "type": column.var_type, "values": values,
-                    }),
-                    ColumnData::NullableComplex(values) => serde_json::json!({
-                        "name": column.name, "type": column.var_type,
-                        "real": values.iter().map(|value| value.map(|value| value.re)).collect::<Vec<_>>(),
-                        "imag": values.iter().map(|value| value.map(|value| value.im)).collect::<Vec<_>>(),
-                    }),
-                    ColumnData::Real(values) => serde_json::json!({
-                        "name": column.name,
-                        "type": column.var_type,
-                        "values": values,
-                    }),
-                    ColumnData::Complex { real, imag } => serde_json::json!({
-                        "name": column.name,
-                        "type": column.var_type,
-                        "real": real,
-                        "imag": imag,
-                    }),
-                };
-                if let Some(unit) = &column.unit {
-                    value["unit"] = serde_json::Value::String(unit.clone());
-                }
-                value
-            })
-            .collect();
+        let mut writer = writer;
+        self.write_json_from(&mut writer, path, self.scale.len(), &mut |array, row| {
+            Ok(self.held_sample(array, row))
+        })
+    }
 
-        let mut json = serde_json::json!({
-            "analysis": self.analysis,
-            "plot_name": self.plot_name,
-            "scale": {
-                "name": self.scale_name,
-                "type": self.scale_type,
-                "values": self.scale,
+    /// The table's JSON document, with each sample array's `rows` values read from
+    /// `sample(array, row)` an array at a time, in document order, instead of from the table's own
+    /// samples: the held table writes its samples through it, and a run whose rows stream from a
+    /// results store writes them from the store, so the two documents are one writer's. An error
+    /// from `sample` stops the document and is returned.
+    pub(crate) fn write_json_from(
+        &self,
+        writer: &mut dyn Write,
+        path: &Path,
+        rows: usize,
+        sample: &mut dyn FnMut(JsonArray, usize) -> Result<Option<f64>, CliError>,
+    ) -> Result<(), CliError> {
+        let document = self.json_document();
+        let source = JsonSource {
+            rows,
+            sample: std::cell::RefCell::new(sample),
+            failure: std::cell::RefCell::new(None),
+        };
+        let written = serde_json::to_writer_pretty(
+            &mut *writer,
+            &WrittenJson {
+                node: &document,
+                source: &source,
             },
-            "signals": signals,
-        });
-        if let Some(unit) = &self.scale_unit {
-            json["scale"]["unit"] = serde_json::Value::String(unit.clone());
+        );
+        if let Some(error) = source.failure.take() {
+            return Err(error);
         }
-
-        serde_json::to_writer_pretty(&mut *writer, &json)
-            .map_err(|e| CliError::output_json_error(path, e))?;
+        written.map_err(|e| CliError::output_json_error(path, e))?;
         writer
             .write_all(b"\n")
             .map_err(|e| CliError::output_error(path, e))?;
         Ok(())
+    }
+
+    /// The JSON document's members: the analysis, the plot name, the scale and every signal, each
+    /// sample array left to its source.
+    fn json_document(&self) -> JsonNode {
+        let text = |value: &str| JsonNode::Held(serde_json::Value::String(value.to_owned()));
+        let signals = self
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(index, column)| {
+                let mut members = vec![
+                    ("name", text(&column.name)),
+                    ("type", text(&column.var_type)),
+                ];
+                match column.data {
+                    ColumnData::Real(_) | ColumnData::NullableReal(_) => {
+                        members.push(("values", JsonNode::Samples(JsonArray::Values(index))));
+                    }
+                    ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => {
+                        members.push(("real", JsonNode::Samples(JsonArray::Real(index))));
+                        members.push(("imag", JsonNode::Samples(JsonArray::Imag(index))));
+                    }
+                }
+                if let Some(unit) = &column.unit {
+                    members.push(("unit", text(unit)));
+                }
+                JsonNode::object(members)
+            })
+            .collect();
+        let mut scale = vec![
+            ("name", text(&self.scale_name)),
+            ("type", text(&self.scale_type)),
+            ("values", JsonNode::Samples(JsonArray::Scale)),
+        ];
+        if let Some(unit) = &self.scale_unit {
+            scale.push(("unit", text(unit)));
+        }
+        JsonNode::object(vec![
+            ("analysis", text(&self.analysis)),
+            ("plot_name", text(&self.plot_name)),
+            ("scale", JsonNode::object(scale)),
+            ("signals", JsonNode::List(signals)),
+        ])
+    }
+
+    /// The held sample of `array` at `row`, `None` where the column holds none.
+    fn held_sample(&self, array: JsonArray, row: usize) -> Option<f64> {
+        let data = |column: usize| &self.columns[column].data;
+        match array {
+            JsonArray::Scale => self.scale.get(row).copied(),
+            JsonArray::Values(column) => match data(column) {
+                ColumnData::Real(values) => values.get(row).copied(),
+                ColumnData::NullableReal(values) => values.get(row).copied().flatten(),
+                ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => None,
+            },
+            JsonArray::Real(column) | JsonArray::Imag(column) => {
+                let imaginary = matches!(array, JsonArray::Imag(_));
+                match data(column) {
+                    ColumnData::Complex { real, imag } => {
+                        if imaginary { imag } else { real }.get(row).copied()
+                    }
+                    ColumnData::NullableComplex(values) => values
+                        .get(row)
+                        .copied()
+                        .flatten()
+                        .map(|value| if imaginary { value.im } else { value.re }),
+                    ColumnData::Real(_) | ColumnData::NullableReal(_) => None,
+                }
+            }
+        }
+    }
+}
+
+/// One sample array of a table's JSON document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JsonArray {
+    /// The scale's values.
+    Scale,
+    /// The values of the real column at this index among the table's.
+    Values(usize),
+    /// The real parts of the complex column at this index.
+    Real(usize),
+    /// The imaginary parts of the complex column at this index.
+    Imag(usize),
+}
+
+/// A JSON document whose sample arrays are written from a source as it is written.
+enum JsonNode {
+    Held(serde_json::Value),
+    /// Members in the order serde_json's own map keeps them, so the document is the one a
+    /// `serde_json::Value` of it would write.
+    Object(Vec<(String, JsonNode)>),
+    List(Vec<JsonNode>),
+    Samples(JsonArray),
+}
+
+impl JsonNode {
+    fn object(mut members: Vec<(&'static str, JsonNode)>) -> Self {
+        let order: serde_json::Map<String, serde_json::Value> = members
+            .iter()
+            .map(|(key, _)| ((*key).to_owned(), serde_json::Value::Null))
+            .collect();
+        Self::Object(
+            order
+                .keys()
+                .filter_map(|key| {
+                    let at = members.iter().position(|(member, _)| member == key)?;
+                    let (key, node) = members.swap_remove(at);
+                    Some((key.to_owned(), node))
+                })
+                .collect(),
+        )
+    }
+}
+
+/// Where a document's sample arrays come from, and the error that stopped one.
+struct JsonSource<'s> {
+    rows: usize,
+    sample:
+        std::cell::RefCell<&'s mut dyn FnMut(JsonArray, usize) -> Result<Option<f64>, CliError>>,
+    failure: std::cell::RefCell<Option<CliError>>,
+}
+
+struct WrittenJson<'n, 's> {
+    node: &'n JsonNode,
+    source: &'n JsonSource<'s>,
+}
+
+impl serde::Serialize for WrittenJson<'_, '_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{Error, SerializeMap, SerializeSeq};
+        let source = self.source;
+        match self.node {
+            JsonNode::Held(value) => value.serialize(serializer),
+            JsonNode::Object(members) => {
+                let mut map = serializer.serialize_map(Some(members.len()))?;
+                for (key, node) in members {
+                    map.serialize_entry(key, &WrittenJson { node, source })?;
+                }
+                map.end()
+            }
+            JsonNode::List(items) => {
+                let mut seq = serializer.serialize_seq(Some(items.len()))?;
+                for node in items {
+                    seq.serialize_element(&WrittenJson { node, source })?;
+                }
+                seq.end()
+            }
+            JsonNode::Samples(array) => {
+                let mut seq = serializer.serialize_seq(Some(source.rows))?;
+                let mut sample = source.sample.borrow_mut();
+                for row in 0..source.rows {
+                    match sample(*array, row) {
+                        Ok(value) => seq.serialize_element(&value)?,
+                        Err(error) => {
+                            *source.failure.borrow_mut() = Some(error);
+                            return Err(S::Error::custom("a sample could not be read"));
+                        }
+                    }
+                }
+                seq.end()
+            }
+        }
     }
 }
 

@@ -234,3 +234,146 @@ fn a_store_that_cannot_show_its_run_is_whole_converts_with_a_note() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A store converts to JSON a chunk at a time, writing the document the whole table writes, and
+/// within resource limits that the whole table, read at once, exceeds.
+#[test]
+fn a_store_streams_the_json_document_the_whole_table_writes() {
+    use crate::cli::{NumericBound, OutputFormat};
+    let dir = scratch("json");
+    run(&dir, LONG_RC, "csv", &dir.join("run.csv"));
+    let store = dir.join("run.rsr");
+    let mut tight = Config::default().resources.limits();
+    tight.max_external_data_values = 30_000;
+    assert!(
+        crate::commands::waveform_io::load_result_selected(
+            &store,
+            crate::cli::InputFormat::Rsr,
+            tight,
+            None
+        )
+        .is_err(),
+        "the whole table, read at once, exceeds the limit"
+    );
+    let selected = ["--variables", "out", "--start", "300n", "--stop", "1300n"];
+    for extra in [&[][..], &selected[..]] {
+        let output = dir.join("streamed.json");
+        let mut args = vec![
+            "convert",
+            store.to_str().unwrap(),
+            output.to_str().unwrap(),
+            "--to",
+            "json",
+        ];
+        args.extend_from_slice(extra);
+        let Commands::Convert(args) = command(&args) else {
+            panic!("expected the convert command");
+        };
+        assert!(
+            super::convert_streamed(&args, tight).unwrap(),
+            "{extra:?}: the store streams its JSON"
+        );
+        let mut whole = super::load_table(&store, Config::default().resources.limits()).unwrap();
+        whole.select_variables(&args.variables).unwrap();
+        whole.clip_scale_range(
+            args.start.as_ref().map(NumericBound::value),
+            args.stop.as_ref().map(NumericBound::value),
+        );
+        let mut written = Vec::new();
+        whole
+            .write_to(&mut written, &output, OutputFormat::Json)
+            .unwrap();
+        assert!(
+            std::fs::read(&output).unwrap() == written,
+            "{extra:?}: the streamed document is the whole table's"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A segment's bytes in memory, every read of them counted.
+struct CountedIo {
+    bytes: Vec<u8>,
+    reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl rspice_results_store::SegmentIo for CountedIo {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        self.reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let start = usize::try_from(offset).unwrap_or(usize::MAX);
+        let held = start
+            .checked_add(buf.len())
+            .and_then(|end| self.bytes.get(start..end))
+            .ok_or(std::io::ErrorKind::UnexpectedEof)?;
+        buf.copy_from_slice(held);
+        Ok(())
+    }
+
+    fn write_at(&mut self, _offset: u64, _data: &[u8]) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
+
+    fn truncate(&mut self, _len: u64) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn size(&self) -> std::io::Result<u64> {
+        Ok(self.bytes.len() as u64)
+    }
+}
+
+/// A range reads only the chunks it reaches, and of them only the columns it keeps: a range
+/// within one chunk of a long run reads that chunk's times and its one kept column and nothing
+/// else, and ranges within a chunk and across chunks convert as the run's own table clips them.
+#[test]
+fn a_range_reads_only_its_own_chunks_and_kept_columns() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let dir = scratch("window");
+    run(&dir, LONG_RC, "csv", &dir.join("run.csv"));
+    let store = dir.join("run.rsr");
+    let bytes = std::fs::read(store.join(rspice_results_store::StoreDir::segment_name(0))).unwrap();
+    let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut reader = rspice_results_store::SegmentReader::open(CountedIo {
+        bytes,
+        reads: reads.clone(),
+    })
+    .unwrap();
+    assert!(
+        reader.chunk_spans().len() >= 3,
+        "the run spans several chunks"
+    );
+    let (lo, hi) = reader.chunk_x_ranges().nth(1).unwrap();
+    let (start, rows) = reader.chunk_spans().nth(1).unwrap();
+    let slot = reader.slots() - 1;
+    reads.store(0, Relaxed);
+    assert_eq!(
+        super::kept_rows(&store, &mut reader, &[slot], lo, hi).unwrap(),
+        Some((start, rows as u64))
+    );
+    let window = reads.swap(0, Relaxed);
+    let (mut x, mut values) = (Vec::new(), Vec::new());
+    reader.read_chunk_x(1, &mut x).unwrap();
+    reader.read_chunk_slot(1, slot, &mut values).unwrap();
+    assert_eq!(
+        window,
+        reads.load(Relaxed),
+        "the range reads its one chunk's times and kept column"
+    );
+    for (from, to) in [("700n", "800n"), ("300n", "1300n")] {
+        let selected = ["--variables", "out", "--start", from, "--stop", to];
+        let (from_store, from_table) = (dir.join("a.csv"), dir.join("b.csv"));
+        convert(&store, &from_store, "csv", &selected);
+        convert(&dir.join("run.csv"), &from_table, "csv", &selected);
+        assert_eq!(
+            std::fs::read(&from_store).unwrap(),
+            std::fs::read(&from_table).unwrap(),
+            "{from}..{to}: the range read from the store"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

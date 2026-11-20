@@ -1044,6 +1044,16 @@ impl<I: SegmentIo> SegmentReader<I> {
             .map(|chunk| (chunk.first_row, chunk.rows as usize))
     }
 
+    /// The smallest and largest x of each chunk of the readable rows, in row order, ignoring NaN
+    /// (both NaN for a chunk whose x are all NaN). They come from the index, so no block is read:
+    /// a reader of an x window decodes only the chunks the window reaches.
+    pub fn chunk_x_ranges(&self) -> impl ExactSizeIterator<Item = (f64, f64)> + '_ {
+        self.catalogue
+            .chunks
+            .iter()
+            .map(|chunk| (chunk.x_min, chunk.x_max))
+    }
+
     /// x of every row of chunk `chunk`, into `out`, resized to the chunk's rows.
     pub fn read_chunk_x(&mut self, chunk: usize, out: &mut Vec<f64>) -> Result<(), StoreError> {
         self.read_chunk_block(chunk, 0, out)

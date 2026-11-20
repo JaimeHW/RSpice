@@ -2,9 +2,10 @@
 //! output request of its own (every saved column, and every event trace sampled on the rows), and
 //! its event histories.
 //!
-//! A conversion to a rawfile or a delimited table reads the store a chunk at a time, as the run
-//! that wrote it publishes its own outputs; one the table would refuse, or that keeps a column
-//! that is not one of the store's, reads the whole table and converts it as any result file.
+//! A conversion to a rawfile, a delimited table, JSON or HDF5 reads the store a chunk at a time,
+//! as the run that wrote it publishes its own outputs, decoding only the chunks a range reaches
+//! and the columns it keeps; one the table would refuse, or that keeps a column that is not one
+//! of the store's, reads the whole table and converts it as any result file.
 //!
 //! Every conversion checks the store first ([`store_notes`]): a segment that is not the run its
 //! manifest names is refused, and a store that cannot show its run is whole converts with a note
@@ -18,11 +19,11 @@ use rspice_core::analysis::transient::TransientResult;
 use rspice_core::execution::HeldEvents;
 use rspice_results::stored_transient::{StoreEvents, StoredTransientRun, fill_rows};
 use rspice_results_store::{
-    FileIo, RunStatus, SegmentReader, SegmentState, StopReason, StoreDir, StoreError,
+    FileIo, RunStatus, SegmentIo, SegmentReader, SegmentState, StopReason, StoreDir, StoreError,
 };
 
 use crate::cli::{CliError, ConvertArgs, InputFormat, NumericBound, OutputFormat};
-use crate::commands::export_table::{ExportTable, scalar_table_taking_samples};
+use crate::commands::export_table::{ExportTable, JsonArray, scalar_table_taking_samples};
 use crate::commands::run::{Column, ColumnStop, RowCursor, plan_columns};
 use crate::commands::run_signals::ScalarSignal;
 use crate::commands::waveform_io::{MIN_RESULT_SAMPLES, conversion_error};
@@ -203,22 +204,22 @@ pub(crate) fn load_table(
 }
 
 /// Convert a store as [`load_table`]'s table converts, reading it a chunk at a time, to a
-/// rawfile, a delimited table or HDF5. `Ok(false)` when it cannot, and the whole table converts
-/// instead: another target, a column that is neither one of the store's nor sampled from an
-/// event trace, a selection the table refuses, a time or a value the table refuses as not
-/// finite, fewer rows than a table holds, or a range that keeps more than one run of rows.
+/// rawfile, a delimited table, JSON or HDF5. `Ok(false)` when it cannot, and the whole table
+/// converts instead: another target, a column that is neither one of the store's nor sampled from
+/// an event trace, a selection the table refuses, a time in the range or a kept value there the
+/// table refuses as not finite, fewer rows than a table holds, or a range that keeps more than
+/// one run of rows.
 pub(crate) fn convert_streamed(
     args: &ConvertArgs,
     limits: rspice_core::ResourceLimits,
 ) -> Result<bool, CliError> {
-    // A JSON document is built whole, so it converts from the whole table until the store has a
-    // reader that serializes one lazily.
     if !matches!(
         args.to,
         OutputFormat::Raw
             | OutputFormat::RawAscii
             | OutputFormat::Csv
             | OutputFormat::Tsv
+            | OutputFormat::Json
             | OutputFormat::Hdf5
     ) {
         return Ok(false);
@@ -261,7 +262,14 @@ pub(crate) fn convert_streamed(
     let Ok(keep) = table.selected_columns(&args.variables) else {
         return Ok(false);
     };
-    // The whole table refuses a value that is not finite in any column, kept or not.
+    let columns: Vec<Column> = match &keep {
+        Some(keep) => columns
+            .iter()
+            .zip(keep)
+            .filter_map(|(&column, &kept)| kept.then_some(column))
+            .collect(),
+        None => columns,
+    };
     let lo = args
         .start
         .as_ref()
@@ -270,6 +278,8 @@ pub(crate) fn convert_streamed(
         .stop
         .as_ref()
         .map_or(f64::INFINITY, NumericBound::value);
+    // The table refuses a value it would write that is not finite; only the range's chunks and
+    // the kept columns are read to find one.
     let slots = columns
         .iter()
         .filter_map(|column| match column {
@@ -279,14 +289,6 @@ pub(crate) fn convert_streamed(
         .collect::<Vec<_>>();
     let Some((first, points)) = kept_rows(path, &mut reader, &slots, lo, hi)? else {
         return Ok(false);
-    };
-    let columns: Vec<Column> = match &keep {
-        Some(keep) => columns
-            .iter()
-            .zip(keep)
-            .filter_map(|(&column, &kept)| kept.then_some(column))
-            .collect(),
-        None => columns,
     };
     if let Some(keep) = keep {
         let mut keep = keep.into_iter();
@@ -304,6 +306,8 @@ pub(crate) fn convert_streamed(
         let mut cursor = RowCursor::over(&dir, &mut reader, &columns, Some(&events), None, first);
         if args.to == OutputFormat::Hdf5 {
             write_hdf5(writer, output, &table, points, &mut cursor)?;
+        } else if args.to == OutputFormat::Json {
+            write_json(writer, output, &table, points, &mut cursor)?;
         } else {
             table.write_streamed_to(writer, output, args.to, points, |row, variable| {
                 cursor.value(row, variable)
@@ -339,35 +343,67 @@ fn write_hdf5(
     })
 }
 
-/// The rows `[lo, hi]` keeps, as `(first row, rows)`, having read every time and every value of
-/// `slots` once and found them finite; `None` when one is not, or when the rows kept are not one
-/// run of rows.
-fn kept_rows(
+/// Write `table`'s JSON document, the one [`ExportTable::write`] writes, with each of its
+/// `points` rows' values read from `cursor` an array at a time.
+fn write_json(
+    writer: &mut dyn std::io::Write,
+    output: &Path,
+    table: &ExportTable,
+    points: usize,
+    cursor: &mut RowCursor<'_>,
+) -> Result<(), CliError> {
+    table.write_json_from(writer, output, points, &mut |array, row| {
+        let variable = match array {
+            JsonArray::Scale => 0,
+            JsonArray::Values(column) => column + 1,
+            JsonArray::Real(_) | JsonArray::Imag(_) => {
+                return Err(CliError::InternalError {
+                    message: "a streamed table has a column that is not dense real".to_owned(),
+                });
+            }
+        };
+        let value = cursor.value(row, variable);
+        if value.is_finite() {
+            Ok(Some(value))
+        } else {
+            Err(cursor
+                .read_failure(output)
+                .unwrap_or_else(|| crate::commands::export_table::invalid_samples(output)))
+        }
+    })
+}
+
+/// The rows `[lo, hi]` keeps, as `(first row, rows)`, having read the time of every row of each
+/// chunk the range reaches, and the values of `slots` in the rows it keeps, and found them
+/// finite; `None` when one is not, or when the rows kept are not one run of rows. A chunk whose
+/// times all lie outside the range is not read.
+fn kept_rows<I: SegmentIo>(
     path: &Path,
-    reader: &mut SegmentReader<FileIo>,
+    reader: &mut SegmentReader<I>,
     slots: &[usize],
     lo: f64,
     hi: f64,
 ) -> Result<Option<(u64, u64)>, CliError> {
-    let spans = reader.chunk_spans().collect::<Vec<_>>();
+    let chunks = reader
+        .chunk_spans()
+        .zip(reader.chunk_x_ranges())
+        .collect::<Vec<_>>();
     let (mut x, mut values) = (Vec::new(), Vec::new());
     let mut kept: Option<(u64, u64)> = None;
     let mut ended = false;
-    for (chunk, &(start, _)) in spans.iter().enumerate() {
+    for (chunk, &((start, _), (x_min, x_max))) in chunks.iter().enumerate() {
+        // Both NaN (every time NaN) reaches the range, so the chunk is read and refused.
+        if x_max < lo || x_min > hi {
+            ended |= kept.is_some();
+            continue;
+        }
         reader
             .read_chunk_x(chunk, &mut x)
             .map_err(|error| read_error(path, error))?;
         if x.iter().any(|time| !time.is_finite()) {
             return Ok(None);
         }
-        for &slot in slots {
-            reader
-                .read_chunk_slot(chunk, slot, &mut values)
-                .map_err(|error| read_error(path, error))?;
-            if values.iter().any(|value| !value.is_finite()) {
-                return Ok(None);
-            }
-        }
+        let mut window: Option<std::ops::Range<usize>> = None;
         for (offset, &time) in x.iter().enumerate() {
             let row = start + offset as u64;
             if time >= lo && time <= hi {
@@ -376,8 +412,23 @@ fn kept_rows(
                     Some((_, count)) => *count += 1,
                     None => kept = Some((row, 1)),
                 }
+                window.get_or_insert(offset..offset).end = offset + 1;
             } else if kept.is_some() {
                 ended = true;
+            }
+        }
+        let Some(window) = window else {
+            continue;
+        };
+        for &slot in slots {
+            reader
+                .read_chunk_slot(chunk, slot, &mut values)
+                .map_err(|error| read_error(path, error))?;
+            if values[window.clone()]
+                .iter()
+                .any(|value| !value.is_finite())
+            {
+                return Ok(None);
             }
         }
     }
