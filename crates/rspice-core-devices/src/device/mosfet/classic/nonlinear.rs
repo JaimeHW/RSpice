@@ -607,6 +607,48 @@ mod tests {
     }
 
     #[test]
+    fn the_xyce_dialect_limits_a_classic_body_junction_with_the_original_spice_pnjlim() {
+        // Drain, gate and source grounded: only the bulk moves, so only the
+        // source-body junction limiter acts on the step. The gate limiters
+        // agree between the dialects: Xyce's fetlim and DEVfetlim differ only
+        // in vtstlo (|vold - vto| + 3 V against + 1 V), and a step longer
+        // than vtstlo already lies outside the window that tests it.
+        let vt = VT_REFERENCE;
+        let limited_vbs = |ngspice: bool, vold: Value, vnew: Value| {
+            let mut mos = Mosfet::new_nmos("m".into(), 1, 2, 3, 4).with_level(3);
+            mos.set_ngspice_dialect(ngspice);
+            mos.update(&[0.0, 0.0, 0.0, vold]);
+            mos.update(&[0.0, 0.0, 0.0, vnew]);
+            mos.eval_vbs
+        };
+        let assert_close = |actual: Value, expected: Value, what: &str| {
+            assert!(
+                (actual - expected).abs() <= 1e-14,
+                "{what}: {actual} V, expected {expected} V"
+            );
+        };
+
+        // Forward from 0.5 V to 1.5 V, past vcrit: Xyce's pnjlim
+        // (N_DEV_DeviceSupport.C:188) steps to vold + vt ln(1 + dv/vt),
+        // ngspice's DEVpnjlim to vold + vt (2 + ln(dv/vt - 2)).
+        assert_close(
+            limited_vbs(false, 0.5, 1.5),
+            0.5 + vt * (1.0 + 1.0 / vt).ln(),
+            "Xyce forward step",
+        );
+        assert_close(
+            limited_vbs(true, 0.5, 1.5),
+            0.5 + vt * (2.0 + (1.0 / vt - 2.0).ln()),
+            "ngspice forward step",
+        );
+
+        // Reverse from 0 V to -5 V: Xyce's pnjlim leaves a reverse step
+        // alone; ngspice's clamps it at 2 vold - 1.
+        assert_eq!(limited_vbs(false, 0.0, -5.0), -5.0, "Xyce reverse step");
+        assert_eq!(limited_vbs(true, 0.0, -5.0), -1.0, "ngspice reverse step");
+    }
+
+    #[test]
     fn inverse_channel_cache_preserves_the_intrinsic_output_slope() {
         for level in [1, 2, 3, 6] {
             for (mut mos, polarity) in [
