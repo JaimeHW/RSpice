@@ -951,7 +951,7 @@ fn retained_result_data_digests_round_trip_and_reject_sample_tampering() {
     run.mark_running().expect("fixture run starts");
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .expect("fixture run completes");
-    run.add_analysis(
+    run.keep_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![1.0, 10.0], vec![0.25, 0.5], "#00aaff")
                 .with_complex_components("V(out)", vec![0.25, 0.5], vec![-0.75, -0.5]),
@@ -997,14 +997,16 @@ fn retained_result_data_digests_round_trip_and_reject_sample_tampering() {
 
     let mut tampered: serde_json::Value =
         serde_json::from_str(&json).expect("result document JSON");
-    tampered["runs"][0]["analyses"][0]["waveforms"][0]["complex"]["imag"][1] =
-        serde_json::json!(-0.499_999_999_999_999_94_f64);
+    // The imaginary part named as the real part's column of the same segment.
+    let imag = &mut tampered["runs"][0]["analyses"][0]["waveforms"][0]["complex"]["imag"];
+    assert_eq!(imag["column"], serde_json::json!(3), "{imag}");
+    imag["column"] = serde_json::json!(2);
     let tampered: ProjectSimulationResults =
         serde_json::from_value(tampered).expect("tampered result remains structurally valid");
     assert!(
         tampered
             .validate()
-            .expect_err("a changed complex sample invalidates its retained digest")
+            .expect_err("a changed complex column invalidates its retained digest")
             .contains("result_data_digest does not match retained analysis content")
     );
 }

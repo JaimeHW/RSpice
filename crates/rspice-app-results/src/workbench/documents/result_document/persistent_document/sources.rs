@@ -440,9 +440,9 @@ pub fn archive_document(
         }
         let run = retained_run(reads, binding.dataset_id)
             .ok_or_else(|| "A run this document reads left the run history.".to_owned())?;
-        let record = ProjectSimulationRun::from(run);
-        // A stored run's record names its segments and holds none of its samples: the
-        // document binds them, and they stay open until a save keeps them beside the project.
+        let record = crate::io::capture_run(run);
+        // The run's record names its segments and holds none of its samples: the document
+        // binds them, and they stay open until a save keeps them beside the project.
         let segments = record
             .stored_segments()
             .into_iter()
@@ -452,8 +452,11 @@ pub fn archive_document(
                 segment.digest.to_string()
             })
             .collect();
-        let record = serde_json::to_string(&record)
-            .map_err(|error| format!("The run could not be written into the document: {error}."))?;
+        let record =
+            rspice_formats::project_results::saving_file(|| serde_json::to_string(&record))
+                .map_err(|error| {
+                    format!("The run could not be written into the document: {error}.")
+                })?;
         let archive = RunArchive::new(RUN_ARCHIVE_ENCODING, record, segments)
             .map_err(|error| error.to_string())?;
         edits.push(DocumentEdit::ArchiveDataset { binding, archive });
@@ -465,9 +468,9 @@ pub fn archive_document(
         .content
         .transact_visualization_document(document_id, revision, edits)
         .map_err(|error| error.to_string())?;
-    state.workbench.prompt(
-        "The result document now holds its runs' samples and reads without the run history.",
-    );
+    state
+        .workbench
+        .prompt("The result document now keeps its runs and reads without the run history.");
     Ok(())
 }
 

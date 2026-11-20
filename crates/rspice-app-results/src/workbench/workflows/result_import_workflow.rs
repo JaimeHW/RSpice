@@ -481,7 +481,7 @@ fn commit_parsed_result_dataset(
         run.execution_target = None;
         run.label = format!("Imported · {source_name}");
         for analysis in analyses {
-            run.add_analysis(analysis);
+            run.keep_analysis(analysis);
         }
         let run_sequence = run.id;
         let dataset_id = run.dataset_id;

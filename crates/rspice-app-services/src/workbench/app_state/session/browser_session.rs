@@ -224,7 +224,7 @@ pub fn keep_runs(model: &Model, platform: &mut PlatformState, ctx: Option<&Conte
     kept.writing = true;
     durable_records::spawn_task(ctx, async move {
         let runs = results.and_then(|results| {
-            serde_json::to_string(&results)
+            rspice_formats::project_results::saving_file(|| serde_json::to_string(&results))
                 .inspect_err(|error| log::warn!("the session's runs could not be encoded: {error}"))
                 .ok()
         });

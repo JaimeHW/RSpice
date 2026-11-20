@@ -195,7 +195,10 @@ impl AppState {
             &!self.platform.project_lifecycle.is_open(),
         )?;
         if !simulation_results.is_empty() {
-            state.serialize_field("simulation_results", &simulation_results)?;
+            // The session names the segments its runs read and holds none of their samples.
+            rspice_formats::project_results::saving_file(|| {
+                state.serialize_field("simulation_results", &simulation_results)
+            })?;
         }
         state.end()
     }

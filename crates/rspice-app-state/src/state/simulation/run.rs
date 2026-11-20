@@ -242,6 +242,16 @@ impl SimulationRun {
         }
     }
 
+    /// Append a finished analysis that no prepared task produced (an imported
+    /// dataset), its samples kept in a results store segment first as
+    /// [`Self::replace_live_or_add_analysis`] keeps them.
+    pub fn keep_analysis(&mut self, mut analysis: AnalysisResult) {
+        if let Err(error) = super::run_store::store_analysis(&mut analysis.data) {
+            log::warn!("{}: {error}", analysis.label);
+        }
+        self.add_analysis(analysis);
+    }
+
     /// Whether any analysis of the run holds samples in memory rather than in
     /// a results store.
     #[must_use]

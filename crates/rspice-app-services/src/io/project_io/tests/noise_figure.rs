@@ -248,7 +248,7 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
         if let Some(quantity) = quantity {
             wave = wave.with_unit(quantity.density_unit());
         }
-        run.add_analysis(
+        run.keep_analysis(
             AnalysisResult::new(1, AnalysisType::Noise, "NOISE")
                 .with_waveforms(vec![wave])
                 .with_noise_summary(summary.clone()),

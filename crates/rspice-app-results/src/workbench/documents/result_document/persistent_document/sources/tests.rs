@@ -32,7 +32,7 @@ fn run(sequence: u64, signals: usize, points: usize, offset: f64) -> SimulationR
         })
         .collect();
     let mut run = SimulationRun::new(sequence);
-    run.add_analysis(
+    run.keep_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(traces),
     );
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)

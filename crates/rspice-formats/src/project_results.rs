@@ -58,7 +58,7 @@ mod executed_deck;
 mod snapshot;
 mod stored_values;
 pub use snapshot::{ProjectSimulationResults, RestoredProjectSimulationResults};
-pub use stored_values::{StoredSegment, segment_folder};
+pub use stored_values::{SAMPLES_IN_MEMORY, StoredSegment, saving_file, segment_folder};
 mod provenance;
 pub use executed_deck::ProjectExecutedDecks;
 // The rows inside are named only where a file is written by hand: production

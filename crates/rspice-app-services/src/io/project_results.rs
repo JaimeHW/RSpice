@@ -9,12 +9,7 @@ pub fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationR
         return capture_simulation_results_without_runs(state);
     }
 
-    let runs: Vec<_> = state
-        .retained
-        .runs
-        .iter()
-        .map(ProjectSimulationRun::from)
-        .collect();
+    let runs: Vec<_> = state.retained.runs.iter().map(capture_run).collect();
     ProjectSimulationResultsData {
         runs,
         imported_monte_carlo_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
@@ -32,6 +27,28 @@ pub fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationR
         ..ProjectSimulationResultsData::default()
     }
     .into()
+}
+
+/// The record a project or session keeps of `run`, naming the results store segments its
+/// samples are in.
+///
+/// A finished analysis is kept in the store as it is retained; one the store could not take
+/// then is written to it now, into the record and not the history, so the file still holds no
+/// samples. An analysis still running keeps only its record: its samples are a preview the
+/// finished result replaces.
+pub fn capture_run(run: &SimulationRun) -> ProjectSimulationRun {
+    if !run.holds_samples_in_memory() {
+        return ProjectSimulationRun::from(run);
+    }
+    let mut kept = run.clone();
+    for analysis in &mut kept.data.analyses {
+        if analysis.is_live_partial() {
+            analysis.waveforms.clear();
+        } else if let Err(error) = crate::state::run_store::store_analysis(&mut analysis.data) {
+            log::warn!("{}: {error}", analysis.label);
+        }
+    }
+    ProjectSimulationRun::from(&kept)
 }
 
 /// The results with every run left out: the imported resume inputs, the

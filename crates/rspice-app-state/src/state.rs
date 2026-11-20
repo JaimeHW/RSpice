@@ -151,6 +151,7 @@ pub use schematic::symbol_context_cache;
 pub use schematic::transform_preview_memo;
 pub use schematic::*;
 pub use simulation::CampaignMemberRefusal;
+pub use simulation::run_store;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.
 #[cfg(any(test, feature = "test-support"))]

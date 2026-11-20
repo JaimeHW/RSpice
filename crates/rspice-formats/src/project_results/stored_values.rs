@@ -3,7 +3,12 @@
 //! A stored run's waveforms are written as [`ColumnReference`]s and its event histories as
 //! references to signals, so a saved project, recovery or session holds no samples of a stored
 //! run and writing it reads none: the segments are kept beside the file
-//! ([`super::ProjectSimulationResults::stored_segments`]). Reading accepts either form.
+//! ([`super::ProjectSimulationResultsData::stored_segments`]). A file is written inside
+//! [`saving_file`], which refuses a waveform that holds its samples in memory instead of writing
+//! them: every run is in the store before its file is written. Outside it (a hardcopy worker's
+//! snapshot, a command-line artifact) samples in memory are written as they are.
+
+use std::cell::Cell;
 
 use rspice_results::store_reader::{ColumnReference, SegmentDigest as Digest, writing_references};
 use rspice_results::waveform::SharedWaveformValues;
@@ -12,24 +17,53 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::numeric::sample_serde;
 
-/// An x axis: its values, which are never unavailable, or its stored window.
+thread_local! {
+    static SAVING_FILE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// What a file write that met samples in memory says.
+pub const SAMPLES_IN_MEMORY: &str = "a waveform holds its samples in memory, and a saved file \
+     names results store segments only: keep the run in the results store first";
+
+/// Run `write` as a project, recovery or session file is written: every waveform and event
+/// history is written as the window of the results store column or signal it reads, and one that
+/// holds its samples in memory fails the write. A saved file holds no samples.
+pub fn saving_file<T>(write: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SAVING_FILE.with(|saving| saving.set(self.0));
+        }
+    }
+    let _restore = Restore(SAVING_FILE.with(|saving| saving.replace(true)));
+    writing_references(write)
+}
+
+fn saving() -> bool {
+    SAVING_FILE.with(Cell::get)
+}
+
+/// An x axis: its stored window, or, outside [`saving_file`], its values.
 pub fn serialize_axis<S: Serializer>(
     values: &SharedWaveformValues,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     match ColumnReference::of(values) {
         Some(reference) => reference.serialize(serializer),
+        None if saving() => Err(serde::ser::Error::custom(SAMPLES_IN_MEMORY)),
         None => values.serialize(serializer),
     }
 }
 
-/// Samples, an unavailable one written as null, or their stored window.
+/// Samples: their stored window, or, outside [`saving_file`], the samples with an unavailable one
+/// written as null.
 pub fn serialize_samples<S: Serializer>(
     values: &SharedWaveformValues,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     match ColumnReference::of(values) {
         Some(reference) => reference.serialize(serializer),
+        None if saving() => Err(serde::ser::Error::custom(SAMPLES_IN_MEMORY)),
         None => sample_serde::serialize_shared(values, serializer),
     }
 }

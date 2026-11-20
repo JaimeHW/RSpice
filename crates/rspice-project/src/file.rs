@@ -1682,9 +1682,13 @@ impl ProjectFile {
 
 impl SavableProject<'_> {
     /// Write the file to `writer` as it is made, a piece at a time, so the
-    /// whole file is never held in memory.
+    /// whole file is never held in memory. Its runs are written as the
+    /// results store segments they read; a run holding samples in memory
+    /// fails the write rather than putting them in the file.
     pub fn write_to(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
-        serde_json::to_writer_pretty(&mut *writer, &*self.project)?;
+        rspice_formats::project_results::saving_file(|| {
+            serde_json::to_writer_pretty(&mut *writer, &*self.project)
+        })?;
         writer.write_all(b"\n")
     }
 }
