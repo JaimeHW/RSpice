@@ -38,6 +38,7 @@ fn analysis() -> RetainedAnalysisResult<RetainedWaveform> {
         format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
         coordinate: None,
         family_member: None,
+        event_dump: None,
     });
     result
 }

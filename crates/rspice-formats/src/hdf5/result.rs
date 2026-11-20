@@ -296,6 +296,7 @@ mod tests {
                     unit: unit.map(str::to_owned),
                 }),
                 family_member: None,
+                event_dump: None,
             });
             let export = prepare_hdf5(
                 &analysis,

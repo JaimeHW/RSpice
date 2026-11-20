@@ -462,6 +462,7 @@ mod tests {
                     format: ResultImportFormat::SpiceRaw,
                     coordinate: None,
                     family_member: None,
+                    event_dump: None,
                 });
                 analysis.validate_retained_evidence().unwrap();
             }

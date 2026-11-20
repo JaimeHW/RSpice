@@ -176,6 +176,8 @@ pub struct ParsedResultDataset {
     /// read. An imported result carries both, and neither is derived from the
     /// other.
     pub(crate) event_payload: Option<AnalysisResultPayload>,
+    /// Where and in what order a dump declared the variables of `event_payload`.
+    pub(crate) event_dump: Option<rspice_results::result_import::ImportedEventDump>,
     /// The source's other analyses, when it holds several; committed beside
     /// this one in the same run.
     pub(crate) plots: Option<Arc<ResultImportPlots>>,
@@ -381,6 +383,7 @@ fn keep_parsed_samples(
                 unit: coordinate.1.clone(),
             }),
             family_member: None,
+            event_dump: None,
         });
         let kept = crate::state::run_store::store_analysis(&mut analysis.data);
         *waveforms = std::mem::take(&mut analysis.data.waveforms);
@@ -475,6 +478,7 @@ fn open_review_draft(state: &mut ResultsParts<'_>, staged: StagedResultImport) {
         family_metadata: parsed.family_metadata,
         notes: parsed.notes,
         event_payload: parsed.event_payload,
+        event_dump: parsed.event_dump,
         plots: parsed.plots,
         selected_signals: vec![true; signal_count],
         validation_error: None,
@@ -585,6 +589,7 @@ fn parsed_result_from_draft(
         delimiter: draft.delimiter,
         notes: draft.notes.clone(),
         event_payload: draft.event_payload.clone(),
+        event_dump: draft.event_dump.clone(),
         plots: draft.plots.clone(),
     })
 }
@@ -681,6 +686,7 @@ fn keep_reviewed_draft(
         coordinate_unit: parsed.coordinate_unit,
         waveforms: parsed.waveforms,
         event_payload: parsed.event_payload,
+        event_dump: parsed.event_dump,
     };
     let mut reviewed = reviewed.retained(source_name, parsed.source_format, &mut bus_count)?;
     if let Some(metadata) = parsed.family_metadata {
@@ -700,6 +706,8 @@ fn keep_reviewed_draft(
             coordinate_unit: plot.coordinate_unit.clone(),
             waveforms: plot.waveforms.clone(),
             event_payload: plot.event_payload.clone(),
+            // A further analysis is a rawfile's plot, never a dump's.
+            event_dump: None,
         }
         .retained(source_name, parsed.source_format, &mut bus_count)?;
         further.validate_retained_evidence()?;
@@ -820,6 +828,7 @@ struct ImportedAnalysis {
     coordinate_unit: Option<String>,
     waveforms: Vec<RetainedTrace>,
     event_payload: Option<AnalysisResultPayload>,
+    event_dump: Option<rspice_results::result_import::ImportedEventDump>,
 }
 
 impl ImportedAnalysis {
@@ -867,6 +876,7 @@ impl ImportedAnalysis {
                 unit: self.coordinate_unit,
             }),
             family_member: self.family_member,
+            event_dump: self.event_dump,
         });
         Ok(analysis)
     }
@@ -1574,6 +1584,7 @@ fn parse_delimited_result_dataset(
         delimiter,
         notes: Vec::new(),
         event_payload: None,
+        event_dump: None,
         plots: None,
     })
 }

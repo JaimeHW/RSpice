@@ -116,6 +116,7 @@ fn imported_dc_axes_use_retained_name_and_unit_instead_of_voltage_defaults() {
                     unit: unit.map(str::to_owned),
                 }),
                 family_member: None,
+                event_dump: None,
             });
         assert_eq!(
             model_axis(&mut state),
@@ -145,6 +146,7 @@ fn imported_overlays_require_compatible_coordinate_units() {
                     unit: unit.map(str::to_owned),
                 }),
                 family_member: None,
+                event_dump: None,
             });
             run.add_analysis(analysis);
             runs.push(run);

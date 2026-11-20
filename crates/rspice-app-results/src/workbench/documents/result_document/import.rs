@@ -42,6 +42,8 @@ pub struct ResultImportDialogState {
     /// file a second time. Committed whole: it is evidence about events, not
     /// a projection of the sampled columns the reader is selecting among.
     pub event_payload: Option<crate::state::AnalysisResultPayload>,
+    /// Where and in what order a dump declared the variables of `event_payload`.
+    pub event_dump: Option<rspice_results::result_import::ImportedEventDump>,
     /// The source's other analyses, when it holds several (a rawfile of an
     /// operating point and a transient, say). The fields above review one of
     /// them; these are committed beside it, as written, in the same run.
@@ -177,6 +179,7 @@ impl Default for ResultImportDialogState {
             family_metadata: None,
             notes: Vec::new(),
             event_payload: None,
+            event_dump: None,
             plots: None,
             selected_signals: Vec::new(),
             validation_error: None,

@@ -346,9 +346,30 @@ pub fn event_vcd_document(
     real_traces: &[RealTrace],
     digital_buses: &[DigitalBusDeclaration],
 ) -> Result<VcdDocument, EventProjectionError> {
-    if !is_writable_scope_name(scope) {
+    event_vcd_document_as_declared(
+        &[scope.to_owned()],
+        &[],
+        digital_traces,
+        real_traces,
+        digital_buses,
+    )
+}
+
+/// [`event_vcd_document`] with every variable under the scope path `scope`, outermost first, and
+/// declared in the order `order` names them: bus names and node names, as
+/// [`VcdEventHistories::declared`] lists them. A variable `order` does not name follows those it
+/// does, in [`event_vcd_document`]'s order. Histories read from a dump and written this way with
+/// the dump's own scope and order declare their variables where and as the dump did.
+pub fn event_vcd_document_as_declared(
+    scope: &[String],
+    order: &[String],
+    digital_traces: &[DigitalTrace],
+    real_traces: &[RealTrace],
+    digital_buses: &[DigitalBusDeclaration],
+) -> Result<VcdDocument, EventProjectionError> {
+    if scope.is_empty() || !scope.iter().all(|level| is_writable_scope_name(level)) {
         return Err(EventProjectionError::Scope {
-            scope: scope.to_string(),
+            scope: scope.join("."),
         });
     }
     validate_digital_bus_table(
@@ -382,6 +403,7 @@ pub fn event_vcd_document(
             )?;
         }
         pending.push(PendingSignal {
+            declared: trace.node_name.clone(),
             name: checked_node_name(&trace.node_name)?,
             kind: VcdSignalKind::Logic,
             width: 1,
@@ -409,11 +431,25 @@ pub fn event_vcd_document(
             )?;
         }
         pending.push(PendingSignal {
+            declared: trace.node_name.clone(),
             name: checked_node_name(&trace.node_name)?,
             kind: VcdSignalKind::Real,
             width: REAL_VARIABLE_WIDTH,
             points,
             hdl_period: None,
+        });
+    }
+    if !order.is_empty() {
+        let rank: std::collections::HashMap<&str, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(rank, name)| (name.as_str(), rank))
+            .collect();
+        // Stable, so what `order` leaves out keeps its place among itself.
+        pending.sort_by_key(|signal| {
+            rank.get(signal.declared.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
         });
     }
 
@@ -429,7 +465,7 @@ pub fn event_vcd_document(
         .map(|signal| VcdSignal {
             identifier: String::new(),
             variables: vec![VcdVariable {
-                scope: vec![scope.to_string()],
+                scope: scope.to_vec(),
                 name: signal.name,
             }],
             width: signal.width,
@@ -451,6 +487,8 @@ pub fn event_vcd_document(
 
 /// One trace, converted but not yet placed on a tick grid.
 struct PendingSignal {
+    /// The bus or node name an `order` names it by.
+    declared: String,
     name: String,
     kind: VcdSignalKind,
     width: u32,
@@ -536,6 +574,7 @@ fn bus_signal(
     }
 
     Ok(PendingSignal {
+        declared: bus.name.clone(),
         name,
         kind: VcdSignalKind::Logic,
         width: bus.width() as u32,
@@ -567,6 +606,11 @@ pub struct VcdEventHistories {
     pub digital_buses: Vec<DigitalBusDeclaration>,
     /// Real-valued histories.
     pub real_traces: Vec<RealTrace>,
+    /// The scope path every variable shared, outermost first, which the names above leave out.
+    pub scope: Vec<String>,
+    /// Every variable in declaration order, by the name the histories give it: a vector's bus
+    /// name, a scalar's or a real's node name.
+    pub declared: Vec<String>,
 }
 
 /// Read a VCD document back as event histories.
@@ -608,7 +652,15 @@ pub fn vcd_event_histories(
             })
     };
     let shared = shared_scope_depth(&document.signals);
-    let mut histories = VcdEventHistories::default();
+    let mut histories = VcdEventHistories {
+        scope: document
+            .signals
+            .iter()
+            .find_map(|signal| signal.variables.first())
+            .map(|variable| variable.scope[..shared].to_vec())
+            .unwrap_or_default(),
+        ..VcdEventHistories::default()
+    };
     let mut seen: BTreeSet<String> = BTreeSet::new();
 
     for signal in &document.signals {
@@ -632,6 +684,7 @@ pub fn vcd_event_histories(
                     });
                 }
                 claim_node(&mut seen, &reference)?;
+                histories.declared.push(reference.clone());
                 histories.real_traces.push(RealTrace {
                     node_name: reference,
                     points,
@@ -650,6 +703,7 @@ pub fn vcd_event_histories(
                     }
                 }
                 claim_node(&mut seen, &reference)?;
+                histories.declared.push(reference.clone());
                 histories.digital_traces.push(DigitalTrace {
                     node_name: reference,
                     points,
@@ -711,6 +765,7 @@ pub fn vcd_event_histories(
                 for member in &members {
                     claim_node(&mut seen, &member.node_name)?;
                 }
+                histories.declared.push(base.to_owned());
                 histories.digital_buses.push(DigitalBusDeclaration::new(
                     base,
                     msb,

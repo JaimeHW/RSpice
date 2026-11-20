@@ -28,6 +28,7 @@ fn project(sample: f64, complex: bool) -> ProjectSimulationResults {
         format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
         coordinate: None,
         family_member: None,
+        event_dump: None,
     });
     run.add_analysis(analysis);
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)

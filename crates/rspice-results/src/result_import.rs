@@ -115,6 +115,20 @@ pub struct ResultImportSource {
     /// import then draw as one family, as a deck's `.step` members do.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub family_member: Option<crate::provenance::AnalysisResultFamilyMember>,
+    /// Where and in what order an imported dump declared its variables, so a dump written from
+    /// the import declares them as the source did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_dump: Option<ImportedEventDump>,
+}
+
+/// The scope a Value Change Dump declared its variables under and the order it declared them in.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedEventDump {
+    /// The scope path every variable shared, outermost first; empty when the source named none.
+    pub scope: Vec<String>,
+    /// Each variable in declaration order, by the bus or node name its event history has.
+    pub order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

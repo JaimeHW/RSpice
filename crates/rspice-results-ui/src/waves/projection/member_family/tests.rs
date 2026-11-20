@@ -263,6 +263,7 @@ fn imported_run(index: usize, member: AnalysisResultFamilyMember) -> AnalysisRes
         format: ResultImportFormat::SpiceRaw,
         coordinate: None,
         family_member: Some(member),
+        event_dump: None,
     });
     analysis
 }

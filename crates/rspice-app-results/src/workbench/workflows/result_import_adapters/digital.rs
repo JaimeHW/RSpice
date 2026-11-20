@@ -16,6 +16,7 @@ fn present_digital(format: ResultImportFormat, decoded: DecodedDigital) -> Parse
     parsed.coordinate_unit = Some("s".to_owned());
     parsed.notes = decoded.notes;
     parsed.event_payload = decoded.event_payload;
+    parsed.event_dump = decoded.event_dump;
     parsed
 }
 

@@ -3,12 +3,12 @@
 use crate::numeric::MAX_EXACT_F64_INTEGER;
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::analysis_type::AnalysisType;
-use rspice_results::events::imported_event_payload;
-use rspice_results::result_import::ResultImportFormat;
+use rspice_results::events::{imported_event_dump, imported_event_payload};
 use rspice_results::result_import::waveforms::{
     ImportedSignal, ImportedWaveforms, WaveformImportLimits, assemble_imported_waveforms,
     validate_name,
 };
+use rspice_results::result_import::{ImportedEventDump, ResultImportFormat};
 use rspice_results::waveform::RetainedWaveform;
 use std::collections::{BTreeSet, HashSet};
 use std::io::Cursor;
@@ -26,6 +26,8 @@ pub struct DecodedDigital {
     pub data: ImportedWaveforms,
     pub notes: Vec<String>,
     pub event_payload: Option<AnalysisResultPayload>,
+    /// Where and in what order the source declared the variables `event_payload` holds.
+    pub event_dump: Option<ImportedEventDump>,
 }
 
 #[derive(Debug)]
@@ -182,6 +184,7 @@ pub fn decode_vcd(
     let histories = rspice_core::execution::vcd_event_histories(&document)
         .map_err(|source| DigitalReadError::EventProjection { format, source })?;
     let event_payload = imported_event_payload(&histories);
+    let event_dump = imported_event_dump(&histories);
 
     let mut signals: Vec<DigitalSignal> = Vec::new();
     let mut aliases = Vec::new();
@@ -330,6 +333,7 @@ pub fn decode_vcd(
             });
         }
         parsed.event_payload = Some(payload);
+        parsed.event_dump = event_dump;
     }
     Ok(parsed)
 }
@@ -411,7 +415,9 @@ pub fn decode_fst(
             width: signal.width,
         })
         .collect::<Vec<_>>();
-    let event_payload = fst_event_payload(&signals, recorded, decoded.timescale_seconds, format)?;
+    let histories = fst_event_histories(&signals, recorded, decoded.timescale_seconds, format)?;
+    let event_payload = histories.as_ref().and_then(imported_event_payload);
+    let event_dump = histories.as_ref().and_then(imported_event_dump);
     let mut parsed = digital_events_to_dataset(
         format,
         decoded.timescale_seconds,
@@ -431,6 +437,7 @@ pub fn decode_fst(
             ));
         }
         parsed.event_payload = Some(payload);
+        parsed.event_dump = event_dump;
     }
     Ok(parsed)
 }
@@ -461,12 +468,12 @@ const fn fst_bit(byte: u8) -> rspice_core::io::VcdBit {
 /// `None` when the file's tick is not a duration VCD can state; the sampled
 /// grid still carries the whole file, and no evidence is invented for it.
 #[cfg(feature = "fst")]
-fn fst_event_payload(
+fn fst_event_histories(
     signals: &[DigitalSignal],
     recorded: Vec<Vec<rspice_core::io::VcdChange>>,
     timescale_seconds: f64,
     format: ResultImportFormat,
-) -> Result<Option<AnalysisResultPayload>, DigitalReadError> {
+) -> Result<Option<rspice_core::execution::VcdEventHistories>, DigitalReadError> {
     let Some(timescale) = rspice_core::io::VcdTimescale::ALL
         .into_iter()
         .find(|scale| scale.seconds() == timescale_seconds)
@@ -494,9 +501,9 @@ fn fst_event_payload(
             changes,
         });
     }
-    let histories = rspice_core::execution::vcd_event_histories(&document)
-        .map_err(|source| DigitalReadError::EventProjection { format, source })?;
-    Ok(imported_event_payload(&histories))
+    rspice_core::execution::vcd_event_histories(&document)
+        .map(Some)
+        .map_err(|source| DigitalReadError::EventProjection { format, source })
 }
 
 fn digital_events_to_dataset(
@@ -630,6 +637,7 @@ fn digital_events_to_dataset(
         .map_err(DigitalReadError::ResultData)?,
         notes: Vec::new(),
         event_payload: None,
+        event_dump: None,
     })
 }
 
@@ -691,6 +699,39 @@ mod tests {
                 max_signal_name_bytes: 1_024,
             },
         }
+    }
+
+    /// A dump written from an imported one declares its variables in the source's scope and in
+    /// the source's order, a real among the wires and a vector as one variable.
+    #[cfg(feature = "result-vcd")]
+    #[test]
+    fn an_imported_dump_is_written_back_in_its_own_scope_and_order() {
+        let source = b"$timescale 1 ns $end\n$scope module top $end\n$var real 64 ! level $end\n$var wire 1 \" clk $end\n$var wire 4 # data [3:0] $end\n$var wire 1 $ en $end\n$upscope $end\n$enddefinitions $end\n#0\nr0.5 !\n0\"\nb0000 #\n1$\n#5\n1\"\nb1010 #\n";
+        let decoded = decode_vcd(source, ResultImportFormat::Vcd, limits()).unwrap();
+        let mut analysis: rspice_results::analysis_result::AnalysisResult =
+            rspice_results::analysis_result::AnalysisResult::new(
+                1,
+                AnalysisType::Transient,
+                "Imported VCD",
+                0.0,
+            );
+        analysis.result_payload = decoded.event_payload;
+        analysis.import_source = Some(rspice_results::result_import::ResultImportSource {
+            source_name: "hand.vcd".to_owned(),
+            format: ResultImportFormat::Vcd,
+            coordinate: None,
+            family_member: None,
+            event_dump: decoded.event_dump,
+        });
+        let text = String::from_utf8(crate::vcd::encode_result_vcd(&analysis).unwrap().bytes)
+            .expect("a dump is ASCII text");
+        assert!(text.contains("$scope module top $end"), "{text}");
+        let declared: Vec<&str> = text
+            .lines()
+            .filter_map(|line| line.trim_start().strip_prefix("$var "))
+            .filter_map(|fields| fields.split_whitespace().nth(3))
+            .collect();
+        assert_eq!(declared, ["level", "clk", "data", "en"], "{text}");
     }
 
     #[test]

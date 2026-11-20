@@ -60,7 +60,7 @@ pub use event_export::{
 pub use event_projection::{
     EventPoints, EventProjectionError, EventSource, EventVcdStream, HeldEvents, VcdEventHistories,
     digital_value_from_vcd_bit, digital_value_to_vcd_bit, event_code_to_vcd_bit,
-    event_vcd_document, event_vcd_stream, vcd_event_histories,
+    event_vcd_document, event_vcd_document_as_declared, event_vcd_stream, vcd_event_histories,
 };
 pub use fingerprint::{topology_fingerprint, topology_fingerprint_with_abort};
 pub use materialized::{

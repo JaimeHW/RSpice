@@ -3,14 +3,15 @@
 //! The core projection and writer also serve the command line, keeping event
 //! times, bus declarations, four-state conversion and bytes identical.
 
-use rspice_core::execution::event_vcd_document;
+use rspice_core::execution::event_vcd_document_as_declared;
 use rspice_core::io::write_vcd;
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::events::core_event_traces;
 
-/// The single scope every RSpice dump declares. `rspice-cli`'s `vcd_io.rs`
-/// uses this exact string; the two exports differ the moment they disagree.
+/// The scope a dump of a run declares. `rspice-cli`'s `vcd_io.rs` uses this exact string; the two
+/// exports differ the moment they disagree. A dump of an imported dump declares the source's
+/// scope instead.
 const EVENT_SCOPE: &str = "events";
 
 const NO_EVENT_EVIDENCE_MESSAGE: &str = "A Value Change Dump carries the digital and real event timelines a transient's event \
@@ -66,6 +67,9 @@ pub struct EncodedVcd {
 
 /// Serialise one analysis's retained event history as a dump.
 ///
+/// An imported dump's variables are declared in the source's scope and in the source's order
+/// ([`rspice_results::result_import::ImportedEventDump`]); a run's under [`EVENT_SCOPE`].
+///
 /// Missing or empty histories, invalid event codes and event times that VCD
 /// cannot represent are refused before bytes are returned.
 pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, VcdWriteError> {
@@ -91,7 +95,16 @@ pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, 
         .iter()
         .map(rspice_core::engine::DigitalBusDeclaration::from)
         .collect::<Vec<_>>();
-    let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &buses)
+    let dump = analysis
+        .import_source
+        .as_ref()
+        .and_then(|source| source.event_dump.as_ref());
+    let scope = match dump {
+        Some(dump) if !dump.scope.is_empty() => dump.scope.clone(),
+        _ => vec![EVENT_SCOPE.to_owned()],
+    };
+    let order = dump.map_or(&[][..], |dump| dump.order.as_slice());
+    let document = event_vcd_document_as_declared(&scope, order, &digital, &real, &buses)
         .map_err(VcdWriteError::Projection)?;
     let node_count = document.signals.len();
     let change_count = document
@@ -184,7 +197,9 @@ mod tests {
         // run disagree.
         let (digital, real) =
             core_event_traces(&digital_evidence, &real_evidence).expect("valid codes");
-        let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &[]).expect("projects");
+        let document =
+            rspice_core::execution::event_vcd_document(EVENT_SCOPE, &digital, &real, &[])
+                .expect("projects");
         let mut expected = Vec::new();
         write_vcd(&mut expected, &document).expect("writes");
         assert_eq!(prepared.bytes, expected);

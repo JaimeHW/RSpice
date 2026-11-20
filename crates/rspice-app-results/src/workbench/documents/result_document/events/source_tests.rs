@@ -97,6 +97,7 @@ fn event_source_import_readout_survives_restoration_and_source_changes() {
                 source_name: "renamed.capture".to_owned(),
                 format,
                 family_member: None,
+                event_dump: None,
             });
         let restored = crate::io::simulation_state_from_results(
             crate::io::capture_simulation_results(&state.model.simulation),
@@ -185,6 +186,7 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
             source_name: "inconsistent.vcd".to_owned(),
             format: crate::state::ResultImportFormat::Vcd,
             family_member: None,
+            event_dump: None,
         });
     assert!(
         state.model.simulation.retained.runs[0].analyses[0]

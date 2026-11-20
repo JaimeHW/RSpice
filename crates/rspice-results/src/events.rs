@@ -178,6 +178,17 @@ pub fn core_event_traces(
     Ok((digital, real))
 }
 
+/// Where and in what order `histories` were declared, for a dump written from their import to
+/// declare its variables as the source did. `None` when they declare nothing.
+pub fn imported_event_dump(
+    histories: &rspice_core::execution::VcdEventHistories,
+) -> Option<crate::result_import::ImportedEventDump> {
+    (!histories.declared.is_empty()).then(|| crate::result_import::ImportedEventDump {
+        scope: histories.scope.clone(),
+        order: histories.declared.clone(),
+    })
+}
+
 /// The retained event evidence for histories a digital importer decoded.
 ///
 /// Both importers land here, so a VCD bus and an FST bus are one shape: the

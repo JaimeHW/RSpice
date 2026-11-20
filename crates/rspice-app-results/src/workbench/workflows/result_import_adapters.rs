@@ -66,6 +66,7 @@ pub(super) fn present_imported_waveforms(
         delimiter: 0,
         notes: Vec::new(),
         event_payload: None,
+        event_dump: None,
         plots: None,
     }
 }
@@ -320,6 +321,7 @@ pub(super) fn parse_spice_raw(
                     digital_traces: events.digital_traces,
                     digital_buses: events.digital_buses,
                     real_traces: events.real_traces,
+                    ..Default::default()
                 },
             )
         });
