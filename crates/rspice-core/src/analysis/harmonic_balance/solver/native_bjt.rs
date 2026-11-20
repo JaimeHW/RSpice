@@ -65,7 +65,12 @@ pub(super) struct NativeStamp {
     residual_scale: Vec<Value>,
     contributions: Vec<(usize, Value)>,
     jacobian: Vec<(usize, usize, Value)>,
-    invalid: bool,
+    /// A stamp addressed a row or column outside the system: a defect of the
+    /// device's wiring, whatever state it was sampled at.
+    misaddressed: bool,
+    /// A stamped value, or the row it accumulated into, left the finite
+    /// range at the sampled state.
+    nonfinite: bool,
 }
 
 impl NativeStamp {
@@ -75,7 +80,8 @@ impl NativeStamp {
             residual_scale: vec![0.0; unknowns],
             contributions: Vec::new(),
             jacobian: Vec::new(),
-            invalid: false,
+            misaddressed: false,
+            nonfinite: false,
         }
     }
     fn clear(&mut self) {
@@ -83,7 +89,32 @@ impl NativeStamp {
         self.residual_scale.fill(0.0);
         self.contributions.clear();
         self.jacobian.clear();
-        self.invalid = false;
+        self.misaddressed = false;
+        self.nonfinite = false;
+    }
+
+    /// The verdict on `device`'s F and Q stamps at one time sample.
+    ///
+    /// A stamp outside the system is a defect of the circuit and ends the
+    /// solve. A non-finite value is a state the device cannot evaluate: the
+    /// solver proposed it, so it is a rejected Newton trial that damping and
+    /// continuation step around, as a transient step whose device evaluation
+    /// overflows is a rejected step, and only a solve with no other state to
+    /// try reports it.
+    fn verdict(f: &Self, q: &Self, device: impl FnOnce() -> String) -> Result<(), HbError> {
+        if f.misaddressed || q.misaddressed {
+            Err(HbError::InvalidCircuit(format!(
+                "{} stamped outside the periodic system",
+                device()
+            )))
+        } else if f.nonfinite || q.nonfinite {
+            Err(HbError::NonFiniteSample(format!(
+                "{} produced non-finite F/Q entries",
+                device()
+            )))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -92,8 +123,10 @@ impl MatrixStamper for NativeStamp {
         if row == 0 || col == 0 || value == 0.0 {
             return;
         }
-        if row > self.residual.len() || col > self.residual.len() || !value.is_finite() {
-            self.invalid = true;
+        if row > self.residual.len() || col > self.residual.len() {
+            self.misaddressed = true;
+        } else if !value.is_finite() {
+            self.nonfinite = true;
         } else {
             self.jacobian.push((row - 1, col - 1, value));
         }
@@ -106,9 +139,9 @@ impl MatrixStamper for NativeStamp {
             *entry += value;
             self.residual_scale[row - 1] += value.abs();
             self.contributions.push((row - 1, value));
-            self.invalid |= !entry.is_finite() || !self.residual_scale[row - 1].is_finite();
+            self.nonfinite |= !entry.is_finite() || !self.residual_scale[row - 1].is_finite();
         } else {
-            self.invalid = true;
+            self.misaddressed = true;
         }
     }
 }
@@ -661,12 +694,7 @@ impl HbSolver {
                 Some(bias) => bjt.stamp_periodic_fq_at_bias(solution, &bias, f, q),
                 None => bjt.stamp_periodic_fq(solution, f, q),
             }
-            if f.invalid || q.invalid {
-                return Err(HbError::InvalidCircuit(format!(
-                    "BJT '{}' produced invalid physical F/Q entries",
-                    bjt.name
-                )));
-            }
+            NativeStamp::verdict(f, q, || format!("BJT '{}'", bjt.name))?;
         }
         let mut response_start = self.num_nodes + self.ac_response_branch_start();
         for device in &self.native_bsim3 {
@@ -700,12 +728,7 @@ impl HbSolver {
                     }
                 }
             }
-            if f.invalid || q.invalid {
-                return Err(HbError::InvalidCircuit(format!(
-                    "BSIM3 '{}' produced invalid physical F/Q entries",
-                    device.name,
-                )));
-            }
+            NativeStamp::verdict(f, q, || format!("BSIM3 '{}'", device.name))?;
         }
         for device in &self.native_bsim4 {
             let auxiliary = device.uses_ac_nqs().then(|| {
@@ -738,12 +761,7 @@ impl HbSolver {
                     }
                 }
             }
-            if f.invalid || q.invalid {
-                return Err(HbError::InvalidCircuit(format!(
-                    "BSIM4 '{}' produced invalid physical F/Q entries",
-                    device.name,
-                )));
-            }
+            NativeStamp::verdict(f, q, || format!("BSIM4 '{}'", device.name))?;
         }
         for device in &self.native_mos {
             let auxiliary = (!device.uses_legacy_bsim()).then(|| {
@@ -763,12 +781,7 @@ impl HbSolver {
             device
                 .stamp_periodic_physical_fq(solution, auxiliary, f, q)
                 .map_err(HbError::InvalidCircuit)?;
-            if f.invalid || q.invalid {
-                return Err(HbError::InvalidCircuit(format!(
-                    "MOSFET '{}' produced invalid physical F/Q entries",
-                    device.name
-                )));
-            }
+            NativeStamp::verdict(f, q, || format!("MOSFET '{}'", device.name))?;
         }
         let integral_start = self.num_nodes + self.physical_branch_count();
         #[cfg(feature = "veriloga")]
@@ -777,12 +790,7 @@ impl HbSolver {
                 continue;
             }
             device.stamp_periodic_fq(solution, time, f, q)?;
-            if f.invalid || q.invalid {
-                return Err(HbError::InvalidCircuit(format!(
-                    "Verilog-A device '{}' produced invalid physical F/Q entries",
-                    device.name()
-                )));
-            }
+            NativeStamp::verdict(f, q, || format!("Verilog-A device '{}'", device.name()))?;
         }
         #[cfg(feature = "veriloga-builtins-base")]
         for device in &mut self.generated_nonlinear_devices {
@@ -790,12 +798,9 @@ impl HbSolver {
                 continue;
             }
             device.stamp_periodic_fq(solution, f, q)?;
-            if f.invalid || q.invalid {
-                return Err(HbError::NonFiniteSample(format!(
-                    "generated Verilog-A device '{}' produced invalid physical F/Q entries",
-                    device.name()
-                )));
-            }
+            NativeStamp::verdict(f, q, || {
+                format!("generated Verilog-A device '{}'", device.name())
+            })?;
         }
         let prescribed = if let Some(prescribed) = &self.quasi_prescribed_integrals {
             prescribed.sample(
@@ -850,12 +855,9 @@ impl HbSolver {
             capacitor
                 .stamp(point, self.config.fundamental_freq, (start, rate), f, q)
                 .map_err(HbError::InvalidCircuit)?;
-            if f.invalid || q.invalid {
-                return Err(HbError::InvalidCircuit(format!(
-                    "capacitor '{}' produced invalid F/Q entries",
-                    capacitor.expression.name
-                )));
-            }
+            NativeStamp::verdict(f, q, || {
+                format!("capacitor '{}'", capacitor.expression.name)
+            })?;
         }
         let point = crate::device::behavioral::BehavioralFqPoint {
             prescribed_integrals: &prescribed[..prescribed.len().min(behavioral_count)],
@@ -868,11 +870,7 @@ impl HbSolver {
             None => self.behavioral_sources.stamp_periodic_fq(point, f, q),
         }
         .map_err(HbError::InvalidCircuit)?;
-        if f.invalid || q.invalid {
-            return Err(HbError::InvalidCircuit(
-                "behavioral periodic F/Q entries are invalid".into(),
-            ));
-        }
+        NativeStamp::verdict(f, q, || "the behavioral sources".to_string())?;
         Ok(())
     }
 
@@ -1347,5 +1345,39 @@ mod tests {
                 accepted
             );
         }
+    }
+
+    /// A state some device cannot evaluate is a sample the solver proposed,
+    /// so a non-finite F, Q or Jacobian entry from any device is a rejected
+    /// trial that damping and continuation step around. A stamp outside the
+    /// system is a defect of the circuit whatever the state, and ends the
+    /// solve.
+    #[test]
+    fn a_non_finite_device_sample_is_a_rejected_trial() {
+        let verdict = |f: &NativeStamp, q: &NativeStamp| {
+            NativeStamp::verdict(f, q, || "BJT 'Q1'".to_string())
+        };
+        let mut f = NativeStamp::new(2);
+        let mut q = NativeStamp::new(2);
+        f.stamp(1, 2, 1.0);
+        f.stamp_rhs(1, -1.0);
+        assert!(verdict(&f, &q).is_ok());
+
+        f.stamp(2, 1, Value::INFINITY);
+        assert!(matches!(verdict(&f, &q), Err(HbError::NonFiniteSample(_))));
+        f.clear();
+        // Finite contributions whose row sum overflows.
+        q.stamp_rhs(2, Value::MAX);
+        q.stamp_rhs(2, Value::MAX);
+        let error = verdict(&f, &q).unwrap_err();
+        assert!(matches!(error, HbError::NonFiniteSample(_)), "{error}");
+        assert!(error.to_string().contains("BJT 'Q1'"), "{error}");
+        q.clear();
+
+        f.stamp(3, 1, 1.0);
+        assert!(matches!(verdict(&f, &q), Err(HbError::InvalidCircuit(_))));
+        f.clear();
+        q.stamp_rhs(3, Value::NAN);
+        assert!(matches!(verdict(&f, &q), Err(HbError::InvalidCircuit(_))));
     }
 }

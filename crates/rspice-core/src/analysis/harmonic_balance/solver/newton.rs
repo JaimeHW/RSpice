@@ -4581,7 +4581,7 @@ mod exact_matrix_free_tests {
 mod junction_limiting_tests {
     use crate::analysis::HbConfig;
     use crate::engine::Engine;
-    use crate::{Netlist, SimulationConfig};
+    use crate::{Netlist, SimulationConfig, SimulationError};
 
     fn newton_corrections(deck: &str, fundamental: f64, harmonics: usize) -> usize {
         let netlist = Netlist::parse(deck).unwrap();
@@ -4635,5 +4635,34 @@ mod junction_limiting_tests {
             50,
         );
         assert!(corrections <= 30, "{corrections} Newton corrections");
+    }
+
+    /// On an oversampled grid the junctions are not limited per time sample,
+    /// so a Newton step can carry a sample's junction to a bias at which the
+    /// BJT's exponentials overflow. That is a rejected trial the line search
+    /// and continuation step around, as any sample a device cannot evaluate
+    /// is. Reported as an invalid circuit, it ended this overdriven stage at
+    /// 10 harmonics on 32 samples before continuation had begun; the stage
+    /// must converge or report that continuation is exhausted.
+    #[test]
+    fn hb_continues_past_a_sample_the_bjt_cannot_evaluate_on_an_oversampled_grid() {
+        let netlist = Netlist::parse(
+            "Overdriven common-emitter stage\n\
+             VCC vcc 0 10\nVIN in 0 SIN(0 1.2 1MEG)\nCIN in b 4.7u\n\
+             R1 vcc b 47k\nR2 b 0 8.2k\nRC vcc c 2.2k\nRE e 0 330\n\
+             COUT c out 4.7u\nRL out 0 100k\nQ1 c b e QN\n\
+             .model QN NPN(IS=1e-14 BF=200 VAF=80 RB=10 RC=1 CJE=20p CJC=8p TF=0.4n TR=50n)\n\
+             .end\n",
+        )
+        .unwrap();
+        match Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(1e6).with_harmonics(10))
+        {
+            Ok(analysis) => assert!(analysis.result.converged),
+            Err(error) => assert!(
+                matches!(error, SimulationError::ConvergenceFailed(_)),
+                "{error}"
+            ),
+        }
     }
 }
