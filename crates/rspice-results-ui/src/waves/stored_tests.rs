@@ -432,3 +432,46 @@ fn the_x_scale_chip_reads_no_rows_of_a_stored_axis_on_any_frame() {
         "the chip decided from the strip model, reading no rows"
     );
 }
+
+/// Statistics over a cursor window on a stored trace read the window's rows
+/// and the axis rows a bisection probes, not the column, and agree with the
+/// same statistics taken over the whole trace in memory.
+#[test]
+fn window_statistics_over_a_stored_trace_read_only_the_window() {
+    const ROWS: usize = 100_000;
+    let (run, rows_read) = tiled_run(ROWS);
+    let models = models(&run);
+    let model = &models[0];
+    let before = rows_read();
+    let window = (10_000.5e-9, 10_100.5e-9);
+    let mut derived = DerivedSeries::default();
+    let stored = super::readout::trace_interval_statistics(
+        &mut derived,
+        model,
+        &model.traces[0],
+        Some(window),
+        None,
+    )
+    .expect("the window lies within the trace");
+    let read = rows_read() - before;
+    assert!(
+        read < 1_000,
+        "the window's statistics read {read} rows of a {ROWS}-row trace"
+    );
+
+    let x: Vec<f64> = (0..ROWS).map(|row| row as f64 * 1.0e-9).collect();
+    let y: Vec<f64> = (0..ROWS).map(|row| (row as f64 * 1.0e-4).sin()).collect();
+    let whole = rspice_results::measurements::measure_interval(&x, &y, Some(window))
+        .expect("the window lies within the trace");
+    for (stored, whole) in [
+        (stored.min, whole.min),
+        (stored.max, whole.max),
+        (stored.mean, whole.mean),
+        (stored.rms, whole.rms),
+    ] {
+        assert!(
+            (stored - whole).abs() <= 1.0e-12 * whole.abs().max(1.0),
+            "{stored} where the whole trace gives {whole}"
+        );
+    }
+}

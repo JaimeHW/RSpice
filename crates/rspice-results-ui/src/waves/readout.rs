@@ -544,22 +544,71 @@ pub fn trace_interval_statistics(
         if trace.x.len() != trace.y.len() {
             return Err(MeasurementError::LengthMismatch);
         }
-        if trace.x.iter().any(|v| !v.is_finite()) {
-            return Err(MeasurementError::NonFiniteAxis);
-        }
-        let range = match branch {
+        let (range, ascending) = match branch {
             Some(index) => {
                 let run = trace
                     .shape
                     .runs()
                     .get(index)
                     .ok_or(MeasurementError::NonMonotoneAxis)?;
-                run.start..run.end
+                (
+                    run.start..run.end,
+                    run.orientation == rspice_results::sampling::XOrientation::Ascending,
+                )
             }
-            None => 0..trace.x.len(),
+            None => (0..trace.x.len(), trace.shape.is_single_ascending()),
         };
-        measure_interval(&trace.x[range.clone()], &trace.y[range], window)
+        // A window over an ascending trace measures only the samples in it
+        // and one either side, found by bisection; a stored trace reads just
+        // those rows and keeps none of them.
+        let range = match window {
+            Some((a, b)) if ascending => window_rows(&trace.x, range, a.min(b), a.max(b)),
+            _ => range,
+        };
+        // A stored window that cannot be read has no samples to measure.
+        let unread = |_| MeasurementError::IncompleteCoverage { fraction: 0.0 };
+        let x = trace.x.read_range(range.clone()).map_err(unread)?;
+        if x.iter().any(|v| !v.is_finite()) {
+            return Err(MeasurementError::NonFiniteAxis);
+        }
+        let y = trace.y.read_range(range).map_err(unread)?;
+        measure_interval(&x, &y, window)
     })
+}
+
+/// The samples of `range` of the ascending axis `x` that a measurement over
+/// `low ..= high` reads: those inside it and the nearest one either side,
+/// found by bisection over single samples.
+fn window_rows(
+    x: &rspice_results::waveform::WaveformValues,
+    range: std::ops::Range<usize>,
+    low: f64,
+    high: f64,
+) -> std::ops::Range<usize> {
+    let sample = |index: usize| {
+        x.read_range(index..index + 1)
+            .ok()
+            .and_then(|value| value.first().copied())
+            .unwrap_or(f64::NAN)
+    };
+    // The first index of `range` whose sample is not `before` the bound.
+    let first_not = |before: &dyn Fn(f64) -> bool| {
+        let (mut lo, mut hi) = (range.start, range.end);
+        while lo < hi {
+            let middle = lo + (hi - lo) / 2;
+            if before(sample(middle)) {
+                lo = middle + 1;
+            } else {
+                hi = middle;
+            }
+        }
+        lo
+    };
+    let start = first_not(&|value| value < low)
+        .saturating_sub(1)
+        .max(range.start);
+    let end = (first_not(&|value| value <= high) + 1).min(range.end);
+    start..end.max(start)
 }
 
 pub fn measurement_values(
