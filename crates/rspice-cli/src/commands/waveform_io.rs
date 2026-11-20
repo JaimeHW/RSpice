@@ -123,10 +123,33 @@ pub(crate) fn load_result_selected(
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ImportedResult, CliError> {
-    let format = format.into();
+    load_result(path, format.into(), resource_limits, section, false)
+}
+
+/// [`load_result_selected`], with each run of an LTspice stepped rawfile a
+/// section of its own: what a conversion reads, so a stepped file is never
+/// written as one table whose time runs backwards at every run.
+pub(crate) fn load_runs_selected(
+    path: &Path,
+    format: impl Into<InputFormat>,
+    resource_limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
+) -> Result<ImportedResult, CliError> {
+    load_result(path, format.into(), resource_limits, section, true)
+}
+
+fn load_result(
+    path: &Path,
+    format: InputFormat,
+    resource_limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
+    runs: bool,
+) -> Result<ImportedResult, CliError> {
     validate_section_selector(path, format, section)?;
     let result = match format {
-        InputFormat::Raw | InputFormat::RawAscii => load_rawfile(path, resource_limits, section),
+        InputFormat::Raw | InputFormat::RawAscii => {
+            load_rawfile(path, resource_limits, section, runs)
+        }
         InputFormat::Csv => load_delimited(path, ',', resource_limits),
         InputFormat::Tsv => load_delimited(path, '\t', resource_limits),
         InputFormat::Json => load_json(path, resource_limits),
@@ -409,12 +432,65 @@ fn load_rawfile(
     path: &Path,
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
+    runs: bool,
 ) -> Result<ImportedResult, CliError> {
     let bytes = read_input_bytes_limited(path, resource_limits.max_external_data_bytes)?;
     let file =
         rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
             .map_err(|error| raw_read_error(path, error))?;
+    let file = if runs {
+        stepped_runs_as_sections(path, file)
+    } else {
+        file
+    };
     raw_result(path, file, section, resource_limits)
+}
+
+/// Every run of an LTspice `stepped` plot as a section of its own, as the app
+/// imports it: one plot holds every run of a `.step` sweep with the scale
+/// restarting for each, and read as one table its time ran backwards at every
+/// run. Each run is named for its plot and number, and for the values the
+/// log beside the rawfile gives it when that log names every run.
+fn stepped_runs_as_sections(
+    path: &Path,
+    mut file: rspice_core::io::ltspice_raw::RawFile,
+) -> rspice_core::io::ltspice_raw::RawFile {
+    if !file.plots.iter().any(|plot| plot.is_stepped()) {
+        return file;
+    }
+    let logged = std::fs::read(path.with_extension("log"))
+        .map(|log| rspice_core::io::ltspice_raw::ltspice_log_step_values(&log))
+        .unwrap_or_default();
+    let mut plots = Vec::with_capacity(file.plots.len());
+    for plot in std::mem::take(&mut file.plots) {
+        if !plot.is_stepped() || plot.has_ordinal_axis().unwrap_or(true) {
+            plots.push(plot);
+            continue;
+        }
+        let runs = plot.into_stepped_runs();
+        let count = runs.len();
+        let named = logged.len() == count;
+        for (index, mut run) in runs.into_iter().enumerate() {
+            let values = if named {
+                let values = logged[index]
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!(", {values}")
+            } else {
+                String::new()
+            };
+            run.header.plotname = format!(
+                "{} (run {} of {count}{values})",
+                run.header.plotname.trim(),
+                index + 1
+            );
+            plots.push(run);
+        }
+    }
+    file.plots = plots;
+    file
 }
 
 /// Preserve parser admission and I/O errors for every RAW read path.

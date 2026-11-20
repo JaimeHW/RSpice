@@ -515,3 +515,107 @@ fn every_rawfile_ltspice_wrote_compares_equal_to_itself() {
         assert!(result.status.success(), "{name}: {result:?}");
     }
 }
+
+/// An ASCII rawfile of one transient plot: `names` after `time`, each row
+/// its time then one value per name.
+fn ascii_rawfile(names: &[&str], rows: &[(f64, Vec<f64>)]) -> String {
+    let mut text = format!(
+        "Title: refused\nDate: today\nPlotname: Transient Analysis\nFlags: real\n\
+         No. Variables: {}\nNo. Points: {}\nVariables:\n\t0\ttime\ttime\n",
+        names.len() + 1,
+        rows.len()
+    );
+    for (index, name) in names.iter().enumerate() {
+        text.push_str(&format!("\t{}\t{name}\tvoltage\n", index + 1));
+    }
+    text.push_str("Values:\n");
+    for (point, (time, values)) in rows.iter().enumerate() {
+        text.push_str(&format!("{point}\t{time:e}\n"));
+        for value in values {
+            text.push_str(&format!("\t{value:e}\n"));
+        }
+    }
+    text
+}
+
+/// A conversion never writes a table the application's importer refuses:
+/// two columns of one name, or a time that runs backwards, are refused with
+/// the column or the point, and no file is written.
+#[test]
+fn a_conversion_refuses_a_table_the_importer_would_refuse() {
+    let dir = common::test_dir("convert-refusals");
+    let duplicated = dir.join("duplicated.raw");
+    std::fs::write(
+        &duplicated,
+        ascii_rawfile(
+            &["V(out)", "V(out)"],
+            &[(0.0, vec![1.0, 2.0]), (1.0e-6, vec![3.0, 4.0])],
+        ),
+    )
+    .unwrap();
+    let falling = dir.join("falling.raw");
+    std::fs::write(
+        &falling,
+        ascii_rawfile(
+            &["V(out)"],
+            &[(0.0, vec![1.0]), (2.0e-6, vec![2.0]), (1.0e-6, vec![3.0])],
+        ),
+    )
+    .unwrap();
+    for (source, reason) in [
+        (&duplicated, "two columns are named 'V(out)'"),
+        (&falling, "falls from 0.000002 to 0.000001 at point 3"),
+    ] {
+        for to in ["csv", "tsv", "json"] {
+            let out = dir.join(format!("out.{to}"));
+            let refused = common::convert_with_flags(source, &out, to, &[]);
+            assert!(!refused.status.success(), "{to}: {refused:?}");
+            let message = String::from_utf8_lossy(&refused.stderr);
+            assert!(message.contains(reason), "{to}: {message}");
+            assert!(!out.exists(), "{to}: nothing is written");
+        }
+    }
+}
+
+/// An LTspice stepped rawfile converts one run at a time, each run a section
+/// named by the values its log gives it, never as one table whose time
+/// restarts at every run.
+#[test]
+fn a_stepped_ltspice_rawfile_converts_each_run_as_its_own_section() {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-core-base/tests/fixtures/ltspice");
+    let dir = common::test_dir("stepped-convert");
+    let source = dir.join("rc_step.raw");
+    std::fs::copy(fixtures.join("rc_step.raw"), &source).unwrap();
+    std::fs::copy(fixtures.join("rc_step.log"), dir.join("rc_step.log")).unwrap();
+
+    let refused = common::convert_with_flags(&source, &dir.join("all.csv"), "csv", &[]);
+    assert!(!refused.status.success(), "{refused:?}");
+    let message = String::from_utf8_lossy(&refused.stderr);
+    for run in [
+        "run 1 of 3, r=1000",
+        "run 2 of 3, r=2000",
+        "run 3 of 3, r=4000",
+    ] {
+        assert!(message.contains(run), "{message}");
+    }
+    assert!(!dir.join("all.csv").exists());
+
+    let mut points = 0;
+    for run in 1..=3 {
+        let out = dir.join(format!("run{run}.csv"));
+        let section = run.to_string();
+        let converted = common::convert_with_flags(&source, &out, "csv", &["--section", &section]);
+        assert!(converted.status.success(), "run {run}: {converted:?}");
+        let (names, rows) = common::read_numeric_csv(&out);
+        assert_eq!(names[0], "time", "run {run}");
+        let time: Vec<f64> = rows.iter().map(|row| row[0].unwrap()).collect();
+        assert_eq!(time[0], 0.0, "run {run} starts at its own zero");
+        assert!(
+            time.windows(2).all(|pair| pair[0] < pair[1]),
+            "run {run}: its time ascends"
+        );
+        points += time.len();
+    }
+    assert_eq!(points, 105, "the runs hold every point of the plot");
+}

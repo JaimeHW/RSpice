@@ -12,7 +12,9 @@
 //! states what each one keeps.
 
 use crate::cli::{CliError, Config, ConvertArgs, InputFormat, NumericBound, OutputFormat};
-use crate::commands::waveform_io::{ImportedResult, detect_format, load_result_selected};
+use crate::commands::waveform_io::{
+    ImportedResult, detect_format, load_result_selected, load_runs_selected,
+};
 use crate::commands::{store_input, vcd_io};
 
 /// Execute the convert command
@@ -85,12 +87,14 @@ pub fn execute(args: ConvertArgs, config: &Config, quiet: bool) -> Result<(), Cl
         return Ok(());
     }
 
-    let imported = load_result_selected(
-        &args.input,
-        from_format,
-        config.resources.limits(),
-        args.section.as_deref(),
-    )?;
+    // A rawfile holds a stepped plot as it is; a table cannot, and reads one run.
+    let (limits, section) = (config.resources.limits(), args.section.as_deref());
+    let rawfile = matches!(args.to, OutputFormat::Raw | OutputFormat::RawAscii);
+    let imported = if rawfile {
+        load_result_selected(&args.input, from_format, limits, section)?
+    } else {
+        load_runs_selected(&args.input, from_format, limits, section)?
+    };
 
     let mut table = match imported {
         ImportedResult::Table(table) => table,
@@ -120,6 +124,7 @@ pub fn execute(args: ConvertArgs, config: &Config, quiet: bool) -> Result<(), Cl
             message: "no data points remain after applying --start/--stop".to_string(),
         });
     }
+    refuse_what_readers_refuse(&args.input, &table, rawfile)?;
     table.write(&args.output, args.to)?;
 
     if !quiet {
@@ -129,6 +134,45 @@ pub fn execute(args: ConvertArgs, config: &Config, quiet: bool) -> Result<(), Cl
         ))?;
     }
 
+    Ok(())
+}
+
+/// A table the application's importer would refuse, or read back as another result, is not
+/// written: two columns of one name cannot be told apart, and a scale that falls is not one
+/// sweep. A rawfile holds the runs of a stepped plot as they are, its scale restarting for
+/// each, so only a table is held to one sweep. The reason names the column or the point.
+fn refuse_what_readers_refuse(
+    path: &std::path::Path,
+    table: &crate::commands::export_table::ExportTable,
+    rawfile: bool,
+) -> Result<(), CliError> {
+    let mut names = std::collections::HashSet::new();
+    let columns = table.columns.iter().map(|column| column.name.as_str());
+    for name in std::iter::once(table.scale_name.as_str()).chain(columns) {
+        if !names.insert(name) {
+            return Err(CliError::ConversionError {
+                message: format!(
+                    "{}: two columns are named '{name}', and a reader cannot tell them apart",
+                    path.display()
+                ),
+            });
+        }
+    }
+    let falls = (!rawfile)
+        .then(|| table.scale.windows(2).position(|pair| pair[1] < pair[0]))
+        .flatten();
+    if let Some(point) = falls {
+        return Err(CliError::ConversionError {
+            message: format!(
+                "{}: the '{}' scale falls from {} to {} at point {}, so it is not one sweep",
+                path.display(),
+                table.scale_name,
+                table.scale[point],
+                table.scale[point + 1],
+                point + 2
+            ),
+        });
+    }
     Ok(())
 }
 
