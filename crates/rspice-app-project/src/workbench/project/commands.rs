@@ -38,6 +38,9 @@ pub enum ProjectCommand {
     /// Write an independent copy, a new project with a history of its own,
     /// and carry on in this one.
     SaveCopy,
+    /// Write the project, as saved, and its results folder as one archive to
+    /// share, which Open project opens.
+    PackWithResults,
     SaveAll,
     CloseProject,
     NewCell,
@@ -193,13 +196,14 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 45] = [
         Self::ProjectLauncher,
         Self::OpenProject,
         Self::NewProject,
         Self::Save,
         Self::SaveAs,
         Self::SaveCopy,
+        Self::PackWithResults,
         Self::SaveAll,
         Self::CloseProject,
         Self::NewCell,
@@ -250,6 +254,7 @@ impl ProjectCommand {
             Self::Save => ids::SAVE,
             Self::SaveAs => CommandKey::new("save-project-as"),
             Self::SaveCopy => CommandKey::new("save-project-copy"),
+            Self::PackWithResults => CommandKey::new("pack-project-with-results"),
             Self::SaveAll => CommandKey::new("save-all"),
             Self::CloseProject => CommandKey::new("close-project"),
             Self::NewCell => ids::NEW_CELL,
@@ -346,6 +351,7 @@ impl ProjectCommand {
             Self::Save => ("Save", "File", reserved, global, SAVE_PROJECT),
             Self::SaveAs => ("Save as…", "File", open, global, SAVE_PROJECT_AS),
             Self::SaveCopy => ("Save a copy…", "File", open, global, NONE),
+            Self::PackWithResults => ("Pack with results…", "File", open, global, NONE),
             Self::SaveAll => ("Save all", "File", open, global, SAVE_ALL),
             Self::CloseProject => ("Close project…", "File", open, global, CLOSE_PROJECT),
             Self::NewCell => ("New cell…", "File", open, global, NEW_CELL),

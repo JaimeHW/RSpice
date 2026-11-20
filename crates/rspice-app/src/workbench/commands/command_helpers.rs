@@ -256,6 +256,7 @@ pub(in crate::workbench) fn run_project_file_action(
             ProjectFileAction::Save => FileMenuAction::Save,
             ProjectFileAction::SaveAs => FileMenuAction::SaveProjectAs,
             ProjectFileAction::SaveCopy => FileMenuAction::SaveProjectCopy,
+            ProjectFileAction::PackWithResults => FileMenuAction::PackProjectWithResults,
             ProjectFileAction::SaveAll => FileMenuAction::SaveAll,
             ProjectFileAction::CloseProject => FileMenuAction::CloseProject,
         },

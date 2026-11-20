@@ -17,6 +17,8 @@ pub mod file_exchange;
 pub mod generated_bundle;
 mod project_execution;
 pub mod project_io;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod project_pack;
 mod project_results;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod result_segments;

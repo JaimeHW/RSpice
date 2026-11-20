@@ -592,3 +592,51 @@ fn a_save_goes_on_while_what_its_folder_holds_is_checked() {
     drop(simulation);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Pack with results writes the project and its results folder as one archive, a job. Moved
+/// alone to another folder and opened there, also a job, it is a project whose every run reads
+/// its samples from beside it.
+#[test]
+fn a_packed_project_opens_from_a_clean_path_with_every_run_readable() {
+    use crate::io::project_pack::{ProjectPackJob, start_pack_open, start_project_pack};
+    use crate::workbench::results_job::JobOutcome;
+    let patience = std::time::Duration::from_secs(60);
+    let root = scratch_folder("packed");
+    let file = root.join("amp.rspiceproj");
+    let (json, samples) = saved_and_closed(&file, &[601, 602]);
+    std::fs::write(&file, &json).unwrap();
+    let archive = root.join("amp.rspicepack");
+    let pack = start_project_pack(file.clone(), archive.clone());
+    assert!(pack.wait(patience));
+    let ProjectPackJob::Packing { job, .. } = pack else {
+        panic!("a pack is written");
+    };
+    assert_eq!(job.take_outcome(), Some(JobOutcome::Done(())));
+
+    let clean = scratch_folder("packed-elsewhere");
+    let shared = clean.join("shared.rspicepack");
+    std::fs::rename(&archive, &shared).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+    let open = start_pack_open(shared);
+    assert!(open.wait(patience));
+    let ProjectPackJob::Opening { job, .. } = open else {
+        panic!("a pack is opened");
+    };
+    let Some(JobOutcome::Done(project)) = job.take_outcome() else {
+        panic!("the pack opens");
+    };
+    assert_eq!(project, clean.join("shared").join("amp.rspiceproj"));
+    let loaded = rspice_results::store_reader::opening_unchecked(|| load_project_file(&project))
+        .expect("the packed project opens");
+    assert_eq!(loaded.file.simulation_results_warning, None);
+    let mut restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
+        .expect("its runs restore");
+    run_segment_checks(&mut restored);
+    assert_eq!(restored.retained.runs.len(), samples.len());
+    for (run, samples) in restored.retained.runs.iter().zip(&samples) {
+        assert_eq!(run.unread_results(), None, "{}", run.label);
+        assert_eq!(&run_bits(run), samples, "{}", run.label);
+    }
+    drop(restored);
+    let _ = std::fs::remove_dir_all(&clean);
+}

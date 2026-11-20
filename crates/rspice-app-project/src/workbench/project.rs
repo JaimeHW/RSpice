@@ -633,6 +633,14 @@ impl CommandSet for ProjectCommand {
                 "no project is open",
             ),
             Self::SaveAs | Self::SaveCopy | Self::CloseProject => (open, "no project is open"),
+            // A pack holds the project file and the results folder beside it, which only a
+            // project saved to a file on this computer has.
+            Self::PackWithResults if !open => (false, "no project is open"),
+            Self::PackWithResults => (
+                cfg!(not(target_arch = "wasm32"))
+                    && reads.platform.project_lifecycle.binding().is_some(),
+                "save the project to a file first",
+            ),
             Self::SaveAll => (
                 open && project_has_unsaved_changes(reads),
                 "no unsaved project changes",
@@ -705,6 +713,7 @@ impl CommandSet for ProjectCommand {
             Self::Save => cx.wb.outbox.push(ProjectFileAction::Save),
             Self::SaveAs => cx.wb.outbox.push(ProjectFileAction::SaveAs),
             Self::SaveCopy => cx.wb.outbox.push(ProjectFileAction::SaveCopy),
+            Self::PackWithResults => cx.wb.outbox.push(ProjectFileAction::PackWithResults),
             Self::SaveAll => cx.wb.outbox.push(ProjectFileAction::SaveAll),
             Self::CloseProject => cx.wb.outbox.push(ProjectFileAction::CloseProject),
             Self::NewCell => open_new_cell_dialog(cx.state, cx.model),

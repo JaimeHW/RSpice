@@ -168,6 +168,9 @@ pub enum StatusKey {
     Platform,
     /// How far a save has copied the results it keeps beside its file.
     Saving,
+    /// How far the Results work run beside the window got: a pack being
+    /// written or opened, or the checks of kept results.
+    ResultsWork,
 }
 
 /// The mark in front of a status cell's text.

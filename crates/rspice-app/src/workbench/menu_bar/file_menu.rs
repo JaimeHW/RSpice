@@ -13,6 +13,7 @@ pub(crate) enum FileMenuAction {
     OpenProject,
     SaveProjectAs,
     SaveProjectCopy,
+    PackProjectWithResults,
     SaveAll,
     RevertActiveDocument,
     CloseActiveDocument,
@@ -51,6 +52,14 @@ pub(crate) fn dispatch_file_menu_action(
         }
         FileMenuAction::SaveProjectCopy => {
             state.save_project_copy();
+        }
+        FileMenuAction::PackProjectWithResults => {
+            #[cfg(not(target_arch = "wasm32"))]
+            state.pack_project_with_results();
+            #[cfg(target_arch = "wasm32")]
+            state.prompt(
+                "Pack with results needs RSpice for desktop: the browser keeps no results folder.",
+            );
         }
         FileMenuAction::SaveAll => {
             state.save_project_scope(

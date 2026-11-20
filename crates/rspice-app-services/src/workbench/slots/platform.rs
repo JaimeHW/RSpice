@@ -59,6 +59,9 @@ pub struct PlatformState {
     /// The first checks of kept segments a project open or a save left to run beside them.
     #[cfg(not(target_arch = "wasm32"))]
     pub segment_checks: Vec<crate::io::result_segments::SegmentCheck>,
+    /// A pack of the project with its results being written, or one being opened.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub project_pack: Option<crate::io::project_pack::ProjectPackJob>,
 }
 
 impl Default for PlatformState {
@@ -83,6 +86,8 @@ impl Default for PlatformState {
             results_save: None,
             #[cfg(not(target_arch = "wasm32"))]
             segment_checks: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            project_pack: None,
         }
     }
 }

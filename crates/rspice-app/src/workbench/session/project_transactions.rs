@@ -61,6 +61,8 @@ use rspice_app_services::services::recent_files::RecentKind;
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 pub(crate) mod check_and_save;
+#[cfg(not(target_arch = "wasm32"))]
+mod project_pack;
 
 /// Replacing the open project with a new one: the project's phases over its
 /// own parts, with the shell's steps between them, in the order the
@@ -781,6 +783,9 @@ impl AppState {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn open_project(&mut self) -> bool {
         match rspice_app_services::io::show_open_project_dialog() {
+            Ok(path) if rspice_app_services::io::project_pack::is_pack(&path) => {
+                self.open_pack(path)
+            }
             Ok(path) => self.load_project_from_path(&path),
             Err(ProjectIoError::Cancelled) => false,
             Err(error) => {

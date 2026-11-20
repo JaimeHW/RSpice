@@ -65,6 +65,10 @@ mod unread_segments;
 pub use unread_segments::{
     keep_segments_in, read_again, read_checked, read_events_again, readable,
 };
+#[cfg(any(unix, windows))]
+mod pack;
+#[cfg(any(unix, windows))]
+pub use pack::{PACK_EXTENSION, folder_to_unpack, pack_project, unpack_project};
 mod provenance;
 pub use executed_deck::ProjectExecutedDecks;
 // The rows inside are named only where a file is written by hand: production

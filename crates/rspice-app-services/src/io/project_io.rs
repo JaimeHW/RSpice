@@ -15,6 +15,10 @@ pub const PROJECT_FILTER: (&str, &[&str]) = ("RSpice Project", &["rspiceproj", "
 pub fn show_open_project_dialog() -> Result<PathBuf, ProjectIoError> {
     rfd::FileDialog::new()
         .add_filter(PROJECT_FILTER.0, PROJECT_FILTER.1)
+        .add_filter(
+            "RSpice Project with Results",
+            &[crate::io::project_pack::PACK_EXTENSION],
+        )
         .add_filter("All Files", &["*"])
         .set_title("Open RSpice Project")
         .pick_file()

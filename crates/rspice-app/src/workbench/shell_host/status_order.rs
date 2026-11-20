@@ -216,6 +216,14 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         content: results_save_cell,
         activate: Some(|app, _| cancel_results_save(app)),
     },
+    StatusCell {
+        key: StatusKey::ResultsWork,
+        zone: StatusZone::Trailing,
+        order: 4,
+        workspace: None,
+        content: results_work_cell,
+        activate: Some(|app, _| cancel_project_pack(app)),
+    },
 ];
 
 fn prompt_cell<'a>(_: &RSpiceApp, readings: &'a StatusReadings) -> Option<StatusText<'a>> {
@@ -687,6 +695,63 @@ fn results_save_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<Statu
     }
 }
 
+/// Results work run beside the window, while it runs: a pack being written or opened, how far
+/// it got, and pressing it cancels the pack; else how far the checks of kept results got.
+fn results_work_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rspice_app_services::workbench::results_job::JobState;
+        if let Some(pack) = &app.state.platform.project_pack
+            && let JobState::Running { step, done, total } = pack.state()
+        {
+            return Some(StatusText {
+                text: Cow::Owned(format!("{step} {} · Cancel", saved_of(done, total))),
+                mark: StatusMark::None,
+                control: StatusControl::Button,
+                hover: Some(Cow::Borrowed("Cancel leaves nothing of the pack.")),
+            });
+        }
+        let checks = &app.state.platform.segment_checks;
+        if checks.is_empty() {
+            return None;
+        }
+        let (done, total) = checks
+            .iter()
+            .filter_map(|check| match check.state() {
+                JobState::Running { done, total, .. } => Some((done, total)),
+                JobState::Finished | JobState::Taken => None,
+            })
+            .fold((0, 0), |(done, total), check| {
+                (done + check.0, total + check.1)
+            });
+        let text = match done.saturating_mul(100).checked_div(total) {
+            Some(percent) => format!("Checking results {percent}%"),
+            None => "Checking results".to_owned(),
+        };
+        Some(StatusText {
+            text: Cow::Owned(text),
+            mark: StatusMark::None,
+            control: StatusControl::Label,
+            hover: Some(Cow::Borrowed(
+                "Each kept results store is read whole once, to show it holds the results it is \
+                 named for. Its runs read their samples once it has.",
+            )),
+        })
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = app;
+        None
+    }
+}
+
+fn cancel_project_pack(app: &mut RSpiceApp) {
+    #[cfg(not(target_arch = "wasm32"))]
+    app.state.cancel_project_pack();
+    #[cfg(target_arch = "wasm32")]
+    let _ = app;
+}
+
 fn cancel_results_save(app: &mut RSpiceApp) {
     #[cfg(not(target_arch = "wasm32"))]
     app.state.cancel_results_save();
@@ -744,6 +809,7 @@ mod tests {
                 (1, StatusKey::Engine),
                 (2, StatusKey::Platform),
                 (3, StatusKey::Saving),
+                (4, StatusKey::ResultsWork),
             ]
         );
     }

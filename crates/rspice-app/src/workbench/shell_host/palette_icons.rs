@@ -83,6 +83,7 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             | ProjectCommand::Save
             | ProjectCommand::SaveAs
             | ProjectCommand::SaveCopy
+            | ProjectCommand::PackWithResults
             | ProjectCommand::SaveAll => Some(Icon::File),
             _ => None,
         };

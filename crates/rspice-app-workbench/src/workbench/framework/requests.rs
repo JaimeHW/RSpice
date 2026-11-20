@@ -477,6 +477,7 @@ pub enum ProjectFileAction {
     Save,
     SaveAs,
     SaveCopy,
+    PackWithResults,
     SaveAll,
     CloseProject,
 }

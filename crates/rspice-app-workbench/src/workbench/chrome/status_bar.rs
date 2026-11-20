@@ -258,7 +258,8 @@ impl StatusVisibility {
             | StatusKey::Page
             | StatusKey::Zoom
             | StatusKey::Engine
-            | StatusKey::Saving => true,
+            | StatusKey::Saving
+            | StatusKey::ResultsWork => true,
         }
     }
 }

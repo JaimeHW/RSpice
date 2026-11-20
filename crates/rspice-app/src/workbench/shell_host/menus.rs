@@ -125,9 +125,10 @@ pub(in crate::workbench) const fn application_menu_entries(
 /// File makes, opens, closes, keeps, brings in and sends out: the project,
 /// its cells and the documents open on them.
 ///
-/// Its 29 rows have 23 letters among their labels to give as access keys:
-/// New deck, Save a copy, Save deck as and Project properties (whose every
-/// letter an earlier row holds), Save all (which has its key) and Live
+/// Its 30 rows have 23 letters among their labels to give as access keys:
+/// New deck, Save a copy, Pack with results, Save deck as and Project
+/// properties (whose every letter an earlier row holds), Save all (which has
+/// its key) and Live
 /// session (shown only to a signed-in account) go without. Manage source
 /// document is there only while a source editor is in front.
 const FILE_MENU: &[MenuEntry] = &[
@@ -155,6 +156,7 @@ const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::Save).access('S'),
     project(ProjectCommand::SaveAs).access('A'),
     project(ProjectCommand::SaveCopy),
+    project(ProjectCommand::PackWithResults),
     code(CodeCommand::SaveDeckAs),
     code(CodeCommand::SaveNetlistAsDeck).access('T'),
     MenuEntry::Only(
