@@ -77,14 +77,9 @@ pub enum EventOrigin<'a> {
     Imported(&'a rspice_results::result_import::ResultImportSource),
     Unrecorded,
 }
-impl<'a> EventOrigin<'a> {
-    fn label(self) -> &'a str {
-        match self {
-            Self::Native => "RSpice prepared execution",
-            Self::Imported(source) => source.format.canonical_id(),
-            Self::Unrecorded => "Source not recorded",
-        }
-    }
+impl EventOrigin<'_> {
+    /// What the reader should know of where the events came from, said once,
+    /// beside the selected event.
     fn note(self) -> Option<&'static str> {
         match self {
             Self::Native => None,
@@ -96,14 +91,14 @@ impl<'a> EventOrigin<'a> {
                 ) =>
             {
                 Some(
-                    "Imported digital values use four-state logic. Source drive strength was not retained; stored event codes use canonical strengths. File attribution does not identify or authenticate the source solver.",
+                    "Read from the file as four-state logic. The import keeps no drive strength, so standard strengths are shown. The file does not prove which simulator wrote it.",
                 )
             }
             Self::Imported(_) => Some(
-                "Imported result data. An encoded strength does not establish source drive strength. File attribution does not identify or authenticate the source solver.",
+                "Read from an imported file. A strength shown here is not the source's drive strength, and the file does not prove which simulator wrote it.",
             ),
             Self::Unrecorded => Some(
-                "Source not recorded. An encoded strength does not establish source drive strength; historical imports and native results cannot be distinguished from these records.",
+                "Where these events came from was not recorded, so a strength shown here is not a drive strength.",
             ),
         }
     }
@@ -425,11 +420,6 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
         &[],
     )
     .show(ui);
-    if !cache.rows().is_empty()
-        && let Some(note) = source.origin.note()
-    {
-        panel_note(ui, note);
-    }
     if let Some(AnalysisResultPayload::TransientEvents {
         current_impulses: Some(history),
         ..
@@ -695,7 +685,7 @@ pub fn right_panel(
         ("Value", numbers.value(event.value()), true),
     ];
     if let EventOrigin::Imported(source) = origin {
-        stats.push(("Source", origin.label().to_owned(), false));
+        stats.push(("Source", source.format.canonical_id().to_owned(), false));
         stats.push(("Import file", source.source_name.clone(), false));
     }
     let mut bus_fallback = None;

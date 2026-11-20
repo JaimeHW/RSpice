@@ -120,9 +120,9 @@ fn each_expression_is_drawn_on_the_axis_of_its_own_unit() {
     // Each pane states its unit as its Y axis' caption; the one whose unit
     // cannot be stated says so there, and its reason is on the caption.
     assert!(
-        painted.iter().any(|text| text == "no unit")
-            && labels.iter().any(|label| label == "no unit"),
-        "the unlabeled pane says it has no unit: {painted:?} {labels:?}"
+        painted.iter().any(|text| text == "unit unknown")
+            && labels.iter().any(|label| label == "unit unknown"),
+        "the unlabeled pane says its unit is unknown: {painted:?} {labels:?}"
     );
     assert!(painted.iter().any(|text| text == "W"), "{painted:?}");
 }

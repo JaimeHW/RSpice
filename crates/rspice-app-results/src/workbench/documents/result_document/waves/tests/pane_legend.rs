@@ -521,7 +521,7 @@ fn a_pane_whose_traces_hold_no_value_is_its_header_alone() {
     assert!(
         !painted
             .iter()
-            .any(|(text, _)| text.starts_with("No visible traces")),
+            .any(|(text, _)| text == rspice_results_ui::waves::stack::NO_VISIBLE_TRACE),
         "no well asks for a trace that is enabled"
     );
     let header = exact(&output, "I(R1)").expect("the currents' row names its trace");

@@ -277,7 +277,7 @@ fn a_log_time_overview_starts_at_the_first_positive_sample() {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out, full)),
             egui::Shape::Path(path) => out.extend(path.points.iter().copied()),
             egui::Shape::LineSegment { points, .. } => out.extend(points.iter().copied()),
-            egui::Shape::Text(text) if text.galley.text() == "FULL" => {
+            egui::Shape::Text(text) if text.galley.text() == "Full" => {
                 *full = Some(text.visual_bounding_rect().center().y);
             }
             _ => {}

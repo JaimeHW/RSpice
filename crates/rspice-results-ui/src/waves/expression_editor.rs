@@ -108,6 +108,9 @@ fn expr_editor_layout(
     }
 }
 
+/// The field's name, in the words the rest of the sheet uses.
+const EXPRESSION_LABEL: &str = "Expression";
+
 /// Paint an editor already bound to the host-selected analysis.
 /// Scope describes the exact source selection that the host will evaluate.
 ///
@@ -126,11 +129,11 @@ pub fn show(
 
     let mut action = Action::None;
 
-    let label_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Medium);
     let error_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let label_width = ui
         .painter()
-        .layout_no_wrap("expr".to_owned(), label_font.clone(), c.text_dim)
+        .layout_no_wrap(EXPRESSION_LABEL.to_owned(), label_font.clone(), c.text_dim)
         .size()
         .x;
     let button_width = ui
@@ -188,7 +191,7 @@ pub fn show(
     ui.painter().with_clip_rect(label_rect).text(
         label_rect.left_center(),
         egui::Align2::LEFT_CENTER,
-        "expr",
+        EXPRESSION_LABEL,
         label_font,
         c.text_dim,
     );
@@ -205,7 +208,7 @@ pub fn show(
                     input_rect.size(),
                     egui::TextEdit::singleline(&mut editor.text)
                         .font(theme::field_mono())
-                        .hint_text("V(out)/V(in) - dB(V(out)) - deriv(V(out))")
+                        .hint_text("e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))")
                         .desired_width(input_rect.width()),
                 )
             },

@@ -347,7 +347,7 @@ fn a_reference_marker_reads_the_analytic_differences() {
             ids[index]
         );
     }
-    assert!(painted.iter().any(|text| text == "ref"));
+    assert!(painted.iter().any(|text| text == "Reference"));
 }
 
 /// With the horizontal-cursor tool, a click on the pane places H1, a second
@@ -629,11 +629,11 @@ fn painted_in(shapes: &[ClippedShape], color: egui::Color32) -> Vec<egui::Rect> 
 }
 
 /// The shared ruler's band and its overview track: the smallest panel fill
-/// holding the overview's "FULL" name, and the canvas fill inside it.
+/// holding the overview's "Full" name, and the canvas fill inside it.
 fn ruler_band(shapes: &[ClippedShape], tokens: &Tokens) -> (egui::Rect, egui::Rect) {
     let name = placed_texts(shapes)
         .into_iter()
-        .find(|(text, _)| text == "FULL")
+        .find(|(text, _)| text == "Full")
         .expect("the ruler names its overview")
         .1;
     let area = |rect: &egui::Rect| rect.area();

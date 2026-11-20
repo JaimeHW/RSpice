@@ -442,7 +442,7 @@ fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
     ui.painter().text(
         Pos2::new(rect.left() + label_left, rect.center().y),
         Align2::LEFT_CENTER,
-        "Colour",
+        "Color",
         label_font,
         t.color.text_dim,
     );
@@ -481,7 +481,7 @@ fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
         t.color.text,
     );
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label("Colour");
+        node.set_label("Color");
         node.set_value(hex.as_str());
     });
     swatch.changed()

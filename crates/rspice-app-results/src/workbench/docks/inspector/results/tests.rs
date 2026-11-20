@@ -339,7 +339,7 @@ fn the_colour_swatch_is_the_colour_the_strip_drew_the_curve_in() {
             .expect("AccessKit tree update")
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Colour"))
+            .find(|(_, node)| node.label() == Some("Color"))
             .and_then(|(_, node)| node.value().map(str::to_owned));
     }
     let parts = host.results_parts();

@@ -203,10 +203,10 @@ fn reference_field(ui: &mut Ui, sheet: &mut SmithSheetState) {
     bar_label(ui, "\u{3a9}");
 }
 
-/// "+ expr": a calculator expression to read onto the chart.
+/// "+ Expression": a calculator expression to read onto the chart.
 fn expression_field(ui: &mut Ui, sheet: &mut SmithSheetState) -> Option<String> {
     let Some(mut text) = sheet.expression_draft.take() else {
-        if chip(ui, "+ expr", false)
+        if chip(ui, "+ Expression", false)
             .on_hover_text("Add a complex expression, such as V(in)/I(Vin) read as Z")
             .clicked()
         {
@@ -635,15 +635,20 @@ fn sample_rows(
             ),
         ));
     }
-    rows.push((
-        "VSWR".to_owned(),
-        if mag < 1.0 {
-            fmt_si_significant((1.0 + mag) / (1.0 - mag), "", digits)
-        } else {
-            "∞".to_owned()
-        },
-    ));
+    rows.push(("VSWR".to_owned(), vswr_text(mag, digits)));
     rows
+}
+
+/// A VSWR as a ratio, "1.5 : 1", the same on the hover card and the panel.
+fn vswr_text(magnitude: f64, digits: usize) -> String {
+    if magnitude < 1.0 {
+        format!(
+            "{} : 1",
+            fmt_si_significant((1.0 + magnitude) / (1.0 - magnitude), "", digits)
+        )
+    } else {
+        "∞".to_owned()
+    }
 }
 
 /// Draw the listed loci, the grid and the circles, and update only the
@@ -953,18 +958,7 @@ pub fn right_panel(
     if let Some(value) = maximum_gamma {
         rows.push(("|Γ| max", fmt_si_significant(value, "", digits), true));
         if trace.reference_impedance_ohm.is_some() {
-            rows.push((
-                "Max VSWR",
-                if value < 1.0 {
-                    format!(
-                        "{} : 1",
-                        fmt_si_significant((1.0 + value) / (1.0 - value), "", digits)
-                    )
-                } else {
-                    "∞".to_owned()
-                },
-                false,
-            ));
+            rows.push(("Max VSWR", vswr_text(value, digits), false));
         }
     }
     crate::presentation::stat_table(ui, &rows);

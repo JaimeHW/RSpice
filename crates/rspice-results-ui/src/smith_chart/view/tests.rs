@@ -59,7 +59,7 @@ fn the_marker_reads_frequency_gamma_impedance_admittance_and_vswr() {
     );
     assert_eq!(rows[3].1, "75 Ω + j0 Ω");
     assert_eq!(rows[4].1, "13.33 mS + j0 S");
-    assert_eq!(rows[5].1, "1.5");
+    assert_eq!(rows[5].1, "1.5 : 1");
 }
 
 /// A trace's columns, owned for a test.

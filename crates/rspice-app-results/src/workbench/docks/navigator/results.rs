@@ -845,7 +845,7 @@ pub(in crate::workbench) fn results(
                     muted(
                         ui,
                         if state.model.simulation.retained.runs.is_empty() {
-                            "No results yet. Run a simulation."
+                            "No results yet — run a simulation"
                         } else {
                             "No dataset or analysis matches this filter."
                         },

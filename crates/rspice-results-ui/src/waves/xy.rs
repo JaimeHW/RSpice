@@ -889,7 +889,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         let reason = refusals
             .first()
             .cloned()
-            .unwrap_or_else(|| "No visible traces — enable one in the legend".to_owned());
+            .unwrap_or_else(|| super::stack::NO_VISIBLE_TRACE.to_owned());
         well_hint(ui, &reason);
         return;
     }

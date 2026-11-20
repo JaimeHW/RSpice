@@ -38,6 +38,9 @@ pub(crate) const WINDOW_CONTROL_GAP: f32 = 4.0;
 /// What the strip's X scale chip reads.
 pub(crate) const X_SCALE_LABEL: &str = "log X";
 
+/// The chip that returns a zoomed strip to its automatic view.
+const FIT_LABEL: &str = "Fit";
+
 /// Where the window control `slot` places from the right stands in a header
 /// row spanning `rect`: the rightmost, 0, ends on the rule every row of strip
 /// chrome ends on.
@@ -455,7 +458,7 @@ impl<'a> StripHeader<'a> {
 
         let inner = rect.shrink2(vec2(HEADER_PADDING_X, 0.0));
         let fit_chip_width = if self.pane_actions && self.zoomed {
-            action_chip_width(ui, "FIT")
+            action_chip_width(ui, FIT_LABEL)
         } else {
             0.0
         };
@@ -643,8 +646,8 @@ impl<'a> StripHeader<'a> {
                         ui.add_space(2.0);
                         if action_chip(
                             ui,
-                            "+ expr",
-                            "Add an expression trace - V(out)/V(in), dB(), deriv()...",
+                            "+ Expression",
+                            "Add an expression trace, e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))",
                         )
                         .clicked()
                         {
@@ -719,7 +722,7 @@ impl<'a> StripHeader<'a> {
             if self.zoomed
                 && action_chip(
                     &mut fit_ui,
-                    "FIT",
+                    FIT_LABEL,
                     "Restore automatic view (double-click the plot does the same)",
                 )
                 .clicked()

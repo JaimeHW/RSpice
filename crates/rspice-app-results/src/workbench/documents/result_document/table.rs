@@ -123,7 +123,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &t,
     );
     if models.is_empty() {
-        well_hint(ui, "No results yet — run a simulation to fill the table");
+        well_hint(ui, "No results yet — run a simulation");
         return;
     }
 

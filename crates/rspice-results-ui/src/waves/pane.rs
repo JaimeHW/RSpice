@@ -419,14 +419,17 @@ pub(crate) fn paint_family_bands(
 const HIGHLIGHT_REACH: f32 = 8.0;
 
 /// What the Y axis of a pane whose unit cannot be stated says in its place.
-const NO_UNIT: &str = "no unit";
+pub(crate) const UNKNOWN_UNIT: &str = "unit unknown";
+
+/// How a pane of plain numbers, a ratio say, is named.
+pub(crate) const NO_UNIT: &str = "no unit";
 
 /// The row above a pane's tick column, where its unit is stated: an
 /// expression whose unit cannot be stated says so there, while a plain
 /// number's axis goes unmarked.
 fn y_caption_row(pane: &UnitPane) -> plot::YCaptionRow {
     plot::YCaptionRow {
-        without_unit: pane.unlabeled.then(|| NO_UNIT.to_owned()),
+        without_unit: pane.unlabeled.then(|| UNKNOWN_UNIT.to_owned()),
     }
 }
 
@@ -973,9 +976,10 @@ pub fn show_plot<'a>(
             response.response.id.with("no-unit-caption"),
             egui::Sense::hover(),
         );
-        explained.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, NO_UNIT));
+        explained
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, UNKNOWN_UNIT));
         explained.on_hover_text(format!(
-            "No unit: {reason}, so this expression has an axis of its own"
+            "Unit unknown: {reason}, so this expression has an axis of its own"
         ));
     }
     let nearest_trace = response

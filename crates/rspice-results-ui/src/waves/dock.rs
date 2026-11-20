@@ -722,7 +722,7 @@ pub fn marker_section(
         if row_ui
             .add(
                 egui::Button::new(
-                    egui::RichText::new("ref")
+                    egui::RichText::new("Reference")
                         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                         .color(if is_reference { c.accent } else { c.text_faint }),
                 )
@@ -741,10 +741,10 @@ pub fn marker_section(
         // word "retained" on the row said it a second time.
         if row_ui
             .add(
-                // A word, as `ref` is: the pencil glyph is not in the mono
-                // face and drew as an empty box.
+                // A word, as Reference is: the pencil glyph is not in the
+                // mono face and drew as an empty box.
                 egui::Button::new(
-                    egui::RichText::new("edit")
+                    egui::RichText::new("Edit")
                         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                         .color(c.text_faint),
                 )
@@ -758,9 +758,9 @@ pub fn marker_section(
         if row_ui
             .add(
                 egui::Button::new(
-                    egui::RichText::new("×")
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                        .color(c.text_dim),
+                    egui::RichText::new("Remove")
+                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                        .color(c.text_faint),
                 )
                 .frame(false),
             )
@@ -853,7 +853,7 @@ pub fn horizontal_cursor_rows(
 /// more than one strip is on the sheet.
 fn horizontal_pane_name(models: &[StripModel], pane: &WavePanePresentationKey) -> String {
     let unit = if pane.unit.is_empty() {
-        "number"
+        crate::waves::pane::NO_UNIT
     } else {
         pane.unit.as_str()
     };

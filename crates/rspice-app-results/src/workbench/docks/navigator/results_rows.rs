@@ -1226,7 +1226,7 @@ pub(super) fn show_virtualized_result_signals(
         muted(
             ui,
             if state.model.simulation.retained.runs.is_empty() {
-                "No results yet. Run a simulation."
+                "No results yet — run a simulation"
             } else {
                 match scope {
                     ResultsBrowserScope::Recent => "Signals you select or show collect here.",

@@ -1211,68 +1211,64 @@ fn parameter_label(parameter: SoaParameterEvidence) -> &'static str {
         SoaParameterEvidence::EmitterCurrent => "Emitter current",
         SoaParameterEvidence::EmitterCurrentPositive => "Emitter current · positive",
         SoaParameterEvidence::EmitterCurrentNegative => "Emitter current · negative",
-        SoaParameterEvidence::CollectorSubstrateVoltage => "Collector to substrate voltage",
+        SoaParameterEvidence::CollectorSubstrateVoltage => "Collector-substrate voltage",
         SoaParameterEvidence::CollectorSubstrateVoltagePositive => {
-            "Collector to substrate voltage positive"
+            "Collector-substrate voltage · positive"
         }
         SoaParameterEvidence::CollectorSubstrateVoltageNegative => {
-            "Collector to substrate voltage negative"
+            "Collector-substrate voltage · negative"
         }
-        SoaParameterEvidence::BaseSubstrateVoltage => "Base to substrate voltage",
-        SoaParameterEvidence::BaseSubstrateVoltagePositive => "Base to substrate voltage positive",
-        SoaParameterEvidence::BaseSubstrateVoltageNegative => "Base to substrate voltage negative",
-        SoaParameterEvidence::EmitterSubstrateVoltage => "Emitter to substrate voltage",
+        SoaParameterEvidence::BaseSubstrateVoltage => "Base-substrate voltage",
+        SoaParameterEvidence::BaseSubstrateVoltagePositive => "Base-substrate voltage · positive",
+        SoaParameterEvidence::BaseSubstrateVoltageNegative => "Base-substrate voltage · negative",
+        SoaParameterEvidence::EmitterSubstrateVoltage => "Emitter-substrate voltage",
         SoaParameterEvidence::EmitterSubstrateVoltagePositive => {
-            "Emitter to substrate voltage positive"
+            "Emitter-substrate voltage · positive"
         }
         SoaParameterEvidence::EmitterSubstrateVoltageNegative => {
-            "Emitter to substrate voltage negative"
+            "Emitter-substrate voltage · negative"
         }
         SoaParameterEvidence::SubstrateCurrent => "Substrate current",
-        SoaParameterEvidence::SubstrateCurrentPositive => "Substrate current positive",
-        SoaParameterEvidence::SubstrateCurrentNegative => "Substrate current negative",
-        SoaParameterEvidence::AnodeCathodeVoltage => "Diode anode to cathode voltage",
+        SoaParameterEvidence::SubstrateCurrentPositive => "Substrate current · positive",
+        SoaParameterEvidence::SubstrateCurrentNegative => "Substrate current · negative",
+        SoaParameterEvidence::AnodeCathodeVoltage => "Diode anode-cathode voltage",
         SoaParameterEvidence::AnodeCathodeVoltagePositive => {
-            "Diode anode to cathode voltage positive"
+            "Diode anode-cathode voltage · positive"
         }
         SoaParameterEvidence::AnodeCathodeVoltageNegative => {
-            "Diode anode to cathode voltage negative"
+            "Diode anode-cathode voltage · negative"
         }
         SoaParameterEvidence::AnodeCurrent => "Diode anode current",
-        SoaParameterEvidence::AnodeCurrentPositive => "Diode anode current positive",
-        SoaParameterEvidence::AnodeCurrentNegative => "Diode anode current negative",
+        SoaParameterEvidence::AnodeCurrentPositive => "Diode anode current · positive",
+        SoaParameterEvidence::AnodeCurrentNegative => "Diode anode current · negative",
 
-        SoaParameterEvidence::BodySourceVoltage => "Vbs",
-        SoaParameterEvidence::BodySourceVoltagePositive => "Vbs positive",
-        SoaParameterEvidence::BodySourceVoltageNegative => "Vbs negative",
-        SoaParameterEvidence::BodyDrainVoltage => "Vbd",
-        SoaParameterEvidence::BodyDrainVoltagePositive => "Vbd positive",
-        SoaParameterEvidence::BodyDrainVoltageNegative => "Vbd negative",
-        SoaParameterEvidence::GateBodyVoltage => "Vgb",
-        SoaParameterEvidence::GateBodyVoltagePositive => "Vgb positive",
-        SoaParameterEvidence::GateBodyVoltageNegative => "Vgb negative",
-        SoaParameterEvidence::BulkCurrent => "Bulk / body-contact current",
-        SoaParameterEvidence::BulkCurrentPositive => "Bulk / body-contact current positive",
-        SoaParameterEvidence::BulkCurrentNegative => "Bulk / body-contact current negative",
-        SoaParameterEvidence::BackgateSourceVoltage => "Ves (back gate to source)",
-        SoaParameterEvidence::BackgateSourceVoltagePositive => "Ves (back gate to source) positive",
-        SoaParameterEvidence::BackgateSourceVoltageNegative => "Ves (back gate to source) negative",
-        SoaParameterEvidence::BackgateDrainVoltage => "Ved (back gate to drain)",
-        SoaParameterEvidence::BackgateDrainVoltagePositive => "Ved (back gate to drain) positive",
-        SoaParameterEvidence::BackgateDrainVoltageNegative => "Ved (back gate to drain) negative",
-        SoaParameterEvidence::GateBackgateVoltage => "Vge (gate to back gate)",
-        SoaParameterEvidence::GateBackgateVoltagePositive => "Vge (gate to back gate) positive",
-        SoaParameterEvidence::GateBackgateVoltageNegative => "Vge (gate to back gate) negative",
-        SoaParameterEvidence::BackgateCurrent => "Back-gate current",
-        SoaParameterEvidence::BackgateCurrentPositive => "Back-gate current positive",
-        SoaParameterEvidence::BackgateCurrentNegative => "Back-gate current negative",
-        SoaParameterEvidence::BodyBackgateVoltage => "Body contact to back gate voltage",
-        SoaParameterEvidence::BodyBackgateVoltagePositive => {
-            "Body contact to back gate voltage positive"
-        }
-        SoaParameterEvidence::BodyBackgateVoltageNegative => {
-            "Body contact to back gate voltage negative"
-        }
+        SoaParameterEvidence::BodySourceVoltage => "Body-source voltage",
+        SoaParameterEvidence::BodySourceVoltagePositive => "Body-source voltage · positive",
+        SoaParameterEvidence::BodySourceVoltageNegative => "Body-source voltage · negative",
+        SoaParameterEvidence::BodyDrainVoltage => "Body-drain voltage",
+        SoaParameterEvidence::BodyDrainVoltagePositive => "Body-drain voltage · positive",
+        SoaParameterEvidence::BodyDrainVoltageNegative => "Body-drain voltage · negative",
+        SoaParameterEvidence::GateBodyVoltage => "Gate-body voltage",
+        SoaParameterEvidence::GateBodyVoltagePositive => "Gate-body voltage · positive",
+        SoaParameterEvidence::GateBodyVoltageNegative => "Gate-body voltage · negative",
+        SoaParameterEvidence::BulkCurrent => "Body-contact current",
+        SoaParameterEvidence::BulkCurrentPositive => "Body-contact current · positive",
+        SoaParameterEvidence::BulkCurrentNegative => "Body-contact current · negative",
+        SoaParameterEvidence::BackgateSourceVoltage => "Backgate-source voltage",
+        SoaParameterEvidence::BackgateSourceVoltagePositive => "Backgate-source voltage · positive",
+        SoaParameterEvidence::BackgateSourceVoltageNegative => "Backgate-source voltage · negative",
+        SoaParameterEvidence::BackgateDrainVoltage => "Backgate-drain voltage",
+        SoaParameterEvidence::BackgateDrainVoltagePositive => "Backgate-drain voltage · positive",
+        SoaParameterEvidence::BackgateDrainVoltageNegative => "Backgate-drain voltage · negative",
+        SoaParameterEvidence::GateBackgateVoltage => "Gate-backgate voltage",
+        SoaParameterEvidence::GateBackgateVoltagePositive => "Gate-backgate voltage · positive",
+        SoaParameterEvidence::GateBackgateVoltageNegative => "Gate-backgate voltage · negative",
+        SoaParameterEvidence::BackgateCurrent => "Backgate current",
+        SoaParameterEvidence::BackgateCurrentPositive => "Backgate current · positive",
+        SoaParameterEvidence::BackgateCurrentNegative => "Backgate current · negative",
+        SoaParameterEvidence::BodyBackgateVoltage => "Body-backgate voltage",
+        SoaParameterEvidence::BodyBackgateVoltagePositive => "Body-backgate voltage · positive",
+        SoaParameterEvidence::BodyBackgateVoltageNegative => "Body-backgate voltage · negative",
     }
 }
 

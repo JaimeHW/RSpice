@@ -894,7 +894,7 @@ fn render_pane_viewer(
             ui,
             &pane.title,
             super::viewer_unavailability_reason(state.results_reads(), viewer)
-                .unwrap_or("The retained analysis does not satisfy this viewer contract."),
+                .unwrap_or("This sheet cannot show the selected analysis."),
         );
         return;
     }

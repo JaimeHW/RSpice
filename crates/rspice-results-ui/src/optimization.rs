@@ -4,6 +4,7 @@ use crate::presentation::{PlotView, fit_controls_to_rows, stat_table, table_row_
 use crate::strip::StripHeader;
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
+use rspice_results::optimization::OptimizationObjectiveGoal;
 use rspice_results::waveform::RetainedTrace;
 use rspice_results::{analysis_result::AnalysisResult, optimization::history::OptimizationView};
 use rspice_ui_kit::panels::section_header;
@@ -47,6 +48,15 @@ pub struct CandidateView<'a> {
 /// would misstate. Full precision belongs to copy and export.
 fn value_text(value: f64, unit: &str, digits: usize) -> String {
     fmt_si_significant(value, unit, digits)
+}
+
+/// What an objective asks of its measurement, in the reader's words.
+fn goal_word(goal: OptimizationObjectiveGoal) -> &'static str {
+    match goal {
+        OptimizationObjectiveGoal::Minimize => "minimize",
+        OptimizationObjectiveGoal::Maximize => "maximize",
+        OptimizationObjectiveGoal::Target => "reach the target",
+    }
 }
 
 /// A difference, signed so the direction reads at a glance, in the notation
@@ -123,7 +133,12 @@ pub fn show(
             .map(|(index, observation)| {
                 let term = &observation.objective;
                 (
-                    format!("{}. {} ({:?})", index + 1, term.measurement, term.goal),
+                    format!(
+                        "{}. {} · {}",
+                        index + 1,
+                        term.measurement,
+                        goal_word(term.goal)
+                    ),
                     format!(
                         "value {}; target {}; scale {}; weight {}; cost {}",
                         value_text(observation.value, &term.unit, digits),

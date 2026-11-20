@@ -603,7 +603,7 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
         painter.text(
             egui::pos2(plot_left - RULER_CAPTION_GAP, track.center().y),
             egui::Align2::RIGHT_CENTER,
-            "FULL",
+            "Full",
             ruler_font,
             c.text_faint,
         );

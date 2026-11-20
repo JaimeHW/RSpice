@@ -115,7 +115,7 @@ pub fn show(
             x: 1.0e6,
             y: level,
             color: colors.accent,
-            label: format!("1 MHz {level:.1} dBc/Hz"),
+            label: format!("1 MHz {}", fmt_si_significant(level, "dBc/Hz", digits)),
             drop_line: true,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,

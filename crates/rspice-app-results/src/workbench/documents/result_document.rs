@@ -84,6 +84,16 @@ pub(crate) fn bode_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
 ///
 /// The navigator and inspector are parts of that frame; this command exposes
 /// them instead of creating a second dataset browser with independent state.
+/// What a sheet with no results says, the same words wherever it is said:
+/// the Run shortcut joins them when one is bound.
+pub(crate) fn no_results_hint(run_shortcut: &str) -> String {
+    if run_shortcut.is_empty() {
+        "No results yet — run a simulation".to_owned()
+    } else {
+        format!("No results yet — run a simulation ({run_shortcut})")
+    }
+}
+
 pub(crate) fn open_dataset_browser(state: &mut ResultsParts<'_>) {
     state.workbench.activate(Workspace::Results);
     state.workbench.navigator_visible = true;
@@ -2313,12 +2323,7 @@ fn show_viewer_well(
             runtime_command_platform(ui.ctx()),
             ui.ctx().os(),
         );
-        let hint = if shortcut.is_empty() {
-            "No retained dataset — run a simulation".to_owned()
-        } else {
-            format!("No retained dataset — run a simulation ({shortcut})")
-        };
-        well_hint(ui, &hint);
+        well_hint(ui, &no_results_hint(&shortcut));
         return;
     }
 

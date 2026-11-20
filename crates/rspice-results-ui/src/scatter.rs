@@ -202,7 +202,7 @@ pub fn domain_bar(
     }
 
     let fit = state.fit;
-    let response = chip(ui, "FIT", fit).on_hover_text(if fit {
+    let response = chip(ui, "Fit", fit).on_hover_text(if fit {
         "Least-squares line and its correlation"
     } else {
         "No fit drawn"

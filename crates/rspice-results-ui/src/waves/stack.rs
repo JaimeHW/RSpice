@@ -479,9 +479,15 @@ pub fn expr_palette_slot(model: &StripModel, slot: usize) -> usize {
     model.traces.len() + slot
 }
 
+/// What a strip says when every trace it holds is hidden.
+pub const NO_VISIBLE_TRACE: &str = "Nothing plotted — show a trace in the legend";
+
+/// What a strip says when its analysis holds no samples to plot.
+const NO_SAMPLES: &str = "Nothing plotted — the analysis has no samples";
+
 pub fn expression_label(expr: &ExprTrace, complex: bool) -> String {
     if expr.complex_policy.is_legacy() {
-        format!("legacy magnitude · {}", elide(&expr.text, 24))
+        format!("mag({})", elide(&expr.text, 24))
     } else if complex {
         format!("mag({})", elide(&expr.text, 24))
     } else {
@@ -515,7 +521,10 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
             .collect(),
     };
     if visible.is_empty() {
-        well_hint(ui, "All strips hidden — restore them from the document bar");
+        well_hint(
+            ui,
+            "Nothing plotted — every strip is closed; restore them with HIDDEN above",
+        );
         return;
     }
 
@@ -998,11 +1007,18 @@ fn show_strip_plot(
 ) {
     let t = Tokens::get(ui.ctx());
     // A strip with signals and nothing of them plotted has no pane, and so
-    // no legend to enable one in: they wait in the signal browser.
-    const NOTHING_PLOTTED: &str = "Nothing plotted — tick a signal in Signals";
+    // no legend to enable one in: they wait in the Data browser.
+    const NOTHING_PLOTTED: &str = "Nothing plotted — tick a signal in the Data browser";
     let Some(x_domain) = model.x_range else {
         let retained = !model.traces.is_empty() || !model.lane_traces.is_empty();
-        well_hint(ui, if retained { NOTHING_PLOTTED } else { "No data" });
+        well_hint(
+            ui,
+            if retained {
+                NOTHING_PLOTTED
+            } else {
+                NO_SAMPLES
+            },
+        );
         return;
     };
     let panes = model.unit_panes();
@@ -1292,7 +1308,7 @@ fn show_xy_strip(
         held.y_view = None;
     }
     let Some(x_domain) = model.x_range else {
-        well_hint(ui, "No data");
+        well_hint(ui, NO_SAMPLES);
         return false;
     };
     let Some(ordinal) = panes.iter().position(|pane| pane.unit == strip.unit) else {
@@ -1380,7 +1396,7 @@ fn show_xy_strip(
             );
         });
     } else if ui.available_height() >= WAVE_MIN_PLOT_HEIGHT {
-        well_hint(ui, "No visible traces — enable one in the legend");
+        well_hint(ui, NO_VISIBLE_TRACE);
     }
     false
 }
@@ -1627,7 +1643,7 @@ fn show_unit_pane(
         // A pane with nothing plotted is its header alone; the hint is for a
         // pane whose plotted traces hold no finite value to fit.
         if ui.available_height() >= WAVE_MIN_PLOT_HEIGHT {
-            well_hint(ui, "No visible traces — enable one in the legend");
+            well_hint(ui, NO_VISIBLE_TRACE);
         }
         return;
     };

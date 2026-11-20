@@ -46,7 +46,7 @@ pub fn show(ui: &mut Ui, view: Option<TransferFunctionView<'_>>) {
     StripHeader::new(
         "XF",
         &format!(
-            "{} -> {} - DC operating point",
+            "{} → {} · DC operating point",
             view.input_source, view.output_expression
         ),
         &[],

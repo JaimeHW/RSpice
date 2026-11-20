@@ -370,7 +370,7 @@ fn a_pane_with_every_trace_hidden_takes_no_row() {
     assert!(
         !found
             .iter()
-            .any(|(text, _)| text.starts_with("No visible traces")),
+            .any(|(text, _)| text == rspice_results_ui::waves::stack::NO_VISIBLE_TRACE),
         "a hidden pane states nothing in a pane-sized well"
     );
     assert_eq!(
@@ -437,7 +437,11 @@ fn a_pane_only_the_default_hides_is_not_drawn() {
     assert!(pane_units(&mut state).is_empty());
     let output = settled(&ctx, &mut state);
     assert!(
-        text_rect(&output, "Nothing plotted — tick a signal in Signals").is_some(),
+        text_rect(
+            &output,
+            "Nothing plotted — tick a signal in the Data browser"
+        )
+        .is_some(),
         "an empty strip points at the signal browser: {:?}",
         texts(&output)
             .into_iter()

@@ -461,13 +461,9 @@ fn show_strips(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome: bool) {
                 rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
-            if shortcut.is_empty() {
-                "No results yet — use the Run button to simulate".to_owned()
-            } else {
-                format!("No results yet — press {shortcut} or use the Run button to simulate")
-            }
+            super::no_results_hint(&shortcut)
         } else {
-            "No waveform is selected for display. Show a retained signal in the Results browser, or place a schematic probe and run again."
+            "Nothing plotted — tick a signal in the Data browser, or probe the schematic and run again"
                 .to_owned()
         };
         well_hint(ui, &hint);
@@ -534,9 +530,9 @@ pub fn active_pane_facts(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Activ
         analysis,
         scale,
         limit_mask: if state.results.session.show_spec_limits {
-            "project specification limits"
+            "specification limits"
         } else {
-            "none bound"
+            "off"
         },
         x_extent,
         y_extent,

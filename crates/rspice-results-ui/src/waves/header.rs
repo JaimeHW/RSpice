@@ -447,9 +447,9 @@ pub fn show_header(
 /// expression whose unit cannot be stated, or of plain numbers.
 fn pane_name<'a>(pane: &UnitPane<'a>) -> &'a str {
     if pane.unlabeled {
-        "no-unit"
+        crate::waves::pane::UNKNOWN_UNIT
     } else if pane.unit.is_empty() {
-        "unitless"
+        crate::waves::pane::NO_UNIT
     } else {
         pane.unit
     }

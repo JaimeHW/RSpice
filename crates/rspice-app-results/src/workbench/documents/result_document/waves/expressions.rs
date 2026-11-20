@@ -824,7 +824,7 @@ mod tests {
             .sync_expression_projection(model.analysis_key, 0);
         let old = resolve_strip_exprs(&mut state.results_parts(), model, &Tokens::default());
         assert_eq!(old[0].y.as_slice(), &[0.0; 2]);
-        assert!(old[0].label.starts_with("legacy magnitude"));
+        assert!(old[0].label.starts_with("mag("));
         assert!(
             state
                 .results
