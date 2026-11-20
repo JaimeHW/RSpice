@@ -388,18 +388,21 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     canvas_text_faint: Color32::from_rgb(136, 143, 148),
     canvas_cursor_a: Color32::from_rgb(242, 184, 36),
     canvas_cursor_b: Color32::from_rgb(205, 212, 217),
-    // Blue, coral, green, violet, cyan, rose, lime, peach: at least 0.1
-    // apart in OKLab, and none of them the amber of cursor A or the grey of
-    // cursor B, so a cursor never reads as a curve.
+    // Blue, vermilion, green, violet, cyan, plum, lime, pink: every pair at
+    // least 0.1 apart in OKLab to a reader with full colour vision and to one
+    // with protanopia, deuteranopia or tritanopia, and none of them the amber
+    // of cursor A or the grey of cursor B, so a cursor never reads as a
+    // curve. A dichromat sees the eight in two dimensions, lightness and one
+    // opponent axis, so the hues are spread in lightness as well as in hue.
     traces: [
-        Color32::from_rgb(100, 170, 245),
-        Color32::from_rgb(250, 105, 90),
-        Color32::from_rgb(110, 215, 110),
-        Color32::from_rgb(175, 145, 255),
-        Color32::from_rgb(60, 215, 210),
-        Color32::from_rgb(235, 120, 190),
-        Color32::from_rgb(200, 230, 80),
-        Color32::from_rgb(255, 175, 140),
+        Color32::from_rgb(118, 173, 255),
+        Color32::from_rgb(255, 47, 0),
+        Color32::from_rgb(16, 149, 90),
+        Color32::from_rgb(150, 96, 255),
+        Color32::from_rgb(20, 235, 252),
+        Color32::from_rgb(181, 98, 178),
+        Color32::from_rgb(171, 218, 46),
+        Color32::from_rgb(255, 128, 173),
     ],
     shadow_color: Color32::from_rgba_premultiplied(0, 0, 0, 107),
     shadow_geom: (14, 42),
@@ -534,18 +537,22 @@ pub fn contrast_ratio(ink: Color32, ground: Color32) -> f64 {
 /// about the smallest step an eye sees and two hues a reader names apart
 /// stand 0.09 or more apart.
 pub fn perceptual_distance(a: Color32, b: Color32) -> f64 {
-    let oklab = |color: Color32| {
-        let [r, g, b] = linear_rgb(color);
-        let l = (0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b).cbrt();
-        let m = (0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b).cbrt();
-        let s = (0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b).cbrt();
-        [
-            0.210_454_255_3 * l + 0.793_617_785 * m - 0.004_072_046_8 * s,
-            1.977_998_495_1 * l - 2.428_592_205 * m + 0.450_593_709_9 * s,
-            0.025_904_037_1 * l + 0.782_771_766_2 * m - 0.808_675_766 * s,
-        ]
-    };
-    let (a, b) = (oklab(a), oklab(b));
+    oklab_distance(oklab(linear_rgb(a)), oklab(linear_rgb(b)))
+}
+
+/// A linear-light sRGB colour in OKLab (Björn Ottosson, 2020).
+fn oklab([r, g, b]: [f64; 3]) -> [f64; 3] {
+    let l = (0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b).cbrt();
+    let m = (0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b).cbrt();
+    let s = (0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b).cbrt();
+    [
+        0.210_454_255_3 * l + 0.793_617_785 * m - 0.004_072_046_8 * s,
+        1.977_998_495_1 * l - 2.428_592_205 * m + 0.450_593_709_9 * s,
+        0.025_904_037_1 * l + 0.782_771_766_2 * m - 0.808_675_766 * s,
+    ]
+}
+
+fn oklab_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     a.iter()
         .zip(b)
         .map(|(a, b)| (a - b).powi(2))
@@ -771,6 +778,90 @@ pub(crate) mod tests {
                 "{mode} selection stands only {selection:.2}:1 off the code well"
             );
             assert_ne!(syntax.current_line, palette.bg_inset, "{mode}");
+        }
+    }
+
+    /// Dichromacy simulation at severity 1.0, applied to linear-light sRGB:
+    /// Machado, Oliveira and Fernandes, "A Physiologically-based Model for
+    /// Simulation of Color Vision Deficiency", IEEE Transactions on
+    /// Visualization and Computer Graphics 15(6), 2009, the severity-1.0 rows
+    /// of the table of matrices published with the paper.
+    const DICHROMACIES: [(&str, [[f64; 3]; 3]); 3] = [
+        (
+            "protanopia",
+            [
+                [0.152_286, 1.052_583, -0.204_868],
+                [0.114_503, 0.786_281, 0.099_216],
+                [-0.003_882, -0.048_116, 1.051_998],
+            ],
+        ),
+        (
+            "deuteranopia",
+            [
+                [0.367_322, 0.860_646, -0.227_968],
+                [0.280_085, 0.672_501, 0.047_413],
+                [-0.011_820, 0.042_940, 0.968_881],
+            ],
+        ),
+        (
+            "tritanopia",
+            [
+                [1.255_528, -0.076_749, -0.178_779],
+                [-0.078_411, 0.930_809, 0.147_602],
+                [0.004_733, 0.691_367, 0.303_900],
+            ],
+        ),
+    ];
+
+    /// How `color` looks to a dichromat whose deficiency `matrix` simulates,
+    /// in OKLab. A simulated channel can leave the gamut; it is clipped, as a
+    /// display would.
+    fn as_seen_with(matrix: &[[f64; 3]; 3], color: Color32) -> [f64; 3] {
+        let linear = linear_rgb(color);
+        oklab(matrix.map(|row| {
+            row.iter()
+                .zip(linear)
+                .map(|(weight, channel)| weight * channel)
+                .sum::<f64>()
+                .clamp(0.0, 1.0)
+        }))
+    }
+
+    /// The simulation reproduces the collisions the old hues were replaced
+    /// for, so a pass below is a statement about the hues and not about a
+    /// broken simulation: the old blue and violet stood 0.013 apart to a
+    /// deuteranope.
+    #[test]
+    fn the_dichromacy_simulation_reproduces_a_known_collision() {
+        let (_, deuteranopia) = DICHROMACIES[1];
+        let distance = oklab_distance(
+            as_seen_with(&deuteranopia, Color32::from_rgb(100, 170, 245)),
+            as_seen_with(&deuteranopia, Color32::from_rgb(175, 145, 255)),
+        );
+        assert!(
+            (distance - 0.013).abs() < 0.001,
+            "old blue and violet are {distance:.4} apart under deuteranopia"
+        );
+    }
+
+    /// Every pair of the eight dark-theme trace hues stays 0.1 apart in OKLab
+    /// to a reader with protanopia, deuteranopia or tritanopia, with no
+    /// preference to turn on.
+    #[test]
+    fn the_trace_hues_stay_apart_for_colour_blind_readers() {
+        for (deficiency, matrix) in DICHROMACIES {
+            let seen = INSTRUMENT_DARK
+                .traces
+                .map(|trace| as_seen_with(&matrix, trace));
+            for (index, a) in seen.iter().enumerate() {
+                for (other, b) in seen.iter().enumerate().skip(index + 1) {
+                    let distance = oklab_distance(*a, *b);
+                    assert!(
+                        distance >= 0.1,
+                        "under {deficiency} traces {index} and {other} are only {distance:.3} apart"
+                    );
+                }
+            }
         }
     }
 }
