@@ -1,15 +1,12 @@
 //! Where a comparison runs. It reads every sample of the signals it compares,
-//! so it runs on a thread of its own while the form shows how far it has got,
-//! and it keeps nothing once it answers: the samples it read go with it. On
-//! the web, which has no threads, it runs where it is asked.
+//! so it runs as a Results job, on a thread of its own, while the form shows
+//! how far it has got, and it keeps nothing once it answers: the samples it
+//! read go with it. On the web, which has no threads, it runs where it is
+//! asked.
 //!
 //! A [`Worker`] is the whole of the arrangement: the comparison goes in when
-//! it starts, progress and the answer come back through one channel, and
-//! dropping it stops the comparison.
-
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex, MutexGuard};
+//! it starts, its progress and answer are the job's, and dropping it stops the
+//! comparison.
 
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::waveform::RetainedWaveform;
@@ -19,6 +16,7 @@ use rspice_results::waveform_comparison::{
 };
 
 use crate::product::DatasetBinding;
+use crate::workbench::results_job::{JobOutcome, JobState, JobStop, ResultsJob};
 
 /// One run's side of a comparison: the waveforms it compares, sharing their
 /// samples with the run.
@@ -71,14 +69,9 @@ impl Job {
     }
 }
 
-/// What a comparison answers: its outcome, boxed so the progress messages
-/// that precede it stay small, or why it has none.
+/// What a comparison answers: its outcome, boxed so a job's value stays small,
+/// or why it has none.
 pub(crate) type Answer = Result<Box<ComparisonOutcome>, String>;
-
-enum Message {
-    Progress(usize, usize),
-    Done(Answer),
-}
 
 /// Where a running comparison has got.
 pub(crate) enum Poll {
@@ -87,107 +80,78 @@ pub(crate) enum Poll {
     Done(Answer),
 }
 
-/// A comparison running, or answered and not yet collected.
+/// A comparison running as a Results job, or answered and not yet collected.
+/// Dropping it stops the comparison.
+#[derive(Debug)]
 pub(crate) struct Worker {
-    messages: Mutex<Receiver<Message>>,
-    progress: Mutex<(usize, usize)>,
-    stop: Arc<AtomicBool>,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    job: ResultsJob<Box<ComparisonOutcome>>,
+    /// The signals it compares: its work before it has stated any.
+    signals: usize,
 }
 
 impl Worker {
     /// Start `job`.
     pub(crate) fn start(job: Job) -> Self {
-        let (sender, messages) = mpsc::channel();
-        let stop = Arc::new(AtomicBool::new(false));
-        let total = job.signals.len();
-        let work = {
-            let sender = sender.clone();
-            let stop = Arc::clone(&stop);
-            move || {
-                let mut progress = |done, total| {
-                    // A form that stopped listening has no use for progress.
-                    let _ = sender.send(Message::Progress(done, total));
-                    !stop.load(Ordering::Relaxed)
-                };
-                let answer = job.run(&mut progress).map(Box::new);
-                let _ = sender.send(Message::Done(answer));
-            }
-        };
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let started = std::thread::Builder::new()
-                .name("results comparison".to_owned())
-                .spawn(work);
-            if let Err(error) = started {
-                let _ = sender.send(Message::Done(Err(format!(
-                    "The comparison could not start: {error}."
-                ))));
-            }
-        }
-        #[cfg(target_arch = "wasm32")]
-        work();
-        drop(sender);
-        Self {
-            messages: Mutex::new(messages),
-            progress: Mutex::new((0, total)),
-            stop,
-        }
+        let signals = job.signals.len();
+        let total = signals as u64;
+        let job = ResultsJob::start("results-comparison", move |context| {
+            context.step("Comparing signals", total);
+            let mut known = total;
+            let mut progress = |done: usize, total: usize| {
+                if total as u64 != known {
+                    known = total as u64;
+                    context.step("Comparing signals", known);
+                }
+                context.done(done as u64);
+                !context.cancelled()
+            };
+            job.run(&mut progress)
+                .map(Box::new)
+                .map_err(JobStop::Failed)
+        });
+        Self { job, signals }
     }
 
     /// Where the comparison has got, or its answer once it has one.
     pub(crate) fn poll(&self) -> Poll {
-        let messages = lock(&self.messages);
-        let mut progress = lock(&self.progress);
-        loop {
-            match messages.try_recv() {
-                Ok(Message::Progress(done, total)) => *progress = (done, total),
-                Ok(Message::Done(answer)) => return Poll::Done(answer),
-                Err(TryRecvError::Empty) => return Poll::Running(progress.0, progress.1),
-                Err(TryRecvError::Disconnected) => {
-                    return Poll::Done(Err("The comparison ended without an answer.".to_owned()));
-                }
-            }
+        match self.job.state() {
+            JobState::Running { done, total: 0, .. } => Poll::Running(done as usize, self.signals),
+            JobState::Running { done, total, .. } => Poll::Running(done as usize, total as usize),
+            JobState::Finished | JobState::Taken => Poll::Done(self.answer()),
+        }
+    }
+
+    /// The answer of a comparison that ended.
+    fn answer(&self) -> Answer {
+        match self.job.take_outcome() {
+            Some(JobOutcome::Done(outcome)) => Ok(outcome),
+            Some(JobOutcome::Failed(reason)) => Err(reason),
+            Some(JobOutcome::Cancelled) => Err("The comparison was stopped.".to_owned()),
+            None => Err("The comparison ended without an answer.".to_owned()),
         }
     }
 
     /// Wait for the answer.
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn wait(&self) -> Answer {
-        let messages = lock(&self.messages);
-        loop {
-            match messages.recv() {
-                Ok(Message::Progress(done, total)) => *lock(&self.progress) = (done, total),
-                Ok(Message::Done(answer)) => return answer,
-                Err(_) => return Err("The comparison ended without an answer.".to_owned()),
-            }
-        }
+        while !self.job.wait(std::time::Duration::from_secs(60)) {}
+        self.answer()
+    }
+
+    /// Let a comparison held by `hold_jobs_for_tests` work.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn release(&self) {
+        self.job.release();
     }
 
     /// Ask the comparison to stop after the signal it is comparing.
     pub(crate) fn stop(&self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.job.cancel();
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
         self.stop();
-    }
-}
-
-impl std::fmt::Debug for Worker {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (done, total) = *lock(&self.progress);
-        formatter
-            .debug_struct("Worker")
-            .field("done", &done)
-            .field("total", &total)
-            .finish_non_exhaustive()
     }
 }

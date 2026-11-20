@@ -352,3 +352,52 @@ fn plot_difference_draws_each_parted_signal_less_its_baseline() {
     );
     assert!(compared(host.results_reads()));
 }
+
+/// A comparison runs as a Results job: while it waits to start, the form's
+/// frames say how far it got and read no sample of either run; let go, it
+/// answers.
+#[test]
+fn a_comparison_runs_as_a_job_and_its_frames_read_no_sample() {
+    use crate::workbench::results_job::hold_jobs_for_tests;
+    let (mut host, columns) = two_wide_stored_runs(4, 20_000);
+    let mut draft = open_draft(&mut host);
+    draft.signals = ["V(n0)", "V(n1)"].map(str::to_owned).to_vec();
+    draft.absolute_tolerance = "1".to_owned();
+    hold_jobs_for_tests(true);
+    {
+        let mut parts = host.results_parts();
+        *parts.result_document_dialog = Some(ResultDocumentDialog::Compare(draft));
+        commit_open_dialog(&mut parts);
+    }
+    hold_jobs_for_tests(false);
+    let read = |columns: &[std::sync::Arc<CountedColumn>]| {
+        columns
+            .iter()
+            .map(|column| column.rows_read())
+            .collect::<Vec<_>>()
+    };
+    let before = read(&columns);
+    for _ in 0..10 {
+        assert_eq!(poll(&mut host.results_parts()), Some((0, 2)));
+    }
+    assert_eq!(
+        read(&columns),
+        before,
+        "a comparison waiting to start read rows"
+    );
+    host.results_parts()
+        .results
+        .compare_run
+        .as_ref()
+        .expect("the comparison runs")
+        .worker
+        .release();
+    let mut parts = host.results_parts();
+    settle_comparison(&mut parts);
+    match parts.result_document_dialog.clone() {
+        Some(ResultDocumentDialog::Compare(draft)) => {
+            assert_eq!(draft.outcome.expect("it answered").rows_compared, 20_000);
+        }
+        _ => panic!("the form stays open on its outcome"),
+    }
+}
