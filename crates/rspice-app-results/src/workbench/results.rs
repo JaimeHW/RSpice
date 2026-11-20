@@ -9,7 +9,7 @@
 //! draws in the same context.
 
 pub mod calculator;
-pub mod clear_history;
+pub(crate) mod clear_history;
 pub mod commands;
 mod expression_diagnostics;
 mod surface;
