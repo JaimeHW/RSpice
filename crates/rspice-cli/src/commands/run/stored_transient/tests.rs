@@ -504,3 +504,137 @@ fn an_event_column_samples_its_trace_as_the_projection_does() {
     assert_eq!(super::event_column(&result, "D(r)"), None);
     assert_eq!(super::event_column(&result, "V(q)"), None);
 }
+
+/// A first segment to `20u` with its checkpoint, run into `dir/out.csv` and its store; returns
+/// the arguments for a run of the same deck with `extra`, the checkpoint and the store.
+fn first_segment(dir: &Path) -> (impl Fn(&[&str]) -> crate::cli::RunArgs, PathBuf, PathBuf) {
+    let input = dir.join("deck.cir");
+    std::fs::write(
+        &input,
+        "rc\nv1 in 0 sin(0 1 4meg)\nr1 in out 1k\nc1 out 0 1n\n.tran 1n 40u\n.end\n",
+    )
+    .unwrap();
+    let (output, state) = (dir.join("out.csv"), dir.join("state.ckpt"));
+    let args = move |extra: &[&str]| {
+        let cli = Cli::try_parse_from(
+            [
+                "rspice",
+                "--quiet",
+                "run",
+                input.to_str().unwrap(),
+                "-o",
+                output.to_str().unwrap(),
+                "-f",
+                "csv",
+            ]
+            .into_iter()
+            .chain(extra.iter().copied()),
+        )
+        .unwrap();
+        let Commands::Run(args) = cli.command else {
+            panic!("expected the run command");
+        };
+        args
+    };
+    crate::commands::run(
+        args(&[
+            "--tran-stop",
+            "20u",
+            "--checkpoint",
+            state.to_str().unwrap(),
+        ]),
+        &Config::default(),
+        false,
+        true,
+    )
+    .expect("the first segment runs");
+    (args, state, dir.join("out.rsr"))
+}
+
+fn rows_of(store: &Path) -> u64 {
+    SegmentReader::open(FileIo::open(&store.join(StoreDir::segment_name(0))).unwrap())
+        .unwrap()
+        .rows()
+}
+
+/// One writer per store: a resume beside a store another run holds (another resume appending to
+/// it, or a run publishing over it) is refused, and the store is left as it was.
+#[test]
+fn a_resume_beside_a_store_another_run_holds_is_refused() {
+    let dir = scratch("resume-busy");
+    let (args, state, store) = first_segment(&dir);
+    let rows = rows_of(&store);
+    let other = rspice_results_store::StoreLock::try_acquire(&store)
+        .unwrap()
+        .expect("nobody holds the store");
+    let refused = crate::commands::run(
+        args(&["--resume", state.to_str().unwrap()]),
+        &Config::default(),
+        false,
+        true,
+    )
+    .expect_err("the store is held");
+    assert!(refused.to_string().contains("another run"), "{refused}");
+    assert_eq!(rows_of(&store), rows, "the store is left as it was");
+    drop(other);
+    crate::commands::run(
+        args(&["--resume", state.to_str().unwrap()]),
+        &Config::default(),
+        false,
+        true,
+    )
+    .expect("once free, the resume appends");
+    assert!(rows_of(&store) > rows);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A resume beside its own store whose manifest is damaged refuses, keeping the store and the
+/// first segment's rows, instead of replacing it with a store from the checkpoint on.
+#[test]
+fn a_resume_beside_a_damaged_manifest_keeps_the_first_segments_rows() {
+    let dir = scratch("resume-manifest");
+    let (args, state, store) = first_segment(&dir);
+    let rows = rows_of(&store);
+    let manifest = store.join(StoreDir::MANIFEST);
+    let mut damaged = std::fs::read(&manifest).unwrap();
+    damaged[30] ^= 0x01;
+    std::fs::write(&manifest, &damaged).unwrap();
+    let refused = crate::commands::run(
+        args(&["--resume", state.to_str().unwrap()]),
+        &Config::default(),
+        false,
+        true,
+    )
+    .expect_err("a store whose manifest cannot be read is not replaced");
+    assert!(refused.to_string().contains("--no-store"), "{refused}");
+    assert_eq!(rows_of(&store), rows, "the first segment's rows are kept");
+    assert_eq!(std::fs::read(&manifest).unwrap(), damaged);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A store a killed run left under its private name is swept by the next run in its folder; one a
+/// live run holds is not.
+#[test]
+fn a_killed_runs_private_store_is_swept_by_the_next_run() {
+    let dir = scratch("sweep");
+    let (dead, live) = (
+        dir.join(".rspice-store-4000000-0.rsr"),
+        dir.join(".rspice-store-4000001-0.rsr"),
+    );
+    for store in [&dead, &live] {
+        std::fs::create_dir_all(store.join("runs")).unwrap();
+        std::fs::write(store.join(StoreDir::segment_name(0)), b"rows of a run").unwrap();
+    }
+    // The killed run's lock file stays behind, unlocked.
+    std::fs::write(rspice_results_store::StoreLock::file_for(&dead), b"").unwrap();
+    let held = rspice_results_store::StoreLock::try_acquire(&live)
+        .unwrap()
+        .expect("nobody holds it");
+    let (_, _, store) = first_segment(&dir);
+    assert!(store.is_dir());
+    assert!(!dead.exists(), "the killed run's store is swept");
+    assert!(!rspice_results_store::StoreLock::file_for(&dead).exists());
+    assert!(live.is_dir(), "a live run's store is left");
+    drop(held);
+    let _ = std::fs::remove_dir_all(&dir);
+}

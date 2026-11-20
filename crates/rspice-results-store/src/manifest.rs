@@ -226,7 +226,6 @@ pub struct StoreDir {
 #[cfg(any(unix, windows))]
 impl StoreDir {
     pub const MANIFEST: &'static str = "manifest.rsm";
-    const STAGED: &'static str = "manifest.rsm.new";
 
     pub fn new(root: impl Into<std::path::PathBuf>) -> Self {
         Self { root: root.into() }
@@ -256,24 +255,47 @@ impl StoreDir {
         }
     }
 
-    /// Replace the manifest atomically.
+    /// Replace the manifest atomically. The store's writer holds its [`crate::StoreLock`], so a
+    /// staged manifest any other writer left is one a writer that died left, and goes.
     pub fn save_manifest(&self, manifest: &Manifest) -> Result<(), StoreError> {
-        self.stage_manifest(manifest)?;
-        self.commit_manifest()
-    }
-
-    /// Write the new manifest beside the old one and make it durable.
-    pub(crate) fn stage_manifest(&self, manifest: &Manifest) -> Result<(), StoreError> {
-        use std::io::Write;
-        let mut file = std::fs::File::create(self.root.join(Self::STAGED))?;
-        file.write_all(&manifest.encode())?;
-        file.sync_all()?;
+        let staged = self.stage_manifest(manifest)?;
+        self.commit_manifest(&staged)?;
+        if let Ok(entries) = std::fs::read_dir(&self.root) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with("manifest.rsm.") && name.ends_with(".new") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
         Ok(())
     }
 
-    /// Rename the staged manifest over the old one, then make the rename durable.
-    pub(crate) fn commit_manifest(&self) -> Result<(), StoreError> {
-        std::fs::rename(self.root.join(Self::STAGED), self.root.join(Self::MANIFEST))?;
+    /// Write the new manifest beside the old one, under a name no other writer stages under,
+    /// and make it durable. Returns where it was staged.
+    pub(crate) fn stage_manifest(
+        &self,
+        manifest: &Manifest,
+    ) -> Result<std::path::PathBuf, StoreError> {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let staged = self.root.join(format!(
+            "{}.{}-{}.new",
+            Self::MANIFEST,
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = std::fs::File::create(&staged)?;
+        file.write_all(&manifest.encode())?;
+        file.sync_all()?;
+        Ok(staged)
+    }
+
+    /// Rename the manifest staged at `staged` over the old one, then make the rename durable.
+    pub(crate) fn commit_manifest(&self, staged: &std::path::Path) -> Result<(), StoreError> {
+        std::fs::rename(staged, self.root.join(Self::MANIFEST))?;
         #[cfg(unix)]
         std::fs::File::open(&self.root)?.sync_all()?;
         Ok(())

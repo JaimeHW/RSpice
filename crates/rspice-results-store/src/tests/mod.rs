@@ -2,6 +2,8 @@
 
 mod events_tests;
 mod integrity_tests;
+#[cfg(any(unix, windows))]
+mod lock_tests;
 mod manifest_tests;
 #[cfg(any(unix, windows))]
 mod place_tests;

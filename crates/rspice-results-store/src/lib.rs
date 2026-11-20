@@ -17,6 +17,8 @@ mod error;
 mod events;
 mod format;
 mod io;
+#[cfg(any(unix, windows))]
+mod lock;
 mod manifest;
 #[cfg(any(unix, windows))]
 mod place;
@@ -40,6 +42,8 @@ pub use events::{EventChange, EventValue, Logic};
 #[cfg(any(unix, windows))]
 pub use io::FileIo;
 pub use io::{MemoryIo, SegmentIo};
+#[cfg(any(unix, windows))]
+pub use lock::StoreLock;
 #[cfg(any(unix, windows))]
 pub use manifest::StoreDir;
 pub use manifest::{Manifest, Member};

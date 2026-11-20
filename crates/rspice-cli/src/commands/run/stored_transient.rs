@@ -38,7 +38,7 @@ use rspice_results::stored_transient::{
 };
 use rspice_results_store::{
     FileIo, FreeSpace, Manifest, Member, SegmentReader, SegmentState, StoreDir, StoreError,
-    StoreSink, WatchedIo, WatchedSink,
+    StoreLock, StoreSink, WatchedIo, WatchedSink,
 };
 
 use super::context::RunContext;
@@ -80,6 +80,13 @@ struct RunStore {
     in_place: bool,
     /// The netlist fingerprint of the checkpoints the store's run wrote, which its manifest names.
     fingerprint: Option<u64>,
+    /// The store's own lock, held from before it was made (or reopened) until it is placed or
+    /// gone: no other run writes it, and a run that sweeps killed runs' stores leaves it alone.
+    lock: StoreLock,
+    /// The lock on the store beside the output, held from when the run finished solving until
+    /// its store is placed, so its output and its store are published together, never
+    /// interleaved with another run's onto the same output.
+    publication: Option<StoreLock>,
 }
 
 /// One segment of a checkpointed transient.
@@ -285,7 +292,7 @@ pub(super) fn run_with<T: StoreRunEnd>(
     ) -> Result<(SinkTransient, T), rspice_core::SimulationError>,
 ) -> Result<(StoredTransient, T), CliError> {
     let appended = match resume {
-        Some(checkpoint) if !ctx.args.no_store => reopen_beside_output(ctx, checkpoint),
+        Some(checkpoint) if !ctx.args.no_store => reopen_beside_output(ctx, checkpoint)?,
         _ => None,
     };
     let OpenStore {
@@ -318,6 +325,15 @@ pub(super) fn run_with<T: StoreRunEnd>(
     };
     if !store.in_place {
         store.fingerprint = end.checkpoint_fingerprint();
+        if let Some(output) = ctx.next_output_path("tran") {
+            match publication_lock(&store_path_beside(&output)) {
+                Ok(lock) => store.publication = Some(lock),
+                Err(error) => {
+                    store.discard();
+                    return Err(error);
+                }
+            }
+        }
     }
     let opened = sink
         .into_parts()
@@ -395,18 +411,49 @@ fn create_store(ctx: &RunContext<'_>) -> Result<OpenStore, CliError> {
 }
 
 /// The store beside a resumed run's output, reopened to take the run's rows after the
-/// checkpoint's, when it holds the run `checkpoint` continues. Any other store there is left for
-/// the run's own store to replace, with a note.
+/// checkpoint's, when it holds the run `checkpoint` continues. Another run's store there is left
+/// for the run's own store to replace, with a note. A store another run is writing or publishing
+/// over now, a store whose manifest cannot be read, and the run's own store that cannot be
+/// reopened are refused, never replaced: each may hold the run's earlier rows.
 fn reopen_beside_output(
     ctx: &RunContext<'_>,
     checkpoint: &TransientCheckpoint,
-) -> Option<OpenStore> {
-    let output = ctx.next_output_path("tran")?;
+) -> Result<Option<OpenStore>, CliError> {
+    let Some(output) = ctx.next_output_path("tran") else {
+        return Ok(None);
+    };
     let dir = store_path_beside(&output);
     let segment = dir.join(StoreDir::segment_name(0));
+    if !segment.is_file() {
+        return Ok(None);
+    }
+    let refuse = |kind: std::io::ErrorKind, why: std::fmt::Arguments<'_>| {
+        CliError::output_error(
+            &dir,
+            std::io::Error::new(
+                kind,
+                format!(
+                    "the resumed transient cannot append to the results store {}: {why}. Its \
+                     segment may hold the run's earlier rows, so it is left as it is; pass \
+                     --no-store to run without a store",
+                    dir.display()
+                ),
+            ),
+        )
+    };
+    let lock = match StoreLock::try_acquire(&dir) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            return Err(refuse(
+                std::io::ErrorKind::ResourceBusy,
+                format_args!("another run is writing it or publishing over it now"),
+            ));
+        }
+        Err(error) => return Err(CliError::output_error(&StoreLock::file_for(&dir), error)),
+    };
     let manifest = StoreDir::new(&dir).load_manifest();
-    if matches!(manifest, Ok(None)) || !segment.is_file() {
-        return None;
+    if matches!(manifest, Ok(None)) {
+        return Ok(None);
     }
     let note = |why: &dyn std::fmt::Display| {
         crate::observability::diagnostic(
@@ -427,11 +474,13 @@ fn reopen_beside_output(
             }) => {}
         Ok(_) => {
             note(&"is not the store of the run the checkpoint continues");
-            return None;
+            return Ok(None);
         }
         Err(error) => {
-            note(&format_args!("cannot be read: {error}"));
-            return None;
+            return Err(refuse(
+                std::io::ErrorKind::InvalidData,
+                format_args!("its manifest cannot be read ({error})"),
+            ));
         }
     }
     let free = free_space(&dir);
@@ -439,23 +488,65 @@ fn reopen_beside_output(
         .map_err(StoreError::from)
         .and_then(|io| StoreSink::appending(WatchedIo::new(io, free.clone()), checkpoint.time));
     match reopened {
-        Ok(sink) => Some(OpenStore {
+        Ok(sink) => Ok(Some(OpenStore {
             store: RunStore {
                 dir,
                 in_place: true,
                 fingerprint,
+                lock,
+                publication: None,
             },
             segment,
             sink,
             free,
-        }),
+        })),
         Err(StoreError::NoRowAt { .. }) => {
             note(&"has no row at the checkpoint's time");
-            None
+            Ok(None)
         }
-        Err(error) => {
-            note(&format_args!("cannot be reopened: {error}"));
-            None
+        Err(error) => Err(refuse(
+            std::io::ErrorKind::InvalidData,
+            format_args!("its segment cannot be reopened ({error})"),
+        )),
+    }
+}
+
+/// The lock on the store `target` beside an output, waited for (with a note) while another run
+/// is publishing over it.
+fn publication_lock(target: &Path) -> Result<StoreLock, CliError> {
+    let failed = |error| CliError::output_error(&StoreLock::file_for(target), error);
+    if let Some(own) = StoreLock::held(target) {
+        return Ok(own);
+    }
+    if let Some(lock) = StoreLock::try_acquire(target).map_err(failed)? {
+        return Ok(lock);
+    }
+    crate::observability::diagnostic(
+        "results_store_wait",
+        None,
+        format_args!(
+            "Note: waiting for another run to finish publishing its results store to {}",
+            target.display()
+        ),
+    );
+    StoreLock::acquire(target).map_err(failed)
+}
+
+/// Delete each store in `folder` that a run of a process now gone left under its private name:
+/// one whose lock any process can take, since its writer holds its lock from before it makes it.
+fn sweep_left_stores(folder: &Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with(".rspice-store-") && name.ends_with(".rsr")) {
+            continue;
+        }
+        let dir = entry.path();
+        if let Ok(Some(_lock)) = StoreLock::try_acquire(&dir) {
+            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 }
@@ -2709,20 +2800,35 @@ impl RunStore {
     fn create(output: Option<&Path>) -> Result<Self, CliError> {
         let ordinal = NEXT_STORE.fetch_add(1, Ordering::Relaxed);
         let name = format!(".rspice-store-{}-{ordinal}.rsr", std::process::id());
-        let dir = match output {
+        let folder = match output {
             Some(output) => output
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
                 .unwrap_or(Path::new("."))
-                .join(name),
-            None => std::env::temp_dir().join(name),
+                .to_path_buf(),
+            None => std::env::temp_dir(),
         };
+        sweep_left_stores(&folder);
+        let dir = folder.join(name);
+        let lock = StoreLock::try_acquire(&dir)
+            .map_err(|error| CliError::output_error(&StoreLock::file_for(&dir), error))?
+            .ok_or_else(|| {
+                CliError::output_error(
+                    &dir,
+                    std::io::Error::new(
+                        std::io::ErrorKind::ResourceBusy,
+                        "a new results store's private name is in use",
+                    ),
+                )
+            })?;
         let store = StoreDir::new(&dir);
         store.create().map_err(|error| store_error(&dir, error))?;
         Ok(Self {
             dir,
             in_place: false,
             fingerprint: None,
+            lock,
+            publication: None,
         })
     }
 
@@ -2754,9 +2860,22 @@ impl RunStore {
             return Ok(None);
         };
         // A store joins the publication its output joins: an axis set's stores are placed with
-        // the set's artifacts, or not at all.
+        // the set's artifacts, or not at all. Until it is placed it stays locked under its private
+        // name, so no sweep takes it for a killed run's.
         let target = store_path_beside(output);
-        crate::commands::publish::directory(&self.dir, &target, place_store)?;
+        let Self {
+            dir,
+            lock,
+            publication,
+            ..
+        } = self;
+        STAGED_LOCKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((dir.clone(), lock));
+        let placed = crate::commands::publish::directory(&dir, &target, place_store);
+        drop(publication);
+        placed?;
         Ok(Some(target))
     }
 
@@ -2776,6 +2895,22 @@ impl RunStore {
 fn place_store(staged: &Path, target: &Path) -> Result<(), CliError> {
     let discard = || {
         let _ = std::fs::remove_dir_all(staged);
+    };
+    let _staged = {
+        let mut locks = STAGED_LOCKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let position = locks.iter().position(|(dir, _)| dir == staged);
+        position.map(|position| locks.swap_remove(position))
+    };
+    // Shared with the run's own publication lock when it holds one; a placement a publication
+    // set makes later takes it afresh.
+    let _publication = match publication_lock(target) {
+        Ok(lock) => lock,
+        Err(error) => {
+            discard();
+            return Err(error);
+        }
     };
     if target.exists() {
         let earlier_store = target.is_dir() && target.join(StoreDir::MANIFEST).is_file();
@@ -2800,6 +2935,10 @@ fn place_store(staged: &Path, target: &Path) -> Result<(), CliError> {
     }
     Ok(())
 }
+
+/// The locks of the stores waiting under their private names to be placed, by private directory.
+static STAGED_LOCKS: std::sync::Mutex<Vec<(PathBuf, StoreLock)>> =
+    std::sync::Mutex::new(Vec::new());
 
 /// The store a run of this process left beside `output`, if one did.
 pub(crate) fn store_left_beside(output: &Path) -> Option<PathBuf> {

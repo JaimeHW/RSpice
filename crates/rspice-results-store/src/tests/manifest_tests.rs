@@ -78,10 +78,9 @@ fn a_crash_between_writing_and_renaming_keeps_the_old_manifest() {
     let mut new = old.clone();
     new.upsert(member(1));
     // The new manifest is written and made durable, then the process dies before the rename.
-    store.stage_manifest(&new).unwrap();
+    let staged = store.stage_manifest(&new).unwrap();
     assert_eq!(store.load_manifest().unwrap(), Some(old.clone()));
     // Or dies halfway through writing it.
-    let staged = root.join("manifest.rsm.new");
     let bytes = new.encode();
     std::fs::write(&staged, &bytes[..bytes.len() / 2]).unwrap();
     assert_eq!(store.load_manifest().unwrap(), Some(old.clone()));
