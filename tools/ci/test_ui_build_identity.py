@@ -49,6 +49,10 @@ class BuildIdentityTests(unittest.TestCase):
         (crate / "src/main.rs").write_text(
             'fn main() { println!("{}", env!("RSPICE_BUILD_HASH")); }\n', encoding="utf-8")
         (root / ".gitignore").write_text("Cargo.lock\n", encoding="utf-8")
+        # The fixture builds with the toolchain the product pins, not the
+        # machine's default: a newer Cargo lays out build-script output
+        # elsewhere, and the helper is only ever built by the pinned one.
+        shutil.copyfile(ROOT / "rust-toolchain.toml", root / "rust-toolchain.toml")
 
     def initialize(self, *options):
         self.git("init", "--initial-branch=main", *options)
