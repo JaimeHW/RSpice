@@ -18,7 +18,9 @@ use crate::sink::StoreSink;
 /// its segment; `None` when the host cannot say.
 pub type FreeSpace = Arc<dyn Fn() -> Option<u64> + Send + Sync>;
 
-/// Free space a segment keeps for closing once a write was refused: its last index and `END`.
+/// The least free space a segment keeps for closing once a write was refused. The writer asks for
+/// more as the segment grows: its last event frames, summaries, index and `END`, which copies
+/// every index entry ([`SegmentIo::reserve`]).
 pub const CLOSING_RESERVE: u64 = 1 << 20;
 
 /// The free space of the volume holding `dir`, as the operating system reports it to an
@@ -148,11 +150,14 @@ impl std::fmt::Display for BudgetRefusal {
 impl std::error::Error for BudgetRefusal {}
 
 /// A segment that keeps room on its volume for the segment to close: a write that grows it past
-/// the free space less [`CLOSING_RESERVE`] fails as storage full. With a run's
-/// [`StorageBudget`], every byte the segment grows by is counted against it, and a write that
-/// would take the run past it fails as [`crate::StoreError::StorageBudget`]. Every write after
-/// either refusal, and every write once the writer says it is closing, is the writer closing the
-/// segment, which the reserve is for and the budget never refuses.
+/// the free space less the reserve fails as storage full. The reserve is what the writer last
+/// said closing can take ([`SegmentIo::reserve`]), and at least [`CLOSING_RESERVE`]. Where the
+/// host cannot say how much is free, the segment holds the reserve itself: its file is kept that
+/// much longer than the segment, and a write the volume will not make room for is refused. With a
+/// run's [`StorageBudget`], every byte the segment grows by is counted against it, and a write
+/// that would take the run past it fails as [`crate::StoreError::StorageBudget`]. Every write
+/// after either refusal, and every write once the writer says it is closing, is the writer
+/// closing the segment, which the reserve is for and the budget never refuses.
 pub struct WatchedIo<I> {
     io: I,
     free: FreeSpace,
@@ -161,6 +166,11 @@ pub struct WatchedIo<I> {
     counted: u64,
     /// A write was refused or the writer is closing the segment: nothing is refused any more.
     closing: bool,
+    /// The bytes kept for closing.
+    reserve: u64,
+    /// Where the host cannot say what is free: the segment's length, the file past it being the
+    /// reserve, held.
+    held: Option<u64>,
 }
 
 impl<I> WatchedIo<I> {
@@ -171,6 +181,8 @@ impl<I> WatchedIo<I> {
             budget: None,
             counted: 0,
             closing: false,
+            reserve: CLOSING_RESERVE,
+            held: None,
         }
     }
 
@@ -193,15 +205,20 @@ impl<I: SegmentIo> SegmentIo for WatchedIo<I> {
     }
 
     fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
-        let watched = !self.closing || self.budget.is_some();
-        let size = if watched { self.io.size()? } else { 0 };
-        let grows = (offset + data.len() as u64).saturating_sub(size);
+        let watched = !self.closing || self.budget.is_some() || self.held.is_some();
+        let size = if watched { self.size()? } else { 0 };
+        let end = offset + data.len() as u64;
+        let grows = end.saturating_sub(size);
         if grows > 0 && watched {
-            if !self.closing
-                && (self.free)().is_some_and(|free| free < grows.saturating_add(CLOSING_RESERVE))
-            {
-                self.closing = true;
-                return Err(std::io::ErrorKind::StorageFull.into());
+            if !self.closing {
+                match (self.free)() {
+                    Some(free) if free < grows.saturating_add(self.reserve) => {
+                        self.closing = true;
+                        return Err(std::io::ErrorKind::StorageFull.into());
+                    }
+                    Some(_) => {}
+                    None => self.hold(size, end)?,
+                }
             }
             if let Some(budget) = &self.budget {
                 if let Err(written) = budget.take(grows, !self.closing) {
@@ -215,6 +232,11 @@ impl<I: SegmentIo> SegmentIo for WatchedIo<I> {
             }
         }
         let written = self.io.write_at(offset, data);
+        if written.is_ok()
+            && let Some(held) = &mut self.held
+        {
+            *held = (*held).max(end);
+        }
         if let Err(error) = &written {
             // The volume filled before the watch saw it: the writes closing the segment still try.
             if error.kind() == std::io::ErrorKind::StorageFull {
@@ -237,15 +259,22 @@ impl<I: SegmentIo> SegmentIo for WatchedIo<I> {
     }
 
     fn truncate(&mut self, len: u64) -> std::io::Result<()> {
-        let Some(budget) = &self.budget else {
-            return self.io.truncate(len);
-        };
-        let size = self.io.size()?;
+        let size = self.size()?;
         self.io.truncate(len)?;
+        if let Some(held) = &mut self.held {
+            *held = len;
+            // What was cut is gone, and the reserve is held again past the new end, zeroed; once
+            // the segment is closing, its file ends with it.
+            if !self.closing {
+                let _ = self.io.truncate(len.saturating_add(self.reserve));
+            }
+        }
         // A segment cut back holds less: its provisional tail, overwritten and cut, is not kept.
-        let shrinks = size.saturating_sub(len).min(self.counted);
-        budget.release(shrinks);
-        self.counted -= shrinks;
+        if let Some(budget) = &self.budget {
+            let shrinks = size.saturating_sub(len).min(self.counted);
+            budget.release(shrinks);
+            self.counted -= shrinks;
+        }
         Ok(())
     }
 
@@ -254,12 +283,40 @@ impl<I: SegmentIo> SegmentIo for WatchedIo<I> {
         self.io.closing();
     }
 
+    fn reserve(&mut self, closing: u64) {
+        self.reserve = closing.max(CLOSING_RESERVE);
+        self.io.reserve(closing);
+    }
+
     fn flush(&mut self) -> std::io::Result<()> {
         self.io.flush()
     }
 
     fn size(&self) -> std::io::Result<u64> {
-        self.io.size()
+        match self.held {
+            Some(len) => Ok(len),
+            None => self.io.size(),
+        }
+    }
+}
+
+impl<I: SegmentIo> WatchedIo<I> {
+    /// Before a write that takes a segment of `size` bytes to `end`, on a host that cannot say
+    /// what is free: make the file the reserve longer than `end`, or refuse the write as storage
+    /// full when the volume will not, keeping the reserve already held for closing.
+    fn hold(&mut self, size: u64, end: u64) -> std::io::Result<()> {
+        let wanted = end.saturating_add(self.reserve);
+        if self.io.size()? < wanted
+            && let Err(error) = self.io.truncate(wanted)
+        {
+            if error.kind() != std::io::ErrorKind::StorageFull {
+                return Err(error);
+            }
+            self.closing = true;
+            return Err(error);
+        }
+        self.held.get_or_insert(size);
+        Ok(())
     }
 }
 

@@ -275,3 +275,160 @@ fn a_run_its_storage_budget_stops_keeps_its_whole_chunks_and_says_the_budget() {
     assert!(rows > 1000 && rows < 200_000, "{rows} rows kept");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A volume of `capacity` bytes that holds only this segment, in memory: a write or an extension
+/// past the capacity is refused as storage full, as a real volume refuses it.
+struct Volume {
+    io: MemoryIo,
+    capacity: u64,
+    used: Arc<AtomicU64>,
+}
+
+impl SegmentIo for Volume {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        self.io.read_at(offset, buf)
+    }
+
+    fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
+        let end = offset + data.len() as u64;
+        if end > self.capacity && end > self.io.size()? {
+            return Err(std::io::ErrorKind::StorageFull.into());
+        }
+        self.io.write_at(offset, data)?;
+        self.used.store(self.io.size()?, Ordering::Release);
+        Ok(())
+    }
+
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        if len > self.capacity {
+            return Err(std::io::ErrorKind::StorageFull.into());
+        }
+        self.io.truncate(len)?;
+        self.used.store(len, Ordering::Release);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn size(&self) -> std::io::Result<u64> {
+        self.io.size()
+    }
+}
+
+/// A watched segment on a volume of `capacity` bytes; `query` says whether the host reports the
+/// free space.
+fn on_volume(capacity: u64, query: bool) -> WatchedIo<Volume> {
+    let used = Arc::new(AtomicU64::new(0));
+    let seen = used.clone();
+    let free: FreeSpace = if query {
+        Arc::new(move || Some(capacity.saturating_sub(seen.load(Ordering::Acquire))))
+    } else {
+        Arc::new(|| None)
+    };
+    WatchedIo::new(
+        Volume {
+            io: MemoryIo::new(),
+            capacity,
+            used,
+        },
+        free,
+    )
+}
+
+/// Push rows (and, with `events`, one change per event signal per chunk) until the volume
+/// refuses one, then close the segment as stopped: it must end with `END`, its status and a
+/// digest its bits hash to, over every whole chunk it holds.
+fn fill(io: WatchedIo<Volume>, schema: &crate::Schema, events: u32) -> (u64, Vec<u8>) {
+    use crate::{EventChange, EventValue, Logic, RunMeta, SegmentWriter};
+    let mut writer =
+        SegmentWriter::with_options(io, schema, &RunMeta::default(), 64, true).unwrap();
+    let mut row = 0_u64;
+    let refused = loop {
+        let x = row as f64 * 1e-9;
+        if events > 0 && row.is_multiple_of(64) {
+            let changes: Vec<EventChange> = (1..=events)
+                .map(|signal| EventChange {
+                    signal,
+                    time: x,
+                    sequence: (row / 64) as u32,
+                    value: EventValue::Logic(if (row / 64 + u64::from(signal)).is_multiple_of(2) {
+                        Logic::Zero
+                    } else {
+                        Logic::One
+                    }),
+                    strength: 0,
+                })
+                .collect();
+            if let Err(error) = writer.push_events(&changes) {
+                break error;
+            }
+        }
+        if let Err(error) = writer.push_row(x, &[(row % 7) as f64]) {
+            break error;
+        }
+        row += 1;
+    };
+    assert_eq!(refused, StoreError::DiskFull);
+    let (receipt, io) = writer
+        .finish(RunStatus::Stopped(StopReason::DiskFull))
+        .unwrap();
+    let bytes = io.into_inner().io.into_bytes();
+    assert_eq!(
+        bytes.len() as u64,
+        receipt.bytes,
+        "nothing held past the tail"
+    );
+    let mut reader = SegmentReader::open(MemoryIo::from_bytes(bytes.clone())).unwrap();
+    let SegmentState::Complete { status, digest } = reader.state().clone() else {
+        panic!("END was written");
+    };
+    assert_eq!(status, RunStatus::Stopped(StopReason::DiskFull));
+    assert_eq!(reader.rows(), receipt.rows);
+    assert_eq!(reader.digest().unwrap(), digest);
+    (receipt.chunks, bytes)
+}
+
+fn one_signal(events: u32) -> crate::Schema {
+    let mut signals = vec![crate::Signal::new("v(out)", "V", crate::SignalKind::Real)];
+    signals.extend(
+        (0..events).map(|bit| crate::Signal::new(format!("d{bit}"), "", crate::SignalKind::Logic)),
+    );
+    crate::Schema {
+        x: crate::Axis {
+            name: "time".into(),
+            unit: "s".into(),
+        },
+        signals,
+    }
+}
+
+/// `END` copies every index entry, so a segment of many chunks needs far more than a fixed
+/// reserve to close: a one-signal run of more than 25,000 chunks that fills its volume still ends
+/// with `END`.
+#[test]
+fn a_run_of_twenty_five_thousand_chunks_that_fills_its_volume_still_writes_end() {
+    let (chunks, _) = fill(on_volume(24 << 20, true), &one_signal(0), 0);
+    assert!(chunks > 25_000, "{chunks} chunks");
+}
+
+/// Every event signal's last changes and every `EVENTS` frame's index entry are part of closing:
+/// a run of 300 event signals that fills its volume still ends with `END`.
+#[test]
+fn a_run_of_three_hundred_event_signals_that_fills_its_volume_still_writes_end() {
+    let (_, bytes) = fill(on_volume(40 << 20, true), &one_signal(300), 300);
+    let frames = super::support::walk(&bytes)
+        .iter()
+        .filter(|frame| frame.kind == crate::format::FrameKind::Events)
+        .count();
+    assert!(frames > 25_000, "{frames} EVENTS frames");
+}
+
+/// A host that cannot say what is free still keeps room to close: the segment holds it past its
+/// end, and gives it back once `END` is written.
+#[test]
+fn a_run_on_a_host_that_cannot_report_free_space_still_writes_end() {
+    let (chunks, _) = fill(on_volume(24 << 20, false), &one_signal(0), 0);
+    assert!(chunks > 25_000, "{chunks} chunks");
+}

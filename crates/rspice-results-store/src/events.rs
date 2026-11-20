@@ -383,6 +383,20 @@ impl EventBuffer {
         (self.written, count as u64, t_min, t_max)
     }
 
+    /// The most payload bytes this signal's `EVENTS` frame can take, trailer included: a full
+    /// buffer's changes, each block at its codec's worst.
+    pub(crate) fn frame_bound(&self) -> usize {
+        let count = EVENTS_PER_FRAME;
+        let stride = self.kind.value_bytes();
+        48 + stride.next_multiple_of(8)
+            + 40 * count.div_ceil(EVENTS_PER_BUCKET)
+            + 12 * 4
+            + 2 * codec::max_encoded_len(8 * count)
+            + codec::max_encoded_len(stride * count)
+            + codec::max_encoded_len(count)
+            + crate::digest::HASH_STATE_LEN
+    }
+
     /// The values seen among `range`: flags, then low and high as raw words. Logic: one flag bit
     /// per level seen. Real: NaN seen, then the range. Bus: X seen, Z seen, then the range of the
     /// value's low 64 bits.

@@ -24,10 +24,12 @@ use crate::events::{EventBuffer, EventChange, EventKind, EventScratch};
 use crate::format::{
     BLOCK_ENTRY_LEN, FLAG_PARTIAL, FORMAT_VERSION, FRAME_HEADER_LEN, FrameBuf, FrameKind,
     INDEX_CHUNKS, INDEX_ENTRY_LIMIT, LEVEL1_ROWS, POINTERS_AT, POINTERS_LEN, SEGMENT_MAGIC,
-    SUPERBLOCK_LEN, bucket_rows, canonical, chunk_crcs_at, chunk_rows, chunk_summaries_at,
-    fold_max, fold_min, summary_buckets_at, summary_crcs_len, summary_frame_rows,
+    SUMMARY_FRAME_BUCKETS, SUPERBLOCK_LEN, bucket_rows, canonical, chunk_crcs_at, chunk_rows,
+    chunk_summaries_at, fold_max, fold_min, summary_buckets_at, summary_crcs_len,
+    summary_frame_rows,
 };
 use crate::summary::Pyramid;
+use crate::watch::CLOSING_RESERVE;
 use crate::{RunMeta, Schema, SegmentIo, StoreError, codec};
 
 /// Why a run stopped before completing.
@@ -425,8 +427,48 @@ impl<I: SegmentIo> Encoder<I> {
         &self.io
     }
 
+    /// The most bytes closing the segment can take after the next frame: every event signal's
+    /// buffer written as a full frame, the summary frames a chunk and the close can write at
+    /// every level, two `INDEX` frames over every entry not yet in one and the entries the next
+    /// frame and the close add, and `END` over every entry. Annotations added at the end (a
+    /// transient's shell, which names each signal) are allowed twice the schema's bytes, and
+    /// [`CLOSING_RESERVE`] more covers the status message and the rest.
+    pub(crate) fn closing_bytes(&self) -> u64 {
+        let frame = |payload: usize| (FRAME_HEADER_LEN + payload).next_multiple_of(8) as u64;
+        let events: u64 = self
+            .events
+            .iter()
+            .map(|buffer| frame(buffer.frame_bound()))
+            .sum();
+        let levels = self.pyramid.levels() + 1;
+        let analog = self.layout.analog.len();
+        let summary = frame(summary_buckets_at(analog) + 16 * SUMMARY_FRAME_BUCKETS * (1 + analog));
+        let pending = self.entries.len() + 1 + 2 * self.events.len() + 2 * levels;
+        let indexed: usize = self
+            .index_frames
+            .iter()
+            .map(|&(_, count)| count as usize)
+            .sum();
+        let annotations: usize = self
+            .annotations
+            .iter()
+            .map(|(key, bytes)| 8 + key.len() + bytes.len())
+            .sum();
+        let end = frame(
+            96 + 16 * self.events.len() + annotations + INDEX_ENTRY_LEN * (indexed + pending),
+        );
+        events
+            + 2 * levels as u64 * summary
+            + 2 * frame(INDEX_HEADER_LEN + INDEX_ENTRY_LEN * pending)
+            + end
+            + 2 * self.layout.schema_bytes.len() as u64
+            + CLOSING_RESERVE
+    }
+
     /// Append the frame in `self.frame` at the real tail.
     fn emit_real(&mut self) -> Result<u64, StoreError> {
+        let closing = self.closing_bytes();
+        self.io.reserve(closing);
         let at = self.tail;
         let bytes = self.frame.finish()?;
         self.io.write_at(at, bytes)?;
@@ -714,6 +756,7 @@ impl<I: SegmentIo> Encoder<I> {
         buffer.digest(self.digest.event_stream(position, count));
         let state = self.digest.event_state(position);
         self.frame.put(&state);
+        debug_assert!(self.frame.payload_len() <= self.events[position].frame_bound());
         let offset = match self.emit_real() {
             Ok(offset) => offset,
             Err(error) => {
@@ -760,6 +803,8 @@ impl<I: SegmentIo> Encoder<I> {
         let written = if frames.is_empty() {
             Ok(())
         } else {
+            let closing = self.closing_bytes();
+            self.io.reserve(closing);
             self.io.write_at(self.tail, &frames)
         };
         self.provisional = frames;
@@ -842,6 +887,8 @@ impl<I: SegmentIo> Encoder<I> {
         }
         let end = self.emit_real()?;
         self.settle()?;
+        // A watched segment that held its closing room past the tail gives it back.
+        self.io.truncate(self.tail)?;
         self.io.flush()?;
         self.write_pointers(end)?;
         self.io.flush()?;

@@ -23,6 +23,9 @@ pub trait SegmentIo {
     /// The writer is closing the segment: what it writes from here on is the run's last event
     /// changes, summaries, index and `END`, never another row.
     fn closing(&mut self) {}
+    /// The most bytes the writer can still need to close the segment after its next write: a
+    /// watched segment keeps them free (see [`crate::WatchedIo`]). Told before every frame.
+    fn reserve(&mut self, _closing: u64) {}
 }
 
 impl<T: SegmentIo + ?Sized> SegmentIo for Box<T> {
@@ -43,6 +46,9 @@ impl<T: SegmentIo + ?Sized> SegmentIo for Box<T> {
     }
     fn closing(&mut self) {
         (**self).closing();
+    }
+    fn reserve(&mut self, closing: u64) {
+        (**self).reserve(closing);
     }
 }
 
