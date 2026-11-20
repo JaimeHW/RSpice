@@ -700,7 +700,7 @@ impl AppState {
             model: &mut self.model,
             platform: &mut self.platform,
             workspace: self.workbench.workspace,
-            presentation: &self.results.results,
+            presentation: &*self.results.results,
         };
         let Some(LoadedProject {
             announcement,
@@ -1448,7 +1448,7 @@ fn save_parts(state: &mut AppState) -> SaveParts<'_> {
             model: &mut state.model,
             platform: &mut state.platform,
             workspace,
-            presentation: &state.results.results,
+            presentation: &*state.results.results,
         },
         workbench: &mut state.workbench,
         facts,
@@ -1677,7 +1677,7 @@ fn live_host(state: &mut AppState) -> LiveHost<'_> {
         model: &mut state.model,
         workbench: &mut state.workbench,
         platform: &state.platform,
-        presentation: &state.results.results,
+        presentation: &*state.results.results,
         design: &*state.design,
     }
 }

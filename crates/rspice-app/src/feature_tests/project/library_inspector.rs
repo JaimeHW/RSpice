@@ -49,7 +49,7 @@ fn announced(
                     model: &state.model,
                     platform: &state.platform,
                     workspace: state.workbench.workspace,
-                    presentation: &state.results.results,
+                    presentation: &*state.results.results,
                 },
             };
             let _ = project_library(ui, &inspector);

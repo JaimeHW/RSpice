@@ -33,7 +33,7 @@ impl LifecycleSource for AppState {
             model: &self.model,
             platform: &self.platform,
             workspace: self.workbench.workspace,
-            presentation: &self.results.results,
+            presentation: &*self.results.results,
         }
     }
 }
@@ -44,7 +44,7 @@ impl LifecycleSourceMut for AppState {
             model: &mut self.model,
             platform: &mut self.platform,
             workspace: self.workbench.workspace,
-            presentation: &self.results.results,
+            presentation: &*self.results.results,
         }
     }
 }

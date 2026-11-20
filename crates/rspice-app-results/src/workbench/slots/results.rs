@@ -32,8 +32,9 @@ pub struct ResultsState {
     /// `simulation.data_version` at the last time the Results view was shown;
     /// drives the "new results" badge on the Results tab.
     pub results_seen_version: u64,
-    /// Results workspace state (viewer, cursors, plot caches).
-    pub results: crate::workbench::documents::result_document::ResultsState,
+    /// Results workspace state (viewer, cursors, plot caches). Boxed: its per-run caches would
+    /// otherwise outgrow the slot's stack budget.
+    pub results: Box<crate::workbench::documents::result_document::ResultsState>,
 
     /// Runtime-only draft for the project-owned result-document transaction.
     pub create_result_document: rspice_results_ui::create_document::CreateResultDocumentDialogState,
@@ -341,7 +342,7 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         &self,
     ) -> &dyn rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource
     {
-        &self.results
+        &*self.results
     }
 
     fn frozen(&self) -> Box<dyn crate::workbench::framework::ports::ResultsPeer> {
