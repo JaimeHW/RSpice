@@ -217,6 +217,35 @@ pub(crate) fn create_segment() -> Result<(PathBuf, TemporaryIo), String> {
         .map_err(|error| format!("{}: {error}", path.display()))
 }
 
+/// A new segment of this process's store folder holding the rows `write` pushes, finished and
+/// open for reading: where a finished analysis's samples go so that nothing holds them in memory
+/// and a saved project names the segment instead of the samples. Deleted with the last column
+/// that reads it, as a transient's own segment is.
+pub fn write_finished_segment(
+    schema: &rspice_results_store::Schema,
+    meta: &rspice_results_store::RunMeta,
+    write: impl FnOnce(
+        &mut rspice_results_store::SegmentWriter<TemporaryIo>,
+    ) -> Result<(), rspice_results_store::StoreError>,
+) -> Result<Arc<StoredRun>, String> {
+    let (path, io) = create_segment()?;
+    let failed = |error: rspice_results_store::StoreError| {
+        let _ = fs::remove_file(&path);
+        format!("{}: {error}", path.display())
+    };
+    let mut writer = rspice_results_store::SegmentWriter::create(io, schema, meta)
+        .map_err(|error| failed(error))?;
+    write(&mut writer).map_err(|error| failed(error))?;
+    let (_, io) = writer
+        .finish(rspice_results_store::RunStatus::Completed)
+        .map_err(|error| failed(error))?;
+    let reader = rspice_results_store::SegmentReader::open(
+        Box::new(io.into_file()) as rspice_results::store_reader::SegmentBytes
+    )
+    .map_err(|error| failed(error))?;
+    Ok(StoredRun::temporary(rspice_results::store_reader::StoreReader::new(reader), path).shared())
+}
+
 /// A segment of this process's store folder, as its run writes it.
 ///
 /// Nothing reads the segment once this process ends: the last waveform that reads it deletes
@@ -224,7 +253,7 @@ pub(crate) fn create_segment() -> Result<(PathBuf, TemporaryIo), String> {
 /// segment in general is synced when its run ends (on macOS a full flush of the drive's cache,
 /// which waits for every other process's writes too). A run kept with a project is made durable
 /// when the project is saved.
-pub(crate) struct TemporaryIo(FileIo);
+pub struct TemporaryIo(FileIo);
 
 impl TemporaryIo {
     pub(crate) fn into_file(self) -> FileIo {
@@ -256,7 +285,7 @@ impl SegmentIo for TemporaryIo {
 
 /// A finished segment its waveforms read from, deleted with the last of them
 /// ([`StoredRun::temporary`]), and its columns and event signals.
-pub(crate) use rspice_results::store_reader::{
+pub use rspice_results::store_reader::{
     Segment as StoredRun, SegmentColumn as StoredColumn, SegmentEvents as StoredEventSignal,
 };
 

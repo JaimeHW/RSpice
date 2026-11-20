@@ -213,7 +213,15 @@ impl SimulationRun {
 
     /// Replace the provisional prefix for this exact task, or append the
     /// terminal result when no live presentation was published.
+    ///
+    /// The result's samples go into a results store segment first, so the
+    /// run holds windows of it and a saved project names the segment. A
+    /// store that cannot take them leaves them in memory, said in the log,
+    /// and the next save tries again.
     pub fn replace_live_or_add_analysis(&mut self, mut analysis: AnalysisResult) {
+        if let Err(error) = super::run_store::store_analysis(&mut analysis.data) {
+            log::warn!("{}: {error}", analysis.label);
+        }
         let matching_live = analysis.provenance().and_then(|provenance| {
             let instance = provenance.source_instance_id();
             self.analyses.iter().position(|existing| {
@@ -232,6 +240,27 @@ impl SimulationRun {
         } else {
             self.add_analysis(analysis);
         }
+    }
+
+    /// Whether any analysis of the run holds samples in memory rather than in
+    /// a results store.
+    #[must_use]
+    pub fn holds_samples_in_memory(&self) -> bool {
+        self.analyses
+            .iter()
+            .any(|analysis| super::run_store::holds_samples_in_memory(&analysis.data))
+    }
+
+    /// Put every sample the run's analyses hold in memory into results store
+    /// segments. Stops at the first analysis the store cannot take.
+    pub fn store_samples(&mut self) -> Result<(), String> {
+        for analysis in &mut self.data.analyses {
+            if super::run_store::holds_samples_in_memory(&analysis.data) {
+                super::run_store::store_analysis(&mut analysis.data)
+                    .map_err(|error| format!("{}: {error}", analysis.label))?;
+            }
+        }
+        Ok(())
     }
 
     #[cfg(any(test, feature = "test-support"))]

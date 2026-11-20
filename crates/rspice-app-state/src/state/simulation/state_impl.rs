@@ -819,6 +819,28 @@ impl SimulationState {
         deleted
     }
 
+    /// Put every sample a retained run still holds in memory into results
+    /// store segments, so a file written next names segments and holds no
+    /// samples. A history already in the store is left untouched, its
+    /// revision with it. Fails with the first run the store cannot take.
+    pub fn store_retained_samples(&mut self) -> Result<(), String> {
+        let holding: Vec<usize> = self
+            .retained
+            .runs
+            .iter()
+            .enumerate()
+            .filter(|(_, run)| run.holds_samples_in_memory())
+            .map(|(index, _)| index)
+            .collect();
+        for index in holding {
+            let run = &mut self.retained.runs[index];
+            let label = run.label.clone();
+            run.store_samples()
+                .map_err(|error| format!("{label}: {error}"))?;
+        }
+        Ok(())
+    }
+
     /// Replace persisted run history and rebuild every derived selection cache.
     ///
     /// Project files persist stable run and dataset IDs plus a run-local

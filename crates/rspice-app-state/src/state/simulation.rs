@@ -26,6 +26,7 @@ pub use rspice_results::noise::{
 mod run;
 #[cfg(test)]
 mod run_history;
+pub mod run_store;
 pub use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
 #[cfg(test)]
 mod run_receipt;

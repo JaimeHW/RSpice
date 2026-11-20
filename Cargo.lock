@@ -5594,6 +5594,7 @@ dependencies = [
  "rspice-pack",
  "rspice-project",
  "rspice-results",
+ "rspice-results-store",
  "rspice-results-ui",
  "rspice-schematic-editor",
  "rspice-simulation",

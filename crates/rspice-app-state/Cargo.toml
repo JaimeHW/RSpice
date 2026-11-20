@@ -36,6 +36,7 @@ rspice-results-ui.workspace = true
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-project.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
+rspice-results-store.workspace = true
 rspice-hardcopy-contract.workspace = true
 rspice-model-library.workspace = true
 rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "monte-carlo-checkpoint", "native-bundle", "project-results", "result-csv", "result-digital", "result-hdf5", "result-vcd", "result-waveform", "spice-raw", "table-schema", "xlsx"] }

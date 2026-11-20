@@ -426,3 +426,190 @@ C1 out 0 10n
     drop((reopened, models));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The longest array anywhere in `value`.
+fn longest_json_array(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(longest_json_array)
+            .max()
+            .unwrap_or(0)
+            .max(items.len()),
+        serde_json::Value::Object(fields) => {
+            fields.values().map(longest_json_array).max().unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
+fn sample_bits(values: &rspice_results::waveform::WaveformValues) -> Vec<u64> {
+    values.iter().map(|value| value.to_bits()).collect()
+}
+
+/// Run `deck`, save its run with a project named `name`, and reopen it: every analysis keeps its
+/// samples in a results store, the saved results hold none of them, and every sample reopens
+/// bit for bit from the segments kept beside the file. Returns the analysis types solved.
+fn saves_by_reference_and_reopens(deck: &str, name: &str) -> Vec<AnalysisType> {
+    let state: RunTestHost = super::super::test_execution::run_manual_batch_session(deck);
+    let simulation = &state.model.simulation;
+    let run = &simulation.retained.runs[0];
+    assert!(!run.analyses.is_empty(), "the deck solved nothing");
+    for analysis in &run.analyses {
+        assert!(
+            analysis.success,
+            "{}: {:?}",
+            analysis.label, analysis.error_message
+        );
+        for waveform in &analysis.waveforms {
+            let complex = waveform
+                .complex
+                .iter()
+                .flat_map(|complex| [&complex.real, &complex.imag]);
+            assert!(
+                [&waveform.x, &waveform.y]
+                    .into_iter()
+                    .chain(complex)
+                    .all(|values| values.is_stored()),
+                "{} of {} is kept in the results store",
+                waveform.name,
+                analysis.label
+            );
+        }
+    }
+
+    let results = crate::io::capture_simulation_results(simulation);
+    let root = std::env::temp_dir().join(format!("rspice-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let file = root.join(format!("{name}.rspiceproj"));
+    rspice_app_services::io::result_segments::keep_segments_now(results.stored_segments(), &file)
+        .expect("the run's segments are kept beside the project");
+    let saved = serde_json::to_string(&results).expect("the project's results serialize");
+    let samples = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.waveforms)
+        .map(|waveform| waveform.y.len())
+        .max()
+        .unwrap_or(0);
+    assert!(samples > 8, "the deck's run is long enough to tell");
+    let longest = longest_json_array(&serde_json::from_str(&saved).unwrap());
+    assert!(
+        longest < samples,
+        "the saved results hold an array of {longest} in a run of {samples}"
+    );
+
+    rspice_results::store_reader::keep_segments_in(
+        &rspice_formats::project_results::segment_folder(&file),
+    );
+    let reopened = crate::io::simulation_state_from_results(
+        serde_json::from_str(&saved).expect("the project's results parse"),
+    )
+    .expect("the project's results restore");
+    let back = &reopened.retained.runs[0];
+    assert_eq!(back.analyses.len(), run.analyses.len());
+    for (before, after) in run.analyses.iter().zip(&back.analyses) {
+        assert_eq!(after.waveforms.len(), before.waveforms.len());
+        for (left, right) in before.waveforms.iter().zip(&after.waveforms) {
+            assert_eq!(right.name, left.name);
+            assert!(
+                right.y.is_stored(),
+                "{} reopens from its segment",
+                right.name
+            );
+            assert_eq!(
+                sample_bits(&right.x),
+                sample_bits(&left.x),
+                "{}",
+                right.name
+            );
+            assert_eq!(
+                sample_bits(&right.y),
+                sample_bits(&left.y),
+                "{}",
+                right.name
+            );
+            assert_eq!(
+                right
+                    .complex
+                    .as_ref()
+                    .map(|c| (sample_bits(&c.real), sample_bits(&c.imag))),
+                left.complex
+                    .as_ref()
+                    .map(|c| (sample_bits(&c.real), sample_bits(&c.imag))),
+                "{}",
+                right.name
+            );
+        }
+    }
+    let solved = run
+        .analyses
+        .iter()
+        .map(|analysis| analysis.analysis_type)
+        .collect();
+    drop(reopened);
+    let _ = std::fs::remove_dir_all(&root);
+    solved
+}
+
+#[test]
+fn an_ac_sweep_saves_by_reference_and_reopens_with_every_sample() {
+    let solved = saves_by_reference_and_reopens(
+        "ac sweep saved by reference
+V1 in 0 DC 0 AC 1
+R1 in out 1k
+C1 out 0 10n
+.ac dec 20 10 1meg
+.end
+",
+        "ac-by-reference",
+    );
+    assert_eq!(solved, [AnalysisType::Ac]);
+}
+
+#[test]
+fn a_noise_run_saves_by_reference_and_reopens_with_every_sample() {
+    let solved = saves_by_reference_and_reopens(
+        "noise run saved by reference
+V1 in 0 DC 0 AC 1
+R1 in out 1k
+R2 out 0 1k
+C1 out 0 10n
+.noise V(out) V1 dec 20 10 1meg
+.end
+",
+        "noise-by-reference",
+    );
+    assert_eq!(solved, [AnalysisType::Noise]);
+}
+
+#[test]
+fn a_dc_sweep_that_runs_down_saves_by_reference_and_reopens_with_every_sample() {
+    let solved = saves_by_reference_and_reopens(
+        "descending dc sweep saved by reference
+V1 in 0 DC 0
+R1 in out 1k
+R2 out 0 2k
+.dc V1 5 -5 -0.25
+.end
+",
+        "dc-down-by-reference",
+    );
+    assert_eq!(solved, [AnalysisType::DcSweep]);
+}
+
+#[test]
+fn a_transient_with_fft_cards_saves_by_reference_and_reopens_with_every_sample() {
+    let solved = saves_by_reference_and_reopens(
+        "fft deck saved by reference
+V1 in 0 SIN(0 1 1k)
+R1 in out 1k
+C1 out 0 10n
+.tran 10u 4m
+.fft V(out) start=0 stop=4m np=1024
+.end
+",
+        "fft-by-reference",
+    );
+    assert!(solved.contains(&AnalysisType::Transient), "{solved:?}");
+}
