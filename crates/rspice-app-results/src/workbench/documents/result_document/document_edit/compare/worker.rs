@@ -139,7 +139,7 @@ impl Worker {
     }
 
     /// Let a comparison held by `hold_jobs_for_tests` work.
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     pub(crate) fn release(&self) {
         self.job.release();
     }
