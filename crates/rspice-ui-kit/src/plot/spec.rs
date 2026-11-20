@@ -3,7 +3,7 @@
 
 use egui::Color32;
 
-use super::format::{offset_anchor_label, tick_label, tick_label_with_step, tick_offset_label};
+use super::format::{axis_tick_labels, offset_anchor_label, offset_tick_labels, tick_label};
 use super::sample::SweepShape;
 use super::scale::{TickSeries, XScale, anchor_label, decade_ticks, linear_ticks};
 
@@ -106,8 +106,14 @@ impl Axis {
             // Offsets are differences, so the transform's offset cancels out
             // of every tick and appears only in the anchor.
             Some(anchor) => {
-                for (value, label) in &mut self.ticks {
-                    *label = tick_offset_label((*value - anchor) * scale, display_step);
+                let deltas = self
+                    .ticks
+                    .iter()
+                    .map(|(value, _)| (*value - anchor) * scale)
+                    .collect::<Vec<_>>();
+                let labels = offset_tick_labels(&deltas, display_step);
+                for ((_, label), text) in self.ticks.iter_mut().zip(labels) {
+                    *label = text;
                 }
                 self.offset_anchor = Some(offset_anchor_label(
                     display(anchor),
@@ -116,8 +122,14 @@ impl Axis {
                 ));
             }
             None => {
-                for (value, label) in &mut self.ticks {
-                    *label = tick_label_with_step(display(*value), display_step);
+                let values = self
+                    .ticks
+                    .iter()
+                    .map(|(value, _)| display(*value))
+                    .collect::<Vec<_>>();
+                let labels = axis_tick_labels(&values, display_step);
+                for ((_, label), text) in self.ticks.iter_mut().zip(labels) {
+                    *label = text;
                 }
             }
         }

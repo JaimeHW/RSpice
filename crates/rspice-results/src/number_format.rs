@@ -392,13 +392,76 @@ pub fn tick_label_with_step(value: f64, step: f64) -> String {
     trimmed(format!("{:.*}", decimals, si_scaled(value, index))) + &tick_scale(index)
 }
 
-/// A tick stated as a signed offset from an axis anchor.
-pub fn tick_offset_label(delta: f64, step: f64) -> String {
-    if delta == 0.0 {
-        return "0".to_owned();
+/// The labels of evenly spaced axis ticks `step` apart, under one prefix.
+///
+/// A prefix chosen tick by tick put three scales on one axis ("999.8, 1k,
+/// 1.0002k", or "0, 50m, 0.1, 0.15"), which a reader has to convert before
+/// comparing two neighbours. The axis takes one: the prefix of its largest
+/// tick, or the one either side of it when that states every tick in fewer
+/// characters or with fewer leading zeros, so a window across 1000 reads
+/// `999.8, 1000, 1000.2`, one from zero to 150 m reads `0, 50m, 100m, 150m`
+/// and one from 200 to 1000 reads `200, 400, … 1000`, never `0.2k`.
+pub fn axis_tick_labels(values: &[f64], step: f64) -> Vec<String> {
+    let largest = values
+        .iter()
+        .map(|value| value.abs())
+        .filter(|value| value.is_finite())
+        .fold(0.0_f64, f64::max);
+    if !(step.is_finite() && step > 0.0) || largest == 0.0 {
+        return values.iter().map(|value| tick_label(*value)).collect();
     }
-    let sign = if delta < 0.0 { "−" } else { "+" };
-    format!("{sign}{}", tick_label_with_step(delta.abs(), step))
+    let base = si_index(largest);
+    // The shortest labels, then the fewest that start "0.", then the
+    // largest tick's own prefix.
+    let cost = |labels: &Vec<String>| {
+        let widest = labels
+            .iter()
+            .map(|label| label.chars().count())
+            .max()
+            .unwrap_or(0);
+        let fractional = labels
+            .iter()
+            .filter(|label| label.trim_start_matches('\u{2212}').starts_with("0."))
+            .count();
+        (widest, fractional)
+    };
+    [base, base + 1, base - 1]
+        .into_iter()
+        .map(|index| {
+            let decimals = step_decimals(si_scaled(step, index));
+            values
+                .iter()
+                .map(|value| {
+                    if *value == 0.0 || !value.is_finite() {
+                        tick_label(*value)
+                    } else {
+                        trimmed(format!("{:.*}", decimals, si_scaled(*value, index)))
+                            + &tick_scale(index)
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .min_by_key(cost)
+        .unwrap_or_default()
+}
+
+/// The labels of an offset axis' ticks, each a signed distance from the
+/// anchor, under one prefix as [`axis_tick_labels`] chooses it.
+pub fn offset_tick_labels(deltas: &[f64], step: f64) -> Vec<String> {
+    let magnitudes = deltas.iter().map(|delta| delta.abs()).collect::<Vec<_>>();
+    axis_tick_labels(&magnitudes, step)
+        .into_iter()
+        .zip(deltas)
+        .map(|(label, delta)| {
+            if label == "0" {
+                label
+            } else if *delta < 0.0 {
+                format!("\u{2212}{label}")
+            } else {
+                format!("+{label}")
+            }
+        })
+        .collect()
 }
 
 /// The anchor an offset axis states once, beside its ticks: the value every
@@ -590,6 +653,45 @@ mod tests {
         assert_eq!(fmt_si_significant(999.999_99, "V", 4), "1.000 kV");
     }
 
+    /// Every tick on an axis carries the same prefix, across six decades of
+    /// axis span and either side of a prefix boundary.
+    #[test]
+    fn an_axis_carries_one_prefix() {
+        let ticks = |values: &[f64], step: f64| axis_tick_labels(values, step);
+        assert_eq!(
+            ticks(&[0.0, 0.05, 0.1, 0.15], 0.05),
+            ["0", "50m", "100m", "150m"]
+        );
+        assert_eq!(
+            ticks(&[999.8, 999.9, 1000.0, 1000.1, 1000.2], 0.1),
+            ["999.8", "999.9", "1000", "1000.1", "1000.2"]
+        );
+        assert_eq!(
+            ticks(&[200.0, 400.0, 600.0, 800.0, 1000.0], 200.0),
+            ["200", "400", "600", "800", "1000"]
+        );
+        assert_eq!(
+            ticks(&[-1.0, -0.5, 0.0, 0.5, 1.0], 0.5),
+            ["\u{2212}1", "\u{2212}0.5", "0", "0.5", "1"]
+        );
+        for decade in -9..=3 {
+            let step = 2.0 * 10f64.powi(decade);
+            let values = (0..=5)
+                .map(|index| f64::from(index) * step)
+                .collect::<Vec<_>>();
+            let labels = ticks(&values, step);
+            let prefixes = labels[1..]
+                .iter()
+                .map(|label| label.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.'))
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(prefixes.len(), 1, "{labels:?}");
+        }
+        assert_eq!(
+            offset_tick_labels(&[-0.0002, 0.0, 0.0002], 0.0002),
+            ["\u{2212}200\u{b5}", "0", "+200\u{b5}"]
+        );
+    }
+
     #[test]
     fn tick_precision_follows_the_step_so_neighbours_differ() {
         assert_eq!(tick_label_with_step(1.000_2, 2.0e-4), "1.0002");
@@ -607,9 +709,10 @@ mod tests {
         assert_eq!(offset_anchor_label(1.0e-3, "s", 2.0e-8), "+1 ms");
         assert_eq!(offset_anchor_label(-2.5e-6, "s", 1.0e-11), "−2.5 µs");
         assert_eq!(offset_anchor_label(1.000_03e-3, "s", 1.0e-8), "+1.00003 ms");
-        assert_eq!(tick_offset_label(2.0e-8, 2.0e-8), "+20n");
-        assert_eq!(tick_offset_label(-4.0e-8, 2.0e-8), "−40n");
-        assert_eq!(tick_offset_label(0.0, 2.0e-8), "0");
+        assert_eq!(
+            offset_tick_labels(&[-4.0e-8, 0.0, 2.0e-8], 2.0e-8),
+            ["−40n", "0", "+20n"]
+        );
     }
 
     #[test]

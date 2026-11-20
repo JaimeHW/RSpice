@@ -1,7 +1,7 @@
 //! Axis scales and tick generation.
 
 use super::number_format::{
-    offset_anchor_label, tick_label, tick_label_with_step, tick_offset_label, wants_offset_notation,
+    axis_tick_labels, offset_anchor_label, offset_tick_labels, tick_label, wants_offset_notation,
 };
 
 /// X-axis scale.
@@ -120,7 +120,7 @@ pub fn linear_ticks(min: f64, max: f64, target: usize) -> TickSeries {
         // rounding error between two of them.
         (((min + max) * 0.5) / step).round() * step
     });
-    let ticks = (first..=last)
+    let values = (first..=last)
         .map(|index| {
             let value = index as f64 * step;
             // Snap float noise (e.g. 0.30000000000000004) to the step grid.
@@ -130,14 +130,18 @@ pub fn linear_ticks(min: f64, max: f64, target: usize) -> TickSeries {
         // moves a value by an ulp — and an edge tick that lands an ulp
         // outside draws its gridline in the axis gutter.
         .filter(|value| (min..=max).contains(value))
-        .map(|value| {
-            let label = match anchor {
-                Some(anchor) => tick_offset_label(value - anchor, step),
-                None => tick_label_with_step(value, step),
-            };
-            (value, label)
-        })
-        .collect();
+        .collect::<Vec<_>>();
+    let labels = match anchor {
+        Some(anchor) => offset_tick_labels(
+            &values
+                .iter()
+                .map(|value| value - anchor)
+                .collect::<Vec<_>>(),
+            step,
+        ),
+        None => axis_tick_labels(&values, step),
+    };
+    let ticks = values.into_iter().zip(labels).collect();
     TickSeries {
         ticks,
         anchor,
