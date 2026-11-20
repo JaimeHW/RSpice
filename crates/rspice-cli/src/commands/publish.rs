@@ -85,10 +85,15 @@ struct StagedDirectory {
     staged: std::path::PathBuf,
     destination: std::path::PathBuf,
     place: PlaceDirectory,
+    discard: DiscardDirectory,
 }
 
 /// Put the directory staged at the first path at the second, replacing what it may replace.
 pub type PlaceDirectory = fn(&Path, &Path) -> Result<(), CliError>;
+
+/// Remove the directory staged at a path when its set is abandoned, with whatever its stager
+/// holds for it (a results store's lock, whose file goes with it).
+pub type DiscardDirectory = fn(&Path);
 
 impl RunTransactionState {
     fn adopt(&self, staged: StagedArtifact, manifest: bool) -> Result<(), CliError> {
@@ -229,17 +234,21 @@ impl RunTransactionState {
 
 fn discard_directories(directories: Vec<StagedDirectory>) {
     for directory in directories {
-        // A directory that cannot be removed stays under its private name.
-        let _ = std::fs::remove_dir_all(&directory.staged);
+        (directory.discard)(&directory.staged);
     }
 }
 
 /// Publish the directory staged at `staged` to `destination`, through `place`.
 ///
 /// With a transaction open on this thread the directory joins it: it is placed once every file
-/// of the set has committed, and removed if the set is abandoned. Otherwise it is placed before
-/// this returns.
-pub fn directory(staged: &Path, destination: &Path, place: PlaceDirectory) -> Result<(), CliError> {
+/// of the set has committed, and removed through `discard` if the set is abandoned. Otherwise it
+/// is placed before this returns.
+pub fn directory(
+    staged: &Path,
+    destination: &Path,
+    place: PlaceDirectory,
+    discard: DiscardDirectory,
+) -> Result<(), CliError> {
     match current() {
         Some(state) => {
             state
@@ -250,6 +259,7 @@ pub fn directory(staged: &Path, destination: &Path, place: PlaceDirectory) -> Re
                     staged: staged.to_path_buf(),
                     destination: destination.to_path_buf(),
                     place,
+                    discard,
                 });
             Ok(())
         }

@@ -2875,7 +2875,8 @@ impl RunStore {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((dir.clone(), lock));
-        let placed = crate::commands::publish::directory(&dir, &target, place_store);
+        let placed =
+            crate::commands::publish::directory(&dir, &target, place_store, discard_staged_store);
         drop(publication);
         placed?;
         Ok(Some(target))
@@ -2936,6 +2937,22 @@ fn place_store(staged: &Path, target: &Path) -> Result<(), CliError> {
         return Err(CliError::output_error(target, error));
     }
     Ok(())
+}
+
+/// Remove a store staged for a publication set the run abandoned, then let go of its lock, whose
+/// file goes with it. A lock left in [`STAGED_LOCKS`] would be held until the process ends, and
+/// a process ends without dropping it, so its file would stay beside the output.
+fn discard_staged_store(staged: &Path) {
+    // A store that cannot be removed stays under its private name, for the next run to sweep.
+    let _ = std::fs::remove_dir_all(staged);
+    let released = {
+        let mut locks = STAGED_LOCKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let position = locks.iter().position(|(dir, _)| dir == staged);
+        position.map(|position| locks.swap_remove(position))
+    };
+    drop(released);
 }
 
 /// The locks of the stores waiting under their private names to be placed, by private directory.
