@@ -30,7 +30,7 @@ use rspice_app_services::workbench::lifecycle::durable_records::{
     forget_browser_tasks, keep_browser_records_in, run_browser_tasks,
 };
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
-    CHECKPOINT_ENCODINGS, ProjectCheckpointReason, list_records,
+    CHECKPOINT_ENCODINGS, ProjectCheckpointReason, capture_for_records, list_records,
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     SaveScope, active_document_is_dirty, has_unsaved_changes, has_unsaved_changes_fresh,
@@ -183,6 +183,27 @@ fn keep_a_run(app: &mut RSpiceApp, samples: usize) {
         .expect("the run's provenance seals");
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.model.simulation.retained.next_run_id = 1;
+}
+
+/// The bytes the open project's autosave takes in a browser's records now,
+/// written into a browser of its own to measure them.
+fn autosave_bytes(app: &RSpiceApp) -> usize {
+    let scratch = MemoryOrigin::new(None);
+    let records = scratch.store();
+    let saved_generation = app
+        .state
+        .platform
+        .browser_project_binding_receipt
+        .as_ref()
+        .map(|receipt| receipt.accepted_generation);
+    let capture = capture_for_records(
+        &app.state,
+        ProjectCheckpointReason::Autosave,
+        saved_generation,
+    )
+    .expect("the project is read for its autosave");
+    block_on(capture.publish(&*records, None)).expect("the autosave is measured");
+    scratch.used()
 }
 
 /// The autosave interval passes: the frame captures the project, the
@@ -456,12 +477,20 @@ fn when_the_browser_is_full_the_autosave_is_kept_and_the_runs_left_out_are_named
         browser.session.record(RUNS_KEY).is_some(),
         "the runs are kept apart from the session"
     );
-    // Nothing more fits.
-    browser.origin.set_quota(Some(browser.origin.used()));
+    let runs = browser
+        .session
+        .record(RUNS_KEY)
+        .map(|record| record.stored_len())
+        .unwrap_or_default();
 
     for index in 1..=5 {
         edit(&mut app, index);
     }
+    // Nothing more fits: the autosave the edits make has room only once the
+    // runs record gives up its space. The run's samples are in the results
+    // store, not in the browser's records, so the autosave is measured.
+    let autosave = autosave_bytes(&app);
+    browser.origin.set_quota(Some(autosave + runs / 2));
     autosave_interval_passes(&ctx, &mut app);
     assert_eq!(browser.autosaves(&app), 1, "the autosave is kept");
     assert!(
