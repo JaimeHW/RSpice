@@ -1671,6 +1671,9 @@ fn show_unit_pane(
     let cursors = (host.session().cursor_strip == Some(model.analysis_index)
         || (host.session().linked_cursors && cursor_domain_matches))
         .then_some(host.session().cursors);
+    // A click on a strip the pair does not stand on starts the pair afresh
+    // there, so it places A however many cursors stood elsewhere.
+    let places_a = cursors.is_none() || host.session().cursor_a_is_next();
     let markers = pane_view::plot_markers(
         model,
         pane,
@@ -1705,7 +1708,7 @@ fn show_unit_pane(
         family_envelopes,
         find_nearest: host.session().marker_tool.is_armed()
             || host.session().trace_pick.is_armed()
-            || (host.session().cursor_placement_enabled() && host.session().cursor_a_is_next()),
+            || (host.session().cursor_placement_enabled() && places_a),
     };
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
     let response = drawn.response;
@@ -1750,21 +1753,19 @@ fn show_unit_pane(
     } else if let Some(clicked_x) = response.clicked_x
         && host.session().cursor_placement_enabled()
     {
-        let placing_cursor_a = host.session().cursor_a_is_next();
         let nearest_anchor =
-            placing_cursor_a.then(|| drawn.nearest_trace.map(|trace| anchor_key(model, trace)));
+            places_a.then(|| drawn.nearest_trace.map(|trace| anchor_key(model, trace)));
         let results = host.session_mut();
-        if results.cursor_strip != Some(model.analysis_index)
-            && (!results.linked_cursors || !cursor_domain_matches)
-        {
+        if cursors.is_none() {
             results.cursors = CursorPair::default();
         }
         results.cursor_strip = Some(model.analysis_index);
-        if placing_cursor_a {
+        if places_a {
             results.cursor_a_anchor = nearest_anchor.flatten();
         }
-        results.stepping_cursor = results.cursors.next_placed();
-        results.cursors.place(clicked_x);
+        if let Some(placed) = results.cursors.place(clicked_x) {
+            results.stepping_cursor = placed;
+        }
     }
 
     if response.view.reset {

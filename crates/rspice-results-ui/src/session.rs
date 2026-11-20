@@ -787,7 +787,7 @@ impl ResultViewerState {
     }
 
     pub fn cursor_a_is_next(&self) -> bool {
-        self.cursors.a.is_none() || self.cursors.b.is_some()
+        self.cursors.next_placed() == Some(CursorId::A)
     }
 
     pub fn toggle_linked_cursors(&mut self) {

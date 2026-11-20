@@ -1,8 +1,9 @@
 //! A/B measurement cursor state.
 //!
-//! Placement follows the design: first click places A, second places B,
-//! a third restarts at A. Values and deltas are read by the right panel;
-//! the plot only draws the verticals and letter flags.
+//! The first click places A and the second B. After that a click places
+//! nothing and deletes nothing: a cursor moves by dragging its line, by the
+//! arrow keys, or by a command that names it. Values and deltas are read by
+//! the readout; the plot only draws the verticals and letter flags.
 
 /// One cursor of the A/B pair.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -40,24 +41,21 @@ pub struct CursorPair {
 }
 
 impl CursorPair {
-    /// Apply one click at `x`.
-    pub fn place(&mut self, x: f64) {
-        match (self.a, self.b) {
-            (None, _) => self.a = Some(x),
-            (Some(_), None) => self.b = Some(x),
-            (Some(_), Some(_)) => {
-                self.a = Some(x);
-                self.b = None;
-            }
-        }
+    /// Apply one click at `x`, and say which cursor it placed: A first,
+    /// then B, then none. A click never takes a cursor away; restarting at A
+    /// on the third click deleted B, a measurement the reader had made.
+    pub fn place(&mut self, x: f64) -> Option<CursorId> {
+        let placed = self.next_placed()?;
+        self.set(placed, x);
+        Some(placed)
     }
 
-    /// Which cursor the next click places.
-    pub fn next_placed(&self) -> CursorId {
-        if self.a.is_some() && self.b.is_none() {
-            CursorId::B
-        } else {
-            CursorId::A
+    /// Which cursor the next click places, if any.
+    pub fn next_placed(&self) -> Option<CursorId> {
+        match (self.a, self.b) {
+            (None, _) => Some(CursorId::A),
+            (Some(_), None) => Some(CursorId::B),
+            (Some(_), Some(_)) => None,
         }
     }
 
@@ -92,27 +90,29 @@ impl CursorPair {
 mod tests {
     use super::*;
 
+    /// The first click places A, the second B, and a third leaves both
+    /// cursors where they were.
     #[test]
-    fn place_cycle() {
+    fn a_third_click_leaves_both_cursors_where_they_were() {
         let mut c = CursorPair::default();
-        c.place(1.0);
+        assert_eq!(c.place(1.0), Some(CursorId::A));
         assert_eq!(c.a, Some(1.0));
-        c.place(2.0);
+        assert_eq!(c.place(2.0), Some(CursorId::B));
         assert_eq!(c.b, Some(2.0));
-        c.place(3.0);
-        assert_eq!((c.a, c.b), (Some(3.0), None));
+        assert_eq!(c.place(3.0), None);
+        assert_eq!((c.a, c.b), (Some(1.0), Some(2.0)));
         c.clear();
         assert!(!c.any());
     }
 
     #[test]
-    fn the_next_click_places_the_cursor_the_cycle_is_on() {
+    fn the_next_click_places_the_cursor_still_missing() {
         let mut c = CursorPair::default();
-        assert_eq!(c.next_placed(), CursorId::A);
+        assert_eq!(c.next_placed(), Some(CursorId::A));
         c.place(1.0);
-        assert_eq!(c.next_placed(), CursorId::B);
+        assert_eq!(c.next_placed(), Some(CursorId::B));
         c.place(2.0);
-        assert_eq!(c.next_placed(), CursorId::A);
+        assert_eq!(c.next_placed(), None);
         c.set(CursorId::B, 5.0);
         assert_eq!(
             (c.get(CursorId::A), c.get(CursorId::B)),
