@@ -223,9 +223,13 @@ impl HbSolver {
             SolverError::InvalidCircuit(message) => {
                 HbError::InvalidCircuit(format!("{context}: {message}"))
             }
-            SolverError::OutOfMemory | SolverError::Overflow => {
-                HbError::LinearSolveFailed(format!("{context}: {error}"))
+            // A correction that leaves the finite range belongs to the state
+            // whose Jacobian produced it, as an overflowing transient trial
+            // does, so continuation steps around it.
+            SolverError::Overflow => {
+                HbError::LinearConvergenceFailed(format!("{context}: {error}"))
             }
+            SolverError::OutOfMemory => HbError::LinearSolveFailed(format!("{context}: {error}")),
         }
     }
 }
@@ -244,6 +248,7 @@ mod tests {
         for error in [
             SolverError::ConvergenceFailed(7),
             SolverError::InaccurateSolution(1e-8),
+            SolverError::Overflow,
         ] {
             let cause = error.to_string();
             let mapped = HbSolver::map_linear_solve_error_with_context(error, "exact 258x258 step");
@@ -251,12 +256,10 @@ mod tests {
             assert!(mapped.to_string().contains(&cause));
             assert!(mapped.to_string().contains("exact 258x258 step"));
         }
-        for error in [SolverError::OutOfMemory, SolverError::Overflow] {
-            let cause = error.to_string();
-            let mapped = HbSolver::map_linear_solve_error(error);
-            assert!(!mapped.is_convergence_failure(), "{mapped}");
-            assert!(mapped.to_string().contains(&cause));
-        }
+        let cause = SolverError::OutOfMemory.to_string();
+        let mapped = HbSolver::map_linear_solve_error(SolverError::OutOfMemory);
+        assert!(!mapped.is_convergence_failure(), "{mapped}");
+        assert!(mapped.to_string().contains(&cause));
         let malformed = HbSolver::map_linear_solve_error(SolverError::InvalidCircuit(
             "malformed operator".to_owned(),
         ));

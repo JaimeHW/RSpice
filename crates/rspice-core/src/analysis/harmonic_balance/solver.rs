@@ -169,7 +169,8 @@ pub enum HbError {
     ConvergenceFailed { iterations: usize, residual: Value },
     /// Matrix is singular
     SingularMatrix,
-    /// A finite linear correction could not be certified. Continuation may retry it.
+    /// The current state's linear correction could not be certified, or
+    /// left the finite range. Continuation may retry from another state.
     LinearConvergenceFailed(String),
     /// A linear solve failed for a reason that continuation cannot repair.
     LinearSolveFailed(String),
