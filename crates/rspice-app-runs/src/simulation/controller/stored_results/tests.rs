@@ -452,6 +452,12 @@ fn sample_bits(values: &rspice_results::waveform::WaveformValues) -> Vec<u64> {
 /// bit for bit from the segments kept beside the file. Returns the analysis types solved.
 fn saves_by_reference_and_reopens(deck: &str, name: &str) -> Vec<AnalysisType> {
     let state: RunTestHost = super::super::test_execution::run_manual_batch_session(deck);
+    host_saves_by_reference_and_reopens(&state, name)
+}
+
+/// The run `state` holds saves by reference and reopens with every sample equal; the kinds of
+/// analysis it solved.
+fn host_saves_by_reference_and_reopens(state: &RunTestHost, name: &str) -> Vec<AnalysisType> {
     let simulation = &state.model.simulation;
     let run = &simulation.retained.runs[0];
     assert!(!run.analyses.is_empty(), "the deck solved nothing");
@@ -612,6 +618,91 @@ C1 out 0 10n
         "fft-by-reference",
     );
     assert!(solved.contains(&AnalysisType::Transient), "{solved:?}");
+}
+
+/// A transient the plan checkpoints is solved in memory, not streamed into a segment; its
+/// samples still go into the results store when it is retained, and its checkpoint image stays
+/// in the run record.
+#[test]
+fn a_checkpointed_transient_saves_by_reference_and_reopens_with_every_sample() {
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use rspice_simulation_contract::tran_checkpoint::TranCheckpointDraft;
+    let mut state = super::super::test_execution::monte_carlo::checkpoint_state();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
+    let ids: Vec<_> = plan
+        .instances()
+        .iter()
+        .map(|instance| instance.id())
+        .collect();
+    for id in ids {
+        plan.set_enabled(id, false).unwrap();
+    }
+    let (id, _) = plan.insert(AnalysisKind::Transient).unwrap();
+    plan.edit(id, |draft| {
+        let AnalysisDraft::Transient(draft) = draft else {
+            unreachable!()
+        };
+        draft.stop = "40n".into();
+        draft.step = "1n".into();
+        draft.max_step = "1n".into();
+        draft.checkpoint = Some(TranCheckpointDraft {
+            interval: Some("15n".into()),
+            resume: vec![],
+        });
+    })
+    .unwrap();
+    let state = super::super::test_execution::run_generated_batches(state, 1);
+    let run = &state.model.simulation.retained.runs[0];
+    assert!(
+        run.analyses
+            .iter()
+            .any(|analysis| analysis.transient_checkpoint.is_some()),
+        "the transient was checkpointed"
+    );
+    let solved = host_saves_by_reference_and_reopens(&state, "checkpointed-by-reference");
+    assert!(solved.contains(&AnalysisType::Transient), "{solved:?}");
+}
+
+/// Each member of a stepped run is an analysis of the run with its own segment, the run record
+/// naming each member's step values; saved, it names every member's segment and reopens with
+/// every sample.
+#[test]
+fn a_stepped_run_keeps_one_segment_per_member_and_reopens_with_every_sample() {
+    let state: RunTestHost = super::super::test_execution::run_manual_batch_session(
+        "rc low-pass family saved by reference
+.param c=1n
+V1 in 0 AC 1
+R1 in out 1k
+C1 out 0 {c}
+.step param c list 1n 10n 100n
+.ac dec 20 1 1meg
+.end
+",
+    );
+    let run = &state.model.simulation.retained.runs[0];
+    let segments: Vec<[u8; 32]> = run
+        .analyses
+        .iter()
+        .map(|member| {
+            let mut digests: Vec<[u8; 32]> = member
+                .waveforms
+                .iter()
+                .filter_map(|waveform| waveform.y.stored_window())
+                .filter_map(|(source, _)| source.identity())
+                .map(|(digest, _)| digest)
+                .collect();
+            digests.dedup();
+            assert_eq!(digests.len(), 1, "{} is one segment", member.label);
+            digests[0]
+        })
+        .collect();
+    assert_eq!(segments.len(), 3, "one analysis per member");
+    assert!(
+        segments[0] != segments[1] && segments[1] != segments[2] && segments[0] != segments[2],
+        "each member has a segment of its own"
+    );
+    let solved = host_saves_by_reference_and_reopens(&state, "stepped-by-reference");
+    assert_eq!(solved, [AnalysisType::Ac; 3]);
 }
 
 #[test]
