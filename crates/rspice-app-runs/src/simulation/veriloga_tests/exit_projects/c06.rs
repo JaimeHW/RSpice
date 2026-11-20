@@ -137,7 +137,7 @@ pub(super) fn project(stop: &str) -> RunTestHost {
 }
 
 /// An analog trace's samples, by its node.
-fn trace<'a>(run: &'a SimulationRun, node: &str) -> (&'a [f64], &'a [f64]) {
+fn trace(run: &SimulationRun, node: &str) -> (Vec<f64>, Vec<f64>) {
     let wave = run
         .analyses
         .iter()
@@ -147,7 +147,7 @@ fn trace<'a>(run: &'a SimulationRun, node: &str) -> (&'a [f64], &'a [f64]) {
                 || wave.name.eq_ignore_ascii_case(&format!("V({node})"))
         })
         .unwrap_or_else(|| panic!("no V({node}) in the run"));
-    (&wave.x, &wave.y)
+    (wave.x.samples(..).collect(), wave.y.samples(..).collect())
 }
 
 /// The trace's mean over `window`, its samples joined by straight lines,
@@ -162,7 +162,7 @@ fn mean(run: &SimulationRun, node: &str, window: (f64, f64)) -> f64 {
     let mut points = vec![(window.0, at(window.0))];
     points.extend(
         x.iter()
-            .zip(y)
+            .zip(&y)
             .filter(|(t, _)| **t > window.0 && **t < window.1)
             .map(|(t, v)| (*t, *v)),
     );

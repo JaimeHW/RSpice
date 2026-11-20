@@ -71,6 +71,9 @@ pub enum EyeTimebaseProvenance {
     /// Nothing was folded: the waveform does not carry a recoverable bit
     /// period and the reader has not stated one.
     AutoRejected(UiEstimateRejection),
+    /// Nothing was folded: the record could not be read, its store having failed or the record
+    /// being larger than the loaded results may hold.
+    Unreadable(String),
 }
 
 impl EyeTimebaseProvenance {
@@ -80,8 +83,12 @@ impl EyeTimebaseProvenance {
     /// is the same in every case and the reader cannot be expected to infer
     /// it from a refusal.
     pub fn rejection_hint(&self, source: &str) -> Option<String> {
-        let Self::AutoRejected(rejection) = self else {
-            return None;
+        let rejection = match self {
+            Self::AutoRejected(rejection) => rejection,
+            Self::Unreadable(reason) => {
+                return Some(format!("{source} could not be read: {reason}"));
+            }
+            Self::Auto { .. } | Self::Explicit { .. } => return None,
         };
         Some(match rejection {
             UiEstimateRejection::NoSignalSwing => {

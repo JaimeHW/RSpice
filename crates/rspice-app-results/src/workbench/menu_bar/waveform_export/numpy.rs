@@ -320,9 +320,18 @@ mod tests {
         let parsed = parse_result_dataset("waveforms.npy", &bytes).expect("re-imports");
         assert_eq!(parsed.sample_count, 3);
         assert_eq!(parsed.waveforms.len(), 2);
-        assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0, 1.0, 2.0]);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [10.0, 11.0, 12.0]);
-        assert_eq!(parsed.waveforms[1].y.as_slice(), [20.0, 21.0, 22.0]);
+        assert_eq!(
+            parsed.waveforms[0].x.read_whole().unwrap().as_ref(),
+            [0.0, 1.0, 2.0]
+        );
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            [10.0, 11.0, 12.0]
+        );
+        assert_eq!(
+            parsed.waveforms[1].y.read_whole().unwrap().as_ref(),
+            [20.0, 21.0, 22.0]
+        );
         // The names are gone, which is the property the export states rather
         // than hides: one array cannot carry them.
         assert_eq!(parsed.waveforms[0].name, "signal_1");
@@ -353,10 +362,19 @@ mod tests {
         let reopened = parse_result_dataset("ac.npy", &bytes).expect("reopen a complex matrix");
         assert_eq!(reopened.sample_count, 3);
         assert_eq!(reopened.waveforms.len(), 1);
-        assert_eq!(reopened.waveforms[0].x.as_ref(), &[1.0, 10.0, 100.0]);
+        assert_eq!(
+            reopened.waveforms[0].x.read_whole().unwrap().as_ref(),
+            &[1.0, 10.0, 100.0]
+        );
         let complex = reopened.waveforms[0].complex.as_ref().unwrap();
-        assert_eq!(complex.real.as_ref(), &[1.0, 0.5, 0.25]);
-        assert_eq!(complex.imag.as_ref(), &[0.0, -0.5, -0.25]);
+        assert_eq!(
+            complex.real.read_whole().unwrap().as_ref(),
+            &[1.0, 0.5, 0.25]
+        );
+        assert_eq!(
+            complex.imag.read_whole().unwrap().as_ref(),
+            &[0.0, -0.5, -0.25]
+        );
     }
 
     #[test]
@@ -385,8 +403,8 @@ mod tests {
             .iter()
             .find(|waveform| waveform.name == "V(out)")
             .expect("named");
-        assert_eq!(out.x.as_slice(), [0.0, 1.0, 2.0]);
-        assert_eq!(out.y.as_slice(), [10.0, 11.0, 12.0]);
+        assert_eq!(out.x.read_whole().unwrap().as_ref(), [0.0, 1.0, 2.0]);
+        assert_eq!(out.y.read_whole().unwrap().as_ref(), [10.0, 11.0, 12.0]);
     }
 
     #[test]
@@ -411,8 +429,14 @@ mod tests {
             .complex
             .as_ref()
             .expect("the complex components survive");
-        assert_eq!(complex.real.as_slice(), [1.0, 0.5, 0.25]);
-        assert_eq!(complex.imag.as_slice(), [0.0, -0.5, -0.25]);
+        assert_eq!(
+            complex.real.read_whole().unwrap().as_ref(),
+            [1.0, 0.5, 0.25]
+        );
+        assert_eq!(
+            complex.imag.read_whole().unwrap().as_ref(),
+            [0.0, -0.5, -0.25]
+        );
     }
 
     #[test]

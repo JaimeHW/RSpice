@@ -63,7 +63,7 @@ fn transient_convergence_changes_dependency_artifact_identity() {
     *convergence = Some(std::sync::Arc::new(
         rspice_results::convergence_quality::TransientConvergenceEvidence::capture(
             Default::default(),
-            time,
+            time.in_memory().unwrap(),
             &rspice_core::abort_signal::NoAbort,
         )
         .unwrap(),
@@ -80,7 +80,7 @@ fn transient_convergence_changes_dependency_artifact_identity() {
     *convergence = Some(std::sync::Arc::new(
         rspice_results::convergence_quality::TransientConvergenceEvidence::capture(
             quality,
-            time,
+            time.in_memory().unwrap(),
             &rspice_core::abort_signal::NoAbort,
         )
         .unwrap(),

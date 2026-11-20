@@ -37,7 +37,7 @@ impl PartialEq for ProjectWaveformData {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
             && self.x == other.x
-            && rspice_results::waveform::samples_equal(&self.y, &other.y)
+            && self.y.same_samples(&other.y)
             && self.color == other.color
             && self.visible == other.visible
             && self.unit == other.unit
@@ -88,18 +88,21 @@ impl ProjectWaveformData {
         if self.x.is_stored() || self.y.is_stored() {
             return Ok(());
         }
-        require_finite_values(&self.x, &format!("{prefix}.x"))?;
-        require_monotonic_non_decreasing(&self.x, &format!("{prefix}.x"))?;
-        if self.y.iter().any(|value| value.is_infinite()) {
+        let (Some(x), Some(y)) = (self.x.in_memory(), self.y.in_memory()) else {
+            return Ok(());
+        };
+        require_finite_values(x, &format!("{prefix}.x"))?;
+        require_monotonic_non_decreasing(x, &format!("{prefix}.x"))?;
+        if y.iter().any(|value| value.is_infinite()) {
             return Err(format!("{prefix}.y contains an infinite value"));
         }
         if let Some(complex) = &self.complex {
             complex.validate(prefix, self.y.len())?;
             if complex
                 .real
-                .iter()
-                .zip(complex.imag.iter())
-                .zip(self.y.iter())
+                .samples(..)
+                .zip(complex.imag.samples(..))
+                .zip(y.iter())
                 .any(|((real, imag), value)| {
                     real.is_nan() != imag.is_nan() || real.is_nan() != value.is_nan()
                 })
@@ -131,8 +134,8 @@ pub struct ProjectComplexWaveformComponents {
 impl PartialEq for ProjectComplexWaveformComponents {
     fn eq(&self, other: &Self) -> bool {
         self.source_name == other.source_name
-            && rspice_results::waveform::samples_equal(&self.real, &other.real)
-            && rspice_results::waveform::samples_equal(&self.imag, &other.imag)
+            && self.real.same_samples(&other.real)
+            && self.imag.same_samples(&other.imag)
     }
 }
 
@@ -145,8 +148,8 @@ impl ProjectComplexWaveformComponents {
         }
         if self
             .real
-            .iter()
-            .chain(self.imag.iter())
+            .samples(..)
+            .chain(self.imag.samples(..))
             .any(|value| value.is_infinite())
         {
             return Err(format!("{prefix}.complex contains an infinite value"));

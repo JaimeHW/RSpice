@@ -145,23 +145,18 @@ impl<W: OutputWaveform> calculator::evaluator::EvaluationContext for Context<'_,
             signal.to_ascii_uppercase().as_str(),
             "TIME" | "T" | "FREQ" | "FREQUENCY"
         ) {
-            return self
-                .axis
-                .map(|wave| {
-                    CalcValue::create_waveform(wave.as_ref().x.to_vec(), wave.as_ref().x.to_vec())
-                })
-                .ok_or_else(absent);
+            return self.axis.ok_or_else(absent).and_then(|wave| {
+                let x = calculator::retained::whole(&wave.as_ref().x)?.into_owned();
+                Ok(CalcValue::create_waveform(x.clone(), x))
+            });
         }
         match self.resolve(signal).map_err(|_| absent())? {
-            probe::Source::Ground => self
-                .axis
-                .map(|wave| {
-                    CalcValue::create_waveform(
-                        wave.as_ref().x.to_vec(),
-                        vec![0.0; wave.as_ref().x.len()],
-                    )
-                })
-                .ok_or_else(absent),
+            probe::Source::Ground => self.axis.ok_or_else(absent).and_then(|wave| {
+                Ok(CalcValue::create_waveform(
+                    calculator::retained::whole(&wave.as_ref().x)?.into_owned(),
+                    vec![0.0; wave.as_ref().x.len()],
+                ))
+            }),
             probe::Source::Waveform(wave) => {
                 calculator::retained::waveform_value(wave.as_ref(), self.complex_policy)
             }

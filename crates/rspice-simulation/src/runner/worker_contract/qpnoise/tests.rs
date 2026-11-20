@@ -33,11 +33,13 @@ fn qpnoise_worker_retained_evidence_and_typed_plots_roundtrip() {
             "missing {unit}"
         );
     }
-    assert!(
-        waveforms
-            .values()
-            .all(|w| w.y_values.iter().all(|v| v.is_finite()))
-    );
+    assert!(waveforms.values().all(|w| {
+        w.y_values
+            .in_memory()
+            .unwrap()
+            .iter()
+            .all(|v| v.is_finite())
+    }));
     assert!(
         response.outputs[2]
             .input_noise

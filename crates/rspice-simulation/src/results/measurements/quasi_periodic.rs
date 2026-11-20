@@ -29,7 +29,7 @@ impl SimulationResult {
                 )
             };
         let waveform = named_value(waveforms, signal)?;
-        let real = *waveform.y_values.get(index)?;
+        let real = waveform.y_values.sample(index)?;
         let imaginary = *waveform.y_imag.as_ref()?.get(index)? * sign;
         let physical_unit = if quantity.eq_ignore_ascii_case("phase") {
             unit("deg")

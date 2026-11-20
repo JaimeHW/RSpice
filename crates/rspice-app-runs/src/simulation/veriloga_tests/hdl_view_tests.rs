@@ -584,8 +584,8 @@ fn run_against_twin(state: RunTestHost, modules: &[(&str, &str, &str)], stop: f6
             assert_eq!(wave.y, sampled.y, "{node}: the same samples");
             Trace {
                 node,
-                x: wave.x.to_vec(),
-                y: wave.y.to_vec(),
+                x: wave.x.read_whole().unwrap().to_vec(),
+                y: wave.y.read_whole().unwrap().to_vec(),
             }
         })
         .collect();

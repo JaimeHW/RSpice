@@ -22,13 +22,20 @@ fn complex_selected_samples_project_magnitude_after_rectangular_interpolation() 
         },
     )
     .unwrap();
-    assert_eq!(selected.x.as_slice(), &[0.0, 0.5, 1.0]);
-    assert_eq!(selected.y.as_slice(), &[1.0, 0.0, 1.0]);
+    assert_eq!(selected.x.read_whole().unwrap().as_ref(), &[0.0, 0.5, 1.0]);
+    assert_eq!(selected.y.read_whole().unwrap().as_ref(), &[1.0, 0.0, 1.0]);
     assert_eq!(
-        selected.data.complex.unwrap().real.as_slice(),
+        selected
+            .data
+            .complex
+            .unwrap()
+            .real
+            .read_whole()
+            .unwrap()
+            .as_ref(),
         &[1.0, 0.0, -1.0]
     );
-    assert_eq!(source.y.as_slice(), &[1.0, 1.0]);
+    assert_eq!(source.y.read_whole().unwrap().as_ref(), &[1.0, 1.0]);
 }
 
 #[test]
@@ -92,7 +99,13 @@ fn complex_saved_outputs_keep_policy_and_components_after_reload_and_deferred_ev
                     .complex
                     .as_ref()
                     .expect("rectangular evidence retained");
-                for (&real, &imag) in complex.real.iter().zip(complex.imag.iter()) {
+                for (&real, &imag) in complex
+                    .real
+                    .read_whole()
+                    .unwrap()
+                    .iter()
+                    .zip(complex.imag.read_whole().unwrap().iter())
+                {
                     close(real, 2.0);
                     close(imag, 0.0);
                 }

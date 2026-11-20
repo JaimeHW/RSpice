@@ -179,7 +179,12 @@ fn add_logic_lanes(
             // The gutter has room for a short name; the expression's own
             // text stays the row's identity.
             let label = rspice_results_ui::waves::logic::convert::digital_label(&expr.text);
-            let lane = LogicLane::from_levels(label.clone(), &x, &output.waveform.data.y);
+            // An evaluated expression's samples, held in memory.
+            let lane = LogicLane::from_levels(
+                label.clone(),
+                x.in_memory().unwrap_or_default(),
+                output.waveform.data.y.in_memory().unwrap_or_default(),
+            );
             lanes
                 .get_or_insert_with(|| model.event_lanes.as_deref().cloned().unwrap_or_default())
                 .logic

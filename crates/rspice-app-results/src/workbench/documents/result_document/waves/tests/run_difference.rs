@@ -70,7 +70,10 @@ fn a_difference_from_the_baseline_states_its_run_and_carries_its_tolerance() {
     );
     let curves = resolve_strip_exprs(&mut state.results_parts(), &models[0], &tokens);
     assert_eq!(curves.len(), 1, "{:?}", state.prompt_text());
-    assert_eq!(curves[0].y.as_slice(), &[0.0, 1.0, 1.0, 0.0, 0.0, 2.0]);
+    assert_eq!(
+        curves[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 1.0, 1.0, 0.0, 0.0, 2.0]
+    );
     assert!(
         curves[0].label.ends_with(" · Run 2, linear X"),
         "{}",
@@ -126,7 +129,7 @@ fn a_difference_from_the_baseline_states_its_run_and_carries_its_tolerance() {
     let band = difference
         .tolerance
         .expect("the difference carries its band");
-    assert_eq!(band.x, curves[0].x.as_slice());
+    assert_eq!(band.x, curves[0].x.read_whole().unwrap().as_ref());
     assert!(
         band.half_width
             .iter()

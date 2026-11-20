@@ -117,8 +117,7 @@ fn transient_checkpoint_authored_plan_prepares_captures_and_resumes_native_run()
     let SimulationResult::Transient { time, .. } = result else {
         panic!("transient")
     };
-    assert_eq!(time.first(), Some(&20e-9));
-    assert_eq!(time.last(), Some(&40e-9));
+    assert_eq!(time.ends(), Some((20e-9, 40e-9)));
     assert_eq!(
         TransientCheckpointEvidence::from_bytes(runner.take_transient_checkpoint().unwrap())
             .unwrap()

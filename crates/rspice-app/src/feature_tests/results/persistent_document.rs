@@ -393,7 +393,7 @@ fn placement(
         anchor: anchor.clone(),
         trace_name: trace_name.to_owned(),
         x,
-        samples: &FIXTURE_SAMPLES,
+        samples: Box::leak(Box::new(FIXTURE_SAMPLES.to_vec().into())),
     }
 }
 

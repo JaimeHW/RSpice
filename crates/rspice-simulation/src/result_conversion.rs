@@ -1031,11 +1031,11 @@ mod waveform_unit_conversion_tests {
             );
             assert_eq!(result.waveforms.len(), 1);
             assert_eq!(
-                result.waveforms[0].x.as_slice(),
+                result.waveforms[0].x.in_memory().unwrap(),
                 &[expected],
                 "[{lower}, {upper}]"
             );
-            assert_eq!(result.waveforms[0].y.as_slice(), &[2.0]);
+            assert_eq!(result.waveforms[0].y.in_memory().unwrap(), &[2.0]);
         }
     }
 
@@ -1179,8 +1179,11 @@ mod waveform_unit_conversion_tests {
             || 0.0,
         );
 
-        assert_eq!(result.waveforms[0].x.as_slice(), &[3.0, 30.0]);
-        assert_eq!(result.waveforms[0].y.as_slice(), &[2.0e-9, 3.0e-9]);
+        assert_eq!(result.waveforms[0].x.in_memory().unwrap(), &[3.0, 30.0]);
+        assert_eq!(
+            result.waveforms[0].y.in_memory().unwrap(),
+            &[2.0e-9, 3.0e-9]
+        );
     }
 
     #[test]
@@ -1212,10 +1215,10 @@ mod waveform_unit_conversion_tests {
 
         assert_eq!(result.waveforms.len(), 2);
         assert_eq!(result.waveforms[0].name, "|V(env)|");
-        assert_eq!(result.waveforms[0].y.as_slice(), &[5.0, 1.0]);
+        assert_eq!(result.waveforms[0].y.in_memory().unwrap(), &[5.0, 1.0]);
         let complex = result.waveforms[0].complex.as_ref().expect("retained I/Q");
-        assert_eq!(complex.real.as_slice(), &[3.0, 0.0]);
-        assert_eq!(complex.imag.as_slice(), &[4.0, 1.0]);
+        assert_eq!(complex.real.in_memory().unwrap(), &[3.0, 0.0]);
+        assert_eq!(complex.imag.in_memory().unwrap(), &[4.0, 1.0]);
         assert_eq!(result.waveforms[1].name, "phase(V(env))");
         assert_eq!(result.waveforms[1].unit.as_deref(), Some("°"));
     }

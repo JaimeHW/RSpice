@@ -238,7 +238,7 @@ pub struct Trace<'a> {
 
 /// A trace's samples as windows of the columns of a results store: its run's axis and the
 /// signal's values over the same rows.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct StoredSamples<'a> {
     pub x: &'a rspice_results::waveform::WaveformValues,
     pub y: &'a rspice_results::waveform::WaveformValues,

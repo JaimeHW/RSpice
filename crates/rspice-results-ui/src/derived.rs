@@ -191,6 +191,11 @@ impl DerivedSeries {
     }
 
     /// Fetch or pair one curve with its pane's abscissa.
+    /// The pairing memoised under `key`, if one is.
+    pub fn xy_curve(&self, key: u64) -> Option<XyCurveMemo> {
+        self.xy_curves.get(&key).cloned()
+    }
+
     pub fn xy_curve_or(
         &mut self,
         key: u64,
@@ -290,15 +295,29 @@ impl DerivedSeries {
         series
     }
 
+    /// The series `build` makes of every sample of `source`, cached under `key`. A stored source
+    /// is read off the frame: until it has arrived the series is empty and is not kept.
+    fn derive(
+        &mut self,
+        key: u64,
+        source: &SharedWaveformValues,
+        build: impl FnOnce(&[f64]) -> Vec<f64>,
+    ) -> SharedWaveformValues {
+        if let Some(hit) = self.map.get(&key) {
+            return hit.clone();
+        }
+        let Some(samples) = source.fetch_whole().ready() else {
+            return SharedWaveformValues::default();
+        };
+        let series = SharedWaveformValues::from(build(&samples));
+        self.map.insert(key, series.clone());
+        series
+    }
+
     /// 20·log₁₀ of a linear-magnitude series, cached under `key`.
-    pub fn db(&mut self, key: u64, magnitude: &[f64]) -> SharedWaveformValues {
-        self.get_or(key, || {
-            SharedWaveformValues::from(
-                magnitude
-                    .iter()
-                    .map(|&m| 20.0 * m.log10())
-                    .collect::<Vec<_>>(),
-            )
+    pub fn db(&mut self, key: u64, magnitude: &SharedWaveformValues) -> SharedWaveformValues {
+        self.derive(key, magnitude, |magnitude| {
+            magnitude.iter().map(|&m| 20.0 * m.log10()).collect()
         })
     }
 
@@ -313,31 +332,36 @@ impl DerivedSeries {
     /// nV/√Hz spectral density of a retained V²/Hz PSD series, cached
     /// under `key` like `db`. Negative retained samples clamp to zero
     /// rather than inventing NaNs the plot would silently drop.
-    pub fn noise_density_nv(&mut self, key: u64, psd_v2_per_hz: &[f64]) -> SharedWaveformValues {
-        self.get_or(Self::NOISE_DENSITY_KEY_BIT | key, || {
-            SharedWaveformValues::from(
-                psd_v2_per_hz
-                    .iter()
-                    .map(|&value| {
-                        if value.is_finite() {
-                            1.0e9 * value.max(0.0).sqrt()
-                        } else {
-                            f64::NAN
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-            )
+    pub fn noise_density_nv(
+        &mut self,
+        key: u64,
+        psd_v2_per_hz: &SharedWaveformValues,
+    ) -> SharedWaveformValues {
+        self.derive(Self::NOISE_DENSITY_KEY_BIT | key, psd_v2_per_hz, |psd| {
+            psd.iter()
+                .map(|&value| {
+                    if value.is_finite() {
+                        1.0e9 * value.max(0.0).sqrt()
+                    } else {
+                        f64::NAN
+                    }
+                })
+                .collect()
         })
     }
 
     /// Continuous (unwrapped) copy of a ±180°-wrapped phase-degree series,
     /// cached under `key` like `db`.
-    pub fn unwrapped(&mut self, key: u64, phase_deg: &[f64]) -> SharedWaveformValues {
-        self.get_or(Self::UNWRAP_KEY_BIT | key, || {
-            SharedWaveformValues::from(rspice_results::calculator::functions::unwrap_phase_deg(
-                phase_deg,
-            ))
-        })
+    pub fn unwrapped(
+        &mut self,
+        key: u64,
+        phase_deg: &SharedWaveformValues,
+    ) -> SharedWaveformValues {
+        self.derive(
+            Self::UNWRAP_KEY_BIT | key,
+            phase_deg,
+            rspice_results::calculator::functions::unwrap_phase_deg,
+        )
     }
 }
 
@@ -348,15 +372,18 @@ mod tests {
     #[test]
     fn display_transforms_preserve_gaps_and_restart_phase_after_them() {
         let mut derived = DerivedSeries::default();
-        let values = [1.0, f64::NAN, 4.0];
-        assert!(derived.db(1, &values)[1].is_nan());
+        let values = SharedWaveformValues::from(vec![1.0, f64::NAN, 4.0]);
+        assert!(derived.db(1, &values).in_memory().unwrap()[1].is_nan());
         let noise = derived.noise_density_nv(1, &values);
-        assert!(noise[1].is_nan());
-        assert_eq!(noise[2], 2.0e9);
-        let phase = derived.unwrapped(1, &[170.0, -170.0, f64::NAN, -170.0, 170.0]);
-        assert_eq!(&phase[..2], &[170.0, 190.0]);
-        assert!(phase[2].is_nan());
-        assert_eq!(&phase[3..], &[-170.0, -190.0]);
+        assert!(noise.in_memory().unwrap()[1].is_nan());
+        assert_eq!(noise.in_memory().unwrap()[2], 2.0e9);
+        let phase = derived.unwrapped(
+            1,
+            &SharedWaveformValues::from(vec![170.0, -170.0, f64::NAN, -170.0, 170.0]),
+        );
+        assert_eq!(&phase.in_memory().unwrap()[..2], &[170.0, 190.0]);
+        assert!(phase.in_memory().unwrap()[2].is_nan());
+        assert_eq!(&phase.in_memory().unwrap()[3..], &[-170.0, -190.0]);
     }
 }
 

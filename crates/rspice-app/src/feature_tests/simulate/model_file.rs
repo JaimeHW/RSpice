@@ -25,10 +25,12 @@ fn held_at(run: &SimulationRun, node: &str, time: f64) -> f64 {
         .unwrap_or_else(|| panic!("no V({node}) in the run"));
     let index = wave
         .x
+        .read_whole()
+        .unwrap()
         .iter()
         .rposition(|t| *t <= time)
         .expect("a sample at or before the time");
-    wave.y[index]
+    wave.y.sample(index).expect("a sample at the index")
 }
 
 /// The diode's anode, fed from 5 V through 1 kΩ, where the diode's current

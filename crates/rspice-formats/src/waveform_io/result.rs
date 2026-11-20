@@ -3,7 +3,7 @@
 mod bounds;
 mod export;
 pub use bounds::WaveformExportError;
-pub(crate) use bounds::{check_export_shape, shared_coordinate};
+pub(crate) use bounds::{check_export_shape, export_samples, shared_coordinate};
 
 #[cfg(test)]
 pub(crate) const EXPORT_TEST_LIMITS:

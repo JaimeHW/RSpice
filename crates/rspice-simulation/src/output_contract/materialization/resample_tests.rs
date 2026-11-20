@@ -91,11 +91,23 @@ fn a_stored_run_resamples_block_by_block_to_the_bits_of_the_whole_columns() {
             let expected = resample_selected_and_final(&memory, grid).unwrap();
             let resampled = resample_selected_and_final(&stored, grid).unwrap();
             assert!(expected.x.len() > 2);
-            assert_eq!(bits(&resampled.x), bits(&expected.x));
-            assert_eq!(bits(&resampled.y), bits(&expected.y));
+            assert_eq!(
+                bits(&resampled.x.in_memory().unwrap()),
+                bits(&expected.x.in_memory().unwrap())
+            );
+            assert_eq!(
+                bits(&resampled.y.in_memory().unwrap()),
+                bits(&expected.y.in_memory().unwrap())
+            );
             let (want, got) = (expected.complex.unwrap(), resampled.complex.unwrap());
-            assert_eq!(bits(&got.real), bits(&want.real));
-            assert_eq!(bits(&got.imag), bits(&want.imag));
+            assert_eq!(
+                bits(&got.real.in_memory().unwrap()),
+                bits(&want.real.in_memory().unwrap())
+            );
+            assert_eq!(
+                bits(&got.imag.in_memory().unwrap()),
+                bits(&want.imag.in_memory().unwrap())
+            );
             // No column was read whole: each read asked for at most a block.
             for (column, _) in &columns {
                 let widest = column.widest_read.load(Ordering::SeqCst);

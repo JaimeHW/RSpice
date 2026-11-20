@@ -71,7 +71,15 @@ fn build_model(state: ResultsReads<'_>, tokens: &Tokens) -> Option<HarmonicBalan
         .filter(|(_, waveform)| waveform.visible && spectrum_trace_is_renderable(waveform))
     {
         let (waveform_index, waveform) = waveform;
-        for (&frequency, &magnitude) in waveform.x.iter().zip(waveform.y.iter()) {
+        // The spectrum's lines are listed whole: a stored spectrum is read off the frame and
+        // drawn once it has arrived.
+        let (Some(frequencies), Some(magnitudes)) = (
+            waveform.x.fetch_whole().ready(),
+            waveform.y.fetch_whole().ready(),
+        ) else {
+            continue;
+        };
+        for (&frequency, &magnitude) in frequencies.iter().zip(magnitudes.iter()) {
             frequency_min = frequency_min.min(frequency);
             frequency_max = frequency_max.max(frequency);
             magnitude_min = magnitude_min.min(magnitude);
@@ -87,8 +95,8 @@ fn build_model(state: ResultsReads<'_>, tokens: &Tokens) -> Option<HarmonicBalan
                 || waveform.name.clone(),
                 |complex| complex.source_name.clone(),
             ),
-            frequency: waveform.x.clone(),
-            magnitude: waveform.y.clone(),
+            frequency: frequencies,
+            magnitude: magnitudes,
             color: palette[traces.len() % palette.len()],
             cache_key: harmonic_trace_cache_key(analysis.id, waveform_index),
         });

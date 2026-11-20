@@ -1251,6 +1251,8 @@ fn standalone_connection_worker_transport_retains_selected_physics() {
         assert!(!q.y_values.is_empty());
         assert!(
             q.y_values
+                .in_memory()
+                .unwrap()
                 .iter()
                 .all(|value| (value - expected).abs() < 1e-9),
             "{name}: {:?}",
@@ -2368,6 +2370,8 @@ fn sp_noise_request_executes_and_retains_physical_results_through_worker_transpo
                     assert!(
                         waveform
                             .y_values
+                            .in_memory()
+                            .unwrap()
                             .iter()
                             .all(|value| (value / thermal - sign).abs() < 1e-10)
                     );
@@ -2390,6 +2394,8 @@ fn sp_noise_request_executes_and_retains_physical_results_through_worker_transpo
                     assert!(
                         waveform
                             .y_values
+                            .in_memory()
+                            .unwrap()
                             .iter()
                             .all(|value| (value - expected).abs() < 1e-8),
                         "{name}: {:?}",
@@ -2400,6 +2406,8 @@ fn sp_noise_request_executes_and_retains_physical_results_through_worker_transpo
                 assert!(
                     waveforms["Sopt"]
                         .y_values
+                        .in_memory()
+                        .unwrap()
                         .iter()
                         .all(|value| (value - 1.0).abs() < 1e-8)
                 );

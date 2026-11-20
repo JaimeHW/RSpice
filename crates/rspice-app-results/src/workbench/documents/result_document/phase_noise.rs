@@ -1,6 +1,6 @@
 //! Phase-noise source qualification, retained trace binding and viewport ownership.
 
-use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SharedWaveformValues};
+use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 #[cfg(test)]
 use crate::state::{AnalysisResultFamilyMetadata, PeriodicNoiseOutputQuantity};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
@@ -8,6 +8,7 @@ use egui::Ui;
 #[cfg(test)]
 use rspice_results::phase_noise::retained_measurement;
 use rspice_results::phase_noise::retained_phase_noise_carrier;
+use rspice_results::waveform::HeldColumn;
 use rspice_results_ui::phase_noise as view;
 
 /// Exactly one phase-noise waveform selected from the active immutable run.
@@ -17,8 +18,8 @@ struct PhaseNoiseModel {
     label: String,
     source: String,
     carrier_frequency_hz: f64,
-    offset_hz: SharedWaveformValues,
-    level_dbc_per_hz: SharedWaveformValues,
+    offset_hz: HeldColumn,
+    level_dbc_per_hz: HeldColumn,
 }
 
 impl PhaseNoiseModel {
@@ -94,8 +95,10 @@ fn model_from_analysis(
             analysis.analysis_type,
             analysis.family_metadata.as_ref(),
         )?,
-        offset_hz: waveform.x.clone(),
-        level_dbc_per_hz: waveform.y.clone(),
+        // The sheet reads the whole spectrum: a stored one is read off the frame, and the model
+        // is built once it has arrived.
+        offset_hz: waveform.x.fetch_whole().ready()?,
+        level_dbc_per_hz: waveform.y.fetch_whole().ready()?,
     })
 }
 
@@ -122,7 +125,7 @@ fn active_periodic_noise_without_phase_trace(state: ResultsReads<'_>) -> bool {
 }
 
 fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
-    super::finite_extremes(values)
+    rspice_results::measurements::finite_extremes(values)
 }
 
 /// Resolve the displayed source and apply requests to the phase-noise viewport.

@@ -188,7 +188,11 @@ fn terminal_dc_node_samples<W: AsRef<RetainedWaveform>>(
         let index = evidence
             .terminal_sample(member, trace.y.len())
             .ok_or_else(|| "DC point has no terminal sample".to_owned())?;
-        values.push((node.clone(), trace.y[index]));
+        let value = trace
+            .y
+            .sample(index)
+            .ok_or_else(|| "DC point has no terminal sample".to_owned())?;
+        values.push((node.clone(), value));
     }
     Ok(values)
 }
@@ -225,8 +229,8 @@ fn terminal_node_samples<W: AsRef<RetainedWaveform>>(
         .filter_map(|waveform| {
             waveform
                 .y
-                .last()
-                .map(|value| (waveform.name.clone(), *value))
+                .ends()
+                .map(|(_, value)| (waveform.name.clone(), value))
         })
         .collect()
 }
@@ -247,9 +251,9 @@ fn terminal_ac_magnitudes<W: AsRef<RetainedWaveform>>(
                 .strip_prefix("|V(")
                 .and_then(|inner| inner.strip_suffix(")|"))?;
             let complex = waveform.complex.as_ref()?;
-            let real = complex.real.last()?;
-            let imaginary = complex.imag.last()?;
-            Some((node.to_owned(), real.hypot(*imaginary)))
+            let (_, real) = complex.real.ends()?;
+            let (_, imaginary) = complex.imag.ends()?;
+            Some((node.to_owned(), real.hypot(imaginary)))
         })
         .collect()
 }

@@ -40,7 +40,10 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
     .expect("reopen result bundle");
     assert_eq!(reopened.analysis_type, AnalysisType::Transient);
     assert_eq!(reopened.waveforms[0].name, "V(out)");
-    assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+    assert_eq!(
+        reopened.waveforms[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 1.25, -0.5]
+    );
     assert_eq!(reopened.waveforms[0].unit, None);
     drop(result_files);
 
@@ -89,8 +92,14 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
         .as_ref()
         .expect("complex components reopen");
     assert_eq!(complex.source_name, "V(out)");
-    assert_eq!(complex.real.as_ref(), &[0.75, -1.5, 0.25]);
-    assert_eq!(complex.imag.as_ref(), &[0.25, 0.5, -0.125]);
+    assert_eq!(
+        complex.real.read_whole().unwrap().as_ref(),
+        &[0.75, -1.5, 0.25]
+    );
+    assert_eq!(
+        complex.imag.read_whole().unwrap().as_ref(),
+        &[0.25, 0.5, -0.125]
+    );
 }
 
 #[test]
@@ -299,7 +308,10 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
         &npy_files[0].1,
     )
     .expect("reopen the array");
-    assert_eq!(npy_reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+    assert_eq!(
+        npy_reopened.waveforms[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 1.25, -0.5]
+    );
     drop(npy_files);
 
     let mut npz_state = state_with_typed_result(transient);
@@ -329,7 +341,10 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
     assert_eq!(npz_reopened.coordinate_name, "time");
     // An archive keeps the names an array cannot.
     assert_eq!(npz_reopened.waveforms[0].name, "V(out)");
-    assert_eq!(npz_reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+    assert_eq!(
+        npz_reopened.waveforms[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 1.25, -0.5]
+    );
 }
 
 #[test]
@@ -372,7 +387,10 @@ fn engineering_export_preference_dispatches_an_hdf5_dataset() {
     assert_eq!(reopened.coordinate_name, "time");
     assert_eq!(reopened.coordinate_unit.as_deref(), Some("s"));
     assert_eq!(reopened.waveforms[0].name, "V(out)");
-    assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+    assert_eq!(
+        reopened.waveforms[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 1.25, -0.5]
+    );
 }
 
 #[test]
@@ -435,14 +453,23 @@ fn hdf5_export_ui_retains_imported_coordinate_names_and_units() {
         assert_eq!(reopened.coordinate_name, name);
         assert_eq!(reopened.coordinate_unit.as_deref(), unit);
         assert_eq!(reopened.analysis_type, kind);
-        assert_eq!(reopened.waveforms[0].x.as_ref(), &[1.0, 2.0]);
+        assert_eq!(
+            reopened.waveforms[0].x.read_whole().unwrap().as_ref(),
+            &[1.0, 2.0]
+        );
         assert_eq!(reopened.waveforms[0].unit, None);
         if kind == AnalysisType::Ac {
             let components = reopened.waveforms[0].complex.as_ref().unwrap();
-            assert_eq!(components.real[0].to_bits(), (-0.0_f64).to_bits());
-            assert_eq!(components.imag.as_ref(), &[2.0, -1.0]);
+            assert_eq!(
+                components.real.read_whole().unwrap()[0].to_bits(),
+                (-0.0_f64).to_bits()
+            );
+            assert_eq!(components.imag.read_whole().unwrap().as_ref(), &[2.0, -1.0]);
         } else {
-            assert_eq!(reopened.waveforms[0].y[0].to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(
+                reopened.waveforms[0].y.read_whole().unwrap()[0].to_bits(),
+                (-0.0_f64).to_bits()
+            );
         }
     }
 }
@@ -539,12 +566,18 @@ fn binary_export_workflows_preserve_mixed_real_and_complex_traces_in_all_domains
                 .as_ref()
                 .expect("retained components survive");
             assert_eq!(complex.source_name, "out");
-            assert_eq!(complex.real[0].to_bits(), (-0.0_f64).to_bits());
-            assert_eq!(complex.real[1], 4.0);
-            assert_eq!(complex.imag.as_ref(), &[2.0, -1.0]);
+            assert_eq!(
+                complex.real.read_whole().unwrap()[0].to_bits(),
+                (-0.0_f64).to_bits()
+            );
+            assert_eq!(complex.real.read_whole().unwrap()[1], 4.0);
+            assert_eq!(complex.imag.read_whole().unwrap().as_ref(), &[2.0, -1.0]);
             assert_eq!(parsed.waveforms[1].name, "scalar");
             assert!(parsed.waveforms[1].complex.is_none());
-            assert_eq!(parsed.waveforms[1].y[1].to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(
+                parsed.waveforms[1].y.read_whole().unwrap()[1].to_bits(),
+                (-0.0_f64).to_bits()
+            );
         }
     }
 }
@@ -615,7 +648,10 @@ fn engineering_export_preference_dispatches_a_matlab_v5_file() {
     assert_eq!(reopened.coordinate_name, "time");
     // MAT names are MATLAB identifiers, so the reader sees the sanitised one.
     assert_eq!(reopened.waveforms[0].name, "V_out_");
-    assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+    assert_eq!(
+        reopened.waveforms[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 1.25, -0.5]
+    );
 }
 
 #[test]

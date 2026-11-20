@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use rspice_results::measurements::measure_interval;
+use rspice_results::measurements::measure_interval_values;
 
 use super::{AnalysisPresentationKey, ResultsReads, frame_work};
 use crate::state::RetainedTrace;
@@ -56,29 +56,22 @@ fn start(waveform: &RetainedTrace, repaint: &egui::Context) -> PendingStatistics
     let (x, y) = (waveform.x.clone(), waveform.y.clone());
     let (slot, repaint) = (Arc::clone(&pending), repaint.clone());
     rspice_app_services::workbench::platform::spawn_or_inline(move || {
-        let samples = x.len().min(y.len());
-        let statistics = match (x.read_range(0..samples), y.read_range(0..samples)) {
-            (Ok(x), Ok(y)) => measure(&x, &y),
-            (Err(failure), _) | (_, Err(failure)) => TraceStatistics {
-                samples,
-                finite: 0,
-                extremes: None,
-                average: Err(failure.to_string()),
-            },
-        };
-        let _ = slot.set(statistics);
+        let _ = slot.set(measure(&x, &y));
         repaint.request_repaint();
     });
     pending
 }
 
-/// The statistics of the samples `y` at `x`.
-pub(crate) fn measure(x: &[f64], y: &[f64]) -> TraceStatistics {
+/// The statistics of the samples `y` at `x`, read a block at a time: a stored trace is never
+/// held whole.
+pub(crate) fn measure(
+    x: &rspice_results::waveform::WaveformValues,
+    y: &rspice_results::waveform::WaveformValues,
+) -> TraceStatistics {
     let samples = x.len().min(y.len());
-    let (x, y) = (&x[..samples], &y[..samples]);
     let mut finite = 0;
     let mut extremes: Option<(f64, f64)> = None;
-    for &value in y.iter().filter(|value| value.is_finite()) {
+    for value in y.samples(..samples).filter(|value| value.is_finite()) {
         finite += 1;
         extremes = Some(extremes.map_or((value, value), |(low, high)| {
             (low.min(value), high.max(value))
@@ -88,7 +81,7 @@ pub(crate) fn measure(x: &[f64], y: &[f64]) -> TraceStatistics {
         samples,
         finite,
         extremes,
-        average: measure_interval(x, y, None)
+        average: measure_interval_values(x, y, 0..samples, None)
             .map(|statistics| statistics.mean)
             .map_err(|error| error.to_string()),
     }

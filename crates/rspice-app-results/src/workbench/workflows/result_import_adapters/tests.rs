@@ -103,10 +103,15 @@ fn hdf5_signed_zero_coordinates_must_be_numerically_distinct() {
             } else {
                 let parsed = parsed.unwrap();
                 assert_eq!(parsed.source_format, format);
-                assert_eq!(parsed.waveforms[0].x[1].to_bits(), (-0.0_f64).to_bits());
+                assert_eq!(
+                    parsed.waveforms[0].x.read_whole().unwrap()[1].to_bits(),
+                    (-0.0_f64).to_bits()
+                );
                 assert!(
                     parsed.waveforms[0]
                         .y
+                        .read_whole()
+                        .unwrap()
                         .iter()
                         .all(|v| v.to_bits() == (-0.0_f64).to_bits())
                 );
@@ -186,7 +191,10 @@ fn an_hdf5_section_is_read_from_what_it_declares_not_what_it_is_called() {
         assert_eq!(parsed.coordinate_name, "time");
         assert_eq!(parsed.waveforms.len(), 1);
         assert_eq!(parsed.waveforms[0].name, "V(out)");
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [0.0, 1.0, 0.0]);
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            [0.0, 1.0, 0.0]
+        );
         assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
     }
 
@@ -249,8 +257,8 @@ fn a_single_sample_source_is_a_result_and_imports() {
     };
     let parsed = parse_hdf5(&one_sample, ResultImportFormat::Hdf5).expect("one point is a result");
     assert_eq!(parsed.sample_count, 1);
-    assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0]);
-    assert_eq!(parsed.waveforms[0].y.as_slice(), [2.5]);
+    assert_eq!(parsed.waveforms[0].x.read_whole().unwrap().as_ref(), [0.0]);
+    assert_eq!(parsed.waveforms[0].y.read_whole().unwrap().as_ref(), [2.5]);
 }
 
 fn arrow_batch() -> (Arc<Schema>, RecordBatch) {
@@ -451,19 +459,28 @@ fn an_ngspice_op_then_tran_rawfile_imports_as_one_run_of_both_analyses() {
     let op_values = run.analyses[1]
         .waveforms
         .iter()
-        .map(|waveform| (waveform.name.as_str(), waveform.y.as_slice()))
+        .map(|waveform| {
+            (
+                waveform.name.as_str(),
+                waveform.y.samples(..).collect::<Vec<_>>(),
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         op_values,
         [
-            ("v(in)", [0.5].as_slice()),
-            ("v(out)", [0.375].as_slice()),
-            ("i(v1)", [-0.000125].as_slice()),
+            ("v(in)", vec![0.5]),
+            ("v(out)", vec![0.375]),
+            ("i(v1)", vec![-0.000125]),
         ]
     );
     assert_eq!(run.analyses[0].waveforms[1].name, "v(out)");
     assert_eq!(
-        run.analyses[0].waveforms[1].y.as_slice(),
+        run.analyses[0].waveforms[1]
+            .y
+            .read_whole()
+            .unwrap()
+            .as_ref(),
         [0.375, 0.3750000799573561, 0.375000239829447]
     );
     let message = &state.model.log_buffer.entries().last().unwrap().message;
@@ -506,7 +523,10 @@ fn vcd_imports_initialized_digital_events() {
             .collect::<Vec<_>>(),
         vec!["top.clk", "top.bus"]
     );
-    assert_eq!(parsed.waveforms[1].y.as_slice(), &[0.0, 1.0, 2.0]);
+    assert_eq!(
+        parsed.waveforms[1].y.read_whole().unwrap().as_ref(),
+        &[0.0, 1.0, 2.0]
+    );
     assert_basic(parsed, ResultImportFormat::Vcd);
 }
 
@@ -553,7 +573,10 @@ fn a_vector_no_f64_sample_can_hold_reaches_the_grid_one_bit_at_a_time() {
         parse_vcd(vcd.as_bytes(), ResultImportFormat::Vcd).expect("a 96-bit vector imports");
     assert_eq!(parsed.waveforms.len(), 96);
     assert_eq!(parsed.waveforms[0].name, "top.wide[95]");
-    assert_eq!(parsed.waveforms[0].y.as_slice(), &[0.0, 1.0]);
+    assert_eq!(
+        parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 1.0]
+    );
     assert!(
         parsed.notes.iter().any(
             |note| note.starts_with("1 vector variable is wider than 53 bits")
@@ -939,7 +962,7 @@ fn an_unknown_or_high_impedance_change_is_retained_as_its_code() {
         ]
     );
     assert_eq!(
-        parsed.waveforms[0].y.as_slice(),
+        parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
         &[0.5, 0.5],
         "the grid still projects an unresolved bit at its own level"
     );

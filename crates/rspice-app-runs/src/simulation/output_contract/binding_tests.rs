@@ -48,7 +48,7 @@ pub(super) fn check_value(run: &SimulationRun, index: usize, expected: f64) {
         .find(|w| w.name == names[0].0)
         .unwrap();
     assert!(!waveform.y.is_empty());
-    for &value in waveform.y.iter() {
+    for &value in waveform.y.read_whole().unwrap().iter() {
         close(value, expected);
     }
 }
@@ -122,7 +122,14 @@ fn scoped_outputs(spec: AnalysisSpec, derived: bool) {
                     Some(if index % 4 == 2 { "A" } else { "V" })
                 );
             }
-            for (point, (&x, &y)) in wave.x.iter().zip(wave.y.iter()).enumerate() {
+            for (point, (&x, &y)) in wave
+                .x
+                .read_whole()
+                .unwrap()
+                .iter()
+                .zip(wave.y.read_whole().unwrap().iter())
+                .enumerate()
+            {
                 let source = if nested {
                     x
                 } else if complex {
@@ -141,8 +148,8 @@ fn scoped_outputs(spec: AnalysisSpec, derived: bool) {
                 close(y, if complex { value.abs() } else { value });
                 if complex {
                     let phase = wave.complex.as_ref().unwrap();
-                    close(phase.real[point], value);
-                    close(phase.imag[point], 0.0);
+                    close(phase.real.read_whole().unwrap()[point], value);
+                    close(phase.imag.read_whole().unwrap()[point], 0.0);
                 }
             }
         }
@@ -308,7 +315,13 @@ fn literal_slash_nodes_take_precedence_over_hierarchy_aliases() {
                         .iter()
                         .find(|w| w.name == *name)
                         .unwrap();
-                    for (&x, &value) in wave.x.iter().zip(wave.y.iter()) {
+                    for (&x, &value) in wave
+                        .x
+                        .read_whole()
+                        .unwrap()
+                        .iter()
+                        .zip(wave.y.read_whole().unwrap().iter())
+                    {
                         let expected = if index == 0 {
                             if complex { 2.0 } else { 9.0 }
                         } else if nested {
@@ -367,7 +380,14 @@ fn scoped_deferred_probes_resolve_after_project_reload() {
                     wave.unit.as_deref(),
                     Some(if index == 0 { "V" } else { "A" })
                 );
-                for (point, (&x, &y)) in wave.x.iter().zip(wave.y.iter()).enumerate() {
+                for (point, (&x, &y)) in wave
+                    .x
+                    .read_whole()
+                    .unwrap()
+                    .iter()
+                    .zip(wave.y.read_whole().unwrap().iter())
+                    .enumerate()
+                {
                     let value = expected(
                         if index == 0 { 3 } else { 2 },
                         if nested {
@@ -388,8 +408,8 @@ fn scoped_deferred_probes_resolve_after_project_reload() {
                     close(y, if complex { value.abs() } else { value });
                     if complex {
                         let phasor = wave.complex.as_ref().unwrap();
-                        close(phasor.real[point], value);
-                        close(phasor.imag[point], 0.0);
+                        close(phasor.real.read_whole().unwrap()[point], value);
+                        close(phasor.imag.read_whole().unwrap()[point], 0.0);
                     }
                 }
             }
@@ -405,7 +425,7 @@ fn raw_scope_lookup_preserves_quantity_namespaces_and_does_not_rewrite_retained_
     ];
     for (expr, expected) in [("V(/X1/out)", 2.0), ("I(X1:out)", 3.0)] {
         let resolved = resolve_raw_probe(expr, &waveforms, "result", false).unwrap();
-        assert_eq!(resolved.y.as_slice(), &[expected]);
+        assert_eq!(resolved.y.read_whole().unwrap().as_ref(), &[expected]);
     }
     assert!(resolve_raw_probe("I(/X1/out)", &waveforms[..1], "result", false).is_err());
     assert!(resolve_raw_probe("V(/X1/out)", &waveforms[1..], "result", false).is_err());
@@ -472,7 +492,7 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
                             .iter()
                             .find(|wave| wave.name == "Deferred physical signal")
                             .unwrap();
-                        close(visible.y[0], expected);
+                        close(visible.y.read_whole().unwrap()[0], expected);
                     } else {
                         assert!(result.is_err(), "{kind:?}: {query}, reload={reload}");
                         assert_eq!(state.view.data_version, version_before);

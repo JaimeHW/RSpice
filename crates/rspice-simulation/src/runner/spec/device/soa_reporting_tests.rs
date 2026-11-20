@@ -92,12 +92,12 @@ fn soa_reporting_preserves_between_sample_violations_through_worker_and_retentio
         assert_eq!(retained.family_metadata, full.family_metadata);
         for wave in &source.waveforms {
             let baseline = full.waveforms.iter().find(|w| w.name == wave.name).unwrap();
-            assert_eq!(source.time, *baseline.x);
-            assert_eq!(wave.values, *baseline.y);
+            assert_eq!(source.time, baseline.x.in_memory().unwrap());
+            assert_eq!(wave.values, baseline.y.in_memory().unwrap());
         }
         for wave in &retained.waveforms {
             assert_eq!(wave.x.len(), expected.len());
-            for (actual, expected) in wave.x.iter().zip(&expected) {
+            for (actual, expected) in wave.x.in_memory().unwrap().iter().zip(&expected) {
                 assert!((actual - expected).abs() < 1e-22);
             }
         }
@@ -106,14 +106,24 @@ fn soa_reporting_preserves_between_sample_violations_through_worker_and_retentio
             .iter()
             .find(|w| w.name == "SOA_VGS(M1)")
             .unwrap();
-        assert!(stress.y.iter().all(|v| *v < 1.8));
+        assert!(stress.y.in_memory().unwrap().iter().all(|v| *v < 1.8));
         let counts = retained
             .waveforms
             .iter()
             .find(|w| w.name == "SOA_VIOLATION_COUNT")
             .unwrap();
-        assert!(counts.y.iter().all(|v| v.fract() == 0.0));
-        assert_eq!(counts.y.last().copied(), Some(violations.len() as f64));
+        assert!(
+            counts
+                .y
+                .in_memory()
+                .unwrap()
+                .iter()
+                .all(|v| v.fract() == 0.0)
+        );
+        assert_eq!(
+            counts.y.in_memory().unwrap().last().copied(),
+            Some(violations.len() as f64)
+        );
         let json = serde_json::to_string(&retained.result_payload).unwrap();
         retained.result_payload = serde_json::from_str(&json).unwrap();
         retained.validate_retained_evidence().unwrap();

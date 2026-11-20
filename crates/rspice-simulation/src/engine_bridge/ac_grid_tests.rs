@@ -46,6 +46,8 @@ fn single_frequency_and_zero_start_lin_run_the_requested_grid() {
         assert!(
             trace
                 .y_values
+                .in_memory()
+                .unwrap()
                 .iter()
                 .all(|value| (value - 0.5).abs() < 1e-12)
         );

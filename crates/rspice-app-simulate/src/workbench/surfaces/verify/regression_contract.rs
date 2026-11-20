@@ -71,17 +71,17 @@ pub(super) fn validate_regression_waveform_data(
     if waveform.x.is_empty() {
         return Err("waveform contains no samples".to_owned());
     }
-    if !strictly_increasing_finite(waveform.x.as_slice()) {
+    if !strictly_increasing_finite_values(&waveform.x) {
         return Err("waveform axis is not finite and strictly increasing".to_owned());
     }
-    if waveform.y.iter().any(|value| !value.is_finite()) {
+    if waveform.y.samples(..).any(|value| !value.is_finite()) {
         return Err("waveform contains a non-finite value".to_owned());
     }
     if let Some(complex) = &waveform.complex
         && (complex.real.len() != waveform.x.len()
             || complex.imag.len() != waveform.x.len()
-            || complex.real.iter().any(|value| !value.is_finite())
-            || complex.imag.iter().any(|value| !value.is_finite()))
+            || complex.real.samples(..).any(|value| !value.is_finite())
+            || complex.imag.samples(..).any(|value| !value.is_finite()))
     {
         return Err("complex waveform components are incomplete or non-finite".to_owned());
     }
@@ -496,11 +496,11 @@ pub(super) fn regression_content_digest(
         for waveform in &analysis.waveforms {
             digest_text(&mut digest, &waveform.name);
             digest.update((waveform.x.len() as u64).to_le_bytes());
-            for value in waveform.x.iter() {
+            for value in waveform.x.samples(..) {
                 digest.update(value.to_bits().to_le_bytes());
             }
             digest.update((waveform.y.len() as u64).to_le_bytes());
-            for value in waveform.y.iter() {
+            for value in waveform.y.samples(..) {
                 digest.update(value.to_bits().to_le_bytes());
             }
             match &waveform.complex {
@@ -508,11 +508,11 @@ pub(super) fn regression_content_digest(
                     digest.update([1]);
                     digest_text(&mut digest, &complex.source_name);
                     digest.update((complex.real.len() as u64).to_le_bytes());
-                    for value in complex.real.iter() {
+                    for value in complex.real.samples(..) {
                         digest.update(value.to_bits().to_le_bytes());
                     }
                     digest.update((complex.imag.len() as u64).to_le_bytes());
-                    for value in complex.imag.iter() {
+                    for value in complex.imag.samples(..) {
                         digest.update(value.to_bits().to_le_bytes());
                     }
                 }
@@ -1618,10 +1618,14 @@ pub(super) fn evaluate_regression_check(
     }
 }
 
-pub(super) fn strictly_increasing_finite(values: &[f64]) -> bool {
+/// Whether a series is finite and strictly increasing, read a block at a time.
+fn strictly_increasing_finite_values(values: &rspice_results::waveform::WaveformValues) -> bool {
     !values.is_empty()
-        && values.iter().all(|value| value.is_finite())
-        && values.windows(2).all(|pair| pair[0] < pair[1])
+        && values.samples(..).all(f64::is_finite)
+        && values
+            .samples(..)
+            .zip(values.samples(1..))
+            .all(|(before, after)| before < after)
 }
 
 pub(super) fn minimum_interpolated_delta(
@@ -1667,60 +1671,51 @@ pub(super) fn minimum_interpolated_delta(
     best
 }
 
-pub(super) fn interpolate_waveform_at(
-    waveform: &crate::state::RetainedTrace,
-    at: f64,
-) -> Option<f64> {
-    let first = *waveform.x.first()?;
-    let last = *waveform.x.last()?;
+pub(super) fn interpolate_waveform_at(x: &[f64], y: &[f64], at: f64) -> Option<f64> {
+    let first = *x.first()?;
+    let last = *x.last()?;
     if !at.is_finite() || at < first || at > last {
         return None;
     }
-    match waveform.x.binary_search_by(|probe| probe.total_cmp(&at)) {
-        Ok(index) => waveform.y.get(index).copied(),
-        Err(upper) if upper > 0 && upper < waveform.x.len() => {
+    match x.binary_search_by(|probe| probe.total_cmp(&at)) {
+        Ok(index) => y.get(index).copied(),
+        Err(upper) if upper > 0 && upper < x.len() => {
             let lower = upper - 1;
-            let span = waveform.x[upper] - waveform.x[lower];
-            Some(
-                waveform.y[lower]
-                    + (waveform.y[upper] - waveform.y[lower]) * ((at - waveform.x[lower]) / span),
-            )
+            let span = x[upper] - x[lower];
+            Some(y[lower] + (y[upper] - y[lower]) * ((at - x[lower]) / span))
         }
         Err(_) => None,
     }
 }
 
 pub(super) fn waveform_evaluation_samples(
-    waveform: &crate::state::RetainedTrace,
+    (x, y): (&[f64], &[f64]),
     window: Option<crate::state::RegressionComparisonWindow>,
 ) -> Result<Vec<(f64, f64)>, String> {
     let Some(window) = window else {
-        return Ok(waveform
-            .x
-            .iter()
-            .copied()
-            .zip(waveform.y.iter().copied())
-            .collect());
+        return Ok(x.iter().copied().zip(y.iter().copied()).collect());
     };
-    let mut x = vec![window.start, window.end];
-    x.extend(
-        waveform
-            .x
-            .iter()
+    let mut samples = vec![window.start, window.end];
+    samples.extend(
+        x.iter()
             .copied()
             .filter(|sample| *sample > window.start && *sample < window.end),
     );
-    x.sort_by(f64::total_cmp);
-    x.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    x.into_iter()
+    samples.sort_by(f64::total_cmp);
+    samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
+    samples
+        .into_iter()
         .map(|sample| {
-            interpolate_waveform_at(waveform, sample)
+            interpolate_waveform_at(x, y, sample)
                 .map(|value| (sample, value))
                 .ok_or_else(|| format!("comparison window boundary x={sample:.6e} is outside retained waveform coverage"))
         })
         .collect()
 }
 
+/// The envelope comparison matches every sample of each waveform against the other's samples
+/// within the skew allowance, on grids of their own, so it reads both whole; a waveform larger
+/// than the whole-read budget is not evaluated, and says why.
 pub(super) fn evaluate_regression_waveform(
     pair: &RegressionWaveformPair<'_>,
     rule: Option<&crate::state::RegressionToleranceRule>,
@@ -1737,16 +1732,38 @@ pub(super) fn evaluate_regression_waveform(
     if let Err(error) = validate_regression_waveform_data(pair.current) {
         return RegressionVerdict::NotEvaluated(format!("candidate {error}"));
     }
-    let baseline = match waveform_evaluation_samples(pair.baseline, rule.comparison_window) {
-        Ok(samples) => samples,
-        Err(error) => return RegressionVerdict::NotEvaluated(format!("baseline {error}")),
+    fn whole(
+        waveform: &crate::state::RetainedTrace,
+    ) -> Result<(std::borrow::Cow<'_, [f64]>, std::borrow::Cow<'_, [f64]>), String> {
+        let x = waveform
+            .x
+            .read_whole()
+            .map_err(|failure| failure.to_string())?;
+        let y = waveform
+            .y
+            .read_whole()
+            .map_err(|failure| failure.to_string())?;
+        Ok((x, y))
+    }
+    let (baseline_x, baseline_y) = match whole(pair.baseline) {
+        Ok(columns) => columns,
+        Err(failure) => return RegressionVerdict::NotEvaluated(format!("baseline {failure}")),
     };
+    let (current_x, current_y) = match whole(pair.current) {
+        Ok(columns) => columns,
+        Err(failure) => return RegressionVerdict::NotEvaluated(format!("candidate {failure}")),
+    };
+    let baseline =
+        match waveform_evaluation_samples((&baseline_x, &baseline_y), rule.comparison_window) {
+            Ok(samples) => samples,
+            Err(error) => return RegressionVerdict::NotEvaluated(format!("baseline {error}")),
+        };
     let mut worst_delta = 0.0_f64;
     let mut allowed_at_worst = 0.0_f64;
     for (baseline_x, baseline_y) in baseline {
         let Some((delta, _)) = minimum_interpolated_delta(
-            pair.current.x.as_slice(),
-            pair.current.y.as_slice(),
+            &current_x,
+            &current_y,
             baseline_x,
             baseline_y,
             rule.time_skew_allowance,
@@ -1771,14 +1788,15 @@ pub(super) fn evaluate_regression_waveform(
             };
         }
     }
-    let candidate = match waveform_evaluation_samples(pair.current, rule.comparison_window) {
-        Ok(samples) => samples,
-        Err(error) => return RegressionVerdict::NotEvaluated(format!("candidate {error}")),
-    };
+    let candidate =
+        match waveform_evaluation_samples((&current_x, &current_y), rule.comparison_window) {
+            Ok(samples) => samples,
+            Err(error) => return RegressionVerdict::NotEvaluated(format!("candidate {error}")),
+        };
     for (candidate_x, candidate_y) in candidate {
         let Some((delta, matched_baseline)) = minimum_interpolated_delta(
-            pair.baseline.x.as_slice(),
-            pair.baseline.y.as_slice(),
+            &baseline_x,
+            &baseline_y,
             candidate_x,
             candidate_y,
             rule.time_skew_allowance,

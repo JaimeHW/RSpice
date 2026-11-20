@@ -9,8 +9,13 @@ pub use retained::{
     samples_equal,
 };
 
+mod reads;
 mod trace;
 mod values;
+pub use reads::{
+    Fetched, HeldColumn, Read, ReadService, ReadValue, SampleSlice, install_read_service, perform,
+    read_service,
+};
 pub use trace::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 #[cfg(feature = "engine-evidence")]
 pub(crate) use values::report_column_read_failure;

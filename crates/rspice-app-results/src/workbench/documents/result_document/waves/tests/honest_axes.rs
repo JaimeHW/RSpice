@@ -240,7 +240,7 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
     let analysis = crate::simulation::controller::test_execution::dc_history::retain(result);
     assert!(analysis.success, "{:?}", analysis.error_message);
     assert_eq!(analysis.waveforms[0].unit.as_deref(), Some("V"));
-    let voltage = analysis.waveforms[0].y[2];
+    let voltage = analysis.waveforms[0].y.read_whole().unwrap()[2];
     assert!(
         (voltage - 1.0).abs() <= rspice_core::constants::RELTOL,
         "1 V within configured relative tolerance; got {voltage:.16e}"

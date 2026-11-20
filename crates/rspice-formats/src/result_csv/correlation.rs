@@ -79,8 +79,8 @@ pub fn encode_correlation_csv(
     }
     if trace
         .x
-        .iter()
-        .chain(trace.y.iter())
+        .samples(..)
+        .chain(trace.y.samples(..))
         .any(|value| !value.is_finite())
     {
         return Err(CorrelationCsvError::NonFiniteSample);
@@ -103,7 +103,7 @@ pub fn encode_correlation_csv(
             condition_header.as_str(),
         ])
         .map_err(CorrelationCsvError::Header)?;
-    for (index, (&x, &y)) in trace.x.iter().zip(trace.y.iter()).enumerate() {
+    for (index, (x, y)) in trace.x.samples(..).zip(trace.y.samples(..)).enumerate() {
         let id = format!("sample-{index:08}");
         let value = y.to_string();
         let coordinate = x.to_string();

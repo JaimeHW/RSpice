@@ -175,8 +175,8 @@ fn ac_result_conversion_retains_complex_components_for_export() {
         .expect("magnitude trace retains complex source data");
 
     assert_eq!(complex.source_name, "S11");
-    assert_eq!(&*complex.real, &[0.1, 0.2]);
-    assert_eq!(&*complex.imag, &[0.0, 0.0]);
+    assert_eq!(complex.real.samples(..).collect::<Vec<_>>(), [0.1, 0.2]);
+    assert_eq!(complex.imag.samples(..).collect::<Vec<_>>(), [0.0, 0.0]);
 }
 
 #[test]

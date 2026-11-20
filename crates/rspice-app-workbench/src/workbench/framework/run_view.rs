@@ -94,8 +94,8 @@ impl ViewerHost for RunView<'_, '_> {
         self.peers.results().viewer_reading()
     }
 
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
-        self.peers.results().fft_input_options(time)
+    fn fft_input_options(&self) -> FftInputOptions {
+        self.peers.results().fft_input_options()
     }
 
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
@@ -216,8 +216,8 @@ impl ViewerHost for FrozenRun {
         self.results.viewer_reading()
     }
 
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
-        self.results.fft_input_options(time)
+    fn fft_input_options(&self) -> FftInputOptions {
+        self.results.fft_input_options()
     }
 
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {

@@ -23,9 +23,9 @@ pub trait ViewerHost: RunEventSink {
     fn model(&self) -> &Model;
     /// What the transient viewers hold now.
     fn viewer_reading(&self) -> ViewerReading;
-    /// How the FFT prepares the input it is given over `time`, as the reader
+    /// How the FFT prepares the input it is given, as the reader
     /// set it.
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions;
+    fn fft_input_options(&self) -> FftInputOptions;
     /// The bit period the reader chose for this result's eye.
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase;
 }

@@ -53,7 +53,12 @@ fn family(base_mode: CornerBaseMode) -> (AnalysisResultFamilyMetadata, Vec<(Stri
     let mut traces = analysis
         .waveforms
         .iter()
-        .map(|waveform| (waveform.name.clone(), waveform.y.as_ref().clone()))
+        .map(|waveform| {
+            (
+                waveform.name.clone(),
+                waveform.y.in_memory().unwrap().to_vec(),
+            )
+        })
         .collect::<Vec<_>>();
     traces.sort_by(|left, right| left.0.cmp(&right.0));
     (

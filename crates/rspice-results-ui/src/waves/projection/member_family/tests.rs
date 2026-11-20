@@ -224,7 +224,7 @@ fn a_stepped_ac_sweep_draws_each_points_decibels_and_phase() {
         .traces
         .iter()
         .filter(|trace| trace.kind == TraceKind::MagnitudeDb)
-        .map(|trace| (trace.name.as_str(), trace.y[1]))
+        .map(|trace| (trace.name.as_str(), trace.y.in_memory().unwrap()[1]))
         .collect();
     assert_eq!(
         decibels,
@@ -237,7 +237,7 @@ fn a_stepped_ac_sweep_draws_each_points_decibels_and_phase() {
         .traces
         .iter()
         .filter(|trace| trace.kind == TraceKind::PhaseDeg)
-        .map(|trace| trace.y[1])
+        .map(|trace| trace.y.in_memory().unwrap()[1])
         .collect();
     assert_eq!(phases, [-45.0, -90.0]);
 }

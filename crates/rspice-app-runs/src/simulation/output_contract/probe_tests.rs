@@ -22,8 +22,8 @@ fn automatic_outputs_retain_dc_sweeps_and_native_noise_results() {
     let result = &dc_run.analyses[0];
     assert!(result.success, "{:?}", result.error_message);
     let wave = &result.waveforms[0];
-    assert_eq!(*wave.x, [-1.0, 0.0, 1.0]);
-    assert_eq!(*wave.y, [-1.0, 0.0, 1.0]);
+    assert_eq!(wave.x.samples(..).collect::<Vec<_>>(), [-1.0, 0.0, 1.0]);
+    assert_eq!(wave.y.samples(..).collect::<Vec<_>>(), [-1.0, 0.0, 1.0]);
     assert_eq!(result.saved_output_receipts.len(), 1);
     result.validate_retained_evidence().unwrap();
 
@@ -67,12 +67,13 @@ fn automatic_outputs_retain_dc_sweeps_and_native_noise_results() {
         !result.waveforms.is_empty(),
         "automatic selection erased the noise spectra"
     );
-    assert!(
-        result
-            .waveforms
+    assert!(result.waveforms.iter().any(|wave| {
+        wave.y
+            .read_whole()
+            .unwrap()
             .iter()
-            .any(|wave| wave.y.iter().any(|value| *value > 0.0))
-    );
+            .any(|value| *value > 0.0)
+    }));
     assert!(result.saved_output_receipts.is_empty());
     result.validate_retained_evidence().unwrap();
     let mut explicit = result.clone();
@@ -185,16 +186,25 @@ fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts
     );
     for wave in [gate, drain, drive] {
         assert_eq!(wave.unit.as_deref(), Some("A"));
-        assert_eq!(*wave.x, [0.0, 8e6, 16e6, 24e6]);
+        assert_eq!(
+            wave.x.samples(..).collect::<Vec<_>>(),
+            [0.0, 8e6, 16e6, 24e6]
+        );
     }
     let gate = gate.complex.as_ref().unwrap();
     let drain = drain.complex.as_ref().unwrap();
     let drive = drive.complex.as_ref().unwrap();
-    assert!(gate.real[1] > 1e-9);
-    assert!(drain.real[1] < -1e-10);
+    assert!(gate.real.read_whole().unwrap()[1] > 1e-9);
+    assert!(drain.real.read_whole().unwrap()[1] < -1e-10);
     for h in 0..4 {
-        assert!((gate.real[h] + drive.real[h]).abs() < 1e-13);
-        assert!((gate.imag[h] + drive.imag[h]).abs() < 1e-13);
+        assert!(
+            (gate.real.read_whole().unwrap()[h] + drive.real.read_whole().unwrap()[h]).abs()
+                < 1e-13
+        );
+        assert!(
+            (gate.imag.read_whole().unwrap()[h] + drive.imag.read_whole().unwrap()[h]).abs()
+                < 1e-13
+        );
     }
     run.analyses[0].saved_output_receipts[0]
         .source_bindings
@@ -337,7 +347,13 @@ fn assert_ground(spec: AnalysisSpec, members: usize) {
     ] {
         for wave in materialized(&run, name, members) {
             assert_eq!(wave.unit.as_deref(), Some("V"));
-            for (&x, &y) in wave.x.iter().zip(wave.y.iter()) {
+            for (&x, &y) in wave
+                .x
+                .read_whole()
+                .unwrap()
+                .iter()
+                .zip(wave.y.read_whole().unwrap().iter())
+            {
                 assert_close(
                     y,
                     if is_ac {
@@ -352,7 +368,13 @@ fn assert_ground(spec: AnalysisSpec, members: usize) {
                     .complex
                     .as_ref()
                     .expect("an AC ground reference retains phase");
-                for (&real, &imag) in complex.real.iter().zip(complex.imag.iter()) {
+                for (&real, &imag) in complex
+                    .real
+                    .read_whole()
+                    .unwrap()
+                    .iter()
+                    .zip(complex.imag.read_whole().unwrap().iter())
+                {
                     assert_close(real, sign);
                     assert_close(imag, 0.0);
                 }
@@ -414,9 +436,11 @@ fn ac_differential_magnitude_comes_from_the_complex_difference() {
     let complex = wave.complex.as_ref().unwrap();
     for ((&magnitude, &real), &imag) in wave
         .y
+        .read_whole()
+        .unwrap()
         .iter()
-        .zip(complex.real.iter())
-        .zip(complex.imag.iter())
+        .zip(complex.real.read_whole().unwrap().iter())
+        .zip(complex.imag.read_whole().unwrap().iter())
     {
         assert_close(real, 2.0);
         assert_close(imag, 0.0);
@@ -456,7 +480,13 @@ fn derived_ground_probes_execute_in_scalar_and_family_results() {
             )],
         );
         for wave in materialized(&run, "Derived", members) {
-            for (&x, &y) in wave.x.iter().zip(wave.y.iter()) {
+            for (&x, &y) in wave
+                .x
+                .read_whole()
+                .unwrap()
+                .iter()
+                .zip(wave.y.read_whole().unwrap().iter())
+            {
                 assert_close(y, if is_dc { x } else { 2.0 });
             }
         }
@@ -480,8 +510,14 @@ fn numeric_looking_node_names_are_not_numeric_values() {
         &outputs,
         OutputSelectionMode::ExplicitOnly,
     );
-    assert_close(materialized(&run, "Raw", 1)[0].y[0], 2.0);
-    assert_close(materialized(&run, "Sum", 1)[0].y[0], 9.0);
+    assert_close(
+        materialized(&run, "Raw", 1)[0].y.read_whole().unwrap()[0],
+        2.0,
+    );
+    assert_close(
+        materialized(&run, "Sum", 1)[0].y.read_whole().unwrap()[0],
+        9.0,
+    );
 }
 
 #[test]
@@ -568,7 +604,13 @@ fn ground_and_spaced_probes_evaluate_after_project_reload() {
                 .find(|wave| wave.name == name)
                 .unwrap();
             assert_eq!(wave.unit.as_deref(), Some("V"));
-            for (&x, &y) in wave.x.iter().zip(wave.y.iter()) {
+            for (&x, &y) in wave
+                .x
+                .read_whole()
+                .unwrap()
+                .iter()
+                .zip(wave.y.read_whole().unwrap().iter())
+            {
                 assert_close(y, if is_ac { 1.0 } else { -x });
             }
             if is_ac {
@@ -577,6 +619,8 @@ fn ground_and_spaced_probes_evaluate_after_project_reload() {
                         .as_ref()
                         .unwrap()
                         .real
+                        .read_whole()
+                        .unwrap()
                         .iter()
                         .all(|&real| (real + 1.0).abs() < 1e-10)
                 );
@@ -657,7 +701,12 @@ fn save_all_names_each_transient_node_voltage_by_its_voltage() {
             .waveforms
             .iter()
             .find(|wave| wave.name == "V(out)")
-            .map(|wave| (wave.x.to_vec(), wave.y.to_vec()))
+            .map(|wave| {
+                (
+                    wave.x.read_whole().unwrap().to_vec(),
+                    wave.y.read_whole().unwrap().to_vec(),
+                )
+            })
             .expect("the probe")
     };
     assert_eq!(

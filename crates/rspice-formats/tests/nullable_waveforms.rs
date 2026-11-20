@@ -54,8 +54,11 @@ fn project_roundtrip_preserves_unavailable_samples_and_binds_their_identity() {
         restored.validate().unwrap();
         assert_eq!(current, restored);
         let waveform = &restored.runs[0].analyses[0].waveforms[0];
-        assert!(waveform.y[1].is_nan());
-        assert_eq!(waveform.y[2].to_bits(), (-0.0_f64).to_bits());
+        assert!(waveform.y.in_memory().unwrap()[1].is_nan());
+        assert_eq!(
+            waveform.y.in_memory().unwrap()[2].to_bits(),
+            (-0.0_f64).to_bits()
+        );
         assert_eq!(waveform.clone().into_waveform().sample(1), None);
         assert_ne!(
             current.runs[0].dataset_content_digest,

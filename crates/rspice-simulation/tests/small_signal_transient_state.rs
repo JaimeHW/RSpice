@@ -282,8 +282,7 @@ fn complex_waveform(
     let imaginary = waveform.y_imag.as_ref().expect("a complex waveform");
     waveform
         .y_values
-        .iter()
-        .copied()
+        .samples(..)
         .zip(imaginary.iter().copied())
         .collect()
 }
@@ -744,7 +743,10 @@ fn ac_bits(result: &SimulationResult) -> Vec<(String, Vec<u64>)> {
     let bits = |values: &[f64]| values.iter().map(|value| value.to_bits()).collect();
     let mut rows = vec![("frequency".to_owned(), bits(frequencies))];
     for (name, waveform) in waveforms {
-        rows.push((format!("{name} re"), bits(&waveform.y_values)));
+        rows.push((
+            format!("{name} re"),
+            bits(waveform.y_values.in_memory().unwrap()),
+        ));
         let imaginary = waveform.y_imag.as_deref().unwrap_or_default();
         rows.push((format!("{name} im"), bits(imaginary)));
     }
@@ -763,9 +765,9 @@ fn transient_out(result: &SimulationResult) -> (Vec<f64>, Vec<f64>) {
     let out = waveforms
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("v(out)") || name.eq_ignore_ascii_case("out"))
-        .map(|(_, waveform)| waveform.y_values.to_vec())
+        .map(|(_, waveform)| waveform.y_values.samples(..).collect())
         .unwrap_or_else(|| panic!("v(out) among {:?}", waveforms.keys().collect::<Vec<_>>()));
-    (time.to_vec(), out)
+    (time.samples(..).collect(), out)
 }
 
 /// The largest distance between two phasor sets, relative to the larger

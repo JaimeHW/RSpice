@@ -154,7 +154,7 @@ fn a_project_of_twenty_large_runs_saves_under_a_mebibyte_and_reopens_every_run()
         for (left, right) in before.waveforms.iter().zip(&after.waveforms) {
             assert!(right.y.is_stored());
             assert_eq!(right.y.len(), POINTS);
-            assert_eq!(right.y.last(), left.y.last(), "{}", right.name);
+            assert_eq!(right.y.ends(), left.y.ends(), "{}", right.name);
         }
     }
     drop((simulation, restored));
@@ -239,7 +239,7 @@ fn run_bits(run: &SimulationRun) -> Vec<Vec<u64>> {
         .waveforms
         .iter()
         .flat_map(|waveform| [&waveform.x, &waveform.y])
-        .map(|values| values.iter().map(|value| value.to_bits()).collect())
+        .map(|values| values.samples(..).map(f64::to_bits).collect())
         .collect()
 }
 

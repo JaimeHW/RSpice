@@ -662,8 +662,8 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sh
         .iter()
         .find(|wave| wave.name == "output_voltage")
         .expect("the materialized output is retained beside its source");
-    assert_eq!(materialized.x[..], [0.0, 1.0]);
-    assert_eq!(materialized.y[..], [0.0, 2.0]);
+    assert_eq!(materialized.x.read_whole().unwrap()[..], [0.0, 1.0]);
+    assert_eq!(materialized.y.read_whole().unwrap()[..], [0.0, 2.0]);
     assert_eq!(row_value(&nodes).as_deref(), Some("2 pts"));
     assert!(
         !nodes

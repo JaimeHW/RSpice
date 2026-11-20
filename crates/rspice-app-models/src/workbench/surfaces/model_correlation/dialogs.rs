@@ -257,9 +257,9 @@ pub(super) fn retained_run_options(cx: &Cx<'_, ModelsFeature>) -> Vec<RetainedRu
                                 && trace.x.len() == trace.y.len()
                                 && trace
                                     .x
-                                    .iter()
-                                    .chain(trace.y.iter())
-                                    .all(|value| value.is_finite())
+                                    .samples(..)
+                                    .chain(trace.y.samples(..))
+                                    .all(f64::is_finite)
                         })
                         .map(|trace| RetainedTraceOption {
                             name: trace.name.clone(),

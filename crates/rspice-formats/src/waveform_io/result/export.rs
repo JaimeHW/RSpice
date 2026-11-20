@@ -27,12 +27,21 @@ pub enum WaveformProjectionError {
         samples: usize,
         axis: usize,
     },
+    /// A signal's samples could not be read from its results store, or are more than the
+    /// loaded results may hold.
+    Unreadable {
+        signal: String,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for WaveformProjectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoSamples => f.write_str("No waveform samples available to export."),
+            Self::Unreadable { signal, reason } => {
+                write!(f, "'{signal}' could not be exported: {reason}")
+            }
             Self::MissingNetwork => {
                 f.write_str("Touchstone export requires complex S-parameter network traces")
             }
@@ -63,6 +72,19 @@ impl std::fmt::Display for WaveformProjectionError {
 }
 
 impl std::error::Error for WaveformProjectionError {}
+
+/// [`super::export_samples`] for a projection.
+fn whole<'a>(
+    signal: &str,
+    values: &'a rspice_results::waveform::WaveformValues,
+) -> Result<std::borrow::Cow<'a, [f64]>, WaveformProjectionError> {
+    values
+        .read_whole()
+        .map_err(|failure| WaveformProjectionError::Unreadable {
+            signal: signal.to_owned(),
+            reason: failure.to_string(),
+        })
+}
 
 struct ExportSignalSlice<'a> {
     name: &'a str,
@@ -191,14 +213,14 @@ fn prepare_touchstone_waveform_dataset(
         .ok_or(WaveformProjectionError::MissingNetwork)?;
     let mut dataset = WaveformDataset::new("S-Parameter");
     let mut axis = WaveformSignal::new("frequency", SignalType::Frequency);
-    axis.data = network.x.as_ref().clone();
+    axis.data = whole(&network.name, &network.x)?.into_owned();
     dataset.set_x(axis);
     for waveform in waveforms {
         let first = dataset.signals.len();
         append_waveform_signal(&mut dataset, &waveform.name, waveform, waveform.x.len())?;
         if waveform.x != network.x {
             for signal in &mut dataset.signals[first..] {
-                signal.x_values = Some(waveform.x.as_ref().clone());
+                signal.x_values = Some(whole(&waveform.name, &waveform.x)?.into_owned());
             }
         }
     }
@@ -217,11 +239,13 @@ fn prepare_flat_waveform_dataset(
         .ok_or(WaveformProjectionError::NoSamples)?;
 
     let reference_len = reference_waveform.x.len();
-    validate_shared_x_axis(waveforms, reference_waveform.x.as_ref())?;
+    validate_shared_x_axis(waveforms, &reference_waveform.x)?;
 
     let mut dataset = WaveformDataset::new("Simulation Results");
     let mut x_signal = WaveformSignal::new(x_name, x_signal_type);
-    x_signal.data.extend(reference_waveform.x.iter().copied());
+    x_signal
+        .data
+        .extend_from_slice(&whole(&reference_waveform.name, &reference_waveform.x)?);
     dataset.set_x(x_signal);
 
     for waveform in waveforms {
@@ -233,11 +257,11 @@ fn prepare_flat_waveform_dataset(
 
 pub(crate) fn validate_shared_x_axis<W: AsRef<RetainedWaveform>>(
     waveforms: &[&W],
-    reference_x: &[f64],
+    reference_x: &rspice_results::waveform::WaveformValues,
 ) -> Result<(), WaveformProjectionError> {
     for waveform in waveforms {
         let waveform = (*waveform).as_ref();
-        if waveform.x.as_ref() != reference_x {
+        if waveform.x != *reference_x {
             return Err(WaveformProjectionError::DifferentCoordinates {
                 signal: sanitize_column_label(&waveform.name),
             });
@@ -350,8 +374,8 @@ fn append_waveform_signal(
                     name: &name,
                     signal_type: complex_signal_type(&complex.source_name, real),
                     unit: waveform.unit.as_deref(),
-                    x_values: waveform.x.as_ref(),
-                    y_values: values.as_ref(),
+                    x_values: &whole(&name, &waveform.x)?,
+                    y_values: &whole(&name, values)?,
                 },
                 reference_len,
             )?;
@@ -364,8 +388,8 @@ fn append_waveform_signal(
             name: signal_name,
             signal_type: signal_type_from_waveform_name(signal_name),
             unit: waveform.unit.as_deref(),
-            x_values: waveform.x.as_ref(),
-            y_values: waveform.y.as_ref(),
+            x_values: &whole(signal_name, &waveform.x)?,
+            y_values: &whole(signal_name, &waveform.y)?,
         },
         reference_len,
     )

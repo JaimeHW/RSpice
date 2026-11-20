@@ -104,6 +104,13 @@ pub fn show(
         significant_digits: digits,
     } = input;
     let mut requested = None;
+    // The table and the convergence plot show every candidate at once: a stored history is
+    // read whole off the frame, and is shown once it has arrived.
+    let held = |values: &rspice_results::waveform::WaveformValues| {
+        values.fetch_whole().ready().unwrap_or_default()
+    };
+    let cost = held(&view.cost.y);
+    let cost_at = |index: usize| cost.get(index).copied().unwrap_or(f64::NAN);
     let outcome = if view.converged {
         "converged"
     } else {
@@ -223,15 +230,17 @@ pub fn show(
     )
     .accessible_name("Optimization convergence")
     .accessible_detail("Exact retained objective cost at each evaluated candidate.");
-    spec.traces.push(
-        Trace::new(
-            view.iterations,
-            &view.cost.y,
-            Tokens::get(ui.ctx()).color.traces[0],
-        )
-        .marker_style(0)
-        .cache_key(0x4F50_5400_u64 ^ analysis_id.rotate_left(17)),
-    );
+    if cost.len() == view.iterations.len() {
+        spec.traces.push(
+            Trace::new(
+                view.iterations,
+                &cost,
+                Tokens::get(ui.ctx()).color.traces[0],
+            )
+            .marker_style(0)
+            .cache_key(0x4F50_5400_u64 ^ analysis_id.rotate_left(17)),
+        );
+    }
     spec.markers.push(plot::Marker {
         x: view.iterations[best_index],
         y: view.best_cost,
@@ -243,10 +252,7 @@ pub fn show(
         shape: plot::MarkerShape::Point,
     });
     if let Some(selection) = selected
-        && let Some((&iteration, &cost)) = view
-            .iterations
-            .get(selection)
-            .zip(view.cost.y.get(selection))
+        && let Some((&iteration, &cost)) = view.iterations.get(selection).zip(cost.get(selection))
         && selection != best_index
     {
         spec.markers.push(plot::Marker {
@@ -267,13 +273,10 @@ pub fn show(
                     "iteration".to_owned(),
                     iteration_text(view.iterations[index], digits),
                 ),
-                (
-                    "cost".to_owned(),
-                    value_text(view.cost.y[index], "", digits),
-                ),
+                ("cost".to_owned(), value_text(cost_at(index), "", digits)),
                 (
                     "Δ best".to_owned(),
-                    signed_readout(view.cost.y[index] - view.best_cost, digits),
+                    signed_readout(cost_at(index) - view.best_cost, digits),
                 ),
             ]
         })
@@ -302,7 +305,11 @@ pub fn show(
     // The table owns horizontal scrolling, so every retained design variable
     // remains addressable. Truncating the list here made the exact structured
     // alternative disagree with the immutable candidate vector.
-    let visible_variables = view.variables;
+    let visible_variables = view
+        .variables
+        .iter()
+        .map(|(name, waveform)| (*name, held(&waveform.y)))
+        .collect::<Vec<_>>();
     let width = ui
         .available_width()
         .max(530.0 + visible_variables.len() as f32 * 150.0);
@@ -354,15 +361,13 @@ pub fn show(
                                 requested = Some(index);
                             }
                         });
-                        row.col(|ui| mono(ui, &value_text(view.cost.y[index], "", digits)));
+                        row.col(|ui| mono(ui, &value_text(cost_at(index), "", digits)));
                         row.col(|ui| {
-                            mono(
-                                ui,
-                                &signed_readout(view.cost.y[index] - view.best_cost, digits),
-                            )
+                            mono(ui, &signed_readout(cost_at(index) - view.best_cost, digits))
                         });
-                        for (_, waveform) in &visible_variables {
-                            row.col(|ui| mono(ui, &value_text(waveform.y[index], "", digits)));
+                        for (_, values) in &visible_variables {
+                            let value = values.get(index).copied().unwrap_or(f64::NAN);
+                            row.col(|ui| mono(ui, &value_text(value, "", digits)));
                         }
                         row.col(|ui| {
                             if best_index == index {
@@ -404,8 +409,7 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         .waveforms
         .iter()
         .find(|waveform| waveform.name == "OPT_COST")
-        .and_then(|waveform| waveform.y.get(index))
-        .copied();
+        .and_then(|waveform| waveform.y.sample(index));
 
     section_header(ui, "Selected optimization candidate", None);
     // The iteration is an index, not a measurement: it printed as
@@ -434,7 +438,7 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         .iter()
         .filter_map(|waveform| {
             let name = waveform.name.strip_prefix("OPT_")?;
-            (name != "COST").then(|| (name, waveform.y.get(index).copied()))
+            (name != "COST").then(|| (name, waveform.y.sample(index)))
         })
         .collect();
     variables.sort_by(|left, right| left.0.cmp(right.0));
@@ -481,7 +485,7 @@ fn candidate_matches_best(
         .waveforms
         .iter()
         .find(|waveform| waveform.name == "OPT_COST")
-        .and_then(|waveform| waveform.y.get(index))
+        .and_then(|waveform| waveform.y.sample(index))
         .is_some_and(|cost| cost.to_bits() == best_cost.to_bits());
     cost_matches
         && best_variables.iter().all(|(name, best)| {
@@ -489,7 +493,7 @@ fn candidate_matches_best(
                 .waveforms
                 .iter()
                 .find(|waveform| waveform.name.strip_prefix("OPT_") == Some(name.as_str()))
-                .and_then(|waveform| waveform.y.get(index))
+                .and_then(|waveform| waveform.y.sample(index))
                 .is_some_and(|value| value.to_bits() == best.to_bits())
         })
 }

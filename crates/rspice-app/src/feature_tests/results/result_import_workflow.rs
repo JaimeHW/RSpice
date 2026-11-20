@@ -38,9 +38,15 @@ fn assert_nullable_import_round_trip(name: &str, bytes: &[u8]) {
             .unwrap();
     let restored = &simulation.active_run().unwrap().analyses[0];
     restored.validate_retained_evidence().unwrap();
-    assert_eq!(restored.waveforms[0].x.as_ref(), &[0.0, 1.0, 2.0]);
+    assert_eq!(
+        restored.waveforms[0].x.read_whole().unwrap().as_ref(),
+        &[0.0, 1.0, 2.0]
+    );
     assert_eq!(restored.waveforms[0].sample(1), None);
-    assert_eq!(restored.waveforms[0].y[2].to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(
+        restored.waveforms[0].y.read_whole().unwrap()[2].to_bits(),
+        (-0.0_f64).to_bits()
+    );
     let projected = rspice_formats::waveform_io::result::project_waveforms(
         restored,
         &[&restored.waveforms[0]],
@@ -52,7 +58,10 @@ fn assert_nullable_import_round_trip(name: &str, bytes: &[u8]) {
         .unwrap();
     let parsed = parse_result_dataset("gaps.csv", csv.as_bytes()).unwrap();
     assert_eq!(parsed.waveforms[0].sample(1), None);
-    assert_eq!(parsed.waveforms[0].y[2].to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(
+        parsed.waveforms[0].y.read_whole().unwrap()[2].to_bits(),
+        (-0.0_f64).to_bits()
+    );
     use rspice_formats::native_bundle::{
         NativeBundleKind, encode_native_bundle, result::project_native_bundle,
     };
@@ -83,7 +92,12 @@ fn imported_angles_and_temperatures_retain_normalized_values_and_units() {
         (7.0, None),
     ];
     for (waveform, (value, unit)) in parsed.waveforms.iter().zip(expected) {
-        assert_eq!(waveform.y.as_slice(), &[value], "{}", waveform.name);
+        assert_eq!(
+            waveform.y.read_whole().unwrap().as_ref(),
+            &[value],
+            "{}",
+            waveform.name
+        );
         assert_eq!(waveform.unit.as_deref(), unit, "{}", waveform.name);
     }
     let mut state = loaded_project_state();
@@ -109,7 +123,10 @@ fn imported_angles_and_temperatures_retain_normalized_values_and_units() {
     )
     .unwrap();
     assert_eq!(sweep.analysis_type, AnalysisType::DcSweep);
-    assert_eq!(sweep.waveforms[0].x.as_slice(), &[0.0, 298.15]);
+    assert_eq!(
+        sweep.waveforms[0].x.read_whole().unwrap().as_ref(),
+        &[0.0, 298.15]
+    );
     assert_eq!(sweep.coordinate_unit.as_deref(), Some("K"));
 
     let error =
@@ -140,7 +157,11 @@ fn raw_coordinate_units_survive_import_review_project_reload_and_waveform_projec
             Some(canonical)
         );
         assert_eq!(
-            state.results.result_import.waveforms[0].x.as_slice(),
+            state.results.result_import.waveforms[0]
+                .x
+                .read_whole()
+                .unwrap()
+                .as_ref(),
             &[0.0, end]
         );
         commit_result_import_draft(&mut state.results_parts()).unwrap();
@@ -156,7 +177,10 @@ fn raw_coordinate_units_survive_import_review_project_reload_and_waveform_projec
         let coordinate = restored.imported_coordinate().unwrap();
         assert_eq!(coordinate.name, name);
         assert_eq!(coordinate.unit.as_deref(), Some(canonical));
-        assert_eq!(restored.waveforms[0].x.as_slice(), &[0.0, end]);
+        assert_eq!(
+            restored.waveforms[0].x.read_whole().unwrap().as_ref(),
+            &[0.0, end]
+        );
         let projected = rspice_formats::waveform_io::result::project_waveforms(
             restored,
             &[&restored.waveforms[0]],
@@ -291,12 +315,18 @@ fn delimited_metadata_survives_review_project_reload_and_reexport() {
     let text = writer.write_text(&projected).unwrap();
     let parsed = parse_result_dataset("restored.csv", text.as_bytes()).unwrap();
     assert_eq!(parsed.coordinate_unit.as_deref(), Some("s"));
-    assert_eq!(parsed.waveforms[0].x.as_ref(), &[0.0, 2e-9, 4e-9]);
+    assert_eq!(
+        parsed.waveforms[0].x.read_whole().unwrap().as_ref(),
+        &[0.0, 2e-9, 4e-9]
+    );
     assert_eq!(parsed.waveforms[0].name, "charge [C]");
     assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("C"));
     assert_eq!(parsed.waveforms[0].sample(0), Some(1.0));
     assert_eq!(parsed.waveforms[0].sample(1), None);
-    assert_eq!(parsed.waveforms[0].y[2].to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(
+        parsed.waveforms[0].y.read_whole().unwrap()[2].to_bits(),
+        (-0.0_f64).to_bits()
+    );
     assert_eq!(parsed.waveforms[1].unit, None);
 }
 
@@ -333,7 +363,10 @@ fn touchstone_v2_import_retains_complex_matrix_and_reference_authority() {
         .expect("active import");
     assert_eq!(analysis.analysis_type, AnalysisType::SParameter);
     assert_eq!(analysis.waveforms.len(), 4);
-    assert_eq!(analysis.waveforms[0].x.as_slice(), &[1.0e6, 2.0e6]);
+    assert_eq!(
+        analysis.waveforms[0].x.read_whole().unwrap().as_ref(),
+        &[1.0e6, 2.0e6]
+    );
     assert!(analysis.waveforms.iter().all(|waveform| {
         waveform.name.starts_with("|S")
             && waveform
@@ -378,21 +411,21 @@ fn touchstone_noise_import_commits_independent_axes_and_persists_units() {
         .iter()
         .find(|waveform| waveform.name == "Rn")
         .unwrap();
-    assert_eq!(rn.x.as_slice(), [2e6]);
-    assert_eq!(rn.y.as_slice(), [15.0]);
+    assert_eq!(rn.x.read_whole().unwrap().as_ref(), [2e6]);
+    assert_eq!(rn.y.read_whole().unwrap().as_ref(), [15.0]);
     assert_eq!(rn.unit.as_deref(), Some("Ω"));
     let gamma = analysis
         .waveforms
         .iter()
         .find(|waveform| waveform.name == "|Sopt|")
         .unwrap();
-    assert!((gamma.complex.as_ref().unwrap().real[0] - 0.5).abs() < 1e-14);
+    assert!((gamma.complex.as_ref().unwrap().real.read_whole().unwrap()[0] - 0.5).abs() < 1e-14);
     let network = analysis
         .waveforms
         .iter()
         .find(|waveform| waveform.name == "|S21|")
         .unwrap();
-    assert_eq!(network.x.as_slice(), [1e6, 3e6]);
+    assert_eq!(network.x.read_whole().unwrap().as_ref(), [1e6, 3e6]);
     let project =
         rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
@@ -536,7 +569,14 @@ fn imported_dataset_is_unattributed_stable_immutable_and_saveable() {
     assert!(run.execution_identity().is_none());
     assert!(run.execution_target.is_none());
     assert!(run.prepared_receipt().is_none());
-    assert_eq!(run.analyses[0].waveforms[0].y.as_slice(), [0.0, 1.0]);
+    assert_eq!(
+        run.analyses[0].waveforms[0]
+            .y
+            .read_whole()
+            .unwrap()
+            .as_ref(),
+        [0.0, 1.0]
+    );
 }
 
 #[test]

@@ -18,12 +18,12 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
     let mut count = vec![0.0; full.x.len()];
     *count.last_mut().unwrap() = 1.0;
     let source = crate::state::SoaSourceHistory {
-        time: full.x.as_ref().clone(),
+        time: full.x.read_whole().unwrap().into_owned(),
         waveforms: vec![
             crate::state::SoaSourceWaveform {
                 name: full.name.clone(),
                 unit: "V".into(),
-                values: full.y.as_ref().clone(),
+                values: full.y.read_whole().unwrap().into_owned(),
             },
             crate::state::SoaSourceWaveform {
                 name: "SOA_VIOLATION_COUNT".into(),
@@ -32,12 +32,16 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
             },
         ],
     };
-    let report_time = vec![full.x[0], *full.x.last().unwrap()];
+    let (first, last) = full.x.ends().unwrap();
+    let report_time = vec![first, last];
     analysis.waveforms = vec![
         RetainedTrace::new(
             &full.name,
             report_time.clone(),
-            vec![full.y[0], *full.y.last().unwrap()],
+            {
+                let (first, last) = full.y.ends().unwrap();
+                vec![first, last]
+            },
             "#00aaff",
         )
         .with_unit("V"),
@@ -93,11 +97,11 @@ fn envelope(state: &mut ResultsTestHost) -> Arc<[[f64; 2]]> {
         [facts.stress_waveform.expect("verified stress history")];
     state.results.results.session.cache.series(
         facts.stress_cache_key,
-        &waveform.x,
-        &waveform.y,
+        waveform.x.read_whole().unwrap().as_ref(),
+        waveform.y.read_whole().unwrap().as_ref(),
         TraceView {
             x0: 0.0,
-            x1: *waveform.x.last().unwrap(),
+            x1: waveform.x.ends().unwrap().1,
             y0: 0.0,
             y1: 4.0,
             x_scale: XScale::Linear,

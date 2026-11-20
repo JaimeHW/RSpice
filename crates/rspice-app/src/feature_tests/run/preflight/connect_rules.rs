@@ -138,8 +138,10 @@ fn switch_times(run: &rspice_app_state::state::SimulationRun, current: &str) -> 
         });
     let row = amps
         .x
+        .read_whole()
+        .unwrap()
         .iter()
-        .zip(amps.y.iter())
+        .zip(amps.y.read_whole().unwrap().iter())
         .find(|(t, i)| {
             let volts = 3.3 * **t / 1e-6;
             volts > 0.05 && i.abs() / volts < 1.5e-3
@@ -227,7 +229,7 @@ fn the_exported_deck_runs_with_the_converter_edge_the_application_ran() {
         crate::feature_tests::code::netlist_export::output_grid(&deck),
     )
     .expect("the exported trace samples on the output grid");
-    let sampled = current.y.to_vec();
+    let sampled = current.y.samples(..).collect::<Vec<f64>>();
     let ran = page
         .app
         .state
@@ -243,7 +245,8 @@ fn the_exported_deck_runs_with_the_converter_edge_the_application_ran() {
         .find(|wave| wave.name == "drive current")
         .expect("the application's run saves the drive current")
         .y
-        .to_vec();
+        .samples(..)
+        .collect::<Vec<f64>>();
     assert_eq!(
         sampled
             .iter()

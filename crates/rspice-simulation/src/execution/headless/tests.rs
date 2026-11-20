@@ -698,7 +698,7 @@ fn final_output(result: &SimulationResult) -> f64 {
         .y_values;
     assert_eq!(output.len(), time.len(), "a full waveform per member");
     assert!(time.len() > 2, "a full waveform per member");
-    *output.last().unwrap()
+    *output.in_memory().unwrap().last().unwrap()
 }
 
 #[test]
@@ -853,7 +853,7 @@ fn a_trial_that_ends_in_finish_returns_its_transient_up_to_the_finish() {
     };
     assert!((at - 5e-9).abs() < 1e-18, "finished at {at:e}");
     // The waveform runs to the finish and stops there.
-    let last = *time.last().unwrap();
+    let last = *time.in_memory().unwrap().last().unwrap();
     assert!(time.len() > 2, "{} points", time.len());
     assert!((last - at).abs() < 1e-15, "the waveform ends at {last:e}");
     let p = &waveforms
@@ -864,7 +864,7 @@ fn a_trial_that_ends_in_finish_returns_its_transient_up_to_the_finish() {
         .y_values;
     assert_eq!(p.len(), time.len());
     // The trial drew its own resistance: the divider is off its nominal half.
-    let end = *p.last().unwrap();
+    let end = *p.in_memory().unwrap().last().unwrap();
     assert!((end - 0.5).abs() > 1e-6, "V(p) {end}");
 }
 
@@ -979,19 +979,32 @@ fn a_resume_continues_the_transient_of_the_same_run_from_the_checkpoint_it_captu
     let (full_time, full) = trace(&results[0]);
     let (resumed_time, resumed) = trace(&results[1]);
     assert!(
-        resumed_time[0] >= 4e-6 * (1.0 - 1e-12),
+        resumed_time.in_memory().unwrap()[0] >= 4e-6 * (1.0 - 1e-12),
         "{}",
-        resumed_time[0]
+        resumed_time.in_memory().unwrap()[0]
     );
-    assert_eq!(resumed_time.last(), full_time.last());
+    assert_eq!(
+        resumed_time.in_memory().unwrap().last(),
+        full_time.in_memory().unwrap().last()
+    );
     let mut shared = 0;
-    for (time, value) in resumed_time.iter().zip(&resumed) {
-        if let Some(index) = full_time.iter().position(|t| t.to_bits() == time.to_bits()) {
+    for (time, value) in resumed_time
+        .in_memory()
+        .unwrap()
+        .iter()
+        .zip(resumed.in_memory().unwrap())
+    {
+        if let Some(index) = full_time
+            .in_memory()
+            .unwrap()
+            .iter()
+            .position(|t| t.to_bits() == time.to_bits())
+        {
             shared += 1;
             assert!(
-                (full[index] - value).abs() <= 1e-12,
+                (full.in_memory().unwrap()[index] - value).abs() <= 1e-12,
                 "at {time:e}: {} uninterrupted, {value} resumed",
-                full[index]
+                full.in_memory().unwrap()[index]
             );
         }
     }

@@ -192,7 +192,17 @@ pub fn show(
         heat_legend(ui, &mut controls.floor_db, &tokens.color);
     }
     let block = &matrix.blocks()[controls.block];
-    let grid = &analysis.waveforms[block.cells()[0]].x;
+    // A stored matrix is read off the frame; it is drawn once it has arrived.
+    let held = |values: &rspice_results::waveform::WaveformValues| values.fetch_whole().ready();
+    let Some(grid) = held(&analysis.waveforms[block.cells()[0]].x) else {
+        return None;
+    };
+    // One coefficient sample, unavailable until its column has arrived.
+    let coefficient = |values: &rspice_results::waveform::WaveformValues, sample: usize| {
+        held(values).map_or(f64::NAN, |values| {
+            values.get(sample).copied().unwrap_or(f64::NAN)
+        })
+    };
     controls.sample = controls.sample.min(grid.len() - 1);
     ui.horizontal_wrapped(|ui| {
         ui.label("Frequency sample");
@@ -239,8 +249,8 @@ pub fn show(
                                 .as_ref()
                                 .expect("resolved coefficient");
                             num_complex::Complex64::new(
-                                complex.real[controls.sample],
-                                complex.imag[controls.sample],
+                                coefficient(&complex.real, controls.sample),
+                                coefficient(&complex.imag, controls.sample),
                             )
                         })
                         .collect::<Vec<_>>()
@@ -286,8 +296,8 @@ pub fn show(
                     let (out, input) = if controls.transpose { (column, row) } else { (row, column) };
                     let waveform = &analysis.waveforms[block.cells()[out * ports + input]];
                     let complex = waveform.complex.as_ref().expect("resolved complex coefficient");
-                    let real = complex.real[controls.sample];
-                    let imaginary = complex.imag[controls.sample];
+                    let real = coefficient(&complex.real, controls.sample);
+                    let imaginary = coefficient(&complex.imag, controls.sample);
                     let label = formatted(real, imaginary, controls.representation, angle_display, significant_digits);
                     if controls.heatmap {
                         let color = heat_color(magnitude_db(real, imaginary), controls.floor_db, &tokens.color);

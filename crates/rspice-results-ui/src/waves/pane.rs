@@ -223,16 +223,11 @@ pub fn nearest_drawn_trace<'a>(
         // abscissa, so clicking the return leg of a loop finds that curve.
         let mut values: Vec<f64> = if trace.shape.is_single_ascending() {
             Vec::new()
-        } else {
-            sample_branches_into(
-                &trace.x,
-                &trace.y,
-                &trace.shape,
-                x,
-                interpolation,
-                &mut samples,
-            );
+        } else if let Some((xs, ys)) = trace.held() {
+            sample_branches_into(&xs, &ys, &trace.shape, x, interpolation, &mut samples);
             samples.iter().map(|sample| sample.value).collect()
+        } else {
+            Vec::new()
         };
         if values.is_empty() {
             values.push(super::trace_value_at(trace, x, interpolation));
@@ -289,10 +284,12 @@ pub fn plot_markers<'a>(
         // A loop has a value on each branch that reaches this X, and a tag on
         // only one of them points at half the evidence.
         let mut samples = Vec::new();
-        if !trace.shape.is_single_ascending() {
+        if !trace.shape.is_single_ascending()
+            && let Some((xs, ys)) = trace.held()
+        {
             sample_branches_into(
-                &trace.x,
-                &trace.y,
+                &xs,
+                &ys,
                 &trace.shape,
                 marker.x,
                 interpolation,
@@ -739,6 +736,18 @@ pub fn show_plot<'a>(
         .chain(model.incomplete.map(str::to_owned))
         .collect::<Vec<_>>()
         .join(". ");
+    // A trace held in memory over an axis a results store keeps (a magnitude in dB, an
+    // expression, over a stored run) strokes its axis from a read made off the frame, and is
+    // not drawn until that read has arrived.
+    let held_traces: Vec<_> = model
+        .traces
+        .iter()
+        .map(|trace| (!trace.y.is_stored()).then(|| trace.held()).flatten())
+        .collect();
+    let held_exprs: Vec<_> = exprs
+        .iter()
+        .map(|expr| super::held_pair(&expr.x, &expr.y))
+        .collect();
     let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
         .accessible_name("Waveform plot")
         .without_x_axis_chrome()
@@ -810,18 +819,24 @@ pub fn show_plot<'a>(
                     .map(|(_, trace)| trace_key(model, trace))
                     .collect::<Vec<_>>(),
             );
-            // A band kept for this view needs none of its members' samples:
-            // handing over a stored member's reads its column whole.
             if let Some(held) = cache.held_band(identity, view) {
                 return held;
             }
+            // A stored member is folded from its tile of the view, never read.
             let members: Vec<plot::BandMember<'_>> = members
                 .iter()
-                .map(|(_, trace)| plot::BandMember {
-                    x: trace.x.as_slice(),
-                    y: trace.y.as_slice(),
-                    parametric: false,
-                    shape: Some(trace.shape.as_ref()),
+                .map(|(_, trace)| {
+                    let memory = trace.x.in_memory().zip(trace.y.in_memory());
+                    plot::BandMember {
+                        x: memory.map_or(&[], |(x, _)| x),
+                        y: memory.map_or(&[], |(_, y)| y),
+                        parametric: false,
+                        shape: Some(trace.shape.as_ref()),
+                        stored: memory.is_none().then_some(plot::StoredSamples {
+                            x: &trace.x,
+                            y: &trace.y,
+                        }),
+                    }
                 })
                 .collect();
             cache.band(identity, &members, view)
@@ -987,8 +1002,10 @@ pub fn show_plot<'a>(
         // A stored trace draws from its store's tiles, never its columns.
         let samples = if trace.y.is_stored() {
             Trace::stored(&trace.x, &trace.y, color)
+        } else if let Some(Some((xs, ys))) = held_traces.get(*index) {
+            Trace::new(xs, ys, color)
         } else {
-            Trace::new(&trace.x, &trace.y, color)
+            continue;
         };
         let mut plot_trace = strip_trace_cues(
             samples
@@ -1007,9 +1024,12 @@ pub fn show_plot<'a>(
         }
         spec.traces.push(plot_trace);
     }
-    for expr in exprs {
+    for (expr, held) in exprs.iter().zip(&held_exprs) {
+        let Some((expr_x, expr_y)) = held else {
+            continue;
+        };
         let mut trace = apply_family_trace_style(
-            Trace::new(&expr.x, &expr.y, expr.color)
+            Trace::new(expr_x, expr_y, expr.color)
                 .width(input.trace_width * SECONDARY_TRACE_RATIO)
                 .cache_key(expr.cache_key)
                 .shape(&expr.shape),
@@ -1049,15 +1069,10 @@ pub fn show_plot<'a>(
         let mut samples: Vec<BranchSample> = Vec::new();
         for trace in &readout_traces {
             samples.clear();
-            if !trace.shape.is_single_ascending() {
-                sample_branches_into(
-                    &trace.x,
-                    &trace.y,
-                    &trace.shape,
-                    x,
-                    interpolation,
-                    &mut samples,
-                );
+            if !trace.shape.is_single_ascending()
+                && let Some((xs, ys)) = trace.held()
+            {
+                sample_branches_into(&xs, &ys, &trace.shape, x, interpolation, &mut samples);
             }
             // A sweep with one answer at this X keeps its single unlabelled
             // row. A loop reports each branch that reaches here, because one
@@ -1085,8 +1100,10 @@ pub fn show_plot<'a>(
                 ));
             }
         }
-        for expr in exprs.iter().take(3) {
-            let value = sample_at_with_shape(&expr.x, &expr.y, &expr.shape, x, interpolation);
+        for (expr, held) in exprs.iter().zip(&held_exprs).take(3) {
+            let value = held.as_ref().map_or(f64::NAN, |(xs, ys)| {
+                sample_at_with_shape(xs, ys, &expr.shape, x, interpolation)
+            });
             rows.push((
                 expr.label.clone(),
                 // The hover readout is a readout: the expression's value in

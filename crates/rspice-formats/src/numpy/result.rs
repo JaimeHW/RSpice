@@ -1,7 +1,9 @@
 //! NumPy array projections from already-selected retained waveforms.
 
 use super::{NamedArray, NumpyWriteError};
-use crate::waveform_io::result::{WaveformExportError, check_export_shape, shared_coordinate};
+use crate::waveform_io::result::{
+    WaveformExportError, check_export_shape, export_samples, shared_coordinate,
+};
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::result_import::waveforms::WaveformImportLimits;
@@ -60,13 +62,13 @@ pub fn prepare_numpy<W: AsRef<RetainedWaveform>>(
         if let Some(complex) = &waveform.complex {
             signals.push(NumpySignal {
                 name: complex.source_name.clone(),
-                real: complex.real.as_ref().to_vec(),
-                imag: Some(complex.imag.as_ref().to_vec()),
+                real: export_samples(&complex.source_name, &complex.real)?.into_owned(),
+                imag: Some(export_samples(&complex.source_name, &complex.imag)?.into_owned()),
             });
         } else {
             signals.push(NumpySignal {
                 name: waveform.name.clone(),
-                real: waveform.y.as_ref().to_vec(),
+                real: export_samples(&waveform.name, &waveform.y)?.into_owned(),
                 imag: None,
             });
         }
@@ -74,7 +76,7 @@ pub fn prepare_numpy<W: AsRef<RetainedWaveform>>(
     Ok(NumpyExport {
         limits,
         coordinate_name: coordinate_name(analysis.analysis_type),
-        coordinate: coordinate.to_vec(),
+        coordinate: coordinate.into_owned(),
         signals,
     })
 }

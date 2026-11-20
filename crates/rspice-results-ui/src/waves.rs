@@ -150,6 +150,32 @@ pub struct StripTrace {
     pub family_visibility_key: Option<FamilyTraceVisibilityKey>,
 }
 
+impl StripTrace {
+    /// The trace's samples as two slices: as they are when held in memory; a stored column once
+    /// the read service has read it off the frame. `None` while a read is on its way, and for a
+    /// stored column larger than the loaded results may hold, which is drawn from its tiles and
+    /// read by window instead.
+    pub fn held(
+        &self,
+    ) -> Option<(
+        rspice_results::waveform::HeldColumn,
+        rspice_results::waveform::HeldColumn,
+    )> {
+        held_pair(&self.x, &self.y)
+    }
+}
+
+/// `x` and `y` as two slices, as [`StripTrace::held`] holds a trace's.
+pub(crate) fn held_pair(
+    x: &SharedWaveformValues,
+    y: &SharedWaveformValues,
+) -> Option<(
+    rspice_results::waveform::HeldColumn,
+    rspice_results::waveform::HeldColumn,
+)> {
+    Some((x.fetch_whole().ready()?, y.fetch_whole().ready()?))
+}
+
 /// What an event lane of a strip draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LaneTraceKind {
@@ -600,8 +626,11 @@ impl StripModel {
 
     /// The analysis' retained sample grid — the X array every trace on this
     /// strip was solved against.
-    pub fn sample_grid(&self) -> Option<&[f64]> {
-        self.traces.first().map(|trace| trace.x.as_slice())
+    /// A stored grid is read off the frame and is `None` until it has arrived.
+    pub fn sample_grid(&self) -> Option<rspice_results::waveform::HeldColumn> {
+        self.traces
+            .first()
+            .and_then(|trace| trace.x.fetch_whole().ready())
     }
 
     /// Whether [`Self::sample_grid`] can be bisected; see
@@ -647,7 +676,7 @@ impl StripModel {
         quantity_policy: rspice_vocabulary::quantity::QuantityPresentationPolicy,
     ) -> Option<String> {
         let trace = self.traces.get(trace_index)?;
-        let value = trace.y.as_slice().get(sample).copied()?;
+        let value = trace.y.fetch_whole().ready()?.get(sample).copied()?;
         Some(self.format_trace_value(trace, value, significant_digits, quantity_policy))
     }
 
@@ -770,7 +799,7 @@ pub(crate) fn grid_is_ascending(model: &StripModel) -> bool {
 
 /// `trace`'s value at `x` by `interpolation`, as a cursor reads it. A trace whose samples a
 /// results store keeps reads only the rows around `x`, never its whole column.
-pub(crate) fn trace_value_at(
+pub fn trace_value_at(
     trace: &StripTrace,
     x: f64,
     interpolation: rspice_ui_kit::plot::SampleInterpolation,
@@ -778,14 +807,15 @@ pub(crate) fn trace_value_at(
     trace
         .y
         .value_at(&trace.x, x, interpolation)
-        .unwrap_or_else(|| {
-            rspice_ui_kit::plot::sample::sample_at_with_shape(
-                &trace.x,
-                &trace.y,
+        .unwrap_or_else(|| match trace.held() {
+            Some((xs, ys)) => rspice_ui_kit::plot::sample::sample_at_with_shape(
+                &xs,
+                &ys,
                 &trace.shape,
                 x,
                 interpolation,
-            )
+            ),
+            None => f64::NAN,
         })
 }
 

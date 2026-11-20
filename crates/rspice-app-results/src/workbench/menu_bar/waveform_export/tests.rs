@@ -1935,7 +1935,10 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
                 )
                 .unwrap();
             assert_eq!(reopened.waveforms.len(), 1);
-            assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 2.0]);
+            assert_eq!(
+                reopened.waveforms[0].y.read_whole().unwrap().as_ref(),
+                &[0.0, 2.0]
+            );
         }
     }
 }

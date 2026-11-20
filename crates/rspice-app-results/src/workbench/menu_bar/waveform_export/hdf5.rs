@@ -208,11 +208,20 @@ mod tests {
         assert_eq!(parsed.sample_count, 3);
         assert_eq!(parsed.waveforms.len(), 2);
         assert_eq!(parsed.waveforms[0].name, "V(out)");
-        assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0, 1.0, 2.0]);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [10.0, 11.0, 12.0]);
+        assert_eq!(
+            parsed.waveforms[0].x.read_whole().unwrap().as_ref(),
+            [0.0, 1.0, 2.0]
+        );
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            [10.0, 11.0, 12.0]
+        );
         assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
         assert_eq!(parsed.waveforms[1].name, "I(R1)");
-        assert_eq!(parsed.waveforms[1].y.as_slice(), [20.0, 21.0, 22.0]);
+        assert_eq!(
+            parsed.waveforms[1].y.read_whole().unwrap().as_ref(),
+            [20.0, 21.0, 22.0]
+        );
         assert_eq!(parsed.waveforms[1].unit.as_deref(), Some("A"));
     }
 
@@ -230,8 +239,8 @@ mod tests {
         let bytes = encode_hdf5(&export).expect("encodes");
         let parsed = parse_result_dataset("waveforms.h5", &bytes).expect("re-imports");
         assert_eq!(parsed.sample_count, 1);
-        assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0]);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [2.5]);
+        assert_eq!(parsed.waveforms[0].x.read_whole().unwrap().as_ref(), [0.0]);
+        assert_eq!(parsed.waveforms[0].y.read_whole().unwrap().as_ref(), [2.5]);
         assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
     }
 
@@ -263,8 +272,14 @@ mod tests {
             .as_ref()
             .expect("the complex components survive");
         assert_eq!(complex.source_name, "V(out)");
-        assert_eq!(complex.real.as_slice(), [1.0, 0.5, 0.25]);
-        assert_eq!(complex.imag.as_slice(), [0.0, -0.5, -0.25]);
+        assert_eq!(
+            complex.real.read_whole().unwrap().as_ref(),
+            [1.0, 0.5, 0.25]
+        );
+        assert_eq!(
+            complex.imag.read_whole().unwrap().as_ref(),
+            [0.0, -0.5, -0.25]
+        );
     }
 
     #[test]
@@ -275,7 +290,10 @@ mod tests {
         let bytes = encode_hdf5(&export).expect("encodes");
         let parsed = parse_result_dataset("waveforms.h5", &bytes).expect("re-imports");
         assert_eq!(parsed.analysis_type, AnalysisType::DcSweep);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [0.0, 1.0, 2.0]);
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            [0.0, 1.0, 2.0]
+        );
     }
 
     #[test]
@@ -286,7 +304,10 @@ mod tests {
         let parsed = parse_result_dataset("waveforms.h5", &bytes).expect("re-imports");
         assert_eq!(parsed.waveforms[0].name, "V(out)");
         assert!(parsed.waveforms[0].complex.is_none());
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [1.0, 0.5]);
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            [1.0, 0.5]
+        );
     }
 
     #[test]

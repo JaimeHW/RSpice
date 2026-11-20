@@ -3,7 +3,8 @@
 use super::{NativeBundleDataset, NativeBundleSignal, NativeBundleSignalValues};
 use crate::WaveformDomain;
 use crate::waveform_io::result::{
-    WaveformProjectionError, axis_signal_for_analysis, validate_shared_x_axis,
+    WaveformExportError, WaveformProjectionError, axis_signal_for_analysis, export_samples,
+    validate_shared_x_axis,
 };
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::waveform::RetainedWaveform;
@@ -19,38 +20,45 @@ pub fn project_native_bundle<'a, W: AsRef<RetainedWaveform>>(
         .map(|waveform| (*waveform).as_ref())
         .filter(|waveform| !waveform.x.is_empty())
         .max_by_key(|waveform| waveform.x.len())
-        .ok_or(WaveformProjectionError::NoSamples)?
-        .x
-        .as_ref();
-    validate_shared_x_axis(waveforms, reference)?;
+        .ok_or(WaveformProjectionError::NoSamples)?;
+    validate_shared_x_axis(waveforms, &reference.x)?;
+    let whole = |signal: &str, values: &'a rspice_results::waveform::WaveformValues| {
+        export_samples(signal, values).map_err(|error| match error {
+            WaveformExportError::Unreadable { signal, reason } => {
+                WaveformProjectionError::Unreadable { signal, reason }
+            }
+            _ => WaveformProjectionError::NoSamples,
+        })
+    };
+    let coordinate = whole(&reference.name, &reference.x)?;
     let (coordinate_name, _) = axis_signal_for_analysis(analysis);
     let signals = waveforms
         .iter()
         .map(|waveform| {
             let waveform = (*waveform).as_ref();
-            if let Some(complex) = &waveform.complex {
+            Ok(if let Some(complex) = &waveform.complex {
                 NativeBundleSignal {
                     name: &complex.source_name,
                     unit: waveform.unit.as_deref(),
                     values: NativeBundleSignalValues::Complex {
-                        real: complex.real.as_ref(),
-                        imag: complex.imag.as_ref(),
+                        real: whole(&complex.source_name, &complex.real)?,
+                        imag: whole(&complex.source_name, &complex.imag)?,
                     },
                 }
             } else {
                 NativeBundleSignal {
                     name: &waveform.name,
                     unit: waveform.unit.as_deref(),
-                    values: NativeBundleSignalValues::Real(waveform.y.as_ref()),
+                    values: NativeBundleSignalValues::Real(whole(&waveform.name, &waveform.y)?),
                 }
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_, WaveformProjectionError>>()?;
     Ok(NativeBundleDataset {
         analysis: native_analysis,
         coordinate_name,
         coordinate_unit: analysis.waveform_coordinate_unit(),
-        coordinate: reference,
+        coordinate,
         signals,
     })
 }

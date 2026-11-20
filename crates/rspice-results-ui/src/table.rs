@@ -599,7 +599,7 @@ fn selected_rows(
     let (start, end) = match cursor.filter(|_| view.around_cursor) {
         Some(x) => {
             let centre =
-                nearest_sample_index(grid, x, model.grid_is_ascending(), on_scan).unwrap_or(0);
+                nearest_sample_index(&grid, x, model.grid_is_ascending(), on_scan).unwrap_or(0);
             (
                 centre.saturating_sub(CURSOR_SPAN),
                 (centre + CURSOR_SPAN + 1).min(retained),
@@ -744,10 +744,10 @@ pub fn show_samples(
     let viewport_height = ui.available_height().max(HEADER_H + ROW_H);
     let grid = model.sample_grid().unwrap_or_default();
     let ascending = model.grid_is_ascending();
-    let cursor_a_row = cursor.and_then(|x| nearest_sample_index(grid, x, ascending, &mut on_scan));
+    let cursor_a_row = cursor.and_then(|x| nearest_sample_index(&grid, x, ascending, &mut on_scan));
     let cursor_b_row = source
         .cursor_b
-        .and_then(|x| nearest_sample_index(grid, x, ascending, &mut on_scan));
+        .and_then(|x| nearest_sample_index(&grid, x, ascending, &mut on_scan));
     let cell =
         |ui: &Ui, rect: egui::Rect, text: &str, color: egui::Color32, align: egui::Align2| {
             let inset = rect.shrink2(egui::vec2(CELL_INSET * 0.5, 0.0));

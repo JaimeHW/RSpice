@@ -61,5 +61,5 @@ fn study_measurement_units_follow_quasi_periodic_channels() {
         .find(|trace| trace.y_unit == "A/√Hz")
         .unwrap();
     let value = converted(&noise, &format!("last:{}", trace.name), "nA/sqrt(Hz)");
-    assert!((value / 1e9 - trace.y_values.last().unwrap()).abs() < 1e-20);
+    assert!((value / 1e9 - trace.y_values.in_memory().unwrap().last().unwrap()).abs() < 1e-20);
 }

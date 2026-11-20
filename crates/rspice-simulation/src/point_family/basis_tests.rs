@@ -147,7 +147,7 @@ fn pvt_family_uses_the_solved_basis_before_authored_aliases_filter_point_outputs
             let summary = &run.analyses[2];
             assert_eq!(summary.waveforms.len(), 1);
             assert_eq!(summary.waveforms[0].name, "Chosen voltage");
-            assert_eq!(summary.waveforms[0].y.as_slice(), &[2.0, 2.0]);
+            assert_eq!(summary.waveforms[0].y.in_memory().unwrap(), &[2.0, 2.0]);
             for point in &run.analyses[..2] {
                 let members = if matches!(base, CornerBaseMode::DcSweepNested { .. }) {
                     2
@@ -225,7 +225,12 @@ fn pvt_nested_dc_reduces_the_last_solved_pair_in_both_traversal_directions() {
             ] {
                 let trace = summary.waveforms.iter().find(|w| w.name == name).unwrap();
                 assert!(
-                    trace.y.iter().all(|value| (value - expected).abs() < 1e-12),
+                    trace
+                        .y
+                        .in_memory()
+                        .unwrap()
+                        .iter()
+                        .all(|value| (value - expected).abs() < 1e-12),
                     "{name}: {:?}",
                     trace.y
                 );
@@ -350,7 +355,7 @@ fn pvt_family_reorders_matching_nodes_and_preserves_physical_zero() {
                         )
                     });
                 assert_eq!(
-                    trace.y.as_slice(),
+                    trace.y.in_memory().unwrap(),
                     &[expected, expected],
                     "{family:?} {base:?} {node}"
                 );

@@ -477,7 +477,8 @@ fn convert_transient_result(
     let measurements = evaluate_transient_measurements(
         netlist,
         &tran_result,
-        &filtered_time,
+        // Made from the engine's samples above, so held in memory.
+        filtered_time.in_memory().unwrap_or_default(),
         start_idx,
         start_time,
         interpolate_start,
@@ -1614,9 +1615,11 @@ mod tests {
             if start_time > 0.0 {
                 assert!(basis.sample_count > time.len() as u64);
             }
-            assert_eq!(time.first().copied(), Some(start_time));
-            assert_eq!(time.last().copied(), Some(1.0));
+            assert_eq!(time.in_memory().unwrap().first().copied(), Some(start_time));
+            assert_eq!(time.in_memory().unwrap().last().copied(), Some(1.0));
             let largest_step = time
+                .in_memory()
+                .unwrap()
                 .windows(2)
                 .map(|pair| pair[1] - pair[0])
                 .fold(0.0, f64::max);
@@ -1637,6 +1640,8 @@ mod tests {
             assert!(
                 output
                     .y_values
+                    .in_memory()
+                    .unwrap()
                     .iter()
                     .all(|value| (*value - 1.0).abs() < 1.0e-12)
             );
@@ -1825,14 +1830,14 @@ mod tests {
             panic!("expected transient result");
         };
         assert_eq!(
-            time.first().copied().map(f64::to_bits),
+            time.in_memory().unwrap().first().copied().map(f64::to_bits),
             Some(0.125_f64.to_bits())
         );
         assert_eq!(waveforms["out"].x_values, time);
         assert_eq!(waveforms["I(V1)"].x_values, time);
         assert_eq!(
-            waveforms["I(V1)"].y_values[0].to_bits(),
-            (-waveforms["out"].y_values[0]).to_bits()
+            waveforms["I(V1)"].y_values.in_memory().unwrap()[0].to_bits(),
+            (-waveforms["out"].y_values.in_memory().unwrap()[0]).to_bits()
         );
 
         let config = crate::engine_services::FourierRunConfig {
@@ -1848,8 +1853,8 @@ mod tests {
             method: rspice_core::analysis::FourierMethod::Interpolant,
         };
         crate::engine_services::run_fourier_from_signal_with_abort(
-            &time,
-            &waveforms["out"].y_values,
+            time.in_memory().unwrap(),
+            waveforms["out"].y_values.in_memory().unwrap(),
             &config,
             &rspice_core::abort_signal::NoAbort,
         )

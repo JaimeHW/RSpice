@@ -77,7 +77,10 @@ fn single_frequency_noise_stb_and_disto_execute_and_publish_one_point() {
         let waveforms = SimulationResult::stb_waveforms(&response).unwrap();
         assert_eq!(frequencies, [1000.0]);
         let expected_gain = 20.0 * (1000.0_f64 / 2.0_f64.sqrt()).log10();
-        assert!((waveforms["Loop Gain (dB)"].y_values[0] - expected_gain).abs() < 1e-6);
+        assert!(
+            (waveforms["Loop Gain (dB)"].y_values.in_memory().unwrap()[0] - expected_gain).abs()
+                < 1e-6
+        );
         assert_eq!(
             waveforms[crate::results::STB_NYQUIST_CONTOUR_WAVEFORM]
                 .y_values
@@ -114,7 +117,7 @@ fn single_frequency_noise_stb_and_disto_execute_and_publish_one_point() {
             .find(|(name, _)| name.eq_ignore_ascii_case("V(out) THD"))
             .unwrap()
             .1;
-        assert!((f1.y_values[0] - 0.5).abs() < 1e-12);
+        assert!((f1.y_values.in_memory().unwrap()[0] - 0.5).abs() < 1e-12);
         assert_eq!(thd.y_values, vec![0.0]);
     }
 }

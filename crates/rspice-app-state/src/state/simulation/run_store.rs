@@ -192,12 +192,14 @@ fn same_axis(left: &WaveformValues, right: &WaveformValues) -> bool {
     if WaveformValues::ptr_eq(left, right) {
         return true;
     }
-    if left.is_stored() || right.is_stored() || left.len() != right.len() {
+    let (Some(left), Some(right)) = (left.in_memory(), right.in_memory()) else {
         return false;
-    }
-    left.iter()
-        .zip(right.iter())
-        .all(|(left, right)| left.to_bits() == right.to_bits())
+    };
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.to_bits() == right.to_bits())
 }
 
 /// The samples of `values`, read once.

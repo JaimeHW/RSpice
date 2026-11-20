@@ -60,7 +60,7 @@ use crate::state::bus_notations;
 use crate::state::{AnalysisResult, SimulationState};
 #[cfg(test)]
 use crate::ui::plot::Trace;
-use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
+use crate::ui::plot::sample::SweepShape;
 use crate::ui::plot::{self, XScale, fmt_si_significant};
 use crate::ui::tokens::Tokens;
 use crate::workbench::ComplexNumberDisplay;
@@ -340,10 +340,8 @@ fn cursor_marker_target(
     // Only a finiteness gate — the marker carries the X, not this value — but
     // it is gated on the reading the strip will make, so it is taken the same
     // way the strip takes it.
-    let sampled = sample_at_with_shape(
-        &trace.x,
-        &trace.y,
-        &trace.shape,
+    let sampled = rspice_results_ui::waves::trace_value_at(
+        trace,
         cursor_x,
         cursor_interpolation(
             state
@@ -395,7 +393,7 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut ResultsParts<'_>, t: &Tokens) 
         anchor,
         trace_name,
         x,
-        samples: samples.as_slice(),
+        samples: &samples,
     };
     if let Some(selector) = super::place_marker(state, placement) {
         marker_dialog::open(state, selector);

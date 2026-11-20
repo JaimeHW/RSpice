@@ -987,9 +987,9 @@ pub(super) fn ac_complex_trace(app: &RSpiceApp) -> (Vec<f64>, Vec<f64>, Vec<f64>
         .as_ref()
         .expect("the trace was selected for its complex components");
     (
-        waveform.x.to_vec(),
-        complex.real.to_vec(),
-        complex.imag.to_vec(),
+        waveform.x.samples(..).collect::<Vec<f64>>(),
+        complex.real.samples(..).collect::<Vec<f64>>(),
+        complex.imag.samples(..).collect::<Vec<f64>>(),
     )
 }
 

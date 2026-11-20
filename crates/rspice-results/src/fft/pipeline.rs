@@ -61,6 +61,8 @@ impl FftInputAllocationStage {
 /// numerical evidence.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum FftInputError {
+    #[error("FFT input could not be read: {0}")]
+    Unreadable(String),
     #[error("FFT input time/value lengths differ ({time_count} time points, {value_count} values)")]
     LengthMismatch {
         time_count: usize,

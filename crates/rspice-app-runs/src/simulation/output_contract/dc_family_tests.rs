@@ -101,9 +101,15 @@ fn assert_outputs(spec: AnalysisSpec, member_count: usize) {
                 .iter()
                 .find(|waveform| waveform.name == evidence.member_trace_name(name, member))
                 .unwrap();
-            assert_eq!(waveform.x.as_slice(), &[0.0, 0.5, 1.0]);
+            assert_eq!(waveform.x.read_whole().unwrap().as_ref(), &[0.0, 0.5, 1.0]);
             assert_eq!(waveform.unit.as_deref(), unit);
-            for (&x, &actual) in waveform.x.iter().zip(waveform.y.iter()) {
+            for (&x, &actual) in waveform
+                .x
+                .read_whole()
+                .unwrap()
+                .iter()
+                .zip(waveform.y.read_whole().unwrap().iter())
+            {
                 let expected = match name {
                     "Output voltage" => bias,
                     "Source current" => (bias - x) / 1000.0,
@@ -373,8 +379,8 @@ fn operating_point_outputs_resolve_retained_voltages_currents_and_expressions() 
     {
         let waveform = &analysis.waveforms[index];
         assert_eq!(waveform.name, name);
-        assert_eq!(waveform.x.as_slice(), &[0.0]);
-        assert!((waveform.y[0] - expected).abs() < 1e-16);
+        assert_eq!(waveform.x.read_whole().unwrap().as_ref(), &[0.0]);
+        assert!((waveform.y.read_whole().unwrap()[0] - expected).abs() < 1e-16);
         assert_eq!(waveform.unit.as_deref(), unit);
         assert_eq!(
             analysis.saved_output_receipts[index]

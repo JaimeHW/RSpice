@@ -73,7 +73,7 @@ pub fn encode_native_bundle(
     let signals = dataset
         .signals
         .iter()
-        .map(|signal| match signal.values {
+        .map(|signal| match &signal.values {
             NativeBundleSignalValues::Real(values) => SignalDocument::Real {
                 name: signal.name,
                 unit: signal.unit,
@@ -88,7 +88,7 @@ pub fn encode_native_bundle(
         })
         .collect();
     let document = DatasetDocument {
-        schema: if dataset.signals.iter().any(|signal| match signal.values {
+        schema: if dataset.signals.iter().any(|signal| match &signal.values {
             NativeBundleSignalValues::Real(values) => values.iter().any(|value| value.is_nan()),
             NativeBundleSignalValues::Complex { real, .. } => {
                 real.iter().any(|value| value.is_nan())
@@ -104,7 +104,7 @@ pub fn encode_native_bundle(
         coordinate: CoordinateDocument {
             name: dataset.coordinate_name,
             unit: dataset.coordinate_unit,
-            values: dataset.coordinate,
+            values: &dataset.coordinate,
         },
         signals,
     };
@@ -212,7 +212,7 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Res
             MAX_COLUMNS - 1
         ));
     }
-    validate_coordinate(dataset.analysis, dataset.coordinate)?;
+    validate_coordinate(dataset.analysis, &dataset.coordinate)?;
     if dataset.coordinate_unit.is_some() {
         // Publication must satisfy the reader's physical-coordinate contract.
         // Validate conversion without changing the borrowed source samples.
@@ -245,7 +245,7 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Res
                 signal.name
             ));
         }
-        match signal.values {
+        match &signal.values {
             NativeBundleSignalValues::Real(values) => {
                 validate_component(signal.name, "values", values, dataset.coordinate.len())?;
                 value_count = value_count.checked_add(values.len()).ok_or_else(|| {
@@ -257,7 +257,7 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Res
                 validate_component(signal.name, "imag", imag, dataset.coordinate.len())?;
                 if real
                     .iter()
-                    .zip(imag)
+                    .zip(imag.iter())
                     .any(|(real, imag)| real.is_nan() != imag.is_nan())
                 {
                     return Err(format!(

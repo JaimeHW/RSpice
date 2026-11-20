@@ -91,7 +91,15 @@ fn ground_waveform<W: OutputWaveform>(
     Ok(W::from_retained(result))
 }
 
-fn complex_samples<W: OutputWaveform>(waveform: &W) -> Result<(&[f64], &[f64]), String> {
+fn complex_samples<W: OutputWaveform>(
+    waveform: &W,
+) -> Result<
+    (
+        &rspice_results::waveform::WaveformValues,
+        &rspice_results::waveform::WaveformValues,
+    ),
+    String,
+> {
     let complex = waveform.as_ref().complex.as_ref().ok_or_else(|| {
         "differential AC probe requires retained rectangular source samples".to_owned()
     })?;
@@ -113,12 +121,18 @@ fn negate_waveform<W: OutputWaveform>(
         Ok(complex_result(
             source,
             name,
-            real.iter().map(|value| -value).collect(),
-            imag.iter().map(|value| -value).collect(),
+            real.samples(..).map(|value| -value).collect(),
+            imag.samples(..).map(|value| -value).collect(),
         ))
     } else {
         let mut result = clone_with_name(source, name);
-        result.as_mut().y = source.as_ref().y.iter().map(|value| -value).collect();
+        result.as_mut().y = source
+            .as_ref()
+            .y
+            .samples(..)
+            .map(|value| -value)
+            .collect::<Vec<_>>()
+            .into();
         Ok(result)
     }
 }
@@ -157,13 +171,13 @@ fn subtract_waveforms<W: OutputWaveform>(
             positive,
             name,
             positive_real
-                .iter()
-                .zip(negative_real)
+                .samples(..)
+                .zip(negative_real.samples(..))
                 .map(|(p, n)| p - n)
                 .collect(),
             positive_imag
-                .iter()
-                .zip(negative_imag)
+                .samples(..)
+                .zip(negative_imag.samples(..))
                 .map(|(p, n)| p - n)
                 .collect(),
         ))
@@ -171,8 +185,8 @@ fn subtract_waveforms<W: OutputWaveform>(
         let y = positive
             .as_ref()
             .y
-            .iter()
-            .zip(negative.as_ref().y.iter())
+            .samples(..)
+            .zip(negative.as_ref().y.samples(..))
             .map(|(p, n)| p - n)
             .collect::<Vec<_>>();
         let mut result = RetainedWaveform::new(name, positive.as_ref().x.clone(), y);

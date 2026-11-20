@@ -288,7 +288,10 @@ fn the_form_exports_the_chosen_analysis_and_signals() {
                 .collect::<Vec<_>>(),
             names
         );
-        assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, out]);
+        assert_eq!(
+            reopened.waveforms[0].y.read_whole().unwrap().as_ref(),
+            &[0.0, out]
+        );
     }
 }
 

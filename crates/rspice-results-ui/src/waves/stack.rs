@@ -248,9 +248,13 @@ pub fn pane_trace_extremes(
             });
             continue;
         }
-        let index = derived.extrema_or(trace_key(model, trace), &trace.y, &mut note_samples);
+        // Held in memory, or held once its read has arrived.
+        let Some((x, y)) = trace.held() else {
+            continue;
+        };
+        let index = derived.extrema_or(trace_key(model, trace), &y, &mut note_samples);
         extremes.absorb(match window {
-            Some(window) => index.window(&trace.x, &trace.y, &trace.shape, window),
+            Some(window) => index.window(&x, &y, &trace.shape, window),
             None => index.whole(),
         });
     }
@@ -264,9 +268,12 @@ fn expression_extremes(
     expression: &ResolvedExpr,
     window: Option<(f64, f64)>,
 ) -> Extremes {
-    let index = derived.extrema_or(expression.cache_key, &expression.y, |_| {});
+    let Some((x, y)) = super::held_pair(&expression.x, &expression.y) else {
+        return Extremes::default();
+    };
+    let index = derived.extrema_or(expression.cache_key, &y, |_| {});
     match window {
-        Some(window) => index.window(&expression.x, &expression.y, &expression.shape, window),
+        Some(window) => index.window(&x, &y, &expression.shape, window),
         None => index.whole(),
     }
 }
@@ -857,7 +864,10 @@ fn expression_conversions(
             .map(|resolved| resolved.y)
             .unwrap_or_default();
         if let Some(text) = super::logic::convert::digital_form_of(ui, &expr.text, || {
-            super::logic::convert::mid_range(&values)
+            values
+                .fetch_whole()
+                .ready()
+                .and_then(|values| super::logic::convert::mid_range(&values))
         }) {
             host.add_expression(model, text);
         }
@@ -932,7 +942,9 @@ pub(crate) fn visible_x_bounds(model: &StripModel) -> Option<(f64, f64)> {
             take(last);
             continue;
         }
-        x.iter().copied().for_each(&mut take);
+        if let Some(x) = x.fetch_whole().ready() {
+            x.iter().copied().for_each(&mut take);
+        }
     }
     maximum.is_finite().then_some((minimum, maximum))
 }
@@ -1158,13 +1170,15 @@ fn pane_expressions(
         let members: Vec<&ResolvedExpr> = exprs.iter().filter(|e| e.slot == slot).collect();
         let first = members.first()?;
         let at_cursor = cursor_a.map(|(x, presentation, _)| {
-            let value = sample_at_with_shape(
-                &first.x,
-                &first.y,
-                &first.shape,
-                x,
-                cursor_interpolation(presentation.cursor_interpolation()),
-            );
+            let value = super::held_pair(&first.x, &first.y).map_or(f64::NAN, |(xs, ys)| {
+                sample_at_with_shape(
+                    &xs,
+                    &ys,
+                    &first.shape,
+                    x,
+                    cursor_interpolation(presentation.cursor_interpolation()),
+                )
+            });
             rspice_ui_kit::plot::fmt_si_significant(
                 value,
                 pane.axis_unit(),

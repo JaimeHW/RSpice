@@ -411,7 +411,7 @@ fn the_real_step_holds_then_steps_and_never_slopes() {
     let trace = real_step_trace(&lane, 13.0 * NS, Color32::WHITE, 9);
     assert_eq!(trace.label, "E(w)");
     assert_eq!(trace.y_extremes, Some((0.0, 0.75)));
-    assert_eq!(*trace.x, x);
+    assert_eq!(trace.x.in_memory().unwrap(), x);
     assert_eq!(lane.value_at(9.0 * NS), Some(0.75), "right-continuous");
     assert_eq!(lane.value_at(8.999 * NS), Some(0.25));
 }

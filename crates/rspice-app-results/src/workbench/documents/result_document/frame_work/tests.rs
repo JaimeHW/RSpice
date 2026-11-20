@@ -806,7 +806,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
         .iter_mut()
         .find(|analysis| analysis.analysis_type == AnalysisType::Soa)
         .expect("the fixture retains an SOA analysis");
-    let mut shortened = analysis.waveforms[0].y.as_ref().clone();
+    let mut shortened = analysis.waveforms[0].y.read_whole().unwrap().into_owned();
     shortened.pop();
     analysis.waveforms[0].y = shortened.into();
     state.model.simulation.view.data_version =

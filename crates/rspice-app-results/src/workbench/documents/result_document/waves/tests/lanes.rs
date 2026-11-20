@@ -609,8 +609,10 @@ fn a_real_net_draws_as_a_step_trace() {
         let (t, before, after) = (pair[1].time_s, pair[0].value, pair[1].value);
         let at: Vec<f64> = step
             .x
+            .read_whole()
+            .unwrap()
             .iter()
-            .zip(step.y.iter())
+            .zip(step.y.read_whole().unwrap().iter())
             .filter(|(x, _)| **x == t)
             .map(|(_, y)| *y)
             .collect();

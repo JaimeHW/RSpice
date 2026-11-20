@@ -845,7 +845,10 @@ fn worker_result_round_trip() {
                 .get("I(V1)[sb=+0]")
                 .expect("PAC branch current is preserved");
             assert_eq!(current.y_unit, "A");
-            assert_eq!(current.y_values[1].to_bits(), f64::from_bits(1).to_bits());
+            assert_eq!(
+                current.y_values.in_memory().unwrap()[1].to_bits(),
+                f64::from_bits(1).to_bits()
+            );
             assert_eq!(
                 current.y_imag.as_ref().expect("current remains complex")[1].to_bits(),
                 (-f64::from_bits(2)).to_bits()

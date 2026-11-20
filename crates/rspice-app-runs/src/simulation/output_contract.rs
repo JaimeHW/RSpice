@@ -113,14 +113,16 @@ mod tests {
                     resolve_raw_probe("v(v1)", &traces, "Voltage", false)
                         .unwrap()
                         .y
-                        .as_slice(),
+                        .in_memory()
+                        .unwrap(),
                     &[0.0, 1.0]
                 );
                 assert_eq!(
                     resolve_raw_probe("i(v1)", &traces, "Current", false)
                         .unwrap()
                         .y
-                        .as_slice(),
+                        .in_memory()
+                        .unwrap(),
                     &[0.0, -0.001]
                 );
             }
@@ -176,8 +178,8 @@ mod tests {
         materialize_saved_outputs(&mut analysis, &[contract]);
         assert_eq!(analysis.waveforms[1].name, "output_voltage");
         assert_eq!(
-            analysis.waveforms[1].x.as_ref(),
-            analysis.waveforms[0].x.as_ref()
+            analysis.waveforms[1].x.in_memory().unwrap(),
+            analysis.waveforms[0].x.in_memory().unwrap()
         );
         assert!(matches!(
             analysis.saved_output_receipts[0].status,
@@ -211,11 +213,13 @@ mod tests {
             ]);
         materialize_saved_outputs(&mut analysis, &[contract]);
         assert_eq!(
-            analysis.waveforms[1].x.as_ref(),
+            analysis.waveforms[1].x.in_memory().unwrap(),
             &[0.0, 0.25, 0.5, 0.75, 1.0]
         );
         for (actual, expected) in analysis.waveforms[1]
             .y
+            .in_memory()
+            .unwrap()
             .iter()
             .zip([0.0_f64, 2.5, 5.0, 7.5, 10.0])
         {
@@ -513,7 +517,8 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .imag
-                .as_ref(),
+                .in_memory()
+                .unwrap(),
             &[-0.1]
         );
         let mut missing = AnalysisResult::new(1, AnalysisType::SParameter, "SP");

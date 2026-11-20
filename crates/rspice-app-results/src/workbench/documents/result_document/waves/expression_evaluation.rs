@@ -152,35 +152,36 @@ fn evaluate_scope(
             .with_sample_projection(indices, axis)
             .map_err(|error| error.to_string())?;
     }
-    let scalar_axis =
-        if let Some(axis) = axis {
-            axis.to_vec()
-        } else if let Some(waveform) = analysis.waveforms.first() {
-            if let Some(indices) = indices {
-                indices
-                    .iter()
-                    .map(|index| {
-                        waveform.x.get(*index).copied().ok_or_else(|| {
-                            "selected rows exceed the retained analysis axis".to_owned()
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-            } else {
-                waveform
-                    .x
-                    .ends()
-                    .map(|(first, last)| vec![first, last])
-                    .unwrap_or_default()
-            }
+    let scalar_axis = if let Some(axis) = axis {
+        axis.to_vec()
+    } else if let Some(waveform) = analysis.waveforms.first() {
+        if let Some(indices) = indices {
+            indices
+                .iter()
+                .map(|index| {
+                    waveform
+                        .x
+                        .sample(*index)
+                        .ok_or_else(|| "selected rows exceed the retained analysis axis".to_owned())
+                })
+                .collect::<Result<Vec<_>, _>>()?
         } else {
-            Vec::new()
-        };
+            waveform
+                .x
+                .ends()
+                .map(|(first, last)| vec![first, last])
+                .unwrap_or_default()
+        }
+    } else {
+        Vec::new()
+    };
     let ctx = EventWords {
         values: ctx,
         analysis,
         lanes,
     };
     let value = calculator::evaluator::evaluate(expr, &ctx).map_err(|error| error.to_string())?;
+    let scalar_axis = rspice_results::waveform::WaveformValues::from(scalar_axis);
     let waveform = calculator::evaluated_waveform(value, text, Some(&scalar_axis))?;
     if waveform.x.is_empty() {
         return Err("expression produced no samples".to_owned());

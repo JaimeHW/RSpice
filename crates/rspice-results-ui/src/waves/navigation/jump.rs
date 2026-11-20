@@ -82,16 +82,27 @@ pub fn crossing_level(session: &ResultViewerState, model: &StripModel, trace: &S
     };
     let [h1, h2] = session.pane_horizontal_cursors(&pane);
     h1.or(h2).unwrap_or_else(|| {
-        let (low, high) = trace
-            .y
-            .iter()
-            .copied()
-            .filter(|value| value.is_finite())
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| {
-                (low.min(value), high.max(value))
-            });
+        let (low, high) = finite_span(trace);
         (low + high) * 0.5
     })
+}
+
+/// The least and greatest finite value of `trace`: a stored trace's from the store's
+/// summaries, never its column.
+fn finite_span(trace: &StripTrace) -> (f64, f64) {
+    if let Some(extent) = trace.y.extent_over(&trace.x, None) {
+        return (extent.min, extent.max);
+    }
+    trace
+        .y
+        .in_memory()
+        .unwrap_or_default()
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| {
+            (low.min(value), high.max(value))
+        })
 }
 
 /// Move the stepping cursor to `jump` on the trace [`jump_trace`] picks.
@@ -146,10 +157,16 @@ pub fn jump_cursor(
             direction,
         },
     };
-    let excursion = feature_search::default_excursion(&trace.y);
+    let (low, high) = finite_span(trace);
+    let excursion = feature_search::excursion_of_span(low, high);
+    // A stored trace is searched a block at a time from its start, never held whole.
+    let (x, y) = (
+        feature_search::WindowedCurve::new(&trace.x),
+        feature_search::WindowedCurve::new(&trace.y),
+    );
     let found =
-        feature_search::find(&trace.x, &trace.y, from, feature, excursion).map_err(|refusal| {
-            match refusal {
+        feature_search::find(&x, &y, from, feature, excursion).map_err(
+            |refusal| match refusal {
                 SearchRefusal::NotFound => {
                     let side = match direction {
                         Some(Direction::Next) => " after the cursor",
@@ -164,8 +181,8 @@ pub fn jump_cursor(
                     format!("{} has no {which}{}{side}", trace.name, jump.noun())
                 }
                 refusal => format!("{}: {refusal}", trace.name),
-            }
-        })?;
+            },
+        )?;
 
     if !same_strip {
         session.clear_cursors();

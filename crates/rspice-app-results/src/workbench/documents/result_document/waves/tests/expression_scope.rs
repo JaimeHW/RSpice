@@ -45,8 +45,8 @@ fn excluded_family_members_cannot_change_a_selected_maximum() {
     let (mut state, models) = fixture(vec![2, 3], "max(V(out))");
     let curves = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(curves.len(), 1);
-    assert_eq!(curves[0].x.as_slice(), &[3.0, 4.0]);
-    assert_eq!(curves[0].y.as_slice(), &[1.0, 1.0]);
+    assert_eq!(curves[0].x.read_whole().unwrap().as_ref(), &[3.0, 4.0]);
+    assert_eq!(curves[0].y.read_whole().unwrap().as_ref(), &[1.0, 1.0]);
 }
 
 #[test]
@@ -59,7 +59,11 @@ fn reductions_are_evaluated_independently_for_each_selected_member() {
             .iter()
             .find(|curve| curve.label.contains(member))
             .unwrap();
-        assert_eq!(curve.y.as_slice(), &[expected, expected], "{member}");
+        assert_eq!(
+            curve.y.read_whole().unwrap().as_ref(),
+            &[expected, expected],
+            "{member}"
+        );
     }
 }
 
@@ -77,13 +81,17 @@ fn stateful_expressions_restart_at_each_member_and_use_the_displayed_axis() {
             .iter()
             .find(|curve| curve.label.contains(member))
             .unwrap();
-        assert_eq!(curve.x.as_slice(), &axis);
-        assert_eq!(curve.y.as_slice(), &[0.0, expected], "{member}");
+        assert_eq!(curve.x.read_whole().unwrap().as_ref(), &axis);
+        assert_eq!(
+            curve.y.read_whole().unwrap().as_ref(),
+            &[0.0, expected],
+            "{member}"
+        );
     }
 
     let (mut state, models) = fixture(vec![2, 3], "xval(V(out))");
     let curves = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
-    assert_eq!(curves[0].y.as_slice(), &[3.0, 4.0]);
+    assert_eq!(curves[0].y.read_whole().unwrap().as_ref(), &[3.0, 4.0]);
 }
 
 #[test]
@@ -103,7 +111,7 @@ fn empty_family_selection_is_an_error_instead_of_a_successful_empty_trace() {
 fn changing_scope_refreshes_calculations_while_visibility_does_not() {
     let (mut state, models) = fixture(vec![2, 3], "max(V(out))");
     let first = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
-    assert_eq!(first[0].y.as_slice(), &[1.0, 1.0]);
+    assert_eq!(first[0].y.read_whole().unwrap().as_ref(), &[1.0, 1.0]);
     let version = state.model.simulation.view.data_version;
     let run = state.model.simulation.active_run().unwrap();
     let digest = run.dataset_content_digest();
@@ -119,8 +127,8 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
         .unwrap();
     state.results.results.set_sample_selection(Some(next));
     let second = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
-    assert_eq!(second[0].x.as_slice(), &[1.0, 2.0]);
-    assert_eq!(second[0].y.as_slice(), &[10.0, 10.0]);
+    assert_eq!(second[0].x.read_whole().unwrap().as_ref(), &[1.0, 2.0]);
+    assert_eq!(second[0].y.read_whole().unwrap().as_ref(), &[10.0, 10.0]);
     toggle_visibility(&mut state.results_parts(), 0, 0);
     let hidden = resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default());
     assert_eq!(hidden[0].y, second[0].y);
@@ -187,6 +195,6 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
         &Tokens::default(),
     );
     assert_eq!(curves.len(), 1);
-    assert_eq!(curves[0].x.as_slice(), &[3.0, 4.0]);
-    assert_eq!(curves[0].y.as_slice(), &[1.0, 1.0]);
+    assert_eq!(curves[0].x.read_whole().unwrap().as_ref(), &[3.0, 4.0]);
+    assert_eq!(curves[0].y.read_whole().unwrap().as_ref(), &[1.0, 1.0]);
 }

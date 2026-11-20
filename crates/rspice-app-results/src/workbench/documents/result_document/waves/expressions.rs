@@ -292,7 +292,7 @@ pub(super) fn resolve_strip_exprs(
                 .results
                 .session
                 .derived
-                .shape_or(cache_key, || SweepShape::of(&x));
+                .shape_or(cache_key, || SweepShape::of_values(&x));
             // Cached beside the shape, under the same identity: the pane's
             // automatic fit wants an expression's bounds on every frame, and
             // resolving a strip happens twice per frame, so scanning for them
@@ -851,7 +851,7 @@ mod tests {
             .session
             .sync_expression_projection(model.analysis_key, 0);
         let old = resolve_strip_exprs(&mut state.results_parts(), model, &Tokens::default());
-        assert_eq!(old[0].y.as_slice(), &[0.0; 2]);
+        assert_eq!(old[0].y.read_whole().unwrap().as_ref(), &[0.0; 2]);
         assert!(old[0].label.starts_with("mag("));
         assert!(
             state
@@ -865,7 +865,7 @@ mod tests {
                 .unwrap()
         );
         let current = resolve_strip_exprs(&mut state.results_parts(), model, &Tokens::default());
-        assert_eq!(current[0].y.as_slice(), &[2.0; 2]);
+        assert_eq!(current[0].y.read_whole().unwrap().as_ref(), &[2.0; 2]);
         assert_eq!(current[0].label, "mag(V(a)-V(b))");
         assert_ne!(old[0].cache_key, current[0].cache_key);
         assert_eq!(

@@ -730,7 +730,8 @@ fn eye_measurements_csv(state: ResultsReads<'_>) -> Option<PreparedTypedResultCs
             format!("auto from {edge_count} edges{confidence}")
         }
         Some(EyeTimebaseProvenance::Explicit { .. }) => "explicit".to_owned(),
-        Some(EyeTimebaseProvenance::AutoRejected(_)) | None => "unknown".to_owned(),
+        Some(EyeTimebaseProvenance::AutoRejected(_) | EyeTimebaseProvenance::Unreadable(_))
+        | None => "unknown".to_owned(),
     };
     let contents = rspice_formats::result_csv::encode_eye_measurements_csv(
         eye.data.traces.len(),
@@ -1306,8 +1307,8 @@ fn prepare_displayed_analysis_stack_csv(
                 analysis,
                 &waveform.name,
                 "display",
-                waveform.x.as_ref(),
-                waveform.y.as_ref(),
+                &waveform.x.read_whole().map_err(|error| error.to_string())?,
+                &waveform.y.read_whole().map_err(|error| error.to_string())?,
             )
             .map_err(|error| error.to_string())?;
             traces += 1;
@@ -1317,8 +1318,11 @@ fn prepare_displayed_analysis_stack_csv(
                     analysis,
                     &complex.source_name,
                     "real",
-                    waveform.x.as_ref(),
-                    complex.real.as_ref(),
+                    &waveform.x.read_whole().map_err(|error| error.to_string())?,
+                    &complex
+                        .real
+                        .read_whole()
+                        .map_err(|error| error.to_string())?,
                 )
                 .map_err(|error| error.to_string())?;
                 csv.append_component(
@@ -1326,8 +1330,11 @@ fn prepare_displayed_analysis_stack_csv(
                     analysis,
                     &complex.source_name,
                     "imaginary",
-                    waveform.x.as_ref(),
-                    complex.imag.as_ref(),
+                    &waveform.x.read_whole().map_err(|error| error.to_string())?,
+                    &complex
+                        .imag
+                        .read_whole()
+                        .map_err(|error| error.to_string())?,
                 )
                 .map_err(|error| error.to_string())?;
             }

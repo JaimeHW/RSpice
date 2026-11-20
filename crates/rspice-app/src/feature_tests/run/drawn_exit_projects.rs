@@ -99,14 +99,16 @@ fn held_at(run: &SimulationRun, name: &str, time: f64) -> f64 {
         .unwrap_or_else(|| panic!("no {name} in the run"));
     let index = wave
         .x
+        .read_whole()
+        .unwrap()
         .iter()
         .rposition(|t| *t <= time)
         .expect("a sample at or before the time");
-    wave.y[index]
+    wave.y.sample(index).expect("a sample at the index")
 }
 
 /// An analog trace's samples, by its node.
-fn trace<'a>(run: &'a SimulationRun, node: &str) -> (&'a [f64], &'a [f64]) {
+fn trace(run: &SimulationRun, node: &str) -> (Vec<f64>, Vec<f64>) {
     let wave = run
         .analyses
         .iter()
@@ -125,7 +127,7 @@ fn trace<'a>(run: &'a SimulationRun, node: &str) -> (&'a [f64], &'a [f64]) {
                     .collect::<Vec<_>>()
             )
         });
-    (&wave.x, &wave.y)
+    (wave.x.samples(..).collect(), wave.y.samples(..).collect())
 }
 
 /// The trace's value at `time`, its samples joined by straight lines.
@@ -144,7 +146,7 @@ fn mean(run: &SimulationRun, node: &str, window: (f64, f64)) -> f64 {
     let mut points = vec![(window.0, at(window.0))];
     points.extend(
         x.iter()
-            .zip(y)
+            .zip(&y)
             .filter(|(t, _)| **t > window.0 && **t < window.1)
             .map(|(t, v)| (*t, *v)),
     );

@@ -466,7 +466,10 @@ fn the_next_crossing_on_a_corpus_transient_is_the_calculators_cross() {
                 .collect();
             panic!("the run keeps V(6): {names:?}")
         });
-    let (x, y) = (waveform.x.to_vec(), waveform.y.to_vec());
+    let (x, y) = (
+        waveform.x.read_whole().unwrap().to_vec(),
+        waveform.y.read_whole().unwrap().to_vec(),
+    );
     let (low, high) = y
         .iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| {

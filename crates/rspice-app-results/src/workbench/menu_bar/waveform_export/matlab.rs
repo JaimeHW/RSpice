@@ -247,10 +247,19 @@ mod tests {
         assert_eq!(parsed.sample_count, 3);
         assert_eq!(parsed.waveforms.len(), 2);
         assert_eq!(parsed.waveforms[0].name, "V_out_");
-        assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0, 1.0, 2.0]);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [10.0, 11.5, 12.25]);
+        assert_eq!(
+            parsed.waveforms[0].x.read_whole().unwrap().as_ref(),
+            [0.0, 1.0, 2.0]
+        );
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            [10.0, 11.5, 12.25]
+        );
         assert_eq!(parsed.waveforms[1].name, "I_R1_");
-        assert_eq!(parsed.waveforms[1].y.as_slice(), [-2.0e-3, 0.0, 2.0e-3]);
+        assert_eq!(
+            parsed.waveforms[1].y.read_whole().unwrap().as_ref(),
+            [-2.0e-3, 0.0, 2.0e-3]
+        );
     }
 
     #[test]
@@ -293,8 +302,14 @@ mod tests {
             .as_ref()
             .expect("the complex components survive");
         assert_eq!(complex.source_name, "V_out_");
-        assert_eq!(complex.real.as_slice(), [1.0, 0.5, 0.25]);
-        assert_eq!(complex.imag.as_slice(), [0.0, -0.5, -0.25]);
+        assert_eq!(
+            complex.real.read_whole().unwrap().as_ref(),
+            [1.0, 0.5, 0.25]
+        );
+        assert_eq!(
+            complex.imag.read_whole().unwrap().as_ref(),
+            [0.0, -0.5, -0.25]
+        );
     }
 
     #[test]
@@ -306,7 +321,10 @@ mod tests {
         let parsed = parse_result_dataset("waveforms.mat", &bytes).expect("re-imports");
         assert_eq!(parsed.analysis_type, AnalysisType::DcSweep);
         assert_eq!(parsed.coordinate_name, "sweep");
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [0.0, 1.0, 2.0]);
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            [0.0, 1.0, 2.0]
+        );
     }
 
     /// Every name this writer publishes a coordinate under is one the reader
@@ -359,8 +377,8 @@ mod tests {
         let bytes = encode_matlab(&export).expect("encodes");
         let parsed = parse_result_dataset("waveforms.mat", &bytes).expect("re-imports");
         assert_eq!(parsed.sample_count, 1);
-        assert_eq!(parsed.waveforms[0].x.as_slice(), [0.0]);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [2.5]);
+        assert_eq!(parsed.waveforms[0].x.read_whole().unwrap().as_ref(), [0.0]);
+        assert_eq!(parsed.waveforms[0].y.read_whole().unwrap().as_ref(), [2.5]);
     }
 
     #[test]
@@ -370,7 +388,10 @@ mod tests {
         let bytes = encode_matlab(&export).expect("encodes");
         let parsed = parse_result_dataset("waveforms.mat", &bytes).expect("re-imports");
         assert!(parsed.waveforms[0].complex.is_none());
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [1.0, 0.5]);
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            [1.0, 0.5]
+        );
     }
 
     #[test]
@@ -531,7 +552,10 @@ mod tests {
         assert_eq!(parsed.coordinate_name, "time");
         assert_eq!(parsed.waveforms.len(), 5);
         assert_eq!(parsed.waveforms[4].name, "time_2");
-        assert_eq!(parsed.waveforms[4].y.as_slice(), [9.0, 10.0]);
+        assert_eq!(
+            parsed.waveforms[4].y.read_whole().unwrap().as_ref(),
+            [9.0, 10.0]
+        );
     }
 
     #[test]

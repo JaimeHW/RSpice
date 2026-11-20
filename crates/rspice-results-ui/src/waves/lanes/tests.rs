@@ -283,8 +283,11 @@ fn a_real_lane_steps_in_the_pane_of_its_unit() {
     let steps = real_step_traces(&model, &panes[0], (f64::NEG_INFINITY, f64::INFINITY));
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].label, "E(w)");
-    assert_eq!(*steps[0].x, [0.0, 40.0 * NS, 40.0 * NS, 100.0 * NS]);
-    assert_eq!(*steps[0].y, [0.25, 0.25, 0.75, 0.75]);
+    assert_eq!(
+        steps[0].x.in_memory().unwrap(),
+        [0.0, 40.0 * NS, 40.0 * NS, 100.0 * NS]
+    );
+    assert_eq!(steps[0].y.in_memory().unwrap(), [0.25, 0.25, 0.75, 0.75]);
 
     let rows = lane_readout_rows(
         &model,

@@ -1172,7 +1172,10 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                                 .to_owned(),
                         ));
                     }
-                    validate_pss_display_contract(&time, &waveforms, &operating_point)?;
+                    let samples = time
+                        .read_whole()
+                        .map_err(|failure| SimulationError::SolverError(failure.to_string()))?;
+                    validate_pss_display_contract(&samples, &waveforms, &operating_point)?;
                     let reporting_times = if time == operating_point.analysis().result.time {
                         Vec::new()
                     } else {

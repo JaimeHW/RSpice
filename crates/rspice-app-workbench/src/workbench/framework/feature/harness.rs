@@ -290,8 +290,8 @@ impl ResultsPort for NullPorts {
         }
     }
 
-    fn fft_input_options(&self, time: &[f64]) -> rspice_results_ui::fft::FftInputOptions {
-        FRESH_FFT.input_options_for_waveform(time)
+    fn fft_input_options(&self) -> rspice_results_ui::fft::FftInputOptions {
+        FRESH_FFT.input_options_for_waveform()
     }
 
     /// The reader stated no bit period.

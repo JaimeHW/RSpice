@@ -86,7 +86,7 @@ impl StackHost for WaveStackHost<'_, '_> {
             anchor: anchor_key(model, trace),
             trace_name: trace.name.clone(),
             x,
-            samples: trace.x.as_slice(),
+            samples: &trace.x,
         };
         if let Some(selector) = super::super::place_marker(self.0, placement) {
             marker_dialog::open(self.0, selector);

@@ -64,7 +64,13 @@ fn task_ground_and_formal_port_bindings_survive_reload_without_deck_history() {
                             .iter()
                             .find(|wave| wave.name == name)
                             .unwrap();
-                        for (&x, &y) in wave.x.iter().zip(wave.y.iter()) {
+                        for (&x, &y) in wave
+                            .x
+                            .read_whole()
+                            .unwrap()
+                            .iter()
+                            .zip(wave.y.read_whole().unwrap().iter())
+                        {
                             close(
                                 y,
                                 if index != 0 {

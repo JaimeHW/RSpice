@@ -850,7 +850,16 @@ fn project_file_round_trips_persisted_simulation_results() {
     assert_eq!(analysis.id, 7);
     assert_eq!(analysis.analysis_type, AnalysisType::Ac);
     assert_eq!(analysis.measurements[0].name, "gain");
-    assert_eq!(analysis.waveforms[0].complex.as_ref().unwrap().imag[2], 0.3);
+    assert_eq!(
+        analysis.waveforms[0]
+            .complex
+            .as_ref()
+            .unwrap()
+            .imag
+            .read_whole()
+            .unwrap()[2],
+        0.3
+    );
     assert_eq!(restored.view.waveforms[0].name, "|V(out)|");
 }
 
@@ -901,8 +910,14 @@ fn project_file_round_trips_exact_pac_branch_current_trace() {
     assert_eq!(current.unit.as_deref(), Some("A"));
     let complex = current.complex.as_ref().expect("complex current retained");
     assert_eq!(complex.source_name, "I(V1)[sb=+0]");
-    assert_eq!(complex.real[1].to_bits(), exact_real.to_bits());
-    assert_eq!(complex.imag[1].to_bits(), exact_imag.to_bits());
+    assert_eq!(
+        complex.real.read_whole().unwrap()[1].to_bits(),
+        exact_real.to_bits()
+    );
+    assert_eq!(
+        complex.imag.read_whole().unwrap()[1].to_bits(),
+        exact_imag.to_bits()
+    );
 }
 
 #[test]

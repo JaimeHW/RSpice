@@ -229,7 +229,8 @@ fn timebase_summary(eye: &EyeDiagramState, significant_digits: usize) -> String 
             rate(1.0 / unit_interval),
             if *incoherent { INCOHERENT_NOTE } else { "" },
         ),
-        Some(EyeTimebaseProvenance::AutoRejected(_)) | None => rate(eye.data.data_rate),
+        Some(EyeTimebaseProvenance::AutoRejected(_) | EyeTimebaseProvenance::Unreadable(_))
+        | None => rate(eye.data.data_rate),
     }
 }
 

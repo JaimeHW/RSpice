@@ -131,8 +131,8 @@ fn the_code_bus_staircase_follows_the_dac() {
             lanes.as_ref(),
         )
         .expect("the code bus reads as a staircase");
-        let x = outputs[0].waveform.data.x.as_slice();
-        let y = outputs[0].waveform.data.y.as_slice();
+        let x = outputs[0].waveform.data.x.read_whole().unwrap();
+        let y = outputs[0].waveform.data.y.read_whole().unwrap();
         let held = |t: f64| {
             let index = x.partition_point(|time| *time <= t);
             y[index - 1]
@@ -184,7 +184,10 @@ fn the_code_bus_staircase_follows_the_dac() {
                 .iter()
                 .find(|waveform| waveform.name == name)
                 .unwrap_or_else(|| panic!("the run has {name}"));
-            (waveform.x.to_vec(), waveform.y.to_vec())
+            (
+                waveform.x.read_whole().unwrap().to_vec(),
+                waveform.y.read_whole().unwrap().to_vec(),
+            )
         };
         let (tx, ty) = column("TOP");
         let (vx, vy) = column("VIN");

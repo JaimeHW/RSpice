@@ -106,8 +106,11 @@ fn a_stored_transient_holds_the_samples_the_in_memory_route_returns_without_read
     assert!(time.is_stored());
     // The authored start falls between two steps: the axis starts there.
     assert_eq!(time.len(), expected_time.len());
-    assert_eq!(time.first().copied(), Some(33.3e-6));
-    assert_eq!(bits(&time), bits(&expected_time));
+    assert_eq!(time.in_memory().unwrap().first().copied(), Some(33.3e-6));
+    assert_eq!(
+        bits(&time.in_memory().unwrap()),
+        bits(&expected_time.in_memory().unwrap())
+    );
     let mut names = waveforms.keys().collect::<Vec<_>>();
     names.sort();
     let mut expected_names = expected_waveforms.keys().collect::<Vec<_>>();
@@ -125,7 +128,11 @@ fn a_stored_transient_holds_the_samples_the_in_memory_route_returns_without_read
             "{name} shares the run's one axis"
         );
         assert_eq!(waveform.y_unit, expected.y_unit, "{name}");
-        assert_eq!(bits(&waveform.y_values), bits(&expected.y_values), "{name}");
+        assert_eq!(
+            bits(&waveform.y_values.in_memory().unwrap()),
+            bits(&expected.y_values.in_memory().unwrap()),
+            "{name}"
+        );
     }
     assert_eq!(
         format!("{measurements:?}"),
@@ -254,7 +261,7 @@ fn a_volume_that_fills_stops_the_run_keeping_the_rows_it_wrote_and_names_the_sto
     );
     assert_eq!(time.len(), kept);
     assert_eq!(stop.at, Some(full_time[kept - 1]));
-    assert_eq!(bits(&time), bits(&full_time[..kept]));
+    assert_eq!(bits(&time.in_memory().unwrap()), bits(&full_time[..kept]));
     assert!(
         waveforms
             .values()

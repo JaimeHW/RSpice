@@ -221,7 +221,13 @@ fn a_vector_file_drives_and_checks_through_a_prepared_run() {
         .find(|(name, _)| name.eq_ignore_ascii_case("a"))
         .map(|(_, waveform)| &waveform.y_values)
         .unwrap_or_else(|| panic!("V(a) in {:?}", waveforms.keys()));
-    assert_eq!((a.first(), a.last()), (Some(&0.0), Some(&1.8)));
+    assert_eq!(
+        (
+            a.in_memory().unwrap().first(),
+            a.in_memory().unwrap().last()
+        ),
+        (Some(&0.0), Some(&1.8))
+    );
     let violations: Vec<_> = checks
         .assertions
         .iter()

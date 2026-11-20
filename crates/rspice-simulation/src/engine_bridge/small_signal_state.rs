@@ -173,6 +173,8 @@ mod tests {
         let imaginary = waveform.y_imag.as_ref().expect("a complex waveform");
         waveform
             .y_values
+            .in_memory()
+            .unwrap()
             .iter()
             .copied()
             .zip(imaginary.iter().copied())

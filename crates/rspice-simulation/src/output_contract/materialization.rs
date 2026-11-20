@@ -116,7 +116,7 @@ fn resolve_derived_with<W: OutputWaveform>(
     calculator::retained::evaluated_waveform(
         value,
         output_name,
-        axis_source.map(|source| source.as_ref().x.as_slice()),
+        axis_source.map(|source| &source.as_ref().x),
     )
     .map(W::from_retained)
 }

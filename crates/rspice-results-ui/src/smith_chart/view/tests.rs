@@ -65,9 +65,9 @@ fn the_marker_reads_frequency_gamma_impedance_admittance_and_vswr() {
 /// A trace's columns, owned for a test.
 struct OwnedTrace {
     name: String,
-    frequencies: SharedWaveformValues,
-    real: SharedWaveformValues,
-    imaginary: SharedWaveformValues,
+    frequencies: HeldColumn,
+    real: HeldColumn,
+    imaginary: HeldColumn,
     reference: Option<f64>,
 }
 
@@ -90,9 +90,21 @@ impl OwnedTrace {
 fn owned_trace(name: &str, points: &[(f64, f64, f64)], reference: Option<f64>) -> OwnedTrace {
     OwnedTrace {
         name: name.to_owned(),
-        frequencies: points.iter().map(|point| point.0).collect(),
-        real: points.iter().map(|point| point.1).collect(),
-        imaginary: points.iter().map(|point| point.2).collect(),
+        frequencies: points
+            .iter()
+            .map(|point| point.0)
+            .collect::<Vec<_>>()
+            .into(),
+        real: points
+            .iter()
+            .map(|point| point.1)
+            .collect::<Vec<_>>()
+            .into(),
+        imaginary: points
+            .iter()
+            .map(|point| point.2)
+            .collect::<Vec<_>>()
+            .into(),
         reference,
     }
 }

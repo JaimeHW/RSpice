@@ -72,7 +72,7 @@ fn a_pwl_export_drives_a_run_through_the_retained_samples() {
 
     let folder = scratch_folder("replay");
     std::fs::write(folder.join("OUT.inc"), &source).unwrap();
-    let stop = original.x.last().copied().unwrap();
+    let stop = original.x.ends().unwrap().1;
     let deck = format!(
         "pwl replay\n.include \"OUT.inc\"\nX1 a 0 PWL_OUT\nR1 a 0 1k\n.tran 10n {stop:e}\n.end\n"
     );
@@ -88,13 +88,21 @@ fn a_pwl_export_drives_a_run_through_the_retained_samples() {
         .find(|waveform| waveform.name == "A")
         .expect("the replay retains A");
     let mut worst = 0.0_f64;
-    for (time, value) in original.x.iter().zip(original.y.iter()) {
+    for (time, value) in original
+        .x
+        .read_whole()
+        .unwrap()
+        .iter()
+        .zip(original.y.read_whole().unwrap().iter())
+    {
         let at = replayed
             .x
+            .read_whole()
+            .unwrap()
             .iter()
             .position(|replay_time| replay_time == time)
             .unwrap_or_else(|| panic!("the replay steps onto the breakpoint at {time:e} s"));
-        worst = worst.max((replayed.y[at] - value).abs());
+        worst = worst.max((replayed.y.read_whole().unwrap()[at] - value).abs());
     }
     // Bit-exact on the reference box; a few ulps leave room for another
     // platform's solver arithmetic, not for a misread number.

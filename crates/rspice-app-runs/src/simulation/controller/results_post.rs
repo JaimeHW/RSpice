@@ -51,19 +51,27 @@ impl SimulationController {
             state.apply_run_event(RunEvent::TransientResultReplaced);
             return;
         };
-        // Eye folding retains its historical paired-prefix behavior. FFT
-        // preparation receives the authored arrays whole so its strict shape
-        // contract can diagnose a mismatch instead of inheriting truncation.
-        let paired_count = waveform.x.len().min(waveform.y.len());
-        let eye_time = &waveform.x[..paired_count];
-        let eye_values = &waveform.y[..paired_count];
-        let time = waveform.x.as_slice();
-        let values = waveform.y.as_slice();
-
         state.apply_run_event(RunEvent::FftSourceChosen {
             source: waveform_key.clone(),
         });
-        let input_options = state.fft_input_options(time);
+        // The spectrum and the eye fold every sample of the record, so seeding them reads it
+        // whole: a stored record is read off the frame by the reader service. Until it has
+        // arrived, or when it is larger than the loaded results may hold, nothing is seeded and
+        // each viewer derives its own off the frame when it is opened.
+        let (Some(time), Some(values)) = (
+            waveform.x.fetch_whole().ready(),
+            waveform.y.fetch_whole().ready(),
+        ) else {
+            return;
+        };
+        // Eye folding retains its historical paired-prefix behavior. FFT
+        // preparation receives the authored arrays whole so its strict shape
+        // contract can diagnose a mismatch instead of inheriting truncation.
+        let paired_count = time.len().min(values.len());
+        let eye_time = &time[..paired_count];
+        let eye_values = &values[..paired_count];
+        let (time, values) = (&time[..], &values[..]);
+        let input_options = state.fft_input_options();
 
         let provenance = self.in_flight_specialized_viewer_provenance(state.model());
         // Same builder as the lazy path in `transient_post`, at the same
@@ -151,7 +159,11 @@ impl SimulationController {
             let Some(imag) = waveform.y_imag.as_ref() else {
                 continue;
             };
-            if waveform.y_values.len() != frequencies.len() || imag.len() != frequencies.len() {
+            // The engine's own samples, held in memory until the run is stored.
+            let Some(values) = waveform.y_values.in_memory() else {
+                continue;
+            };
+            if values.len() != frequencies.len() || imag.len() != frequencies.len() {
                 continue;
             }
 
@@ -161,7 +173,7 @@ impl SimulationController {
                 loop_gain_locus = Some(rspice_results_ui::nyquist::NyquistData::from_arrays(
                     LOOP_GAIN_LOCUS_LABEL,
                     frequencies,
-                    &waveform.y_values,
+                    values,
                     imag,
                 ));
             }

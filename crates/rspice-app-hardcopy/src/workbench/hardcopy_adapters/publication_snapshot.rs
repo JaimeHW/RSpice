@@ -1204,13 +1204,21 @@ fn trace_unit<'a>(name: &str, retained_unit: Option<&'a str>) -> &'a str {
     }
 }
 
-fn bits_of(values: &[f64], trace: &str) -> Result<Vec<u64>, PublicationBuildError> {
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err(PublicationBuildError::NonFiniteSample {
-            trace: trace.to_string(),
-        });
+/// The bits of every sample of `values`, read a block at a time.
+fn bits_of(
+    values: &rspice_results::waveform::WaveformValues,
+    trace: &str,
+) -> Result<Vec<u64>, PublicationBuildError> {
+    let mut bits = Vec::with_capacity(values.len());
+    for value in values.samples(..) {
+        if !value.is_finite() {
+            return Err(PublicationBuildError::NonFiniteSample {
+                trace: trace.to_string(),
+            });
+        }
+        bits.push(value.to_bits());
     }
-    Ok(values.iter().map(|value| value.to_bits()).collect())
+    Ok(bits)
 }
 
 fn results_section(

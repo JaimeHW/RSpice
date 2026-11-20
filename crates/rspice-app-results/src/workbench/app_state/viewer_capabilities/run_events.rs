@@ -30,10 +30,10 @@ impl AnalysisWorkspaceState {
         }
     }
 
-    /// How the FFT prepares the input it is given over `time`, as the reader
+    /// How the FFT prepares the input it is given, as the reader
     /// set it.
-    pub(crate) fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
-        self.fft_state.input_options_for_waveform(time)
+    pub(crate) fn fft_input_options(&self) -> FftInputOptions {
+        self.fft_state.input_options_for_waveform()
     }
 }
 
@@ -43,10 +43,10 @@ impl ResultsReads<'_> {
         self.analysis.viewer_reading()
     }
 
-    /// How the FFT prepares the input it is given over `time`, as the reader
+    /// How the FFT prepares the input it is given, as the reader
     /// set it.
-    pub fn fft_input_options(self, time: &[f64]) -> FftInputOptions {
-        self.analysis.fft_input_options(time)
+    pub fn fft_input_options(self) -> FftInputOptions {
+        self.analysis.fft_input_options()
     }
 
     /// The bit period the reader chose for this result's eye.
@@ -64,8 +64,8 @@ impl ViewerHost for ResultsParts<'_> {
         self.results_reads().viewer_reading()
     }
 
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
-        self.results_reads().fft_input_options(time)
+    fn fft_input_options(&self) -> FftInputOptions {
+        self.results_reads().fft_input_options()
     }
 
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {

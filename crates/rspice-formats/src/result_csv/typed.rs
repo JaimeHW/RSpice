@@ -922,17 +922,16 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
                     || evaluation.envelope.is_some()
                     || evaluation.duration.is_some()
                 {
-                    #[derive(Clone, Copy)]
                     struct Samples<'a> {
-                        x: &'a [f64],
-                        y: &'a [f64],
+                        x: std::borrow::Cow<'a, [f64]>,
+                        y: std::borrow::Cow<'a, [f64]>,
                     }
                     let find = |name: String| {
                         if let Some(source) = source_history {
                             let wave = source.waveforms.iter().find(|wave| wave.name == name)?;
                             Some(Samples {
-                                x: &source.time,
-                                y: &wave.values,
+                                x: std::borrow::Cow::Borrowed(&source.time),
+                                y: std::borrow::Cow::Borrowed(&wave.values),
                             })
                         } else {
                             let wave = analysis
@@ -941,8 +940,8 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
                                 .map(AsRef::as_ref)
                                 .find(|wave| wave.name == name)?;
                             Some(Samples {
-                                x: &wave.x,
-                                y: &wave.y,
+                                x: wave.x.read_whole().ok()?,
+                                y: wave.y.read_whole().ok()?,
                             })
                         }
                     };
@@ -985,7 +984,9 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
                             soa_parameter_csv(evaluation.parameter).into(),
                             format!(
                                 "{:.17e}",
-                                limits.map_or(evaluation.limit_value, |wave| wave.y[i])
+                                limits
+                                    .as_ref()
+                                    .map_or(evaluation.limit_value, |wave| wave.y[i])
                             ),
                             format!("{:.17e}", stress.y[i]),
                             format!("{:.17e}", stress.x[i]),
@@ -1005,7 +1006,7 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
                             if let Some(derating) = evaluation.derating {
                                 contents.push_str(&format!(
                                     ",{:.17e},{:.17e},{:.17e},{:.17e}",
-                                    temperatures?.y[i],
+                                    temperatures.as_ref()?.y[i],
                                     derating.rated_power_w,
                                     derating.curve.reference_temperature_kelvin,
                                     derating.curve.watts_per_kelvin
@@ -1019,7 +1020,7 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
                         append_envelope(
                             &mut contents,
                             evaluation,
-                            curve_voltages.map(|v| v.y[i]),
+                            curve_voltages.as_ref().map(|v| v.y[i]),
                             false,
                         )?;
                         contents.push('\n');

@@ -130,7 +130,13 @@ fn a_spice_export_moved_whole_runs_as_the_application_runs_the_design() {
         outcome.out_volts.len(),
         "{name} on the accepted points"
     );
-    for (exported, ran) in exported.y.iter().zip(&outcome.out_volts) {
+    for (exported, ran) in exported
+        .y
+        .read_whole()
+        .unwrap()
+        .iter()
+        .zip(&outcome.out_volts)
+    {
         assert_eq!(
             exported.to_bits(),
             ran.to_bits(),

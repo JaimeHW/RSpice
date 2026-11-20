@@ -846,13 +846,15 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
                         key,
                         waveform
                             .y_values
-                            .iter()
-                            .zip(imag.iter().chain(std::iter::repeat(&0.0)))
-                            .map(|(re, im)| [*re, *im])
+                            .samples(..)
+                            .zip(imag.iter().copied().chain(std::iter::repeat(0.0)))
+                            .map(|(re, im)| [re, im])
                             .collect(),
                     );
                 } else {
-                    observation.real.insert(key, waveform.y_values.to_vec());
+                    observation
+                        .real
+                        .insert(key, waveform.y_values.samples(..).collect());
                 }
             }
         };
@@ -885,7 +887,7 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
             ..
         } => {
             observation.kind = "tran".into();
-            observation.axis = time.to_vec();
+            observation.axis = time.samples(..).collect();
             waveforms_into(&mut observation, waveforms);
             record_measures(measurements, &mut observation);
             for history in &events.digital {

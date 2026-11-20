@@ -161,21 +161,29 @@ fn assert_continuation(baseline: &SimulationResult, resumed: &SimulationResult, 
         panic!("transient")
     };
     let seam = expected_time
+        .in_memory()
+        .unwrap()
         .iter()
         .position(|t| t.to_bits() == saved_time.to_bits())
         .unwrap();
-    assert_eq!(time, &expected_time[seam..]);
+    assert_eq!(time, &expected_time.in_memory().unwrap()[seam..]);
     assert_eq!(waveforms.len(), expected.len());
     for (name, actual) in waveforms {
         let expected = &expected[name];
-        assert_eq!(actual.x_values, expected.x_values[seam..], "{name}");
+        assert_eq!(
+            actual.x_values,
+            expected.x_values.in_memory().unwrap()[seam..],
+            "{name}"
+        );
         assert_eq!(
             actual
                 .y_values
+                .in_memory()
+                .unwrap()
                 .iter()
                 .map(|v| v.to_bits())
                 .collect::<Vec<_>>(),
-            expected.y_values[seam..]
+            expected.y_values.in_memory().unwrap()[seam..]
                 .iter()
                 .map(|v| v.to_bits())
                 .collect::<Vec<_>>(),

@@ -65,17 +65,25 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
         )
     {
         // A stored run's time axis ascends, so its ends are its extent, read
-        // without reading the axis; a decade scale needs its least positive
-        // sample, which only the samples give.
+        // without reading the axis; on a decade scale its least positive
+        // sample is found by bisection.
         if x.is_ascending_axis()
-            && model.x_scale == XScale::Linear
             && let Some((first, last)) = x.ends()
         {
-            take(first);
+            if model.x_scale == XScale::Log10 {
+                let positive = x.partition_point(|value| !(value > 0.0));
+                x.sample(positive).into_iter().for_each(&mut take);
+            } else {
+                take(first);
+            }
             take(last);
             continue;
         }
-        x.iter().copied().for_each(&mut take);
+        // Any other axis is held in memory, or read off the frame and taken
+        // once it has arrived.
+        if let Some(x) = x.fetch_whole().ready() {
+            x.iter().copied().for_each(&mut take);
+        }
     }
     if !x0.is_finite() || !x1.is_finite() {
         return None;

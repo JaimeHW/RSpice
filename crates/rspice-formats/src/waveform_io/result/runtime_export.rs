@@ -141,7 +141,11 @@ pub fn project_sparameter_waveforms(
             } else {
                 let mut signal = WaveformSignal::new(name, SignalType::Unknown);
                 signal.unit = if name == "Rn" { "Ω" } else { "1" }.into();
-                signal.data = waveform.y_values.to_vec();
+                signal.data = waveform
+                    .y_values
+                    .read_whole()
+                    .map_err(|failure| failure.to_string())?
+                    .into_owned();
                 dataset.add_signal(signal);
             }
         }
@@ -160,7 +164,11 @@ fn push_complex_signal_pair(
         .ok_or_else(|| format!("{} waveform is missing imaginary component", name))?;
 
     let mut real_signal = WaveformSignal::new(format!("{}_RE", name), SignalType::SParameter);
-    real_signal.data = waveform.y_values.to_vec();
+    real_signal.data = waveform
+        .y_values
+        .read_whole()
+        .map_err(|failure| failure.to_string())?
+        .into_owned();
     dataset.add_signal(real_signal);
 
     let mut imag_signal = WaveformSignal::new(format!("{}_IM", name), SignalType::SParameter);

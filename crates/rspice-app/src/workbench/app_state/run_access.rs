@@ -23,8 +23,8 @@ impl ViewerHost for AppState {
         self.results_reads().viewer_reading()
     }
 
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
-        self.results_reads().fft_input_options(time)
+    fn fft_input_options(&self) -> FftInputOptions {
+        self.results_reads().fft_input_options()
     }
 
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {

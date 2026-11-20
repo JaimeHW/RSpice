@@ -758,6 +758,8 @@ mod tests {
         assert!(
             decoded.data.waveforms[1]
                 .y
+                .in_memory()
+                .unwrap()
                 .iter()
                 .all(|value| *value == 0.0)
         );
@@ -808,8 +810,11 @@ mod tests {
         let decoded =
             digital_events_to_dataset(ResultImportFormat::Vcd, 1e-9, signals(), events(0), policy)
                 .unwrap();
-        assert_eq!(decoded.data.waveforms[0].x.as_slice(), [0.0, 1e-9]);
-        assert_eq!(decoded.data.waveforms[0].y.as_slice(), [0.0, 1.0]);
+        assert_eq!(
+            decoded.data.waveforms[0].x.in_memory().unwrap(),
+            [0.0, 1e-9]
+        );
+        assert_eq!(decoded.data.waveforms[0].y.in_memory().unwrap(), [0.0, 1.0]);
     }
 
     #[test]
@@ -817,9 +822,12 @@ mod tests {
         let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! a $end\n$var wire 2 \" bus $end\n$upscope $end\n$enddefinitions $end\n#0\nx!\nb0x \"\n#1\n1!\nb01 \"\n#2\nz!\nb11 \"\n";
         let parsed =
             decode_vcd(vcd, ResultImportFormat::Vcd, limits()).expect("four-state VCD imports");
-        assert_eq!(parsed.data.waveforms[0].y.as_slice(), &[0.5, 1.0, 0.5]);
         assert_eq!(
-            parsed.data.waveforms[1].y.as_slice(),
+            parsed.data.waveforms[0].y.in_memory().unwrap(),
+            &[0.5, 1.0, 0.5]
+        );
+        assert_eq!(
+            parsed.data.waveforms[1].y.in_memory().unwrap(),
             &[0.5, 1.0, 3.0],
             "a vector with any unknown bit denotes no integer"
         );
@@ -861,7 +869,7 @@ mod tests {
         let parsed =
             decode_vcd(vcd, ResultImportFormat::Vcd, limits()).expect("VCD with a dump block");
         assert_eq!(
-            parsed.data.waveforms[0].y.as_slice(),
+            parsed.data.waveforms[0].y.in_memory().unwrap(),
             &[0.0, 1.0, 0.5],
             "a $dumpoff block records that the signals stopped being dumped"
         );

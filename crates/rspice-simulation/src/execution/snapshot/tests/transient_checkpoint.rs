@@ -147,12 +147,17 @@ fn transient_checkpoint_authored_points_route_immutable_inputs_and_continue_exac
                 panic!()
             };
             let seam = time
+                .in_memory()
+                .unwrap()
                 .iter()
                 .position(|time| *time == images[i].accepted_time())
                 .unwrap();
-            assert_eq!(actual_time, time[seam..]);
+            assert_eq!(actual_time, time.in_memory().unwrap()[seam..]);
             for (name, waveform) in actual {
-                assert_eq!(waveform.y_values, waveforms[&name].y_values[seam..]);
+                assert_eq!(
+                    waveform.y_values,
+                    waveforms[&name].y_values.in_memory().unwrap()[seam..]
+                );
             }
             assert_eq!(final_images.last(), baselines[i].1.last());
         }

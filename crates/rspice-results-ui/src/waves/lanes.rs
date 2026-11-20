@@ -444,7 +444,7 @@ pub fn real_step_traces(
             let end = model
                 .x_range
                 .map(|range| range.1)
-                .or_else(|| lane.x.last().copied())?;
+                .or_else(|| lane.x.ends().map(|(_, last)| last))?;
             let key = stable_hash(&(
                 model.analysis_key,
                 &lane.source_waveform_name,

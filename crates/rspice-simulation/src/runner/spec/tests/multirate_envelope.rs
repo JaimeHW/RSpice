@@ -102,12 +102,27 @@ fn multirate_envelope_saved_controls_execute_and_retain_physical_results() {
         .find(|w| w.name.to_ascii_lowercase().starts_with("env(v(out); k=[0]"))
         .unwrap();
     assert_eq!(trace.unit.as_deref(), Some("V"));
-    assert_eq!(trace.x.first(), Some(&0.0));
-    assert_eq!(trace.x.last(), Some(&0.002));
-    assert_eq!(trace.x.iter().filter(|t| **t == 0.00073).count(), 2);
+    assert_eq!(trace.x.in_memory().unwrap().first(), Some(&0.0));
+    assert_eq!(trace.x.in_memory().unwrap().last(), Some(&0.002));
+    assert_eq!(
+        trace
+            .x
+            .in_memory()
+            .unwrap()
+            .iter()
+            .filter(|t| **t == 0.00073)
+            .count(),
+        2
+    );
     let mut expected = 0.0;
     let mut previous = 0.0;
-    for (&time, &value) in trace.x.iter().zip(trace.y.iter()) {
+    for (&time, &value) in trace
+        .x
+        .in_memory()
+        .unwrap()
+        .iter()
+        .zip(trace.y.in_memory().unwrap().iter())
+    {
         let step = time - previous;
         if step > 0.0 {
             let source = if previous >= 0.00073 { 0.001 } else { 0.0 };
@@ -186,7 +201,7 @@ fn multirate_envelope_independent_tones_adapt_and_transfer_exact_event_measureme
         })
         .unwrap();
     let expected = (1.0 - (-0.00127_f64 / (1e-6 / 0.003)).exp()) / 3.0;
-    assert!((dc.y_values.last().unwrap() - expected).abs() < 2e-3);
+    assert!((dc.y_values.in_memory().unwrap().last().unwrap() - expected).abs() < 2e-3);
     let carrier = waveforms
         .values()
         .find(|w| {
@@ -202,6 +217,8 @@ fn multirate_envelope_independent_tones_adapt_and_transfer_exact_event_measureme
         );
     for (&re, &im) in carrier
         .y_values
+        .in_memory()
+        .unwrap()
         .iter()
         .zip(carrier.y_imag.as_ref().unwrap())
     {
@@ -238,7 +255,7 @@ fn multirate_envelope_strobe_preserves_incoming_and_outgoing_source_limits() {
         .output_interval_schedule
         .unwrap()
         .initial_interval;
-    assert!(time.contains(&interval), "{time:?}");
+    assert!(time.in_memory().unwrap().contains(&interval), "{time:?}");
     let source = waveforms
         .values()
         .find(|w| {
@@ -247,13 +264,28 @@ fn multirate_envelope_strobe_preserves_incoming_and_outgoing_source_limits() {
                 .starts_with("env(v(input); k=[0]")
         })
         .unwrap();
-    assert_eq!(time.iter().filter(|t| **t == 0.00073).count(), 2);
-    for (index, (&time, &value)) in time.iter().zip(&source.y_values).enumerate() {
+    assert_eq!(
+        time.in_memory()
+            .unwrap()
+            .iter()
+            .filter(|t| **t == 0.00073)
+            .count(),
+        2
+    );
+    for (index, (&time, &value)) in time
+        .in_memory()
+        .unwrap()
+        .iter()
+        .zip(source.y_values.in_memory().unwrap())
+        .enumerate()
+    {
         let expected = if time < 0.00073
-            || (time == 0.00073 && source.x_values.get(index + 1) == Some(&time))
+            || (time == 0.00073
+                && source.x_values.in_memory().unwrap().get(index + 1) == Some(&time))
         {
             0.0
-        } else if time < 0.002 || source.x_values.get(index + 1) == Some(&time) {
+        } else if time < 0.002 || source.x_values.in_memory().unwrap().get(index + 1) == Some(&time)
+        {
             1.0
         } else {
             2.0

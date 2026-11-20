@@ -28,10 +28,12 @@ fn at(analysis: &AnalysisResult, name: &str, x: f64) -> f64 {
     let waveform = signal(analysis, name);
     let index = waveform
         .x
+        .read_whole()
+        .unwrap()
         .iter()
         .position(|value| (value - x).abs() <= 1e-9 * x.abs().max(1.0))
         .unwrap_or_else(|| panic!("{x} on the sweep of {}", analysis.label));
-    waveform.y[index]
+    waveform.y.read_whole().unwrap()[index]
 }
 
 fn coordinate(analysis: &AnalysisResult) -> Vec<(String, f64)> {
@@ -109,7 +111,13 @@ fn a_stepped_dc_sweep_keeps_one_id_vds_curve_per_gate_voltage() {
         assert_eq!(coordinate(curve), [("vgs".to_owned(), vgs)]);
         let drain = signal(curve, "I(VD)");
         assert_eq!(drain.x.len(), 61, "{}: the whole sweep", curve.label);
-        for (vds, id) in drain.x.iter().zip(drain.y.iter()) {
+        for (vds, id) in drain
+            .x
+            .read_whole()
+            .unwrap()
+            .iter()
+            .zip(drain.y.read_whole().unwrap().iter())
+        {
             // gmin across the drain junction is the only departure.
             assert!(
                 (-id - square_law(vgs, *vds)).abs() < 1e-11,
@@ -152,11 +160,19 @@ fn minus_3db(analysis: &AnalysisResult) -> f64 {
     let threshold = std::f64::consts::FRAC_1_SQRT_2;
     let at = magnitude
         .y
+        .read_whole()
+        .unwrap()
         .windows(2)
         .position(|pair| pair[0] >= threshold && pair[1] < threshold)
         .expect("the response crosses -3 dB");
-    let (f0, f1) = (magnitude.x[at].log10(), magnitude.x[at + 1].log10());
-    let (m0, m1) = (magnitude.y[at], magnitude.y[at + 1]);
+    let (f0, f1) = (
+        magnitude.x.read_whole().unwrap()[at].log10(),
+        magnitude.x.read_whole().unwrap()[at + 1].log10(),
+    );
+    let (m0, m1) = (
+        magnitude.y.read_whole().unwrap()[at],
+        magnitude.y.read_whole().unwrap()[at + 1],
+    );
     10f64.powf(f0 + (m0 - threshold) / (m0 - m1) * (f1 - f0))
 }
 

@@ -624,6 +624,8 @@ pub(in crate::runner) mod tests {
         assert!(
             waveforms["S11"]
                 .y_values
+                .in_memory()
+                .unwrap()
                 .iter()
                 .all(|value| (*value - 1.0 / 7.0).abs() < 1e-12)
         );
@@ -1423,7 +1425,7 @@ R2 out 0 1k\n\
                 .unwrap();
             assert_eq!(input.unit.as_deref(), Some("A²/Hz"));
             let expected = 4.0 * rspice_core::constants::K_BOLTZMANN * 300.15 / 1e3;
-            for density in input.y.iter() {
+            for density in input.y.in_memory().unwrap().iter() {
                 assert!(
                     (density / expected - 1.0).abs() < 1e-10,
                     "{kind:?}: {density:e}"
@@ -1433,7 +1435,7 @@ R2 out 0 1k\n\
             assert_eq!(summary.input_quantity, Some(NoiseInputQuantity::Current));
             assert_eq!(summary.input_rms_unit(), "A rms");
             assert_eq!(
-                input.x.as_slice(),
+                input.x.in_memory().unwrap(),
                 &[1e3, 5.5e3, 1e4],
                 "{kind:?} frequency grid"
             );
@@ -1611,7 +1613,7 @@ R2 out 0 1k\n\
         assert_eq!(frequencies.len(), 2);
         assert!(waveforms.contains_key("S11"));
         assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
-        for value in &waveforms["S21[k=+0,m=+0]"].y_values {
+        for value in waveforms["S21[k=+0,m=+0]"].y_values.in_memory().unwrap() {
             assert!((*value - 2.0 / 3.0).abs() < 1e-7);
         }
     }
@@ -1670,7 +1672,7 @@ R2 out 0 1k\n\
         waveforms
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("out"))
-            .map(|(_, waveform)| waveform.y_values.to_vec())
+            .map(|(_, waveform)| waveform.y_values.in_memory().unwrap().to_vec())
             .unwrap_or_else(|| {
                 panic!(
                     "the divider's output node is retained; the run returned {:?}",
@@ -2210,6 +2212,8 @@ R2 out 0 1k\n\
             assert!(
                 reflection
                     .y_values
+                    .in_memory()
+                    .unwrap()
                     .iter()
                     .all(|value| (value - 1.0 / 3.0).abs() < 1e-10)
             );
@@ -2287,7 +2291,7 @@ R2 out 0 1k\n\
         assert_eq!(response.y_values.len(), authored.len());
 
         for (index, frequency) in authored.iter().copied().enumerate() {
-            let magnitude = response.y_values[index].hypot(imaginary[index]);
+            let magnitude = response.y_values.in_memory().unwrap()[index].hypot(imaginary[index]);
             let omega_rc = std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE;
             let exact = 1.0 / (1.0 + omega_rc * omega_rc).sqrt();
             assert!(
@@ -2324,11 +2328,12 @@ R2 out 0 1k\n\
             panic!("expected AC")
         };
         assert_eq!(frequencies, vec![1000.0, 0.0, 1000.0]);
-        for (value, expected) in
-            waveforms["V(OUT)"]
-                .y_values
-                .iter()
-                .zip([0.5, 2.0 / 3.0, 1.0 / 3.0])
+        for (value, expected) in waveforms["V(OUT)"]
+            .y_values
+            .in_memory()
+            .unwrap()
+            .iter()
+            .zip([0.5, 2.0 / 3.0, 1.0 / 3.0])
         {
             assert!((value - expected).abs() < 1e-10);
         }

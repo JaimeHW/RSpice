@@ -485,6 +485,9 @@ pub struct BandMember<'a> {
     pub y: &'a [f64],
     pub parametric: bool,
     pub shape: Option<&'a SweepShape>,
+    /// Samples a results store keeps, folded from its tile of the view rather than read; `x`
+    /// and `y` are then empty.
+    pub stored: Option<super::spec::StoredSamples<'a>>,
 }
 
 /// Fold every member's stroke into the per-column extremes of `view`.
@@ -533,6 +536,47 @@ fn band_columns(members: &[BandMember<'_>], view: TraceView) -> Vec<[f64; 2]> {
         cell[1] = cell[1].max(value);
     };
     for member in members {
+        // A stored member's tile holds each column's extremes; a view few
+        // enough of its rows fall in is those rows, stroked as any member's.
+        let tile_rows;
+        let mut member = *member;
+        if let Some(stored) = member.stored {
+            use rspice_results::waveform::ColumnTile;
+            let tile = match view.x_scale {
+                XScale::Linear => stored.y.tile_over(stored.x, view.x0, view.x1, columns),
+                XScale::Log10 => stored.y.log_tile_over(stored.x, view.x0, view.x1, columns),
+            };
+            match tile {
+                Some(ColumnTile::Envelope { min, max, touched }) => {
+                    for column in (0..columns.min(min.len())).filter(|&column| touched[column]) {
+                        for value in [min[column], max[column]] {
+                            if value.is_finite() && !(decade_y && value <= 0.0) {
+                                fold(column, value);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Some(ColumnTile::Samples {
+                    x,
+                    y,
+                    before,
+                    after,
+                }) => {
+                    let rows: Vec<(f64, f64)> = before
+                        .into_iter()
+                        .chain(x.into_iter().zip(y))
+                        .chain(after)
+                        .collect();
+                    tile_rows = rows.into_iter().unzip::<f64, f64, Vec<f64>, Vec<f64>>();
+                    member.x = &tile_rows.0;
+                    member.y = &tile_rows.1;
+                }
+                // Samples the store cannot tile are not folded: reading them
+                // would read the column whole.
+                None => continue,
+            }
+        }
         // An X-ordered member is read over its visible window, with one
         // sample of margin each side so the strokes into the plot edges are
         // read too; anything else is read whole, in source order.
@@ -732,8 +776,11 @@ pub fn decimate_minmax(
 /// so far first), or as the rows themselves with one row of margin either
 /// side when few enough fall in the view. A pixel whose rows hold no
 /// available value breaks the stroke, as a hole in the samples does.
-/// Samples the store cannot tile are reduced as [`decimate_minmax`] reduces
-/// them, which reads them.
+/// On a decade axis the tile is read by decade and its pixels are spaced
+/// evenly in log10 x. Samples the store cannot tile (an axis that does not
+/// ascend, or a decade view reaching zero) are reduced as [`decimate_minmax`]
+/// reduces them when the loaded results may hold them whole, and are not
+/// drawn when they may not.
 fn stored_envelope(stored: super::spec::StoredSamples<'_>, view: TraceView) -> Arc<[[f64; 2]]> {
     use rspice_results::waveform::ColumnTile;
     if view.columns == 0
@@ -744,15 +791,19 @@ fn stored_envelope(stored: super::spec::StoredSamples<'_>, view: TraceView) -> A
     {
         return Arc::from([]);
     }
-    let tile = if view.x_scale == XScale::Linear {
-        stored.y.tile_over(stored.x, view.x0, view.x1, view.columns)
-    } else {
-        None
+    let tile = match view.x_scale {
+        XScale::Linear => stored.y.tile_over(stored.x, view.x0, view.x1, view.columns),
+        XScale::Log10 => stored
+            .y
+            .log_tile_over(stored.x, view.x0, view.x1, view.columns),
     };
     let Some(tile) = tile else {
+        let (Ok(x), Ok(y)) = (stored.x.read_whole(), stored.y.read_whole()) else {
+            return Arc::from([]);
+        };
         return decimate_minmax(
-            stored.x,
-            stored.y,
+            &x,
+            &y,
             view.x0,
             view.x1,
             view.x_scale,
@@ -760,6 +811,16 @@ fn stored_envelope(stored: super::spec::StoredSamples<'_>, view: TraceView) -> A
             XOrientation::Ascending,
         )
         .into();
+    };
+    // The middle of each envelope pixel, evenly spaced in the view's scale.
+    let middle = |pixel: usize, pixels: usize| {
+        let fraction = (pixel as f64 + 0.5) / pixels as f64;
+        match view.x_scale {
+            XScale::Linear => view.x0 + fraction * (view.x1 - view.x0),
+            XScale::Log10 => {
+                10f64.powf(view.x0.log10() + fraction * (view.x1.log10() - view.x0.log10()))
+            }
+        }
     };
     match tile {
         ColumnTile::Samples {
@@ -774,14 +835,13 @@ fn stored_envelope(stored: super::spec::StoredSamples<'_>, view: TraceView) -> A
             .map(|(x, y)| [x, y])
             .collect(),
         ColumnTile::Envelope { min, max, touched } => {
-            let width = (view.x1 - view.x0) / min.len() as f64;
             let mut out = Vec::with_capacity(2 * min.len());
             let mut last = f64::NAN;
             for pixel in 0..min.len() {
                 if !touched[pixel] {
                     continue;
                 }
-                let x = view.x0 + (pixel as f64 + 0.5) * width;
+                let x = middle(pixel, min.len());
                 let (lo, hi) = (min[pixel], max[pixel]);
                 if lo.is_nan() || hi.is_nan() {
                     out.push([x, f64::NAN]);
@@ -1385,6 +1445,7 @@ mod tests {
             y,
             parametric: false,
             shape: None,
+            stored: None,
         }
     }
 

@@ -2,7 +2,7 @@
 
 use egui::Ui;
 use num_complex::Complex64;
-use rspice_results::{network_matrix::impedance_from_gamma, waveform::SharedWaveformValues};
+use rspice_results::{network_matrix::impedance_from_gamma, waveform::HeldColumn};
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
@@ -24,9 +24,9 @@ use crate::strip::{self, LegendChip};
 pub struct SmithPlotTrace<'a> {
     pub index: usize,
     pub name: &'a str,
-    pub frequencies: SharedWaveformValues,
-    pub real: SharedWaveformValues,
-    pub imaginary: SharedWaveformValues,
+    pub frequencies: HeldColumn,
+    pub real: HeldColumn,
+    pub imaginary: HeldColumn,
     /// The impedance the coefficient is referred to: a port's retained Z₀
     /// for a reflection term, the pane's Z₀ for a response, and none for a
     /// transmission or mixed-mode term, which cannot claim Z or VSWR.

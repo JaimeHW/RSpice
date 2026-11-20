@@ -87,7 +87,7 @@ impl FftState {
     }
 
     /// Build pipeline input options for a source timeline.
-    pub fn input_options_for_waveform(&self, _source_time: &[f64]) -> FftInputOptions {
+    pub fn input_options_for_waveform(&self) -> FftInputOptions {
         self.input_options_for_bounds(None)
     }
 

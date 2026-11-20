@@ -180,7 +180,12 @@ fn render() -> Render {
         spec.left_margin = LEFT;
         spec.traces = vec![
             Trace::new(&v_x, &v_y, tokens.color.traces[2]),
-            Trace::new(&step.x, &step.y, step_color).shape(&step.shape),
+            Trace::new(
+                step.x.in_memory().unwrap(),
+                step.y.in_memory().unwrap(),
+                step_color,
+            )
+            .shape(&step.shape),
         ];
         let response = plot::show(ui, &spec, &mut cache, None, None);
         measured = Some((

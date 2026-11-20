@@ -126,7 +126,7 @@ impl SimulationResult {
                     };
                     measured_unit = unit(&waveform.y_unit);
                     Some((
-                        *waveform.y_values.get(index)?,
+                        waveform.y_values.sample(index)?,
                         if waveform.is_complex {
                             *waveform.y_imag.as_ref()?.get(index)?
                         } else if quantity.eq_ignore_ascii_case("real") {
@@ -198,7 +198,7 @@ impl SimulationResult {
                 }
                 Self::Ac { waveforms, .. } => named_value(waveforms, key)
                     .filter(|waveform| !waveform.is_complex && waveform.y_values.len() == 1)
-                    .and_then(|waveform| waveform.y_values.first().copied()),
+                    .and_then(|waveform| waveform.y_values.sample(0)),
                 _ => None,
             }
         } else if mode.eq_ignore_ascii_case("last") {
@@ -214,7 +214,7 @@ impl SimulationResult {
                 | Self::Qpnoise { waveforms, .. } => {
                     let waveform = last_waveform_by_name(waveforms, key)?;
                     measured_unit = unit(&waveform.y_unit);
-                    waveform.y_values.last().copied()
+                    waveform.y_values.ends().map(|(_, last)| last)
                 }
                 Self::Noise { .. } => {
                     measured_unit = self.noise_study_unit(key);
@@ -585,8 +585,8 @@ fn waveform_last_value_by_name(
 ) -> Option<f64> {
     last_waveform_by_name(waveforms, key)?
         .y_values
-        .last()
-        .copied()
+        .ends()
+        .map(|(_, last)| last)
 }
 
 fn last_waveform_by_name<'a>(

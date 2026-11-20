@@ -59,7 +59,7 @@ fn place_quick(
             anchor: marker_anchor_for(analysis, "V(out)"),
             trace_name: "V(out)".to_owned(),
             x,
-            samples: &[0.0, 1.0],
+            samples: &vec![0.0, 1.0].into(),
         },
     )
 }

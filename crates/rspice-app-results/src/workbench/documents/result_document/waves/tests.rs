@@ -172,8 +172,11 @@ fn retained_and_live_expressions_align_real_analysis_waveforms() {
 
     let outputs = evaluate_expression(&state.model.simulation, 0, "V(a)-V(b)", None).unwrap();
     let series = &outputs[0].waveform;
-    assert_eq!(series.x.as_slice(), &[0.0, 1.0, 2.0, 3.0]);
-    assert_eq!(series.y.as_slice(), &[0.0; 4]);
+    assert_eq!(
+        series.x.read_whole().unwrap().as_ref(),
+        &[0.0, 1.0, 2.0, 3.0]
+    );
+    assert_eq!(series.y.read_whole().unwrap().as_ref(), &[0.0; 4]);
     let expression = parser::try_parse("min(V(a)-V(b))").unwrap();
     assert_eq!(
         evaluator::evaluate(
@@ -771,11 +774,11 @@ fn only_a_spec_marker_declines_to_report_a_trace_value() {
 #[test]
 fn decibel_projection_preserves_exact_zero_as_negative_infinity() {
     let mut derived = DerivedSeries::default();
-    let values = derived.db(0xD1570, &[1.0, 0.1, 0.0]);
+    let values = derived.db(0xD1570, &vec![1.0, 0.1, 0.0].into());
 
-    assert_eq!(values[0], 0.0);
-    assert_eq!(values[1], -20.0);
-    assert_eq!(values[2], f64::NEG_INFINITY);
+    assert_eq!(values.sample(0), Some(0.0));
+    assert_eq!(values.sample(1), Some(-20.0));
+    assert_eq!(values.sample(2), Some(f64::NEG_INFINITY));
 }
 
 #[test]
@@ -873,8 +876,8 @@ fn noise_analyses_project_psd_into_an_nv_sqrt_hz_pane() {
     // 1e-18 V²/Hz → 1 nV/√Hz; 4e-18 → 2 nV/√Hz. The projection is the
     // exact amplitude-density conversion, not a relabeled PSD.
     let trace = &models[0].traces[0];
-    assert!((trace.y[0] - 1.0).abs() < 1e-9);
-    assert!((trace.y[1] - 2.0).abs() < 1e-9);
+    assert!((trace.y.read_whole().unwrap()[0] - 1.0).abs() < 1e-9);
+    assert!((trace.y.read_whole().unwrap()[1] - 2.0).abs() < 1e-9);
 }
 
 #[test]
@@ -898,7 +901,7 @@ fn noise_input_units_use_current_density_without_a_second_si_prefix() {
         &HashSet::new(),
     );
     assert_eq!(models[0].unit_panes()[0].unit, "nA/√Hz");
-    assert!((models[0].traces[0].y[1] - 2.0).abs() < 1e-12);
+    assert!((models[0].traces[0].y.read_whole().unwrap()[1] - 2.0).abs() < 1e-12);
     assert_eq!(
         rspice_results::number_format::fmt_si_significant(2000.0, "nA/√Hz", 4),
         "2000 nA/√Hz"
@@ -958,10 +961,16 @@ fn hbnoise_figure_keeps_decibels_in_a_separate_pane_from_density() {
     );
     assert_eq!(models.len(), 1);
     assert!(matches!(models[0].traces[0].kind, TraceKind::NoiseDensity));
-    assert_eq!(models[0].traces[0].y.as_slice(), &[1.0, 2.0]);
+    assert_eq!(
+        models[0].traces[0].y.read_whole().unwrap().as_ref(),
+        &[1.0, 2.0]
+    );
     assert!(matches!(models[0].traces[1].kind, TraceKind::Value));
     assert_eq!(models[0].traces[1].unit.as_deref(), Some("dB"));
-    assert_eq!(models[0].traces[1].y.as_slice(), &[0.0, 3.0]);
+    assert_eq!(
+        models[0].traces[1].y.read_whole().unwrap().as_ref(),
+        &[0.0, 3.0]
+    );
     assert_eq!(models[0].unit_panes().len(), 2);
 }
 
@@ -994,11 +1003,23 @@ fn family_selection_projects_exact_source_rows_without_mutating_the_run() {
         &HashSet::new(),
     );
 
-    assert_eq!(models[0].traces[0].x.as_slice(), &[2.0, 4.0]);
-    assert_eq!(models[0].traces[0].y.as_slice(), &[20.0, 40.0]);
+    assert_eq!(
+        models[0].traces[0].x.read_whole().unwrap().as_ref(),
+        &[2.0, 4.0]
+    );
+    assert_eq!(
+        models[0].traces[0].y.read_whole().unwrap().as_ref(),
+        &[20.0, 40.0]
+    );
     let original = &simulation.active_run().unwrap().analyses[0].waveforms[0];
-    assert_eq!(original.x.as_slice(), &[1.0, 2.0, 3.0, 4.0]);
-    assert_eq!(original.y.as_slice(), &[10.0, 20.0, 30.0, 40.0]);
+    assert_eq!(
+        original.x.read_whole().unwrap().as_ref(),
+        &[1.0, 2.0, 3.0, 4.0]
+    );
+    assert_eq!(
+        original.y.read_whole().unwrap().as_ref(),
+        &[10.0, 20.0, 30.0, 40.0]
+    );
 }
 
 #[test]
@@ -1067,28 +1088,48 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
         .find(|trace| !trace.overlay && trace.name.contains("TT"))
         .unwrap();
     let tt_visibility_key = tt.family_visibility_key.unwrap();
-    assert_eq!(ss.x.as_slice(), &[1.0, 2.0]);
-    assert_eq!(ss.y.as_slice(), &[10.0, 20.0]);
-    assert_eq!(tt.x.as_slice(), &[3.0, 4.0]);
-    assert_eq!(tt.y.as_slice(), &[30.0, 40.0]);
+    assert_eq!(ss.x.read_whole().unwrap().as_ref(), &[1.0, 2.0]);
+    assert_eq!(ss.y.read_whole().unwrap().as_ref(), &[10.0, 20.0]);
+    assert_eq!(tt.x.read_whole().unwrap().as_ref(), &[3.0, 4.0]);
+    assert_eq!(tt.y.read_whole().unwrap().as_ref(), &[30.0, 40.0]);
     assert_ne!(ss.color, tt.color);
     assert_ne!(
         ss.family_style.unwrap().marker_ordinal,
         tt.family_style.unwrap().marker_ordinal
     );
-    let styled = apply_family_trace_style(Trace::new(&ss.x, &ss.y, ss.color), ss.family_style);
+    let styled = apply_family_trace_style(
+        Trace::new(
+            ss.x.in_memory().unwrap(),
+            ss.y.in_memory().unwrap(),
+            ss.color,
+        ),
+        ss.family_style,
+    );
     assert_eq!(styled.dash_style, ss.family_style.unwrap().dash_ordinal);
     assert_eq!(styled.marker_style, ss.family_style.unwrap().marker_ordinal);
     assert!(styled.show_single_point);
     assert!(model.traces.last().unwrap().overlay);
-    assert_eq!(model.traces.last().unwrap().x.as_slice(), &[3.0, 4.0]);
+    assert_eq!(
+        model
+            .traces
+            .last()
+            .unwrap()
+            .x
+            .read_whole()
+            .unwrap()
+            .as_ref(),
+        &[3.0, 4.0]
+    );
 
     let source = &simulation.retained.runs[0].analyses[0].waveforms[0];
     assert_eq!(
-        source.x.as_slice(),
+        source.x.read_whole().unwrap().as_ref(),
         &[101.0, 102.0, 103.0, 104.0, 105.0, 106.0]
     );
-    assert_eq!(source.y.as_slice(), &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
+    assert_eq!(
+        source.y.read_whole().unwrap().as_ref(),
+        &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+    );
 
     let mut copied = String::new();
     append_copied_cursor(
@@ -1285,8 +1326,8 @@ fn filtered_overlay_uses_typed_ast_and_ignores_excluded_duplicate_x_rows() {
     assert_eq!(models[0].signal_trace_count, 1);
     assert_eq!(models[0].traces.len(), 2);
     let overlay = models[0].traces.iter().find(|trace| trace.overlay).unwrap();
-    assert_eq!(overlay.x.as_slice(), &[3.0, 4.0]);
-    assert_eq!(overlay.y.as_slice(), &[31.0, 41.0]);
+    assert_eq!(overlay.x.read_whole().unwrap().as_ref(), &[3.0, 4.0]);
+    assert_eq!(overlay.y.read_whole().unwrap().as_ref(), &[31.0, 41.0]);
 }
 
 fn ac_result(source_id: AnalysisInstanceId, values: [f64; 2], snapshot_byte: u8) -> AnalysisResult {
@@ -1354,11 +1395,17 @@ fn overlays_pair_two_same_kind_results_by_exact_source_instance() {
     assert_eq!(models[0].signal_trace_count, 1);
     assert_eq!(models[0].traces.len(), 2);
     assert!(models[0].traces[1].overlay);
-    assert_eq!(models[0].traces[1].y.as_slice(), &[101.0, 102.0]);
+    assert_eq!(
+        models[0].traces[1].y.read_whole().unwrap().as_ref(),
+        &[101.0, 102.0]
+    );
     assert_eq!(models[1].signal_trace_count, 1);
     assert_eq!(models[1].traces.len(), 2);
     assert!(models[1].traces[1].overlay);
-    assert_eq!(models[1].traces[1].y.as_slice(), &[201.0, 202.0]);
+    assert_eq!(
+        models[1].traces[1].y.read_whole().unwrap().as_ref(),
+        &[201.0, 202.0]
+    );
 }
 
 #[test]
@@ -1385,9 +1432,15 @@ fn complex_display_policy_uses_original_components_or_radian_phase() {
     assert_eq!(cartesian[0].signal_trace_count, 2);
     assert_eq!(cartesian[0].y_unit, "");
     assert_eq!(cartesian[0].traces[0].name, "re(V(out))");
-    assert_eq!(cartesian[0].traces[0].y.as_slice(), &[0.8, 6.0]);
+    assert_eq!(
+        cartesian[0].traces[0].y.read_whole().unwrap().as_ref(),
+        &[0.8, 6.0]
+    );
     assert_eq!(cartesian[0].traces[1].name, "im(V(out))");
-    assert_eq!(cartesian[0].traces[1].y.as_slice(), &[0.6, 8.0]);
+    assert_eq!(
+        cartesian[0].traces[1].y.read_whole().unwrap().as_ref(),
+        &[0.6, 8.0]
+    );
 }
 
 /// Results ▸ Waveform defaults: an AC magnitude is drawn in decibels over a
@@ -1414,14 +1467,20 @@ fn ac_magnitude_and_frequency_axis_follow_the_reader_choice() {
     };
     let shipped = project(rspice_results_ui::waves::AcDisplay::default());
     assert_eq!(shipped[0].x_scale, XScale::Log10);
-    assert_eq!(shipped[0].traces[0].y.as_slice(), &[0.0, 20.0]);
+    assert_eq!(
+        shipped[0].traces[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 20.0]
+    );
 
     let linear = project(rspice_results_ui::waves::AcDisplay {
         linear_magnitude: true,
         linear_frequency: true,
     });
     assert_eq!(linear[0].x_scale, XScale::Linear);
-    assert_eq!(linear[0].traces[0].y.as_slice(), &[1.0, 10.0]);
+    assert_eq!(
+        linear[0].traces[0].y.read_whole().unwrap().as_ref(),
+        &[1.0, 10.0]
+    );
 }
 
 /// The retired radians index reads back as magnitude and phase; the phase
@@ -1685,5 +1744,8 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
     assert_eq!(models[0].x_scale, XScale::Log10);
     assert!(models[0].traces[0].kind == TraceKind::Value);
     assert_eq!(models[0].traces[0].unit.as_deref(), Some("dBc"));
-    assert_eq!(models[0].traces[0].y.as_slice(), &[-80.0, -60.0]);
+    assert_eq!(
+        models[0].traces[0].y.read_whole().unwrap().as_ref(),
+        &[-80.0, -60.0]
+    );
 }

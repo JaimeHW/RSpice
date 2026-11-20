@@ -167,7 +167,8 @@ fn each_corner_runs_the_verilog_a_its_own_section_binds() {
         .expect("the family traces V(OUT)");
     let expected = [0.5, 1.0 / 3.0];
     assert_eq!(out.y.len(), expected.len(), "{:?}", out.y);
-    for (corner, (solved, expected)) in out.y.iter().zip(expected).enumerate() {
+    for (corner, (solved, expected)) in out.y.in_memory().unwrap().iter().zip(expected).enumerate()
+    {
         assert!(
             (solved - expected).abs() < 1.0e-9,
             "{}: V(OUT) is {solved}, expected {expected}",

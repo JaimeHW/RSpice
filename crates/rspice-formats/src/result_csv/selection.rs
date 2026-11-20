@@ -32,19 +32,24 @@ pub fn encode_exact_sample(
     let mut exact = format!(
         "{}\tx={}\ty={}",
         waveform.name,
-        copied(waveform.x[index], x_unit),
-        copied(waveform.y[index], y_unit)
+        copied(sample(&waveform.x, index), x_unit),
+        copied(sample(&waveform.y, index), y_unit)
     );
     if let Some(complex) = &waveform.complex {
         write!(
             exact,
             "\treal={}\timag={}",
-            copied(complex.real[index], y_unit),
-            copied(complex.imag[index], y_unit)
+            copied(sample(&complex.real, index), y_unit),
+            copied(sample(&complex.imag, index), y_unit)
         )
         .expect("writing to a String cannot fail");
     }
     Ok(exact)
+}
+
+/// Sample `index` of `values`, NaN where it cannot be read.
+fn sample(values: &rspice_results::waveform::WaveformValues, index: usize) -> f64 {
+    values.sample(index).unwrap_or(f64::NAN)
 }
 
 /// Encode an admitted signal as exact sample rows with its source labels.
@@ -65,20 +70,19 @@ pub fn encode_signal_tsv(
     } else {
         exact.push_str("sample\tx\ty\n");
     }
-    for index in 0..waveform.x.len() {
-        write!(
-            exact,
-            "{index}\t{:.17e}\t{:.17e}",
-            waveform.x[index], waveform.y[index]
-        )
-        .expect("writing to a String cannot fail");
-        if let Some(complex) = &waveform.complex {
-            write!(
-                exact,
-                "\t{:.17e}\t{:.17e}",
-                complex.real[index], complex.imag[index]
-            )
-            .expect("writing to a String cannot fail");
+    let mut complex = waveform
+        .complex
+        .as_ref()
+        .map(|complex| complex.real.samples(..).zip(complex.imag.samples(..)));
+    for (index, (x, y)) in waveform
+        .x
+        .samples(..)
+        .zip(waveform.y.samples(..))
+        .enumerate()
+    {
+        write!(exact, "{index}\t{x:.17e}\t{y:.17e}").expect("writing to a String cannot fail");
+        if let Some((real, imag)) = complex.as_mut().and_then(Iterator::next) {
+            write!(exact, "\t{real:.17e}\t{imag:.17e}").expect("writing to a String cannot fail");
         }
         exact.push('\n');
     }

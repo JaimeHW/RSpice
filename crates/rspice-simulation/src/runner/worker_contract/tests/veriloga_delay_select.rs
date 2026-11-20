@@ -100,7 +100,11 @@ fn the_worker_runs_a_minimum_artifact_only_for_a_minimum_deck() {
         .unwrap_or_else(|| panic!("p voltage waveform missing from {:?}", waveforms.keys()));
     assert!(!p.y_values.is_empty());
     assert!(
-        p.y_values.iter().all(|volts| (volts - 0.5).abs() < 1e-9),
+        p.y_values
+            .in_memory()
+            .unwrap()
+            .iter()
+            .all(|volts| (volts - 0.5).abs() < 1e-9),
         "{:?}",
         p.y_values
     );

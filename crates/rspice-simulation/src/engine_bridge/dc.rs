@@ -1122,7 +1122,14 @@ mod operating_point_contract_tests {
             .expect("source branch current is retained");
         assert_eq!(current.y_unit, "A");
         assert_eq!(current.y_values.len(), sweep_values.len());
-        assert!(current.y_values.iter().all(|value| value.is_finite()));
+        assert!(
+            current
+                .y_values
+                .in_memory()
+                .unwrap()
+                .iter()
+                .all(|value| value.is_finite())
+        );
     }
 
     /// A retracing sweep reports each signal twice, named for the direction it
@@ -1182,7 +1189,13 @@ mod operating_point_contract_tests {
         // shared-axis length check on the way to a plot.
         assert_eq!(forward.y_values.len(), sweep_values.len());
         assert_eq!(reverse.y_values.len(), sweep_values.len());
-        for (forward, reverse) in forward.y_values.iter().zip(&reverse.y_values) {
+        for (forward, reverse) in forward
+            .y_values
+            .in_memory()
+            .unwrap()
+            .iter()
+            .zip(reverse.y_values.in_memory().unwrap())
+        {
             assert!(
                 (forward - reverse).abs() <= 1.0e-9,
                 "a linear divider must retrace exactly: {forward} vs {reverse}"
@@ -1190,8 +1203,8 @@ mod operating_point_contract_tests {
         }
         // The divider halves its input, so the forward branch rises with the
         // source. This is what makes the branch comparison above load-bearing.
-        assert!((forward.y_values[0] - 0.0).abs() <= 1.0e-9);
-        assert!((forward.y_values[2] - 0.5).abs() <= 1.0e-9);
+        assert!((forward.y_values.in_memory().unwrap()[0] - 0.0).abs() <= 1.0e-9);
+        assert!((forward.y_values.in_memory().unwrap()[2] - 0.5).abs() <= 1.0e-9);
 
         // Currents are branched the same way, and keep their unit.
         let current = trace("I(Vin) [reverse]");

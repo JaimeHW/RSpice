@@ -300,11 +300,11 @@ pub(crate) mod tests {
                 .unwrap();
             assert_eq!(
                 row[6].parse::<f64>().unwrap().to_bits(),
-                complex.real[1].to_bits()
+                complex.real.read_whole().unwrap()[1].to_bits()
             );
             assert_eq!(
                 row[7].parse::<f64>().unwrap().to_bits(),
-                complex.imag[1].to_bits()
+                complex.imag.read_whole().unwrap()[1].to_bits()
             );
         }
         use crate::quantity::AngleDisplay;

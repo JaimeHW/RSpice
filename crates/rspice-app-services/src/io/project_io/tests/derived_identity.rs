@@ -352,7 +352,7 @@ fn a_declared_corner_space_round_trips_with_its_base_analysis_tag() {
     family.validate_retained_evidence().unwrap();
     assert_eq!(family.waveforms.len(), 1);
     assert_eq!(family.waveforms[0].name, "Chosen voltage");
-    assert_eq!(family.waveforms[0].y.as_slice(), &[2.0, 2.0]);
+    assert_eq!(&*family.waveforms[0].y.read_whole().unwrap(), &[2.0, 2.0]);
     assert_eq!(family.saved_output_receipts.len(), 1);
     // The history keeps its samples in the store, as the controller keeps a finished analysis.
     simulation.store_retained_samples().unwrap();

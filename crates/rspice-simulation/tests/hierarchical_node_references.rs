@@ -180,8 +180,8 @@ fn every_analysis_reports_one_connected_internal_node() {
             SimulationResult::Ac { waveforms, .. } => {
                 let key = only_internal_signal(waveforms.keys(), "ac");
                 let waveform = &waveforms[key];
-                let magnitude =
-                    waveform.y_values[0].hypot(waveform.y_imag.as_ref().expect("complex")[0]);
+                let magnitude = waveform.y_values.in_memory().unwrap()[0]
+                    .hypot(waveform.y_imag.as_ref().expect("complex")[0]);
                 // |R / ((1k + R) + j w R C 1k)| with R = 400 and C = 1n.
                 let omega = 2.0 * std::f64::consts::PI * 1.0e5;
                 let expected =
@@ -198,7 +198,12 @@ fn every_analysis_reports_one_connected_internal_node() {
             } => {
                 let key = only_internal_signal(waveforms.keys(), "tran");
                 let waveform = &waveforms[key];
-                let last = *waveform.y_values.last().expect("samples");
+                let last = *waveform
+                    .y_values
+                    .in_memory()
+                    .unwrap()
+                    .last()
+                    .expect("samples");
                 assert!(
                     (last - MID_DC).abs() < 1e-3,
                     "tran: the loads reach the internal node: {last}"

@@ -25,8 +25,14 @@ fn signal<'a>(analysis: &'a AnalysisResult, name: &str) -> &'a crate::state::Ret
 /// The value the signal holds at `time`: its last sample at or before it.
 fn held_at(analysis: &AnalysisResult, name: &str, time: f64) -> f64 {
     let waveform = signal(analysis, name);
-    let last = waveform.x.iter().rposition(|t| *t <= time).expect("sample");
-    waveform.y[last]
+    let last = waveform
+        .x
+        .read_whole()
+        .unwrap()
+        .iter()
+        .rposition(|t| *t <= time)
+        .expect("sample");
+    waveform.y.read_whole().unwrap()[last]
 }
 
 fn member(analysis: &AnalysisResult) -> &AnalysisResultFamilyMember {
@@ -115,18 +121,27 @@ fn peak_to_peak(analysis: &AnalysisResult, name: &str, start: f64, stop: f64) ->
     let at = |time: f64| {
         let right = waveform.x.partition_point(|t| t < time);
         let left = right.saturating_sub(1);
-        let (t0, t1) = (waveform.x[left], waveform.x[right]);
-        let (y0, y1) = (waveform.y[left], waveform.y[right]);
+        let (t0, t1) = (
+            waveform.x.read_whole().unwrap()[left],
+            waveform.x.read_whole().unwrap()[right],
+        );
+        let (y0, y1) = (
+            waveform.y.read_whole().unwrap()[left],
+            waveform.y.read_whole().unwrap()[right],
+        );
         if t1 == t0 {
             y1
         } else {
             y0 + (y1 - y0) * (time - t0) / (t1 - t0)
         }
     };
-    let window = waveform
-        .x
+    let (xs, ys) = (
+        waveform.x.read_whole().unwrap(),
+        waveform.y.read_whole().unwrap(),
+    );
+    let window = xs
         .iter()
-        .zip(waveform.y.iter())
+        .zip(ys.iter())
         .filter(|(t, _)| **t > start && **t < stop)
         .map(|(_, y)| *y)
         .chain([at(start), at(stop)]);
@@ -143,7 +158,7 @@ fn retained_bytes(analyses: &[AnalysisResult]) -> usize {
     let mut bytes = 0;
     for waveform in analyses.iter().flat_map(|analysis| &analysis.waveforms) {
         for values in [&waveform.x, &waveform.y] {
-            if seen.insert(values.as_ptr() as usize) {
+            if seen.insert(values.in_memory().unwrap().as_ptr() as usize) {
                 bytes += values.len() * std::mem::size_of::<f64>();
             }
         }

@@ -240,9 +240,9 @@ pub struct PolarLocus {
     label: String,
     unit: String,
     reference_impedance_ohm: Option<f64>,
-    x: rspice_results::waveform::SharedWaveformValues,
-    real: rspice_results::waveform::SharedWaveformValues,
-    imag: rspice_results::waveform::SharedWaveformValues,
+    x: rspice_results::waveform::HeldColumn,
+    real: rspice_results::waveform::HeldColumn,
+    imag: rspice_results::waveform::HeldColumn,
 }
 
 impl PolarLocus {
@@ -660,6 +660,8 @@ pub fn resolve_locus(analysis: &AnalysisResult, sheet: &PolarSheetState) -> Opti
     locus_of(analysis, quantity)
 }
 
+/// The locus of `quantity`, once its samples have arrived: a stored sweep is read off the frame,
+/// and is not drawn until it is.
 fn locus_of(analysis: &AnalysisResult, quantity: &PolarQuantity) -> Option<PolarLocus> {
     let waveform = analysis.waveforms.get(quantity.waveform_index)?;
     let complex = waveform.complex.as_ref()?;
@@ -668,9 +670,9 @@ fn locus_of(analysis: &AnalysisResult, quantity: &PolarQuantity) -> Option<Polar
         label: quantity.label.clone(),
         unit: quantity.unit.clone(),
         reference_impedance_ohm: quantity.reference_impedance_ohm,
-        x: waveform.x.clone(),
-        real: complex.real.clone(),
-        imag: complex.imag.clone(),
+        x: waveform.x.fetch_whole().ready()?,
+        real: complex.real.fetch_whole().ready()?,
+        imag: complex.imag.fetch_whole().ready()?,
     })
 }
 

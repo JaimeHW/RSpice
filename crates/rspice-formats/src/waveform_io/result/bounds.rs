@@ -1,7 +1,9 @@
 //! Validate borrowed waveform tables before a format allocates output arrays.
 
+use std::borrow::Cow;
+
 use rspice_results::result_import::waveforms::WaveformImportLimits;
-use rspice_results::waveform::RetainedWaveform;
+use rspice_results::waveform::{RetainedWaveform, WaveformValues};
 
 #[derive(Debug)]
 pub enum WaveformExportError {
@@ -28,12 +30,21 @@ pub enum WaveformExportError {
         actual: usize,
         expected: usize,
     },
+    /// A signal's samples could not be read from its results store, or are more than the
+    /// loaded results may hold.
+    Unreadable {
+        signal: String,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for WaveformExportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoSamples => f.write_str("No waveform samples available to export."),
+            Self::Unreadable { signal, reason } => {
+                write!(f, "'{signal}' could not be exported: {reason}")
+            }
             Self::RowLimit {
                 rows,
                 minimum,
@@ -113,7 +124,7 @@ pub(crate) fn check_export_shape(
 pub(crate) fn shared_coordinate<'a, W: AsRef<RetainedWaveform>>(
     waveforms: &[&'a W],
     limits: WaveformImportLimits,
-) -> Result<&'a [f64], WaveformExportError> {
+) -> Result<Cow<'a, [f64]>, WaveformExportError> {
     let reference = waveforms
         .iter()
         .map(|waveform| (*waveform).as_ref())
@@ -134,7 +145,7 @@ pub(crate) fn shared_coordinate<'a, W: AsRef<RetainedWaveform>>(
     )?;
     for waveform in waveforms {
         let waveform = (*waveform).as_ref();
-        if waveform.x.as_ref() != reference.x.as_ref() {
+        if waveform.x != reference.x {
             return Err(WaveformExportError::DifferentCoordinates {
                 signal: waveform.name.clone(),
             });
@@ -157,7 +168,22 @@ pub(crate) fn shared_coordinate<'a, W: AsRef<RetainedWaveform>>(
             check("imaginary", complex.imag.len())?;
         }
     }
-    Ok(reference.x.as_slice())
+    export_samples(&reference.name, &reference.x)
+}
+
+/// The samples of `values`, the signal `signal`, for a writer that takes them as one array:
+/// borrowed when they are in memory, read whole from their results store when the loaded results
+/// may hold them, refused with the store's reason otherwise.
+pub(crate) fn export_samples<'a>(
+    signal: &str,
+    values: &'a WaveformValues,
+) -> Result<Cow<'a, [f64]>, WaveformExportError> {
+    values
+        .read_whole()
+        .map_err(|failure| WaveformExportError::Unreadable {
+            signal: signal.to_owned(),
+            reason: failure.to_string(),
+        })
 }
 
 #[cfg(test)]

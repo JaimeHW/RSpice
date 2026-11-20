@@ -10,8 +10,7 @@ use crate::derived::{DerivedSeries, WindowStats};
 use egui::Ui;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::sample::{
-    SweepClass, SweepShape, XOrientation, nearest_sample, sample_at_with_shape,
-    sample_branches_into,
+    SweepClass, SweepShape, XOrientation, nearest_sample, sample_branches_into,
 };
 use rspice_ui_kit::plot::{
     CursorId, CursorPair, SampleInterpolation, TraceLook, XScale, paint_trace_swatch,
@@ -416,7 +415,12 @@ fn trace_readout_rows(
         let approximate = |x: Option<f64>| {
             x.map_or_else(
                 || READOUT_ABSENT.to_owned(),
-                |x| format!("\u{2248} {}", format(nearest_sample(&trace.x, &trace.y, x))),
+                |x| {
+                    let nearest = trace
+                        .held()
+                        .map_or(f64::NAN, |(xs, ys)| nearest_sample(&xs, &ys, x));
+                    format!("\u{2248} {}", format(nearest))
+                },
             )
         };
         return vec![ReadoutRow {
@@ -432,17 +436,11 @@ fn trace_readout_rows(
 
     let sample = |x: f64, branch: Option<usize>| -> Option<f64> {
         match branch {
-            None => Some(
-                trace
-                    .y
-                    .value_at(&trace.x, x, interpolation)
-                    .unwrap_or_else(|| {
-                        sample_at_with_shape(&trace.x, &trace.y, shape, x, interpolation)
-                    }),
-            ),
+            None => Some(super::trace_value_at(trace, x, interpolation)),
             Some(branch) => {
+                let (xs, ys) = trace.held()?;
                 let mut out = Vec::new();
-                sample_branches_into(&trace.x, &trace.y, shape, x, interpolation, &mut out);
+                sample_branches_into(&xs, &ys, shape, x, interpolation, &mut out);
                 out.iter()
                     .find(|found| found.run == branch)
                     .map(|found| found.value)

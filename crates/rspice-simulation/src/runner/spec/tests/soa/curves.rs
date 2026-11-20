@@ -88,7 +88,7 @@ fn soa_current_envelope_draft_dispatch_retains_limits_and_retained_configuration
         assert_eq!(volts.unit.as_deref(), Some("V"));
         assert_eq!(limits.unit.as_deref(), Some("A"));
         for i in 0..volts.y.len() {
-            let v = volts.y[i];
+            let v = volts.y.in_memory().unwrap()[i];
             let peak = (0.04_f64 * 0.02).sqrt();
             let expected = (if v > 10.0 {
                 0.0
@@ -99,18 +99,18 @@ fn soa_current_envelope_draft_dispatch_retains_limits_and_retained_configuration
             })
             .min(0.015);
             assert!(
-                (limits.y[i] - expected).abs() < 1e-14,
+                (limits.y.in_memory().unwrap()[i] - expected).abs() < 1e-14,
                 "{v}: {} != {expected}",
-                limits.y[i]
+                limits.y.in_memory().unwrap()[i]
             );
             let current = if v < 1.0 {
                 0.02 * (v - v * v / 2.0)
             } else {
                 0.01
             };
-            assert!((stress.y[i] - current).abs() < 1e-8);
+            assert!((stress.y.in_memory().unwrap()[i] - current).abs() < 1e-8);
         }
-        assert!(limits.y.contains(&0.0));
+        assert!(limits.y.in_memory().unwrap().contains(&0.0));
         for name in ["SOA_ID_CURVE_LIMIT(X1.M1)", "SOA_ID_CURVE_VOLTAGE(X1.M1)"] {
             let mut altered = retained.clone();
             let wave = altered
@@ -119,7 +119,13 @@ fn soa_current_envelope_draft_dispatch_retains_limits_and_retained_configuration
                 .find(|w| w.name == name)
                 .unwrap();
             // Use an interior point below the cap so voltage tampering changes its limit.
-            let i = volts.y.iter().position(|v| *v > 2.0 && *v < 9.0).unwrap();
+            let i = volts
+                .y
+                .in_memory()
+                .unwrap()
+                .iter()
+                .position(|v| *v > 2.0 && *v < 9.0)
+                .unwrap();
             wave.y.make_mut()[i] *= 1.2;
             assert!(altered.validate_retained_evidence().is_err());
         }

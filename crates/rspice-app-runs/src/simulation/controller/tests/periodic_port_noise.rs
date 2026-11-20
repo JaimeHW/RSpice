@@ -201,7 +201,17 @@ fn periodic_port_noise_project_round_trip_preserves_covariance_and_temperature_u
         assert_eq!(covariance.unit.as_deref(), Some("W/Hz"));
         let expected_covariance = -4.0 / 9.0 * rspice_core::constants::K_BOLTZMANN * 300.15;
         assert!(
-            (covariance.complex.as_ref().unwrap().real[0] / expected_covariance - 1.0).abs() < 1e-7
+            (covariance
+                .complex
+                .as_ref()
+                .unwrap()
+                .real
+                .read_whole()
+                .unwrap()[0]
+                / expected_covariance
+                - 1.0)
+                .abs()
+                < 1e-7
         );
     }
 }

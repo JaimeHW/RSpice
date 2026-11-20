@@ -51,7 +51,16 @@ pub fn serialize_shared<S: Serializer>(
     values: &SharedWaveformValues,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    serialize(values.try_values().map_err(S::Error::custom)?, serializer)
+    let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+    for block in values.blocks(..) {
+        for &value in block.map_err(S::Error::custom)?.iter() {
+            if value.is_infinite() {
+                return Err(S::Error::custom("infinite waveform sample"));
+            }
+            sequence.serialize_element(&(!value.is_nan()).then_some(value))?;
+        }
+    }
+    sequence.end()
 }
 
 #[cfg(feature = "project-results")]

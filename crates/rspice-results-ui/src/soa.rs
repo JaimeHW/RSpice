@@ -237,18 +237,22 @@ pub fn build_soa_plan(
             let limits = derating_waveform(analysis, evaluation, false);
             let temperature = derating_waveform(analysis, evaluation, true);
             SoaRuleFacts {
-                limit_waveform: limits.map(|found| found.index),
-                temperature_waveform: temperature.map(|found| found.index),
-                stress_waveform: stress.map(|found| found.index),
-                worst_interval: worst_interval(stress, limits.map(|w| w.y.as_slice()), evaluation),
-                stress_axes: stress.map(|waveform| {
+                limit_waveform: limits.as_ref().map(|found| found.index),
+                temperature_waveform: temperature.as_ref().map(|found| found.index),
+                stress_waveform: stress.as_ref().map(|found| found.index),
+                worst_interval: worst_interval(
+                    stress.as_ref(),
+                    limits.as_ref().map(|w| &w.y[..]),
+                    evaluation,
+                ),
+                stress_axes: stress.as_ref().map(|waveform| {
                     let (x_min, x_max) = padded_range(waveform.x.iter().copied(), None);
                     let (y_min, y_max) = padded_range(
                         waveform
                             .y
                             .iter()
                             .copied()
-                            .chain(limits.into_iter().flat_map(|wave| wave.y.iter().copied())),
+                            .chain(limits.iter().flat_map(|wave| wave.y.iter().copied())),
                         Some([0.0, evaluation.limit_value, evaluation.worst_actual_value]),
                     );
                     ((x_min.max(0.0), x_max), (y_min.max(0.0), y_max))
@@ -790,22 +794,23 @@ fn threshold_text(fraction: Option<f64>) -> String {
 }
 
 /// Borrow either the complete SOA observations or a legacy full-grid trace.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct SoaTrace<'a> {
     index: usize,
     name: &'a str,
-    x: &'a Vec<f64>,
-    y: &'a Vec<f64>,
+    x: rspice_results::waveform::SampleSlice<'a>,
+    y: rspice_results::waveform::SampleSlice<'a>,
 }
 
-impl<'a> From<&'a RetainedTrace> for SoaTrace<'a> {
-    fn from(wave: &'a RetainedTrace) -> Self {
-        Self {
+impl<'a> SoaTrace<'a> {
+    /// The trace of `wave`, once its samples have arrived: a stored trace is read off the frame.
+    fn of(wave: &'a RetainedTrace) -> Option<Self> {
+        Some(Self {
             index: usize::MAX,
             name: &wave.name,
-            x: &wave.x,
-            y: &wave.y,
-        }
+            x: wave.x.fetch_whole().ready()?.into(),
+            y: wave.y.fetch_whole().ready()?.into(),
+        })
     }
 }
 
@@ -819,11 +824,11 @@ fn evidence_trace(analysis: &AnalysisResult, index: usize) -> Option<SoaTrace<'_
         Some(SoaTrace {
             index,
             name: &wave.name,
-            x: &source.time,
-            y: &wave.values,
+            x: source.time.as_slice().into(),
+            y: wave.values.as_slice().into(),
         })
     } else {
-        let mut trace = SoaTrace::from(analysis.waveforms.get(index)?);
+        let mut trace = SoaTrace::of(analysis.waveforms.get(index)?)?;
         trace.index = index;
         Some(trace)
     }
@@ -861,7 +866,7 @@ fn derating_waveform<'a>(
         return None;
     };
     evidence_traces(analysis).find(|wave| {
-        wave.name == name && wave.x.as_slice() == time.as_slice() && wave.y.len() == time.len()
+        wave.name == name && &wave.x[..] == time.as_slice() && wave.y.len() == time.len()
     })
 }
 
@@ -886,7 +891,7 @@ fn stress_waveform<'a>(
     }
     evidence_traces(analysis).find(|waveform| {
         if waveform.name != name
-            || waveform.x.as_slice() != time.as_slice()
+            || &waveform.x[..] != time.as_slice()
             || waveform.x.len() != expected_samples
             || waveform.y.len() != expected_samples
         {
@@ -904,7 +909,9 @@ fn stress_waveform<'a>(
                 || waveform.y.iter().enumerate().all(|(index, value)| {
                     rspice_results::safety::compare_soa_stress(
                         *value,
-                        limits.map_or(evaluation.limit_value, |wave| wave.y[index]),
+                        limits
+                            .as_ref()
+                            .map_or(evaluation.limit_value, |wave| wave.y[index]),
                         evaluation.worst_actual_value,
                         evaluation.limit_value,
                     )
@@ -914,7 +921,7 @@ fn stress_waveform<'a>(
 }
 
 fn worst_interval(
-    stress: Option<SoaTrace<'_>>,
+    stress: Option<&SoaTrace<'_>>,
     limits: Option<&[f64]>,
     evaluation: &SoaEvaluationEvidence,
 ) -> SoaWorstInterval {
@@ -925,7 +932,7 @@ fn worst_interval(
     let Some(waveform) = stress else {
         return SoaWorstInterval::NotRetained { worst_s };
     };
-    let worst_index = nearest_sample_index(waveform.x.as_slice(), worst_s);
+    let worst_index = nearest_sample_index(&waveform.x[..], worst_s);
     if let Some(duration) = evaluation.duration {
         use rspice_results::safety::{SoaLimitTrace, scan_soa_duration_with_mode};
         let limit_trace = limits.map_or(
@@ -933,8 +940,8 @@ fn worst_interval(
             SoaLimitTrace::Samples,
         );
         if let Ok(scan) = scan_soa_duration_with_mode(
-            waveform.x.as_slice(),
-            waveform.y.as_slice(),
+            &waveform.x[..],
+            &waveform.y[..],
             limit_trace,
             duration.minimum_duration_s,
             duration.mode(),
@@ -963,7 +970,7 @@ fn worst_interval(
         }
     };
     let Some((start, end)) =
-        dynamic_active_interval_indices(waveform.y.as_slice(), worst_index, threshold)
+        dynamic_active_interval_indices(&waveform.y[..], worst_index, threshold)
     else {
         return SoaWorstInterval::NotReproduced { worst_s };
     };
@@ -1061,16 +1068,16 @@ fn stress_trace_card(
             .accessible_detail(&detail);
             spec.traces.push(
                 Trace::new(
-                    waveform.x.as_slice(),
-                    waveform.y.as_slice(),
+                    &waveform.x[..],
+                    &waveform.y[..],
                     t.color.traces[0],
                 )
                 // Without an identity the renderer re-reduces every retained
                 // sample on every frame the card is open.
                 .cache_key(facts.stress_cache_key),
             );
-            if let Some(limits) = limits {
-                spec.traces.push(Trace::new(limits.x.as_slice(), limits.y.as_slice(), t.color.err).cache_key(facts.stress_cache_key ^ 0x7BD3_815F_A904_260C));
+            if let Some(limits) = &limits {
+                spec.traces.push(Trace::new(&limits.x[..], &limits.y[..], t.color.err).cache_key(facts.stress_cache_key ^ 0x7BD3_815F_A904_260C));
                 mono(ui, if evaluation.duration.is_some() { "Red trace: allowed limit at each sample. Worst point follows duration-qualified severity, then utilization." } else { "Red trace: allowed limit at each sample. Worst point: highest stress / allowed-limit ratio." });
             } else {
                 spec.limit_lines.push(LimitLine {
@@ -1086,7 +1093,7 @@ fn stress_trace_card(
                 "WORST",
             ));
             let readout = |hover_x: f64| {
-                let index = nearest_sample_index(waveform.x.as_slice(), hover_x);
+                let index = nearest_sample_index(&waveform.x[..], hover_x);
                 let mut readout = vec![
                     ("t".to_owned(), numbers.value(waveform.x[index], "s")),
                     (
@@ -1096,14 +1103,14 @@ fn stress_trace_card(
                     (
                         "Margin".to_owned(),
                         numbers.difference(
-                            limits.map_or(evaluation.limit_value, |wave| wave.y[index]) - waveform.y[index],
+                            limits.as_ref().map_or(evaluation.limit_value, |wave| wave.y[index]) - waveform.y[index],
                             unit,
                         ),
                     ),
                 ];
-                if let Some(temperatures) = temperatures {
+                if let Some(temperatures) = &temperatures {
                     readout.push(("Device temperature".into(), numbers.value(temperatures.y[index], "K")));
-                    readout.push(("Allowed power".into(), numbers.value(limits.expect("derated limit").y[index], "W")));
+                    readout.push(("Allowed power".into(), numbers.value(limits.as_ref().expect("derated limit").y[index], "W")));
                 }
                 readout
             };
@@ -1419,7 +1426,8 @@ mod tests {
         };
         let mut evaluation = evaluations[0].clone();
         evaluation.thresholds.warning_fraction = Some(0.5);
-        let interval = worst_interval(Some((&analysis.waveforms[0]).into()), None, &evaluation);
+        let stress = SoaTrace::of(&analysis.waveforms[0]).expect("in-memory trace");
+        let interval = worst_interval(Some(&stress), None, &evaluation);
         assert_eq!(
             interval,
             SoaWorstInterval::AboveThreshold {
@@ -1478,7 +1486,7 @@ mod tests {
             assert_eq!(facts.stress_waveform.is_some(), scanned.is_some(), "{rule}");
             assert_eq!(
                 facts.worst_interval,
-                worst_interval(scanned, None, evaluation),
+                worst_interval(scanned.as_ref(), None, evaluation),
                 "{rule}"
             );
             let expected_axes = scanned.map(|waveform| {

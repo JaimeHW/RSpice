@@ -101,6 +101,16 @@ impl SweepShape {
         Self::of_samples(x.iter().copied())
     }
 
+    /// [`Self::of`] a series' samples: an axis its run checked ascends without being read, and
+    /// any other is classified a block at a time.
+    #[must_use]
+    pub fn of_values(x: &crate::waveform::WaveformValues) -> Self {
+        if x.is_ascending_axis() {
+            return Self::ascending(x.len());
+        }
+        Self::of_samples(x.samples(..))
+    }
+
     /// [`Self::of`] the samples `x` yields, in one pass that keeps none of them: a stored axis is
     /// classified a block at a time.
     #[must_use]

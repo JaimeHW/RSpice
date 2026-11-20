@@ -49,7 +49,7 @@ pub fn waveform_value(
 /// Every sample of an operand: an expression is evaluated over every sample of its operands at
 /// once, so a stored operand is read whole, and one larger than the loaded-results budget is
 /// refused with the reason.
-pub(crate) fn whole(
+pub fn whole(
     values: &crate::waveform::WaveformValues,
 ) -> Result<std::borrow::Cow<'_, [f64]>, EvaluationError> {
     values
@@ -97,12 +97,13 @@ pub trait DatasetSource {
 pub fn evaluated_waveform(
     value: CalcValue,
     name: &str,
-    scalar_axis: Option<&[f64]>,
+    scalar_axis: Option<&crate::waveform::WaveformValues>,
 ) -> Result<RetainedWaveform, String> {
+    // A scalar is held at every sample of the axis, which it shares rather than copies.
     let axis = || {
         scalar_axis
             .filter(|axis| !axis.is_empty())
-            .map(<[f64]>::to_vec)
+            .cloned()
             .ok_or_else(|| "scalar expression has no retained axis".to_owned())
     };
     match value {
@@ -119,7 +120,7 @@ pub fn evaluated_waveform(
                     let y = vec![value; x.len()];
                     (x, y)
                 }
-                ComplexValue::Waveform(x, y) => (x, y),
+                ComplexValue::Waveform(x, y) => (x.into(), y),
             };
             let magnitude: Vec<_> = y.iter().map(|value| value.re.hypot(value.im)).collect();
             let (real, imag): (Vec<_>, Vec<_>) =

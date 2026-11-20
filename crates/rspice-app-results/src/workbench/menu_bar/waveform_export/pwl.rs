@@ -130,7 +130,7 @@ pub(super) fn encode_pwl(
         ));
     }
     let mut points: Vec<(f64, f64)> = Vec::with_capacity(trace.x.len());
-    for (&time, &value) in trace.x.iter().zip(trace.y.iter()) {
+    for (time, value) in trace.x.samples(..).zip(trace.y.samples(..)) {
         if !time.is_finite() || !value.is_finite() {
             return Err(format!(
                 "'{}' holds a non-finite sample at t = {time:e} s, which a PWL source cannot take.",

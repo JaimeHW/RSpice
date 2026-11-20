@@ -210,12 +210,7 @@ fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(
                 active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
             label: waveform.name.clone(),
-            points: waveform
-                .x
-                .iter()
-                .copied()
-                .zip(waveform.y.iter().copied())
-                .collect(),
+            points: waveform.x.samples(..).zip(waveform.y.samples(..)).collect(),
         })
         .collect();
     quick_plot_from_scaled_series(
@@ -273,9 +268,8 @@ fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
         label: format!("|{}| (dB)", summary.signal),
         points: summary
             .frequency
-            .iter()
-            .copied()
-            .zip(summary.gain_db.iter().copied())
+            .samples(..)
+            .zip(summary.gain_db.samples(..))
             .collect(),
     }];
     if let Some(phase) = summary.phase_deg {
@@ -287,9 +281,8 @@ fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
             label: format!("phase({}) (°)", summary.signal),
             points: summary
                 .frequency
-                .iter()
-                .copied()
-                .zip(phase.iter().copied())
+                .samples(..)
+                .zip(phase.samples(..))
                 .collect(),
         });
     }
@@ -373,7 +366,7 @@ fn quick_noise_spectrum_plot<W: AsRef<RetainedWaveform>>(
                         == Some(RetainedNoiseReference::Output)
                         || retained_noise_contributor(&waveform.name))
                     && retained_noise_waveform_is_renderable(waveform)
-                    && waveform.x.as_slice() == anchor.x.as_slice()
+                    && waveform.x == anchor.x
             })
             .collect()
     };
@@ -395,9 +388,8 @@ fn quick_noise_spectrum_plot<W: AsRef<RetainedWaveform>>(
             ),
             points: waveform
                 .x
-                .iter()
-                .copied()
-                .zip(waveform.y.iter().map(|density| density.sqrt() * 1.0e9))
+                .samples(..)
+                .zip(waveform.y.samples(..).map(|density| density.sqrt() * 1.0e9))
                 .collect(),
         })
         .collect();
@@ -448,12 +440,7 @@ fn quick_harmonic_balance_plot<W: AsRef<RetainedWaveform>>(
                 || waveform.name.clone(),
                 |complex| complex.source_name.clone(),
             ),
-            points: waveform
-                .x
-                .iter()
-                .copied()
-                .zip(waveform.y.iter().copied())
-                .collect(),
+            points: waveform.x.samples(..).zip(waveform.y.samples(..)).collect(),
         })
         .collect();
     quick_plot_from_series(ResultViewer::HarmonicBalance, "Results", 0, series, None)
@@ -491,12 +478,7 @@ fn quick_phase_noise_plot<W: AsRef<RetainedWaveform>>(
                 active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
             label: format!("{} - dBc/Hz", waveform.name),
-            points: waveform
-                .x
-                .iter()
-                .copied()
-                .zip(waveform.y.iter().copied())
-                .collect(),
+            points: waveform.x.samples(..).zip(waveform.y.samples(..)).collect(),
         })
         .collect();
     // Offset frequency in decades, phase noise in dBc/Hz: the two axes of
@@ -521,10 +503,11 @@ fn quick_fft_plot<W: AsRef<RetainedWaveform>>(
         presentation.fft_selected_source.as_deref(),
         "FFT source waveform",
     )?;
+    let (time, values) = whole_pair(waveform)?;
     let input = rspice_results::fft::pipeline::prepare_fft_input_with_options(
         &waveform.name,
-        &waveform.x,
-        &waveform.y,
+        &time,
+        &values,
         presentation.fft_input_options(),
     )
     .map_err(|error| {
@@ -580,12 +563,13 @@ fn quick_eye_plot<W: AsRef<RetainedWaveform>>(
         presentation.fft_selected_source.as_deref(),
         "eye source waveform",
     )?;
-    let bit_period = retained_eye_bit_period(&waveform.x, &waveform.y)?;
+    let (time, values) = whole_pair(waveform)?;
+    let bit_period = retained_eye_bit_period(&time, &values)?;
     let data = rspice_core::analysis::signal_integrity::EyeDataBuilder::new()
         .bit_period(bit_period)
         .ui_count(2)
         .skip_initial(2)
-        .build(&waveform.x, &waveform.y);
+        .build(&time, &values);
     if data.traces.is_empty() {
         return Err(HardcopySourceError::MissingViewerEvidence("eye diagram"));
     }
@@ -758,13 +742,29 @@ fn quick_complex_plot<W: AsRef<RetainedWaveform>>(
             label: waveform.name.clone(),
             points: complex
                 .real
-                .iter()
-                .copied()
-                .zip(complex.imag.iter().copied())
+                .samples(..)
+                .zip(complex.imag.samples(..))
                 .collect(),
         })
         .collect();
     quick_plot_from_series(viewer, "Results", 0, series, None)
+}
+
+/// Both columns of a spectrum's or an eye's source: the transform folds every sample of the
+/// record, so it reads them whole, and a record past the whole-read budget is refused.
+fn whole_pair(
+    waveform: &RetainedWaveform,
+) -> Result<(std::borrow::Cow<'_, [f64]>, std::borrow::Cow<'_, [f64]>), HardcopySourceError> {
+    let refused = |failure: rspice_results::waveform::ColumnReadFailure| {
+        HardcopySourceError::InvalidVisualizationSource(format!(
+            "{} could not be read: {failure}",
+            waveform.name
+        ))
+    };
+    Ok((
+        waveform.x.read_whole().map_err(refused)?,
+        waveform.y.read_whole().map_err(refused)?,
+    ))
 }
 
 fn selected_retained_waveform<'a, W: AsRef<RetainedWaveform>>(
@@ -800,9 +800,8 @@ fn selected_retained_waveform<'a, W: AsRef<RetainedWaveform>>(
     let sample_count = selected.x.len().min(selected.y.len());
     if selected
         .x
-        .iter()
-        .take(sample_count)
-        .chain(selected.y.iter().take(sample_count))
+        .samples(..sample_count)
+        .chain(selected.y.samples(..sample_count))
         .any(|value| !value.is_finite())
     {
         return Err(HardcopySourceError::InvalidRetainedWaveform(

@@ -98,10 +98,22 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
             .find(|waveform| waveform.name.eq_ignore_ascii_case("|V(out)|"))
             .unwrap();
         assert_eq!(
-            output.x.iter().copied().collect::<Vec<_>>(),
+            output
+                .x
+                .in_memory()
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
             [1000.0, 0.0, 1000.0]
         );
-        for (actual, expected) in output.y.iter().zip([0.5, 2.0 / 3.0, 0.2]) {
+        for (actual, expected) in output
+            .y
+            .in_memory()
+            .unwrap()
+            .iter()
+            .zip([0.5, 2.0 / 3.0, 0.2])
+        {
             assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
         }
     }
@@ -138,6 +150,8 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
     assert_eq!(actual_axis, frequencies);
     for (actual, expected) in waveforms["V(OUT)"]
         .y_values
+        .in_memory()
+        .unwrap()
         .iter()
         .zip([0.5, 2.0 / 3.0, 0.2])
     {
@@ -245,8 +259,20 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
                     || waveform.name.eq_ignore_ascii_case("V(out)")
             })
             .unwrap();
-        let time = output.x.iter().copied().collect::<Vec<_>>();
-        let values = output.y.iter().copied().collect::<Vec<_>>();
+        let time = output
+            .x
+            .in_memory()
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let values = output
+            .y
+            .in_memory()
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
         assert!(!time.is_empty());
         assert_eq!(time.len(), values.len());
         assert!(values.iter().all(|value| value.is_finite()));

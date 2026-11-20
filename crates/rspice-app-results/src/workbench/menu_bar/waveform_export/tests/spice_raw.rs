@@ -132,8 +132,18 @@ fn a_transient_rawfile_reopens_with_every_sample_exact() {
         for (back, original) in reopened.waveforms.iter().zip(&retained) {
             assert_eq!(back.name, original.name);
             assert_eq!(back.unit, original.unit, "{}", original.name);
-            assert_eq!(bits(&back.x), bits(&original.x), "{}", original.name);
-            assert_eq!(bits(&back.y), bits(&original.y), "{}", original.name);
+            assert_eq!(
+                bits(&back.x.read_whole().unwrap()),
+                bits(&original.x.read_whole().unwrap()),
+                "{}",
+                original.name
+            );
+            assert_eq!(
+                bits(&back.y.read_whole().unwrap()),
+                bits(&original.y.read_whole().unwrap()),
+                "{}",
+                original.name
+            );
         }
     }
 }
@@ -178,8 +188,14 @@ fn an_ac_rawfile_reopens_with_its_complex_samples_exact() {
                     .filter(|complex| complex.source_name == "V(OUT)")
             })
             .expect("V(OUT) reopens complex");
-        assert_eq!(bits(&back.real), bits(&out.real));
-        assert_eq!(bits(&back.imag), bits(&out.imag));
+        assert_eq!(
+            bits(&back.real.read_whole().unwrap()),
+            bits(&out.real.read_whole().unwrap())
+        );
+        assert_eq!(
+            bits(&back.imag.read_whole().unwrap()),
+            bits(&out.imag.read_whole().unwrap())
+        );
     }
 }
 

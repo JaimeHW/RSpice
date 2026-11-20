@@ -317,7 +317,7 @@ pub(in crate::workbench) fn results(
                                 // value of V(out)". A solved scalar does have
                                 // one, and states it.
                                 value: (samples == 1)
-                                    .then(|| waveform.y.iter().copied().find(|v| v.is_finite()))
+                                    .then(|| waveform.y.samples(..).find(|v| v.is_finite()))
                                     .flatten()
                                     .map(|value| {
                                         crate::ui::plot::fmt_si_significant(value, unit, 4)

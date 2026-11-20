@@ -64,8 +64,11 @@ fn close_secondary_values_retain_every_solved_voltage_and_current_curve() {
     let mut constants = waveforms
         .values()
         .filter(|trace| trace.y_unit == "V")
-        .filter(|trace| trace.y_values.first() == trace.y_values.last())
-        .map(|trace| trace.y_values[0])
+        .filter(|trace| {
+            trace.y_values.in_memory().unwrap().first()
+                == trace.y_values.in_memory().unwrap().last()
+        })
+        .map(|trace| trace.y_values.in_memory().unwrap()[0])
         .collect::<Vec<_>>();
     constants.sort_by(f64::total_cmp);
     assert_eq!(constants.len(), 3);
@@ -113,11 +116,18 @@ fn dc_display_order_preserves_actual_terminal_coordinates_and_branch_units() {
                 let name = metadata.trace_name(quantity, last_member);
                 let trace = result.waveforms.iter().find(|w| w.name == name).unwrap();
                 assert_eq!(trace.unit.as_deref(), Some(quantity.unit()));
-                assert!(trace.x.windows(2).all(|pair| pair[0] < pair[1]));
+                assert!(
+                    trace
+                        .x
+                        .in_memory()
+                        .unwrap()
+                        .windows(2)
+                        .all(|pair| pair[0] < pair[1])
+                );
                 let last = metadata
                     .terminal_sample(last_member, trace.y.len())
                     .unwrap();
-                assert!((trace.x[last] - primary).abs() < 1e-14);
+                assert!((trace.x.in_memory().unwrap()[last] - primary).abs() < 1e-14);
                 let expected = match quantity {
                     DcSweepQuantity::NodeVoltage(node) if node == "IN" => primary,
                     DcSweepQuantity::NodeVoltage(_) => expected_secondary,
@@ -127,11 +137,14 @@ fn dc_display_order_preserves_actual_terminal_coordinates_and_branch_units() {
                     DcSweepQuantity::BranchCurrent(_) => (primary - expected_secondary) / 1000.0,
                 };
                 assert!(
-                    (trace.y[last] - expected).abs() < 1e-12,
+                    (trace.y.in_memory().unwrap()[last] - expected).abs() < 1e-12,
                     "{name}: {} != {expected}",
-                    trace.y[last]
+                    trace.y.in_memory().unwrap()[last]
                 );
-                assert_eq!(result.waveforms[0].x.as_ptr(), trace.x.as_ptr());
+                assert_eq!(
+                    result.waveforms[0].x.in_memory().unwrap().as_ptr(),
+                    trace.x.in_memory().unwrap().as_ptr()
+                );
             }
         }
     }
@@ -163,7 +176,7 @@ fn single_point_and_retraced_dc_keep_member_traversal() {
             let trace = result.waveforms.iter().find(|w| w.name == name).unwrap();
             let last = metadata.terminal_sample(member, trace.y.len()).unwrap();
             let expected = if member == 0 { stop } else { start };
-            assert!((trace.y[last] - expected).abs() < 1e-12);
+            assert!((trace.y.in_memory().unwrap()[last] - expected).abs() < 1e-12);
         }
     }
 }
@@ -232,8 +245,8 @@ fn ordered_dc_lists_preserve_repeats_on_both_axes_and_in_retained_results() {
             .iter()
             .find(|trace| trace.name == name)
             .unwrap();
-        assert_eq!(trace.x.as_slice(), primary);
-        for (x, current) in primary.iter().zip(trace.y.iter()) {
+        assert_eq!(trace.x.in_memory().unwrap(), primary);
+        for (x, current) in primary.iter().zip(trace.y.in_memory().unwrap().iter()) {
             assert!((current + (x - outer) / 1000.0).abs() < 1e-12);
         }
         assert_eq!(
@@ -286,8 +299,14 @@ fn logarithmic_dc_axes_and_a_current_source_outer_sweep_execute_exact_points() {
             .iter()
             .find(|trace| trace.name == name)
             .unwrap();
-        assert_eq!(trace.x.as_slice(), [1.0, 10.0, 100.0]);
-        for (x, y) in trace.x.iter().zip(trace.y.iter()) {
+        assert_eq!(trace.x.in_memory().unwrap(), [1.0, 10.0, 100.0]);
+        for (x, y) in trace
+            .x
+            .in_memory()
+            .unwrap()
+            .iter()
+            .zip(trace.y.in_memory().unwrap().iter())
+        {
             assert!(
                 (y - x - offset).abs() < 1e-11 * (x + offset).abs().max(1.0),
                 "outer={offset}, x={x}, y={y}, error={}",

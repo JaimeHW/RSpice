@@ -150,7 +150,10 @@ fn trace(run: &rspice_app_state::state::SimulationRun, net: &str) -> (Vec<f64>, 
                 waves().map(|wave| wave.name.as_str()).collect::<Vec<_>>()
             )
         });
-    (wave.x.to_vec(), wave.y.to_vec())
+    (
+        wave.x.samples(..).collect::<Vec<f64>>(),
+        wave.y.samples(..).collect::<Vec<f64>>(),
+    )
 }
 
 fn description(page: &Page, label: &str) -> String {
@@ -395,7 +398,11 @@ fn point_traces(
             let wave = analysis.waveforms.iter().find(|wave| {
                 wave.name.eq_ignore_ascii_case(&name) || wave.name.eq_ignore_ascii_case(net)
             })?;
-            Some((swept.value.clone(), wave.x.to_vec(), wave.y.to_vec()))
+            Some((
+                swept.value.clone(),
+                wave.x.samples(..).collect::<Vec<f64>>(),
+                wave.y.samples(..).collect::<Vec<f64>>(),
+            ))
         })
         .collect()
 }

@@ -82,10 +82,12 @@ pub fn encode_optimization_csv<W: AsRef<RetainedWaveform>>(
     for index in 0..view.iterations.len() {
         contents.push_str(&format!(
             "{:.17e},{:.17e}",
-            view.iterations[index], view.cost.y[index]
+            view.iterations[index],
+            view.cost.y.sample(index).unwrap_or(f64::NAN)
         ));
         for (_, waveform) in &view.variables {
-            contents.push_str(&format!(",{:.17e}", waveform.y[index]));
+            let value = waveform.y.sample(index).unwrap_or(f64::NAN);
+            contents.push_str(&format!(",{value:.17e}"));
         }
         contents.push('\n');
     }

@@ -117,10 +117,16 @@ fn waveform_storage_detaches_edits_without_changing_accepted_samples_or_wire_for
     complex.real.make_mut()[1] = 7.0;
     complex.imag.make_mut()[1] = 9.0;
     assert_eq!(serde_json::to_vec(&accepted).unwrap(), frozen);
-    assert_eq!(live.x[1], 2.5);
-    assert_eq!(live.y[1], 4.5);
-    assert_eq!(live.complex.as_ref().unwrap().real[1], 6.5);
-    assert_eq!(live.complex.as_ref().unwrap().imag[1], 8.5);
+    assert_eq!(live.x.read_whole().unwrap()[1], 2.5);
+    assert_eq!(live.y.read_whole().unwrap()[1], 4.5);
+    assert_eq!(
+        live.complex.as_ref().unwrap().real.read_whole().unwrap()[1],
+        6.5
+    );
+    assert_eq!(
+        live.complex.as_ref().unwrap().imag.read_whole().unwrap()[1],
+        8.5
+    );
     assert!(
         candidate.validate().is_err(),
         "editing samples must invalidate their sealed digest"

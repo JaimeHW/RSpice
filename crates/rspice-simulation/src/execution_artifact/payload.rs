@@ -157,13 +157,12 @@ impl TransientTrajectoryArtifact {
                 )));
             }
             if waveform.x_values.len() != time.len()
-                || waveform
-                    .x_values
-                    .iter()
-                    .zip(time)
-                    .any(|(waveform_time, common_time)| {
-                        waveform_time.to_bits() != common_time.to_bits()
-                    })
+                || !rspice_results::waveform::WaveformValues::ptr_eq(&waveform.x_values, time)
+                    && waveform.x_values.samples(..).zip(time.samples(..)).any(
+                        |(waveform_time, common_time)| {
+                            waveform_time.to_bits() != common_time.to_bits()
+                        },
+                    )
             {
                 return Err(ExecutionArtifactError::InvalidPayload(format!(
                     "transient waveform '{name}' does not use the result's canonical time axis"
@@ -171,10 +170,10 @@ impl TransientTrajectoryArtifact {
             }
             let values = waveform
                 .y_values
-                .try_values()
+                .read_whole()
                 .map_err(|failure| ExecutionArtifactError::InvalidPayload(failure.to_string()))?;
             if artifact_waveforms
-                .insert(name.clone(), values.clone())
+                .insert(name.clone(), values.into_owned())
                 .is_some()
             {
                 return Err(ExecutionArtifactError::InvalidPayload(format!(
@@ -208,9 +207,9 @@ impl TransientTrajectoryArtifact {
         }
         let trajectory = TransientTrajectoryArtifact {
             time: time
-                .try_values()
+                .read_whole()
                 .map_err(|failure| ExecutionArtifactError::InvalidPayload(failure.to_string()))?
-                .clone(),
+                .into_owned(),
             voltage_impulses: events.voltage_impulses.clone(),
             current_impulses: events.current_impulses.clone(),
             waveforms: artifact_waveforms,

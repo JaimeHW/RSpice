@@ -44,7 +44,7 @@ fn samples(state: &AppState) -> Vec<Vec<u64>> {
         .flat_map(|run| &run.analyses)
         .flat_map(|analysis| &analysis.waveforms)
         .flat_map(|waveform| [&waveform.x, &waveform.y])
-        .map(|values| values.iter().map(|value| value.to_bits()).collect())
+        .map(|values| values.samples(..).map(f64::to_bits).collect())
         .collect()
 }
 

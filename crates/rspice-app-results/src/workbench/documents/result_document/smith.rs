@@ -6,6 +6,7 @@ use egui::Ui;
 use num_complex::Complex64;
 use rspice_results::network_matrix::trace_identity;
 use rspice_results::network_matrix::two_port::TwoPortSweep;
+use rspice_results::waveform::{HeldColumn, SharedWaveformValues};
 
 use super::{ResultsParts, ResultsReads};
 use crate::state::{
@@ -131,14 +132,19 @@ pub fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool {
             let Some(complex) = waveform.complex.as_ref() else {
                 continue;
             };
+            // The chart holds every point of the network: a stored one is read off the frame,
+            // and the sheet is built once every column has arrived.
+            let Some((frequencies, real, imaginary)) = held_columns(&waveform.x, complex) else {
+                return clear(state);
+            };
             if state
                 .analysis
                 .smith_chart_state
                 .load_sparam_data(
                     &waveform.name,
-                    &waveform.x,
-                    &complex.real,
-                    &complex.imag,
+                    &frequencies,
+                    &real,
+                    &imaginary,
                     reference_impedance_ohm,
                 )
                 .is_err()
@@ -165,11 +171,14 @@ pub fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool {
             let Some(complex) = waveform.complex.as_ref() else {
                 continue;
             };
+            let Some((frequencies, real, imaginary)) = held_columns(&waveform.x, complex) else {
+                return clear(state);
+            };
             let _ = state.analysis.smith_chart_state.load_response_data(
                 &waveform.name,
-                &waveform.x,
-                &complex.real,
-                &complex.imag,
+                &frequencies,
+                &real,
+                &imaginary,
             );
         }
     }
@@ -180,6 +189,24 @@ pub fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool {
         .analysis
         .bind_specialized_viewer_cache(ActiveViewer::SmithChart, provenance);
     true
+}
+
+/// A complex trace's sweep and parts, once all three have arrived: a stored trace is read off
+/// the frame.
+fn held_columns(
+    x: &rspice_results::waveform::WaveformValues,
+    complex: &rspice_results::waveform::ComplexWaveformComponents,
+) -> Option<(HeldColumn, HeldColumn, HeldColumn)> {
+    Some((
+        x.fetch_whole().ready()?,
+        complex.real.fetch_whole().ready()?,
+        complex.imag.fetch_whole().ready()?,
+    ))
+}
+
+/// A derived column built in memory, as a chart holds it.
+fn held(values: SharedWaveformValues) -> HeldColumn {
+    values.fetch_whole().ready().unwrap_or_default()
 }
 
 /// The cache owner of the selected result: the key every derived column of
@@ -231,11 +258,13 @@ fn evaluate_expression(
         .map_err(|error| error.to_string())?;
     let waveform = rspice_results::calculator::retained::evaluated_waveform(value, text, None)
         .map_err(|_| "a constant is not a locus".to_owned())?;
+    // An evaluated locus, held in memory.
+    let collect = |values: &SharedWaveformValues| values.samples(..).collect::<Vec<f64>>();
     let (real, imag) = match &waveform.complex {
-        Some(complex) => (complex.real.to_vec(), complex.imag.to_vec()),
-        None => (waveform.y.to_vec(), vec![0.0; waveform.y.len()]),
+        Some(complex) => (collect(&complex.real), collect(&complex.imag)),
+        None => (collect(&waveform.y), vec![0.0; waveform.y.len()]),
     };
-    let frequencies = waveform.x.to_vec();
+    let frequencies = collect(&waveform.x);
     if frequencies.is_empty() || frequencies.len() != real.len() || frequencies.len() != imag.len()
     {
         return Err("the expression produced no samples".to_owned());
@@ -358,9 +387,9 @@ fn prepare<'a>(
         traces.push(SmithPlotTrace {
             index,
             name: &trace.name,
-            frequencies,
-            real,
-            imaginary,
+            frequencies: held(frequencies),
+            real: held(real),
+            imaginary: held(imaginary),
             reference_impedance_ohm: trace.reference_impedance_ohm,
             visible: trace.visible && !sheet.hidden.contains(&trace.name),
             removable: false,
@@ -435,10 +464,10 @@ fn prepare<'a>(
         let gamma = |part: usize| {
             Arc::new(
                 raw_real
-                    .iter()
-                    .zip(raw_imag.iter())
+                    .samples(..)
+                    .zip(raw_imag.samples(..))
                     .map(|(re, im)| {
-                        let gamma = reading.reflection(Complex64::new(*re, *im), reference);
+                        let gamma = reading.reflection(Complex64::new(re, im), reference);
                         if part == 0 { gamma.re } else { gamma.im }
                     })
                     .collect::<Vec<_>>(),
@@ -451,9 +480,9 @@ fn prepare<'a>(
         traces.push(SmithPlotTrace {
             index,
             name: text,
-            frequencies,
-            real,
-            imaginary,
+            frequencies: held(frequencies),
+            real: held(real),
+            imaginary: held(imaginary),
             reference_impedance_ohm: Some(reference),
             visible: true,
             removable: true,
@@ -879,7 +908,7 @@ mod tests {
             .derived
             .get_or(key ^ 0x501_0000, || Vec::new().into());
         assert_eq!(
-            cached.first().copied(),
+            cached.sample(0),
             Some(-0.6),
             "the sheet drew the previous analysis' coefficients"
         );

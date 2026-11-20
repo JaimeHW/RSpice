@@ -42,7 +42,7 @@ use rspice_results::waveform::RetainedWaveform;
 
 use crate::SignalType;
 use crate::waveform_io::result::{
-    WaveformExportError, axis_signal_for_analysis, shared_coordinate,
+    WaveformExportError, axis_signal_for_analysis, export_samples, shared_coordinate,
     signal_type_from_waveform_name,
 };
 
@@ -119,8 +119,8 @@ struct Column<'a> {
     name: &'a str,
     var_type: &'static str,
     unit: Option<&'a str>,
-    real: &'a [f64],
-    imag: Option<&'a [f64]>,
+    real: std::borrow::Cow<'a, [f64]>,
+    imag: Option<std::borrow::Cow<'a, [f64]>>,
 }
 
 /// The rawfile type a signal is declared with: its unit's quantity when it
@@ -183,14 +183,19 @@ pub fn encode_result_raw<W: AsRef<RetainedWaveform>>(
                 name: &complex.source_name,
                 var_type: variable_type(&complex.source_name, waveform.unit.as_deref()),
                 unit: waveform.unit.as_deref(),
-                real: complex.real.as_ref(),
-                imag: Some(complex.imag.as_ref()),
+                real: export_samples(&complex.source_name, &complex.real)
+                    .map_err(RawProjectionError::Waveforms)?,
+                imag: Some(
+                    export_samples(&complex.source_name, &complex.imag)
+                        .map_err(RawProjectionError::Waveforms)?,
+                ),
             },
             None => Column {
                 name: &waveform.name,
                 var_type: variable_type(&waveform.name, waveform.unit.as_deref()),
                 unit: waveform.unit.as_deref(),
-                real: waveform.y.as_ref(),
+                real: export_samples(&waveform.name, &waveform.y)
+                    .map_err(RawProjectionError::Waveforms)?,
                 imag: None,
             },
         };
@@ -269,7 +274,10 @@ pub fn encode_result_raw<W: AsRef<RetainedWaveform>>(
             None => (coordinate[row], 0.0),
             Some(column) => {
                 let column = &columns[column];
-                (column.real[row], column.imag.map_or(0.0, |imag| imag[row]))
+                (
+                    column.real[row],
+                    column.imag.as_ref().map_or(0.0, |imag| imag[row]),
+                )
             }
         },
     )

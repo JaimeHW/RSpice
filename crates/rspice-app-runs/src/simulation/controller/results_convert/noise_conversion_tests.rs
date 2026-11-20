@@ -47,8 +47,11 @@ fn hbnoise_retains_noise_figure_as_decibels_with_its_source_reference() {
         .find(|wave| wave.name == "Noise figure (SSB)")
         .unwrap();
     assert_eq!(waveform.unit.as_deref(), Some("dB"));
-    assert_eq!(waveform.x.as_slice(), figure.frequencies.as_slice());
-    assert_eq!(waveform.y.as_slice(), figure.decibels.as_slice());
+    assert_eq!(
+        waveform.x.read_whole().unwrap(),
+        figure.frequencies.as_slice()
+    );
+    assert_eq!(waveform.y.read_whole().unwrap(), figure.decibels.as_slice());
     assert_eq!(result.validate_retained_evidence(), Ok(()));
     let index = result
         .waveforms
@@ -105,7 +108,10 @@ fn descending_data_axis_is_retained_monotonically_with_every_series_paired() {
     );
 
     for waveform in &result.waveforms {
-        assert_eq!(waveform.x.as_ref(), &[1.0, 10.0, 10.0]);
+        assert_eq!(
+            waveform.x.read_whole().unwrap().as_ref(),
+            &[1.0, 10.0, 10.0]
+        );
     }
     let waveform = |name: &str| {
         result
@@ -114,10 +120,20 @@ fn descending_data_axis_is_retained_monotonically_with_every_series_paired() {
             .find(|waveform| waveform.name == name)
             .unwrap_or_else(|| panic!("missing retained waveform {name}"))
     };
-    assert_eq!(waveform("onoise").y.as_ref(), &[10.0, 100.0, 101.0]);
-    assert_eq!(waveform("inoise").y.as_ref(), &[20.0, 200.0, 201.0]);
     assert_eq!(
-        waveform("noise(R1:thermal)").y.as_ref(),
+        waveform("onoise").y.read_whole().unwrap().as_ref(),
+        &[10.0, 100.0, 101.0]
+    );
+    assert_eq!(
+        waveform("inoise").y.read_whole().unwrap().as_ref(),
+        &[20.0, 200.0, 201.0]
+    );
+    assert_eq!(
+        waveform("noise(R1:thermal)")
+            .y
+            .read_whole()
+            .unwrap()
+            .as_ref(),
         &[30.0, 300.0, 301.0]
     );
 }
@@ -237,12 +253,20 @@ fn sp_noise_retains_temperature_complex_signs_and_extreme_finite_magnitudes() {
     assert!(
         waveform
             .y
+            .read_whole()
+            .unwrap()
             .iter()
             .all(|value| value.is_finite() && *value > 0.0)
     );
     let complex = waveform.complex.as_ref().unwrap();
-    assert_eq!(complex.real.as_ref(), &[-1e-200, -1e200]);
-    assert_eq!(complex.imag.as_ref(), &[1e-200, 1e200]);
+    assert_eq!(
+        complex.real.read_whole().unwrap().as_ref(),
+        &[-1e-200, -1e200]
+    );
+    assert_eq!(
+        complex.imag.read_whole().unwrap().as_ref(),
+        &[1e-200, 1e200]
+    );
     let mut restored = result.clone();
     restored.family_metadata =
         serde_json::from_str(&serde_json::to_string(&result.family_metadata).unwrap()).unwrap();

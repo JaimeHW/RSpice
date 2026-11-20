@@ -57,11 +57,11 @@ fn native_publication_checks_json_and_archive_growth_before_allocating_past_the_
         analysis: crate::WaveformDomain::Transient,
         coordinate_name: "time",
         coordinate_unit: None,
-        coordinate: &[0.0, 1.0],
+        coordinate: (&[0.0, 1.0][..]).into(),
         signals: vec![NativeBundleSignal {
             name: "out",
             unit: None,
-            values: NativeBundleSignalValues::Real(&[1.0, 2.0]),
+            values: NativeBundleSignalValues::Real((&[1.0, 2.0][..]).into()),
         }],
     };
     for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
@@ -111,11 +111,11 @@ fn native_coordinates_reject_both_orders_of_duplicate_signed_zero() {
                 analysis,
                 coordinate_name: "axis",
                 coordinate_unit: None,
-                coordinate: &coordinate,
+                coordinate: (&coordinate[..]).into(),
                 signals: vec![NativeBundleSignal {
                     name: "out",
                     unit: None,
-                    values: NativeBundleSignalValues::Real(&values),
+                    values: NativeBundleSignalValues::Real((&values[..]).into()),
                 }],
             };
             for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
@@ -148,13 +148,13 @@ fn native_export_counts_the_magnitude_retained_by_complex_imports() {
         analysis: crate::WaveformDomain::Transient,
         coordinate_name: "time",
         coordinate_unit: None,
-        coordinate: &coordinate,
+        coordinate: (&coordinate[..]).into(),
         signals: vec![NativeBundleSignal {
             name: "out",
             unit: None,
             values: NativeBundleSignalValues::Complex {
-                real: &component,
-                imag: &component,
+                real: (&component[..]).into(),
+                imag: (&component[..]).into(),
             },
         }],
     };
@@ -210,19 +210,19 @@ fn native_nullable_samples_use_version_three_and_reject_ambiguous_availability()
         analysis: crate::WaveformDomain::Transient,
         coordinate_name: "time",
         coordinate_unit: Some("s"),
-        coordinate: &[0.0, 1.0, 2.0],
+        coordinate: (&[0.0, 1.0, 2.0][..]).into(),
         signals: vec![
             NativeBundleSignal {
                 name: "real",
                 unit: Some("V"),
-                values: NativeBundleSignalValues::Real(&real),
+                values: NativeBundleSignalValues::Real((&real[..]).into()),
             },
             NativeBundleSignal {
                 name: "complex",
                 unit: Some("A"),
                 values: NativeBundleSignalValues::Complex {
-                    real: &real,
-                    imag: &imag,
+                    real: (&real[..]).into(),
+                    imag: (&imag[..]).into(),
                 },
             },
         ],
@@ -266,10 +266,10 @@ fn native_nullable_samples_use_version_three_and_reject_ambiguous_availability()
         );
     }
     for values in [
-        NativeBundleSignalValues::Real(&[1.0, f64::INFINITY, 0.0]),
+        NativeBundleSignalValues::Real((&[1.0, f64::INFINITY, 0.0][..]).into()),
         NativeBundleSignalValues::Complex {
-            real: &real,
-            imag: &[2.0, 0.0, 0.0],
+            real: (&real[..]).into(),
+            imag: (&[2.0, 0.0, 0.0][..]).into(),
         },
     ] {
         let invalid = NativeBundleDataset {
@@ -278,6 +278,7 @@ fn native_nullable_samples_use_version_three_and_reject_ambiguous_availability()
                 unit: None,
                 values,
             }],
+            coordinate: dataset.coordinate.clone(),
             ..dataset
         };
         assert!(encode_native_bundle(kind, &invalid, MAX_RESULT_DATASET_BYTES).is_err());
@@ -290,11 +291,11 @@ fn coordinate_units_round_trip_through_version_two_without_relabeling_samples() 
         analysis: crate::WaveformDomain::DcSweep,
         coordinate_name: "bias",
         coordinate_unit: Some("mA"),
-        coordinate: &[0.0, 2.0],
+        coordinate: (&[0.0, 2.0][..]).into(),
         signals: vec![NativeBundleSignal {
             name: "out",
             unit: Some("V"),
-            values: NativeBundleSignalValues::Real(&[1.0, 3.0]),
+            values: NativeBundleSignalValues::Real((&[1.0, 3.0][..]).into()),
         }],
     };
     let bytes = encode_native_bundle(
@@ -336,11 +337,11 @@ fn native_export_rejects_coordinates_its_reader_cannot_interpret() {
             analysis: domain,
             coordinate_name: "x",
             coordinate_unit: Some(unit),
-            coordinate: &coordinate,
+            coordinate: (&coordinate[..]).into(),
             signals: vec![NativeBundleSignal {
                 name: "out",
                 unit: None,
-                values: NativeBundleSignalValues::Real(&[1.0, 2.0]),
+                values: NativeBundleSignalValues::Real((&[1.0, 2.0][..]).into()),
             }],
         };
         let error = encode_native_bundle(
@@ -363,19 +364,19 @@ fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
         analysis: crate::WaveformDomain::Ac,
         coordinate_name: "frequency",
         coordinate_unit: None,
-        coordinate: &coordinate,
+        coordinate: (&coordinate[..]).into(),
         signals: vec![
             NativeBundleSignal {
                 name: "gain",
                 unit: None,
-                values: NativeBundleSignalValues::Real(&real_values),
+                values: NativeBundleSignalValues::Real((&real_values[..]).into()),
             },
             NativeBundleSignal {
                 name: "V(out)",
                 unit: Some("V"),
                 values: NativeBundleSignalValues::Complex {
-                    real: &complex_real,
-                    imag: &complex_imag,
+                    real: (&complex_real[..]).into(),
+                    imag: (&complex_imag[..]).into(),
                 },
             },
         ],

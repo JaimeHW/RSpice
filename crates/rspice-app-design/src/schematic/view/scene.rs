@@ -573,8 +573,7 @@ fn transient_annotation_time(
     analysis: &crate::state::AnalysisResult,
     cursor: Option<f64>,
 ) -> Option<(f64, bool)> {
-    let times = &analysis.waveforms.first()?.x;
-    let (first, last) = (*times.first()?, *times.last()?);
+    let (first, last) = analysis.waveforms.first()?.x.ends()?;
     Some(
         cursor
             .filter(|time| (first..=last).contains(time))
@@ -602,7 +601,11 @@ fn transient_operating_point(state: &CanvasFacts<'_>) -> Option<(crate::state::D
         };
         values.push(crate::state::OperatingPointValue {
             name: trace.name.clone(),
-            value: rspice_results::sampling::sample_at(&trace.x, &trace.y, time),
+            value: trace.y.sample_at(
+                &trace.x,
+                time,
+                rspice_results::sampling::SampleInterpolation::Linear,
+            ),
             unit: trace.unit.clone().unwrap_or_else(|| unit.to_owned()),
         });
     }

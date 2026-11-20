@@ -79,8 +79,8 @@ fn result_trace_statistics_ignore_non_finite_samples() {
     use crate::workbench::documents::result_document::trace_statistics::measure;
 
     let statistics = measure(
-        &[0.0, 1.0, 2.0, 3.0, 4.0],
-        &[f64::NAN, -2.0, 1.0, f64::INFINITY, 4.0],
+        &vec![0.0, 1.0, 2.0, 3.0, 4.0].into(),
+        &vec![f64::NAN, -2.0, 1.0, f64::INFINITY, 4.0].into(),
     );
     assert_eq!(statistics.extremes, Some((-2.0, 4.0)));
     assert_eq!((statistics.finite, statistics.samples), (3, 5));
@@ -93,7 +93,11 @@ fn result_trace_statistics_ignore_non_finite_samples() {
         statistics.average
     );
     assert_eq!(
-        measure(&[0.0, 1.0], &[f64::NAN, f64::INFINITY]).extremes,
+        measure(
+            &vec![0.0, 1.0].into(),
+            &vec![f64::NAN, f64::INFINITY].into()
+        )
+        .extremes,
         None
     );
 }

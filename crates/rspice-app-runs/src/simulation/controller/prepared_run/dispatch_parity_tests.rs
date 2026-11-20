@@ -104,7 +104,13 @@ fn independent_ac_data_instances_keep_their_own_parameter_tables() {
         } else {
             [0.5, 0.5]
         };
-        for (actual, expected) in waveforms["V(OUT)"].y_values.iter().zip(expected) {
+        for (actual, expected) in waveforms["V(OUT)"]
+            .y_values
+            .read_whole()
+            .unwrap()
+            .iter()
+            .zip(expected)
+        {
             assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
         }
         ac_count += 1;

@@ -7,7 +7,7 @@ use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::waveform::RetainedWaveform;
 
-use crate::waveform_io::result::{WaveformExportError, shared_coordinate};
+use crate::waveform_io::result::{WaveformExportError, export_samples, shared_coordinate};
 use rspice_results::result_import::waveforms::WaveformImportLimits;
 
 #[derive(Debug)]
@@ -136,8 +136,12 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
             Some(complex) if spectral => columns.push(Hdf5Column::Complex {
                 name: complex.source_name.clone(),
                 unit: waveform.unit.clone(),
-                real: complex.real.as_ref().to_vec(),
-                imag: complex.imag.as_ref().to_vec(),
+                real: export_samples(&complex.source_name, &complex.real)
+                    .map_err(Hdf5ProjectionError::Waveforms)?
+                    .into_owned(),
+                imag: export_samples(&complex.source_name, &complex.imag)
+                    .map_err(Hdf5ProjectionError::Waveforms)?
+                    .into_owned(),
             }),
             Some(complex) => {
                 for (label, part, values) in
@@ -147,7 +151,9 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
                         name: format!("{label}({})", complex.source_name),
                         quantity: format!("complex_{part}:{}", quantity(&complex.source_name)),
                         unit: waveform.unit.clone(),
-                        values: values.as_ref().to_vec(),
+                        values: export_samples(&complex.source_name, values)
+                            .map_err(Hdf5ProjectionError::Waveforms)?
+                            .into_owned(),
                     });
                 }
             }
@@ -155,7 +161,9 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
                 name: waveform.name.clone(),
                 quantity: quantity(&waveform.name),
                 unit: waveform.unit.clone(),
-                values: waveform.y.as_ref().to_vec(),
+                values: export_samples(&waveform.name, &waveform.y)
+                    .map_err(Hdf5ProjectionError::Waveforms)?
+                    .into_owned(),
             }),
         }
     }

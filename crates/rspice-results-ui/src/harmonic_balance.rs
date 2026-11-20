@@ -4,7 +4,7 @@ use crate::presentation::{PlotView, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 use crate::waves::ReadoutPolicy;
 use egui::Ui;
-use rspice_results::waveform::SharedWaveformValues;
+use rspice_results::waveform::HeldColumn;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -16,8 +16,8 @@ pub mod recorded_fft;
 /// result-conversion magnitude, not a display-derived dB or RMS estimate.
 pub struct HarmonicTrace {
     pub name: String,
-    pub frequency: SharedWaveformValues,
-    pub magnitude: SharedWaveformValues,
+    pub frequency: HeldColumn,
+    pub magnitude: HeldColumn,
     pub color: egui::Color32,
     pub cache_key: u64,
 }

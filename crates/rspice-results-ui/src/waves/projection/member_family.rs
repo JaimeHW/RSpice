@@ -194,7 +194,7 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                     context.run_id,
                     false,
                 ),
-                || SweepShape::of(&x),
+                || SweepShape::of_values(&x),
             );
             traces.push(StripTrace {
                 waveform_index: trace.waveform_index,

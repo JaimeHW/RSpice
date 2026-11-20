@@ -6,7 +6,7 @@ use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::waveform::RetainedWaveform;
 
-use crate::waveform_io::result::{WaveformExportError, shared_coordinate};
+use crate::waveform_io::result::{WaveformExportError, export_samples, shared_coordinate};
 use rspice_results::result_import::waveforms::WaveformImportLimits;
 
 #[derive(Debug)]
@@ -108,10 +108,22 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
         let (source, real, imag) = match &waveform.complex {
             Some(complex) => (
                 complex.source_name.clone(),
-                complex.real.as_ref().to_vec(),
-                Some(complex.imag.as_ref().to_vec()),
+                export_samples(&complex.source_name, &complex.real)
+                    .map_err(MatlabProjectionError::Waveforms)?
+                    .into_owned(),
+                Some(
+                    export_samples(&complex.source_name, &complex.imag)
+                        .map_err(MatlabProjectionError::Waveforms)?
+                        .into_owned(),
+                ),
             ),
-            None => (waveform.name.clone(), waveform.y.as_ref().to_vec(), None),
+            None => (
+                waveform.name.clone(),
+                export_samples(&waveform.name, &waveform.y)
+                    .map_err(MatlabProjectionError::Waveforms)?
+                    .into_owned(),
+                None,
+            ),
         };
         let name = names.allocate(&source);
         entries.push(note_entry(&name, &source, waveform.unit.as_deref()));

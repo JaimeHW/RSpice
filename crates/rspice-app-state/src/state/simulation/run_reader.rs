@@ -15,53 +15,13 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
-use rspice_results::sampling::SampleInterpolation;
-use rspice_results::waveform::{ColumnTile, WaveformValues};
+use rspice_results::waveform::WaveformValues;
 
 /// The memory budget of loaded results a process starts with: 1 GiB.
 pub const DEFAULT_BUDGET: u64 = 1 << 30;
 
-/// What a view reads of one series.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Read {
-    /// Samples `first .. first + count` of the series' window.
-    Range { first: usize, count: usize },
-    /// `pixels` pixels over x in `x0 ..= x1`, x being the run's axis.
-    Tile { x0: f64, x1: f64, pixels: usize },
-    /// The value at `x`, interpolated as the series is drawn.
-    Point {
-        x: f64,
-        interpolation: SampleInterpolation,
-    },
-}
-
-/// What a read gave.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ReadValue {
-    Samples(Arc<[f64]>),
-    Tile(Arc<ColumnTile>),
-    Point(Option<f64>),
-    /// Why it could not be read: the store failed, or the read is larger than the budget.
-    Failed(String),
-}
-
-impl ReadValue {
-    /// The bytes the cache counts for it.
-    fn bytes(&self) -> u64 {
-        let len = match self {
-            Self::Samples(samples) => samples.len() * 8,
-            Self::Tile(tile) => match tile.as_ref() {
-                ColumnTile::Samples { x, y, .. } => (x.len() + y.len()) * 8 + 32,
-                ColumnTile::Envelope { min, max, touched } => {
-                    (min.len() + max.len()) * 8 + touched.len()
-                }
-            },
-            Self::Point(_) => 16,
-            Self::Failed(reason) => reason.len(),
-        };
-        len as u64 + 64
-    }
-}
+use rspice_results::waveform::perform;
+pub use rspice_results::waveform::{Read, ReadValue};
 
 /// One read the cache keeps: the run, the series' column and window, and the read.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -84,37 +44,13 @@ impl ReadKey {
             Read::Range { first, count } => [0, first as u64, count as u64, 0],
             Read::Tile { x0, x1, pixels } => [1, x0.to_bits(), x1.to_bits(), pixels as u64],
             Read::Point { x, interpolation } => [2, x.to_bits(), interpolation as u64, 0],
+            Read::LogTile { x0, x1, pixels } => [3, x0.to_bits(), x1.to_bits(), pixels as u64],
         };
         Some(Self {
             run,
             column: (digest, column, window.first, window.rows),
             read,
         })
-    }
-}
-
-fn perform(values: &WaveformValues, x: &WaveformValues, read: Read) -> ReadValue {
-    match read {
-        Read::Range { first, count } => {
-            let end = first.saturating_add(count).min(values.len());
-            match values.read_range(first.min(end)..end) {
-                Ok(samples) => ReadValue::Samples(samples.into_owned().into()),
-                Err(failure) => ReadValue::Failed(failure.to_string()),
-            }
-        }
-        Read::Tile { x0, x1, pixels } => match values.tile_over(x, x0, x1, pixels) {
-            Some(tile) => ReadValue::Tile(Arc::new(tile)),
-            None => ReadValue::Failed(format!(
-                "'{}' cannot be drawn in tiles over its run's axis",
-                values
-                    .stored_window()
-                    .map_or("", |(source, _)| source.name())
-            )),
-        },
-        Read::Point {
-            x: at,
-            interpolation,
-        } => ReadValue::Point(values.value_at(x, at, interpolation)),
     }
 }
 
@@ -321,6 +257,9 @@ impl RunReader {
 
     /// Hold at most `budget` bytes from now on, letting go of reads at once to fit.
     pub fn set_budget(&self, budget: u64) {
+        // A whole read made without the service (an export, a validation) is held to the same
+        // budget.
+        rspice_results::waveform::set_whole_read_budget(budget);
         let mut cache = self.shared.lock();
         cache.budget = budget;
         cache.make_room(0);
@@ -404,7 +343,21 @@ pub fn results_storage<'a>(
 /// The process's reader service, holding [`DEFAULT_BUDGET`] until the reader sets another.
 pub fn run_reader() -> &'static RunReader {
     static READER: std::sync::OnceLock<RunReader> = std::sync::OnceLock::new();
-    READER.get_or_init(|| RunReader::new(DEFAULT_BUDGET))
+    let reader = READER.get_or_init(|| RunReader::new(DEFAULT_BUDGET));
+    rspice_results::waveform::install_read_service(reader);
+    reader
+}
+
+impl rspice_results::waveform::ReadService for RunReader {
+    fn request(
+        &self,
+        run: u64,
+        values: &WaveformValues,
+        x: &WaveformValues,
+        read: Read,
+    ) -> Option<ReadValue> {
+        RunReader::request(self, run, values, x, read)
+    }
 }
 
 /// The worker: read each queued job and keep what it gave, until the service is gone.

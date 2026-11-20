@@ -120,8 +120,8 @@ impl ViewerHost for RunTestHost {
     }
 
     /// The FFT prepares its input as a new session's does.
-    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
-        FftState::default().input_options_for_waveform(time)
+    fn fft_input_options(&self) -> FftInputOptions {
+        FftState::default().input_options_for_waveform()
     }
 
     /// The reader stated no bit period.

@@ -66,9 +66,15 @@ fn wave_cache_restored_history_replaces_same_version_and_display_sequence() {
         after[0].analysis_key.dataset_id(),
         restored.retained.runs[0].dataset_id
     );
-    assert_eq!(after[0].traces[0].y.as_slice(), [20.0; 3]);
+    assert_eq!(
+        after[0].traces[0].y.read_whole().unwrap().as_ref(),
+        [20.0; 3]
+    );
     assert_ne!(results.models.generation(), generation);
-    assert_eq!(before[0].traces[0].y.as_slice(), [0.0; 3]);
+    assert_eq!(
+        before[0].traces[0].y.read_whole().unwrap().as_ref(),
+        [0.0; 3]
+    );
 }
 
 #[test]
@@ -89,7 +95,10 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
 
     let after = spectrum_models(&simulation, &mut results);
     assert_eq!(simulation.view.data_version, version);
-    assert_eq!(after[0].traces[0].y.as_slice(), [0.0, 20.0, 40.0]);
+    assert_eq!(
+        after[0].traces[0].y.read_whole().unwrap().as_ref(),
+        [0.0, 20.0, 40.0]
+    );
     assert_eq!(
         pane_y_range(&mut results.session.derived, &after[0], &[0]),
         Some((-3.2, 43.2))
@@ -103,8 +112,14 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
         .copy_from_slice(&[3.0, 2.0, 1.0]);
     let reversed = spectrum_models(&simulation, &mut results);
     assert!(!reversed[0].traces[0].shape.is_single_ascending());
-    assert_eq!(reversed[0].traces[0].x.as_slice(), [3.0, 2.0, 1.0]);
-    assert_eq!(before[0].traces[0].x.as_slice(), [1.0, 2.0, 3.0]);
+    assert_eq!(
+        reversed[0].traces[0].x.read_whole().unwrap().as_ref(),
+        [3.0, 2.0, 1.0]
+    );
+    assert_eq!(
+        before[0].traces[0].x.read_whole().unwrap().as_ref(),
+        [1.0, 2.0, 3.0]
+    );
 }
 
 #[test]
@@ -138,7 +153,10 @@ fn wave_cache_cursor_copy_refreshes_values_without_frame_preparation() {
     let mut state = ResultsTestHost::default();
     state.model.simulation = restored_spectrum(1.0, 3);
     let models = spectrum_models(&state.model.simulation, &mut state.results.results);
-    assert_eq!(models[0].traces[0].y.as_slice(), [0.0; 3]);
+    assert_eq!(
+        models[0].traces[0].y.read_whole().unwrap().as_ref(),
+        [0.0; 3]
+    );
     state.results.results.session.cursor_strip = Some(0);
     state.results.results.session.cursors.a = Some(1.0);
     state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
@@ -243,11 +261,18 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
             .iter()
             .map(|index| {
                 let trace = &model.traces[*index];
+                let memory = trace.x.in_memory().zip(trace.y.in_memory());
                 rspice_ui_kit::plot::BandMember {
-                    x: trace.x.as_slice(),
-                    y: trace.y.as_slice(),
+                    x: memory.map_or(&[], |(x, _)| x),
+                    y: memory.map_or(&[], |(_, y)| y),
                     parametric: false,
                     shape: Some(trace.shape.as_ref()),
+                    stored: memory
+                        .is_none()
+                        .then_some(rspice_ui_kit::plot::StoredSamples {
+                            x: &trace.x,
+                            y: &trace.y,
+                        }),
                 }
             })
             .collect();

@@ -630,7 +630,11 @@ fn expression_chip(
     label.context_menu(|ui| {
         rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
             if let Some(text) = super::logic::convert::digital_form_of(ui, &expression.text, || {
-                super::logic::convert::mid_range(expression.values.as_slice())
+                expression
+                    .values
+                    .fetch_whole()
+                    .ready()
+                    .and_then(|values| super::logic::convert::mid_range(&values))
             }) {
                 host.add_expression(text);
             }
@@ -818,7 +822,11 @@ pub(super) fn trace_middle(trace: &StripTrace) -> Option<f64> {
     match trace.y.extent_over(&trace.x, None) {
         Some(extent) if extent.min <= extent.max => Some(0.5 * (extent.min + extent.max)),
         Some(_) => None,
-        None => super::logic::convert::mid_range(&trace.y),
+        None => trace
+            .y
+            .fetch_whole()
+            .ready()
+            .and_then(|values| super::logic::convert::mid_range(&values)),
     }
 }
 

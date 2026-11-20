@@ -26,7 +26,7 @@ pub type WaveformsContext<'a> =
 pub(crate) fn evaluated_waveform(
     value: CalcValue,
     name: &str,
-    scalar_axis: Option<&[f64]>,
+    scalar_axis: Option<&rspice_results::waveform::WaveformValues>,
 ) -> Result<RetainedTrace, String> {
     Ok(RetainedTrace {
         data: rspice_results::calculator::retained::evaluated_waveform(value, name, scalar_axis)?,
@@ -118,11 +118,13 @@ impl<'a> SimulationContext<'a> {
             .view
             .waveforms
             .first()
-            .map(|waveform| waveform.x.to_vec())
             .ok_or_else(|| {
                 EvaluationError::IdentifierNotFound(format!(
                     "{signal}@{dataset} has no X axis here to be read onto"
                 ))
+            })
+            .and_then(|waveform| {
+                rspice_results::calculator::retained::whole(&waveform.x).map(|x| x.into_owned())
             })?;
         let waveform = datasets.waveform_on(signal, dataset, &axis)?;
         waveform_value(&waveform, self.complex_policy)
@@ -155,7 +157,7 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
             "TIME" | "T" => {
                 // Look for any transient waveform and return its X axis as time
                 if let Some(wf) = self.simulation.view.waveforms.first() {
-                    let x: Vec<f64> = wf.x.to_vec();
+                    let x = rspice_results::calculator::retained::whole(&wf.x)?.into_owned();
                     let y = x.clone(); // TIME returns x as both x and y
                     return Ok(CalcValue::create_waveform(x, y));
                 }
@@ -166,7 +168,7 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
             "FREQ" | "FREQUENCY" => {
                 // Look for AC waveform and return its X axis as frequency
                 if let Some(wf) = self.simulation.view.waveforms.first() {
-                    let x: Vec<f64> = wf.x.to_vec();
+                    let x = rspice_results::calculator::retained::whole(&wf.x)?.into_owned();
                     let y = x.clone();
                     return Ok(CalcValue::create_waveform(x, y));
                 }

@@ -56,7 +56,10 @@ fn hb_device_current_spectra_preserve_phasors_units_and_direction_through_worker
     };
     let value = |name: &str, index: usize| {
         let wave = wave(name);
-        Complex64::new(wave.y_values[index], wave.y_imag.as_ref().unwrap()[index])
+        Complex64::new(
+            wave.y_values.in_memory().unwrap()[index],
+            wave.y_imag.as_ref().unwrap()[index],
+        )
     };
     for name in [
         "I(VDRIVE)",

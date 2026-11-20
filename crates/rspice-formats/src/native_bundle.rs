@@ -9,6 +9,8 @@ mod reader;
 pub mod result;
 mod writer;
 
+use std::borrow::Cow;
+
 pub use reader::{NativeBundleReadLimits, decode_native_bundle};
 pub use writer::encode_native_bundle;
 
@@ -53,7 +55,7 @@ pub struct NativeBundleDataset<'a> {
     pub analysis: crate::WaveformDomain,
     pub coordinate_name: &'a str,
     pub coordinate_unit: Option<&'a str>,
-    pub coordinate: &'a [f64],
+    pub coordinate: Cow<'a, [f64]>,
     pub signals: Vec<NativeBundleSignal<'a>>,
 }
 
@@ -66,8 +68,11 @@ pub struct NativeBundleSignal<'a> {
 
 #[derive(Debug)]
 pub enum NativeBundleSignalValues<'a> {
-    Real(&'a [f64]),
-    Complex { real: &'a [f64], imag: &'a [f64] },
+    Real(Cow<'a, [f64]>),
+    Complex {
+        real: Cow<'a, [f64]>,
+        imag: Cow<'a, [f64]>,
+    },
 }
 
 /// A native bundle validation or encoding/decoding failure.

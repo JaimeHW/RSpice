@@ -97,8 +97,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .curve()
             .map(|curve| NyquistPlot {
                 curve,
-                real: re,
-                imaginary: im,
+                // Built above from the locus, so held in memory.
+                real: re.in_memory().unwrap_or_default(),
+                imaginary: im.in_memory().unwrap_or_default(),
                 stability: *stats,
             })
     });

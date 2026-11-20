@@ -47,16 +47,23 @@ fn complex_live_outputs_keep_aligned_components_and_full_precision_source_knots(
     assert_eq!(previews.len(), 1);
     let preview = &previews[0];
     assert!(preview.x.len() <= DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-    assert!(preview.x.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(
+        preview
+            .x
+            .read_whole()
+            .unwrap()
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+    );
     let complex = preview.complex.as_ref().unwrap();
     assert_eq!(preview.x.len(), complex.real.len());
     assert_eq!(preview.x.len(), complex.imag.len());
-    for (index, &point) in preview.x.iter().enumerate() {
+    for (index, &point) in preview.x.read_whole().unwrap().iter().enumerate() {
         let source_index = x
             .binary_search_by(|candidate| candidate.total_cmp(&point))
             .unwrap();
-        assert_eq!(complex.real[index], y[source_index]);
-        assert_eq!(complex.imag[index], y[source_index]);
+        assert_eq!(complex.real.read_whole().unwrap()[index], y[source_index]);
+        assert_eq!(complex.imag.read_whole().unwrap()[index], y[source_index]);
     }
     assert!(calculator::waveform_value(preview, ComplexExpressionPolicy::Rectangular).is_ok());
 }
@@ -72,7 +79,10 @@ fn out(run: &SimulationRun) -> (Vec<f64>, Vec<f64>) {
                 waves().map(|wave| &wave.name).collect::<Vec<_>>()
             )
         });
-    (wave.x.to_vec(), wave.y.to_vec())
+    (
+        wave.x.samples(..).collect::<Vec<f64>>(),
+        wave.y.samples(..).collect::<Vec<f64>>(),
+    )
 }
 
 /// A run on the plan's default output selection keeps every point its

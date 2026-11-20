@@ -775,7 +775,7 @@ fn digest(run: &SimulationRun) -> u64 {
     for analysis in &run.analyses {
         for wave in &analysis.waveforms {
             wave.name.hash(&mut hasher);
-            for value in wave.x.iter().chain(wave.y.iter()) {
+            for value in wave.x.samples(..).chain(wave.y.samples(..)) {
                 value.to_bits().hash(&mut hasher);
             }
         }
@@ -841,10 +841,13 @@ fn held_at(run: &SimulationRun, name: &str, time: f64) -> f64 {
         .unwrap_or_else(|| panic!("no {name} in the run"));
     let index = wave
         .x
-        .iter()
-        .rposition(|t| *t <= time)
+        .samples(..)
+        .enumerate()
+        .filter(|(_, t)| *t <= time)
+        .last()
+        .map(|(index, _)| index)
         .expect("a sample at or before the time");
-    wave.y[index]
+    wave.y.sample(index).expect("a sample at the index")
 }
 
 /// The value the run measured as `name`.

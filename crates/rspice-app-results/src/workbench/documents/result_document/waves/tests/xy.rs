@@ -850,16 +850,22 @@ fn a_mosfet_family_plots_each_members_drain_current_against_its_drain_voltage() 
         let id = trace(model, &format!("I(VD){suffix}"));
         let vd = trace(model, &format!("V(D){suffix}"));
         let curve = rspice_results_ui::waves::xy::resample(
-            (vd.x.as_slice(), vd.y.as_slice()),
-            (id.x.as_slice(), id.y.as_slice()),
+            (
+                vd.x.read_whole().unwrap().as_ref(),
+                vd.y.read_whole().unwrap().as_ref(),
+            ),
+            (
+                id.x.read_whole().unwrap().as_ref(),
+                id.y.read_whole().unwrap().as_ref(),
+            ),
             crate::ui::plot::SampleInterpolation::Linear,
         )
         .expect("one sweep pairs");
         assert!(!curve.interpolated);
         assert_eq!(curve.x.len(), 61, "Vds from 0 to 3 V in 50 mV steps");
         for (k, (&x, &y)) in curve.x.iter().zip(&curve.y).enumerate() {
-            assert_eq!(x.to_bits(), vd.y[k].to_bits());
-            assert_eq!(y.to_bits(), id.y[k].to_bits());
+            assert_eq!(x.to_bits(), vd.y.read_whole().unwrap()[k].to_bits());
+            assert_eq!(y.to_bits(), id.y.read_whole().unwrap()[k].to_bits());
             assert!((x - 0.05 * k as f64).abs() < 1.0e-9, "Vds[{k}] = {x}");
         }
         // Saturation at Vds = 3 V: Id = kp/2 · W/L · (Vgs − Vto)² · (1 + λ·Vds).
@@ -950,13 +956,25 @@ fn a_transient_ramp_drawn_against_its_input_is_the_dc_transfer_curve() {
     let vin = trace(&models[0], "IN");
     let vout = trace(&models[0], "OUT");
     let curve = rspice_results_ui::waves::xy::resample(
-        (vin.x.as_slice(), vin.y.as_slice()),
-        (vout.x.as_slice(), vout.y.as_slice()),
+        (
+            vin.x.read_whole().unwrap().as_ref(),
+            vin.y.read_whole().unwrap().as_ref(),
+        ),
+        (
+            vout.x.read_whole().unwrap().as_ref(),
+            vout.y.read_whole().unwrap().as_ref(),
+        ),
         crate::ui::plot::SampleInterpolation::Linear,
     )
     .expect("one transient grid pairs");
     let mut compared = 0;
-    for (&v_in, &v_out) in dc_out.x.iter().zip(dc_out.y.iter()) {
+    for (&v_in, &v_out) in dc_out
+        .x
+        .read_whole()
+        .unwrap()
+        .iter()
+        .zip(dc_out.y.read_whole().unwrap().iter())
+    {
         if !(0.05..=1.95).contains(&v_in) {
             continue;
         }

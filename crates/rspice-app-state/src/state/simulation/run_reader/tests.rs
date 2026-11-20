@@ -7,6 +7,7 @@ use super::*;
 use crate::state::simulation::run_store::store_analysis_in_memory;
 use rspice_results::analysis_result::AnalysisResult as RetainedAnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
+use rspice_results::sampling::SampleInterpolation;
 use rspice_results::waveform::RetainedWaveform;
 
 const ROWS: usize = 20_000;

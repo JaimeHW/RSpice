@@ -189,7 +189,14 @@ fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrumModel> {
     let run = state.model.simulation.active_run()?;
     let (_, analysis) = selected_noise_analysis(state)?;
     let shape = noise_spectrum_shape(state, run.dataset_id, analysis)?;
-    let frequency = analysis.waveforms.get(shape.anchor)?.x.clone();
+    // The inspector lists every frequency at once: a stored sweep is read off the frame, and
+    // the model is built once it has arrived.
+    let frequency = analysis
+        .waveforms
+        .get(shape.anchor)?
+        .x
+        .fetch_whole()
+        .ready()?;
     let (total_rms, input_rms, band) = analysis
         .noise_summary
         .as_ref()
@@ -497,7 +504,7 @@ mod tests {
         // projection tests.
         assert!(state.model.simulation.select_analysis(1));
         let model = build_noise_model(state.results_reads()).expect("ordinary noise spectrum");
-        assert_eq!(model.frequency.as_slice(), &[1.0, 10.0]);
+        assert_eq!(&model.frequency[..], &[1.0, 10.0]);
         assert_eq!(selected_noise_trace_count(&state), Some(1));
     }
 

@@ -143,8 +143,14 @@ fn soa_directional_limits_survive_draft_preparation_worker_requests_and_retained
             let positive = trace(&format!("SOA_{}_POS({device})", base.stress_code()));
             let negative = trace(&format!("SOA_{}_NEG({device})", base.stress_code()));
             for i in 0..magnitude.len() {
-                assert_eq!(positive[i] + negative[i], magnitude[i]);
-                assert!(positive[i] == 0.0 || negative[i] == 0.0);
+                assert_eq!(
+                    positive.in_memory().unwrap()[i] + negative.in_memory().unwrap()[i],
+                    magnitude.in_memory().unwrap()[i]
+                );
+                assert!(
+                    positive.in_memory().unwrap()[i] == 0.0
+                        || negative.in_memory().unwrap()[i] == 0.0
+                );
             }
         }
     }
@@ -156,12 +162,14 @@ fn soa_directional_limits_survive_draft_preparation_worker_requests_and_retained
     ] {
         let conducting = trace(&format!("SOA_{code}_{sign}({device})"));
         assert!(
-            conducting.iter().all(|v| *v > 1e-5),
+            conducting.in_memory().unwrap().iter().all(|v| *v > 1e-5),
             "{device}: {conducting:?}"
         );
         let opposite = if sign == "POS" { "NEG" } else { "POS" };
         assert!(
             trace(&format!("SOA_{code}_{opposite}({device})"))
+                .in_memory()
+                .unwrap()
                 .iter()
                 .all(|v| *v == 0.0)
         );
@@ -175,7 +183,12 @@ fn soa_directional_limits_survive_draft_preparation_worker_requests_and_retained
         let primary = trace(&format!("SOA_{incoming}({device})"));
         let returning = trace(&format!("SOA_{outgoing}_{polarity}({device})"));
         let factor = if device.starts_with('Q') { 1.01 } else { 1.0 };
-        for (incoming, outgoing) in primary.iter().zip(returning.iter()) {
+        for (incoming, outgoing) in primary
+            .in_memory()
+            .unwrap()
+            .iter()
+            .zip(returning.in_memory().unwrap().iter())
+        {
             assert!((outgoing - factor * incoming).abs() < 1e-10 + incoming * 1e-6);
         }
         if device.starts_with('Q') {
@@ -183,12 +196,19 @@ fn soa_directional_limits_survive_draft_preparation_worker_requests_and_retained
                 "SOA_IB_{}({device})",
                 if device == "QN" { "POS" } else { "NEG" }
             ));
-            for (base, collector) in base.iter().zip(primary.iter()) {
+            for (base, collector) in base
+                .in_memory()
+                .unwrap()
+                .iter()
+                .zip(primary.in_memory().unwrap().iter())
+            {
                 assert!((base * 100.0 - collector).abs() < 1e-10 + collector * 1e-6);
             }
         } else {
             assert!(
                 trace(&format!("SOA_IG({device})"))
+                    .in_memory()
+                    .unwrap()
                     .iter()
                     .all(|i| i.abs() < 1e-10)
             );
@@ -200,7 +220,13 @@ fn soa_directional_limits_survive_draft_preparation_worker_requests_and_retained
         ("SOA_VBC_NEG(QN)", 0.85),
         ("SOA_VBC_POS(QP)", 0.85),
     ] {
-        assert!(trace(name).iter().all(|v| (*v - expected).abs() < 1e-12));
+        assert!(
+            trace(name)
+                .in_memory()
+                .unwrap()
+                .iter()
+                .all(|v| (*v - expected).abs() < 1e-12)
+        );
     }
     for (device, current, factor) in [
         ("MN", "ID", 1.0),
@@ -210,7 +236,12 @@ fn soa_directional_limits_survive_draft_preparation_worker_requests_and_retained
     ] {
         let power = trace(&format!("SOA_PDISS({device})"));
         let magnitude = trace(&format!("SOA_{current}({device})"));
-        for (power, current) in power.iter().zip(magnitude.iter()) {
+        for (power, current) in power
+            .in_memory()
+            .unwrap()
+            .iter()
+            .zip(magnitude.in_memory().unwrap().iter())
+        {
             assert!((*power - factor * current).abs() < 1e-10 + current * 1e-6);
             assert!(*power > 0.0);
         }
@@ -278,7 +309,14 @@ fn soa_temperature_limits_survive_draft_worker_execution_and_retained_results() 
             .iter()
             .find(|w| w.name == format!("SOA_TEMP({device})"))
             .unwrap();
-        assert!(trace.y.iter().all(|value| (value - kelvin).abs() < 1e-10));
+        assert!(
+            trace
+                .y
+                .in_memory()
+                .unwrap()
+                .iter()
+                .all(|value| (value - kelvin).abs() < 1e-10)
+        );
     }
     round_trip_payload(retained);
 }
@@ -372,9 +410,11 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_draft_and_retained_res
             for base in bases {
                 let (positive, negative) = base.directional_pair().unwrap();
                 let magnitude = trace(device, *base);
-                for (index, value) in magnitude.iter().enumerate() {
+                for (index, value) in magnitude.in_memory().unwrap().iter().enumerate() {
                     assert!(
-                        (trace(device, positive)[index] + trace(device, negative)[index] - value)
+                        (trace(device, positive).in_memory().unwrap()[index]
+                            + trace(device, negative).in_memory().unwrap()[index]
+                            - value)
                             .abs()
                             < 1e-14
                     );
@@ -402,6 +442,8 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_draft_and_retained_res
         ] {
             assert!(
                 trace(device, quantity)
+                    .in_memory()
+                    .unwrap()
                     .iter()
                     .all(|v| (v - expected).abs() < 1e-8),
                 "LEVEL={level} {device} {quantity:?}"
@@ -507,9 +549,12 @@ fn soa_diode_and_bjt_substrate_limits_survive_draft_worker_and_retained_results(
         for base in bases {
             let (positive, negative) = base.directional_pair().unwrap();
             let magnitude = trace(device, *base);
-            for (index, value) in magnitude.iter().enumerate() {
+            for (index, value) in magnitude.in_memory().unwrap().iter().enumerate() {
                 assert!(
-                    (trace(device, positive)[index] + trace(device, negative)[index] - value).abs()
+                    (trace(device, positive).in_memory().unwrap()[index]
+                        + trace(device, negative).in_memory().unwrap()[index]
+                        - value)
+                        .abs()
                         < 1e-14
                 );
             }
@@ -533,6 +578,8 @@ fn soa_diode_and_bjt_substrate_limits_survive_draft_worker_and_retained_results(
     ] {
         assert!(
             trace(device, quantity)
+                .in_memory()
+                .unwrap()
                 .iter()
                 .all(|v| (v - expected).abs() < 1e-8),
             "{device} {quantity:?}"
@@ -549,11 +596,13 @@ fn soa_diode_and_bjt_substrate_limits_survive_draft_worker_and_retained_results(
         ("X1.D2", SoAParameter::IaNegative, 2.0),
     ] {
         let current = trace(device, direction);
-        assert!(current.iter().all(|v| *v > 0.0));
-        for (i, p) in current
-            .iter()
-            .zip(trace(device, SoAParameter::Pdiss).iter())
-        {
+        assert!(current.in_memory().unwrap().iter().all(|v| *v > 0.0));
+        for (i, p) in current.in_memory().unwrap().iter().zip(
+            trace(device, SoAParameter::Pdiss)
+                .in_memory()
+                .unwrap()
+                .iter(),
+        ) {
             assert!(
                 (p - voltage * i).abs() < 1e-12 + 1e-6 * p.abs(),
                 "{device}: P={p}, I={i}"
@@ -671,8 +720,10 @@ fn soa_intrinsic_voltage_rules_survive_draft_worker_and_retained_results() {
         ("D1", SoAParameter::Vak, SoAParameter::VakPositive, 0.8),
     ] {
         for (outside, inside) in trace(device, external)
+            .in_memory()
+            .unwrap()
             .iter()
-            .zip(trace(device, intrinsic).iter())
+            .zip(trace(device, intrinsic).in_memory().unwrap().iter())
         {
             assert!((outside - applied).abs() < 1e-8);
             assert!(
@@ -683,6 +734,8 @@ fn soa_intrinsic_voltage_rules_survive_draft_worker_and_retained_results() {
     }
     assert!(
         trace("MF", SoAParameter::Vbs)
+            .in_memory()
+            .unwrap()
             .iter()
             .all(|value| value.is_finite())
     );
@@ -914,15 +967,27 @@ fn soa_derating_survives_draft_worker_thermal_transient_and_retained_results() {
     let temps = trace("SOA_PDISS_TEMPERATURE(Q1)");
     assert_eq!(temps.unit.as_deref(), Some("K"));
     assert_eq!(limits.unit.as_deref(), Some("W"));
-    assert!(temps.y.last().unwrap() - temps.y[0] > 70.0);
-    assert!(limits.y.contains(&0.05));
-    assert!(limits.y.contains(&0.0));
-    for (&temp, &limit) in temps.y.iter().zip(limits.y.iter()) {
+    assert!(temps.y.in_memory().unwrap().last().unwrap() - temps.y.in_memory().unwrap()[0] > 70.0);
+    assert!(limits.y.in_memory().unwrap().contains(&0.05));
+    assert!(limits.y.in_memory().unwrap().contains(&0.0));
+    for (&temp, &limit) in temps
+        .y
+        .in_memory()
+        .unwrap()
+        .iter()
+        .zip(limits.y.in_memory().unwrap().iter())
+    {
         assert_eq!(limit, curve.limit(0.05, temp));
     }
     for event in violations {
-        let i = limits.x.iter().position(|t| *t == event.time_s).unwrap();
-        assert_eq!(event.limit_value, limits.y[i]);
+        let i = limits
+            .x
+            .in_memory()
+            .unwrap()
+            .iter()
+            .position(|t| *t == event.time_s)
+            .unwrap();
+        assert_eq!(event.limit_value, limits.y.in_memory().unwrap()[i]);
     }
     let mut tampered = retained.clone();
     let wave = tampered
@@ -1251,7 +1316,10 @@ fn check_soa_duration_round_trip(
         .iter()
         .find(|wave| wave.name == "SOA_VIOLATION_COUNT")
         .unwrap();
-    assert_eq!(count.y.last().copied(), Some(violations.len() as f64));
+    assert_eq!(
+        count.y.in_memory().unwrap().last().copied(),
+        Some(violations.len() as f64)
+    );
     let mut tampered = retained.clone();
     let Some(rspice_results::analysis_payload::AnalysisResultPayload::Soa { evaluations, .. }) =
         &mut tampered.result_payload

@@ -103,7 +103,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
             .map(|wave| crate::state::SoaSourceWaveform {
                 name: wave.name.clone(),
                 unit: wave.unit.clone().unwrap(),
-                values: wave.y.as_ref().clone(),
+                values: wave.y.read_whole().unwrap().into_owned(),
             })
             .collect(),
     };

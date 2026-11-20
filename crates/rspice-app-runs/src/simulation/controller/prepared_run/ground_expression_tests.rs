@@ -198,6 +198,8 @@ fn samples(run: &mut SimulationRun, name: &str) -> Vec<f64> {
         .find(|waveform_data| waveform_data.name == *waveform)
         .expect("the materialized waveform is retained")
         .y
+        .read_whole()
+        .unwrap()
         .to_vec()
 }
 

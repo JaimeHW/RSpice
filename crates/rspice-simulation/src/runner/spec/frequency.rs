@@ -1230,7 +1230,10 @@ mod pac_trace_tests {
         let current = &waveforms["I(V1)[sb=+0]"];
         assert_eq!(current.y_unit, "A");
         assert!(current.is_complex);
-        assert_eq!(current.y_values[0].to_bits(), real.to_bits());
+        assert_eq!(
+            current.y_values.in_memory().unwrap()[0].to_bits(),
+            real.to_bits()
+        );
         assert_eq!(
             current.y_imag.as_ref().expect("imaginary data retained")[0].to_bits(),
             imag.to_bits()
@@ -1344,10 +1347,10 @@ mod pxf_group_delay_tests {
         let delay = &waveforms["group_delay"];
         assert_eq!(delay.x_values, vec![1.5, 2.5, 3.5, 4.5]);
         assert_eq!(delay.y_unit, "s");
-        assert_eq!(delay.y_values[0], 0.25);
-        assert!(delay.y_values[1].is_nan());
-        assert!(delay.y_values[2].is_nan());
-        assert_eq!(delay.y_values[3], 0.25);
+        assert_eq!(delay.y_values.in_memory().unwrap()[0], 0.25);
+        assert!(delay.y_values.in_memory().unwrap()[1].is_nan());
+        assert!(delay.y_values.in_memory().unwrap()[2].is_nan());
+        assert_eq!(delay.y_values.in_memory().unwrap()[3], 0.25);
         let retained = crate::result_conversion::convert(
             received,
             rspice_results::analysis_type::AnalysisType::Pxf,

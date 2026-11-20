@@ -456,7 +456,7 @@ impl SimulationController {
             source_name,
             time: waveform.x.clone(),
             values: waveform.y.clone(),
-            fft_options: state.fft_input_options(&waveform.x),
+            fft_options: state.fft_input_options(),
             eye_timebase: state.eye_timebase_for(analysis_key),
         })
     }
@@ -498,6 +498,8 @@ pub fn eye_matches_timebase(
                 unit_interval: want,
             },
         ) => had.to_bits() == want.to_bits(),
+        // A record that could not be read is not read again for another rate.
+        (EyeTimebaseProvenance::Unreadable(_), _) => true,
         _ => false,
     }
 }
@@ -566,19 +568,38 @@ pub fn build_eye_from_waveform(
     ((eye_data.trace_count() > 0).then_some(eye_data), provenance)
 }
 
+/// Both columns of a derivation's source. A spectrum and an eye fold every sample of the record,
+/// so the task reads them whole, off the frame; a record past the whole-read budget is refused.
+fn whole_source(
+    source: &DerivedWaveformSource,
+) -> Result<(std::borrow::Cow<'_, [f64]>, std::borrow::Cow<'_, [f64]>), String> {
+    let time = source
+        .time
+        .read_whole()
+        .map_err(|failure| failure.to_string())?;
+    let values = source
+        .values
+        .read_whole()
+        .map_err(|failure| failure.to_string())?;
+    Ok((time, values))
+}
+
 fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {
-    let (data, provenance) =
-        build_eye_from_waveform(&source.time, &source.values, source.eye_timebase);
+    let (data, provenance) = match whole_source(source) {
+        Ok((time, values)) => build_eye_from_waveform(&time, &values, source.eye_timebase),
+        Err(reason) => (None, EyeTimebaseProvenance::Unreadable(reason)),
+    };
     EyeBuild { data, provenance }
 }
 
 fn build_fft_prepared_input(
     source: &DerivedWaveformSource,
 ) -> Result<PreparedFftInput, FftInputError> {
+    let (time, values) = whole_source(source).map_err(FftInputError::Unreadable)?;
     rspice_results_ui::fft::prepare_fft_input_with_options(
         &source.source_name,
-        &source.time,
-        &source.values,
+        &time,
+        &values,
         source.fft_options,
     )
 }

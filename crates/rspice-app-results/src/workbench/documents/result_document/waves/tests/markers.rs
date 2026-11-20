@@ -353,7 +353,7 @@ fn samples_after_the_stop_time_are_counted_at_the_stop_time() {
         .as_deref()
         .expect("the late samples are marked");
     let stop = markers.stop.as_ref().expect("the stop time is marked");
-    let last = *run.analyses[0].waveforms[0].x.last().unwrap();
+    let last = run.analyses[0].waveforms[0].x.ends().unwrap().1;
     assert_eq!((stop.time, stop.beyond), (last, 2));
     let ctx = theme_context();
     frame(&ctx, &mut state, Vec::new());

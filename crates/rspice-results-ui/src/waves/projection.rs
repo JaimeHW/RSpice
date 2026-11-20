@@ -82,6 +82,8 @@ fn selected_series_pair_indices(
     if x.len() != y.len() || source_indices.last().is_some_and(|index| *index >= x.len()) {
         return None;
     }
+    // A stored pair is read off the frame; the selection is drawn once it has arrived.
+    let (x, y) = (x.fetch_whole().ready()?, y.fetch_whole().ready()?);
     let selected_x = source_indices
         .iter()
         .map(|index| x[*index])

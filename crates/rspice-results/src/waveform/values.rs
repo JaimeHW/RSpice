@@ -253,8 +253,6 @@ struct Stored {
     lead_value: OnceLock<f64>,
     /// The first and last sample, read once.
     ends: OnceLock<Option<(f64, f64)>>,
-    /// The whole window, for the transitional slice view alone.
-    kept: OnceLock<Vec<f64>>,
 }
 
 impl Stored {
@@ -435,7 +433,6 @@ impl WaveformValues {
             failure: OnceLock::new(),
             lead_value: OnceLock::new(),
             ends: OnceLock::new(),
-            kept: OnceLock::new(),
         }))))
     }
 
@@ -1071,46 +1068,6 @@ pub mod column_work {
             counted.stored_reads += 1;
             work.set(counted);
         });
-    }
-}
-
-/// Transitional: the whole window as one slice, read on first touch and kept, for the consumers
-/// not yet reading by window. It goes once none is left.
-impl std::ops::Deref for WaveformValues {
-    type Target = Vec<f64>;
-
-    fn deref(&self) -> &Vec<f64> {
-        match &self.0 {
-            Repr::Memory(values) => values,
-            Repr::Stored(stored) => stored.kept.get_or_init(|| self.samples(..).collect()),
-        }
-    }
-}
-
-impl WaveformValues {
-    /// Transitional: [`std::ops::Deref`], or why the window could not be read.
-    pub fn try_values(&self) -> Result<&Vec<f64>, ColumnReadFailure> {
-        if let Repr::Stored(stored) = &self.0
-            && stored.kept.get().is_none()
-        {
-            self.read_range(0..self.len())?;
-        }
-        Ok(self)
-    }
-}
-
-impl AsRef<Vec<f64>> for WaveformValues {
-    fn as_ref(&self) -> &Vec<f64> {
-        self
-    }
-}
-
-impl<'a> IntoIterator for &'a WaveformValues {
-    type Item = &'a f64;
-    type IntoIter = std::slice::Iter<'a, f64>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        std::ops::Deref::deref(self).iter()
     }
 }
 

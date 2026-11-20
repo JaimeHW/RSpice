@@ -730,7 +730,8 @@ pub(crate) fn run_plan_of_instance(
             .find(|wave| wave.name.eq_ignore_ascii_case(&name))
             .unwrap_or_else(|| panic!("{name} is retained"))
             .y
-            .to_vec(),
+            .samples(..)
+            .collect::<Vec<f64>>(),
     };
     assert!(!out_volts.is_empty(), "{name} has samples");
     RunOutcome { deck, out_volts }

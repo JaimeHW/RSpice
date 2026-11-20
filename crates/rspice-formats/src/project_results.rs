@@ -1196,7 +1196,7 @@ impl ProjectAnalysisResult {
                         rspice_results::dc_sweep::DcTraceView {
                             name: &trace.name,
                             unit: trace.unit.as_deref(),
-                            x: Some(&trace.x),
+                            x: trace.x.in_memory(),
                             x_len: trace.x.len(),
                             sample_count: trace.y.len(),
                             complex: trace.complex.is_some(),

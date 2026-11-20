@@ -772,17 +772,33 @@ pub struct MarkerPlacement<'a> {
     /// document declines to interpolate one into existence — so a document
     /// placement is snapped onto the nearest of these. A quick marker keeps
     /// the requested position, which is what the quick view has always meant.
-    pub samples: &'a [f64],
+    pub samples: &'a rspice_results::waveform::SharedWaveformValues,
 }
 
 impl MarkerPlacement<'_> {
-    /// The nearest retained sample to the requested position.
+    /// The nearest retained sample to the requested position: on an axis its run checked
+    /// ascends, one of the two samples either side of it, found without reading the column;
+    /// on any other, the nearest of every sample, read a block at a time.
     fn retained_x(&self) -> f64 {
+        let distance = |left: &f64, right: &f64| -> std::cmp::Ordering {
+            (left - self.x).abs().total_cmp(&(right - self.x).abs())
+        };
+        if self.samples.is_ascending_axis() {
+            let at = self.samples.partition_point(|sample| sample < self.x);
+            let beside = [at.checked_sub(1), Some(at)]
+                .into_iter()
+                .flatten()
+                .filter_map(|index| self.samples.sample(index))
+                .filter(|sample: &f64| sample.is_finite())
+                .min_by(distance);
+            if let Some(nearest) = beside {
+                return nearest;
+            }
+        }
         self.samples
-            .iter()
-            .copied()
-            .filter(|sample| sample.is_finite())
-            .min_by(|left, right| (left - self.x).abs().total_cmp(&(right - self.x).abs()))
+            .samples(..)
+            .filter(|sample: &f64| sample.is_finite())
+            .min_by(distance)
             .unwrap_or(self.x)
     }
 }
@@ -1674,9 +1690,19 @@ pub struct BodeDerived {
 }
 
 /// Finite (min, max) of a slice, if any finite values exist.
-pub(super) fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
+/// The least and greatest finite sample of `values`, read a block at a time.
+pub(super) fn finite_extremes(
+    values: &rspice_results::waveform::SharedWaveformValues,
+) -> Option<(f64, f64)> {
     frame_work::note_samples(frame_work::FrameSampleRead::TraceExtremes, values.len());
-    rspice_results::measurements::finite_extremes(values)
+    values
+        .samples(..)
+        .filter(|value: &f64| value.is_finite())
+        .fold(None, |held: Option<(f64, f64)>, value| {
+            Some(held.map_or((value, value), |(low, high): (f64, f64)| {
+                (low.min(value), high.max(value))
+            }))
+        })
 }
 
 // ---------------------------------------------------------------------------

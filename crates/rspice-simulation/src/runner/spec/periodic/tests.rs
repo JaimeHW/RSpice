@@ -80,7 +80,13 @@ fn envelope_current_branches_survive_all_initializers_and_worker_transport() {
             assert_eq!(wave.y_unit, "A");
             assert!(wave.is_complex);
             assert_eq!(wave.x_values, time);
-            for (real, imag) in wave.y_values.iter().zip(wave.y_imag.as_ref().unwrap()) {
+            for (real, imag) in wave
+                .y_values
+                .in_memory()
+                .unwrap()
+                .iter()
+                .zip(wave.y_imag.as_ref().unwrap())
+            {
                 assert!(
                     real.abs() < 1e-7 && (imag - sign * 0.5e-3).abs() < 1e-7,
                     "{method:?} {name}: {real} + j{imag}"
@@ -108,7 +114,13 @@ fn envelope_current_preserves_native_device_lead_units_and_values() {
     let wave = waveforms.values().next().unwrap();
     assert!(wave.name.eq_ignore_ascii_case("ENV(@M1[id])"));
     assert_eq!(wave.y_unit, "A");
-    for (real, imag) in wave.y_values.iter().zip(wave.y_imag.as_ref().unwrap()) {
+    for (real, imag) in wave
+        .y_values
+        .in_memory()
+        .unwrap()
+        .iter()
+        .zip(wave.y_imag.as_ref().unwrap())
+    {
         assert!(
             real.abs() < 2e-8 && (imag + 1e-5).abs() < 2e-8,
             "{real} + j{imag}"
@@ -138,7 +150,13 @@ fn envelope_current_includes_ideal_capacitor_charge_in_source_current() {
             .find(|wave| wave.name.eq_ignore_ascii_case(name))
             .unwrap();
         assert_eq!(wave.y_unit, "A");
-        for (real, imag) in wave.y_values.iter().zip(wave.y_imag.as_ref().unwrap()) {
+        for (real, imag) in wave
+            .y_values
+            .in_memory()
+            .unwrap()
+            .iter()
+            .zip(wave.y_imag.as_ref().unwrap())
+        {
             assert!(
                 (real - expected).abs() < 1e-7 && imag.abs() < 1e-7,
                 "{name}: {real} + j{imag}"
@@ -238,7 +256,7 @@ fn an_authored_fourier_run_reports_every_output() {
     // The same solve, projected twice: the halved output's fundamental is
     // half of the first's.
     let magnitude = |waveform: &SampledWaveform| {
-        let real = waveform.y_values[1];
+        let real = waveform.y_values.in_memory().unwrap()[1];
         let imaginary = waveform.y_imag.as_ref().unwrap()[1];
         real.hypot(imaginary)
     };
@@ -444,7 +462,7 @@ fn a_fourier_window_is_read_by_the_rule_of_the_deck_s_dialect() {
         .unwrap() else {
             panic!("a Fourier run reports a spectrum");
         };
-        let thd = waveforms["THD(%)"].y_values[0];
+        let thd = waveforms["THD(%)"].y_values.in_memory().unwrap()[0];
         let core = FourierAnalysis::new(
             FourierConfig::new(1.0)
                 .with_harmonics(3)
@@ -546,7 +564,10 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
     assert_eq!(waveforms.len(), 42);
     let fundamental = &waveforms["V(n0) Spectrum"];
     assert!(
-        (fundamental.y_values[1].hypot(fundamental.y_imag.as_ref().unwrap()[1]) - 1.0).abs()
+        (fundamental.y_values.in_memory().unwrap()[1]
+            .hypot(fundamental.y_imag.as_ref().unwrap()[1])
+            - 1.0)
+            .abs()
             < 0.002
     );
     let mut fewer_values = limits;

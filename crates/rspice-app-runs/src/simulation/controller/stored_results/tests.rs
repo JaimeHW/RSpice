@@ -393,8 +393,18 @@ C1 out 0 10n
             "{} reopens from its kept segment",
             after.name
         );
-        assert_eq!(bits(&after.x), bits(&before.x), "{}", after.name);
-        assert_eq!(bits(&after.y), bits(&before.y), "{}", after.name);
+        assert_eq!(
+            bits(&after.x.read_whole().unwrap()),
+            bits(&before.x.read_whole().unwrap()),
+            "{}",
+            after.name
+        );
+        assert_eq!(
+            bits(&after.y.read_whole().unwrap()),
+            bits(&before.y.read_whole().unwrap()),
+            "{}",
+            after.name
+        );
     }
 
     // The reopened run draws: its strip carries every trace with every sample.
@@ -444,7 +454,7 @@ fn longest_json_array(value: &serde_json::Value) -> usize {
 }
 
 fn sample_bits(values: &rspice_results::waveform::WaveformValues) -> Vec<u64> {
-    values.iter().map(|value| value.to_bits()).collect()
+    values.samples(..).map(f64::to_bits).collect()
 }
 
 /// Run `deck`, save its run with a project named `name`, and reopen it: every analysis keeps its
@@ -743,7 +753,7 @@ fn a_reopened_run_reads_one_time_axis_for_ten_signals() {
         waveforms.iter().map(|w| &w.name).collect::<Vec<_>>()
     );
     let before = rspice_results::waveform::column_work::ColumnWork::read();
-    let rows: usize = nodes.iter().map(|waveform| waveform.x.iter().count()).sum();
+    let rows: usize = nodes.iter().map(|waveform| waveform.x.len()).sum();
     let work = before.since();
     assert_eq!(rows, nodes.len() * nodes[0].x.len());
     assert_eq!(

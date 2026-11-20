@@ -93,8 +93,11 @@ impl NoiseReportCsv {
             }
         }
         for waveform in waveforms {
-            for (sample_index, (&frequency, &value)) in
-                waveform.x.iter().zip(waveform.y.iter()).enumerate()
+            for (sample_index, (frequency, value)) in waveform
+                .x
+                .samples(..)
+                .zip(waveform.y.samples(..))
+                .enumerate()
             {
                 let mut fields = record("spectrum", analysis);
                 fields[3] = csv_field(&waveform.name);

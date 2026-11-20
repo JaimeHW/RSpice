@@ -45,14 +45,14 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                     continue;
                 }
                 let magnitude = real
-                    .iter()
+                    .samples(..)
                     .zip(imag.iter())
                     .map(|(real, imag)| real.hypot(*imag))
                     .collect::<Vec<_>>();
                 let phase = real
-                    .iter()
+                    .samples(..)
                     .zip(imag.iter())
-                    .map(|(real, imag)| imag.atan2(*real).to_degrees())
+                    .map(|(real, imag)| imag.atan2(real).to_degrees())
                     .collect::<Vec<_>>();
                 results.push(
                     rspice_results::waveform::RetainedWaveform::new(
@@ -269,14 +269,14 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                         continue;
                     }
                     let magnitude_values: Vec<f64> = real
-                        .iter()
+                        .samples(..)
                         .zip(imag.iter())
                         .map(|(r, i)| r.hypot(*i))
                         .collect();
                     let phase = real
-                        .iter()
+                        .samples(..)
                         .zip(imag.iter())
-                        .map(|(r, i)| i.atan2(*r).to_degrees())
+                        .map(|(r, i)| i.atan2(r).to_degrees())
                         .collect::<Vec<_>>();
 
                     let magnitude = rspice_results::waveform::RetainedWaveform::new(

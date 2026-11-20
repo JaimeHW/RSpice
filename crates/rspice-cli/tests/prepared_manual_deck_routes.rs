@@ -313,7 +313,11 @@ fn assert_same_transient_on(
     else {
         panic!("one transient, saw {} results", prepared.len());
     };
-    same_bits("time", &reals(&cli["axes"][0]["values"]["values"]), time);
+    same_bits(
+        "time",
+        &reals(&cli["axes"][0]["values"]["values"]),
+        time.in_memory().expect("engine samples"),
+    );
     let signals = cli["signals"].as_array().expect("the CLI's signals");
     assert!(!signals.is_empty());
     for signal in signals {
@@ -338,7 +342,7 @@ fn assert_same_transient_on(
         same_bits(
             name,
             &reals(&signal["values"]["samples"]),
-            &waveform.y_values,
+            waveform.y_values.in_memory().expect("engine samples"),
         );
     }
     let traces = cli["payload"]["digitalTraces"]

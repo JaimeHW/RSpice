@@ -1731,9 +1731,18 @@ mod tests {
         assert_eq!(parsed.analysis_type, AnalysisType::Transient);
         assert_eq!(parsed.sample_count, 3);
         assert_eq!(parsed.waveforms.len(), 2);
-        assert_eq!(parsed.waveforms[0].x.as_slice(), &[0.0, 5e-4, 1e-3]);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), &[0.0, 1.25, 2.5]);
-        assert_eq!(parsed.waveforms[1].y.as_slice(), &[10e-6, 11e-6, 12e-6]);
+        assert_eq!(
+            parsed.waveforms[0].x.read_whole().unwrap().as_ref(),
+            &[0.0, 5e-4, 1e-3]
+        );
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            &[0.0, 1.25, 2.5]
+        );
+        assert_eq!(
+            parsed.waveforms[1].y.read_whole().unwrap().as_ref(),
+            &[10e-6, 11e-6, 12e-6]
+        );
         assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
         assert_eq!(parsed.waveforms[1].unit.as_deref(), Some("A"));
         assert!(rspice_results::waveform::WaveformValues::ptr_eq(
@@ -1828,7 +1837,10 @@ mod tests {
         )
         .expect("valid AC TSV");
         assert_eq!(parsed.analysis_type, AnalysisType::Ac);
-        assert_eq!(parsed.waveforms[0].x.as_slice(), &[1e3, 1e4, 1e5]);
+        assert_eq!(
+            parsed.waveforms[0].x.read_whole().unwrap().as_ref(),
+            &[1e3, 1e4, 1e5]
+        );
 
         let error = parse_result_dataset("response.csv", b"frequency [Hz],V(out) [V]\n1,1\n0,2\n")
             .expect_err("zero frequency rejected");
@@ -1851,7 +1863,10 @@ mod tests {
         let parsed = parse_result_dataset("sweep.csv", b"V1 [V],V(out) [V]\n5,4.5\n2.5,2.2\n0,0\n")
             .expect("decreasing DC sweep remains ordered");
         assert_eq!(parsed.analysis_type, AnalysisType::DcSweep);
-        assert_eq!(parsed.waveforms[0].x.as_slice(), &[5.0, 2.5, 0.0]);
+        assert_eq!(
+            parsed.waveforms[0].x.read_whole().unwrap().as_ref(),
+            &[5.0, 2.5, 0.0]
+        );
     }
 
     #[test]
@@ -1859,7 +1874,10 @@ mod tests {
         let parsed = parse_result_dataset("conductance.csv", b"bias [V],g(out) [mS]\n0,1\n1,2\n")
             .expect("mS is conductance, not milliseconds");
         assert_eq!(parsed.analysis_type, AnalysisType::DcSweep);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), &[1e-3, 2e-3]);
+        assert_eq!(
+            parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+            &[1e-3, 2e-3]
+        );
     }
 
     #[test]
@@ -1900,7 +1918,7 @@ mod tests {
         let parsed = parse_result_dataset("op.csv", b"time [s],V(out) [V]\n0,2.5\n")
             .expect("a single operating point is a result");
         assert_eq!(parsed.sample_count, 1);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), [2.5]);
+        assert_eq!(parsed.waveforms[0].y.read_whole().unwrap().as_ref(), [2.5]);
 
         let error = parse_result_dataset("empty.csv", b"time [s],V(out) [V]\n")
             .expect_err("a header with no rows holds no result");

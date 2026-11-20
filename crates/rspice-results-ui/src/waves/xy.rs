@@ -15,7 +15,7 @@ use super::{StripModel, StripTrace, TraceKind, UnitPane, stable_hash, trace_key}
 use crate::presentation::well_hint;
 use egui::Ui;
 use rspice_results::visualization_document::Abscissa;
-use rspice_results::waveform::SharedWaveformValues;
+use rspice_results::waveform::{Fetched, SharedWaveformValues};
 use rspice_ui_kit::plot::sample::sample_at_with;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, SampleInterpolation, Trace, XScale};
 use rspice_ui_kit::tokens::Tokens;
@@ -799,13 +799,32 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             return None;
         };
         let memo = stable_hash(&("xy", key, series.cache_key, interpolation as u8));
-        match derived.xy_curve_or(memo, || {
-            resample(
-                (series.grid.as_slice(), series.values.as_slice()),
-                (grid.as_slice(), values.as_slice()),
-                interpolation,
-            )
-        }) {
+        let paired = match derived.xy_curve(memo) {
+            Some(paired) => paired,
+            None => {
+                // Pairing two operands on one grid reads every sample of both, the merged grid
+                // being a union of theirs: stored operands are read off the frame under the
+                // reader's budget, and the curve is drawn once they have arrived.
+                let mut held = Vec::with_capacity(4);
+                for column in [&series.grid, &series.values, grid, values] {
+                    match column.fetch_whole() {
+                        Fetched::Ready(column) => held.push(column),
+                        Fetched::Pending => return None,
+                        Fetched::Refused(reason) => {
+                            refusals.push(format!(
+                                "{name} could not be read to pair with {}: {reason}",
+                                abscissa.text()
+                            ));
+                            return None;
+                        }
+                    }
+                }
+                derived.xy_curve_or(memo, || {
+                    resample((&held[0], &held[1]), (&held[2], &held[3]), interpolation)
+                })
+            }
+        };
+        match paired {
             Ok(curve) => Some((curve, memo)),
             Err(refusal) => {
                 refusals.push(refusal_text(abscissa, name, refusal));

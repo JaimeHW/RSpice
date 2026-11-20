@@ -43,11 +43,13 @@ pub fn marker_position(
         .iter()
         .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)
         .and_then(|trace| {
-            // A stored trace is read for the search and not kept.
-            let samples = trace.x.len().min(trace.y.len());
-            let along = trace.x.read_range(0..samples).ok()?;
-            let values = trace.y.read_range(0..samples).ok()?;
-            feature_search::nearest(&along, &values, x, search)
+            // A stored trace is searched a block at a time, never held whole.
+            feature_search::nearest(
+                &feature_search::WindowedCurve::new(&trace.x),
+                &feature_search::WindowedCurve::new(&trace.y),
+                x,
+                search,
+            )
         })
         .map(|found| found.x)
         .ok_or(x);

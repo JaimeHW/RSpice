@@ -1013,17 +1013,25 @@ fn waveform_overlay(
         )
     });
 
-    let mut finite_values = reference
-        .y
+    // The overlay strokes both waveforms whole: stored ones are read off the frame, and drawn
+    // once they have arrived.
+    let (Some(reference_x), Some(reference_y), Some(current_x), Some(current_y)) = (
+        reference.x.fetch_whole().ready(),
+        reference.y.fetch_whole().ready(),
+        current.x.fetch_whole().ready(),
+        current.y.fetch_whole().ready(),
+    ) else {
+        return;
+    };
+    let mut finite_values = reference_y
         .iter()
-        .chain(current.y.iter())
+        .chain(current_y.iter())
         .copied()
         .filter(|value| value.is_finite())
         .collect::<Vec<_>>();
     if let Some(rule) = rule {
         finite_values.extend(
-            reference
-                .y
+            reference_y
                 .iter()
                 .copied()
                 .filter(|value| value.is_finite())
@@ -1033,10 +1041,9 @@ fn waveform_overlay(
                 }),
         );
     }
-    let finite_x = reference
-        .x
+    let finite_x = reference_x
         .iter()
-        .chain(current.x.iter())
+        .chain(current_x.iter())
         .copied()
         .filter(|value| value.is_finite())
         .collect::<Vec<_>>();
@@ -1064,18 +1071,17 @@ fn waveform_overlay(
     let plot = axes::paint(ui, area, &axes);
     let points = |x_values: &[f64], y_values: &[f64]| axes::points(plot, &axes, x_values, y_values);
     ui.painter().add(egui::Shape::line(
-        points(reference.x.as_slice(), reference.y.as_slice()),
+        points(&reference_x, &reference_y),
         egui::Stroke::new(1.5, t.color.text_dim),
     ));
     if let Some(rule) = rule {
         for side in [-1.0, 1.0] {
-            let envelope = reference
-                .y
+            let envelope = reference_y
                 .iter()
                 .map(|value| *value + side * permitted_delta(*value, rule))
                 .collect::<Vec<_>>();
             ui.painter().extend(egui::Shape::dashed_line(
-                &points(reference.x.as_slice(), &envelope),
+                &points(&reference_x, &envelope),
                 egui::Stroke::new(1.0, t.color.text_faint),
                 4.0,
                 3.0,
@@ -1083,7 +1089,7 @@ fn waveform_overlay(
         }
     }
     ui.painter().add(egui::Shape::line(
-        points(current.x.as_slice(), current.y.as_slice()),
+        points(&current_x, &current_y),
         egui::Stroke::new(1.5, current_color),
     ));
 }

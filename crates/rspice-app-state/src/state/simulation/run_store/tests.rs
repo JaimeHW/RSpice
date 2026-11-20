@@ -6,7 +6,7 @@ use super::*;
 use rspice_results::analysis_type::AnalysisType;
 
 fn bits(values: &WaveformValues) -> Vec<u64> {
-    values.iter().map(|value| value.to_bits()).collect()
+    values.samples(..).map(f64::to_bits).collect()
 }
 
 /// An imported AC result of two complex traces on one frequency axis, one with a sample its source

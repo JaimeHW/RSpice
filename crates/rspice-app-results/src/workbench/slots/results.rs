@@ -293,8 +293,8 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         self.analysis.viewer_reading()
     }
 
-    fn fft_input_options(&self, time: &[f64]) -> rspice_results_ui::fft::FftInputOptions {
-        self.analysis.fft_input_options(time)
+    fn fft_input_options(&self) -> rspice_results_ui::fft::FftInputOptions {
+        self.analysis.fft_input_options()
     }
 
     fn eye_timebase_for(

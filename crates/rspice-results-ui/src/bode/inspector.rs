@@ -6,7 +6,7 @@ use rspice_results::bode::AcBodeMetrics;
 use rspice_results::engine_evidence::{
     QpacAnalysisResult, QpxfAnalysisResult, QpxfGroupDelay, QpxfOutput,
 };
-use rspice_results::waveform::SharedWaveformValues;
+use rspice_results::waveform::HeldColumn;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -28,7 +28,7 @@ pub enum BodeInspector<'a> {
 /// right panel's card. The spectrum itself renders through the waves
 /// pane-stack's nV/√Hz projection.
 pub struct NoiseSpectrumModel {
-    pub frequency: SharedWaveformValues,
+    pub frequency: HeldColumn,
     pub total_rms: Option<f64>,
     pub input_rms: Option<f64>,
     pub input_rms_unit: &'static str,

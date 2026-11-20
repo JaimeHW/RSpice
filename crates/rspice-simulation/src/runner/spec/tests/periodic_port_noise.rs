@@ -77,9 +77,9 @@ fn periodic_port_noise_survives_execution_worker_and_retention() {
             panic!("periodic network result");
         };
         assert_eq!(frequencies, &[1e4]);
-        assert!((waveforms["PN_F"].y_values[0] - 2.0).abs() < 1e-7);
-        assert!((waveforms["PN_Rn"].y_values[0] - 50.0).abs() < 1e-5);
-        assert!((waveforms["PN_Fdsb"].y_values[0] - 2.0).abs() < 1e-7);
+        assert!((waveforms["PN_F"].y_values.in_memory().unwrap()[0] - 2.0).abs() < 1e-7);
+        assert!((waveforms["PN_Rn"].y_values.in_memory().unwrap()[0] - 50.0).abs() < 1e-5);
+        assert!((waveforms["PN_Fdsb"].y_values.in_memory().unwrap()[0] - 2.0).abs() < 1e-7);
         assert_eq!(waveforms["Cw1_2[k=-1,m=-1]"].y_unit, "W/Hz");
         for signal in ["S21", "S21[k=-1,m=-1]"] {
             assert_eq!(waveforms[signal].y_unit, "1");
@@ -89,7 +89,10 @@ fn periodic_port_noise_survives_execution_worker_and_retention() {
                 .value_in_unit("%")
                 .unwrap()
                 .unwrap();
-            assert!((converted - waveforms[signal].y_values[0] * 100.0).abs() < 1e-12);
+            assert!(
+                (converted - waveforms[signal].y_values.in_memory().unwrap()[0] * 100.0).abs()
+                    < 1e-12
+            );
         }
         for (name, target, expected) in [
             ("periodic_noise_carrier_hz", "MHz", 1.0),
@@ -139,7 +142,17 @@ fn periodic_port_noise_survives_execution_worker_and_retention() {
         assert_eq!(covariance.unit.as_deref(), Some("W/Hz"));
         let expected_covariance = -4.0 / 9.0 * rspice_core::constants::K_BOLTZMANN * 300.15;
         assert!(
-            (covariance.complex.as_ref().unwrap().real[0] / expected_covariance - 1.0).abs() < 1e-7
+            (covariance
+                .complex
+                .as_ref()
+                .unwrap()
+                .real
+                .in_memory()
+                .unwrap()[0]
+                / expected_covariance
+                - 1.0)
+                .abs()
+                < 1e-7
         );
         let original_digest = retained
             .result_data_ref()
