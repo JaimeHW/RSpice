@@ -95,7 +95,14 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
     }];
     let coordinate_source =
         crate::waveform_io::result::axis_signal_for_analysis_type(analysis.analysis_type).0;
-    let mut entries = vec![note_entry(coordinate_name, coordinate_source, None)];
+    // One member of a `.step` or Monte Carlo family says which one it is first, where a note cut
+    // to fit the header still keeps it.
+    let mut entries: Vec<String> = analysis
+        .family_member()
+        .map(|member| member.label())
+        .into_iter()
+        .collect();
+    entries.push(note_entry(coordinate_name, coordinate_source, None));
     for waveform in waveforms {
         let waveform = (*waveform).as_ref();
         let (source, real, imag) = match &waveform.complex {

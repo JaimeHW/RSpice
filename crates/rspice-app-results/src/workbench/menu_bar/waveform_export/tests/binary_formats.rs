@@ -651,3 +651,67 @@ fn a_domain_the_matlab_layout_has_no_coordinate_for_refuses_and_writes_nothing()
         "{message}"
     );
 }
+
+/// One member of a `.step` family names its point in every export that keeps a title or a
+/// note: the CSV and TSV metadata title, the rawfile's `Title:`, the HDF5 document title and the
+/// MATLAB header. NumPy keeps arrays and nothing else, so its export tells the reader which run
+/// it was. The member is titled as a solved or imported member is, `Transient · r = 2k`.
+#[test]
+fn a_stepped_member_names_its_step_in_every_export() {
+    use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
+    use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
+
+    let member = AnalysisResultFamilyMember::StepPoint {
+        index: 1,
+        coordinate: vec![AnalysisResultStepCoordinate {
+            name: "r".to_owned(),
+            value: 2000.0,
+        }],
+    };
+    let point = member.label();
+    let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, member.titled("Transient"))
+        .with_waveforms(vec![waveform(
+            "V(out)",
+            vec![0.0, 1.0e-6, 2.0e-6],
+            vec![0.0, 1.25, -0.5],
+        )]);
+    analysis.import_source = Some(ResultImportSource {
+        source_name: "lt_step.raw".to_owned(),
+        format: ResultImportFormat::SpiceRaw,
+        coordinate: None,
+        family_member: Some(member),
+        event_dump: None,
+    });
+    let export = |choice: usize| {
+        let mut state = state_with_typed_result(analysis.clone());
+        state
+            .model
+            .preferences
+            .set_choice(
+                crate::workbench::ChoicePreference::EngineeringExport,
+                choice,
+            )
+            .expect("an export preference");
+        let io = MockExportWorkflowIo::default();
+        action_export_dataset_with_io(
+            &mut state.results_parts(),
+            &io,
+            &DatasetExportChoice::default(),
+        );
+        let prompt = state.prompt_text().unwrap_or_default().to_owned();
+        (io, prompt)
+    };
+    let names = |bytes: &[u8]| String::from_utf8_lossy(bytes).contains(&point);
+
+    let (csv, _) = export(0);
+    let title = csv.datasets.borrow()[0].title.clone();
+    assert!(title.contains(&point), "CSV: {title}");
+    let (tsv, _) = export(2);
+    assert!(names(tsv.text_files.borrow()[0].1.as_bytes()), "TSV");
+    for (choice, format) in [(8, "HDF5"), (9, "MATLAB"), (10, "raw"), (11, "ASCII raw")] {
+        let (io, _) = export(choice);
+        assert!(names(&io.byte_files.borrow()[0].1), "{format}");
+    }
+    let (_, prompt) = export(7);
+    assert!(prompt.contains(&point), "{prompt}");
+}

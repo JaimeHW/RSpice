@@ -88,6 +88,11 @@ pub fn project_waveforms<W: AsRef<RetainedWaveform>>(
     } else {
         prepare_flat_waveform_dataset(&waveforms, x_name, x_signal_type)?
     };
+    // One member of a `.step` or Monte Carlo family says which one it is wherever the format
+    // keeps a title.
+    if let Some(member) = analysis.family_member() {
+        prepared.title = member.titled(&prepared.title);
+    }
     if let Some(coordinate) = analysis.imported_coordinate()
         && let Some(axis) = prepared.x_signal.as_mut()
     {

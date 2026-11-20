@@ -138,6 +138,12 @@ pub(super) fn export_numpy(
         }
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
     };
+    // NumPy files carry arrays and nothing else, so which member of a family this is goes to the
+    // reader instead.
+    let member = displayed
+        .primary_analysis(state.results_reads())
+        .and_then(|analysis| analysis.family_member())
+        .map(|member| member.label());
     let prepared = match prepared {
         Ok(prepared) => prepared,
         Err(message) => {
@@ -188,7 +194,7 @@ pub(super) fn export_numpy(
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     kind.label(),
                     &published_path,
-                    Some(completion_detail(&prepared, kind)),
+                    Some(completion_detail(&prepared, kind, member.as_deref())),
                     io,
                 ),
             );
@@ -202,13 +208,13 @@ pub(super) fn export_numpy(
 
 /// What the reader is told they now have. For `.npy` this is load-bearing:
 /// the column order is the only key to the file.
-fn completion_detail(export: &NumpyExport, kind: NumpyKind) -> String {
+fn completion_detail(export: &NumpyExport, kind: NumpyKind, member: Option<&str>) -> String {
     let dtype = if export.is_complex() {
         "complex128"
     } else {
         "float64"
     };
-    match kind {
+    let mut detail = match kind {
         NumpyKind::Array => format!(
             "one {dtype} array, {} rows x {} columns; {}. An .npy file carries no names, so this \
              order is the only key to its columns.",
@@ -224,7 +230,13 @@ fn completion_detail(export: &NumpyExport, kind: NumpyKind) -> String {
             export.coordinate.len(),
             export.coordinate_name,
         ),
+    };
+    if let Some(member) = member {
+        detail.push_str(&format!(
+            " The file does not say which run it is: {member}."
+        ));
     }
+    detail
 }
 
 #[cfg(test)]
