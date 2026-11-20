@@ -30,12 +30,18 @@ pub fn solve(config: DcSweepConfig) -> SimulationResult {
     super::run_manual_deck(&source)
 }
 
+/// The solved sweep as the run history retains it: converted, and its samples kept in the
+/// results store, whose windows its waveforms then read.
 pub fn retain(result: SimulationResult) -> crate::state::AnalysisResult {
-    crate::simulation::SimulationController::new().convert_to_analysis_result_with_metadata_owned(
-        result,
-        rspice_results::analysis_type::AnalysisType::DcSweep,
-        "DC family",
-    )
+    let mut analysis = crate::simulation::SimulationController::new()
+        .convert_to_analysis_result_with_metadata_owned(
+            result,
+            rspice_results::analysis_type::AnalysisType::DcSweep,
+            "DC family",
+        );
+    crate::state::run_store::store_analysis(&mut analysis.data)
+        .expect("the results store keeps the solved sweep");
+    analysis
 }
 
 pub fn evidence(
