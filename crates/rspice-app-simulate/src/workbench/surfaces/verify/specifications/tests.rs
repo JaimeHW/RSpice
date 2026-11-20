@@ -458,10 +458,10 @@ fn a_margin_carries_the_resolution_of_its_worst_value() {
             .clone()
     };
     for (measurement, worst, margin) in [
-        ("gain", "39.40 dB", "-0.60 dB"),
-        ("bw", "11.90 MHz", "+1.90 MHz"),
-        ("pm", "47.00 deg", "+2.00 deg"),
-        ("idd", "1.160 mA", "+40 \u{b5}A"),
+        ("gain", "39.4 dB", "\u{2212}0.6 dB"),
+        ("bw", "11.9 MHz", "+1.9 MHz"),
+        ("pm", "47 deg", "+2 deg"),
+        ("idd", "1.16 mA", "+40 \u{b5}A"),
     ] {
         assert_eq!(cell(measurement, Col::Worst), worst, "{measurement}");
         assert_eq!(cell(measurement, Col::Margin), margin, "{measurement}");
@@ -469,19 +469,19 @@ fn a_margin_carries_the_resolution_of_its_worst_value() {
 
     // Under the value's last digit a margin is zero spelled as the value is,
     // on its side; past four significant digits it rounds as a value does.
-    assert_eq!(difference_text(-0.004, 39.996, "dB"), "-0.00 dB");
-    assert_eq!(difference_text(0.0, 1.2e-3, "A"), "0.000 mA");
+    assert_eq!(difference_text(-0.004, 39.996, "dB"), "\u{2212}0.00 dB");
+    assert_eq!(difference_text(0.0, 1.2e-3, "A"), "0.0 mA");
     assert_eq!(difference_text(12.345_6, 0.5, "V"), "+12.35 V");
-    assert_eq!(difference_text(-2.4e-9, 1.0e-6, "s"), "-2 ns");
+    assert_eq!(difference_text(-2.4e-9, 1.0e-6, "s"), "\u{2212}2 ns");
 }
 
 /// A level in decibels, a percentage and an angle take no SI prefix: six
-/// tenths of a decibel is `-0.6000 dB`, never `-600.0 mdB`.
+/// tenths of a decibel is `−0.6 dB`, never `−600 mdB`.
 #[test]
 fn a_level_or_an_angle_takes_no_si_prefix() {
-    assert_eq!(format_value(-0.6, "dB"), "-0.6000 dB");
-    assert_eq!(format_value(2.0, "deg"), "2.000 deg");
-    assert_eq!(format_value(40.0e-6, "A"), "40.00 \u{b5}A");
+    assert_eq!(format_value(-0.6, "dB"), "\u{2212}0.6 dB");
+    assert_eq!(format_value(2.0, "deg"), "2 deg");
+    assert_eq!(format_value(40.0e-6, "A"), "40 \u{b5}A");
     assert_eq!(
         limit_text(&SpecificationComparison::Maximum { limit: 1.2e-3 }, "A").as_deref(),
         Some("\u{2264} 1.2 mA")

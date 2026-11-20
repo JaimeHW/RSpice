@@ -229,8 +229,8 @@ fn a_stepped_ac_sweep_draws_each_points_decibels_and_phase() {
     assert_eq!(
         decibels,
         [
-            ("|V(out)| · c = 1 n", -20.0),
-            ("|V(out)| · c = 10 n", -40.0)
+            ("|V(out)| · c = 1e\u{2212}9", -20.0),
+            ("|V(out)| · c = 10e\u{2212}9", -40.0)
         ]
     );
     let phases: Vec<_> = built[0]
@@ -293,7 +293,11 @@ fn the_runs_of_an_imported_stepped_rawfile_draw_as_one_family() {
         .collect();
     assert_eq!(
         names,
-        ["V(out) · r = 1 k", "V(out) · r = 2 k", "V(out) · r = 4 k"]
+        [
+            "V(out) · r = 1000",
+            "V(out) · r = 2000",
+            "V(out) · r = 4000"
+        ]
     );
 }
 

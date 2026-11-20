@@ -422,7 +422,7 @@ mod tests {
         let complex = ComplexRoot::pole(-1_234.567, 98_765.43);
         assert_eq!(
             format_dominant_pole(&complex, &policy, 4),
-            "σ -1.235 krad/s · jω 98.77 krad/s"
+            "σ \u{2212}1.235 krad/s · jω 98.77 krad/s"
         );
     }
 }

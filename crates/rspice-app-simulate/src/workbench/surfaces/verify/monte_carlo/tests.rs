@@ -531,7 +531,7 @@ fn a_limit_and_a_tick_are_spelled_like_the_values_beside_them() {
         super::super::histogram::tick_text(10.0e6, 2.0e6, "Hz"),
         "10 MHz"
     );
-    assert_eq!(format_value(38.9, "dB"), "38.90 dB");
+    assert_eq!(format_value(38.9, "dB"), "38.9 dB");
 }
 
 /// The bins put the limit on an edge and keep every sample; a bar's failing

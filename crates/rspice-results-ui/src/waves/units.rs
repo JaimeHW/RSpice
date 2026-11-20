@@ -206,7 +206,7 @@ mod tests {
         );
         assert_eq!(fmt_in_unit(4.07, NOISE_DENSITY_UNIT, 3), "4.07 nV/√Hz");
         // Base units keep their SI scaling.
-        assert_eq!(fmt_in_unit(1.5e-3, "A", 3), "1.50 mA");
+        assert_eq!(fmt_in_unit(1.5e-3, "A", 3), "1.5 mA");
     }
 
     /// A readout states the number; it does not pad it out to the reader's
@@ -232,7 +232,7 @@ mod tests {
         // ladder keeps its exponent, and only the mantissa in front of it is
         // trimmed — trimming an integer's or an exponent's zeros would change
         // the number by orders of magnitude.
-        assert_eq!(fmt_in_unit(1.0e40, "V", 7), "10.00000e39 V");
+        assert_eq!(fmt_in_unit(1.0e40, "V", 7), "10e39 V");
         assert_eq!(fmt_in_unit_readout(1.0e40, "V", 7), "10e39 V");
         assert_eq!(fmt_in_unit_readout(1.0e29, "V", 7), "100e27 V");
         assert_eq!(fmt_in_unit_readout(1.0e30, "V", 7), "1e30 V");

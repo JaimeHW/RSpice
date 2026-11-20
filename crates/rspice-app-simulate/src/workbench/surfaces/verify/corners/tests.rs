@@ -532,18 +532,18 @@ fn every_colour_is_the_sheets_status() {
             .collect::<Vec<_>>()
     };
     assert_eq!(
-        inks("42.30 dB"),
+        inks("42.3 dB"),
         [t.color.err],
         "fails only by its guard band"
     );
-    assert_eq!(inks("39.40 dB"), [t.color.text, t.color.err]);
+    assert_eq!(inks("39.4 dB"), [t.color.text, t.color.err]);
     assert_eq!(
-        inks("44.20 dB"),
+        inks("44.2 dB"),
         [t.color.text, t.color.text],
         "a pass is neutral"
     );
     assert_eq!(
-        inks("47.00 deg"),
+        inks("47 deg"),
         [t.color.text, t.color.warn],
         "near its floor"
     );
@@ -685,12 +685,12 @@ fn the_selected_cell_states_its_point_value_margin_and_analysis() {
             .find(|(name, _)| name == label)
             .map(|(_, value)| value.as_str())
     };
-    assert_eq!(value("Value"), Some("39.40 dB"));
+    assert_eq!(value("Value"), Some("39.4 dB"));
     let margin = sheet(&harness).rows[0].cells[point]
         .signed_margin
         .expect("a judged value has a margin");
     assert!(margin < 0.0);
-    assert_eq!(value("Margin"), Some("-0.60 dB"));
+    assert_eq!(value("Margin"), Some("\u{2212}0.6 dB"));
     assert_eq!(value("Limit"), Some("\u{2265} 40 dB"));
     assert_eq!(value("Status"), Some("Fail"));
     assert_eq!(value("Analysis"), Some("Transient"));

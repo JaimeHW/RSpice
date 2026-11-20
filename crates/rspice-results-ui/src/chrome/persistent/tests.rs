@@ -45,7 +45,7 @@ fn a_measurement_reads_in_engineering_notation_at_the_document_digits() {
     );
     assert_eq!(
         measurement_text("max(V(out))", Some((1.234_567_8e-6, None)), 4),
-        "max(V(out)) = 1.235 µ"
+        "max(V(out)) = 1.235e\u{2212}6"
     );
     assert_eq!(
         measurement_text("Measurement 3", None, 7),
@@ -85,20 +85,20 @@ fn a_family_measurement_reads_its_distribution_and_yield() {
     );
     assert_eq!(
         family_text(&family, 3),
-        "n 5 of 6 \u{b7} mean 3.00 \u{b7} \u{3c3} 1.58 \u{b7} min 1.00 \u{b7} max 5.00 \u{b7} \
-         yield 3/6 [1.50, 4.50] \u{b7} fails Trial 0, Trial 4 +1"
+        "n 5 of 6 \u{b7} mean 3 \u{b7} \u{3c3} 1.58 \u{b7} min 1 \u{b7} max 5 \u{b7} \
+         yield 3/6 [1.5, 4.5] \u{b7} fails Trial 0, Trial 4 +1"
     );
     family.lower = None;
     family.failing = (0..6).map(|index| format!("Trial {index}")).collect();
     family.passed = Some(0);
     assert!(
         family_text(&family, 3)
-            .ends_with("yield 0/6 \u{2264} 4.50 \u{b7} fails Trial 0, Trial 1 +4")
+            .ends_with("yield 0/6 \u{2264} 4.5 \u{b7} fails Trial 0, Trial 1 +4")
     );
     // A kept mean states the yield's share itself.
     family.statistic = FamilyStatistic::Mean;
     assert!(
         family_text(&family, 3)
-            .ends_with("yield 0/6 (0 %) \u{2264} 4.50 \u{b7} fails Trial 0, Trial 1 +4")
+            .ends_with("yield 0/6 (0 %) \u{2264} 4.5 \u{b7} fails Trial 0, Trial 1 +4")
     );
 }

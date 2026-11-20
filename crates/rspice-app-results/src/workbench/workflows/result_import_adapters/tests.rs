@@ -989,19 +989,19 @@ fn an_ltspice_stepped_rawfile_imports_one_analysis_per_run_named_by_its_log() {
         analyses,
         [
             (
-                "Imported \u{b7} Transient Analysis \u{b7} r = 1 k",
+                "Imported \u{b7} Transient Analysis \u{b7} r = 1000",
                 0,
                 1000.0,
                 55
             ),
             (
-                "Imported \u{b7} Transient Analysis \u{b7} r = 2 k",
+                "Imported \u{b7} Transient Analysis \u{b7} r = 2000",
                 1,
                 2000.0,
                 31
             ),
             (
-                "Imported \u{b7} Transient Analysis \u{b7} r = 4 k",
+                "Imported \u{b7} Transient Analysis \u{b7} r = 4000",
                 2,
                 4000.0,
                 19

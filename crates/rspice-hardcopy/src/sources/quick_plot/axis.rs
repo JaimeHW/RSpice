@@ -13,7 +13,7 @@
 
 use super::*;
 
-use rspice_results::number_format::fmt_si_significant;
+use rspice_results::number_format::tick_label;
 use rspice_results::visualization_document::AxisScale;
 
 /// The widest span, in decades, over which a printed axis rules its mantissas.
@@ -124,7 +124,7 @@ fn logarithmic_rules(min: f64, max: f64) -> Vec<(f64, String, bool)> {
     for decade in first..=last {
         let value = 10.0_f64.powi(decade);
         if value.is_finite() && value > 0.0 {
-            rules.push((f64::from(decade), fmt_si_significant(value, "", 3), true));
+            rules.push((f64::from(decade), tick_label(value), true));
         }
     }
     if max - min > MINOR_DECADE_LIMIT {
@@ -142,7 +142,7 @@ fn logarithmic_rules(min: f64, max: f64) -> Vec<(f64, String, bool)> {
                 continue;
             }
             let label = if promote {
-                fmt_si_significant(value, "", 3)
+                tick_label(value)
             } else {
                 String::new()
             };
@@ -171,7 +171,7 @@ mod tests {
                 .iter()
                 .map(|tick| tick.label.as_str())
                 .collect::<Vec<_>>(),
-            vec!["1.00", "10.0", "100"]
+            vec!["1", "10", "100"]
         );
         let first = major[0].start.y_um - major[1].start.y_um;
         let second = major[1].start.y_um - major[2].start.y_um;
@@ -263,9 +263,7 @@ mod tests {
                 .iter()
                 .map(|tick| tick.label.as_str())
                 .collect::<Vec<_>>(),
-            [
-                "2.00 k", "3.00 k", "4.00 k", "5.00 k", "6.00 k", "7.00 k", "8.00 k"
-            ]
+            ["2k", "3k", "4k", "5k", "6k", "7k", "8k"]
         );
     }
 

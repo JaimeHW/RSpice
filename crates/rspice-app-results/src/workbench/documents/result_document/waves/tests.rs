@@ -221,15 +221,15 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
     );
 }
 
-/// The digit preference is a ceiling on a readout and a column width on a
-/// table, and the two spellings of a value are not the same string.
+/// The digit preference is a ceiling, and a value reads the same in a
+/// readout and in a table cell: zeros only where a rounding resolved them.
 ///
 /// The defect: the strip legend, the cursor columns and the measurement rows
 /// all read `1.500000 V` at the default preference — seven digits claimed for
-/// a number that has two. The Table viewer keeps the padding, because its
-/// cells are right-aligned in fixed columns and the decimal points line up.
+/// a number that has two — and the Table viewer spelled the same value a
+/// second way.
 #[test]
-fn a_readout_states_the_value_while_a_table_column_pads_it() {
+fn a_readout_and_a_table_cell_spell_a_value_alike() {
     let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
@@ -272,13 +272,13 @@ fn a_readout_states_the_value_while_a_table_column_pads_it() {
         model
             .format_sample(0, 1, digits, quantity_policy)
             .as_deref(),
-        Some("1.500000 V"),
-        "while a table cell holds the reader's digits"
+        Some("1.5 V"),
+        "and a table cell"
     );
     assert_eq!(
         model.format_x_at(1, digits, quantity_policy),
-        "1.000000 s",
-        "as does the table's own X column"
+        "1 s",
+        "and the table's own X column"
     );
 }
 

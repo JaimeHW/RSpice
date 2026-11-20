@@ -944,7 +944,7 @@ mod tests {
             .find(|row| row.contains("PARAM:GAIN"))
             .unwrap_or_else(|| panic!("no PARAM:GAIN row among {rows:?}"));
         assert!(
-            gain.ends_with("normalized sensitivity 250m, raw sensitivity 250m"),
+            gain.ends_with("normalized sensitivity 0.25, raw sensitivity 0.25"),
             "{gain}"
         );
     }

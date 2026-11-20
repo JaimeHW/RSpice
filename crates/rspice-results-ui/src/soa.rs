@@ -1470,7 +1470,7 @@ mod tests {
             significant_digits: 4,
             quantity_policy: units.presentation_policy(),
         };
-        assert_eq!(celsius.value(-0.012_345_678_9, "A"), "-12.35 mA");
+        assert_eq!(celsius.value(-0.012_345_678_9, "A"), "\u{2212}12.35 mA");
         assert_eq!(celsius.value(398.15, "K"), "125 °C");
         assert_eq!(celsius.difference(10.0, "K"), "10 °C");
         units.set_temperature_display(TemperatureDisplay::Fahrenheit);

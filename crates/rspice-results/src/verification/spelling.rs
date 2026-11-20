@@ -9,21 +9,13 @@
 //! letter never stands alone where a unit would be: half of a unitless
 //! number is `0.5`, never `500 m`, which reads as metres.
 
-use crate::number_format::{fmt_si_bound, fmt_si_significant, fmt_significant};
+use crate::number_format::{fmt_si_significant, unit_takes_prefix};
 use crate::specification::SpecificationComparison;
-
-/// Whether `unit` takes an SI prefix. A level in decibels, a percentage and
-/// an angle in degrees do not: half a decibel is `0.5 dB`, never `500 mdB`.
-/// No unit takes none either, since a prefix with nothing after it reads as
-/// a unit of its own.
-fn takes_si_prefix(unit: &str) -> bool {
-    !(unit.is_empty() || unit.starts_with("dB") || matches!(unit, "%" | "deg" | "\u{b0}"))
-}
 
 /// Whether [`format_value`] prints `value` with an SI prefix: `1.160 mA` is,
 /// `12.60 V` and `12.60` are not.
 fn prefixed(value: f64, unit: &str) -> bool {
-    takes_si_prefix(unit) && !format_value(value, unit).ends_with(&format!(" {unit}"))
+    unit_takes_prefix(unit) && !format_value(value, unit).ends_with(&format!(" {unit}"))
 }
 
 /// `number` followed by `unit`, or alone when there is no unit.
@@ -36,32 +28,19 @@ fn with_unit(number: &str, unit: &str) -> String {
 }
 
 /// A measured value in engineering notation with its unit: four significant
-/// digits, an SI prefix where the unit takes one, never a bare exponent.
+/// digits, an SI prefix where the unit takes one.
 #[must_use]
 pub fn format_value(value: f64, unit: &str) -> String {
-    if takes_si_prefix(unit) {
-        fmt_si_significant(value, unit, 4)
-    } else {
-        with_unit(&fmt_significant(value, 4, ""), unit)
-    }
+    fmt_si_significant(value, unit, 4)
 }
 
 /// One bound of a limit in the notation of the values held against it,
-/// without the zeros nobody wrote it with: `40 dB`, `1.2 mA`.
+/// without the zeros nobody wrote it with: `40 dB`, `1.2 mA`. A bound is an
+/// authored number, so the formatter's rule that zeros are printed only where
+/// a rounding resolved them leaves it as it was written.
 #[must_use]
 pub fn format_bound(value: f64, unit: &str) -> String {
-    if takes_si_prefix(unit) {
-        return fmt_si_bound(value, unit);
-    }
-    let text = fmt_significant(value, 4, "");
-    // Scientific notation carries its own exponent, and trimming its mantissa
-    // would change the number.
-    let number = if text.contains('.') && !text.contains(['e', 'E']) {
-        text.trim_end_matches('0').trim_end_matches('.')
-    } else {
-        text.as_str()
-    };
-    with_unit(number, unit)
+    fmt_si_significant(value, unit, 4)
 }
 
 /// A limit as a verdict states it: `≥ 40 dB`, `≤ 1.2 mA`, `10 MHz … 20 MHz`,
@@ -122,7 +101,7 @@ pub fn difference_text(difference: f64, of: f64, unit: &str) -> String {
         let sign = if difference > 0.0 {
             "+"
         } else if difference.is_sign_negative() {
-            "-"
+            "\u{2212}"
         } else {
             ""
         };
@@ -142,7 +121,7 @@ pub fn difference_text(difference: f64, of: f64, unit: &str) -> String {
     let text = if prefixed(of, unit) {
         fmt_si_significant(rounded, unit, digits)
     } else {
-        with_unit(&fmt_significant(rounded, digits, ""), unit)
+        with_unit(&fmt_si_significant(rounded, "", digits), unit)
     };
     format!("{sign}{}", text.trim_end())
 }

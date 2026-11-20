@@ -941,7 +941,7 @@ fn a_cursor_on_the_figure_reads_the_instant_and_both_coordinates() {
         painted
             .iter()
             .any(|text| text.starts_with("B \u{b7} t 500 ")
-                && text.ends_with("s \u{b7} V(a) 0 V \u{b7} -866 mV")),
+                && text.ends_with("s \u{b7} V(a) 0 V \u{b7} \u{2212}866 mV")),
         "{painted:?}"
     );
 }

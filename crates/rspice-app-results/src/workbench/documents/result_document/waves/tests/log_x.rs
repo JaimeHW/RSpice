@@ -151,7 +151,7 @@ fn a_signed_sweep_refuses_a_logarithmic_axis_and_says_why() {
     let mut state = strip_host(AnalysisType::DcSweep, x);
     state.results.results.session.viewer = crate::workbench::ResultViewer::DcSweep;
     let reason = log_x_refusal(&model(&mut state)[0]).expect("a signed sweep is refused");
-    assert!(reason.contains("reaches -1"), "{reason}");
+    assert!(reason.contains("reaches \u{2212}1"), "{reason}");
     assert!(reason.contains("positive values only"), "{reason}");
     // A choice that reaches the strip anyway, from a file, is not applied.
     let analysis = key(&state);

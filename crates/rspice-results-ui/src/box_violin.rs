@@ -1272,7 +1272,7 @@ mod tests {
         assert_eq!(columns[0].name, "vos");
         assert_eq!(columns[0].unit, "V");
         assert_eq!(columns[0].bounds(), [(-50.0, true), (50.0, false)]);
-        assert_eq!(columns[0].limit_text(), "-50 V \u{2026} 50 V");
+        assert_eq!(columns[0].limit_text(), "\u{2212}50 V \u{2026} 50 V");
     }
     #[test]
     fn a_sampled_variable_is_drawable_and_reports_no_requirement() {

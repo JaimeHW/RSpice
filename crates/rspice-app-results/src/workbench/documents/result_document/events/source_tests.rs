@@ -982,12 +982,12 @@ fn the_event_tables_state_their_numbers_at_the_readers_digits() {
     for wanted in [
         "Retained interval: 0 s to 100 ns",
         "12.34568 ns",
-        "-2.5 fC",
+        "\u{2212}2.5 fC",
         "40 ns",
         "3.3 pC",
         "1.234568 ns",
         "7.5 ns",
-        "123.4568 m",
+        "0.1234568",
         "Time",
         "Signed charge",
     ] {

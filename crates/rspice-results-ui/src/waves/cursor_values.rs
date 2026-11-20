@@ -7,7 +7,7 @@ use super::units::as_readout;
 use super::{StripModel, anchor_key};
 use rspice_results::feature_search;
 use rspice_results::result_presentation::{MarkerKind, WaveformPresentationKey};
-use rspice_ui_kit::plot::{XScale, fmt_si_significant, fmt_significant};
+use rspice_ui_kit::plot::{XScale, fmt_si_significant};
 use rspice_vocabulary::quantity::{FrequencyDisplay, QuantityPresentationPolicy};
 
 #[cfg(test)]
@@ -124,8 +124,7 @@ pub fn x_reciprocal(
     Some(as_readout(&match model.x_unit.as_str() {
         "s" => frequency_text(inverse, significant_digits, quantity_policy),
         "Hz" => fmt_si_significant(inverse, "s", significant_digits),
-        "" => fmt_significant(inverse, significant_digits, ""),
-        unit => fmt_significant(inverse, significant_digits, &format!(" /{unit}")),
+        unit => fmt_si_significant(inverse, &format!("/{unit}"), significant_digits),
     }))
 }
 
@@ -149,18 +148,5 @@ fn frequency_text(
 /// one (`2 MV/s`, `15 mA/V`), plain digits on one that carries its own scale
 /// (`-20 dB/dec`, `45 °/kHz`).
 pub fn slope_text(slope: f64, y_unit: &str, x_unit: &str, significant_digits: usize) -> String {
-    let compound = format!("{y_unit}/{x_unit}");
-    let prefixed = !y_unit.is_empty()
-        && !y_unit.starts_with("dB")
-        && !matches!(y_unit, "°" | "deg" | "rad")
-        && !super::units::unit_carries_its_decade(y_unit);
-    if prefixed {
-        as_readout(&fmt_si_significant(slope, &compound, significant_digits))
-    } else {
-        as_readout(&fmt_significant(
-            slope,
-            significant_digits,
-            &format!(" {compound}"),
-        ))
-    }
+    fmt_si_significant(slope, &format!("{y_unit}/{x_unit}"), significant_digits)
 }

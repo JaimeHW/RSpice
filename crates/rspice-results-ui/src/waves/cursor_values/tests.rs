@@ -6,9 +6,9 @@ use super::*;
 fn a_slope_carries_an_si_prefix_unless_its_unit_carries_its_own_scale() {
     // 0.1 V over 0.5 ps.
     assert_eq!(slope_text(2.0e11, "V", "s", 7), "200 GV/s");
-    assert_eq!(slope_text(-1.5e-3, "A", "s", 7), "-1.5 mA/s");
+    assert_eq!(slope_text(-1.5e-3, "A", "s", 7), "\u{2212}1.5 mA/s");
     // A decibel slope is never prefixed: "kdB" is no unit.
-    assert_eq!(slope_text(-20.0, "dB", "dec", 7), "-20 dB/dec");
+    assert_eq!(slope_text(-20.0, "dB", "dec", 7), "\u{2212}20 dB/dec");
 }
 
 #[test]

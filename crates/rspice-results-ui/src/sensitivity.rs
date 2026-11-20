@@ -653,9 +653,12 @@ mod tests {
     #[test]
     fn chart_values_read_in_engineering_notation_at_the_readers_digits() {
         assert_eq!(chart_value(3.0.into(), 7), "+3");
-        assert_eq!(chart_value((-1.234_567_89e-3).into(), 7), "-1.234568m");
-        assert_eq!(chart_value(2.718_281_828e4.into(), 3), "+27.2k");
-        assert_eq!(chart_scale(0.012_5, 7), "±12.5m");
+        assert_eq!(
+            chart_value((-1.234_567_89e-3).into(), 7),
+            "\u{2212}0.001234568"
+        );
+        assert_eq!(chart_value(2.718_281_828e4.into(), 3), "+27200");
+        assert_eq!(chart_scale(0.012_5, 7), "±0.0125");
     }
 
     /// A panel value reads in engineering notation with its prefix on the
@@ -664,9 +667,9 @@ mod tests {
     /// seventeen digits.
     #[test]
     fn panel_values_read_in_engineering_notation() {
-        assert_eq!(exact_value(1.234_567_890_123_456_7e-9), "1.23457n");
-        assert_eq!(exact_value(-2.5e3), "-2.5k");
-        assert_eq!(exact_value(0.75), "750m");
+        assert_eq!(exact_value(1.234_567_890_123_456_7e-9), "1.23457e\u{2212}9");
+        assert_eq!(exact_value(-2.5e3), "\u{2212}2500");
+        assert_eq!(exact_value(0.75), "0.75");
         assert_eq!(
             exact_basis_label(SensitivityResultMode::Ac {
                 frequency_hz: 2.5e6,

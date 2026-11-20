@@ -81,9 +81,9 @@ fn the_reference_view_compares_every_shared_check() {
         texts,
         [
             "bw".to_owned(),
-            "18.20 MHz".to_owned(),
-            "17.10 MHz".to_owned(),
-            "-1.10 MHz".to_owned(),
+            "18.2 MHz".to_owned(),
+            "17.1 MHz".to_owned(),
+            "\u{2212}1.1 MHz".to_owned(),
             "-6.04 %".to_owned(),
             "rel 2 %".to_owned(),
             "Fail".to_owned(),
@@ -92,8 +92,8 @@ fn the_reference_view_compares_every_shared_check() {
     // Each value carries the unit its producer states, and one it states none
     // for is bare.
     let text = |name: &str, column: usize| row_cells(row(&harness, name))[column].text.clone();
-    assert_eq!(text("tsettle", 1), "1.620 \u{00b5}s");
-    assert_eq!(text("overshoot", 1), "12.60");
+    assert_eq!(text("tsettle", 1), "1.62 \u{00b5}s");
+    assert_eq!(text("overshoot", 1), "12.6");
     assert!(
         text("V(out)", 3).starts_with("max ") && text("V(out)", 3).ends_with('V'),
         "a waveform's change is in its trace's unit: {}",
@@ -418,11 +418,11 @@ fn the_selected_row_states_its_rule_and_allowance() {
     let facts = selected_reference(&harness.state.verification).expect("a row is selected");
     assert_eq!((facts.title.as_str(), facts.result), ("bw", "Fail"));
     for (label, value) in [
-        ("Reference", "18.20 MHz \u{00b7} Run 3"),
-        ("Current", "17.10 MHz \u{00b7} Run 4"),
-        ("Change", "-1.10 MHz (-6.04 %)"),
+        ("Reference", "18.2 MHz \u{00b7} Run 3"),
+        ("Current", "17.1 MHz \u{00b7} Run 4"),
+        ("Change", "\u{2212}1.1 MHz (-6.04 %)"),
         ("Tolerance", "rel 2 %"),
-        ("Allowed change", "364.0 kHz"),
+        ("Allowed change", "364 kHz"),
     ] {
         assert!(
             facts
@@ -499,5 +499,5 @@ fn a_unitless_change_is_spelled_as_its_values_are() {
         .take(4)
         .map(|cell| cell.text.clone())
         .collect::<Vec<_>>();
-    assert_eq!(texts, ["overshoot", "12.60", "12.10", "-0.50"]);
+    assert_eq!(texts, ["overshoot", "12.6", "12.1", "\u{2212}0.5"]);
 }

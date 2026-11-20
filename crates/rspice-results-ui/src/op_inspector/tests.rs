@@ -504,14 +504,14 @@ fn the_header_pins_at_the_top_and_the_next_section_pushes_it_off() {
 #[test]
 fn values_share_one_mantissa_edge_and_one_unit_edge() {
     for (value, unit, mantissa, suffix) in [
-        (5.0, "V", "5.00000", "V"),
+        (5.0, "V", "5", "V"),
         (0.751_626_9, "V", "751.627", "mV"),
-        (0.0, "A", "0.00000", "A"),
-        (-41.7321e-3, "A", "-41.7321", "mA"),
-        (999.9996e-3, "V", "1.00000", "V"),
-        (2.0e6, "Hz", "2.00000", "MHz"),
+        (0.0, "A", "0", "A"),
+        (-41.7321e-3, "A", "−41.7321", "mA"),
+        (999.9996e-3, "V", "1", "V"),
+        (2.0e6, "Hz", "2", "MHz"),
         (123.456, "", "123.456", ""),
-        (1234.56, "", "1.23456", "k"),
+        (1234.56, "", "1234.56", ""),
         (27.0, CELSIUS, "27.0000", CELSIUS),
         (0.5, CELSIUS, "0.500000", CELSIUS),
         (-273.15, CELSIUS, "-273.150", CELSIUS),

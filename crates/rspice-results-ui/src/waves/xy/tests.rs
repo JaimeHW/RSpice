@@ -239,7 +239,7 @@ fn a_coordinate_reads_to_the_resolution_of_its_axis() {
     assert_eq!(at_resolution(0.5, axis, false, "V"), "500 mV");
     assert_eq!(
         at_resolution(-(3.0f64.sqrt()) / 2.0, axis, false, "V"),
-        "-866 mV"
+        "\u{2212}866 mV"
     );
     // Zoomed in tenfold, one more digit means something.
     assert_eq!(

@@ -267,7 +267,7 @@ mod tests {
             Ok(value) => value.clone(),
             Err(error) => panic!("1/3 failed: {error}"),
         };
-        assert_eq!(result.readout, "= 333.33333 m", "eight significant digits");
+        assert_eq!(result.readout, "= 0.33333333", "eight significant digits");
     }
 
     #[test]

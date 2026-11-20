@@ -2107,10 +2107,10 @@ fn a_temperature_crossed_with_a_parameter_answers_no_point_scoped_specification(
             .map(|(label, _)| label.as_str())
             .collect::<Vec<_>>(),
         [
-            "temp = 27, r = 1 k",
-            "temp = 125, r = 1 k",
-            "temp = 27, r = 2 k",
-            "temp = 125, r = 2 k"
+            "temp = 27, r = 1000",
+            "temp = 125, r = 1000",
+            "temp = 27, r = 2000",
+            "temp = 125, r = 2000"
         ]
     );
     assert!(

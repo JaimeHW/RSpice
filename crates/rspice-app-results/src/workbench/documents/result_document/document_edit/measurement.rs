@@ -707,7 +707,7 @@ mod tests {
         // {1, 2, 4, 5}: mean 3, sample sigma sqrt(10 / 3) = 1.826.
         let statistics = family.statistics.unwrap().unwrap();
         assert!(
-            statistics.starts_with("n 4 of 5 (1 not measured) · mean 3.000000 · σ 1.825742"),
+            statistics.starts_with("n 4 of 5 (1 not measured) · mean 3 · σ 1.825742"),
             "{statistics}"
         );
         assert_eq!(
@@ -725,7 +725,7 @@ mod tests {
         assert!(preview.family.unwrap().judged.is_none());
         draft.statistic = FamilyStatistic::Mean;
         let preview = super::preview(host.results_reads(), &draft);
-        assert_eq!(preview.value.unwrap().unwrap(), "Keeps the mean: 3.000000");
+        assert_eq!(preview.value.unwrap().unwrap(), "Keeps the mean: 3");
 
         draft.upper = "lots".to_owned();
         let judged = super::preview(host.results_reads(), &draft)
@@ -908,7 +908,7 @@ mod tests {
                 }
             }
             assert!(
-                text.lines().any(|line| line == "1.500000 V"),
+                text.lines().any(|line| line == "1.5 V"),
                 "{expression} reads in volts: {text}"
             );
         }

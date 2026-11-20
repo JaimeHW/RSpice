@@ -541,7 +541,7 @@ fn the_legend_states_values_past_the_ends_of_the_prefix_ladder() {
     for (top, vin, top_text, vin_text) in [
         (2.402_879e-20, 7.5e24, "24.02879 zV", "7.5 YV"),
         (3.1e-23, 4.2e15, "31 yV", "4.2 PV"),
-        (2.402_879e-26, 4.56e31, "24.02879e-27 V", "45.6e30 V"),
+        (2.402_879e-26, 4.56e31, "24.02879e\u{2212}27 V", "45.6e30 V"),
     ] {
         let mut state = review_strip(false);
         hold(&mut state, "TOP", top);

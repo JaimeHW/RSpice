@@ -470,7 +470,7 @@ fn histogram_shows_retained_mean_confidence_without_inventing_legacy_limits() {
     let text = paint(&mut state, true);
     // The level and the interval are one statement, and the estimator's own
     // name is not a number the reader acts on.
-    for expected in ["Mean 90% CI", "900 m to 1.1"] {
+    for expected in ["Mean 90% CI", "0.9 to 1.1"] {
         assert!(text.contains(expected), "missing {expected}: {text}");
     }
     for gone in ["Percentile bootstrap", "2000 resamples", "seed 7"] {
