@@ -123,6 +123,10 @@ impl Review {
                     });
             }
             egui::CentralPanel::default().show(ctx, |ui| {
+                // The plot relies on the document well for its background.
+                let well = ui.available_rect_before_wrap();
+                let canvas = rspice_ui_kit::tokens::Tokens::get(ui.ctx()).color.canvas_bg;
+                ui.painter().rect_filled(well, 0.0, canvas);
                 waves::show(ui, &mut host.results_parts());
             });
             crate::workbench::documents::result_document::show_document_dialog(

@@ -666,18 +666,23 @@ fn a_real_net_draws_as_a_step_trace() {
     );
 }
 
-/// The picture for review: a strip with the analog panes and the logic and
-/// bus lanes of the SAR run.
+/// The picture for review, written under `RSPICE_PICTURES`: a strip with the
+/// analog panes and the logic and bus lanes of the SAR run, in its well.
 #[test]
 #[ignore = "writes the review picture"]
 fn write_the_sar_strip_picture() {
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let run = sar_run();
     let eoc = history(run, "EOC");
     let (mut state, _) = sar_strip(BusRadix::Hex, false);
     place_cursors(&mut state, Some(eoc[eoc.len() - 1].0 + 1e-9), None);
-    let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| show(ui, &mut state.results_parts()));
+    let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| {
+        well(ui);
+        show(ui, &mut state.results_parts());
+    });
     std::fs::write(
-        "/Users/jameswhitfield/Desktop/RSpice-wip-archive/app-audit/w1-lanes-frame.png",
+        format!("{directory}/sar-strip.png"),
         canvas.png(canvas.height()),
     )
     .expect("the picture is written");

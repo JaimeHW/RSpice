@@ -463,8 +463,7 @@ fn measure_twenty_by_40k_frame_cost() {
     report("20 traces x 40k points", &mut state);
 }
 
-/// Eight million cells, the most one retained document holds, as twenty
-/// signals of four hundred thousand points.
+/// Eight million cells, as twenty signals of four hundred thousand points.
 #[test]
 #[ignore = "measurement harness"]
 fn measure_eight_million_cells_frame_cost() {
