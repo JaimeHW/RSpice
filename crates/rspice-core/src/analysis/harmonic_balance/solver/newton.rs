@@ -1578,7 +1578,7 @@ impl HbSolver {
                 .flatten()
                 .any(|scale| !scale.is_finite() || *scale < 0.0)
         {
-            return Err(HbError::InvalidCircuit(
+            return Err(HbError::NonFiniteSample(
                 "nonlinear HB residual certificate contains a non-finite value".to_string(),
             ));
         }
@@ -1679,7 +1679,7 @@ impl HbSolver {
                     || !voltage_scale.is_finite()
                     || !constitutive_scale.is_finite()
                 {
-                    return Err(HbError::InvalidCircuit(format!(
+                    return Err(HbError::NonFiniteSample(format!(
                         "nonlinear HB branch {} produced a non-finite KVL residual",
                         branch_index + 1
                     )));

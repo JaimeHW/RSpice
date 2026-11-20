@@ -983,9 +983,14 @@ impl HbSolver {
         let mut waves = self.periodic_state_waveforms(state, "native device F/Q evaluation")?;
         for spectrum in &state.mna_branch_currents {
             let waveform = self.fft.to_time_domain(spectrum);
-            if waveform.len() != self.fft.size() || waveform.iter().any(|v| !v.is_finite()) {
+            if waveform.len() != self.fft.size() {
                 return Err(HbError::InvalidCircuit(
                     "native device branch-current waveform is invalid".into(),
+                ));
+            }
+            if waveform.iter().any(|v| !v.is_finite()) {
+                return Err(HbError::NonFiniteSample(
+                    "native device branch-current waveform is non-finite".into(),
                 ));
             }
             waves.push(waveform);
@@ -1254,7 +1259,7 @@ impl HbSolver {
                     .or_insert_with(|| vec![0.0; times])[time];
                 *sum += value;
                 if !sum.is_finite() {
-                    return Err(HbError::InvalidCircuit(
+                    return Err(HbError::NonFiniteSample(
                         "native device Jacobian accumulation is non-finite".into(),
                     ));
                 }

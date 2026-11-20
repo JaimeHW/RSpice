@@ -176,10 +176,12 @@ pub enum HbError {
     LinearSolveFailed(String),
     /// Invalid circuit configuration
     InvalidCircuit(String),
-    /// A device evaluated to a non-finite value at a sample of a state the
-    /// solver proposed. A Newton trial that meets one is a rejected trial,
-    /// as a transient step whose evaluation overflows is a rejected step;
-    /// only a solve that has no other state to try reports it.
+    /// A device or residual evaluated at a state the solver proposed left the
+    /// range the periodic system represents: a non-finite value, or one the
+    /// Fourier transform cannot hold at a shared scale. A Newton trial that
+    /// meets one is a rejected trial, as a transient step whose evaluation
+    /// overflows is a rejected step; only a solve that has no other state to
+    /// try reports it.
     NonFiniteSample(String),
     /// Invalid numerical solver configuration.
     InvalidConfig(HbConfigError),

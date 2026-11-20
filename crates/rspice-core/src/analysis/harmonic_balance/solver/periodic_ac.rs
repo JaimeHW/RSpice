@@ -187,7 +187,7 @@ fn validate_periodic_state(
             .enumerate()
             .find(|(_, value)| !complex_is_finite(*value))
         {
-            return Err(HbError::InvalidCircuit(format!(
+            return Err(HbError::NonFiniteSample(format!(
                 "{context} state node {node} harmonic {harmonic} is non-finite ({:+.6e}{:+.6e}j)",
                 value.re, value.im
             )));
@@ -1256,7 +1256,7 @@ impl HbSolver {
                 .enumerate()
                 .find(|(_, value)| !value.is_finite())
             {
-                return Err(HbError::InvalidCircuit(format!(
+                return Err(HbError::NonFiniteSample(format!(
                     "{context} node {node} time sample {sample} is non-finite ({value})"
                 )));
             }
@@ -1283,8 +1283,11 @@ impl HbSolver {
             .copied()
             .map(Value::abs)
             .fold(0.0, Value::max);
+        // The samples come from a state, so values outside the range the
+        // transform can represent are the state's; only a grid of the wrong
+        // size is the system's.
         if !max_abs.is_finite() {
-            return Err(HbError::InvalidCircuit(format!(
+            return Err(HbError::NonFiniteSample(format!(
                 "{context} contains a non-finite sample"
             )));
         }
@@ -1297,7 +1300,7 @@ impl HbSolver {
         for (sample, &value) in waveform.iter().enumerate() {
             let scaled = libm::scalbn(value, -binary_exponent);
             if !scaled.is_finite() || (value != 0.0 && scaled == 0.0) {
-                return Err(HbError::InvalidCircuit(format!(
+                return Err(HbError::NonFiniteSample(format!(
                     "{context} sample {sample} is not representable at the shared Fourier scale"
                 )));
             }
@@ -1314,7 +1317,7 @@ impl HbSolver {
         }
         for (harmonic, coefficient) in spectrum.iter_mut().enumerate() {
             if !complex_is_finite(*coefficient) {
-                return Err(HbError::InvalidCircuit(format!(
+                return Err(HbError::NonFiniteSample(format!(
                     "{context} normalized harmonic {harmonic} is non-finite"
                 )));
             }
@@ -1325,7 +1328,7 @@ impl HbSolver {
                 || (normalized_coefficient.re != 0.0 && coefficient.re == 0.0)
                 || (normalized_coefficient.im != 0.0 && coefficient.im == 0.0)
             {
-                return Err(HbError::InvalidCircuit(format!(
+                return Err(HbError::NonFiniteSample(format!(
                     "{context} harmonic {harmonic} is not representable at its physical scale"
                 )));
             }
@@ -1334,7 +1337,7 @@ impl HbSolver {
             .iter()
             .all(|coefficient| *coefficient == Complex64::new(0.0, 0.0))
         {
-            return Err(HbError::InvalidCircuit(format!(
+            return Err(HbError::NonFiniteSample(format!(
                 "{context} is nonzero but has no representable retained Fourier coefficient"
             )));
         }
@@ -1375,7 +1378,7 @@ impl HbSolver {
                 for (device_index, device) in self.nonlinear_devices.iter().enumerate() {
                     for ((i, j), g) in device.jacobian(&node_voltages) {
                         if !g.is_finite() {
-                            return Err(HbError::InvalidCircuit(format!(
+                            return Err(HbError::NonFiniteSample(format!(
                                 "periodic conductance from {:?} device #{device_index} at ({i}, {j}), time sample {t}, is non-finite",
                                 device.device_type
                             )));
@@ -1391,7 +1394,7 @@ impl HbSolver {
                                 &mut g_time.entry((i, j)).or_insert_with(|| vec![0.0; n_time])[t];
                             *sample += g;
                             if !sample.is_finite() {
-                                return Err(HbError::InvalidCircuit(format!(
+                                return Err(HbError::NonFiniteSample(format!(
                                     "periodic conductance accumulation at ({i}, {j}), time sample {t}, is non-finite"
                                 )));
                             }
@@ -1449,7 +1452,7 @@ impl HbSolver {
             for (device_index, device) in self.nonlinear_devices.iter().enumerate() {
                 for ((i, j), c) in device.charge_jacobian(&node_voltages) {
                     if !c.is_finite() {
-                        return Err(HbError::InvalidCircuit(format!(
+                        return Err(HbError::NonFiniteSample(format!(
                             "periodic capacitance from {:?} device #{device_index} at ({i}, {j}), time sample {t}, is non-finite",
                             device.device_type
                         )));
@@ -1465,7 +1468,7 @@ impl HbSolver {
                             &mut c_time.entry((i, j)).or_insert_with(|| vec![0.0; n_time])[t];
                         *sample += c;
                         if !sample.is_finite() {
-                            return Err(HbError::InvalidCircuit(format!(
+                            return Err(HbError::NonFiniteSample(format!(
                                 "periodic capacitance accumulation at ({i}, {j}), time sample {t}, is non-finite"
                             )));
                         }
@@ -3725,6 +3728,9 @@ mod matrix_free_tests {
         );
     }
 
+    /// Erasing or overflowing a sampled value is a failure of the state the
+    /// samples came from, which a Newton trial rejects and continuation steps
+    /// around; a waveform that does not fill the grid is the system's.
     #[test]
     fn periodic_spectrum_scales_extreme_waveforms_and_rejects_erasure() {
         let config = HbConfig::new(1.0e6).with_harmonics(1);
@@ -3742,6 +3748,7 @@ mod matrix_free_tests {
         let error = solver
             .checked_periodic_spectrum(&erased, 1, "minimum impulse")
             .expect_err("an unrepresentable nonzero Fourier coefficient must not become zero");
+        assert!(matches!(error, HbError::NonFiniteSample(_)), "{error}");
         assert!(
             error
                 .to_string()
@@ -3756,12 +3763,23 @@ mod matrix_free_tests {
         let error = solver
             .checked_periodic_spectrum(&mixed_scale, 1, "mixed-scale cancellation waveform")
             .expect_err("normalization may not erase a representable DC residue");
+        assert!(matches!(error, HbError::NonFiniteSample(_)), "{error}");
         assert!(
             error
                 .to_string()
                 .contains("not representable at the shared Fourier scale"),
             "{error}"
         );
+
+        mixed_scale[2] = Value::INFINITY;
+        let error = solver
+            .checked_periodic_spectrum(&mixed_scale, 1, "overflowed waveform")
+            .unwrap_err();
+        assert!(matches!(error, HbError::NonFiniteSample(_)), "{error}");
+        let error = solver
+            .checked_periodic_spectrum(&mixed_scale[1..], 1, "short waveform")
+            .unwrap_err();
+        assert!(matches!(error, HbError::InvalidCircuit(_)), "{error}");
     }
 
     #[test]
