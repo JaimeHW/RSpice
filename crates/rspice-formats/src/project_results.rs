@@ -297,7 +297,7 @@ pub struct ProjectSimulationRun {
     pub id: u64,
     pub label: String,
     pub timestamp: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "stored_values::deserialize_run_analyses")]
     pub analyses: Vec<ProjectAnalysisResult>,
     /// Canonical identity of the ordered retained analysis content. Schemas
     /// through v7 omitted this field and acquire it during migration.

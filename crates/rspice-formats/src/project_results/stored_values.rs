@@ -8,7 +8,7 @@
 //! them: every run is in the store before its file is written. Outside it (a hardcopy worker's
 //! snapshot, a command-line artifact) samples in memory are written as they are.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use rspice_results::store_reader::{ColumnReference, SegmentDigest as Digest, writing_references};
 use rspice_results::waveform::SharedWaveformValues;
@@ -19,6 +19,10 @@ use crate::numeric::sample_serde;
 
 thread_local! {
     static SAVING_FILE: Cell<bool> = const { Cell::new(false) };
+    /// The x axis windows the run being read has met, each read as one waveform: every signal of
+    /// a run names the same window of its segment's x column.
+    static RUN_AXES: RefCell<Option<Vec<(ColumnReference, SharedWaveformValues)>>> =
+        const { RefCell::new(None) };
 }
 
 /// What a file write that met samples in memory says.
@@ -68,6 +72,50 @@ pub fn serialize_samples<S: Serializer>(
     }
 }
 
+/// A run's analyses, every waveform among them that names an x axis window it has met reading
+/// that window's one waveform: after a reopen the signals of a run share one axis, as they do
+/// on the run that wrote them, and a reader of the whole axis holds one copy of it.
+pub fn deserialize_run_analyses<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error> {
+    struct Restore(Option<Vec<(ColumnReference, SharedWaveformValues)>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let outer = self.0.take();
+            RUN_AXES.with(|axes| *axes.borrow_mut() = outer);
+        }
+    }
+    let _restore = Restore(RUN_AXES.with(|axes| axes.borrow_mut().replace(Vec::new())));
+    Vec::<T>::deserialize(deserializer)
+}
+
+/// The waveform of the window `reference` names, the one the run being read already has for an
+/// x axis window it met before.
+fn referenced_values(reference: ColumnReference) -> Result<SharedWaveformValues, String> {
+    let axis = reference.column == 0;
+    let met = || {
+        RUN_AXES.with(|axes| {
+            axes.borrow().as_ref().and_then(|axes| {
+                axes.iter()
+                    .find(|(met, _)| *met == reference)
+                    .map(|(_, values)| values.clone())
+            })
+        })
+    };
+    if axis && let Some(values) = met() {
+        return Ok(values);
+    }
+    let values = reference.values()?;
+    if axis {
+        RUN_AXES.with(|axes| {
+            if let Some(axes) = axes.borrow_mut().as_mut() {
+                axes.push((reference, values.clone()));
+            }
+        });
+    }
+    Ok(values)
+}
+
 pub fn deserialize_axis<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<SharedWaveformValues, D::Error> {
@@ -109,9 +157,9 @@ impl<'de> Visitor<'de> for Values {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
-        ColumnReference::deserialize(serde::de::value::MapAccessDeserializer::new(map))?
-            .values()
-            .map_err(serde::de::Error::custom)
+        let reference =
+            ColumnReference::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+        referenced_values(reference).map_err(serde::de::Error::custom)
     }
 }
 

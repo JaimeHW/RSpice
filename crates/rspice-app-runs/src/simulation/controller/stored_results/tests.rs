@@ -613,3 +613,64 @@ C1 out 0 10n
     );
     assert!(solved.contains(&AnalysisType::Transient), "{solved:?}");
 }
+
+#[test]
+fn a_reopened_run_reads_one_time_axis_for_ten_signals() {
+    let mut deck = String::from("ten node ladder\nV1 n0 0 PULSE(0 1 0 1u 1u 50u 100u)\n");
+    for node in 1..=10 {
+        deck.push_str(&format!(
+            "R{node} n{} n{node} 1k\nC{node} n{node} 0 1n\n",
+            node - 1
+        ));
+    }
+    deck.push_str(".tran 0.1u 200u\n.end\n");
+    let state: RunTestHost = super::super::test_execution::run_manual_batch_session(&deck);
+    let simulation = &state.model.simulation;
+    let results = crate::io::capture_simulation_results(simulation);
+    let root = std::env::temp_dir().join(format!("rspice-one-axis-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let file = root.join("ladder.rspiceproj");
+    rspice_app_services::io::result_segments::keep_segments_now(results.stored_segments(), &file)
+        .expect("the run's segment is kept beside the project");
+    let saved = serde_json::to_string(&results).expect("the project's results serialize");
+    rspice_results::store_reader::keep_segments_in(
+        &rspice_formats::project_results::segment_folder(&file),
+    );
+    let reopened = crate::io::simulation_state_from_results(
+        serde_json::from_str(&saved).expect("the project's results parse"),
+    )
+    .expect("the project's results restore");
+
+    let waveforms = &reopened.retained.runs[0].analyses[0].waveforms;
+    let nodes: Vec<_> = waveforms
+        .iter()
+        .filter(|waveform| waveform.name.starts_with('N'))
+        .collect();
+    assert!(
+        nodes.len() >= 10,
+        "{:?}",
+        waveforms.iter().map(|w| &w.name).collect::<Vec<_>>()
+    );
+    let before = rspice_results::waveform::column_work::ColumnWork::read();
+    let rows: usize = nodes.iter().map(|waveform| waveform.x.iter().count()).sum();
+    let work = before.since();
+    assert_eq!(rows, nodes.len() * nodes[0].x.len());
+    assert_eq!(
+        work.stored_reads,
+        1,
+        "{} signals read their time axis {} times",
+        nodes.len(),
+        work.stored_reads
+    );
+    assert!(
+        nodes
+            .iter()
+            .all(|waveform| rspice_results::waveform::WaveformValues::ptr_eq(
+                &waveform.x,
+                &nodes[0].x
+            )),
+        "every signal reads one axis"
+    );
+    drop(reopened);
+    let _ = std::fs::remove_dir_all(&root);
+}
