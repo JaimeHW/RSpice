@@ -3337,3 +3337,132 @@ fn an_observed_parameter_reaches_the_cards_and_instances_that_read_it() {
         );
     }
 }
+
+/// A formal read again in one call reuses its argument's value: nested calls
+/// that each read their formal twice cost one argument read per call, where
+/// reading the argument again per read doubled the work per level.
+#[test]
+fn a_formal_read_again_reuses_its_argument() {
+    use crate::expr::Derivative;
+    let mut ctx = ParamContext::new();
+    ctx.define_function("TWICE", vec!["X".to_owned()], "X+X");
+    ctx.define_function("SQUARE", vec!["X".to_owned()], "X*X");
+    let nested = (0..24).fold("P".to_owned(), |inner, _| format!("TWICE({inner})"));
+    let mut prepared =
+        PreparedExpression::compile(&parse_expression(&nested).unwrap(), &ctx).unwrap();
+    let mut reads = 0usize;
+    let value = prepared
+        .evaluate_with(&ctx, &mut |name| {
+            assert_eq!(name, "P");
+            reads += 1;
+            Ok(Some(1.5.into()))
+        })
+        .unwrap();
+    assert_eq!(value, ComplexValue::from(1.5 * f64::from(1 << 24)));
+    assert_eq!(reads, 1);
+
+    // A derivative read with the argument is reused with it.
+    let mut prepared =
+        PreparedExpression::compile(&parse_expression("SQUARE(SQUARE(P))").unwrap(), &ctx).unwrap();
+    let (value, direction) = prepared
+        .evaluate_scalar_direction_with(&ctx, &mut |name| {
+            assert_eq!(name, "P");
+            Ok(Some((2.0.into(), Derivative::from(1.0))))
+        })
+        .unwrap();
+    assert_eq!(value, 16.0);
+    assert_eq!(direction.binary64(), 32.0);
+}
+
+/// An output expression reads each `.FUNC` body once and calls it by
+/// reference, with the value the calls written out give; where the deck
+/// binds probe operands, each binding of a function reads its own instance.
+#[test]
+fn an_output_expression_calls_each_function_body_by_reference() {
+    use crate::abort_signal::NoAbort;
+    let mut ctx = ParamContext::new();
+    ctx.set_function_probe_operands(FunctionProbeOperands::Literal);
+    ctx.define_function("leaf", vec!["a".into(), "b".into()], "a < b ? a : b");
+    ctx.define_function("mid", vec!["a".into(), "b".into()], "leaf(a,b)+leaf(b,a)");
+    ctx.define_function("top", vec!["a".into()], "mid(a,a+mid(a,1))");
+    let text = "top(p)+leaf(1,2)";
+    let output = OutputExpression::parse(text, &ctx, &NoAbort).unwrap();
+    let keys = output
+        .instances()
+        .iter()
+        .map(FunctionInstance::key)
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["TOP", "MID", "LEAF"]);
+    let resolve = |name: &str| Ok((name == "P").then(|| ComplexValue::from(3.0)));
+    let value = PreparedExpression::compile_output(
+        output.root(),
+        &output,
+        &ctx,
+        &std::collections::HashSet::new(),
+        &mut |_| Ok(None),
+    )
+    .unwrap()
+    .evaluate_with(&ctx, &mut |name| resolve(name))
+    .unwrap();
+    let written_out = expand_output_user_functions(text, &ctx).unwrap();
+    let expected = PreparedExpression::compile(&parse_expression(&written_out).unwrap(), &ctx)
+        .unwrap()
+        .evaluate_with(&ctx, &mut |name| resolve(name))
+        .unwrap();
+    assert_eq!(value, expected);
+
+    ctx.define_function("loop", vec!["x".into()], "loop(x)");
+    ctx.define_function("broken", vec![], "(");
+    for (text, message) in [
+        ("leaf(1)", "Function 'LEAF' expects 2 args but got 1"),
+        ("loop(1)", "Detected recursive .FUNC expansion for 'LOOP'"),
+        ("broken()", "Failed to parse .FUNC BROKEN body '('"),
+    ] {
+        match OutputExpression::parse(text, &ctx, &NoAbort) {
+            Err(OutputExpressionError::Semantic(detail)) => {
+                assert!(detail.starts_with(message), "{text}: {detail}");
+            }
+            other => panic!("{text} read as {other:?}"),
+        }
+    }
+
+    let mut ctx = ParamContext::new();
+    ctx.set("p", 3.0);
+    ctx.define_function("fv", vec!["x".to_string()], "v(x)*2");
+    ctx.define_function("fn", vec!["x".to_string()], "fv(x)+1");
+    let output = OutputExpression::parse("fn(n1)+fn(p)+fv(n1)", &ctx, &NoAbort).unwrap();
+    let keys = output
+        .instances()
+        .iter()
+        .map(FunctionInstance::key)
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["FN(N1)", "FV(N1)", "FN(3)", "FV(3)"]);
+    let bound = output.instance("FV(3)").unwrap();
+    assert_eq!(bound.probe_binding("x"), Some("3"));
+    assert_eq!(serialize_bound_body(bound.body()), "V(3)*2");
+    match OutputExpression::parse("fn(1+2)", &ctx, &NoAbort) {
+        Err(OutputExpressionError::Semantic(detail)) => assert!(
+            detail.starts_with(".FUNC FV reads its argument 'X' as a node or device name in V(X)")
+                && detail.contains("which names neither"),
+            "{detail}"
+        ),
+        other => panic!("fn(1+2) read as {other:?}"),
+    }
+}
+
+fn serialize_bound_body(body: &Expr) -> String {
+    match body {
+        Expr::BinOp {
+            op: BinOpKind::Mul,
+            left,
+            right,
+        } => match (left.as_ref(), right.as_ref()) {
+            (Expr::FnCall { name, args }, Expr::Number(factor)) => match args.as_slice() {
+                [Expr::Param(node)] => format!("{name}({node})*{factor}"),
+                _ => format!("{body:?}"),
+            },
+            _ => format!("{body:?}"),
+        },
+        _ => format!("{body:?}"),
+    }
+}

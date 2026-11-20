@@ -5,7 +5,9 @@
 //! complete coverage. Empty complete histories and missing histories differ.
 
 use super::*;
-use crate::netlist::expr::{BinOpKind, UnaryOpKind};
+use crate::netlist::expr::{
+    BinOpKind, ExprError, FunctionInstance, OutputExpression, OutputExpressionError, UnaryOpKind,
+};
 use crate::transient_observation::ImpulseTraceRef;
 use crate::{CurrentImpulseOwner, CurrentImpulseTrace};
 
@@ -44,7 +46,7 @@ fn failure(detail: impl Into<String>) -> ImpulseObservationError {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Form<'a> {
     // Some only for a time-independent, real, finite expression. A sampled
     // voltage or an impulse-free current is still time dependent.
@@ -65,6 +67,32 @@ impl Form<'_> {
         }
         self.terms.retain(|term| term.weight != 0.0);
         Ok(())
+    }
+}
+
+/// Where a node is read: the output expression it belongs to and the call
+/// whose body holds it, if any.
+#[derive(Clone, Copy)]
+struct Scope<'o, 'c, 'a> {
+    output: &'o OutputExpression,
+    call: Option<&'c Call<'o, 'a>>,
+}
+
+/// A call entered: the instance whose body is read, and the form of each
+/// argument, which its formal reads.
+struct Call<'o, 'a> {
+    instance: &'o FunctionInstance,
+    arguments: Vec<Form<'a>>,
+}
+
+impl<'a> Call<'_, 'a> {
+    /// The form of the argument the formal `name` reads.
+    fn argument(&self, name: &str) -> Option<&Form<'a>> {
+        self.instance
+            .formals()
+            .iter()
+            .zip(&self.arguments)
+            .find_map(|(formal, argument)| (formal == name).then_some(argument))
     }
 }
 
@@ -293,9 +321,16 @@ impl<'a> Resolver<'a, '_> {
         Ok(form)
     }
 
-    fn expression(&self, expression: &NetExpr) -> Result<Form<'a>, ImpulseObservationError> {
+    fn expression(
+        &self,
+        expression: &NetExpr,
+        scope: Scope<'_, '_, 'a>,
+    ) -> Result<Form<'a>, ImpulseObservationError> {
         if self.abort.is_aborted() {
             return Err(ImpulseObservationError::Aborted);
+        }
+        if let Some(form) = self.called(expression, scope)? {
+            return Ok(form);
         }
         let mut form = match expression {
             NetExpr::Param(name) => {
@@ -306,7 +341,7 @@ impl<'a> Resolver<'a, '_> {
                     )
                 {
                     Form {
-                        constant: self.constant(expression),
+                        constant: self.constant(expression, scope),
                         ..Form::default()
                     }
                 } else {
@@ -314,7 +349,7 @@ impl<'a> Resolver<'a, '_> {
                 }
             }
             NetExpr::Number(_) | NetExpr::ComplexNumber(_) => Form {
-                constant: self.constant(expression),
+                constant: self.constant(expression, scope),
                 ..Form::default()
             },
             NetExpr::StringLiteral(_) => Form::default(),
@@ -334,7 +369,7 @@ impl<'a> Resolver<'a, '_> {
                 self.probe(&format!("{name}({})", arguments.join(",")))?
             }
             NetExpr::UnaryOp { op, operand } => {
-                let mut child = self.expression(operand)?;
+                let mut child = self.expression(operand, scope)?;
                 if !child.terms.is_empty() {
                     match op {
                         UnaryOpKind::Neg => child.scale(-1.0)?,
@@ -343,14 +378,16 @@ impl<'a> Resolver<'a, '_> {
                         }
                     }
                 }
-                child.constant = child.constant.and_then(|_| self.constant(expression));
+                child.constant = child
+                    .constant
+                    .and_then(|_| self.constant(expression, scope));
                 child
             }
             NetExpr::BinOp { op, left, right } => {
-                let mut left = self.expression(left)?;
-                let mut right = self.expression(right)?;
+                let mut left = self.expression(left, scope)?;
+                let mut right = self.expression(right, scope)?;
                 let constant = if left.constant.is_some() && right.constant.is_some() {
-                    self.constant(expression)
+                    self.constant(expression, scope)
                 } else {
                     None
                 };
@@ -415,7 +452,7 @@ impl<'a> Resolver<'a, '_> {
                     "RAND" | "RANDOM" | "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "MC"
                 );
                 for arg in args {
-                    let child = self.expression(arg)?;
+                    let child = self.expression(arg, scope)?;
                     if !child.terms.is_empty() {
                         return Err(failure(
                             "functions of impulses are undefined; use an affine expression",
@@ -424,7 +461,9 @@ impl<'a> Resolver<'a, '_> {
                     all_constant &= child.constant.is_some();
                 }
                 Form {
-                    constant: all_constant.then(|| self.constant(expression)).flatten(),
+                    constant: all_constant
+                        .then(|| self.constant(expression, scope))
+                        .flatten(),
                     ..Form::default()
                 }
             }
@@ -456,11 +495,80 @@ impl<'a> Resolver<'a, '_> {
         Ok(form)
     }
 
-    fn constant(&self, expression: &NetExpr) -> Option<Value> {
+    /// The form of a formal, which reads its argument's, or of a call, which
+    /// reads as its function's body; `None` for any other node.
+    fn called<'o>(
+        &self,
+        expression: &NetExpr,
+        scope: Scope<'o, '_, 'a>,
+    ) -> Result<Option<Form<'a>>, ImpulseObservationError> {
+        if let NetExpr::Param(name) = expression
+            && let Some(argument) = scope.call.and_then(|call| call.argument(name))
+        {
+            return Ok(Some(argument.clone()));
+        }
+        let NetExpr::FnCall { name, args } = expression else {
+            return Ok(None);
+        };
+        let Some(instance) = scope.output.instance(name) else {
+            return Ok(None);
+        };
+        // Each argument's form is found once for the call.
+        let arguments = args
+            .iter()
+            .map(|arg| self.expression(arg, scope))
+            .collect::<Result<Vec<_>, _>>()?;
+        let call = Call {
+            instance,
+            arguments,
+        };
+        self.expression(
+            instance.body(),
+            Scope {
+                output: scope.output,
+                call: Some(&call),
+            },
+        )
+        .map(Some)
+    }
+
+    fn constant(&self, expression: &NetExpr, scope: Scope<'_, '_, 'a>) -> Option<Value> {
         // Use the same parameter/dialect evaluator, retaining complex and
         // nonfinite failures instead of projecting them into coefficients.
-        crate::netlist::expr::evaluate_complex_raw(expression, self.params)
-            .ok()
+        let value = if scope.call.is_none() && scope.output.instances().is_empty() {
+            crate::netlist::expr::evaluate_complex_raw(expression, self.params).ok()?
+        } else {
+            // In a body, a formal reads its argument's constant; a call
+            // evaluates its function's compiled body.
+            let mut program = PreparedExpression::compile_output(
+                expression,
+                scope.output,
+                self.params,
+                &HashSet::new(),
+                &mut |_| Ok(None),
+            )
+            .ok()?;
+            program
+                .evaluate_with_abort(
+                    self.params,
+                    &mut |name| {
+                        let Some(argument) = scope.call.and_then(|call| call.argument(name)) else {
+                            return Ok(None);
+                        };
+                        argument
+                            .constant
+                            .map(|value| Some(ComplexValue::from(value)))
+                            .ok_or_else(|| {
+                                ExprError::InvalidArgument(format!(
+                                    "argument {name} is not a constant"
+                                ))
+                            })
+                    },
+                    self.abort,
+                )
+                .ok()?
+        };
+        Some(value)
             .filter(|value| is_real(*value) && value.re.is_finite())
             .map(|value| value.re)
     }
@@ -654,34 +762,25 @@ pub(crate) fn resolve_with_coverage<'a>(
         .strip_prefix('{')
         .and_then(|body| body.strip_suffix('}'))
     {
-        let protected = params
-            .all_params()
-            .into_iter()
-            .map(|(name, _)| name.to_ascii_uppercase())
-            .collect();
-        let expanded = crate::netlist::expr::expand_output_user_functions_with_abort(
-            body, params, &protected, abort,
-        )
-        .map_err(|error| match error {
-            crate::netlist::expr::BehavioralPreparationError::Aborted => {
-                ImpulseObservationError::Aborted
+        let output = OutputExpression::parse(body, params, abort).map_err(|error| match error {
+            OutputExpressionError::Aborted => ImpulseObservationError::Aborted,
+            OutputExpressionError::Parse(detail) | OutputExpressionError::Semantic(detail) => {
+                failure(detail)
             }
-            crate::netlist::expr::BehavioralPreparationError::Semantic(detail) => failure(detail),
         })?;
-        let parsed = crate::netlist::expr::parse_expression_with_abort(&expanded, abort).map_err(
-            |error| match error {
-                crate::netlist::expr::ParseExpressionWithAbortError::Aborted => {
-                    ImpulseObservationError::Aborted
-                }
-                crate::netlist::expr::ParseExpressionWithAbortError::Parse(error) => {
-                    failure(error.to_string())
-                }
-            },
-        )?;
-        parsed
-            .ensure_stack_safe_depth()
-            .map_err(|error| failure(error.to_string()))?;
-        resolver.expression(&parsed)?.terms
+        for tree in output.trees() {
+            tree.ensure_stack_safe_depth()
+                .map_err(|error| failure(error.to_string()))?;
+        }
+        resolver
+            .expression(
+                output.root(),
+                Scope {
+                    output: &output,
+                    call: None,
+                },
+            )?
+            .terms
     } else {
         resolver.probe(trimmed)?.terms
     };

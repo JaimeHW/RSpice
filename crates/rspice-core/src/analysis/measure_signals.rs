@@ -67,7 +67,8 @@ use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
 use crate::netlist::expr::{
-    ComplexValue, Expr as NetExpr, ExpressionEvaluationError, PreparedExpression, is_real,
+    ComplexValue, Expr as NetExpr, ExpressionEvaluationError, OutputExpression,
+    OutputExpressionError, PreparedExpression, is_real,
 };
 use crate::netlist::{
     InterfaceNodeAliases, Netlist, NetlistSourceLocation, OutputAnalysisKind, OutputDirectiveKind,
@@ -870,52 +871,77 @@ impl LivePreparedExpression {
         params: &crate::netlist::ParamContext,
         abort: &dyn AbortSignal,
     ) -> Result<Self, LivePreparedExpressionCompileError> {
+        Self::compile_using(params, abort, |bindings| {
+            PreparedExpression::compile_with_bindings(expression, params, &HashSet::new(), bindings)
+        })
+    }
+
+    /// Compile an output expression's call graph, each function body once.
+    fn compile_output_with_abort(
+        output: &OutputExpression,
+        params: &crate::netlist::ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, LivePreparedExpressionCompileError> {
+        Self::compile_using(params, abort, |bindings| {
+            PreparedExpression::compile_output(
+                output.root(),
+                output,
+                params,
+                &HashSet::new(),
+                bindings,
+            )
+        })
+    }
+
+    /// Compile with each probe accessor bound to a typed external read.
+    fn compile_using(
+        params: &crate::netlist::ParamContext,
+        abort: &dyn AbortSignal,
+        compile: impl FnOnce(
+            &mut dyn FnMut(&NetExpr) -> Result<Option<String>, crate::netlist::expr::ExprError>,
+        ) -> Result<PreparedExpression, crate::netlist::expr::ExprError>,
+    ) -> Result<Self, LivePreparedExpressionCompileError> {
         let mut probes = HashMap::new();
         let mut compilation_aborted = false;
-        let evaluator = PreparedExpression::compile_with_bindings(
-            expression,
-            params,
-            &HashSet::new(),
-            &mut |node| {
-                if abort.is_aborted() {
-                    compilation_aborted = true;
-                    return Err(crate::netlist::expr::ExprError::InvalidArgument(
-                        "expression compilation aborted".to_owned(),
-                    ));
-                }
-                let NetExpr::FnCall { name, args } = node else {
-                    return Ok(None);
-                };
-                if params.has_function(name)
-                    || !(is_equation_probe_accessor(name)
-                        || is_equation_noise_accessor(name)
-                        || is_equation_generic_output_accessor(name))
-                {
-                    return Ok(None);
-                }
-                let prefix = name.to_ascii_uppercase();
-                let arguments = args
-                    .iter()
-                    .map(|argument| {
-                        equation_probe_argument(Some(argument)).ok_or_else(|| {
-                            crate::netlist::expr::ExprError::InvalidArgument(format!(
-                                "{prefix}() in measurement has an invalid argument"
-                            ))
-                        })
+        let evaluator = compile(&mut |node| {
+            if abort.is_aborted() {
+                compilation_aborted = true;
+                return Err(crate::netlist::expr::ExprError::InvalidArgument(
+                    "expression compilation aborted".to_owned(),
+                ));
+            }
+            let NetExpr::FnCall { name, args } = node else {
+                return Ok(None);
+            };
+            if params.has_function(name)
+                || !(is_equation_probe_accessor(name)
+                    || is_equation_noise_accessor(name)
+                    || is_equation_generic_output_accessor(name))
+            {
+                return Ok(None);
+            }
+            let prefix = name.to_ascii_uppercase();
+            let arguments = args
+                .iter()
+                .map(|argument| {
+                    equation_probe_argument(Some(argument)).ok_or_else(|| {
+                        crate::netlist::expr::ExprError::InvalidArgument(format!(
+                            "{prefix}() in measurement has an invalid argument"
+                        ))
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let authored = format!("{prefix}({})", arguments.join(","));
-                // Parsed identifiers cannot contain NUL. The compiler stores
-                // this as a typed external node, separate from formal arguments.
-                let key = format!("\0RSPICE_LIVE_PROBE_{}", probes.len());
-                probes.insert(
-                    key.clone(),
-                    LiveRawOutputOperator::compile(&authored)
-                        .map_err(crate::netlist::expr::ExprError::InvalidArgument)?,
-                );
-                Ok(Some(key))
-            },
-        );
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let authored = format!("{prefix}({})", arguments.join(","));
+            // Parsed identifiers cannot contain NUL. The compiler stores
+            // this as a typed external node, separate from formal arguments.
+            let key = format!("\0RSPICE_LIVE_PROBE_{}", probes.len());
+            probes.insert(
+                key.clone(),
+                LiveRawOutputOperator::compile(&authored)
+                    .map_err(crate::netlist::expr::ExprError::InvalidArgument)?,
+            );
+            Ok(Some(key))
+        });
         if compilation_aborted || abort.is_aborted() {
             return Err(LivePreparedExpressionCompileError::Aborted);
         }
@@ -2157,23 +2183,14 @@ pub fn tran_print_operands_read_other_rows(netlist: &Netlist) -> bool {
             })
 }
 
-/// Whether an output expression, its user functions expanded as
-/// [`evaluate_output_operand`] expands them, reads rows other than the one it
-/// is evaluated at.
+/// Whether an output expression, in its own tree or in a body of a function
+/// it calls, reads rows other than the one it is evaluated at: an `SDT`
+/// carries its integral from row to row.
 fn expression_reads_other_rows(body: &str, params: &crate::netlist::ParamContext) -> bool {
-    let protected_identifiers = params
-        .all_params()
-        .into_iter()
-        .map(|(name, _)| name.to_ascii_uppercase())
-        .collect::<HashSet<_>>();
-    crate::netlist::expr::expand_output_user_functions_with_abort(
-        body,
-        params,
-        &protected_identifiers,
-        &NoAbort,
-    )
-    .map_or(true, |expanded| {
-        super::measure::stream::reads_other_rows(&expanded)
+    OutputExpression::parse(body, params, &NoAbort).map_or(true, |output| {
+        output.any_node(
+            |node| matches!(node, NetExpr::FnCall { name, .. } if name.eq_ignore_ascii_case("SDT")),
+        )
     })
 }
 
@@ -2904,45 +2921,21 @@ pub(crate) fn evaluate_output_operand(
             if abort.is_aborted() {
                 return Err(OutputOperandEvaluationError::Aborted);
             }
-            let protected_identifiers = params
-                .all_params()
-                .into_iter()
-                .map(|(name, _)| name.to_ascii_uppercase())
-                .collect::<HashSet<_>>();
-            if abort.is_aborted() {
-                return Err(OutputOperandEvaluationError::Aborted);
-            }
-            let expanded = crate::netlist::expr::expand_output_user_functions_with_abort(
-                body,
-                params,
-                &protected_identifiers,
-                abort,
+            // The expression and the bodies of the functions it calls, each
+            // read once; Xyce reads `{X1:R1:R}` as one device-parameter name.
+            let output =
+                OutputExpression::parse(body, params, abort).map_err(|error| match error {
+                    OutputExpressionError::Aborted => OutputOperandEvaluationError::Aborted,
+                    OutputExpressionError::Parse(error) => {
+                        (None, format!("failed to parse expression: {error}")).into()
+                    }
+                    OutputExpressionError::Semantic(detail) => (None, detail).into(),
+                })?;
+            let column_kind = expression_output_column_kind(output.head(), signal_index);
+            let mut prepared = LivePreparedExpression::compile_output_with_abort(
+                &output, params, abort,
             )
             .map_err(|error| match error {
-                crate::netlist::expr::BehavioralPreparationError::Aborted => {
-                    OutputOperandEvaluationError::Aborted
-                }
-                crate::netlist::expr::BehavioralPreparationError::Semantic(detail) => {
-                    (None, detail).into()
-                }
-            })?;
-            // Xyce reads `{X1:R1:R}` as one device-parameter name.
-            let parse = if params.expression_dialect() == crate::config::ExpressionDialect::Xyce {
-                crate::netlist::expr::parse_xyce_expression_with_abort
-            } else {
-                crate::netlist::expr::parse_expression_with_abort
-            };
-            let parsed = parse(&expanded, abort).map_err(|error| match error {
-                crate::netlist::expr::ParseExpressionWithAbortError::Aborted => {
-                    OutputOperandEvaluationError::Aborted
-                }
-                crate::netlist::expr::ParseExpressionWithAbortError::Parse(error) => {
-                    (None, format!("failed to parse expression: {error}")).into()
-                }
-            })?;
-            let column_kind = expression_output_column_kind(&parsed, signal_index);
-            let mut prepared = LivePreparedExpression::compile_with_abort(&parsed, params, abort)
-                .map_err(|error| match error {
                 LivePreparedExpressionCompileError::Aborted => {
                     OutputOperandEvaluationError::Aborted
                 }
@@ -8911,6 +8904,42 @@ mod tests {
         .expect_err("DC series materialization must poll cancellation");
         assert!(matches!(error, SimulationError::Aborted));
         assert!(counting_abort.count() >= 5);
+    }
+
+    #[test]
+    fn an_output_expression_reads_each_argument_once_per_call() {
+        // `TWICE` reads its formal twice, so writing twenty-four nested calls
+        // out doubles the expression twenty-four times, past the expansion
+        // budget. Called by reference, each call reads its argument once.
+        let nested = (0..24).fold("V(out)".to_owned(), |inner, _| format!("TWICE({inner})"));
+        let netlist = Netlist::parse(&format!(
+            "nested output calls\n\
+             V1 out 0 0\n\
+             R1 out 0 1k\n\
+             .FUNC TWICE(X) {{X+X}}\n\
+             .DC V1 0 1 1\n\
+             .PRINT DC {{{nested}}}\n\
+             .END\n"
+        ))
+        .expect("nested calls validate without being written out");
+        let point = |value: Value| {
+            let mut result = SimulationResult::new(2, 1);
+            result.node_names = vec!["0".into(), "out".into()];
+            result.node_voltages = vec![0.0, value];
+            result.branch_names = vec!["V1".into()];
+            result.branch_currents = vec![-value];
+            result
+        };
+        let sweep = vec![(0.0, point(0.0)), (1.5, point(1.5))];
+        let columns = evaluate_dc_output_requests_with_abort(
+            &netlist,
+            &sweep,
+            ResourceLimits::default(),
+            &NoAbort,
+        )
+        .expect("the nested column evaluates");
+        let (_, _, values) = columns.last().expect("the nested column is printed");
+        assert_eq!(values, &[0.0, 1.5 * 2.0_f64.powi(24)]);
     }
 
     #[test]

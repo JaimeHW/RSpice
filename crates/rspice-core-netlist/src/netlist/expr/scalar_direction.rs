@@ -16,6 +16,8 @@ pub(super) struct ScalarDirection<'a, F> {
     resolver: &'a mut F,
     directions: Vec<Derivative>,
     functions: HashMap<(usize, usize), ScalarFunction>,
+    /// The direction of each argument a formal has read, by binding slot.
+    remembered: Vec<Derivative>,
 }
 
 struct ScalarFunction {
@@ -42,6 +44,7 @@ impl<'a, F> ScalarDirection<'a, F> {
             resolver,
             directions: Vec::new(),
             functions: HashMap::new(),
+            remembered: Vec::new(),
         }
     }
 
@@ -212,6 +215,25 @@ where
 
     fn discard_condition(&mut self, _condition: ComplexValue) -> Result<(), ExprError> {
         self.pop().map(|_| ())
+    }
+
+    fn remember(&mut self, slot: usize) -> Result<(), ExprError> {
+        let direction = *self.directions.last().ok_or_else(|| {
+            ExprError::InvalidArgument("expression direction stack underflow".to_owned())
+        })?;
+        if self.remembered.len() <= slot {
+            self.remembered.resize(slot + 1, 0.0.into());
+        }
+        self.remembered[slot] = direction;
+        Ok(())
+    }
+
+    fn recall(&mut self, slot: usize) -> Result<(), ExprError> {
+        let direction = *self.remembered.get(slot).ok_or_else(|| {
+            ExprError::InvalidArgument("expression argument direction is missing".to_owned())
+        })?;
+        self.directions.push(direction);
+        Ok(())
     }
 }
 

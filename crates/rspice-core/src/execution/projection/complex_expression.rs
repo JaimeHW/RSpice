@@ -22,8 +22,8 @@ use crate::abort_signal::AbortSignal;
 use crate::analysis::measure_signals::PhaseUnit;
 use crate::engine::SimulationError;
 use crate::netlist::expr::{
-    BehavioralPreparationError, BinOpKind, ComplexValue, Expr, ExprError,
-    ExpressionEvaluationError, ParseExpressionWithAbortError, PreparedExpression, UnaryOpKind,
+    BinOpKind, ComplexValue, Expr, ExprError, ExpressionEvaluationError, OutputExpression,
+    OutputExpressionError, PreparedExpression, UnaryOpKind,
 };
 use crate::netlist::{OutputOperandKind, ParamContext, SaveSignal, canonical_symbol};
 
@@ -38,30 +38,20 @@ pub(super) fn xyce_ac_expression_columns(
     phase_unit: PhaseUnit,
     abort: &dyn AbortSignal,
 ) -> Result<Option<Vec<ProjectedSignal>>, SimulationError> {
-    let protected = params
-        .all_params()
-        .into_iter()
-        .map(|(name, _)| name.to_ascii_uppercase())
-        .collect::<HashSet<_>>();
-    let expanded = match crate::netlist::expr::expand_output_user_functions_with_abort(
-        body, params, &protected, abort,
-    ) {
-        Ok(expanded) => expanded,
-        Err(BehavioralPreparationError::Aborted) => return Err(SimulationError::Aborted),
-        Err(BehavioralPreparationError::Semantic(_)) => return Ok(None),
-    };
-    let expression = match crate::netlist::expr::parse_xyce_expression_with_abort(&expanded, abort)
-    {
-        Ok(expression) => expression,
-        Err(ParseExpressionWithAbortError::Aborted) => return Err(SimulationError::Aborted),
-        Err(ParseExpressionWithAbortError::Parse(_)) => return Ok(None),
+    let output = match OutputExpression::parse(body, params, abort) {
+        Ok(output) => output,
+        Err(OutputExpressionError::Aborted) => return Err(SimulationError::Aborted),
+        Err(OutputExpressionError::Parse(_) | OutputExpressionError::Semantic(_)) => {
+            return Ok(None);
+        }
     };
 
     let mut phasors: Vec<Vec<ComplexValue>> = Vec::new();
     let mut keys: HashMap<String, usize> = HashMap::new();
     let mut unavailable = None;
-    let compiled = PreparedExpression::compile_with_bindings(
-        &expression,
+    let compiled = PreparedExpression::compile_output(
+        output.root(),
+        &output,
         params,
         &HashSet::new(),
         &mut |node| {
@@ -161,7 +151,7 @@ pub(super) fn xyce_ac_expression_columns(
     }
 
     let name = authored.trim();
-    let columns = if is_complex(&expression) {
+    let columns = if output_is_complex(&output) {
         vec![
             real_column(format!("Re({name})"), values.iter().map(|value| value.re))?,
             real_column(format!("Im({name})"), values.iter().map(|value| value.im))?,
@@ -215,17 +205,58 @@ fn probe_argument(argument: &Expr) -> Option<String> {
 
 /// Whether Xyce types the expression complex: some `V()` or `I()` phasor (or
 /// a literal with an imaginary part) reaches the root through nodes that
-/// carry their operands' type.
-fn is_complex(expression: &Expr) -> bool {
-    let mut pending = vec![expression];
+/// carry their operands' type, through the bodies of the functions it calls
+/// as through its own nodes.
+fn output_is_complex(output: &OutputExpression) -> bool {
+    let mut summaries = HashMap::new();
+    complex_reach(output.root(), &[], output, &mut summaries).complex
+}
+
+/// How a tree's type reaches its root: complex in itself, and which of the
+/// enclosing function's formals carry their argument's type to it.
+#[derive(Clone, Default)]
+struct TypeReach {
+    complex: bool,
+    formals: Vec<usize>,
+}
+
+/// The type reach of `tree`, read in a body with `formals`. A call carries
+/// the type its instance's body does, so each instance is typed once.
+fn complex_reach(
+    tree: &Expr,
+    formals: &[String],
+    output: &OutputExpression,
+    summaries: &mut HashMap<String, TypeReach>,
+) -> TypeReach {
+    let mut reach = TypeReach::default();
+    let mut pending = vec![tree];
     while let Some(node) = pending.pop() {
+        if let Expr::FnCall { name, args } = node
+            && let Some(instance) = output.instance(name)
+        {
+            let callee = match summaries.get(instance.key()) {
+                Some(callee) => callee.clone(),
+                None => {
+                    let callee =
+                        complex_reach(instance.body(), instance.formals(), output, summaries);
+                    summaries.insert(instance.key().to_owned(), callee.clone());
+                    callee
+                }
+            };
+            reach.complex |= callee.complex;
+            pending.extend(callee.formals.iter().filter_map(|&formal| args.get(formal)));
+            continue;
+        }
         match node {
-            Expr::Number(_) | Expr::StringLiteral(_) | Expr::Param(_) => {}
-            Expr::ComplexNumber(value) => {
-                if value.im != 0.0 {
-                    return true;
+            Expr::Param(name) => {
+                if let Some(formal) = formals.iter().position(|formal| formal == name)
+                    && !reach.formals.contains(&formal)
+                {
+                    reach.formals.push(formal);
                 }
             }
+            Expr::Number(_) | Expr::StringLiteral(_) => {}
+            Expr::ComplexNumber(value) => reach.complex |= value.im != 0.0,
             Expr::UnaryOp {
                 op: UnaryOpKind::Neg,
                 operand,
@@ -240,8 +271,8 @@ fn is_complex(expression: &Expr) -> bool {
             // `%` is Xyce's real fmod; comparisons and logic are real.
             Expr::BinOp { .. } => {}
             Expr::FnCall { name, args } => match name.to_ascii_uppercase().as_str() {
-                "V" | "I" => return true,
-                lead if is_lead_accessor(lead) => return true,
+                "V" | "I" => reach.complex = true,
+                lead if is_lead_accessor(lead) => reach.complex = true,
                 "IF" => pending.extend(args.iter().skip(1)),
                 "VR" | "VI" | "VM" | "VP" | "VDB" | "IR" | "II" | "IM" | "IP" | "IDB" | "ABS"
                 | "REAL" | "RE" | "IMAG" | "IMG" | "PH" | "PHASE" | "MAG" | "M" | "DB" | "MAX"
@@ -252,12 +283,20 @@ fn is_complex(expression: &Expr) -> bool {
             },
         }
     }
-    false
+    reach
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_complex;
+    use super::output_is_complex;
+    use crate::netlist::ParamContext;
+    use crate::netlist::expr::OutputExpression;
+
+    fn is_complex(body: &str, params: &ParamContext) -> bool {
+        let output =
+            OutputExpression::parse(body, params, &crate::abort_signal::NoAbort).expect("parses");
+        output_is_complex(&output)
+    }
 
     #[test]
     fn xyce_types_an_ac_expression_by_its_phasors() {
@@ -273,8 +312,30 @@ mod tests {
             ("max(v(1), v(2))", false),
             ("v(2) > 0", false),
         ] {
-            let expression = crate::netlist::expr::parse_expression(body).expect("parses");
-            assert_eq!(is_complex(&expression), complex, "{body}");
+            assert_eq!(is_complex(body, &ParamContext::new()), complex, "{body}");
+        }
+    }
+
+    #[test]
+    fn a_call_carries_the_type_its_body_gives_its_arguments() {
+        let mut params = ParamContext::new();
+        params.define_function("twice", vec!["x".into()], "2*x");
+        params.define_function("magnitude", vec!["x".into()], "abs(x)");
+        params.define_function("probe", vec!["x".into()], "v(2)+x");
+        params.define_function(
+            "outer",
+            vec!["a".into(), "b".into()],
+            "twice(a)*magnitude(b)",
+        );
+        for (body, complex) in [
+            ("twice(v(2))", true),
+            ("twice(vr(2))", false),
+            ("magnitude(v(2))", false),
+            ("probe(1)", true),
+            ("outer(v(1), 1)", true),
+            ("outer(1, v(1))", false),
+        ] {
+            assert_eq!(is_complex(body, &params), complex, "{body}");
         }
     }
 }

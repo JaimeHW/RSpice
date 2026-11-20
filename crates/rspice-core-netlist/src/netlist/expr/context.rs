@@ -409,6 +409,8 @@ pub struct ParamContext {
     /// First source location of each parameter-function definition in the
     /// current parser scope.
     scope_function_definitions: HashMap<String, crate::netlist::NetlistSourceLocation>,
+    /// The `.FUNC` bodies output expressions have read, each parsed once.
+    function_bodies: super::output_expression::FunctionBodies,
 }
 
 impl ParamContext {
@@ -1544,6 +1546,10 @@ impl ParamContext {
     /// preventing repeated argument substitution from multiplying static ASTs.
     pub fn function_count(&self) -> usize {
         self.functions.len()
+    }
+
+    pub(crate) fn function_bodies(&self) -> &super::output_expression::FunctionBodies {
+        &self.function_bodies
     }
 }
 

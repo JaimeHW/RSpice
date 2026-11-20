@@ -180,6 +180,8 @@ pub(super) struct ParameterDirection<'a, F> {
     directions: Vec<ComplexDirection>,
     error: Option<ExprError>,
     consumed: bool,
+    /// The direction of each argument a formal has read, by binding slot.
+    remembered: Vec<ComplexDirection>,
 }
 
 impl<'a, F> ParameterDirection<'a, F> {
@@ -189,6 +191,7 @@ impl<'a, F> ParameterDirection<'a, F> {
             directions: Vec::new(),
             error: None,
             consumed: false,
+            remembered: Vec::new(),
         }
     }
 
@@ -378,6 +381,27 @@ where
                 invalid("conditional boundary has no two-sided parameter derivative")
             });
         }
+        Ok(())
+    }
+
+    fn remember(&mut self, slot: usize) -> Result<(), ExprError> {
+        let direction = *self
+            .directions
+            .last()
+            .ok_or_else(|| invalid("parameter direction stack underflow"))?;
+        if self.remembered.len() <= slot {
+            self.remembered.resize(slot + 1, ComplexDirection::zero());
+        }
+        self.remembered[slot] = direction;
+        Ok(())
+    }
+
+    fn recall(&mut self, slot: usize) -> Result<(), ExprError> {
+        let direction = *self
+            .remembered
+            .get(slot)
+            .ok_or_else(|| invalid("parameter argument direction is missing"))?;
+        self.directions.push(direction);
         Ok(())
     }
 }

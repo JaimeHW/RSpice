@@ -35,6 +35,7 @@ mod context;
 mod error;
 mod eval;
 mod model;
+mod output_expression;
 mod parameter_direction;
 mod parser;
 mod resolution;
@@ -67,7 +68,7 @@ pub use behavioral::{
 pub(crate) use behavioral::{
     FunctionProbeOperands, finalize_parameter_expressions_with_abort,
     prepare_behavioral_expression_preserving_parameters_with_abort,
-    prepare_behavioral_expression_preserving_spelling_with_abort,
+    prepare_behavioral_expression_preserving_spelling_with_abort, prepare_output_tree_with_abort,
     validate_prepared_behavioral_runtime_expression,
 };
 pub use behavioral::{
@@ -101,6 +102,8 @@ pub use model::{
     set_model_temperature_scalars,
 };
 pub use num_complex::Complex64 as ComplexValue;
+#[doc(hidden)]
+pub use output_expression::{FunctionInstance, OutputExpression, OutputExpressionError};
 #[doc(hidden)]
 pub use parameter_direction::ComplexDirection;
 #[doc(hidden)]

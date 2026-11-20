@@ -286,7 +286,7 @@ pub fn prepare_behavioral_expression(
     expression: &str,
     params: &ParamContext,
 ) -> Result<String, String> {
-    match prepare_behavioral_expression_impl(expression, params, false, None, &NoAbort) {
+    match prepare_behavioral_expression_impl(expression, params, false, None, false, &NoAbort) {
         Ok(expression) => Ok(expression),
         Err(BehavioralPreparationError::Semantic(error)) => Err(error),
         Err(BehavioralPreparationError::Aborted) => {
@@ -304,7 +304,27 @@ pub(crate) fn prepare_behavioral_expression_preserving_parameters_with_abort(
     preserved_parameters: &HashSet<String>,
     abort: &dyn AbortSignal,
 ) -> Result<String, BehavioralPreparationError> {
-    prepare_behavioral_expression_impl(expression, params, false, Some(preserved_parameters), abort)
+    prepare_behavioral_expression_impl(
+        expression,
+        params,
+        false,
+        Some(preserved_parameters),
+        false,
+        abort,
+    )
+}
+
+/// Prepare one tree of an output expression for checking: parameters fold
+/// as [`prepare_behavioral_expression`] folds them, but the formals of the
+/// body it is stay as written and a call to a user function stays a call,
+/// since each body the expression reaches is checked once as its own tree.
+pub(crate) fn prepare_output_tree_with_abort(
+    expression: &str,
+    params: &ParamContext,
+    formals: &HashSet<String>,
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
+    prepare_behavioral_expression_impl(expression, params, false, Some(formals), true, abort)
 }
 
 /// Prepare a behavioral expression while retaining its original spelling when
@@ -318,7 +338,7 @@ pub(crate) fn prepare_behavioral_expression_preserving_spelling_with_abort(
     params: &ParamContext,
     abort: &dyn AbortSignal,
 ) -> Result<String, BehavioralPreparationError> {
-    prepare_behavioral_expression_impl(expression, params, true, None, abort)
+    prepare_behavioral_expression_impl(expression, params, true, None, false, abort)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -340,7 +360,7 @@ pub fn prepare_behavioral_expression_with_abort(
     params: &ParamContext,
     abort: &dyn AbortSignal,
 ) -> Result<String, BehavioralPreparationError> {
-    prepare_behavioral_expression_impl(expression, params, false, None, abort)
+    prepare_behavioral_expression_impl(expression, params, false, None, false, abort)
 }
 
 /// Expand `.FUNC` calls while preserving ordinary and global parameter leaves.
@@ -483,6 +503,7 @@ fn prepare_behavioral_expression_impl(
     params: &ParamContext,
     preserve_unchanged_spelling: bool,
     preserved_parameters: Option<&HashSet<String>>,
+    keep_user_calls: bool,
     abort: &dyn AbortSignal,
 ) -> Result<String, BehavioralPreparationError> {
     if abort.is_aborted() {
@@ -506,6 +527,7 @@ fn prepare_behavioral_expression_impl(
     let expanded = {
         let mut expander = FunctionExpander::new(params, &mut probe_protector, abort);
         expander.preserved_parameters = preserved_parameters;
+        expander.keep_user_calls = keep_user_calls;
         expander.expand_expr(&parsed, 0)?
     };
     if abort.is_aborted() {
@@ -1125,6 +1147,8 @@ struct FunctionExpander<'a, 'p> {
     fold_static_function_graph: bool,
     expand_parameter_bindings: bool,
     preserved_parameters: Option<&'a HashSet<String>>,
+    /// Leave calls to user functions as calls rather than writing them out.
+    keep_user_calls: bool,
     abort: &'a dyn AbortSignal,
 }
 
@@ -1159,6 +1183,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             fold_static_function_graph: params.function_count() > LARGE_FUNCTION_GRAPH_THRESHOLD,
             expand_parameter_bindings: true,
             preserved_parameters: None,
+            keep_user_calls: false,
             abort,
         }
     }
@@ -1404,7 +1429,12 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                     }
                     let (mut expanded_args, arg_depths) =
                         values.split_off(values.len() - arg_count);
-                    let Some(func_def) = self.params.get_function(&name) else {
+                    let user_function = if self.keep_user_calls {
+                        None
+                    } else {
+                        self.params.get_function(&name)
+                    };
+                    let Some(func_def) = user_function else {
                         if let Some(index) = fold_condition_branch(&name, &expanded_args) {
                             values.push(expanded_args.swap_remove(index), arg_depths[index])?;
                             continue;
@@ -1617,7 +1647,7 @@ fn is_behavioral_runtime_symbol(name: &str) -> bool {
     runtime_special_quantity(name).is_some()
 }
 
-fn is_circuit_probe(name: &str) -> bool {
+pub(super) fn is_circuit_probe(name: &str) -> bool {
     name.eq_ignore_ascii_case("V") || name.eq_ignore_ascii_case("I")
 }
 
@@ -1875,7 +1905,7 @@ fn split_probe_args(inner: &str) -> Option<Vec<&str>> {
     Some(args)
 }
 
-fn is_simple_probe_reference(raw: &str) -> bool {
+pub(super) fn is_simple_probe_reference(raw: &str) -> bool {
     !raw.is_empty()
         && raw.chars().all(|c| {
             c.is_alphanumeric()
@@ -1886,7 +1916,7 @@ fn is_simple_probe_reference(raw: &str) -> bool {
         })
 }
 
-fn expand_spice_poly_expression(
+pub(super) fn expand_spice_poly_expression(
     expression: &str,
     abort: &dyn AbortSignal,
 ) -> Result<String, BehavioralPreparationError> {
@@ -2196,7 +2226,7 @@ impl ProbeOperandBinder<'_> {
 
 /// The node a numeric actual argument names: SPICE node names may be
 /// non-negative integers, and no other number spells one.
-fn integral_node_name(value: Value) -> Option<String> {
+pub(super) fn integral_node_name(value: Value) -> Option<String> {
     const LARGEST_EXACT_INTEGER: Value = 9_007_199_254_740_992.0;
     (value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= LARGEST_EXACT_INTEGER)
         .then(|| format!("{}", value as u64))
@@ -2263,7 +2293,7 @@ fn folds_left_into(inner: BinOpKind, outer: BinOpKind) -> bool {
     )
 }
 
-fn serialize_expr(expr: &NetExpr) -> String {
+pub(super) fn serialize_expr(expr: &NetExpr) -> String {
     enum Task<'a> {
         Expr(&'a NetExpr),
         /// A binary operation without its enclosing parentheses.

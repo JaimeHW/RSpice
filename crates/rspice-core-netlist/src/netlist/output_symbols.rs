@@ -829,131 +829,17 @@ pub fn validate_output_expressions_with_abort(
                 Some(expression),
                 abort,
             )?;
-            let authored_expression = expression;
-            let expanded_expression = super::expr::expand_output_user_functions_with_abort(
-                authored_expression,
-                &netlist.params,
+            if let Some(issue) = first_output_expression_issue(
+                netlist,
+                request.analysis,
+                expression,
+                flattened_elements.as_deref(),
                 &runtime_scalar_identifiers,
+                xyce_dialect,
                 abort,
-            )
-            .map_err(|error| match error {
-                super::expr::BehavioralPreparationError::Aborted => ParseWithAbortError::Aborted,
-                super::expr::BehavioralPreparationError::Semantic(detail) => {
-                    output_expression_error(
-                        request,
-                        authored_expression,
-                        OutputExpressionIssue::Syntax { detail },
-                    )
-                }
-            })?;
-            if xyce_dialect && let Some(issue) = first_xyce_ddx_issue(&expanded_expression, abort)?
-            {
-                return Err(output_expression_error(request, authored_expression, issue));
+            )? {
+                return Err(output_expression_error(request, expression, issue));
             }
-            let protected = protect_xyce_output_operands(
-                &expanded_expression,
-                request.analysis,
-                flattened_elements.as_deref(),
-                &runtime_scalar_identifiers,
-                abort,
-            )
-            .map_err(|error| match error {
-                OutputOperandProtectionError::Aborted => ParseWithAbortError::Aborted,
-                OutputOperandProtectionError::Invalid(issue) => {
-                    output_expression_error(request, authored_expression, issue)
-                }
-            })?;
-            let prepared = super::expr::prepare_behavioral_expression_with_abort(
-                &protected,
-                &netlist.params,
-                abort,
-            )
-            .map_err(|error| match error {
-                super::expr::BehavioralPreparationError::Aborted => ParseWithAbortError::Aborted,
-                super::expr::BehavioralPreparationError::Semantic(reason) => {
-                    output_expression_error(
-                        request,
-                        authored_expression,
-                        OutputExpressionIssue::Syntax { detail: reason },
-                    )
-                }
-            })?;
-            // User-defined functions and symbolic parameters can expand to
-            // output-only operands, so protect once more after expansion.
-            ensure_parse_not_aborted(abort)?;
-            let prepared = protect_xyce_output_operands(
-                &prepared,
-                request.analysis,
-                flattened_elements.as_deref(),
-                &runtime_scalar_identifiers,
-                abort,
-            )
-            .map_err(|error| match error {
-                OutputOperandProtectionError::Aborted => ParseWithAbortError::Aborted,
-                OutputOperandProtectionError::Invalid(issue) => {
-                    output_expression_error(request, authored_expression, issue)
-                }
-            })?;
-            let parsed = match super::expr::parse_expression_with_abort(&prepared, abort) {
-                Ok(parsed) => parsed,
-                Err(super::expr::ParseExpressionWithAbortError::Aborted) => {
-                    return Err(ParseWithAbortError::Aborted);
-                }
-                Err(super::expr::ParseExpressionWithAbortError::Parse(error)) => {
-                    return Err(ParseError::OutputExpressionValidation(Box::new(
-                        OutputExpressionValidationError {
-                            directive: request.directive,
-                            origin: request.origin.clone(),
-                            expression: authored_expression.clone(),
-                            issue: OutputExpressionIssue::Syntax {
-                                detail: error.to_string(),
-                            },
-                        },
-                    ))
-                    .into());
-                }
-            };
-            ensure_parse_not_aborted(abort)?;
-            let issue =
-                if let Some(issue) = first_output_function_issue(&parsed, xyce_dialect, abort)? {
-                    issue
-                } else if let Some(identifier) =
-                    first_unresolved_output_identifier(&parsed, &runtime_scalar_identifiers, abort)?
-                {
-                    OutputExpressionIssue::UnresolvedIdentifier {
-                        identifier: identifier.to_ascii_uppercase(),
-                    }
-                } else if let Err(error) = crate::expr::parse_expression_strict_with_abort(
-                    &strict_output_validation_expression(
-                        &parsed,
-                        &runtime_scalar_identifiers,
-                        xyce_dialect,
-                        abort,
-                    )?,
-                    abort,
-                ) {
-                    match error {
-                        crate::expr::ParseExpressionWithAbortError::Aborted => {
-                            return Err(ParseWithAbortError::Aborted);
-                        }
-                        crate::expr::ParseExpressionWithAbortError::Parse(error) => {
-                            OutputExpressionIssue::Syntax {
-                                detail: error.to_string(),
-                            }
-                        }
-                    }
-                } else {
-                    continue;
-                };
-            return Err(ParseError::OutputExpressionValidation(Box::new(
-                OutputExpressionValidationError {
-                    directive: request.directive,
-                    origin: request.origin.clone(),
-                    expression: authored_expression.clone(),
-                    issue,
-                },
-            ))
-            .into());
         }
     }
     ensure_parse_not_aborted(abort)
@@ -973,9 +859,195 @@ fn output_expression_error(
     .into()
 }
 
+/// The first issue in one authored output expression. The expression and the
+/// body of each function it calls are each checked once as their own tree, a
+/// body's formals reading as runtime scalars bound by its calls; the checks
+/// run in turn over every tree, as they would over the calls written out.
+fn first_output_expression_issue(
+    netlist: &Netlist,
+    analysis: Option<OutputAnalysisKind>,
+    authored: &str,
+    flattened_elements: Option<&[Element]>,
+    runtime_scalar_identifiers: &HashSet<String>,
+    xyce_dialect: bool,
+    abort: &dyn AbortSignal,
+) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
+    use super::expr::{OutputExpression, OutputExpressionError};
+    let params = &netlist.params;
+    let mut unparsed = None;
+    let graph = match OutputExpression::parse(authored, params, abort) {
+        Ok(output) => Some(output),
+        Err(OutputExpressionError::Aborted) => return Err(ParseWithAbortError::Aborted),
+        Err(OutputExpressionError::Semantic(detail)) => {
+            return Ok(Some(OutputExpressionIssue::Syntax { detail }));
+        }
+        // An output operand can be written as no expression parses it
+        // (`@R1[I]`); the checks below read the text with those operands
+        // set aside, and refuse a call they then find with this detail.
+        Err(OutputExpressionError::Parse(detail)) => {
+            unparsed = Some(detail);
+            None
+        }
+    };
+    if xyce_dialect {
+        let issue = match &graph {
+            Some(output) => first_xyce_ddx_issue_in_graph(output, abort)?,
+            None => first_xyce_ddx_issue(authored, abort)?,
+        };
+        if issue.is_some() {
+            return Ok(issue);
+        }
+    }
+    let mut trees: Vec<(&str, &[String])> = vec![(authored, &[])];
+    if let Some(output) = &graph {
+        let mut read = HashSet::new();
+        for instance in output.instances() {
+            if read.insert(instance.function().name.as_str()) {
+                trees.push((instance.function().body.as_str(), instance.formals()));
+            }
+        }
+    }
+    let mut checked = Vec::with_capacity(trees.len());
+    for (text, formals) in trees {
+        let mut runtime = runtime_scalar_identifiers.clone();
+        runtime.extend(formals.iter().map(|formal| canonical_symbol(formal)));
+        let formals = formals.iter().cloned().collect::<HashSet<_>>();
+        match prepare_output_tree(
+            text,
+            &formals,
+            analysis,
+            flattened_elements,
+            &runtime,
+            params,
+            abort,
+        )? {
+            Ok(parsed) => checked.push((parsed, runtime)),
+            Err(issue) => return Ok(Some(issue)),
+        }
+    }
+    if let Some(detail) = unparsed
+        && checked
+            .first()
+            .is_some_and(|(parsed, _)| calls_user_function(parsed, params))
+    {
+        return Ok(Some(OutputExpressionIssue::Syntax { detail }));
+    }
+    for (parsed, _) in &checked {
+        if let Some(issue) = first_output_function_issue(parsed, xyce_dialect, params, abort)? {
+            return Ok(Some(issue));
+        }
+    }
+    for (parsed, runtime) in &checked {
+        if let Some(identifier) = first_unresolved_output_identifier(parsed, runtime, abort)? {
+            return Ok(Some(OutputExpressionIssue::UnresolvedIdentifier {
+                identifier: identifier.to_ascii_uppercase(),
+            }));
+        }
+    }
+    for (parsed, runtime) in &checked {
+        let strict =
+            strict_output_validation_expression(parsed, runtime, xyce_dialect, params, abort)?;
+        match crate::expr::parse_expression_strict_with_abort(&strict, abort) {
+            Ok(_) => {}
+            Err(crate::expr::ParseExpressionWithAbortError::Aborted) => {
+                return Err(ParseWithAbortError::Aborted);
+            }
+            Err(crate::expr::ParseExpressionWithAbortError::Parse(error)) => {
+                return Ok(Some(OutputExpressionIssue::Syntax {
+                    detail: error.to_string(),
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// One tree of an output expression made ready for the checks: its output
+/// operands set aside, its parameters folded with its formals kept, and
+/// parsed. The inner result is the issue that stops it.
+fn prepare_output_tree(
+    text: &str,
+    formals: &HashSet<String>,
+    analysis: Option<OutputAnalysisKind>,
+    flattened_elements: Option<&[Element]>,
+    runtime_scalar_identifiers: &HashSet<String>,
+    params: &super::expr::ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<Result<super::expr::Expr, OutputExpressionIssue>, ParseWithAbortError> {
+    let protect = |source: &str| {
+        protect_xyce_output_operands(
+            source,
+            analysis,
+            flattened_elements,
+            runtime_scalar_identifiers,
+            params,
+            abort,
+        )
+    };
+    let protected = match protect(text) {
+        Ok(protected) => protected,
+        Err(OutputOperandProtectionError::Aborted) => return Err(ParseWithAbortError::Aborted),
+        Err(OutputOperandProtectionError::Invalid(issue)) => return Ok(Err(issue)),
+    };
+    let prepared =
+        match super::expr::prepare_output_tree_with_abort(&protected, params, formals, abort) {
+            Ok(prepared) => prepared,
+            Err(super::expr::BehavioralPreparationError::Aborted) => {
+                return Err(ParseWithAbortError::Aborted);
+            }
+            Err(super::expr::BehavioralPreparationError::Semantic(detail)) => {
+                return Ok(Err(OutputExpressionIssue::Syntax { detail }));
+            }
+        };
+    // Symbolic parameters can fold to output-only operands, so set those
+    // aside once more after folding.
+    ensure_parse_not_aborted(abort)?;
+    let prepared = match protect(&prepared) {
+        Ok(prepared) => prepared,
+        Err(OutputOperandProtectionError::Aborted) => return Err(ParseWithAbortError::Aborted),
+        Err(OutputOperandProtectionError::Invalid(issue)) => return Ok(Err(issue)),
+    };
+    let parsed = match super::expr::parse_expression_with_abort(&prepared, abort) {
+        Ok(parsed) => parsed,
+        Err(super::expr::ParseExpressionWithAbortError::Aborted) => {
+            return Err(ParseWithAbortError::Aborted);
+        }
+        Err(super::expr::ParseExpressionWithAbortError::Parse(error)) => {
+            return Ok(Err(OutputExpressionIssue::Syntax {
+                detail: error.to_string(),
+            }));
+        }
+    };
+    ensure_parse_not_aborted(abort)?;
+    Ok(Ok(parsed))
+}
+
+fn calls_user_function(expression: &super::expr::Expr, params: &super::expr::ParamContext) -> bool {
+    use super::expr::Expr;
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        match expression {
+            Expr::FnCall { name, args } => {
+                if params.has_function(name) {
+                    return true;
+                }
+                pending.extend(args.iter());
+            }
+            Expr::UnaryOp { operand, .. } => pending.push(operand),
+            Expr::BinOp { left, right, .. } => {
+                pending.push(right);
+                pending.push(left);
+            }
+            Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) | Expr::Param(_) => {}
+        }
+    }
+    false
+}
+
 fn first_output_function_issue(
     expression: &super::expr::Expr,
     xyce_dialect: bool,
+    params: &super::expr::ParamContext,
     abort: &dyn AbortSignal,
 ) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
     use super::expr::Expr;
@@ -985,6 +1057,11 @@ fn first_output_function_issue(
         poll_parse_abort(abort, visited)?;
         visited = visited.saturating_add(1);
         match expression {
+            // A call's arity was checked when its graph was read, and its
+            // function's body is a tree of its own.
+            Expr::FnCall { name, args } if params.has_function(name) => {
+                pending.extend(args.iter().rev());
+            }
             Expr::FnCall { name, args } => {
                 let upper = name.to_ascii_uppercase();
                 if let Some((minimum, maximum)) = output_only_function_arity(&upper, xyce_dialect) {
@@ -1138,6 +1215,195 @@ fn validate_xyce_ddx_expression_tree(
         }
     }
     Ok(None)
+}
+
+/// A call entered while checking DDX: its instance, its arguments and the
+/// call whose body holds it.
+struct DdxCall<'o> {
+    instance: &'o super::expr::FunctionInstance,
+    arguments: &'o [super::expr::Expr],
+    caller: Option<usize>,
+}
+
+/// The first DDX issue in an output expression's graph. A body holding a DDX
+/// is checked on each call path that reaches it, with its formals reading the
+/// arguments their calls pass, as the calls written out read them; a body
+/// that holds none is not entered.
+fn first_xyce_ddx_issue_in_graph(
+    output: &super::expr::OutputExpression,
+    abort: &dyn AbortSignal,
+) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
+    use super::expr::Expr;
+    let mut holds_ddx = HashMap::new();
+    let mut calls: Vec<DdxCall<'_>> = Vec::new();
+    let mut pending = vec![(output.root(), None)];
+    let mut visited = 0usize;
+    while let Some((expression, call)) = pending.pop() {
+        poll_parse_abort(abort, visited)?;
+        visited = visited.saturating_add(1);
+        match expression {
+            Expr::FnCall { name, args } => {
+                if let Some(instance) = output.instance(name) {
+                    if instance_holds_ddx(output, instance, &mut holds_ddx) {
+                        calls.push(DdxCall {
+                            instance,
+                            arguments: args,
+                            caller: call,
+                        });
+                        pending.push((instance.body(), Some(calls.len() - 1)));
+                    }
+                } else if name.eq_ignore_ascii_case("DDX")
+                    && let Some(issue) =
+                        validate_one_xyce_ddx_in_graph(expression, call, &mut calls, output, abort)?
+                {
+                    return Ok(Some(issue));
+                }
+                pending.extend(args.iter().rev().map(|argument| (argument, call)));
+            }
+            Expr::UnaryOp { operand, .. } => pending.push((operand, call)),
+            Expr::BinOp { left, right, .. } => {
+                pending.push((right, call));
+                pending.push((left, call));
+            }
+            Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) | Expr::Param(_) => {}
+        }
+    }
+    Ok(None)
+}
+
+fn instance_holds_ddx(
+    output: &super::expr::OutputExpression,
+    instance: &super::expr::FunctionInstance,
+    holds_ddx: &mut HashMap<String, bool>,
+) -> bool {
+    if let Some(&holds) = holds_ddx.get(instance.key()) {
+        return holds;
+    }
+    let mut callees = Vec::new();
+    let direct = output_tree_any(instance.body(), &mut |node| match node {
+        super::expr::Expr::FnCall { name, .. } => match output.instance(name) {
+            Some(callee) => {
+                callees.push(callee);
+                false
+            }
+            None => name.eq_ignore_ascii_case("DDX"),
+        },
+        _ => false,
+    });
+    let holds = direct
+        || callees
+            .into_iter()
+            .any(|callee| instance_holds_ddx(output, callee, holds_ddx));
+    holds_ddx.insert(instance.key().to_owned(), holds);
+    holds
+}
+
+fn output_tree_any(
+    expression: &super::expr::Expr,
+    predicate: &mut impl FnMut(&super::expr::Expr) -> bool,
+) -> bool {
+    use super::expr::Expr;
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        if predicate(expression) {
+            return true;
+        }
+        match expression {
+            Expr::FnCall { args, .. } => pending.extend(args.iter().rev()),
+            Expr::UnaryOp { operand, .. } => pending.push(operand),
+            Expr::BinOp { left, right, .. } => {
+                pending.push(right);
+                pending.push(left);
+            }
+            Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) | Expr::Param(_) => {}
+        }
+    }
+    false
+}
+
+/// `expression` read in `call`'s body, a formal followed to the argument its
+/// call passes, until it is no formal.
+fn ddx_argument<'o>(
+    mut expression: &'o super::expr::Expr,
+    mut call: Option<usize>,
+    calls: &[DdxCall<'o>],
+) -> (&'o super::expr::Expr, Option<usize>) {
+    while let super::expr::Expr::Param(name) = expression
+        && let Some(entered) = call.and_then(|index| calls.get(index))
+        && let Some(argument) = entered
+            .instance
+            .formals()
+            .iter()
+            .position(|formal| formal == name)
+            .and_then(|position| entered.arguments.get(position))
+    {
+        expression = argument;
+        call = entered.caller;
+    }
+    (expression, call)
+}
+
+fn validate_one_xyce_ddx_in_graph<'o>(
+    expression: &'o super::expr::Expr,
+    call: Option<usize>,
+    calls: &mut Vec<DdxCall<'o>>,
+    output: &'o super::expr::OutputExpression,
+    abort: &dyn AbortSignal,
+) -> Result<Option<OutputExpressionIssue>, ParseWithAbortError> {
+    use super::expr::Expr;
+    let Expr::FnCall { args, .. } = expression else {
+        return Ok(Some(OutputExpressionIssue::Syntax {
+            detail: "DDX did not parse as a function call".to_string(),
+        }));
+    };
+    let [left, right] = args.as_slice() else {
+        return Ok(Some(OutputExpressionIssue::Syntax {
+            detail: format!("DDX expects exactly 2 arguments but got {}", args.len()),
+        }));
+    };
+    let (target, _) = ddx_argument(right, call, calls);
+    let Some(target) = xyce_ddx_target(target) else {
+        return Ok(Some(OutputExpressionIssue::Syntax {
+            detail: "DDX differentiation target must be a parameter, V(node), or I(device)"
+                .to_string(),
+        }));
+    };
+    let mut pending = vec![(left, call)];
+    let mut visited = 0usize;
+    while let Some((expression, call)) = pending.pop() {
+        poll_parse_abort(abort, visited)?;
+        visited = visited.saturating_add(1);
+        let (expression, call) = ddx_argument(expression, call, calls);
+        if xyce_ddx_target(expression).as_ref() == Some(&target) {
+            return Ok(None);
+        }
+        match expression {
+            Expr::FnCall { name, args } => {
+                if let Some(instance) = output.instance(name) {
+                    calls.push(DdxCall {
+                        instance,
+                        arguments: args,
+                        caller: call,
+                    });
+                    pending.push((instance.body(), Some(calls.len() - 1)));
+                } else if !(name.eq_ignore_ascii_case("V") || name.eq_ignore_ascii_case("I")) {
+                    pending.extend(args.iter().rev().map(|argument| (argument, call)));
+                }
+            }
+            Expr::UnaryOp { operand, .. } => pending.push((operand, call)),
+            Expr::BinOp { left, right, .. } => {
+                pending.push((right, call));
+                pending.push((left, call));
+            }
+            Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) | Expr::Param(_) => {}
+        }
+    }
+    Ok(Some(OutputExpressionIssue::Syntax {
+        detail: format!(
+            "DDX differentiation target {} is not present in its first argument",
+            target.label()
+        ),
+    }))
 }
 
 fn validate_one_xyce_ddx_expression(
@@ -1414,39 +1680,19 @@ pub fn validate_output_symbols_with_abort(
     let mut unresolved = Vec::new();
     for (request_index, request) in netlist.output_requests.iter().enumerate() {
         poll_parse_abort(abort, request_index)?;
-        let mut expanded_dependencies = Vec::new();
+        let mut expression_dependencies = Vec::new();
         for expression in &request.expressions {
-            let runtime_scalar_identifiers = output_runtime_scalar_identifiers(
-                netlist,
-                Some(&elements),
-                request.analysis,
-                Some(expression),
-                abort,
-            )?;
-            let expanded = super::expr::expand_output_user_functions_with_abort(
-                expression,
-                &netlist.params,
-                &runtime_scalar_identifiers,
-                abort,
-            )
-            .map_err(|error| match error {
-                super::expr::BehavioralPreparationError::Aborted => ParseWithAbortError::Aborted,
-                super::expr::BehavioralPreparationError::Semantic(detail) => {
-                    output_expression_error(
-                        request,
-                        expression,
-                        OutputExpressionIssue::Syntax { detail },
-                    )
-                }
-            })?;
-            expanded_dependencies.extend(extract_output_dependencies_with_context(&expanded, true));
+            poll_parse_text(abort, expression)?;
+            expression_dependencies.extend(output_expression_dependencies(
+                request, expression, netlist, abort,
+            )?);
         }
         let ordered = if request.directive.is_direct_output() {
             let mut ordered = direct_output_validation_order(request);
-            ordered.extend(expanded_dependencies.iter());
+            ordered.extend(expression_dependencies.iter());
             ordered
         } else {
-            authored_validation_order(request, &expanded_dependencies)
+            authored_validation_order(request, &expression_dependencies)
         };
         let mut seen = HashSet::new();
         for dependency in ordered {
@@ -1509,6 +1755,46 @@ pub fn validate_output_symbols_with_abort(
             .into(),
         )
     }
+}
+
+/// The circuit symbols an output expression reads: in its own text and in
+/// the body of each function it calls, each body read once, a probe operand
+/// a call binds reading the node it names.
+fn output_expression_dependencies(
+    request: &OutputRequest,
+    expression: &str,
+    netlist: &Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<OutputSymbolDependency>, ParseWithAbortError> {
+    use super::expr::{OutputExpression, OutputExpressionError};
+    let mut dependencies = extract_output_dependencies_with_context(expression, true);
+    match OutputExpression::parse(expression, &netlist.params, abort) {
+        Ok(output) => {
+            for instance in output.instances() {
+                let mut body =
+                    extract_output_dependencies_with_context(&instance.function().body, true);
+                for dependency in &mut body {
+                    if matches!(dependency.operator.to_ascii_uppercase().as_str(), "V" | "I")
+                        && let Some(node) = instance.probe_binding(dependency.symbol.trim())
+                    {
+                        dependency.symbol = node.to_owned();
+                    }
+                }
+                dependencies.extend(body);
+            }
+        }
+        Err(OutputExpressionError::Aborted) => return Err(ParseWithAbortError::Aborted),
+        // Its text is all there is to read: no call of it reaches a body.
+        Err(OutputExpressionError::Parse(_)) => {}
+        Err(OutputExpressionError::Semantic(detail)) => {
+            return Err(output_expression_error(
+                request,
+                expression,
+                OutputExpressionIssue::Syntax { detail },
+            ));
+        }
+    }
+    Ok(dependencies)
 }
 
 fn analysis_owned_output_vector_exists(
@@ -2422,6 +2708,7 @@ fn protect_xyce_output_operands(
     analysis: Option<OutputAnalysisKind>,
     flattened_elements: Option<&[Element]>,
     runtime_scalar_identifiers: &HashSet<String>,
+    params: &super::expr::ParamContext,
     abort: &dyn AbortSignal,
 ) -> Result<String, OutputOperandProtectionError> {
     let bytes = source.as_bytes();
@@ -2500,9 +2787,12 @@ fn protect_xyce_output_operands(
         {
             open += 1;
         }
+        // A user function keeps its name over an accessor's: its call is
+        // the function's.
         if open < bytes.len()
             && byte(bytes, open) == Some(b'(')
             && xyce_output_operand_operator(&operator)
+            && !params.has_function(&operator)
         {
             let close = match matching_output_parenthesis_with_abort(bytes, open, abort) {
                 Ok(Some(close)) => close,
@@ -2804,6 +3094,7 @@ fn strict_output_validation_expression(
     expression: &super::expr::Expr,
     runtime_scalar_identifiers: &HashSet<String>,
     xyce_dialect: bool,
+    params: &super::expr::ParamContext,
     abort: &dyn AbortSignal,
 ) -> Result<String, ParseWithAbortError> {
     use super::expr::{BinOpKind, Expr, UnaryOpKind};
@@ -2874,6 +3165,17 @@ fn strict_output_validation_expression(
                 tasks.push(Task::Static(operator));
                 tasks.push(Task::Expression(left));
                 tasks.push(Task::Static("("));
+            }
+            // A user function's body is checked as its own tree; its call
+            // reads here as a sum of its arguments, each checked in place.
+            Task::Expression(Expr::FnCall { name, args }) if params.has_function(name) => {
+                tasks.push(Task::Static(")"));
+                for argument in args.iter().rev() {
+                    tasks.push(Task::Static(")"));
+                    tasks.push(Task::Expression(argument));
+                    tasks.push(Task::Static("+("));
+                }
+                tasks.push(Task::Static("(0"));
             }
             Task::Expression(Expr::FnCall { name, args }) => {
                 if output_only_function_arity(name, xyce_dialect).is_some() {

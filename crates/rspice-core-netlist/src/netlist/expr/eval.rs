@@ -124,6 +124,12 @@ pub struct PreparedExpression {
     numeric_args: Vec<ComplexValue>,
     call_scopes: Vec<PreparedCallScope>,
     arg_bindings: Vec<PreparedArgBinding>,
+    /// The value each argument binding read, once a formal has read it.
+    binding_values: Vec<Option<ComplexValue>>,
+    /// Whether a formal read again reuses its argument's value: everywhere
+    /// but where an argument may draw from the random stream, as each read
+    /// of a written-out argument draws again.
+    memoize_arguments: bool,
 }
 
 #[derive(Debug)]
@@ -200,15 +206,32 @@ enum PreparedEvalFrame {
         bindings_start: usize,
     },
     MarkRuntime,
+    /// Keep the value on top of the stack as the argument binding's value.
+    StoreBinding(usize),
+}
+
+/// Where a compiled call finds the function it calls.
+#[derive(Clone, Copy)]
+enum FunctionSource<'a> {
+    /// The context's `.FUNC` definitions, each body parsed when reached.
+    Context,
+    /// An output expression's function instances, each body read once.
+    Output(&'a OutputExpression),
+}
+
+enum PendingBody<'a> {
+    Source(String),
+    Tree(&'a Expr),
 }
 
 struct PreparedExpressionBuilder<'a> {
     ctx: &'a ParamContext,
+    functions: FunctionSource<'a>,
     external_parameters: &'a HashSet<String>,
     external_bindings: &'a mut dyn FnMut(&Expr) -> Result<Option<String>, ExprError>,
     programs: Vec<PreparedProgram>,
     function_programs: HashMap<String, usize>,
-    pending_functions: VecDeque<(usize, String)>,
+    pending_functions: VecDeque<(usize, PendingBody<'a>)>,
     maximum_builtin_args: usize,
     maximum_user_args: usize,
 }
@@ -257,6 +280,19 @@ pub(super) trait PreparedEvaluation {
     }
 
     fn discard_condition(&mut self, _condition: ComplexValue) -> Result<(), ExprError> {
+        Ok(())
+    }
+
+    /// Keep in `slot` what evaluating the value on top of the stack left
+    /// besides the value (a derivative, say): a formal read again in the same
+    /// call reuses its argument through [`Self::recall`] instead of evaluating
+    /// it again.
+    fn remember(&mut self, _slot: usize) -> Result<(), ExprError> {
+        Ok(())
+    }
+
+    /// Push what [`Self::remember`] kept in `slot`, alongside its value.
+    fn recall(&mut self, _slot: usize) -> Result<(), ExprError> {
         Ok(())
     }
 }
@@ -319,8 +355,46 @@ impl PreparedExpression {
         external_parameters: &HashSet<String>,
         external_bindings: &mut dyn FnMut(&Expr) -> Result<Option<String>, ExprError>,
     ) -> Result<Self, ExprError> {
+        Self::compile_from(
+            expr,
+            ctx,
+            FunctionSource::Context,
+            external_parameters,
+            external_bindings,
+        )
+    }
+
+    /// Compile `root`, the root of `output` or a subtree of one of its trees,
+    /// calling the output's function instances by reference: each body is
+    /// compiled once, however many calls reach it, and host bindings apply
+    /// in every body as they do in the root.
+    #[doc(hidden)]
+    pub fn compile_output(
+        root: &Expr,
+        output: &OutputExpression,
+        ctx: &ParamContext,
+        external_parameters: &HashSet<String>,
+        external_bindings: &mut dyn FnMut(&Expr) -> Result<Option<String>, ExprError>,
+    ) -> Result<Self, ExprError> {
+        Self::compile_from(
+            root,
+            ctx,
+            FunctionSource::Output(output),
+            external_parameters,
+            external_bindings,
+        )
+    }
+
+    fn compile_from<'a>(
+        expr: &Expr,
+        ctx: &'a ParamContext,
+        functions: FunctionSource<'a>,
+        external_parameters: &'a HashSet<String>,
+        external_bindings: &'a mut dyn FnMut(&Expr) -> Result<Option<String>, ExprError>,
+    ) -> Result<Self, ExprError> {
         let mut builder = PreparedExpressionBuilder {
             ctx,
+            functions,
             external_parameters,
             external_bindings,
             programs: Vec::new(),
@@ -347,6 +421,15 @@ impl PreparedExpression {
         let frame_capacity = node_count.max(1);
         let call_scope_capacity = builder.function_programs.len();
         let binding_capacity = builder.maximum_user_args;
+        let memoize_arguments = !builder.programs.iter().any(|program| {
+            program.nodes.iter().any(|node| {
+                matches!(
+                    node,
+                    PreparedNode::Function { name, args, user_program: None }
+                        if draws_random_sample(name, args.len())
+                )
+            })
+        });
         Ok(Self {
             programs: builder.programs.into(),
             root,
@@ -355,6 +438,8 @@ impl PreparedExpression {
             numeric_args: Vec::with_capacity(builder.maximum_builtin_args),
             call_scopes: Vec::with_capacity(call_scope_capacity),
             arg_bindings: Vec::with_capacity(binding_capacity),
+            binding_values: Vec::with_capacity(binding_capacity),
+            memoize_arguments,
         })
     }
 
@@ -461,6 +546,7 @@ impl PreparedExpression {
         self.numeric_args.clear();
         self.call_scopes.clear();
         self.arg_bindings.clear();
+        self.binding_values.clear();
         self.frames.push(PreparedEvalFrame::Eval {
             expression: self.root,
             scope: None,
@@ -528,13 +614,27 @@ impl PreparedExpression {
                                         "function argument '{name}' has an invalid prepared binding"
                                     )));
                                 }
-                                let binding =
-                                    self.arg_bindings[call_scope.bindings_start + *formal_index];
-                                self.frames.push(PreparedEvalFrame::MarkRuntime);
-                                self.frames.push(PreparedEvalFrame::Eval {
-                                    expression: binding.expression,
-                                    scope: binding.caller_scope,
-                                });
+                                // An argument is evaluated where a formal
+                                // first reads it, and that value serves every
+                                // later read in the call: a call's cost is its
+                                // body's, however deeply arguments nest calls.
+                                let slot = call_scope.bindings_start + *formal_index;
+                                if self.memoize_arguments
+                                    && let Some(value) = self.binding_values[slot]
+                                {
+                                    evaluation.recall(slot)?;
+                                    self.values.push(EvaluatedValue::runtime(value));
+                                } else {
+                                    let binding = self.arg_bindings[slot];
+                                    if self.memoize_arguments {
+                                        self.frames.push(PreparedEvalFrame::StoreBinding(slot));
+                                    }
+                                    self.frames.push(PreparedEvalFrame::MarkRuntime);
+                                    self.frames.push(PreparedEvalFrame::Eval {
+                                        expression: binding.expression,
+                                        scope: binding.caller_scope,
+                                    });
+                                }
                             } else {
                                 let value = if let Some(value) = evaluation.resolve(name)? {
                                     value
@@ -620,6 +720,8 @@ impl PreparedExpression {
                                         caller_scope: scope,
                                     }
                                 }));
+                                self.binding_values
+                                    .extend(std::iter::repeat_n(None, args.len()));
                                 let scope_index = self.call_scopes.len();
                                 self.call_scopes.push(PreparedCallScope {
                                     function_program: *function_program,
@@ -768,6 +870,7 @@ impl PreparedExpression {
                     }
                     self.call_scopes.pop();
                     self.arg_bindings.truncate(bindings_start);
+                    self.binding_values.truncate(bindings_start);
                     if let Some(value) = self.values.last_mut() {
                         value.numval = false;
                     }
@@ -776,6 +879,15 @@ impl PreparedExpression {
                     if let Some(value) = self.values.last_mut() {
                         value.numval = false;
                     }
+                }
+                PreparedEvalFrame::StoreBinding(slot) => {
+                    let value = self.values.last().ok_or_else(|| {
+                        ExprError::InvalidArgument(
+                            "prepared expression argument value is missing".to_string(),
+                        )
+                    })?;
+                    self.binding_values[slot] = Some(value.numeric);
+                    evaluation.remember(slot)?;
                 }
             }
         }
@@ -822,12 +934,7 @@ impl PreparedExpression {
                         name,
                         args,
                         user_program: None,
-                    } => {
-                        statistical |=
-                            matches!(name.as_str(), "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "MC")
-                                || (matches!(name.as_str(), "RAND" | "RANDOM") && args.is_empty())
-                                || (name == "LIMIT" && args.len() == 2);
-                    }
+                    } => statistical |= draws_random_sample(name, args.len()),
                     _ => {}
                 }
             }
@@ -857,34 +964,64 @@ impl<'a> PreparedExpressionBuilder<'a> {
         Ok(program)
     }
 
+    fn calls_user_function(&self, name: &str) -> bool {
+        match self.functions {
+            FunctionSource::Context => self.ctx.has_function(name),
+            FunctionSource::Output(output) => output.instance(name).is_some(),
+        }
+    }
+
     fn ensure_function_program(&mut self, name: &str) -> Result<usize, ExprError> {
         if let Some(&program) = self.function_programs.get(name) {
             return Ok(program);
         }
-        let function = self
-            .ctx
-            .get_function(name)
-            .cloned()
-            .ok_or_else(|| ExprError::UnknownFunction(name.to_string()))?;
+        let (key, formal_args, body) = match self.functions {
+            FunctionSource::Context => {
+                let function = self
+                    .ctx
+                    .get_function(name)
+                    .cloned()
+                    .ok_or_else(|| ExprError::UnknownFunction(name.to_string()))?;
+                (
+                    function.name,
+                    function.args,
+                    PendingBody::Source(function.body),
+                )
+            }
+            FunctionSource::Output(output) => {
+                let instance = output
+                    .instance(name)
+                    .ok_or_else(|| ExprError::UnknownFunction(name.to_string()))?;
+                (
+                    instance.key().to_owned(),
+                    instance.formals().to_vec(),
+                    PendingBody::Tree(instance.body()),
+                )
+            }
+        };
         let program = self.programs.len();
-        self.function_programs
-            .insert(function.name.clone(), program);
-        self.maximum_user_args = self.maximum_user_args.max(function.args.len());
+        self.function_programs.insert(key, program);
+        self.maximum_user_args = self.maximum_user_args.max(formal_args.len());
         self.programs.push(PreparedProgram {
             nodes: Vec::new(),
             root: 0,
-            formal_args: function.args.clone(),
+            formal_args,
         });
         // Register the program before visiting its body, so recursion and
         // shared callees keep one identity without recursing on the host stack.
-        self.pending_functions.push_back((program, function.body));
+        self.pending_functions.push_back((program, body));
         Ok(program)
     }
 
     fn compile_function_bodies(&mut self) -> Result<(), ExprError> {
-        while let Some((program, source)) = self.pending_functions.pop_front() {
-            let body = parse_expression(&source)?;
-            let root = self.compile_node(program, &body)?;
+        while let Some((program, body)) = self.pending_functions.pop_front() {
+            let root = match body {
+                PendingBody::Source(source) => {
+                    let body = parse_expression(&source)?;
+                    self.compile_node(program, &body)?
+                }
+                PendingBody::Tree(body) => self.compile_node(program, body)?,
+            };
             self.programs[program].root = root;
         }
         Ok(())
@@ -922,7 +1059,7 @@ impl<'a> PreparedExpressionBuilder<'a> {
                 },
                 Expr::FnCall { name, args } => {
                     let upper = name.to_ascii_uppercase();
-                    let user_program = if self.ctx.has_function(&upper) {
+                    let user_program = if self.calls_user_function(&upper) {
                         Some(self.ensure_function_program(&upper)?)
                     } else {
                         None
@@ -946,6 +1083,14 @@ impl<'a> PreparedExpressionBuilder<'a> {
         self.programs[program].nodes.push(node);
         Ok(index)
     }
+}
+
+/// Whether a builtin call draws from the deck's random stream, so that each
+/// evaluation of it is a new sample.
+fn draws_random_sample(name: &str, argc: usize) -> bool {
+    matches!(name, "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "MC")
+        || (matches!(name, "RAND" | "RANDOM") && argc == 0)
+        || (name == "LIMIT" && argc == 2)
 }
 
 /// Match Xyce's public expression-evaluation boundary, which replaces each
