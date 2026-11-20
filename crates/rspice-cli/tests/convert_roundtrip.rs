@@ -361,6 +361,50 @@ fn convert(input: &Path, output: &Path, to: &str, extra: &[&str]) {
     rspice(&args);
 }
 
+/// A rawfile states each variable's quantity, not its unit. A conversion writes the SI unit each
+/// quantity is, as an import of the same file shows it, into every format that carries units.
+#[test]
+fn a_rawfile_converts_with_the_units_its_quantities_imply() {
+    let dir = test_dir("raw_quantity_units");
+    for (name, raw, scale, signals) in [
+        (
+            "tran",
+            "Title: rc\nDate: now\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 3\nNo. Points: 2\nVariables:\n\t0\ttime\ttime\n\t1\tv(out)\tvoltage\n\t2\ti(v1)\tcurrent\nValues:\n0\t0\n\t1\n\t-1e-3\n1\t1e-9\n\t0.5\n\t-5e-4\n",
+            "s",
+            vec!["V", "A"],
+        ),
+        (
+            "ac",
+            "Title: rc\nDate: now\nPlotname: AC Analysis\nFlags: complex\nNo. Variables: 2\nNo. Points: 2\nVariables:\n\t0\tfrequency\tfrequency\n\t1\tv(out)\tvoltage\nValues:\n0\t1,0\n\t1,0\n1\t10,0\n\t0.5,-0.5\n",
+            "Hz",
+            vec!["V"],
+        ),
+    ] {
+        let source = dir.join(format!("{name}.raw"));
+        std::fs::write(&source, raw).unwrap();
+        for format in ["json", "hdf5", "csv"] {
+            let encoded = dir.join(format!("{name}.{format}"));
+            convert(&source, &encoded, format, &[]);
+            let json = if format == "json" {
+                encoded
+            } else {
+                let decoded = dir.join(format!("{name}.{format}.json"));
+                convert(&encoded, &decoded, "json", &[]);
+                decoded
+            };
+            let read = common::read_json(&json);
+            assert_eq!(read["scale"]["unit"], scale, "{name} {format}");
+            let units: Vec<_> = read["signals"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|signal| signal["unit"].as_str().unwrap_or("none").to_owned())
+                .collect();
+            assert_eq!(units, signals, "{name} {format}");
+        }
+    }
+}
+
 #[test]
 fn typed_table_coordinates_and_quantities_survive_json_hdf5_and_raw() {
     let dir = test_dir("typed_table_cycle");

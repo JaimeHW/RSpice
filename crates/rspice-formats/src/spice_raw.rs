@@ -234,43 +234,7 @@ fn decode_plot(
         .map_err(RawReadError::Parse)?;
     let ordinal = parsed.has_ordinal_axis().map_err(RawReadError::Parse)?;
     let domain = coordinate_domain(&parsed, ordinal)?;
-    let units = rspice_core::io::ltspice_raw::raw_table_units(&parsed.header)
-        .map_err(RawReadError::Parse)?
-        .unwrap_or_else(|| {
-            let mut units = vec![None; parsed.variables.len()];
-            if !ordinal && let Some(coordinate) = parsed.variables.first() {
-                // Ordinary SPICE RAW declares SI quantities rather than a
-                // separate unit. Explicit table metadata above may instead
-                // declare an unknown unit and must never inherit this fallback.
-                let unit = match coordinate.var_type.trim().to_ascii_lowercase().as_str() {
-                    "time" => Some("s"),
-                    "frequency" => Some("Hz"),
-                    "voltage" => Some("V"),
-                    "current" => Some("A"),
-                    "index" => Some("1"),
-                    _ => match domain {
-                        crate::WaveformDomain::Transient => Some("s"),
-                        crate::WaveformDomain::Ac => Some("Hz"),
-                        crate::WaveformDomain::DcSweep => None,
-                    },
-                };
-                units[0] = unit.map(str::to_owned);
-            }
-            // A signal's declared quantity is its unit, so a `voltage` keeps saying so however
-            // it is named, and is declared a voltage again when it is written out.
-            for (unit, variable) in units
-                .iter_mut()
-                .zip(&parsed.variables)
-                .skip(usize::from(!ordinal))
-            {
-                *unit = match variable.var_type.trim().to_ascii_lowercase().as_str() {
-                    "voltage" => Some("V".to_owned()),
-                    "current" | "device_current" | "subckt_current" => Some("A".to_owned()),
-                    _ => None,
-                };
-            }
-            units
-        });
+    let units = plot_units(&parsed, ordinal, domain)?;
     let mut waveforms = parsed.waveforms.into_iter().zip(units).peekable();
     let (coordinate_name, coordinate, coordinate_unit) = if ordinal {
         let (first, _) = waveforms.peek().ok_or(RawReadError::NoVariables)?;
@@ -339,6 +303,63 @@ fn decode_plot(
         .normalize_coordinate_unit()
         .map_err(RawReadError::Coordinate)?;
     Ok(dataset)
+}
+
+/// The unit of each variable of one plot, in declaration order: what RSpice's table metadata
+/// states, or else the SI unit each declared quantity is (`time` is `s`, a `voltage` is `V`).
+/// An ordinal plot's variables are all signals. The importer and `rspice convert` read units by
+/// this one rule, so a converted file states the units an import shows.
+pub fn raw_plot_units(
+    parsed: &rspice_core::io::ltspice_raw::RawWaveformData,
+) -> Result<Vec<Option<String>>, RawReadError> {
+    let ordinal = parsed.has_ordinal_axis().map_err(RawReadError::Parse)?;
+    plot_units(parsed, ordinal, coordinate_domain(parsed, ordinal)?)
+}
+
+fn plot_units(
+    parsed: &rspice_core::io::ltspice_raw::RawWaveformData,
+    ordinal: bool,
+    domain: crate::WaveformDomain,
+) -> Result<Vec<Option<String>>, RawReadError> {
+    Ok(
+        rspice_core::io::ltspice_raw::raw_table_units(&parsed.header)
+            .map_err(RawReadError::Parse)?
+            .unwrap_or_else(|| {
+                let mut units = vec![None; parsed.variables.len()];
+                if !ordinal && let Some(coordinate) = parsed.variables.first() {
+                    // Ordinary SPICE RAW declares SI quantities rather than a
+                    // separate unit. Explicit table metadata above may instead
+                    // declare an unknown unit and must never inherit this fallback.
+                    let unit = match coordinate.var_type.trim().to_ascii_lowercase().as_str() {
+                        "time" => Some("s"),
+                        "frequency" => Some("Hz"),
+                        "voltage" => Some("V"),
+                        "current" => Some("A"),
+                        "index" => Some("1"),
+                        _ => match domain {
+                            crate::WaveformDomain::Transient => Some("s"),
+                            crate::WaveformDomain::Ac => Some("Hz"),
+                            crate::WaveformDomain::DcSweep => None,
+                        },
+                    };
+                    units[0] = unit.map(str::to_owned);
+                }
+                // A signal's declared quantity is its unit, so a `voltage` keeps saying so however
+                // it is named, and is declared a voltage again when it is written out.
+                for (unit, variable) in units
+                    .iter_mut()
+                    .zip(&parsed.variables)
+                    .skip(usize::from(!ordinal))
+                {
+                    *unit = match variable.var_type.trim().to_ascii_lowercase().as_str() {
+                        "voltage" => Some("V".to_owned()),
+                        "current" | "device_current" | "subckt_current" => Some("A".to_owned()),
+                        _ => None,
+                    };
+                }
+                units
+            }),
+    )
 }
 
 fn coordinate_domain(

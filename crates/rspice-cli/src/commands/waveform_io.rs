@@ -547,9 +547,10 @@ pub(super) fn raw_result(
         .into_iter()
         .nth(index)
         .expect("selected existing plot");
-    let units = rspice_core::io::ltspice_raw::raw_table_units(&data.header)
-        .map_err(|error| conversion_error(path, error))?
-        .unwrap_or_else(|| vec![None; data.variables.len()]);
+    // The units an import of this plot shows: its table metadata's, or the SI unit each
+    // declared quantity is.
+    let units = rspice_formats::spice_raw::raw_plot_units(&data)
+        .map_err(|error| conversion_error(path, error))?;
     if let Some(fft) = fft_plots.remove(&index) {
         return Ok(ImportedResult::Fft(fft));
     }
