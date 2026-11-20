@@ -203,3 +203,131 @@ fn cancelling_an_import_leaves_nothing_behind() {
     );
     assert!(state.model.simulation.retained.runs.is_empty());
 }
+
+/// Draw the Results navigator `frames` times; the sample work they did.
+fn draw_navigator(ctx: &egui::Context, state: &mut ResultsTestHost, frames: usize) -> ColumnWork {
+    use crate::workbench::docks::navigator;
+    let before = ColumnWork::read();
+    let mut run_details = None;
+    for _ in 0..frames {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_680.0, 1_020.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    navigator::results::results(ui, &mut state.results_parts(), &mut run_details);
+                });
+            },
+        );
+    }
+    before.since()
+}
+
+/// A run of 50,000 stored samples, shown in Results.
+fn stored_run(state: &mut ResultsTestHost) {
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
+    let x: Vec<f64> = (0..50_000).map(|row| row as f64 * 1.0e-9).collect();
+    let y: Vec<f64> = x.iter().map(|time| (time * 1.0e6).sin()).collect();
+    let mut run = SimulationRun::new(1);
+    run.keep_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            RetainedTrace::new("V(out)".to_owned(), x, y, "#4f81bd"),
+        ]),
+    );
+    state.model.simulation.retained.runs = vec![run].into();
+    assert!(state.model.simulation.select_run(0));
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
+}
+
+/// The first check of a kept segment runs as a job while the navigator
+/// draws: the run that reads it says it is being checked, no frame reads a
+/// sample, and the check's end leaves the run reading.
+#[test]
+fn the_navigator_draws_flat_frames_while_a_kept_segment_is_checked() {
+    use rspice_results::store_reader::{SegmentDigest, UncheckedSegment, defer_check};
+    let mut state = ResultsTestHost::default();
+    stored_run(&mut state);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let (source, _) = state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
+        .y
+        .stored_window()
+        .expect("the run keeps its samples in a segment");
+    let digest = source.identity().expect("its segment states its digest").0;
+    let path = std::path::PathBuf::from(source.store());
+
+    hold_jobs_for_tests(true);
+    defer_check(UncheckedSegment {
+        digest: SegmentDigest(digest),
+        path,
+        replace_from: None,
+    });
+    let checks = &mut state.platform.segment_checks;
+    crate::io::result_segments::start_segment_checks(checks);
+    hold_jobs_for_tests(false);
+    assert_eq!(state.platform.segment_checks.len(), 1);
+    draw_navigator(&ctx, &mut state, 1);
+    assert_eq!(
+        draw_navigator(&ctx, &mut state, FRAMES),
+        ColumnWork::default()
+    );
+    let run = &state.model.simulation.retained.runs[0];
+    assert!(run.checking_results().is_some(), "the run is being checked");
+    assert_eq!(run.unread_results(), None);
+
+    let check = state.platform.segment_checks[0].clone();
+    check.release();
+    assert!(check.wait(std::time::Duration::from_secs(60)));
+    assert!(!crate::io::result_segments::poll_segment_checks(
+        &mut state.model.simulation,
+        &mut state.platform.segment_checks
+    ));
+    let run = &state.model.simulation.retained.runs[0];
+    assert_eq!(run.checking_results(), None);
+    assert_eq!(run.unread_results(), None);
+}
+
+/// Packing a project with its results runs as a job: the frames drawn while
+/// it works read no sample, and Cancel leaves no archive.
+#[test]
+fn the_navigator_draws_flat_frames_while_a_project_is_packed() {
+    use crate::io::project_pack::{ProjectPackJob, start_project_pack};
+    let folder =
+        std::env::temp_dir().join(format!("rspice-results-job-pack-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let project = folder.join("amp.rspiceproj");
+    std::fs::write(&project, "{}").unwrap();
+    let mut state = ResultsTestHost::default();
+    stored_run(&mut state);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+
+    for cancel in [true, false] {
+        let archive = folder.join("amp.rspicepack");
+        hold_jobs_for_tests(true);
+        let pack = start_project_pack(project.clone(), archive.clone());
+        hold_jobs_for_tests(false);
+        draw_navigator(&ctx, &mut state, 1);
+        assert_eq!(
+            draw_navigator(&ctx, &mut state, FRAMES),
+            ColumnWork::default()
+        );
+        let ProjectPackJob::Packing { job, .. } = &pack else {
+            panic!("a pack is written");
+        };
+        if cancel {
+            pack.cancel();
+        }
+        job.release();
+        assert!(pack.wait(std::time::Duration::from_secs(60)));
+        assert_eq!(archive.exists(), !cancel, "cancelled: {cancel}");
+    }
+    std::fs::remove_dir_all(&folder).unwrap();
+}
