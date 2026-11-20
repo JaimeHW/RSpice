@@ -9,8 +9,9 @@ fn bits(values: &WaveformValues) -> Vec<u64> {
     values.iter().map(|value| value.to_bits()).collect()
 }
 
-/// An AC result of two complex traces on one frequency axis, and a DC trace on a sweep that runs
-/// down, each axis its own allocation as a converter makes them.
+/// An imported AC result of two complex traces on one frequency axis, one with a sample its source
+/// left unavailable, and a DC trace on a sweep that runs down, each axis its own allocation as a
+/// converter makes them.
 fn analysis() -> RetainedAnalysisResult<RetainedWaveform> {
     let frequencies = || (0..50).map(|k| 10.0 * 1.2_f64.powi(k)).collect::<Vec<_>>();
     let magnitude: Vec<f64> = (0..50).map(|k| 1.0 / (1.0 + k as f64)).collect();
@@ -32,6 +33,12 @@ fn analysis() -> RetainedAnalysisResult<RetainedWaveform> {
         )
         .with_unit("A"),
     ];
+    result.import_source = Some(rspice_results::result_import::ResultImportSource {
+        source_name: "ac.raw".into(),
+        format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
+        coordinate: None,
+        family_member: None,
+    });
     result
 }
 
@@ -186,4 +193,24 @@ fn a_waveform_of_a_segment_that_states_no_digest_is_kept_again_where_a_file_can_
         after.x.is_ascending_axis(),
         "its time axis is the new segment's own"
     );
+}
+
+/// A solver result with an unavailable sample does not validate: the store refuses it and its
+/// samples stay in memory, where every save and restore refuses them too.
+#[test]
+fn a_result_that_does_not_validate_stays_in_memory() {
+    let mut analysis = analysis();
+    analysis.import_source = None;
+    let before = analysis.clone();
+    let refused = store_analysis_in_memory(&mut analysis).expect_err("a solver NaN is refused");
+    assert!(refused.contains("unavailable sample"), "{refused}");
+    assert!(holds_samples_in_memory(&analysis));
+    for (left, right) in before.waveforms.iter().zip(&analysis.waveforms) {
+        assert!(
+            !right.x.is_stored() && !right.y.is_stored(),
+            "{}",
+            right.name
+        );
+        assert_eq!(bits(&right.y), bits(&left.y), "{}", right.name);
+    }
 }

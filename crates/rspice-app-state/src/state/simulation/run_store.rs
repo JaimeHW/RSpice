@@ -163,8 +163,9 @@ fn samples(values: &WaveformValues) -> Result<Cow<'_, [f64]>, String> {
 }
 
 /// Write every series `analysis` holds in memory into results store segments, and make its
-/// waveforms read them. An analysis whose waveforms are all stored is left as it is. On failure
-/// nothing changes: the waveforms keep their samples in memory.
+/// waveforms read them. An analysis whose waveforms are all stored is left as it is, and one that
+/// does not validate is refused. On failure nothing changes: the waveforms keep their samples in
+/// memory.
 pub fn store_analysis<W>(analysis: &mut RetainedAnalysisResult<W>) -> Result<(), String>
 where
     W: AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
@@ -216,6 +217,14 @@ where
             .columns
             .extend(parts.iter().map(|&part| (index, part)));
     }
+    if groups.is_empty() {
+        return Ok(());
+    }
+    // Validation does not read a stored series again: a result is checked while its samples are
+    // in memory, and one that fails stays there, so every save and restore refuses it.
+    analysis
+        .validate_retained_evidence()
+        .map_err(|reason| format!("the results store keeps only valid results: {reason}"))?;
     let mut kept = Vec::with_capacity(groups.len());
     for group in &groups {
         kept.push(keep_group(
