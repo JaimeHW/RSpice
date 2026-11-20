@@ -4217,8 +4217,20 @@ mod fixed_lane_tests {
         core::array::from_fn(|index| values[(index + 3) % values.len()])
     }
 
+    /// Every lane matches bit for bit, except that a NaN result need only be
+    /// a NaN: Rust leaves a computed NaN's sign and payload unspecified, and
+    /// a release build folds the constant fallback (INF - INF gives +NaN)
+    /// where the hardware lanes give x86's default -NaN.
     fn assert_same_bits<const N: usize>(actual: [f64; N], expected: [f64; N]) {
         for index in 0..N {
+            if expected[index].is_nan() {
+                assert!(
+                    actual[index].is_nan(),
+                    "lane {index} differs: actual={:?}, expected NaN",
+                    actual[index]
+                );
+                continue;
+            }
             assert_eq!(
                 actual[index].to_bits(),
                 expected[index].to_bits(),
