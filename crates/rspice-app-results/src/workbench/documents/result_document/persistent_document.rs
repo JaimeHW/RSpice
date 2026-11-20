@@ -350,19 +350,18 @@ fn compatible_active_viewer(
     })
 }
 
+/// The digest of the netlist a current run is made from, when the netlist is
+/// generated from the current design; `None` while it is stale or empty. The
+/// toolbar and Latest tracking ask on every frame; the netlist is digested
+/// once per edit ([`super::netlist_digest`]).
 pub fn current_result_source_digest(state: ResultsReads<'_>) -> Option<ContentDigest> {
     let netlist = &state.model.netlist_artifacts;
+    let content = &state.model.simulation.source.netlist_content;
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
-        && !state
-            .model
-            .simulation
-            .source
-            .netlist_content
-            .trim()
-            .is_empty())
-    .then(|| crate::state::content_digest(&state.model.simulation.source.netlist_content))
+        && !content.trim().is_empty())
+    .then(|| super::netlist_digest(state.results, content))
 }
 
 fn run_matches_current_authority(
@@ -474,7 +473,15 @@ pub fn refresh_latest_binding(
                 .then_with(|| left.timestamp.total_cmp(&right.timestamp))
                 .then_with(|| left.dataset_id.as_uuid().cmp(&right.dataset_id.as_uuid()))
         })
-        .map(|(run, analysis)| (run.dataset_id, run.dataset_content_digest(), analysis.id))
+        // The digest the workspace keeps per dataset: this runs on every
+        // frame, and hashing an in-memory run reads every sample it holds.
+        .map(|(run, analysis)| {
+            (
+                run.dataset_id,
+                super::retained_dataset_digest(state.results_reads(), run),
+                analysis.id,
+            )
+        })
     else {
         // Latest tracking is non-destructive. When no authenticated current
         // producer exists, keep the last immutable binding readable; the

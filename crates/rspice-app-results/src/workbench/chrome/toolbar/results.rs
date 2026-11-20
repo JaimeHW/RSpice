@@ -3,8 +3,8 @@
 
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::command_catalog::CommandKey;
-use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{WorkbenchIcon, labeled_icon_button_sized};
+use crate::workbench::documents::result_document::persistent_document::current_result_source_digest;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::layout::LayoutSpec;
@@ -231,15 +231,6 @@ fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Lay
     true
 }
 
-fn current_result_source_digest(model: &Model) -> Option<ContentDigest> {
-    let netlist = &model.netlist_artifacts;
-    (netlist.generation_error.is_none()
-        && netlist.generated_input_digest.is_some()
-        && netlist.generated_input_digest == netlist.current_generation_input_digest
-        && !model.simulation.source.netlist_content.trim().is_empty())
-    .then(|| crate::state::content_digest(&model.simulation.source.netlist_content))
-}
-
 pub fn run_has_current_success_authority(
     run: &crate::state::SimulationRun,
     project_revision: ObjectRevision,
@@ -257,7 +248,7 @@ pub fn results_document_is_historical(state: ResultsReads<'_>) -> bool {
     use crate::workbench::state::WorkspaceDocumentId;
 
     let project_revision = state.model.workspace.content.project.revision();
-    let source_digest = current_result_source_digest(state.model);
+    let source_digest = current_result_source_digest(state);
     match state.workbench.documents.active(Workspace::Results) {
         Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => state
             .model

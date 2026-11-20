@@ -983,3 +983,5 @@ fn a_reset_snapshot_measures_only_work_that_follows_it() {
 
 /// Every sheet, drawn whole in all four theme combinations.
 mod contrast;
+/// The workspace around the sheet: Latest tracking, the toolbar and the docks.
+mod idle_workspace;

@@ -83,6 +83,8 @@ pub enum DatasetWalk {
     /// The selected trace's statistics: its finite extremes and count, and its
     /// average over X.
     TraceStatistics,
+    /// Digesting the netlist text, to decide whether a run is current.
+    NetlistDigest,
     /// Building the data browser's row model: every retained signal's row.
     BrowserRows,
 }
@@ -90,7 +92,7 @@ pub enum DatasetWalk {
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(any(test, feature = "test-support"))]
-    pub(crate) const ALL: [Self; 24] = [
+    pub(crate) const ALL: [Self; 25] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -114,6 +116,7 @@ impl DatasetWalk {
         Self::EventProjectionScan,
         Self::MismatchCumulative,
         Self::TraceStatistics,
+        Self::NetlistDigest,
         Self::BrowserRows,
     ];
 }

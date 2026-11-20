@@ -1392,6 +1392,25 @@ pub(crate) fn retained_dataset_digest(
     )
 }
 
+/// The digest of the netlist text `content`, digested once per edit: the
+/// text it was taken of is kept, and only a different text is digested
+/// again.
+pub(crate) fn netlist_digest(
+    results: &ResultsState,
+    content: &str,
+) -> crate::product::ContentDigest {
+    let mut memo = results.netlist_digest.borrow_mut();
+    if let Some((text, digest)) = memo.as_ref()
+        && text == content
+    {
+        return *digest;
+    }
+    frame_work::note(frame_work::DatasetWalk::NetlistDigest);
+    let digest = crate::state::content_digest(content);
+    *memo = Some((content.to_owned(), digest));
+    digest
+}
+
 /// The window the reader has pinned on the active sheet, if any.
 ///
 /// A sheet's zoom lives in one of two places: keyed to the analysis, which is
@@ -1586,6 +1605,8 @@ pub struct ResultsState {
     /// Source-aware structural verdicts per analysis and question;
     /// see [`analysis_answers_structural_gate`].
     structural_gates: RetainedMemo<(AnalysisPresentationKey, StructuralGate), bool>,
+    /// The netlist last digested and its digest; see [`netlist_digest`].
+    netlist_digest: std::cell::RefCell<Option<(String, crate::product::ContentDigest)>>,
     /// Whether Compare datasets has a baseline for a candidate analysis; see
     /// [`document_edit::compare::compare_available`].
     compare_availability: RetainedMemo<AnalysisPresentationKey, bool>,
