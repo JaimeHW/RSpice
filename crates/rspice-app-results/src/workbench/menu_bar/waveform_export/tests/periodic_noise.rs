@@ -34,14 +34,14 @@ fn periodic_port_noise_export_preserves_spectra_and_reference_context() {
     let real = dataset
         .signals
         .iter()
-        .find(|s| s.name.starts_with("re(Cw"))
+        .find(|s| s.name.starts_with("Re(Cw"))
         .unwrap();
     assert_eq!(real.unit, "W/Hz");
     assert_eq!(real.data, [-3e-20]);
     let csv = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv)
         .write_text(&dataset)
         .unwrap();
-    assert!(csv.contains("re(Cw1_2[k=+1,m=-1])"), "{csv}");
+    assert!(csv.contains("Re(Cw1_2[k=+1,m=-1])"), "{csv}");
     assert!(csv.contains("periodic_noise_reference_temperature_kelvin"));
     assert!(csv.contains("325"));
     let dataset = prepare_single_analysis_dataset(&analysis, &waves, true).unwrap();

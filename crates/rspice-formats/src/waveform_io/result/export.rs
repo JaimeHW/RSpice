@@ -327,12 +327,32 @@ pub(crate) const fn axis_signal_for_analysis_type(
     }
 }
 
+/// A complex signal is written as its exact parts, `Re(x)` then `Im(x)`, which every table reader
+/// of this product reads back as one complex `x`; its magnitude is derived from them and is not
+/// written beside them, where a reader would take it for a third signal.
 fn append_waveform_signal(
     dataset: &mut WaveformDataset,
     signal_name: &str,
     waveform: &RetainedWaveform,
     reference_len: usize,
 ) -> Result<(), WaveformProjectionError> {
+    if let Some(complex) = &waveform.complex {
+        for (part, values, real) in [("Re", &complex.real, true), ("Im", &complex.imag, false)] {
+            let name = format!("{part}({})", complex.source_name);
+            append_signal_values(
+                dataset,
+                ExportSignalSlice {
+                    name: &name,
+                    signal_type: complex_signal_type(&complex.source_name, real),
+                    unit: waveform.unit.as_deref(),
+                    x_values: waveform.x.as_ref(),
+                    y_values: values.as_ref(),
+                },
+                reference_len,
+            )?;
+        }
+        return Ok(());
+    }
     append_signal_values(
         dataset,
         ExportSignalSlice {
@@ -343,35 +363,7 @@ fn append_waveform_signal(
             y_values: waveform.y.as_ref(),
         },
         reference_len,
-    )?;
-
-    if let Some(complex) = &waveform.complex {
-        let real_name = format!("re({})", complex.source_name);
-        append_signal_values(
-            dataset,
-            ExportSignalSlice {
-                name: &real_name,
-                signal_type: complex_signal_type(&complex.source_name, true),
-                unit: waveform.unit.as_deref(),
-                x_values: waveform.x.as_ref(),
-                y_values: complex.real.as_ref(),
-            },
-            reference_len,
-        )?;
-        let imag_name = format!("im({})", complex.source_name);
-        append_signal_values(
-            dataset,
-            ExportSignalSlice {
-                name: &imag_name,
-                signal_type: complex_signal_type(&complex.source_name, false),
-                unit: waveform.unit.as_deref(),
-                x_values: waveform.x.as_ref(),
-                y_values: complex.imag.as_ref(),
-            },
-            reference_len,
-        )?;
-    }
-    Ok(())
+    )
 }
 
 fn append_signal_values(

@@ -1134,6 +1134,7 @@ fn parse_delimited_result_dataset(
     text: &str,
     delimiter: u8,
 ) -> Result<ParsedResultDataset, String> {
+    use rspice_formats::delimited::layout::{ColumnKind, complex_pair_name};
     use rspice_formats::delimited::{
         DecodedDelimitedWaveforms, DelimitedReadLimits, decode_delimited_waveforms,
     };
@@ -1143,6 +1144,7 @@ fn parse_delimited_result_dataset(
         columns: headers,
         coordinate,
         signal_values,
+        kinds,
     } = decode_delimited_waveforms(
         text,
         delimiter,
@@ -1156,22 +1158,34 @@ fn parse_delimited_result_dataset(
     .map_err(|error| error.to_string())?;
     let analysis_type = imported_analysis_type(domain);
     let coordinate = Arc::new(coordinate);
-    let waveforms = signal_values
-        .into_iter()
-        .enumerate()
-        .map(|(index, values)| {
-            let mut waveform = RetainedTrace::new(
-                headers[index + 1].name.clone(),
-                Arc::clone(&coordinate),
-                values,
-                // No stored colour: the canvas theme's palette colours an
-                // imported trace by its slot, as it does a simulated one.
-                "",
-            );
-            waveform.unit = headers[index + 1].canonical_unit().map(str::to_owned);
-            waveform
-        })
-        .collect();
+    // A complex signal's two parts come back as the one signal they were: its magnitude drawn,
+    // its parts kept exact.
+    let mut waveforms = Vec::with_capacity(signal_values.len());
+    let mut values = signal_values.into_iter().enumerate();
+    while let Some((index, column)) = values.next() {
+        let header = &headers[index + 1];
+        let unit = header.canonical_unit().map(str::to_owned);
+        // No stored colour: the canvas theme's palette colours an imported trace by its slot,
+        // as it does a simulated one.
+        let mut waveform = if kinds.get(index) == Some(&ColumnKind::ComplexReal)
+            && let Some(name) = headers
+                .get(index + 2)
+                .and_then(|imag| complex_pair_name(&header.name, &imag.name))
+            && let Some((_, imag)) = values.next()
+        {
+            let magnitude = column
+                .iter()
+                .zip(&imag)
+                .map(|(real, imag)| real.hypot(*imag))
+                .collect::<Vec<_>>();
+            RetainedTrace::new(format!("|{name}|"), Arc::clone(&coordinate), magnitude, "")
+                .with_complex_components(name, column, imag)
+        } else {
+            RetainedTrace::new(header.name.clone(), Arc::clone(&coordinate), column, "")
+        };
+        waveform.unit = unit;
+        waveforms.push(waveform);
+    }
     Ok(ParsedResultDataset {
         source_format: if delimiter == b'\t' {
             ResultImportFormat::Tsv

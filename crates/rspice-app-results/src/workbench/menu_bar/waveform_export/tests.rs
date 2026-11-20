@@ -1267,8 +1267,10 @@ fn csv_export_ignores_divergent_axes_owned_by_an_inactive_analysis() {
     assert_eq!(dataset.signal_names(), vec!["|V(out)|"]);
 }
 
+/// A complex signal is written as its exact parts, and the file reads back as the one complex
+/// signal it was, not as separate real traces.
 #[test]
-fn csv_export_includes_complex_real_and_imaginary_columns() {
+fn a_complex_ac_run_round_trips_through_csv_as_complex() {
     let current_real = f64::from_bits(1);
     let current_imag = -f64::from_bits(2);
     let ac = AnalysisResult::new(1, AnalysisType::Ac, "AC Analysis").with_waveforms(vec![
@@ -1317,19 +1319,17 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
     assert_eq!(
         dataset.signal_names(),
         vec![
-            "|V(out)|",
-            "re(V(out))",
-            "im(V(out))",
-            "|I(V1)[sb=+0]|",
-            "re(I(V1)[sb=+0])",
-            "im(I(V1)[sb=+0])",
+            "Re(V(out))",
+            "Im(V(out))",
+            "Re(I(V1)[sb=+0])",
+            "Im(I(V1)[sb=+0])",
         ]
     );
     assert_eq!(
         dataset
             .signals
             .iter()
-            .find(|signal| signal.name == "re(V(out))")
+            .find(|signal| signal.name == "Re(V(out))")
             .map(|signal| signal.data.as_slice()),
         Some(&[0.8, 1.6][..])
     );
@@ -1337,19 +1337,19 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
         dataset
             .signals
             .iter()
-            .find(|signal| signal.name == "im(V(out))")
+            .find(|signal| signal.name == "Im(V(out))")
             .map(|signal| signal.data.as_slice()),
         Some(&[0.6, 1.2][..])
     );
     let current_real_signal = dataset
         .signals
         .iter()
-        .find(|signal| signal.name == "re(I(V1)[sb=+0])")
+        .find(|signal| signal.name == "Re(I(V1)[sb=+0])")
         .expect("exact current real components are exported");
     let current_imag_signal = dataset
         .signals
         .iter()
-        .find(|signal| signal.name == "im(I(V1)[sb=+0])")
+        .find(|signal| signal.name == "Im(I(V1)[sb=+0])")
         .expect("exact current imaginary components are exported");
     assert_eq!(current_real_signal.unit, "A");
     assert_eq!(current_imag_signal.unit, "A");
@@ -1361,6 +1361,37 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
         current_imag_signal.data[1].to_bits(),
         current_imag.to_bits()
     );
+
+    for (format, name) in [
+        (crate::io::WaveformFormat::Csv, "ac.csv"),
+        (crate::io::WaveformFormat::Tsv, "ac.tsv"),
+    ] {
+        let text = crate::io::WaveformWriter::new(format)
+            .write_text(dataset)
+            .expect("the dataset writes");
+        let parsed = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+            name,
+            text.as_bytes(),
+        )
+        .expect("the export reads back");
+        assert_eq!(parsed.analysis_type, AnalysisType::Ac);
+        let names: Vec<_> = parsed
+            .waveforms
+            .iter()
+            .map(|waveform| waveform.name.as_str())
+            .collect();
+        assert_eq!(names, ["|V(out)|", "|I(V1)[sb=+0]|"], "{name}");
+        let current = &parsed.waveforms[1];
+        let parts = current.complex.as_ref().expect("the current is complex");
+        assert_eq!(parts.source_name, "I(V1)[sb=+0]");
+        assert_eq!(parts.real[1].to_bits(), current_real.to_bits());
+        assert_eq!(parts.imag[1].to_bits(), current_imag.to_bits());
+        assert_eq!(current.unit.as_deref(), Some("A"));
+        let voltage = parsed.waveforms[0].complex.as_ref().expect("complex");
+        assert_eq!(voltage.real.as_slice(), &[0.8, 1.6]);
+        assert_eq!(voltage.imag.as_slice(), &[0.6, 1.2]);
+        assert_eq!(parsed.waveforms[0].y.as_slice(), &[1.0, 2.0]);
+    }
 }
 
 #[test]

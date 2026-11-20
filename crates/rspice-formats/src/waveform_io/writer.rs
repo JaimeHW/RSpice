@@ -548,10 +548,14 @@ impl WaveformWriter {
             .map(column)
             .collect::<Vec<_>>();
         for (index, pair) in dataset.signals.windows(2).enumerate() {
+            // The parts of a complex signal of any quantity: a voltage or current states which
+            // part it is in its type, an S-parameter or a quantity of no stated kind by its name.
             if matches!(
                 (pair[0].signal_type, pair[1].signal_type),
                 (SignalType::VoltageReal, SignalType::VoltageImag)
                     | (SignalType::CurrentReal, SignalType::CurrentImag)
+                    | (SignalType::SParameter, SignalType::SParameter)
+                    | (SignalType::Unknown, SignalType::Unknown)
             ) && complex_pair_name(&pair[0].name, &pair[1].name).is_some()
             {
                 columns[index + 1].kind = ColumnKind::ComplexReal;

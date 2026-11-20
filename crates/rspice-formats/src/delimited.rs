@@ -41,6 +41,11 @@ pub struct DecodedDelimitedWaveforms {
     pub columns: Vec<DelimitedColumn>,
     pub coordinate: Vec<f64>,
     pub signal_values: Vec<Vec<f64>>,
+    /// How each signal column reads, in header order without the coordinate: a real signal, or
+    /// one part of a complex one. A table that declares its layout says; one that does not is
+    /// read by the convention its writers keep, an adjacent `Re(x)`, `Im(x)` being one complex
+    /// `x`.
+    pub kinds: Vec<layout::ColumnKind>,
 }
 
 #[derive(Debug)]
@@ -186,6 +191,7 @@ pub fn decode_delimited_waveforms(
     let mut signal_values = vec![Vec::new(); headers.len() - 1];
     let mut direction = None;
     let mut has_layout = false;
+    let mut declared_kinds = None;
 
     for (row_index, record) in reader.records().enumerate() {
         let line = row_index + 2;
@@ -220,7 +226,8 @@ pub fn decode_delimited_waveforms(
             } else {
                 names
             };
-            metadata::parse_table_record(&layout_headers, &fields)?;
+            declared_kinds =
+                metadata::parse_table_record(&layout_headers, &fields)?.map(|layout| layout.kinds);
             has_layout = true;
             continue;
         }
@@ -293,11 +300,19 @@ pub fn decode_delimited_waveforms(
         headers[0].stated_unit = dataset.coordinate_unit;
     }
 
+    let kinds = declared_kinds.unwrap_or_else(|| {
+        let names: Vec<_> = headers[1..]
+            .iter()
+            .map(|header| header.name.as_str())
+            .collect();
+        layout::infer_layout(&names)
+    });
     Ok(DecodedDelimitedWaveforms {
         domain: analysis_type,
         columns: headers,
         coordinate,
         signal_values,
+        kinds,
     })
 }
 
