@@ -135,7 +135,10 @@ fn a_cancelled_save_copying_its_results_leaves_the_project_file_and_its_unsaved_
     std::fs::remove_dir_all(&folder).unwrap();
     let mut reopened = AppState::default();
     assert!(reopened.load_project_from_path(&file));
-    let missing = format!("The results of {label} are missing");
+    let missing = format!(
+        "The results of {label} (its results store {digest}.rsr is missing: it was deleted or \
+         moved outside RSpice) cannot be read."
+    );
     assert!(
         reopened
             .model
