@@ -216,6 +216,17 @@ impl Manifest {
     }
 }
 
+/// A store's manifest, in its directory.
+pub(crate) const MANIFEST: &str = "manifest.rsm";
+
+/// A store's folder of segments, in its directory.
+pub(crate) const RUNS: &str = "runs";
+
+/// Segment `index`'s file name, in [`RUNS`]: short, so a store's paths fit a Windows path budget.
+pub(crate) fn segment_file_name(index: u32) -> String {
+    format!("{index:06}.rsr")
+}
+
 /// A store directory on a file system.
 #[cfg(any(unix, windows))]
 #[derive(Debug, Clone)]
@@ -225,7 +236,7 @@ pub struct StoreDir {
 
 #[cfg(any(unix, windows))]
 impl StoreDir {
-    pub const MANIFEST: &'static str = "manifest.rsm";
+    pub const MANIFEST: &'static str = MANIFEST;
 
     pub fn new(root: impl Into<std::path::PathBuf>) -> Self {
         Self { root: root.into() }
@@ -237,12 +248,12 @@ impl StoreDir {
 
     /// The segment path a member's manifest entry names: `runs/<index>.rsr`.
     pub fn segment_name(index: u32) -> String {
-        format!("runs/{index:06}.rsr")
+        format!("{RUNS}/{}", segment_file_name(index))
     }
 
     /// Create the directory and its `runs/` folder.
     pub fn create(&self) -> Result<(), StoreError> {
-        std::fs::create_dir_all(self.root.join("runs"))?;
+        std::fs::create_dir_all(self.root.join(RUNS))?;
         Ok(())
     }
 

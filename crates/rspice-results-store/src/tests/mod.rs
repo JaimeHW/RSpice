@@ -5,6 +5,7 @@ mod integrity_tests;
 #[cfg(any(unix, windows))]
 mod lock_tests;
 mod manifest_tests;
+mod opfs_tests;
 #[cfg(any(unix, windows))]
 mod place_tests;
 mod reader_tests;

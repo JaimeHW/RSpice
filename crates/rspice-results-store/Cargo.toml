@@ -31,6 +31,23 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
+# A browser's origin-private file system, through a worker's synchronous access
+# handles, for a store in the browser.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = [
+    "DomException",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemGetDirectoryOptions",
+    "FileSystemGetFileOptions",
+    "FileSystemHandle",
+    "FileSystemReadWriteOptions",
+    "FileSystemSyncAccessHandle",
+] }
+
 [dev-dependencies]
 # A small transient run through the sink, read back against the in-memory one.
 rspice-core.workspace = true

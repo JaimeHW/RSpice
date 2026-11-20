@@ -20,6 +20,8 @@ mod io;
 #[cfg(any(unix, windows))]
 mod lock;
 mod manifest;
+#[cfg(any(target_arch = "wasm32", test))]
+mod opfs;
 #[cfg(any(unix, windows))]
 mod place;
 mod reader;
@@ -47,6 +49,8 @@ pub use lock::StoreLock;
 #[cfg(any(unix, windows))]
 pub use manifest::StoreDir;
 pub use manifest::{Manifest, Member};
+#[cfg(target_arch = "wasm32")]
+pub use opfs::{OpfsIo, OpfsStoreDir, SyncAccessHandle};
 #[cfg(any(unix, windows))]
 pub use place::{PlaceError, PlaceWays, Placed, place_segment, remove_unkept_segments};
 pub use reader::{EventSpan, SegmentReader, SegmentState};

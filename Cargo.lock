@@ -6135,11 +6135,15 @@ name = "rspice-results-store"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "js-sys",
  "libc",
  "lz4_flex 0.13.1",
  "rspice-core",
  "rspice-core-base",
  "sha2 0.11.0",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "windows-sys 0.61.2",
 ]
 
