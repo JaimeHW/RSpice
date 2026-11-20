@@ -3414,43 +3414,90 @@ impl CmContext {
     /// Copy-on-write maps are compared by identity: `before` shares each of
     /// them, so a write through this context would have copied the map it
     /// wrote, and a setter that stores what is already there does not write.
+    /// State slots are compared bit for bit: a model keeps NaN in a slot that
+    /// holds nothing yet (a DIG gate's pending output time), and NaN equals
+    /// nothing under `==`, not even the NaN it was.
     #[cfg(debug_assertions)]
     pub(crate) fn debug_assert_only_outputs_written(&self, before: &CmContext, model: &str) {
         fn same<T>(a: &CopyOnWrite<T>, b: &CopyOnWrite<T>) -> bool {
             CopyOnWrite::ptr_eq(a, b)
         }
-        let unchanged = self.state == before.state
-            && self.state_prev == before.state_prev
-            && self.int_state == before.int_state
-            && self.pending_events.len() == before.pending_events.len()
-            && self.pending_real_events.len() == before.pending_real_events.len()
-            && self.requested_breakpoints == before.requested_breakpoints
-            && self.requested_edge_completions == before.requested_edge_completions
-            && self.requested_landings == before.requested_landings
-            && self.static_stamps == before.static_stamps
-            && self.static_rhs == before.static_rhs
-            && same(&self.inputs, &before.inputs)
-            && same(
-                &self.committed_digital_outputs,
-                &before.committed_digital_outputs,
-            )
-            && same(&self.other_digital_drivers, &before.other_digital_drivers)
-            && same(&self.inertial_outputs, &before.inertial_outputs)
-            && same(&self.transient_histories, &before.transient_histories)
-            && same(
-                &self.input_analog_vector_transitions,
-                &before.input_analog_vector_transitions,
-            )
-            && same(
-                &self.output_analog_transitions,
-                &before.output_analog_transitions,
-            )
-            && same(&self.resources, &before.resources)
-            && same(&self.setup.0, &before.setup.0);
+        fn same_bits(a: &[Value], b: &[Value]) -> bool {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.to_bits() == b.to_bits())
+        }
+        let written = [
+            ("state", same_bits(&self.state, &before.state)),
+            (
+                "state_prev",
+                same_bits(&self.state_prev, &before.state_prev),
+            ),
+            ("int_state", self.int_state == before.int_state),
+            (
+                "pending_events",
+                self.pending_events.len() == before.pending_events.len(),
+            ),
+            (
+                "pending_real_events",
+                self.pending_real_events.len() == before.pending_real_events.len(),
+            ),
+            (
+                "requested_breakpoints",
+                self.requested_breakpoints == before.requested_breakpoints,
+            ),
+            (
+                "requested_edge_completions",
+                self.requested_edge_completions == before.requested_edge_completions,
+            ),
+            (
+                "requested_landings",
+                self.requested_landings == before.requested_landings,
+            ),
+            ("static_stamps", self.static_stamps == before.static_stamps),
+            ("static_rhs", self.static_rhs == before.static_rhs),
+            ("inputs", same(&self.inputs, &before.inputs)),
+            (
+                "committed_digital_outputs",
+                same(
+                    &self.committed_digital_outputs,
+                    &before.committed_digital_outputs,
+                ),
+            ),
+            (
+                "other_digital_drivers",
+                same(&self.other_digital_drivers, &before.other_digital_drivers),
+            ),
+            (
+                "inertial_outputs",
+                same(&self.inertial_outputs, &before.inertial_outputs),
+            ),
+            (
+                "transient_histories",
+                same(&self.transient_histories, &before.transient_histories),
+            ),
+            (
+                "input_analog_vector_transitions",
+                same(
+                    &self.input_analog_vector_transitions,
+                    &before.input_analog_vector_transitions,
+                ),
+            ),
+            (
+                "output_analog_transitions",
+                same(
+                    &self.output_analog_transitions,
+                    &before.output_analog_transitions,
+                ),
+            ),
+            ("resources", same(&self.resources, &before.resources)),
+            ("setup", same(&self.setup.0, &before.setup.0)),
+        ]
+        .into_iter()
+        .filter_map(|(field, unchanged)| (!unchanged).then_some(field))
+        .collect::<Vec<_>>();
         debug_assert!(
-            unchanged,
+            written.is_empty(),
             "code model '{model}' declares that a probe writes only its outputs, \
-             but its probe wrote other context state"
+             but its probe wrote other context state: {written:?}"
         );
     }
 
