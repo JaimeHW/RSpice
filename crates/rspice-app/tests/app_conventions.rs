@@ -1590,6 +1590,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("io.rs", "file_exchange"),
             ("io.rs", "generated_bundle"),
             ("io.rs", "project_io"),
+            ("io.rs", "project_pack"),
             ("io.rs", "result_segments"),
             ("io.rs", "schematic_io"),
             ("io.rs", "waveform_io"),
