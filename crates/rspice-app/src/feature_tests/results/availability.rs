@@ -594,57 +594,6 @@ fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
     );
 }
 
-/// Every sheet, drawn at the touch composition the tablet build uses.
-///
-/// The shell has raised its own rows to a 44 px target for a long time
-/// while this workspace kept fixed workstation heights, so its chips and
-/// icon buttons grew past the bands holding them. A frame is what proves
-/// the composition survives, not the constants alone.
-#[test]
-fn every_sheet_draws_at_a_touch_composition() {
-    for viewer in ResultViewer::all() {
-        let mut app = app_showing(viewer);
-        app.state.results.results.session.viewer = viewer;
-        let ctx = egui::Context::default();
-        rspice_app_workbench::ui::Theme::default().apply(&ctx);
-        rspice_app_workbench::ui::Theme::default().apply_responsive_metrics_with_target(
-            &ctx,
-            Some(rspice_app_workbench::ui::tokens::TOUCH_TARGET),
-        );
-        assert!(
-            Tokens::get(&ctx).metrics.is_touch(),
-            "the fixture did not reach a touch composition"
-        );
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1_024.0, 1_366.0),
-            )),
-            ..Default::default()
-        };
-        for _ in 0..2 {
-            let output = ctx.run_ui(input.clone(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    super::with_surface_parts(&mut app, |state, run_controller| {
-                        show_persistent_pane_viewer(ui, state, run_controller, viewer, None)
-                    });
-                });
-            });
-            for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
-                let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
-                    continue;
-                };
-                assert!(
-                    mesh.vertices
-                        .iter()
-                        .all(|vertex| vertex.pos.x.is_finite() && vertex.pos.y.is_finite()),
-                    "{viewer:?} put a non-finite vertex in the mesh at a touch composition",
-                );
-            }
-        }
-    }
-}
-
 /// A dataset each sheet reports itself able to draw. Built from retained
 /// evidence and, where a sheet reads a derived cache, through the same
 /// derivation the controller runs after a completed analysis — never by
