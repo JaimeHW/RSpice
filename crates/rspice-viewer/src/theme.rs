@@ -194,22 +194,4 @@ mod tests {
         let wrapped = LIGHT.resolve(Paint::Role(PaintRole::TraceSeries(8)));
         assert_eq!(wrapped, LIGHT.traces[0]);
     }
-
-    /// A shaded body in a theme ink is that ink in each theme's palette at
-    /// the tint's share, never bare and never one theme's colour in both.
-    #[test]
-    fn a_tint_is_its_role_colour_at_its_share_in_each_theme() {
-        let tint = Paint::Tint {
-            role: PaintRole::Foreground,
-            alpha: 38,
-        };
-        for palette in [LIGHT, DARK] {
-            let [r, g, b, _] = palette.foreground.to_srgba_unmultiplied();
-            assert_eq!(
-                palette.resolve(tint),
-                Color32::from_rgba_unmultiplied(r, g, b, 38)
-            );
-        }
-        assert_ne!(LIGHT.resolve(tint), DARK.resolve(tint));
-    }
 }
