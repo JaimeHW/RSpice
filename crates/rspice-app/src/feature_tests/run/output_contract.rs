@@ -9,8 +9,8 @@ use rspice_app_runs::simulation::output_contract::fixtures::{ac, output};
 use rspice_app_runs::simulation::output_contract::materialize_live_saved_outputs;
 use rspice_app_state::product::AnalysisInstanceId;
 use rspice_app_state::state::{
-    AnalysisResult, ComplexExpressionPolicy, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace,
-    SavedOutputKind, SavedOutputStreaming, SimulationRun,
+    AnalysisResult, ComplexExpressionPolicy, RetainedTrace, SavedOutputKind, SavedOutputStreaming,
+    SimulationRun,
 };
 
 use crate::feature_tests::engineer::Engineer;
@@ -46,7 +46,8 @@ fn complex_live_outputs_keep_aligned_components_and_full_precision_source_knots(
     let previews = materialize_live_saved_outputs(&source, &[contract]);
     assert_eq!(previews.len(), 1);
     let preview = &previews[0];
-    assert!(preview.x.len() <= DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+    // The live history is already thinned per pixel column; the preview takes it whole.
+    assert_eq!(preview.x.len(), x.len());
     assert!(
         preview
             .x
