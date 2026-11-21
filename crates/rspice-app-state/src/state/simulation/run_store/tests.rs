@@ -4,6 +4,8 @@
 
 use super::*;
 use rspice_results::analysis_type::AnalysisType;
+use rspice_results::store_reader::SegmentColumn;
+use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
 
 fn bits(values: &WaveformValues) -> Vec<u64> {
     values.samples(..).map(f64::to_bits).collect()

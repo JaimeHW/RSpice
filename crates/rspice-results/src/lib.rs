@@ -94,6 +94,8 @@ pub mod stability;
 #[cfg(feature = "engine-evidence")]
 pub mod store_reader;
 #[cfg(feature = "engine-evidence")]
+pub mod stored_analysis;
+#[cfg(feature = "engine-evidence")]
 pub mod stored_transient;
 pub mod transfer_function;
 #[cfg(feature = "engine-evidence")]

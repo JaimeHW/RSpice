@@ -4,76 +4,30 @@
 //! Every analysis reaches the history with its waveforms in memory, except a desktop transient
 //! on its default outputs, which writes its own segment as it solves. Before an analysis is kept,
 //! each waveform holding a series in memory is written to a segment of this process's store, one
-//! segment per distinct x axis, and its series become windows of the segment's columns. A saved
-//! project or session then names the segment by its digest and holds none of the samples.
-//!
-//! An x axis that ascends strictly is the segment's own axis, so a view tiles the waveforms on it
-//! from the segment's summaries. Any other axis (a DC sweep that runs down, a nested sweep that
-//! repeats) is a column of its own beside an axis of row numbers, and is read as values.
+//! segment per distinct x axis ([`rspice_results::stored_analysis`]), and its series become
+//! windows of the segment's columns. A saved project or session then names the segment by its
+//! digest and holds none of the samples.
 //!
 //! The browser build has no store folder: its segments live in the page's memory, read the same
 //! way, and each is kept in the open project's store in the browser's own storage, from which a
 //! reload loads it again ([`browser`]).
 
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use crate::product::ContentDigest;
 use rspice_results::analysis_result::AnalysisResult as RetainedAnalysisResult;
 use rspice_results::result_digest::ResultDigestEncoding;
-use rspice_results::store_reader::{Segment, SegmentBytes, SegmentColumn, StoreReader};
-use rspice_results::waveform::{RetainedWaveform, StoredWindow, WaveformValues, WindowLead};
+use rspice_results::store_reader::{Segment, SegmentBytes, StoreReader};
+/// How the filler [`keep_segment`] is handed pushes the segment's rows.
+pub use rspice_results::stored_analysis::{FillSegment, PushRows};
+use rspice_results::waveform::RetainedWaveform;
 /// The store's words for a segment's shape, so a caller of [`keep_segment`] names its schema
 /// without reaching the store itself.
 pub use rspice_results_store::{Axis, RunMeta, Schema, Signal, SignalKind, StoreError};
 use rspice_results_store::{MemoryIo, SegmentReader, SegmentWriter};
 
-/// Rows written per call to the segment writer.
-const ROWS_PER_PUSH: usize = 4096;
-
-/// Which series of a waveform a column holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Part {
-    Y,
-    Real,
-    Imag,
-}
-
-/// The waveforms that share one x axis, and the series of theirs one segment keeps.
-struct Group {
-    x: WaveformValues,
-    /// (waveform index, series) per value column, in column order.
-    columns: Vec<(usize, Part)>,
-}
-
-/// Pushes rows (their x, then their value columns row-major) into a segment's writer.
-pub type PushRows<'a> = dyn FnMut(&[f64], &[f64]) -> Result<(), StoreError> + 'a;
-
-/// Fills a segment through the [`PushRows`] it is handed.
-pub type FillSegment<'a> = dyn FnMut(&mut PushRows<'_>) -> Result<(), StoreError> + 'a;
-
 /// Makes a finished segment of a schema from the rows its filler pushes.
 type MakeSegment = fn(&Schema, &RunMeta, &mut FillSegment<'_>) -> Result<Arc<Segment>, String>;
-
-/// Whether a saved file can name `values`: a window of a segment that states its digest. A
-/// segment its run left without `END` states none, and is kept again as if in memory, read once.
-fn named_by_store(values: &WaveformValues) -> bool {
-    values
-        .stored_window()
-        .is_some_and(|(source, _)| source.identity().is_some())
-}
-
-/// Whether any series of `waveform` is held in memory, or in a segment that states no digest.
-fn holds_memory(waveform: &RetainedWaveform) -> bool {
-    let complex = waveform
-        .complex
-        .iter()
-        .flat_map(|complex| [&complex.real, &complex.imag]);
-    [&waveform.x, &waveform.y]
-        .into_iter()
-        .chain(complex)
-        .any(|values| !named_by_store(values))
-}
 
 /// Why the first waveform or event history of `analyses` that cannot be read cannot be: its
 /// segment gone from every folder, or there and damaged. `None` when every one reads, or waits
@@ -169,46 +123,7 @@ pub fn holds_samples_in_memory<W: AsRef<RetainedWaveform>>(
     analysis
         .waveforms
         .iter()
-        .any(|waveform| holds_memory(waveform.as_ref()))
-}
-
-fn series(waveform: &RetainedWaveform, part: Part) -> Option<&WaveformValues> {
-    match part {
-        Part::Y => Some(&waveform.y),
-        Part::Real => waveform.complex.as_ref().map(|complex| &complex.real),
-        Part::Imag => waveform.complex.as_ref().map(|complex| &complex.imag),
-    }
-}
-
-fn series_mut(waveform: &mut RetainedWaveform, part: Part) -> Option<&mut WaveformValues> {
-    match part {
-        Part::Y => Some(&mut waveform.y),
-        Part::Real => waveform.complex.as_mut().map(|complex| &mut complex.real),
-        Part::Imag => waveform.complex.as_mut().map(|complex| &mut complex.imag),
-    }
-}
-
-/// Whether `left` and `right` are one x axis: the same samples, compared without reading a stored
-/// window.
-fn same_axis(left: &WaveformValues, right: &WaveformValues) -> bool {
-    if WaveformValues::ptr_eq(left, right) {
-        return true;
-    }
-    let (Some(left), Some(right)) = (left.in_memory(), right.in_memory()) else {
-        return false;
-    };
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| left.to_bits() == right.to_bits())
-}
-
-/// The samples of `values`, read once.
-fn samples(values: &WaveformValues) -> Result<Cow<'_, [f64]>, String> {
-    values
-        .read_range(0..values.len())
-        .map_err(|failure| failure.to_string())
+        .any(|waveform| rspice_results::stored_analysis::holds_memory(waveform.as_ref()))
 }
 
 /// Write every series `analysis` holds in memory into results store segments, and make its
@@ -290,149 +205,9 @@ fn store_analysis_with<W>(
 where
     W: AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
 {
-    let mut groups: Vec<Group> = Vec::new();
-    for (index, waveform) in analysis.waveforms.iter().enumerate() {
-        let waveform = waveform.as_ref();
-        if !holds_memory(waveform) {
-            continue;
-        }
-        let group = match groups
-            .iter()
-            .position(|group| same_axis(&group.x, &waveform.x))
-        {
-            Some(group) => group,
-            None => {
-                groups.push(Group {
-                    x: waveform.x.clone(),
-                    columns: Vec::new(),
-                });
-                groups.len() - 1
-            }
-        };
-        let parts: &[Part] = if waveform.complex.is_some() {
-            &[Part::Y, Part::Real, Part::Imag]
-        } else {
-            &[Part::Y]
-        };
-        groups[group]
-            .columns
-            .extend(parts.iter().map(|&part| (index, part)));
-    }
-    if groups.is_empty() {
-        return Ok(());
-    }
-    // Validation does not read a stored series again: a result is checked while its samples are
-    // in memory, and one that fails stays there, so every save and restore refuses it.
-    analysis
-        .validate_retained_evidence()
-        .map_err(|reason| format!("the results store keeps only valid results: {reason}"))?;
-    let mut kept = Vec::with_capacity(groups.len());
-    for group in &groups {
-        kept.push(keep_group(
-            &analysis.label,
-            &analysis.waveforms,
-            group,
-            make,
-        )?);
-    }
-    for (group, (x, columns)) in groups.iter().zip(kept) {
-        for (&(index, part), values) in group.columns.iter().zip(columns) {
-            let waveform = analysis.waveforms[index].as_mut();
-            waveform.x = x.clone();
-            if let Some(series) = series_mut(waveform, part) {
-                *series = values;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// One group's segment: its x axis and each of its columns, as stored windows.
-fn keep_group<W: AsRef<RetainedWaveform>>(
-    label: &str,
-    waveforms: &[W],
-    group: &Group,
-    make: MakeSegment,
-) -> Result<(WaveformValues, Vec<WaveformValues>), String> {
-    let rows = group.x.len();
-    let x = samples(&group.x)?;
-    let axis = x.iter().all(|x| x.is_finite()) && x.windows(2).all(|pair| pair[0] < pair[1]);
-    let mut columns: Vec<Cow<'_, [f64]>> = Vec::with_capacity(group.columns.len() + 1);
-    let mut signals = Vec::with_capacity(group.columns.len() + 1);
-    if !axis {
-        signals.push(Signal::new("x", "", SignalKind::Real));
-        columns.push(Cow::Borrowed(&x[..]));
-    }
-    for &(index, part) in &group.columns {
-        let waveform = waveforms[index].as_ref();
-        let values = series(waveform, part)
-            .ok_or_else(|| format!("waveform '{}' lost its complex samples", waveform.name))?;
-        if values.len() != rows {
-            return Err(format!(
-                "waveform '{}' holds {} samples on an axis of {rows}",
-                waveform.name,
-                values.len()
-            ));
-        }
-        let name = match part {
-            Part::Y => waveform.name.clone(),
-            Part::Real => format!("re({})", waveform.name),
-            Part::Imag => format!("im({})", waveform.name),
-        };
-        signals.push(Signal::new(
-            name,
-            waveform.unit.clone().unwrap_or_default(),
-            SignalKind::Real,
-        ));
-        columns.push(samples(values)?);
-    }
-    let schema = Schema {
-        x: Axis {
-            name: if axis { "x" } else { "row" }.to_owned(),
-            unit: String::new(),
-        },
-        signals,
-    };
-    let meta = RunMeta {
-        analysis: label.to_owned(),
-        ..RunMeta::default()
-    };
-    let segment = make(&schema, &meta, &mut |push: &mut PushRows<'_>| {
-        let mut row_values = Vec::with_capacity(columns.len() * ROWS_PER_PUSH);
-        let mut row_x = Vec::with_capacity(ROWS_PER_PUSH);
-        let mut first = 0;
-        while first < rows {
-            let last = (first + ROWS_PER_PUSH).min(rows);
-            row_x.clear();
-            row_values.clear();
-            for row in first..last {
-                row_x.push(if axis { x[row] } else { row as f64 });
-                row_values.extend(columns.iter().map(|column| column[row]));
-            }
-            push(&row_x, &row_values)?;
-            first = last;
-        }
-        Ok(())
-    })?;
-    let window = StoredWindow {
-        first: 0,
-        rows: rows as u64,
-        lead: WindowLead::None,
-    };
-    let stored = |slot: Option<usize>, name: String| {
-        WaveformValues::stored(SegmentColumn::new(Arc::clone(&segment), slot, name), window)
-    };
-    let (x, offset) = if axis {
-        (stored(None, "x".to_owned())?, 0)
-    } else {
-        (stored(Some(0), "x".to_owned())?, 1)
-    };
-    let values = schema.signals[offset..]
-        .iter()
-        .enumerate()
-        .map(|(slot, signal)| stored(Some(slot + offset), signal.name.clone()))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((x, values))
+    rspice_results::stored_analysis::store_analysis(analysis, &mut |schema, meta, fill| {
+        make(schema, meta, fill)
+    })
 }
 
 fn kept_failure(error: impl std::fmt::Display) -> String {
