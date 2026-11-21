@@ -10,9 +10,10 @@ use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painte
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_services::workbench::lifecycle::durable_records::{MemoryOrigin, block_on};
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
-    ProjectCheckpointReason, ProjectCheckpointSummary, budget_use, create,
-    keep_unsaved_checkpoints_in, list, storage_location,
+    ProjectCheckpointReason, ProjectCheckpointSummary, budget_use, capture_for_records, create,
+    keep_unsaved_checkpoints_in, list, segments_checkpoints_read, storage_location,
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
@@ -206,6 +207,50 @@ C1 out 0 10n
 
 /// The autosave holds unsaved work; a save of every document leaves none, so
 /// it goes.
+/// A save in the browser keeps, in the project's results store, every segment a checkpoint of
+/// the project reads: a checkpoint that holds a run names its segment after the run has left
+/// the project, and a checkpoint of another project names none.
+#[test]
+fn a_browser_checkpoint_names_the_segment_of_the_run_it_holds_for_the_save_to_keep() {
+    let mut state: AppState =
+        rspice_app_runs::simulation::controller::test_execution::run_manual_batch_session(
+            "a run a browser checkpoint holds
+V1 in 0 PULSE(0 1 0 1u 1u 50u 100u)
+R1 in out 1k
+C1 out 0 10n
+.tran 0.1u 300u
+.end
+",
+        );
+    state.open_project_session();
+    let segment = state
+        .platform
+        .project_lifecycle
+        .result_cache
+        .capture(&state.model.simulation)
+        .stored_segments()[0]
+        .digest;
+    let records = MemoryOrigin::new(None).store();
+    let capture = capture_for_records(&state, ProjectCheckpointReason::Manual, None)
+        .expect("the project is read for its checkpoint");
+    block_on(capture.publish(&*records, None)).expect("the checkpoint is kept");
+    drop(std::mem::take(&mut state.model.simulation));
+
+    let project = state.model.workspace.content.project.id().to_string();
+    let named =
+        block_on(segments_checkpoints_read(&*records, &project)).expect("the checkpoints read");
+    assert!(
+        named.contains(&segment.0),
+        "the checkpoint's run segment {segment} is not kept: {named:?}"
+    );
+    let other = block_on(segments_checkpoints_read(
+        &*records,
+        &uuid::Uuid::new_v4().to_string(),
+    ))
+    .expect("the checkpoints read");
+    assert!(other.is_empty(), "another project's save keeps {other:?}");
+}
+
 #[test]
 fn a_save_of_every_document_removes_the_autosave() {
     let (mut app, root) = saved_project("checkpoint-store-autosave");

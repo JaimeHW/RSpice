@@ -1988,6 +1988,36 @@ pub async fn list_records(
     Ok(checkpoints)
 }
 
+/// Every results store segment the project's checkpoints in the browser's
+/// records read, by digest: a save keeps them in the project's store beside
+/// the ones its file reads, so a checkpoint restored later reads its runs.
+/// Refused when a checkpoint cannot be read, so nothing a checkpoint may
+/// read is let go of.
+pub async fn segments_checkpoints_read(
+    records: &dyn DurableRecords,
+    project_id: &str,
+) -> Result<std::collections::HashSet<[u8; 32]>, String> {
+    let mut snapshots = Vec::new();
+    for checkpoint in list_records(records, project_id).await? {
+        let (_, snapshot_key) = checkpoint
+            .locator
+            .record_keys()
+            .ok_or("a checkpoint of the project is kept on disk")?;
+        let bytes = records
+            .get(snapshot_key)
+            .await?
+            .and_then(Record::into_bytes)
+            .ok_or("a checkpoint's project is missing from the browser's storage")?;
+        snapshots.push(bytes);
+    }
+    Ok(
+        rspice_app_state::state::run_store::named::segments_of_project(
+            project_id,
+            snapshots.iter().map(Vec::as_slice),
+        ),
+    )
+}
+
 /// A checkpoint's project, read back from the browser's records and
 /// verified against its manifest.
 pub async fn load_record(

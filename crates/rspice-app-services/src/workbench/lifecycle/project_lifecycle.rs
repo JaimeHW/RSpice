@@ -1707,10 +1707,33 @@ pub fn complete_browser_save(
             .map(|segment| segment.digest)
             .chain(archived)
             .collect();
+        let project_id = candidate.file.workspace.project.id().to_string();
         finish_successful_save(state, candidate, binding, completion.scope);
         // The project's results store lets go of what neither this file, nor the version it
-        // replaced, nor the page reads.
-        rspice_app_state::state::run_store::browser::saved(read);
+        // replaced, nor a checkpoint of the project, nor the page reads. A checkpoint that cannot
+        // be read lets nothing go.
+        wasm_bindgen_futures::spawn_local(async move {
+            let Some(records) = super::durable_records::browser_records() else {
+                return;
+            };
+            match super::project_checkpoint::segments_checkpoints_read(
+                &*records.checkpoints,
+                &project_id,
+            )
+            .await
+            {
+                Ok(checkpoints) => rspice_app_state::state::run_store::browser::saved(
+                    read,
+                    checkpoints
+                        .into_iter()
+                        .map(rspice_results::store_reader::SegmentDigest),
+                ),
+                Err(reason) => log::warn!(
+                    "the project's results store keeps every segment, as its checkpoints could \
+                     not be read: {reason}"
+                ),
+            }
+        });
         state
             .lifecycle_parts()
             .platform

@@ -189,7 +189,9 @@ pub fn follow(
 pub async fn preload(bytes: &[u8]) {
     // A file that names no segment has nothing to wait for: its project opens at once, and its
     // store opens once it is open.
-    let Some((store, named)) = names_in(bytes).filter(|(_, named)| !named.is_empty()) else {
+    let Some((store, named)) =
+        super::named::segments_named_in(bytes).filter(|(_, named)| !named.is_empty())
+    else {
         return;
     };
     let current = with(|client| {
@@ -231,50 +233,6 @@ pub async fn preload(bytes: &[u8]) {
     });
     write_queued();
     repaint();
-}
-
-/// The project a file names (its id) and every segment it reads: the `segment` a stored window or
-/// event history names, and the `segments` an archived run lists. Other digests a file spells,
-/// a snapshot's or a revision's, name no segment.
-fn names_in(bytes: &[u8]) -> Option<(String, HashSet<[u8; 32]>)> {
-    use serde_json::Value;
-
-    let file: Value = serde_json::from_slice(bytes).ok()?;
-    let project = file.pointer("/workspace/project/id")?.as_str()?.to_owned();
-    let mut digests = HashSet::new();
-    let mut add = |value: &Value| {
-        if let Some(digest) = value
-            .as_str()
-            .and_then(|text| rspice_results::store_reader::parse_digest(text).ok())
-        {
-            digests.insert(digest.0);
-        }
-    };
-    let mut pending = vec![&file];
-    while let Some(value) = pending.pop() {
-        match value {
-            Value::Array(values) => pending.extend(values),
-            Value::Object(fields) => {
-                for (key, field) in fields {
-                    match (key.as_str(), field) {
-                        ("segment", _) => add(field),
-                        ("segments", Value::Array(listed)) => {
-                            for item in listed {
-                                if item.is_string() {
-                                    add(item);
-                                } else {
-                                    pending.push(item);
-                                }
-                            }
-                        }
-                        _ => pending.push(field),
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    Some((project, digests))
 }
 
 /// Open `store` in the worker (`None`: close the one it holds), and say what this tab has of it
@@ -818,11 +776,16 @@ fn read_again(simulation: &mut SimulationState) {
     }
 }
 
-/// After the open project was saved reading the segments `read`: the store lets go of every
-/// segment neither that file, nor the version it replaced, nor this page reads, as a desktop
-/// project's folder does after a save.
-pub fn saved(read: impl IntoIterator<Item = SegmentDigest>) {
+/// After the open project was saved reading the segments `read`, its retained checkpoints reading
+/// `checkpoints`: the store lets go of every segment neither that file, nor the version it
+/// replaced, nor a checkpoint, nor this page reads, as a desktop project's folder does after a
+/// save.
+pub fn saved(
+    read: impl IntoIterator<Item = SegmentDigest>,
+    checkpoints: impl IntoIterator<Item = SegmentDigest>,
+) {
     let read: HashSet<[u8; 32]> = read.into_iter().map(|digest| digest.0).collect();
+    let checkpoints: HashSet<[u8; 32]> = checkpoints.into_iter().map(|digest| digest.0).collect();
     let open: HashSet<[u8; 32]> = rspice_results::store_reader::open_segments()
         .iter()
         .filter_map(|segment| segment.reader().digest().map(|digest| digest.0))
@@ -842,6 +805,7 @@ pub fn saved(read: impl IntoIterator<Item = SegmentDigest>) {
             .chain(replaced)
             .chain(open)
             .chain(queued)
+            .chain(checkpoints)
             .collect();
         Some(keep)
     });
