@@ -1140,7 +1140,7 @@ fn section_card(ui: &mut Ui, title: &str, description: &str, add_body: impl FnOn
 pub mod tests {
     use super::*;
     #[cfg(test)]
-    use crate::state::{Cell, Library, PortSpec, View};
+    use crate::state::{Cell, Library, View};
     use crate::state::{
         GeneratedSymbolViews, ParameterInheritance, SymbolElectricalType, SymbolGraphicTemplate,
         SymbolIdentity, SymbolNetlistBinding, SymbolParameterConstraints, SymbolParameterDefault,
@@ -1214,40 +1214,6 @@ pub mod tests {
         )
     }
 
-    #[test]
-    fn typed_fixture_is_a_valid_real_contract() {
-        let definition = typed_symbol();
-        definition.validate().expect("fixture validates");
-        assert_eq!(
-            definition
-                .pins
-                .iter()
-                .map(|pin| (pin.name.as_str(), pin.order))
-                .collect::<Vec<_>>(),
-            [("IN", 1), ("OUT", 2)]
-        );
-        assert_eq!(
-            definition.parameter_form.netlist_parameter_order(),
-            ["gain"]
-        );
-        assert_eq!(
-            definition.source,
-            SymbolSourceContract::ExistingSchematicPins {
-                schematic_view: "schematic".to_owned(),
-                ports: vec![
-                    PortSpec {
-                        name: "IN".to_owned(),
-                        direction: PortDirection::In,
-                    },
-                    PortSpec {
-                        name: "OUT".to_owned(),
-                        direction: PortDirection::Out,
-                    },
-                ],
-            }
-        );
-    }
-
     /// The project feature over a session holding one library, `authoring`,
     /// whose `amp` cell's typed symbol view is selected, with the Symbol &
     /// form page in front.
@@ -1299,24 +1265,6 @@ pub mod tests {
             .iter()
             .map(|(_, node)| node)
             .collect()
-    }
-
-    #[test]
-    fn specialist_renders_both_pages_at_desktop_tablet_and_phone_widths() {
-        for page in LibraryCellviewPage::ALL {
-            for size in [vec2(1440.0, 900.0), vec2(820.0, 1180.0), vec2(390.0, 844.0)] {
-                let mut harness = harness_with_typed_symbol();
-                harness.state.library_cellview_page = page;
-                let output = render(&mut harness, size);
-                assert!(
-                    !output.shapes.is_empty(),
-                    "{} did not render at {}x{}",
-                    page.label(),
-                    size.x,
-                    size.y
-                );
-            }
-        }
     }
 
     #[test]

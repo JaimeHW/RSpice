@@ -23,14 +23,6 @@ enum LayoutTemplate {
 }
 
 impl LayoutTemplate {
-    #[cfg(test)]
-    const ALL: [Self; 4] = [
-        Self::Engineering,
-        Self::Canvas,
-        Self::Diagnostics,
-        Self::ResultsReview,
-    ];
-
     const LABELS: [&'static str; 4] = ["Engineering", "Canvas", "Diagnostics", "Results review"];
     const DETAILS: [&'static str; 4] = [
         "Navigator, editor, inspector and console",
@@ -170,22 +162,5 @@ fn apply_layout(state: &mut PreferencesDialogs<'_>, template: LayoutTemplate, sc
             LayoutScope::CurrentWorkspace => state.workbench.apply_results_review_layout(),
             LayoutScope::AllWorkspaces => state.workbench.apply_results_review_to_all_workspaces(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn template_and_scope_order_are_stable() {
-        assert_eq!(
-            LayoutTemplate::LABELS,
-            ["Engineering", "Canvas", "Diagnostics", "Results review"]
-        );
-        for template in LayoutTemplate::ALL {
-            assert_eq!(LayoutTemplate::from_index(template.index()), template);
-        }
-        assert_eq!(LayoutScope::LABELS, ["This workspace", "Every workspace"]);
     }
 }

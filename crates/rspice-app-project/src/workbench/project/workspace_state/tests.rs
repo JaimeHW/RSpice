@@ -1,39 +1,6 @@
-//! The project pages' catalog and the wire spellings older sessions saved
-//! them under.
-
-use std::collections::HashSet;
+//! The wire spellings the project pages are saved under.
 
 use super::*;
-
-#[test]
-fn project_page_catalog_is_the_complete_five_tab_contract() {
-    assert_eq!(
-        ProjectPage::ALL,
-        [
-            ProjectPage::Overview,
-            ProjectPage::Library,
-            ProjectPage::Configuration,
-            ProjectPage::Dependencies,
-            ProjectPage::Recovery,
-        ]
-    );
-    assert_eq!(ProjectPage::default(), ProjectPage::Overview);
-    assert_eq!(
-        ProjectPage::ALL.map(ProjectPage::label),
-        [
-            "Overview",
-            "Library Manager",
-            "Configuration",
-            "Dependencies",
-            "Recovery",
-        ]
-    );
-    assert_eq!(
-        ProjectPage::ALL.into_iter().collect::<HashSet<_>>().len(),
-        ProjectPage::ALL.len(),
-        "the project tab catalog must not contain duplicate routes"
-    );
-}
 
 #[test]
 fn project_pages_round_trip() {

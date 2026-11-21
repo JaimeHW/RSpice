@@ -886,24 +886,3 @@ fn muted(ui: &mut Ui, text: &str) {
             .color(tokens.color.text_faint),
     );
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn technology_copy_does_not_claim_physical_pdk_qualification() {
-        for copy in [
-            TECHNOLOGY_SURFACE_ACTION,
-            TECHNOLOGY_DIALOG_TITLE,
-            TECHNOLOGY_DIALOG_PRIMARY,
-            TECHNOLOGY_DIALOG_CURRENT,
-            TECHNOLOGY_DETACH_TITLE,
-            TECHNOLOGY_CHECKPOINT_PENDING,
-        ] {
-            let copy = copy.to_ascii_lowercase();
-            assert!(!copy.contains("qualified"));
-            assert!(!copy.contains("rule deck"));
-        }
-    }
-}

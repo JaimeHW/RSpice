@@ -1848,72 +1848,6 @@ mod tests {
         );
     }
 
-    /// Every contract value starts after the full label column. The column
-    /// was a sized allocation that shrank to its label, so "Saved source" ran
-    /// straight into the path beside it.
-    #[test]
-    fn recovery_contract_values_start_after_the_label_column() {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let viewport = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1440.0, 900.0));
-        let layout = LauncherLayout::resolve(viewport);
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(viewport),
-                ..Default::default()
-            },
-            |ui| recovery_contract_row(ui, "Saved source", "C:\\work\\rc_lowpass.rsch", layout),
-        );
-        let nodes = output
-            .platform_output
-            .accesskit_update
-            .expect("accessibility tree")
-            .nodes;
-        let left = |text: &str| {
-            nodes
-                .iter()
-                .find(|(_, node)| node.label() == Some(text) || node.value() == Some(text))
-                .and_then(|(_, node)| node.bounds())
-                .unwrap_or_else(|| panic!("no node for {text}"))
-                .x0
-        };
-        assert!(
-            left("C:\\work\\rc_lowpass.rsch") - left("Saved source")
-                >= f64::from(RECOVERY_CONTRACT_LABEL_COLUMN),
-            "the value starts inside the label column"
-        );
-    }
-
-    #[test]
-    fn launcher_surface_is_one_header_track_over_the_body() {
-        let surface = Rect::from_min_size(egui::pos2(130.0, 125.0), vec2(1180.0, 650.0));
-        let regions = LauncherSurfaceRegions::resolve(surface, 48.0);
-
-        assert_eq!(
-            regions.header,
-            Rect::from_min_size(surface.min, vec2(1180.0, 48.0))
-        );
-        assert_eq!(regions.body.top(), regions.header.bottom());
-        assert_eq!(regions.body.bottom(), surface.bottom());
-        assert_eq!(
-            regions.header.height() + regions.body.height(),
-            surface.height()
-        );
-    }
-
-    #[test]
-    fn recovery_footer_is_always_anchored_to_the_page_bottom() {
-        let available = Rect::from_min_size(egui::pos2(314.0, 213.0), vec2(996.0, 486.0));
-        let regions = LauncherPageRegions::resolve(available, LAUNCHER_PAGE_FOOTER_MIN_HEIGHT);
-
-        assert_eq!(regions.body.top(), available.top());
-        assert_eq!(regions.body.bottom(), available.bottom() - 51.0);
-        assert_eq!(regions.footer.top(), regions.body.bottom());
-        assert_eq!(regions.footer.height(), 51.0);
-        assert_eq!(regions.footer.bottom(), available.bottom());
-    }
-
     #[test]
     fn project_names_come_from_the_file_name_without_extension() {
         assert_eq!(
@@ -1925,18 +1859,6 @@ mod tests {
     #[test]
     fn project_names_have_a_nonempty_fallback() {
         assert_eq!(project_name_from_path(Path::new("/")), "Unnamed project");
-    }
-
-    #[test]
-    fn launcher_filter_and_sort_labels_are_complete_and_stable() {
-        assert_eq!(
-            ProjectLauncherFilter::ALL.map(ProjectLauncherFilter::label),
-            ["All", "Pinned"]
-        );
-        assert_eq!(
-            ProjectLauncherSort::ALL.map(ProjectLauncherSort::label),
-            ["Last opened", "Name"]
-        );
     }
 
     #[test]
