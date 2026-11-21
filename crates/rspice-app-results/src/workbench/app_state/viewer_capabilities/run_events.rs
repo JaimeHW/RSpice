@@ -147,38 +147,23 @@ impl RunEventSink for ResultsParts<'_> {
             RunEvent::ViewerCacheConfirmed { viewer, owner } => {
                 self.analysis.bind_specialized_viewer_cache(viewer, owner);
             }
-            RunEvent::FrequencyResponseReplaced {
-                owner,
-                bode,
-                loop_gain,
-            } => {
+            RunEvent::FrequencyResponseReplaced { owner, bode } => {
                 self.analysis
                     .clear_specialized_viewer_cache_authority(ActiveViewer::BodePlot);
                 self.analysis
-                    .clear_specialized_viewer_cache_authority(ActiveViewer::Nyquist);
-                self.analysis
                     .clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
-                self.analysis.nyquist_state.clear();
                 self.analysis.smith_chart_state.clear_traces();
-                if let Some(locus) = loop_gain {
-                    self.analysis.nyquist_state.load_data(locus);
-                }
-                let loaded_nyquist = !self.analysis.nyquist_state.is_empty();
                 let has_bode = bode.response_count() > 0;
                 if has_bode {
                     self.analysis.bode_plot_state.load_data(bode);
                 } else {
                     self.analysis.bode_plot_state.load_data(BodeData::new());
                 }
-                if let Some(owner) = owner {
-                    if has_bode {
-                        self.analysis
-                            .bind_specialized_viewer_cache(ActiveViewer::BodePlot, owner);
-                    }
-                    if loaded_nyquist {
-                        self.analysis
-                            .bind_specialized_viewer_cache(ActiveViewer::Nyquist, owner);
-                    }
+                if let Some(owner) = owner
+                    && has_bode
+                {
+                    self.analysis
+                        .bind_specialized_viewer_cache(ActiveViewer::BodePlot, owner);
                 }
             }
             RunEvent::CompletionsCollected => self

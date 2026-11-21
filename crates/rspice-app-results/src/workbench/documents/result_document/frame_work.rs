@@ -58,6 +58,9 @@ pub enum DatasetWalk {
     /// unity-gain crossing and phase inversion on it: the frequency-response
     /// stability extraction behind the Bode card and the Bode tab's gate.
     BodeMargins,
+    /// Reading a stability analysis's loop gain into its Nyquist locus and
+    /// winding it: every sample of the sweep.
+    LoopGainLocus,
     /// Verifying one retained ordinary-noise spectrum: every sample finite
     /// and positive, every frequency positive and strictly increasing.
     NoiseSpectrumScan,
@@ -94,7 +97,7 @@ pub enum DatasetWalk {
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(any(test, feature = "test-support"))]
-    pub(crate) const ALL: [Self; 26] = [
+    pub(crate) const ALL: [Self; 27] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -108,6 +111,7 @@ impl DatasetWalk {
         Self::EyeRaster,
         Self::TableCursorScan,
         Self::BodeMargins,
+        Self::LoopGainLocus,
         Self::NoiseSpectrumScan,
         Self::RawFrequencyCurveScan,
         Self::HarmonicSpectrumScan,

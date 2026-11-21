@@ -12,13 +12,11 @@
 //!
 //! # Architecture
 //!
-//! The locus is the loop gain a stability run measures — see
-//! [`state::NyquistState`] for why there is exactly one of it.
+//! The locus is the loop gain a stability run measures. The host reads it
+//! off the run it shows whenever the sheet is drawn; nothing here holds one.
 
-pub mod state;
 pub mod view;
 
 pub use rspice_results::nyquist::{
     EncirclementCount, NyquistData, NyquistMargin, closed_loop_rhp_poles,
 };
-pub use state::NyquistState;

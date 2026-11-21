@@ -16,8 +16,8 @@ use rspice_app_results::workbench::documents::result_document::{
     sheet_purpose, show, show_persistent_pane_viewer, smith, viewer_availability, waves,
 };
 use rspice_app_state::state::{
-    ActiveViewer, AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace,
-    SensitivityResultMode, SensitivityResultRow, SimulationRun, SpecializedViewerCacheProvenance,
+    AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SensitivityResultMode,
+    SensitivityResultRow, SimulationRun,
 };
 use rspice_app_workbench::ui::tokens::Tokens;
 
@@ -620,7 +620,8 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 vec![0.0, 0.4, 0.9, 1.2],
                 "#00aaff",
             )]),
-        ResultViewer::Bode | ResultViewer::Nyquist => ac_analysis(),
+        ResultViewer::Bode => ac_analysis(),
+        ResultViewer::Nyquist => stability_analysis(),
         ResultViewer::SParameters | ResultViewer::Smith | ResultViewer::Polar => sparameter_analysis(),
         ResultViewer::NetworkMatrix => network_matrix_analysis(false),
         ResultViewer::Scatter | ResultViewer::BoxViolin => {
@@ -747,18 +748,14 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
 
-    // Three sheets read a cache the controller fills after a run rather
-    // than the retained analysis itself. Derive it exactly as the
+    // The Smith chart reads a cache the controller fills after a run
+    // rather than the retained analysis itself. Derive it exactly as the
     // controller's post-processing does, so the fixture cannot claim a
     // capability the data would not actually produce.
-    match viewer {
-        ResultViewer::Nyquist => derive_nyquist(&mut app),
-        ResultViewer::Smith => {
-            assert!(smith::synchronize_active_analysis(
-                &mut app.state.results_parts()
-            ));
-        }
-        _ => {}
+    if viewer == ResultViewer::Smith {
+        assert!(smith::synchronize_active_analysis(
+            &mut app.state.results_parts()
+        ));
     }
 
     if viewer == ResultViewer::Soa {
@@ -782,6 +779,53 @@ pub(super) fn transient_analysis() -> AnalysisResult {
         .collect();
     AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_waveforms(vec![RetainedTrace::new("V(out)", time, values, "#00aaff")])
+}
+
+/// A stability analysis retaining its loop gain, L = 4/(1 + jf/1 kHz)³ from
+/// 1 Hz to 1 MHz: the Re and Im traces the Nyquist sheet reads and the Bode
+/// pair beside them.
+pub(super) fn stability_analysis() -> AnalysisResult {
+    let frequency: Vec<f64> = (0..=60).map(|i| 10f64.powf(f64::from(i) / 10.0)).collect();
+    // |L| = 4 / (1 + x²)^(3/2) and ∠L = −3·atan(x), with x = f / 1 kHz.
+    let polar: Vec<(f64, f64)> = frequency
+        .iter()
+        .map(|&f| {
+            let x = f / 1.0e3;
+            (4.0 / (1.0 + x * x).powf(1.5), -3.0 * x.atan())
+        })
+        .collect();
+    let trace = |name: &str, values: Vec<f64>| {
+        RetainedTrace::new(name, frequency.clone(), values, "#00aaff")
+    };
+    AnalysisResult::new(1, AnalysisType::Stb, "STB").with_waveforms(vec![
+        trace(
+            rspice_results::nyquist::LOOP_GAIN_REAL_TRACE,
+            polar.iter().map(|(m, p)| m * p.cos()).collect(),
+        ),
+        trace(
+            rspice_results::nyquist::LOOP_GAIN_IMAGINARY_TRACE,
+            polar.iter().map(|(m, p)| m * p.sin()).collect(),
+        ),
+        trace(
+            "Loop Gain (dB)",
+            polar.iter().map(|(m, _)| 20.0 * m.log10()).collect(),
+        ),
+        trace(
+            "Loop Phase (deg)",
+            polar
+                .iter()
+                .map(|(_, p)| {
+                    let degrees = p.to_degrees();
+                    // Retained phase is folded into (−180°, 180°].
+                    if degrees <= -180.0 {
+                        degrees + 360.0
+                    } else {
+                        degrees
+                    }
+                })
+                .collect(),
+        ),
+    ])
 }
 
 pub(super) fn ac_analysis() -> AnalysisResult {
@@ -954,58 +998,6 @@ pub(super) fn transfer_function_analysis() -> AnalysisResult {
             nominal_output: None,
         },
     )
-}
-
-pub(super) fn in_flight_cache_provenance(app: &RSpiceApp) -> SpecializedViewerCacheProvenance {
-    let run = app
-        .state
-        .model
-        .simulation
-        .active_run()
-        .expect("the fixture retained one run");
-    let dataset_id = run.dataset_id;
-    let analysis = app
-        .state
-        .model
-        .simulation
-        .active_analysis()
-        .expect("the fixture selected one analysis");
-    SpecializedViewerCacheProvenance::for_analysis(dataset_id, analysis)
-}
-
-pub(super) fn ac_complex_trace(app: &RSpiceApp) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-    let analysis = app
-        .state
-        .model
-        .simulation
-        .active_analysis()
-        .expect("the fixture selected one analysis");
-    let waveform = analysis
-        .waveforms
-        .iter()
-        .find(|waveform| waveform.complex.is_some())
-        .expect("the AC fixture retains one complex trace");
-    let complex = waveform
-        .complex
-        .as_ref()
-        .expect("the trace was selected for its complex components");
-    (
-        waveform.x.samples(..).collect::<Vec<f64>>(),
-        complex.real.samples(..).collect::<Vec<f64>>(),
-        complex.imag.samples(..).collect::<Vec<f64>>(),
-    )
-}
-
-pub(super) fn derive_nyquist(app: &mut RSpiceApp) {
-    let (frequency, real, imaginary) = ac_complex_trace(app);
-    let provenance = in_flight_cache_provenance(app);
-    app.state.results.analysis.nyquist_state.load_data(
-        rspice_results::nyquist::NyquistData::from_arrays("V(out)", &frequency, &real, &imaginary),
-    );
-    app.state
-        .results
-        .analysis
-        .bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
 }
 
 /// Every sheet can be made a project result document through the draft a

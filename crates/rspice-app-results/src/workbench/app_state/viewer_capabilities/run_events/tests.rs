@@ -12,7 +12,6 @@ use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use rspice_results_ui::eye_diagram::{EyeTimebaseProvenance, EyeTrace};
 use rspice_results_ui::fft::data::FftBuildError;
 use rspice_results_ui::fft::{FftFailure, FftInputError, PreparedFftInput, WindowFunction};
-use rspice_results_ui::nyquist::NyquistData;
 
 fn provenance() -> SpecializedViewerCacheProvenance {
     SpecializedViewerCacheProvenance::for_prepared_analysis(
@@ -76,15 +75,6 @@ fn responses(count: usize) -> BodeData {
     bode
 }
 
-fn locus() -> NyquistData {
-    NyquistData::from_arrays(
-        "L(jω)",
-        &[1.0, 10.0, 100.0],
-        &[2.0, 0.5, -0.1],
-        &[0.0, -1.0, -0.2],
-    )
-}
-
 /// Every viewer holds data owned by some other result, so each event's
 /// effect shows against it.
 fn seeded() -> (ResultsTestHost, SpecializedViewerCacheProvenance) {
@@ -94,16 +84,6 @@ fn seeded() -> (ResultsTestHost, SpecializedViewerCacheProvenance) {
         .analysis
         .bode_plot_state
         .load_data(responses(1));
-    state
-        .results
-        .analysis
-        .nyquist_state
-        .load_data(NyquistData::from_arrays(
-            "old nyquist",
-            &[1.0, 10.0],
-            &[1.0, -0.5],
-            &[0.0, 0.25],
-        ));
     state
         .results
         .analysis
@@ -121,7 +101,6 @@ fn seeded() -> (ResultsTestHost, SpecializedViewerCacheProvenance) {
     let other = provenance();
     for viewer in [
         ActiveViewer::BodePlot,
-        ActiveViewer::Nyquist,
         ActiveViewer::SmithChart,
         ActiveViewer::Fft,
         ActiveViewer::EyeDiagram,
@@ -154,14 +133,12 @@ fn snapshot(state: &ResultsTestHost, owner: SpecializedViewerCacheProvenance) ->
     let fft = &state.results.analysis.fft_state;
     let eye = &state.results.analysis.eye_diagram_state;
     format!(
-        "authority bode={} nyquist={} smith={} fft={} eye={}\n\
+        "authority bode={} smith={} fft={} eye={}\n\
          fft source={:?} cache={:?} data={} analysis={} error={} revision={}\n\
          eye traces={} timebase={:?} revision={}\n\
-         nyquist {:?}\n\
          bode responses={}\n\
          smith traces={}",
         who(authority.bode),
-        who(authority.nyquist),
         who(authority.smith),
         who(authority.fft),
         who(authority.eye),
@@ -178,12 +155,6 @@ fn snapshot(state: &ResultsTestHost, owner: SpecializedViewerCacheProvenance) ->
         eye.trace_count(),
         eye.timebase_provenance(),
         eye.data_revision(),
-        state
-            .results
-            .analysis
-            .nyquist_state
-            .curve()
-            .map(|curve| (curve.name.as_str(), curve.points.len())),
         state.results.analysis.bode_plot_state.data.response_count(),
         state.results.analysis.smith_chart_state.traces.len(),
     )
@@ -199,10 +170,9 @@ fn applied(event: impl FnOnce(SpecializedViewerCacheProvenance) -> RunEvent) -> 
 fn a_replaced_transient_result_empties_the_fft_and_eye_and_frees_their_owners() {
     assert_eq!(
         applied(|_| RunEvent::TransientResultReplaced),
-        "authority bode=other nyquist=other smith=other fft=none eye=none\n\
+        "authority bode=other smith=other fft=none eye=none\n\
          fft source=Some(\"V(old)\") cache=None data=false analysis=false error=None revision=2\n\
          eye traces=0 timebase=None revision=2\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -214,10 +184,9 @@ fn a_chosen_fft_source_changes_only_the_selection() {
         applied(|_| RunEvent::FftSourceChosen {
             source: "V(out)".to_owned(),
         }),
-        "authority bode=other nyquist=other smith=other fft=other eye=other\n\
+        "authority bode=other smith=other fft=other eye=other\n\
          fft source=Some(\"V(out)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -231,10 +200,9 @@ fn a_folded_eye_is_loaded_with_its_timebase_and_owned_only_when_something_folded
             eye: Some(eye()),
             timebase: explicit(),
         }),
-        "authority bode=other nyquist=other smith=other fft=other eye=owner\n\
+        "authority bode=other smith=other fft=other eye=owner\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=2 timebase=Some(Explicit { unit_interval: 1e-9, incoherent: false }) revision=2\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -244,10 +212,9 @@ fn a_folded_eye_is_loaded_with_its_timebase_and_owned_only_when_something_folded
             eye: None,
             timebase: explicit(),
         }),
-        "authority bode=other nyquist=other smith=other fft=other eye=other\n\
+        "authority bode=other smith=other fft=other eye=other\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=0 timebase=Some(Explicit { unit_interval: 1e-9, incoherent: false }) revision=2\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -257,10 +224,9 @@ fn a_folded_eye_is_loaded_with_its_timebase_and_owned_only_when_something_folded
 fn a_changed_bit_period_empties_the_eye_and_frees_its_owner() {
     assert_eq!(
         applied(|_| RunEvent::EyeTimebaseChanged),
-        "authority bode=other nyquist=other smith=other fft=other eye=none\n\
+        "authority bode=other smith=other fft=other eye=none\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=0 timebase=None revision=2\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -270,10 +236,9 @@ fn a_changed_bit_period_empties_the_eye_and_frees_its_owner() {
 fn an_outdated_eye_is_emptied_and_its_owner_left_for_synchronization() {
     assert_eq!(
         applied(|_| RunEvent::EyeOutdated),
-        "authority bode=other nyquist=other smith=other fft=other eye=other\n\
+        "authority bode=other smith=other fft=other eye=other\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=0 timebase=None revision=2\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -286,10 +251,9 @@ fn a_prepared_fft_input_is_owned_only_when_the_viewer_accepts_it() {
             owner: Some(owner),
             input: Ok(sine("V(out)")),
         }),
-        "authority bode=other nyquist=other smith=other fft=owner eye=other\n\
+        "authority bode=other smith=other fft=owner eye=other\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(out)\", 16, 16.0)) data=true analysis=true error=None revision=2\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -302,10 +266,9 @@ fn a_prepared_fft_input_is_owned_only_when_the_viewer_accepts_it() {
     });
     assert_eq!(
         snapshot(&state, owner),
-        "authority bode=other nyquist=other smith=other fft=none eye=other\n\
+        "authority bode=other smith=other fft=none eye=other\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(out)\", 16, 16.0)) data=false analysis=false error=Some(Build(ErasedWindowedSample { index: 1, .. })) revision=2\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -315,10 +278,9 @@ fn a_prepared_fft_input_is_owned_only_when_the_viewer_accepts_it() {
             owner: Some(owner),
             input: Err(mismatch()),
         }),
-        "authority bode=other nyquist=other smith=other fft=none eye=other\n\
+        "authority bode=other smith=other fft=none eye=other\n\
          fft source=Some(\"V(old)\") cache=None data=false analysis=false error=Some(Input(LengthMismatch { time_count: 17, value_count: 16 })) revision=2\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -328,10 +290,9 @@ fn a_prepared_fft_input_is_owned_only_when_the_viewer_accepts_it() {
 fn a_lost_fft_worker_is_recorded_and_frees_the_owner() {
     assert_eq!(
         applied(|_| RunEvent::FftWorkerLost),
-        "authority bode=other nyquist=other smith=other fft=none eye=other\n\
+        "authority bode=other smith=other fft=none eye=other\n\
          fft source=Some(\"V(old)\") cache=None data=false analysis=false error=Some(WorkerDisconnected) revision=2\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -341,10 +302,9 @@ fn a_lost_fft_worker_is_recorded_and_frees_the_owner() {
 fn an_outdated_fft_is_cleared_and_its_owner_left_for_synchronization() {
     assert_eq!(
         applied(|_| RunEvent::FftOutdated),
-        "authority bode=other nyquist=other smith=other fft=other eye=other\n\
+        "authority bode=other smith=other fft=other eye=other\n\
          fft source=Some(\"V(old)\") cache=None data=false analysis=false error=None revision=2\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -354,10 +314,9 @@ fn an_outdated_fft_is_cleared_and_its_owner_left_for_synchronization() {
 fn an_emptied_fft_frees_only_its_owner() {
     assert_eq!(
         applied(|_| RunEvent::FftEmptied),
-        "authority bode=other nyquist=other smith=other fft=none eye=other\n\
+        "authority bode=other smith=other fft=none eye=other\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
@@ -370,27 +329,24 @@ fn a_confirmed_cache_changes_only_its_owner() {
             viewer: ActiveViewer::Fft,
             owner,
         }),
-        "authority bode=other nyquist=other smith=other fft=owner eye=other\n\
+        "authority bode=other smith=other fft=owner eye=other\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"old nyquist\", 2))\n\
          bode responses=1\n\
          smith traces=1"
     );
 }
 
 #[test]
-fn a_frequency_response_replaces_bode_nyquist_and_smith_and_owns_what_it_loaded() {
+fn a_frequency_response_replaces_bode_and_smith_and_owns_what_it_loaded() {
     assert_eq!(
         applied(|owner| RunEvent::FrequencyResponseReplaced {
             owner: Some(owner),
             bode: responses(2),
-            loop_gain: Some(locus()),
         }),
-        "authority bode=owner nyquist=owner smith=none fft=other eye=other\n\
+        "authority bode=owner smith=none fft=other eye=other\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist Some((\"L(jω)\", 3))\n\
          bode responses=2\n\
          smith traces=0"
     );
@@ -398,12 +354,10 @@ fn a_frequency_response_replaces_bode_nyquist_and_smith_and_owns_what_it_loaded(
         applied(|owner| RunEvent::FrequencyResponseReplaced {
             owner: Some(owner),
             bode: responses(0),
-            loop_gain: None,
         }),
-        "authority bode=none nyquist=none smith=none fft=other eye=other\n\
+        "authority bode=none smith=none fft=other eye=other\n\
          fft source=Some(\"V(old)\") cache=Some((\"V(old)\", 16, 16.0)) data=true analysis=true error=None revision=1\n\
          eye traces=2 timebase=None revision=1\n\
-         nyquist None\n\
          bode responses=0\n\
          smith traces=0"
     );
@@ -413,10 +367,9 @@ fn a_frequency_response_replaces_bode_nyquist_and_smith_and_owns_what_it_loaded(
 fn collected_completions_release_every_cache_the_active_result_does_not_own() {
     assert_eq!(
         applied(|_| RunEvent::CompletionsCollected),
-        "authority bode=none nyquist=none smith=none fft=none eye=none\n\
+        "authority bode=none smith=none fft=none eye=none\n\
          fft source=Some(\"V(old)\") cache=None data=false analysis=false error=None revision=2\n\
          eye traces=0 timebase=None revision=2\n\
-         nyquist None\n\
          bode responses=0\n\
          smith traces=0"
     );

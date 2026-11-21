@@ -50,7 +50,6 @@ impl AppState {
 pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState {
     AnalysisWorkspaceState {
         bode_plot_state: rspice_results_ui::bode::BodePlotState::default(),
-        nyquist_state: rspice_results_ui::nyquist::NyquistState::default(),
         eye_diagram_state: rspice_results_ui::eye_diagram::EyeDiagramState::default(),
         fft_state: rspice_results_ui::fft::FftState::default(),
         smith_chart_state: rspice_results_ui::smith_chart::SmithChartState::default(),

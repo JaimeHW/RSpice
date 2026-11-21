@@ -23,7 +23,6 @@ mod measurement;
 mod output_contract;
 mod preflight;
 mod prepared_run;
-mod results_post;
 mod transient_post;
 mod veriloga_project;
 

@@ -25,6 +25,7 @@ pub mod manifest;
 pub(crate) mod network_matrix;
 mod noise_contrib;
 mod nyquist;
+pub(crate) use nyquist::loop_gain_source;
 pub mod op_inspector;
 pub mod operational_state;
 mod optimization;
@@ -1500,8 +1501,9 @@ pub struct ResultsState {
     logic_lanes_source: u64,
     /// Cached Bode margins + extremes for the active data version.
     pub bode: Option<BodeDerived>,
-    /// Cached Nyquist stability numbers for the active data version.
-    pub nyquist: Option<nyquist::NyquistDerived>,
+    /// Each stability analysis's locus and its stability numbers, read off
+    /// the run once per data version.
+    pub(crate) nyquist: std::collections::HashMap<nyquist::LoopGainSource, nyquist::NyquistDerived>,
     /// `simulation.data_version` last seen by the workspace; when it
     /// advances, the merged event order is read again.
     seen_version: u64,

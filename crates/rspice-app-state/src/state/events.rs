@@ -8,7 +8,6 @@
 use rspice_results_ui::bode::BodeData;
 use rspice_results_ui::eye_diagram::{EyeData, EyeTimebaseProvenance};
 use rspice_results_ui::fft::{FftInputError, PreparedFftInput};
-use rspice_results_ui::nyquist::NyquistData;
 
 use super::{ActiveViewer, SpecializedViewerCacheProvenance};
 
@@ -50,13 +49,11 @@ pub enum RunEvent {
         viewer: ActiveViewer,
         owner: SpecializedViewerCacheProvenance,
     },
-    /// A frequency-domain result replaced what the Bode, Nyquist and Smith
-    /// viewers hold. `loop_gain` is the stability run's loop-gain locus, the
-    /// only response the Nyquist viewer is given.
+    /// A frequency-domain result replaced what the Bode and Smith viewers
+    /// hold.
     FrequencyResponseReplaced {
         owner: Option<SpecializedViewerCacheProvenance>,
         bode: BodeData,
-        loop_gain: Option<NyquistData>,
     },
     /// The run tier finished collecting this frame's completions, which may
     /// have changed the active result.

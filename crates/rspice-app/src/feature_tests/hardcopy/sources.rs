@@ -526,15 +526,7 @@ fn nyquist_and_smith_require_active_retained_complex_samples() {
             vec![2.0; 16],
             "#00ffff",
         )]);
-    let mut stale = quick_view_state(real_only, ResultViewer::Nyquist);
-    stale.results.analysis.nyquist_state.load_data(
-        rspice_results_ui::nyquist::NyquistData::from_arrays(
-            "stale",
-            &[1.0, 2.0],
-            &[9_999.0, 8_888.0],
-            &[7_777.0, 6_666.0],
-        ),
-    );
+    let stale = quick_view_state(real_only, ResultViewer::Nyquist);
     assert!(matches!(
         resolve_quick_view(&stale),
         Err(HardcopySourceError::UnavailableRetainedSource { .. })

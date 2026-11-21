@@ -8,11 +8,6 @@ use super::transient_post::{DerivedViewAvailability, LoadedDerivedView};
 use super::*;
 use crate::state::{RunEvent, SpecializedViewerCacheProvenance};
 
-use rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
-
-/// What the locus is, named for the reader rather than for the transport.
-pub const LOOP_GAIN_LOCUS_LABEL: &str = "L(jω)";
-
 impl SimulationController {
     pub fn in_flight_specialized_viewer_provenance(
         &self,
@@ -111,25 +106,6 @@ impl SimulationController {
         }
     }
 
-    /// The waveform a stability run retains its loop-gain contour under, when
-    /// the analysis that just finished is one.
-    ///
-    /// The shared frequency-view population receives a projection of the typed
-    /// stability result. Resolve its analysis kind from the prepared task so
-    /// other frequency responses are not interpreted as loop gain.
-    fn loop_gain_contour_name(&self) -> Option<&'static str> {
-        let analysis_type = self
-            .current_spec
-            .as_ref()
-            .map(|spec| self.spec_to_analysis_type(spec))
-            .or_else(|| {
-                self.current_config
-                    .as_ref()
-                    .map(|config| self.config_to_analysis_type(config))
-            })?;
-        (analysis_type == AnalysisType::Stb).then_some(STB_NYQUIST_CONTOUR_WAVEFORM)
-    }
-
     pub fn populate_ac_post_views(
         &self,
         state: &mut impl RunHost,
@@ -137,21 +113,9 @@ impl SimulationController {
         waveforms: &std::collections::HashMap<String, crate::simulation::SampledWaveform>,
     ) {
         let mut bode_data = rspice_results_ui::bode::BodeData::new();
-        let mut loop_gain_locus = None;
 
         let mut names: Vec<_> = waveforms.keys().cloned().collect();
         names.sort();
-        // The Nyquist sheet is a loop-gain instrument: its encirclements and
-        // margins are the stability criterion applied to a return ratio. Only
-        // a stability run measures one, and it retains exactly one contour for
-        // it, so that contour is the only thing the sheet is given. Every
-        // other complex response here — an AC node response, a harmonic
-        // balance spectrum — is a perfectly good curve that is not a loop
-        // gain, and drawing it there would attach a stability verdict to a
-        // quantity that has none.
-        let loop_gain = self
-            .loop_gain_contour_name()
-            .filter(|name| waveforms.contains_key(*name));
         for name in names {
             let Some(waveform) = waveforms.get(&name) else {
                 continue;
@@ -168,22 +132,12 @@ impl SimulationController {
             }
 
             bode_data.add_response();
-
-            if loop_gain == Some(name.as_str()) {
-                loop_gain_locus = Some(rspice_results_ui::nyquist::NyquistData::from_arrays(
-                    LOOP_GAIN_LOCUS_LABEL,
-                    frequencies,
-                    values,
-                    imag,
-                ));
-            }
         }
 
         let owner = self.in_flight_specialized_viewer_provenance(state.model());
         state.apply_run_event(RunEvent::FrequencyResponseReplaced {
             owner,
             bode: bode_data,
-            loop_gain: loop_gain_locus,
         });
     }
 

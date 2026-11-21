@@ -429,6 +429,39 @@ fn optimization_analysis() -> AnalysisResult {
         ])
 }
 
+/// A stability result: its loop gain, a single pole at 10 Hz under 60 dB,
+/// retained as the Re and Im traces the Nyquist sheet reads.
+fn stability_analysis() -> AnalysisResult {
+    let (frequency, real, imaginary) = (0..NYQUIST_POINTS).fold(
+        (Vec::new(), Vec::new(), Vec::new()),
+        |(mut frequency, mut real, mut imaginary), index| {
+            let f = 10f64.powf(index as f64 * 6.0 / NYQUIST_POINTS as f64);
+            let (magnitude, phase) = (
+                1_000.0 / (1.0 + (f / 10.0).powi(2)).sqrt(),
+                -(f / 10.0).atan(),
+            );
+            frequency.push(f);
+            real.push(magnitude * phase.cos());
+            imaginary.push(magnitude * phase.sin());
+            (frequency, real, imaginary)
+        },
+    );
+    AnalysisResult::new(12, AnalysisType::Stb, "STB").with_waveforms(vec![
+        RetainedTrace::new(
+            rspice_results::nyquist::LOOP_GAIN_REAL_TRACE,
+            frequency.clone(),
+            real,
+            "#00aaff",
+        ),
+        RetainedTrace::new(
+            rspice_results::nyquist::LOOP_GAIN_IMAGINARY_TRACE,
+            frequency,
+            imaginary,
+            "#ffbd2e",
+        ),
+    ])
+}
+
 /// One run carrying every dataset the measured surfaces read.
 fn large_state() -> ResultsTestHost {
     let mut state = ResultsTestHost::default();
@@ -444,6 +477,7 @@ fn large_state() -> ResultsTestHost {
     run.add_analysis(harmonic_balance_analysis());
     run.add_analysis(phase_noise_analysis());
     run.add_analysis(sparameter_analysis());
+    run.add_analysis(stability_analysis());
 
     state.model.simulation.retained.runs = vec![run].into();
     assert!(state.model.simulation.select_run(0));
@@ -478,29 +512,6 @@ fn large_state() -> ResultsTestHost {
             rspice_results_ui::fft::data::SpectrumNormalization::Peak,
         )
         .expect("finite qualified FFT frame fixture"),
-    );
-
-    let (frequency, real, imaginary) = (0..NYQUIST_POINTS).fold(
-        (Vec::new(), Vec::new(), Vec::new()),
-        |(mut frequency, mut real, mut imaginary), index| {
-            let f = 10f64.powf(index as f64 * 6.0 / NYQUIST_POINTS as f64);
-            let (magnitude, phase) = (
-                1_000.0 / (1.0 + (f / 10.0).powi(2)).sqrt(),
-                -(f / 10.0).atan(),
-            );
-            frequency.push(f);
-            real.push(magnitude * phase.cos());
-            imaginary.push(magnitude * phase.sin());
-            (frequency, real, imaginary)
-        },
-    );
-    state.results.analysis.nyquist_state.load_data(
-        rspice_results_ui::nyquist::NyquistData::from_arrays(
-            "Loop gain",
-            &frequency,
-            &real,
-            &imaginary,
-        ),
     );
 
     // The reader has the envelope on: the drawn panes build it, and so does
@@ -648,9 +659,8 @@ fn state_for(viewer: ResultViewer) -> ResultsTestHost {
         ResultViewer::Soa => select_analysis(&mut state, AnalysisType::Soa),
         ResultViewer::Contribution => select_analysis(&mut state, AnalysisType::Sensitivity),
         ResultViewer::Optimization => select_analysis(&mut state, AnalysisType::Optimization),
-        ResultViewer::Bode | ResultViewer::Nyquist => {
-            select_analysis(&mut state, AnalysisType::Ac);
-        }
+        ResultViewer::Bode => select_analysis(&mut state, AnalysisType::Ac),
+        ResultViewer::Nyquist => select_analysis(&mut state, AnalysisType::Stb),
         ResultViewer::NoiseContrib => select_analysis(&mut state, AnalysisType::Noise),
         _ => select_analysis(&mut state, AnalysisType::Transient),
     }

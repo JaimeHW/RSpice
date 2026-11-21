@@ -13,7 +13,7 @@ use crate::workbench::app_state::Model;
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::documents::result_document::{
-    ResultsParts, ResultsReads, ResultsState, histogram_is_available,
+    ResultsParts, ResultsReads, ResultsState, histogram_is_available, loop_gain_source,
 };
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
@@ -21,7 +21,6 @@ use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpecializedViewerCacheAuthority {
     pub(crate) bode: Option<SpecializedViewerCacheProvenance>,
-    pub nyquist: Option<SpecializedViewerCacheProvenance>,
     pub(crate) smith: Option<SpecializedViewerCacheProvenance>,
     pub fft: Option<SpecializedViewerCacheProvenance>,
     pub(crate) eye: Option<SpecializedViewerCacheProvenance>,
@@ -32,8 +31,6 @@ pub struct SpecializedViewerCacheAuthority {
 pub struct AnalysisWorkspaceState {
     /// Bode viewer state
     pub bode_plot_state: rspice_results_ui::bode::BodePlotState,
-    /// Nyquist viewer state
-    pub nyquist_state: rspice_results_ui::nyquist::NyquistState,
     /// Eye diagram viewer state
     pub eye_diagram_state: rspice_results_ui::eye_diagram::EyeDiagramState,
     /// FFT viewer state
@@ -74,7 +71,6 @@ impl AnalysisWorkspaceState {
         self.histogram_state.clear_selection();
         self.bode_plot_state
             .load_data(rspice_results_ui::bode::BodeData::new());
-        self.nyquist_state.clear();
         self.smith_chart_state.clear_traces();
         self.cache_authority = Default::default();
     }
@@ -84,11 +80,13 @@ impl AnalysisWorkspaceState {
     fn cache_provenance(&self, viewer: ActiveViewer) -> Option<SpecializedViewerCacheProvenance> {
         match viewer {
             ActiveViewer::BodePlot => self.cache_authority.bode,
-            ActiveViewer::Nyquist => self.cache_authority.nyquist,
             ActiveViewer::SmithChart => self.cache_authority.smith,
             ActiveViewer::Fft => self.cache_authority.fft,
             ActiveViewer::EyeDiagram => self.cache_authority.eye,
-            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => None,
+            ActiveViewer::Waveform
+            | ActiveViewer::Nyquist
+            | ActiveViewer::PoleZero
+            | ActiveViewer::Histogram => None,
         }
     }
 }
@@ -182,7 +180,6 @@ impl AnalysisWorkspaceState {
         let active = model.active_specialized_viewer_cache_provenance();
         for viewer in [
             ActiveViewer::BodePlot,
-            ActiveViewer::Nyquist,
             ActiveViewer::SmithChart,
             ActiveViewer::Fft,
             ActiveViewer::EyeDiagram,
@@ -201,13 +198,15 @@ impl AnalysisWorkspaceState {
             ActiveViewer::BodePlot => self
                 .bode_plot_state
                 .load_data(rspice_results_ui::bode::BodeData::new()),
-            ActiveViewer::Nyquist => self.nyquist_state.clear(),
             ActiveViewer::SmithChart => self.smith_chart_state.clear_traces(),
             ActiveViewer::Fft => self.fft_state.clear(),
             ActiveViewer::EyeDiagram => self
                 .eye_diagram_state
                 .load_data(rspice_results_ui::eye_diagram::EyeData::default()),
-            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => return,
+            ActiveViewer::Waveform
+            | ActiveViewer::Nyquist
+            | ActiveViewer::PoleZero
+            | ActiveViewer::Histogram => return,
         }
         self.clear_specialized_viewer_cache_authority(viewer);
     }
@@ -218,11 +217,13 @@ impl AnalysisWorkspaceState {
     ) -> &mut Option<SpecializedViewerCacheProvenance> {
         match viewer {
             ActiveViewer::BodePlot => &mut self.cache_authority.bode,
-            ActiveViewer::Nyquist => &mut self.cache_authority.nyquist,
             ActiveViewer::SmithChart => &mut self.cache_authority.smith,
             ActiveViewer::Fft => &mut self.cache_authority.fft,
             ActiveViewer::EyeDiagram => &mut self.cache_authority.eye,
-            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => {
+            ActiveViewer::Waveform
+            | ActiveViewer::Nyquist
+            | ActiveViewer::PoleZero
+            | ActiveViewer::Histogram => {
                 panic!("this viewer does not own mutable cache provenance")
             }
         }
@@ -231,11 +232,13 @@ impl AnalysisWorkspaceState {
     fn specialized_viewer_cache_has_data(&self, viewer: ActiveViewer) -> bool {
         match viewer {
             ActiveViewer::BodePlot => !self.bode_plot_state.is_empty(),
-            ActiveViewer::Nyquist => !self.nyquist_state.is_empty(),
             ActiveViewer::SmithChart => !self.smith_chart_state.traces.is_empty(),
             ActiveViewer::Fft => self.fft_state.has_data(),
             ActiveViewer::EyeDiagram => self.eye_diagram_state.trace_count() > 0,
-            ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => false,
+            ActiveViewer::Waveform
+            | ActiveViewer::Nyquist
+            | ActiveViewer::PoleZero
+            | ActiveViewer::Histogram => false,
         }
     }
 }
@@ -318,19 +321,15 @@ impl ResultsReads<'_> {
                 }
             }
             ActiveViewer::Nyquist => {
-                if !self.specialized_viewer_cache_matches_active(viewer)
-                    || self.analysis.nyquist_state.is_empty()
-                {
-                    // The sheet takes a retained loop-gain contour and nothing
-                    // else — an AC node response is not a loop gain, and the
-                    // stability numbers beside the locus have no meaning on
-                    // one. Offering an AC sweep sent the reader to run an
-                    // analysis that can never fill this viewer.
-                    ViewerCapability::unavailable(
-                        "Requires a retained Nyquist contour from a stability (.STB) run",
-                    )
+                // The sheet draws a loop gain and nothing else: an AC node
+                // response is not one, and the stability numbers beside the
+                // locus have no meaning on it.
+                if loop_gain_source(self).is_some() {
+                    ViewerCapability::available("The shown stability analysis keeps its loop gain")
                 } else {
-                    ViewerCapability::available("Active analysis loop-gain locus loaded")
+                    ViewerCapability::unavailable(
+                        "Requires a stability (.STB) analysis, which measures a loop gain",
+                    )
                 }
             }
             ActiveViewer::Fft => {
@@ -419,7 +418,6 @@ mod tests {
         bode::BodeData,
         eye_diagram::{EyeData, EyeTrace},
         fft::{FftData, WindowFunction},
-        nyquist::NyquistData,
     };
 
     fn retained_analysis(
@@ -447,17 +445,6 @@ mod tests {
         let mut bode = BodeData::new();
         bode.add_response();
         state.results.analysis.bode_plot_state.load_data(bode);
-
-        state
-            .results
-            .analysis
-            .nyquist_state
-            .load_data(NyquistData::from_arrays(
-                "old nyquist",
-                &[1.0, 10.0],
-                &[1.0, -0.5],
-                &[0.0, 0.25],
-            ));
 
         state
             .results
@@ -490,7 +477,6 @@ mod tests {
             .expect("seeded active result");
         for viewer in [
             ActiveViewer::BodePlot,
-            ActiveViewer::Nyquist,
             ActiveViewer::SmithChart,
             ActiveViewer::Fft,
             ActiveViewer::EyeDiagram,
@@ -618,7 +604,6 @@ mod tests {
             .analysis
             .synchronize_specialized_viewer_cache_authority(&state.model);
         assert!(state.results.analysis.bode_plot_state.is_empty());
-        assert!(state.results.analysis.nyquist_state.is_empty());
         assert!(state.results.analysis.smith_chart_state.traces.is_empty());
         assert!(!state.results.analysis.fft_state.has_data());
         assert_eq!(state.results.analysis.eye_diagram_state.trace_count(), 0);
@@ -628,14 +613,11 @@ mod tests {
         );
     }
 
-    /// The gate has to name the analysis that can open it.
-    ///
-    /// The sheet takes a retained loop-gain contour and nothing else, so
-    /// "complex loop-gain/AC response data" sends a reader to run an AC
-    /// sweep that can never fill it. And a Nyquist result is one locus, not
-    /// a set of curves.
+    /// The gate has to name the analysis that can open it, and opens on the
+    /// shown run's retained loop gain alone: an AC response never opens it,
+    /// and a stability run does with nothing loaded beforehand.
     #[test]
-    fn the_nyquist_gate_names_the_stability_analysis_and_its_single_locus() {
+    fn the_nyquist_gate_names_the_stability_analysis_and_opens_on_its_loop_gain() {
         let mut state = ResultsTestHost::default();
         let closed = state
             .results_reads()
@@ -653,15 +635,27 @@ mod tests {
         );
 
         seed_result_viewers(&mut state);
+        assert!(
+            !state.viewer_is_available(ActiveViewer::Nyquist),
+            "an AC response is not a loop gain"
+        );
+
+        let loop_gain = |name: &str| {
+            crate::state::RetainedTrace::new(name, vec![1.0, 10.0], vec![1.0, -0.5], "#fff")
+        };
+        let mut run = crate::state::SimulationRun::new(2);
+        run.add_analysis(
+            retained_analysis(1, crate::state::AnalysisType::Stb, 0x41).with_waveforms(vec![
+                loop_gain(rspice_results::nyquist::LOOP_GAIN_REAL_TRACE),
+                loop_gain(rspice_results::nyquist::LOOP_GAIN_IMAGINARY_TRACE),
+            ]),
+        );
+        state.model.simulation.retained.runs.push(run);
+        assert!(state.model.simulation.select_run(1));
         let open = state
             .results_reads()
             .viewer_capability(ActiveViewer::Nyquist);
         assert!(open.available, "{}", open.reason);
-        assert!(
-            !open.reason.contains("curves"),
-            "one locus is not a set of curves: {}",
-            open.reason
-        );
     }
 
     #[test]

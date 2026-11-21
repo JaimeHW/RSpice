@@ -142,7 +142,41 @@ const SETTLED_HIGH_FREQUENCY_MAGNITUDE: f64 = 0.1;
 /// closure stops depending on where exactly the sweep began.
 const SETTLED_LOW_FREQUENCY_AXIS_RATIO: f64 = 1.0e-2;
 
+use crate::analysis_type::AnalysisType;
 use crate::stability::GAIN_MARGIN_TIE_DECIBELS;
+use crate::waveform::RetainedWaveform;
+
+/// The trace a stability run keeps the real part of its loop gain under.
+pub const LOOP_GAIN_REAL_TRACE: &str = "Re(Loop Gain)";
+
+/// The trace a stability run keeps the imaginary part of its loop gain under.
+pub const LOOP_GAIN_IMAGINARY_TRACE: &str = "Im(Loop Gain)";
+
+/// What a loop gain's locus is called on the sheet that draws it.
+pub const LOOP_GAIN_LOCUS_LABEL: &str = "L(jω)";
+
+/// Where an analysis keeps its loop gain: the indices of its real and
+/// imaginary traces among `waveforms`. Only a stability run measures a loop
+/// gain; an AC node response or a harmonic-balance spectrum is a complex
+/// curve with no stability criterion to apply to it, so nothing else has
+/// one. No sample is read.
+pub fn loop_gain_traces<W: AsRef<RetainedWaveform>>(
+    analysis_type: AnalysisType,
+    waveforms: &[W],
+) -> Option<(usize, usize)> {
+    if analysis_type != AnalysisType::Stb {
+        return None;
+    }
+    let position = |name: &str| {
+        waveforms
+            .iter()
+            .position(|waveform| waveform.as_ref().name == name)
+    };
+    Some((
+        position(LOOP_GAIN_REAL_TRACE)?,
+        position(LOOP_GAIN_IMAGINARY_TRACE)?,
+    ))
+}
 
 /// Samples each margin interpolant passes through.
 const STENCIL_SAMPLES: usize = 6;

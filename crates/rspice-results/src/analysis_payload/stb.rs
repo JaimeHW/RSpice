@@ -16,13 +16,13 @@ impl AnalysisResultPayload {
         let frequencies = Arc::new(points.iter().map(|p| p.frequency).collect::<Vec<_>>());
         let mut traces = vec![
             RetainedWaveform::new(
-                "Re(Loop Gain)",
+                crate::nyquist::LOOP_GAIN_REAL_TRACE,
                 frequencies.clone(),
                 points.iter().map(|p| p.loop_gain.re).collect::<Vec<_>>(),
             )
             .with_unit("1"),
             RetainedWaveform::new(
-                "Im(Loop Gain)",
+                crate::nyquist::LOOP_GAIN_IMAGINARY_TRACE,
                 frequencies.clone(),
                 points.iter().map(|p| p.loop_gain.im).collect::<Vec<_>>(),
             )

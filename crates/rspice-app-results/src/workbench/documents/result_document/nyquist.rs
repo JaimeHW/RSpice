@@ -1,53 +1,142 @@
-//! Application source selection and cache coordination for the Nyquist viewer.
+//! The Nyquist sheet: the loop gain of the stability analysis shown, read off
+//! the run's retained traces whenever the sheet is shown.
+//!
+//! The locus is not held anywhere but in the run. Any retained stability run
+//! draws, in memory or stored, straight after it finished or after the project
+//! was reopened, and each run in the history draws its own.
 
 #[cfg(test)]
 mod agreement;
 
-use crate::ui::plot;
+use std::sync::Arc;
+
+use crate::product::DatasetId;
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
+use rspice_results::nyquist::{LOOP_GAIN_LOCUS_LABEL, loop_gain_traces};
+use rspice_results::waveform::Fetched;
 use rspice_results_ui::nyquist::NyquistData;
-use rspice_results_ui::nyquist::view::{
-    self, IMAGINARY_SERIES, NYQUIST_CACHE_BASE, NyquistPlot, NyquistStability, REAL_SERIES,
-};
+use rspice_results_ui::nyquist::view::{self, NyquistPlot, NyquistStability};
+use rspice_results_ui::presentation::well_hint;
 
-/// The retained loop-gain locus.
-fn active_curve(state: ResultsReads<'_>) -> Option<&NyquistData> {
-    state
-        .analysis
-        .nyquist_state
-        .curve()
-        .filter(|curve| !curve.is_empty())
+/// Where the shown run keeps the loop gain the sheet draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct LoopGainSource {
+    dataset: DatasetId,
+    analysis: usize,
+    real: usize,
+    imaginary: usize,
 }
 
-/// Stability numbers cached on the application data version.
-#[derive(Debug, Clone, Copy)]
+/// The stability analysis the sheet draws: the selected analysis when it
+/// measured a loop gain, else the shown run's first that did. A solve that
+/// failed retained whatever the engine emitted before it gave up, which is no
+/// loop gain to read a criterion off.
+pub(crate) fn loop_gain_source(state: ResultsReads<'_>) -> Option<LoopGainSource> {
+    let simulation = &state.model.simulation;
+    let run = simulation.active_run()?;
+    let source = |index: usize| {
+        let analysis = run.analyses.get(index)?;
+        if !analysis.success {
+            return None;
+        }
+        let (real, imaginary) = loop_gain_traces(analysis.analysis_type, &analysis.waveforms)?;
+        Some(LoopGainSource {
+            dataset: run.dataset_id,
+            analysis: index,
+            real,
+            imaginary,
+        })
+    };
+    simulation
+        .view
+        .active_analysis_idx
+        .and_then(source)
+        .or_else(|| (0..run.analyses.len()).find_map(source))
+}
+
+/// One stability analysis's locus and the numbers read off it, kept until
+/// the run history's samples change.
+#[derive(Debug, Clone)]
 pub struct NyquistDerived {
     version: u64,
+    locus: Arc<NyquistData>,
+    real: Arc<[f64]>,
+    imaginary: Arc<[f64]>,
     stability: NyquistStability,
 }
 
-fn derived(state: &mut ResultsParts<'_>) -> Option<NyquistDerived> {
+/// What the sheet has to draw for the run shown.
+enum Locus {
+    Ready(NyquistDerived),
+    /// A stored run's loop gain is being read; a later frame has it.
+    Reading,
+    /// The loop gain cannot be read, and why.
+    Refused(String),
+    /// The run shown measured no loop gain.
+    Absent,
+}
+
+const NEEDS_LOOP_GAIN: &str =
+    "No loop gain — run a stability (.STB) analysis to draw its Nyquist locus";
+
+/// The shown run's locus, read through the reader service: whole, since the
+/// encirclement count and the margins are searched over the whole sweep.
+fn locus(state: &mut ResultsParts<'_>) -> Locus {
+    let Some(source) = loop_gain_source(state.results_reads()) else {
+        return Locus::Absent;
+    };
     let version = state.model.simulation.view.data_version;
-    if let Some(cached) = state.results.nyquist
+    if let Some(cached) = state.results.nyquist.get(&source)
         && cached.version == version
     {
-        return Some(cached);
+        return Locus::Ready(cached.clone());
     }
-    let curve = active_curve(state.results_reads())?;
-    let computed = NyquistDerived {
+    let Some(analysis) = state
+        .model
+        .simulation
+        .active_run()
+        .and_then(|run| run.analyses.get(source.analysis))
+    else {
+        return Locus::Absent;
+    };
+    let (real, imaginary) = (
+        &analysis.waveforms[source.real],
+        &analysis.waveforms[source.imaginary],
+    );
+    let (frequency, real, imaginary) = match (
+        real.x.fetch_whole(),
+        real.y.fetch_whole(),
+        imaginary.y.fetch_whole(),
+    ) {
+        (Fetched::Ready(frequency), Fetched::Ready(real), Fetched::Ready(imaginary)) => {
+            (frequency, real, imaginary)
+        }
+        (Fetched::Refused(reason), _, _)
+        | (_, Fetched::Refused(reason), _)
+        | (_, _, Fetched::Refused(reason)) => return Locus::Refused(reason),
+        _ => return Locus::Reading,
+    };
+    super::frame_work::note(super::frame_work::DatasetWalk::LoopGainLocus);
+    let locus = NyquistData::from_arrays(LOOP_GAIN_LOCUS_LABEL, &frequency, &real, &imaginary);
+    let derived = NyquistDerived {
         version,
         stability: NyquistStability {
-            encirclements: curve.count_encirclements(),
-            min_distance: curve.min_distance_from_critical(),
-            gain_margin: curve.gain_margin(),
-            phase_margin: curve.phase_margin(),
+            encirclements: locus.count_encirclements(),
+            min_distance: locus.min_distance_from_critical(),
+            gain_margin: locus.gain_margin(),
+            phase_margin: locus.phase_margin(),
         },
+        real: locus.points.iter().map(|point| point.real).collect(),
+        imaginary: locus.points.iter().map(|point| point.imag).collect(),
+        locus: Arc::new(locus),
     };
-    state.results.nyquist = Some(computed);
-    Some(computed)
+    let nyquist = &mut state.results.nyquist;
+    nyquist.retain(|_, held| held.version == version);
+    nyquist.insert(source, derived.clone());
+    Locus::Ready(derived)
 }
 
 /// The reader's significant digits, which the stability figures read at.
@@ -60,56 +149,38 @@ fn significant_digits(state: ResultsReads<'_>) -> usize {
     )
 }
 
-/// Present the active retained loop gain and apply local viewer outcomes.
+/// Draw the shown run's loop gain and apply the viewer's local outcomes.
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let significant_digits = significant_digits(state.results_reads());
-    // Component arrays for the plot engine, cached per data version.
-    //
-    // The cache and the locus live in disjoint halves of the session, so the
-    // arrays are built by reference. Copying the whole contour out first —
-    // purely to release the borrow — meant every frame paid for a complete
-    // copy of the locus before finding out the cache already held it.
-    let prepared = if active_curve(state.results_reads()).is_some() {
-        let nyquist = &state.analysis.nyquist_state;
-        let points = nyquist
-            .curve()
-            .map(|curve| curve.points.as_slice())
-            .unwrap_or_default();
-        let series = &mut state.results.session.derived;
-        let re = series.get_or(
-            plot::trace_cache_key(NYQUIST_CACHE_BASE, REAL_SERIES),
-            || points.iter().map(|p| p.real).collect::<Vec<_>>().into(),
-        );
-        let im = series.get_or(
-            plot::trace_cache_key(NYQUIST_CACHE_BASE, IMAGINARY_SERIES),
-            || points.iter().map(|p| p.imag).collect::<Vec<_>>().into(),
-        );
-        let stats = derived(state).map(|cached| cached.stability);
-        Some((re, im, stats))
-    } else {
-        None
+    let derived = match locus(state) {
+        Locus::Ready(derived) => derived,
+        Locus::Reading => {
+            well_hint(ui, rspice_results::waveform::BEING_READ);
+            return;
+        }
+        Locus::Refused(reason) => {
+            well_hint(ui, &reason);
+            return;
+        }
+        Locus::Absent => {
+            well_hint(ui, NEEDS_LOOP_GAIN);
+            return;
+        }
     };
-    let source = prepared.as_ref().and_then(|(re, im, stats)| {
-        state
-            .analysis
-            .nyquist_state
-            .curve()
-            .map(|curve| NyquistPlot {
-                curve,
-                // Built above from the locus, so held in memory.
-                real: re.in_memory().unwrap_or_default(),
-                imaginary: im.in_memory().unwrap_or_default(),
-                stability: *stats,
-            })
-    });
+    let source = NyquistPlot {
+        curve: &derived.locus,
+        real: &derived.real,
+        imaginary: &derived.imaginary,
+        stability: Some(derived.stability),
+    };
     let results = &mut state.results;
     let viewer = super::ResultViewer::Nyquist;
     let mut view = results.session.plot_view(viewer, 0);
     let mut pin = results.session.rf_pin.get(&viewer).copied();
     if let Some(response) = view::show(
         ui,
-        source,
+        Some(source),
         &mut view,
         &mut pin,
         &mut results.session.cache,
@@ -133,46 +204,125 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     }
 }
 
-/// Read the cached stability of the selected source into the inspector.
+/// The stability numbers of the shown run's loop gain, in the inspector.
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let significant_digits = significant_digits(state.results_reads());
-    view::right_panel(
-        ui,
-        derived(state).map(|cached| cached.stability),
-        &quantity_policy,
-        significant_digits,
-    );
+    let stability = match locus(state) {
+        Locus::Ready(derived) => Some(derived.stability),
+        _ => None,
+    };
+    view::right_panel(ui, stability, &quantity_policy, significant_digits);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
+    use rspice_results::nyquist::{LOOP_GAIN_IMAGINARY_TRACE, LOOP_GAIN_REAL_TRACE};
 
-    /// The derived numbers are cached on the retained data version, so a new
-    /// result replaces them instead of serving the previous locus's stability.
+    /// A stability analysis retaining `L = gain / (1 + jf/1 kHz)³` at ten
+    /// points a decade from 1 Hz to 1 MHz, as its Re and Im traces.
+    fn stability_analysis(gain: f64) -> AnalysisResult {
+        let frequency: Vec<f64> = (0..=60).map(|i| 10f64.powf(f64::from(i) / 10.0)).collect();
+        let (real, imaginary): (Vec<f64>, Vec<f64>) = frequency
+            .iter()
+            .map(|&f| {
+                let l = num_complex::Complex64::new(gain, 0.0)
+                    / num_complex::Complex64::new(1.0, f / 1.0e3).powi(3);
+                (l.re, l.im)
+            })
+            .unzip();
+        AnalysisResult::new(1, AnalysisType::Stb, "STB").with_waveforms(vec![
+            RetainedTrace::new(LOOP_GAIN_REAL_TRACE, frequency.clone(), real, "#fff"),
+            RetainedTrace::new(LOOP_GAIN_IMAGINARY_TRACE, frequency, imaginary, "#fff"),
+        ])
+    }
+
+    fn run_of(analysis: AnalysisResult) -> SimulationRun {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        run
+    }
+
+    fn gain_margin_db(state: &mut ResultsTestHost) -> Option<f64> {
+        match locus(&mut state.results_parts()) {
+            Locus::Ready(derived) => derived
+                .stability
+                .gain_margin
+                .map(|margin| 20.0 * margin.value.log10()),
+            _ => None,
+        }
+    }
+
+    /// The locus is read off the shown run's retained loop gain, so a run in
+    /// the history that nothing loaded draws, and each run draws its own.
     #[test]
-    fn derived_stability_follows_the_retained_data_version() {
+    fn each_retained_stability_run_draws_its_own_locus() {
         let mut state = ResultsTestHost::default();
-        state
-            .results
-            .analysis
-            .nyquist_state
-            .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[0.0], &[0.0]));
+        state.model.simulation.retained.runs = vec![
+            run_of(stability_analysis(4.0)),
+            run_of(stability_analysis(2.0)),
+        ]
+        .into();
+        assert!(state.model.simulation.select_run(0));
+        let first = gain_margin_db(&mut state).expect("the first run's locus");
+        assert!((first - 20.0 * 2f64.log10()).abs() < 1.0e-3, "{first}");
 
-        let first =
-            derived(&mut state.results_parts()).expect("a loaded locus has stability numbers");
-        assert_eq!(first.stability.min_distance, Some(1.0));
+        assert!(state.model.simulation.select_run(1));
+        let second = gain_margin_db(&mut state).expect("the second run's locus");
+        assert!((second - 20.0 * 4f64.log10()).abs() < 1.0e-3, "{second}");
+    }
 
-        state
-            .results
-            .analysis
-            .nyquist_state
-            .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[-1.0], &[2.0]));
-        state.model.simulation.view.data_version =
-            state.model.simulation.view.data_version.wrapping_add(1);
-        let second =
-            derived(&mut state.results_parts()).expect("the replacement locus is derived afresh");
-        assert_eq!(second.stability.min_distance, Some(2.0));
+    /// A stored stability run draws its locus from the results store: each
+    /// column is read once, and the next frame reads nothing.
+    #[test]
+    fn a_stored_stability_run_reads_its_loop_gain_once() {
+        let in_memory = stability_analysis(4.0);
+        let column = |index: usize| {
+            in_memory.waveforms[index]
+                .y
+                .in_memory()
+                .expect("the fixture holds its samples")
+                .to_vec()
+        };
+        let frequency = in_memory.waveforms[0]
+            .x
+            .in_memory()
+            .expect("the fixture holds its frequencies")
+            .to_vec();
+        let (mut stored, columns) = super::super::test_fixtures::stored_transient(
+            frequency,
+            vec![
+                (LOOP_GAIN_REAL_TRACE.to_owned(), column(0)),
+                (LOOP_GAIN_IMAGINARY_TRACE.to_owned(), column(1)),
+            ],
+            None,
+        );
+        stored.analysis_type = AnalysisType::Stb;
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run_of(stored)].into();
+        assert!(state.model.simulation.select_run(0));
+
+        let margin = gain_margin_db(&mut state).expect("the stored run's locus");
+        assert!((margin - 20.0 * 2f64.log10()).abs() < 1.0e-3, "{margin}");
+        let reads: Vec<u64> = columns.iter().map(|column| column.whole_reads()).collect();
+        assert_eq!(reads, [1, 1, 1], "each column is read whole once");
+        assert!(gain_margin_db(&mut state).is_some());
+        let again: Vec<u64> = columns.iter().map(|column| column.whole_reads()).collect();
+        assert_eq!(again, reads, "the next frame reads nothing");
+    }
+
+    /// An AC response is a complex curve, not a loop gain: no locus.
+    #[test]
+    fn an_ac_response_draws_no_locus() {
+        let mut analysis = stability_analysis(4.0);
+        analysis.analysis_type = AnalysisType::Ac;
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run_of(analysis)].into();
+        assert!(state.model.simulation.select_run(0));
+
+        assert!(loop_gain_source(state.results_reads()).is_none());
+        assert!(matches!(locus(&mut state.results_parts()), Locus::Absent));
     }
 }

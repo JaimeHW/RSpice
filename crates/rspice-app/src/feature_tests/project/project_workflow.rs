@@ -6,7 +6,6 @@ use rspice_app_workbench::workbench::app::dialogs::confirmation_state::Confirmat
 use rspice_results_ui::bode::BodeData;
 use rspice_results_ui::eye_diagram::{EyeData, EyeTrace};
 use rspice_results_ui::fft::{FftData, window::WindowFunction};
-use rspice_results_ui::nyquist::NyquistData;
 use std::path::Path;
 
 use crate::workbench::app::project_transactions::apply_loaded_project;
@@ -561,17 +560,6 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
     state
         .results
         .analysis
-        .nyquist_state
-        .load_data(NyquistData::from_arrays(
-            "old nyquist",
-            &[1.0, 10.0],
-            &[1.0, -0.5],
-            &[0.0, 0.25],
-        ));
-
-    state
-        .results
-        .analysis
         .smith_chart_state
         .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
         .expect("valid Smith fixture");
@@ -599,7 +587,6 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
         .expect("default test project has an active retained analysis");
     for viewer in [
         ActiveViewer::BodePlot,
-        ActiveViewer::Nyquist,
         ActiveViewer::SmithChart,
         ActiveViewer::Fft,
         ActiveViewer::EyeDiagram,
@@ -615,7 +602,6 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
         ActiveViewer::SmithChart,
         ActiveViewer::EyeDiagram,
         ActiveViewer::BodePlot,
-        ActiveViewer::Nyquist,
         ActiveViewer::Fft,
     ] {
         assert!(
