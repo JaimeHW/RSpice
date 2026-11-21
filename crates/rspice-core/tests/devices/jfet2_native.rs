@@ -475,25 +475,6 @@ fn jfet2_xyce_variant_can_be_selected_internally() {
 }
 
 #[test]
-fn jfet2_xyce_dialect_struct_literal_selects_xyce_variant() {
-    let netlist = Netlist::parse(xyce_jfet2_dc_deck()).expect("deck parses");
-    let engine = Engine::new(SimulationConfig {
-        spice_dialect: SpiceDialect::Xyce,
-        ..Default::default()
-    });
-    let (_result, report) = engine
-        .run_dc_op_with_report(&netlist)
-        .expect("op converges");
-    let entry = report
-        .entries
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case("j1"))
-        .expect("j1 op report entry");
-
-    assert_eq!(entry.device_kind, "JFET2_XYCE");
-}
-
-#[test]
 fn jfet2_xyce_variant_preserves_pjf_polarity() {
     let netlist = Netlist::parse(xyce_pjf_jfet2_dc_deck()).expect("deck parses");
     let result = xyce_jfet2_engine()

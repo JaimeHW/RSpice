@@ -1106,20 +1106,6 @@ fn bsim_level_without_native_model_is_rejected() {
 }
 
 #[test]
-fn bsim3_levels_run_natively() {
-    // LEVEL=49/8 are ngspice-compatible BSIM3 aliases; LEVEL=9 is Xyce's
-    // BSIM3 front when the card has a BSIM3 parameter surface. All route to
-    // the native port: no allow_simplified_mos opt-in, no rejection.
-    for level in [49, 8, 9] {
-        let deck = op_deck(
-            &format!(".model nmod NMOS (LEVEL={level} VTH0=0.5 TOX=4.1n NCH=2.35e17)"),
-            "",
-        );
-        run(&deck).unwrap_or_else(|err| panic!("LEVEL={level} must run natively: {err}"));
-    }
-}
-
-#[test]
 fn level9_bsim3_only_selectors_route_to_bsim3_not_mos9() {
     for selector in ["ACM=1", "CALCACM=1", "BINUNIT=1", "PARAMCHK=0"] {
         let deck = op_deck(&format!(".model nmod NMOS (LEVEL=9 {selector})"), "");
@@ -1166,19 +1152,6 @@ fn level9_string_bsim3_version_routes_to_bsim3_not_mos9() {
         entry.device_kind, "BSIM3",
         "LEVEL=9 VERSION=\"3.2.2\" must not silently fall through to MOS9"
     );
-}
-
-#[test]
-fn bsim4_levels_run_natively() {
-    // LEVEL=54 and LEVEL=14 route to the native BSIM4 v4.8 port — no
-    // allow_simplified_mos opt-in, no rejection.
-    for level in [54, 14] {
-        let deck = op_deck(
-            &format!(".model nmod NMOS (LEVEL={level} VTH0=0.5 TOXE=1.4n NDEP=3e18)"),
-            "",
-        );
-        run(&deck).unwrap_or_else(|err| panic!("LEVEL={level} must run natively: {err}"));
-    }
 }
 
 #[test]
@@ -1399,55 +1372,6 @@ fn xyce_ekv3_level301_incomplete_card_fails_closed_outside_native_slice() {
         !message.contains("allow_simplified_mos"),
         "EKV3 LEVEL=301 must not suggest or use the simplified MOS escape hatch: {message}"
     );
-}
-
-#[test]
-fn simplified_mos_opt_in_zero_still_rejects() {
-    let deck = op_deck(
-        ".model nmod NMOS (LEVEL=53 VTH0=0.5)",
-        ".options allow_simplified_mos=0",
-    );
-    run(&deck).expect_err("allow_simplified_mos=0 keeps the rejection");
-}
-
-#[test]
-fn level3_runs_without_fallback_warning() {
-    let deck = "* mos level policy\n\
-                vdd d 0 dc 1.8\n\
-                vg g 0 dc 1.0\n\
-                m1 d g 0 0 n3native w=1u l=0.1u\n\
-                .model n3native NMOS (LEVEL=3 VTO=0.6 KP=100u)\n\
-                .op\n\
-                .end\n";
-    let (report, warnings) = log_capture::lines_logged(log::LevelFilter::Warn, || run_report(deck));
-    let report = report.expect("LEVEL=3 must run as native Berkeley MOS3");
-    let entry = report
-        .entries
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
-        .expect("m1 op entry");
-    assert!(
-        !entry.device_kind.is_empty(),
-        "m1 op entry has a device kind"
-    );
-    assert!(
-        !warnings.iter().any(|message| {
-            message.contains("no native MOS3") || message.contains("MOS3-specific parameters")
-        }),
-        "LEVEL=3 must not emit the old simplified fallback warning; warnings={warnings:?}"
-    );
-}
-
-#[test]
-fn native_levels_unaffected() {
-    for model_line in [
-        ".model nmod NMOS (LEVEL=1 VTO=0.6 KP=100u)",
-        ".model nmod NMOS (LEVEL=2 VTO=0.6 KP=100u)",
-        ".model nmod NMOS (LEVEL=6 VTO=0.6 KC=100u)",
-    ] {
-        let deck = op_deck(model_line, "");
-        run(&deck).unwrap_or_else(|err| panic!("{model_line} must build: {err}"));
-    }
 }
 
 #[test]

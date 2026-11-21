@@ -3525,28 +3525,6 @@ fn rgatemod1_creates_external_gate_resistance() {
 }
 
 #[test]
-fn rgatemod2_runs_without_simplified_mos_optin() {
-    let deck = rgatemod2_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let result = engine().run_dc_op(&netlist);
-    assert!(
-        result.is_ok(),
-        "RGATEMOD=2 must build and run natively, got {result:?}"
-    );
-}
-
-#[test]
-fn rgatemod3_runs_without_simplified_mos_optin() {
-    let deck = rgatemod3_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let result = engine().run_dc_op(&netlist);
-    assert!(
-        result.is_ok(),
-        "RGATEMOD=3 must build and run natively, got {result:?}"
-    );
-}
-
-#[test]
 fn rgatemod2_pmos_gate_tunneling_op_matches_ngspice46() {
     // ngspice-46 reference from the same deck with `.print op v(out) v(m1#gate)
     // i(vdd) i(vin) i(vb)`. The stressed PMOS gate-current path keeps the

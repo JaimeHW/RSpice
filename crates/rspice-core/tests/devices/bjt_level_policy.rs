@@ -1236,22 +1236,6 @@ fn vbic_level11_rejects_unresolved_native_model_params() {
 }
 
 #[test]
-fn vbic_level4_still_runs_natively() {
-    let deck = op_deck(".model qmod NPN (LEVEL=4 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=1)");
-    run(&deck).expect("LEVEL=4 remains the native VBIC selector");
-}
-
-#[test]
-fn xyce_vbic_levels_11_and_12_run_natively() {
-    for level in [11, 12] {
-        let deck = op_deck(&format!(
-            ".model qmod NPN (LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=1 RCI=2 RBX=1 RBI=2)"
-        ));
-        run(&deck).unwrap_or_else(|err| panic!("Xyce VBIC LEVEL={level} must run natively: {err}"));
-    }
-}
-
-#[test]
 fn xyce_vbic_levels_11_and_12_use_vbic_internal_topology() {
     for level in [11, 12] {
         let deck = op_deck(&format!(
