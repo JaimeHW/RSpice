@@ -1216,6 +1216,8 @@ pub fn show(
             3.0,
         ));
     }
+    // Where the limit labels sit, so a marker's tag keeps clear of them.
+    let mut limit_labels: Vec<Rect> = Vec::new();
     for line in &spec.limit_lines {
         if !(line.y >= spec.y.min && line.y <= spec.y.max) {
             continue;
@@ -1227,16 +1229,22 @@ pub fn show(
             6.0,
             4.0,
         ));
-        inside.text(
-            pos2(
-                plot_rect.right() - 4.0,
-                (py - 3.0).max(plot_rect.top() + 11.0),
-            ),
-            Align2::RIGHT_BOTTOM,
-            &line.label,
+        // Above its line, or below it when the line runs too near the top
+        // for the words to stand clear: never across the dashes.
+        let galley = painter.layout_no_wrap(
+            line.label.clone(),
             theme::mono(9.0, FontWeight::Medium),
             line.color,
         );
+        let size = galley.size();
+        let top = if py - 3.0 - size.y >= plot_rect.top() + 1.0 {
+            py - 3.0 - size.y
+        } else {
+            py + 3.0
+        };
+        let label = Rect::from_min_size(pos2(plot_rect.right() - 4.0 - size.x, top), size);
+        inside.galley(label.min, galley, line.color);
+        limit_labels.push(label);
     }
 
     // ---- custom underlay (histogram bars, eye acquisitions)
@@ -1415,6 +1423,9 @@ pub fn show(
 
     // ---- markers
     let tag_font = theme::mono(9.5, FontWeight::Regular);
+    // What a tag keeps clear of beside the curves: the limit labels, and
+    // every tag already placed.
+    let mut obstacles = limit_labels;
     for marker in &spec.markers {
         // A marker states where something is. Off the window there is no
         // "where" to draw, and a dot pinned to the frame would claim a
@@ -1481,15 +1492,41 @@ pub fn show(
         // very edge of it, and a staggering offset can push it past either
         // end. Keep the whole tag inside rather than letting a corner of it
         // spill over the axis chrome.
-        let tx = tx.clamp(
-            plot_rect.left() + 2.0,
-            (plot_rect.right() - tag_w - 2.0).max(plot_rect.left() + 2.0),
-        );
-        let ty = ty.clamp(
-            plot_rect.top() + 2.0,
-            (plot_rect.bottom() - tag_h - 2.0).max(plot_rect.top() + 2.0),
-        );
-        let tag_rect = Rect::from_min_size(pos2(tx, ty), vec2(tag_w, tag_h));
+        let place = |tx: f32, ty: f32| {
+            let tx = tx.clamp(
+                plot_rect.left() + 2.0,
+                (plot_rect.right() - tag_w - 2.0).max(plot_rect.left() + 2.0),
+            );
+            let ty = ty.clamp(
+                plot_rect.top() + 2.0,
+                (plot_rect.bottom() - tag_h - 2.0).max(plot_rect.top() + 2.0),
+            );
+            Rect::from_min_size(pos2(tx, ty), vec2(tag_w, tag_h))
+        };
+        let mut tag_rect = place(tx, ty);
+        // A point's tag set on the curve it names, on a limit line, on a
+        // limit's words or on another tag hides them: it takes the first
+        // corner of the point that is clear, nearest first, and keeps its
+        // usual place when none is.
+        if !limit_line {
+            let (right, left) = (px + 9.0, px - tag_w - 9.0);
+            let lift = tag_h + 4.0;
+            let clear = |rect: Rect| !tag_collides(rect, spec, plot_rect, &mx, &my, &obstacles);
+            if !clear(tag_rect)
+                && let Some(rect) = [0.0, lift, 2.0 * lift]
+                    .into_iter()
+                    .flat_map(|farther| {
+                        let (above, below) = (py - tag_h - 7.0 - farther, py + 9.0 + farther);
+                        [(right, above), (left, above), (right, below), (left, below)]
+                    })
+                    .map(|(x, y)| place(x, y))
+                    .find(|rect| clear(*rect))
+            {
+                tag_rect = rect;
+            }
+        }
+        obstacles.push(tag_rect);
+        let (tx, ty) = (tag_rect.left(), tag_rect.top());
         inside.rect(
             tag_rect,
             t.radius,
@@ -2346,6 +2383,88 @@ fn handle_navigation(
     if y != Window::SAME {
         out.view.y = store_y(y);
     }
+}
+
+/// Whether a marker tag at `rect` covers a trace, a limit line or one of
+/// the limit labels at `labels`. Only the samples under the tag are read;
+/// a dense trace is read at a stride, which is fine enough for a tag.
+fn tag_collides(
+    rect: Rect,
+    spec: &PlotSpec,
+    plot_rect: Rect,
+    mx: &dyn Fn(f64) -> f32,
+    my: &dyn Fn(f64) -> f32,
+    labels: &[Rect],
+) -> bool {
+    const MOST_SEGMENTS: usize = 2048;
+    let near = rect.expand(2.0);
+    if labels.iter().any(|label| label.intersects(near)) {
+        return true;
+    }
+    if spec.limit_lines.iter().any(|line| {
+        line.y >= spec.y.min && line.y <= spec.y.max && near.y_range().contains(my(line.y))
+    }) {
+        return true;
+    }
+    let data_x = |screen: f32| {
+        let at = f64::from((screen - plot_rect.left()) / plot_rect.width());
+        spec.x_scale.denormalize(at, spec.x.min, spec.x.max)
+    };
+    let (from, to) = (data_x(near.left()), data_x(near.right()));
+    spec.traces.iter().any(|trace| {
+        let (x, y) = (trace.x, trace.y);
+        let n = x.len().min(y.len());
+        if n < 2 || !(x[0] <= x[n - 1]) {
+            return false;
+        }
+        let first = x[..n].partition_point(|v| *v < from).saturating_sub(1);
+        let last = (x[..n].partition_point(|v| *v <= to) + 1).min(n);
+        if last <= first + 1 {
+            return false;
+        }
+        let stride = ((last - first) / MOST_SEGMENTS).max(1);
+        let mut previous: Option<Pos2> = None;
+        for i in (first..last)
+            .step_by(stride)
+            .chain(std::iter::once(last - 1))
+        {
+            if !(x[i].is_finite() && y[i].is_finite()) {
+                previous = None;
+                continue;
+            }
+            let point = pos2(mx(x[i]), my(y[i]));
+            if let Some(start) = previous
+                && segment_meets_rect(start, point, near)
+            {
+                return true;
+            }
+            previous = Some(point);
+        }
+        false
+    })
+}
+
+/// Whether the segment from `a` to `b` passes through `rect`.
+fn segment_meets_rect(a: Pos2, b: Pos2, rect: Rect) -> bool {
+    let (left, right) = (a.x.min(b.x), a.x.max(b.x));
+    if right < rect.left() || left > rect.right() {
+        return false;
+    }
+    // The segment's height over the part of it inside the rect's columns.
+    let at = |x: f32| {
+        if (b.x - a.x).abs() < f32::EPSILON {
+            a.y
+        } else {
+            a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x)
+        }
+    };
+    let (x0, x1) = (left.max(rect.left()), right.min(rect.right()));
+    let (y0, y1) = if (b.x - a.x).abs() < f32::EPSILON {
+        (a.y.min(b.y), a.y.max(b.y))
+    } else {
+        (at(x0).min(at(x1)), at(x0).max(at(x1)))
+    };
+    y1 >= rect.top() && y0 <= rect.bottom()
 }
 
 /// The floating hover readout: elevated box, mono rows, k dim / v bright.
