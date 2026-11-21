@@ -84,6 +84,11 @@ struct Client {
     /// The history's revision and the count of kept segments when it was last looked through
     /// for segments to load.
     scanned: Option<(rspice_results::run_history::RunHistoryRevision, usize)>,
+    /// Whether a project file about to be read is having its segments loaded ([`preload`]).
+    preloading: bool,
+    /// The segments loaded for a project file about to be read, held until that project (by id)
+    /// is open.
+    preloaded: Option<(String, Vec<Arc<Segment>>)>,
     repaint: Option<egui::Context>,
 }
 
@@ -127,7 +132,7 @@ pub(super) fn keep(segment: &Arc<Segment>) {
     }
 }
 
-/// Follow the open project, once a frame: hold its store, cut the runs a full store stopped and
+//// Follow the open project, once a frame: hold its store, cut the runs a full store stopped and
 /// say so, and load and read again the runs whose segments the store keeps and the page does not
 /// hold. Returns each run the store stopped, by its sequence, with the stop it keeps.
 pub fn follow(
@@ -135,10 +140,14 @@ pub fn follow(
     project: Option<String>,
     ctx: &egui::Context,
 ) -> Vec<(u64, ResultsStorageStop)> {
-    let followed = with(|client| {
+    let (followed, preloading) = with(|client| {
         client.repaint.get_or_insert_with(|| ctx.clone());
-        client.store == project
+        (client.store == project, client.preloading)
     });
+    // A project file about to be read has the worker's attention until its segments are here.
+    if preloading {
+        return Vec::new();
+    }
     let changed = !followed && {
         let named = segments_read(simulation, false);
         with(|client| {
@@ -152,10 +161,20 @@ pub fn follow(
             client.queued.clear();
             client.loading.clear();
             client.unloadable.clear();
+            client.scanned = None;
             client.named = named;
         });
         true
     };
+    with(|client| {
+        // The project whose segments were loaded before its file was read is open now: its
+        // runs read them, and they need holding here no longer.
+        if client.preloaded.as_ref().map(|(store, _)| store) == project.as_ref()
+            && let Some((_, segments)) = client.preloaded.take()
+        {
+            client.loaded.extend(segments);
+        }
+    });
     if changed {
         open_store(project);
     }
@@ -164,44 +183,121 @@ pub fn follow(
     stops
 }
 
+/// Before a project file is read (`bytes`): open its store and load every segment the file names
+/// that the store keeps, so its runs open reading their samples. The segments are held until that
+/// project is open, and the store goes back to the project open now.
+pub async fn preload(bytes: &[u8]) {
+    let Some((store, named)) = names_in(bytes) else {
+        return;
+    };
+    let current = with(|client| {
+        client.preloaded = None;
+        client.preloading = true;
+        client.store.clone()
+    });
+    // Segments still being written finish first: the worker holds one store at a time.
+    while with(|client| client.writing) {
+        sleep(20).await;
+    }
+    let (standing, kept) = open_now(Some(&store)).await;
+    let mut held = Vec::new();
+    if standing == Standing::Held {
+        for digest in named.iter().filter(|digest| kept.contains_key(*digest)) {
+            if rspice_results::store_reader::kept_segment(SegmentDigest(*digest)).is_some() {
+                continue;
+            }
+            match load(SegmentDigest(*digest)).await {
+                Ok((segment, _)) => held.push(segment),
+                Err(reason) => {
+                    log::warn!("results store segment {}: {reason}", SegmentDigest(*digest))
+                }
+            }
+        }
+    }
+    if current != Some(store.clone()) {
+        let (standing, kept) = open_now(current.as_deref()).await;
+        with(|client| {
+            if client.store == current && current.is_some() {
+                client.standing = standing;
+                client.kept = kept;
+            }
+        });
+    }
+    with(|client| {
+        client.preloaded = Some((store, held));
+        client.preloading = false;
+    });
+    write_queued();
+    repaint();
+}
+
+/// The project a file names (its id) and every segment digest it spells.
+fn names_in(bytes: &[u8]) -> Option<(String, HashSet<[u8; 32]>)> {
+    let file: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let project = file.pointer("/workspace/project/id")?.as_str()?.to_owned();
+    let mut digests = HashSet::new();
+    let mut pending = vec![&file];
+    while let Some(value) = pending.pop() {
+        match value {
+            serde_json::Value::String(text) if text.len() == 64 => {
+                if let Ok(digest) = rspice_results::store_reader::parse_digest(text) {
+                    digests.insert(digest.0);
+                }
+            }
+            serde_json::Value::Array(values) => pending.extend(values),
+            serde_json::Value::Object(fields) => pending.extend(fields.values()),
+            _ => {}
+        }
+    }
+    Some((project, digests))
+}
+
+/// Open `store` in the worker (`None`: close the one it holds), and say what this tab has of it
+/// and the segments it keeps.
+async fn open_now(store: Option<&str>) -> (Standing, HashMap<[u8; 32], u64>) {
+    let request = match store {
+        Some(store) => ResultsStoreRequest::Open {
+            store: store.to_owned(),
+        },
+        None => ResultsStoreRequest::Close,
+    };
+    let answer = call(&request, Array::new()).await;
+    if store.is_none() {
+        return (Standing::Unasked, HashMap::new());
+    }
+    let mut kept = HashMap::new();
+    let standing = match answer {
+        Ok((ResultsStoreResponse::Opened { standing, segments }, _)) => {
+            kept = segments
+                .iter()
+                .filter_map(|record| {
+                    let digest = rspice_results::store_reader::parse_digest(&record.digest).ok()?;
+                    Some((digest.0, record.bytes))
+                })
+                .collect();
+            match standing {
+                ResultsStoreStanding::Held => Standing::Held,
+                ResultsStoreStanding::HeldElsewhere => Standing::HeldElsewhere,
+                ResultsStoreStanding::Unavailable { reason } => Standing::Unavailable(reason),
+            }
+        }
+        Ok((ResultsStoreResponse::Failed { reason }, _)) | Err(reason) => {
+            Standing::Unavailable(reason)
+        }
+        Ok((other, _)) => Standing::Unavailable(format!("the store answered {other:?}")),
+    };
+    if let Standing::Unavailable(reason) = &standing {
+        log::warn!("this browser keeps no results store: {reason}");
+    }
+    (standing, kept)
+}
+
 fn open_store(project: Option<String>) {
     wasm_bindgen_futures::spawn_local(async move {
-        let request = match &project {
-            Some(store) => ResultsStoreRequest::Open {
-                store: store.clone(),
-            },
-            None => ResultsStoreRequest::Close,
-        };
-        let answer = call(&request, Array::new()).await;
+        let (standing, kept) = open_now(project.as_deref()).await;
         let current = with(|client| client.store == project);
         if !current || project.is_none() {
             return;
-        }
-        let standing = match answer {
-            Ok((ResultsStoreResponse::Opened { standing, segments }, _)) => {
-                with(|client| {
-                    client.kept = segments
-                        .iter()
-                        .filter_map(|record| {
-                            let digest =
-                                rspice_results::store_reader::parse_digest(&record.digest).ok()?;
-                            Some((digest.0, record.bytes))
-                        })
-                        .collect();
-                });
-                match standing {
-                    ResultsStoreStanding::Held => Standing::Held,
-                    ResultsStoreStanding::HeldElsewhere => Standing::HeldElsewhere,
-                    ResultsStoreStanding::Unavailable { reason } => Standing::Unavailable(reason),
-                }
-            }
-            Ok((ResultsStoreResponse::Failed { reason }, _)) | Err(reason) => {
-                Standing::Unavailable(reason)
-            }
-            Ok((other, _)) => Standing::Unavailable(format!("the store answered {other:?}")),
-        };
-        if let Standing::Unavailable(reason) = &standing {
-            log::warn!("this browser keeps no results store: {reason}");
         }
         let held = standing == Standing::Held;
         // Every segment the page holds now goes into the store it opened: a project saved for
@@ -212,6 +308,7 @@ fn open_store(project: Option<String>) {
             Vec::new()
         };
         with(|client| {
+            client.kept = kept;
             client.queued.clear();
             if let Some(store) = &project {
                 client
@@ -227,10 +324,14 @@ fn open_store(project: Option<String>) {
     });
 }
 
-/// Write the queued segments one after another, while this tab holds their store.
+// Write the queued segments one after another, while this tab holds their store.
 fn write_queued() {
     let start = with(|client| {
-        if client.writing || client.standing != Standing::Held || client.queued.is_empty() {
+        if client.writing
+            || client.preloading
+            || client.standing != Standing::Held
+            || client.queued.is_empty()
+        {
             return false;
         }
         client.writing = true;
@@ -242,7 +343,7 @@ fn write_queued() {
     wasm_bindgen_futures::spawn_local(async move {
         loop {
             let next = with(|client| {
-                if client.standing != Standing::Held {
+                if client.preloading || client.standing != Standing::Held {
                     return None;
                 }
                 let store = client.store.clone()?;
@@ -557,7 +658,10 @@ fn load_unread(simulation: &mut SimulationState) {
             with(|client| {
                 client.loading.remove(&digest);
                 match loaded {
-                    Ok(segment) => client.loaded.push(segment),
+                    Ok((segment, len)) => {
+                        client.kept.insert(digest, len);
+                        client.loaded.push(segment);
+                    }
                     Err(reason) => {
                         log::warn!("results store segment {}: {reason}", SegmentDigest(digest));
                         client.unloadable.insert(digest, reason);
@@ -569,8 +673,9 @@ fn load_unread(simulation: &mut SimulationState) {
     }
 }
 
-/// The kept segment `digest`, checked by the worker and read into the page's memory.
-async fn load(digest: SegmentDigest) -> Result<Arc<Segment>, String> {
+/// The kept segment `digest`, checked by the worker and read into the page's memory, with its
+/// bytes in the store.
+async fn load(digest: SegmentDigest) -> Result<(Arc<Segment>, u64), String> {
     let hex = digest.to_string();
     let len = match call(
         &ResultsStoreRequest::Check {
@@ -584,7 +689,6 @@ async fn load(digest: SegmentDigest) -> Result<Arc<Segment>, String> {
         ResultsStoreResponse::Checked { len } => len,
         other => return Err(refusal(other)),
     };
-    with(|client| client.kept.insert(digest.0, len));
     let size = usize::try_from(len).map_err(|_| "it is longer than this page's memory")?;
     let mut bytes = Vec::new();
     bytes
@@ -625,7 +729,10 @@ async fn load(digest: SegmentDigest) -> Result<Arc<Segment>, String> {
     if reader.digest() != Some(digest) {
         return Err("the bytes read are not the segment asked for".to_owned());
     }
-    Ok(Segment::kept(reader, std::path::PathBuf::new()).shared())
+    Ok((
+        Segment::kept(reader, std::path::PathBuf::new()).shared(),
+        len,
+    ))
 }
 
 /// Read again every run of the history that could not read its samples, its signals sharing one

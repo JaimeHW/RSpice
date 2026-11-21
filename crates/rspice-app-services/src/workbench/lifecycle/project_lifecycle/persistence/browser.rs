@@ -474,6 +474,8 @@ pub(super) async fn restore_browser_binding(
             return BrowserRestoreResult::Retryable(error);
         }
     };
+    // The segments its runs read load from the project's results store before it is read.
+    rspice_app_state::state::run_store::browser::preload(&bytes).await;
     match candidate.decode(
         bytes,
         &permission,
@@ -604,6 +606,8 @@ async fn reopen_browser_binding(binding_id: uuid::Uuid) -> BrowserReopenResult {
             return BrowserReopenResult::Missing(format!("its file could not be read: {error}"));
         }
     };
+    // The segments its runs read load from the project's results store before it is read.
+    rspice_app_state::state::run_store::browser::preload(&bytes).await;
     let Ok(bytes) = ProjectBytes::from_bytes(bytes) else {
         return BrowserReopenResult::Failed(
             "browser project exceeds the supported project-size limit".to_owned(),

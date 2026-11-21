@@ -408,6 +408,8 @@ async fn run_browser_open(picker: js_sys::Promise) -> BrowserOpenResult {
         Ok(bytes) => bytes,
         Err(error) => return BrowserOpenResult::Failed(error),
     };
+    // The segments its runs read load from the project's results store before it is read.
+    rspice_app_state::state::run_store::browser::preload(&bytes).await;
     let bytes = match ProjectBytes::from_bytes(bytes) {
         Ok(bytes) => bytes,
         Err(_) => {
