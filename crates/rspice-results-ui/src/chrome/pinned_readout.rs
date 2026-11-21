@@ -7,7 +7,7 @@
 //! the reader can select, and its Copy button puts every row on the
 //! clipboard as tab-separated text.
 
-use egui::{Align, Layout, RichText, Stroke, Ui, UiBuilder, pos2};
+use egui::{Align2, RichText, Stroke, Ui, pos2, vec2};
 use rspice_results::plot_axis::XScale;
 use rspice_ui_kit::icons::Icon;
 use rspice_ui_kit::plot::{PlotResponse, ReadoutRow};
@@ -19,6 +19,8 @@ use rspice_ui_kit::widgets::IconButton;
 const CARD_INSET: f32 = 8.0;
 /// The side of the card's Copy and Unpin buttons.
 const CARD_BUTTON_SIDE: f32 = 18.0;
+/// The pitch of the card's rows, the hover readout's own.
+const CARD_LINE_HEIGHT: f32 = 16.0;
 
 /// After `plot::show`: a click on the plot pins `readout` at the X it chose,
 /// and a pin already placed is marked and its card drawn. Returns whether
@@ -55,20 +57,34 @@ pub fn follow(
         return changed;
     }
     let font = theme::mono(11.0, FontWeight::Regular);
-    let mut card = ui.new_child(
-        UiBuilder::new()
-            .id_salt("rspice.results.pinned-readout")
-            .max_rect(rect.shrink(CARD_INSET))
-            .layout(Layout::top_down(Align::Max)),
-    );
     let mut unpin = false;
+    // Its own layer over the plot, sized to its rows: a click on the card
+    // stays on the card instead of moving the pin under it.
+    egui::Area::new(ui.id().with("rspice.results.pinned-readout"))
+        .pivot(Align2::RIGHT_TOP)
+        .fixed_pos(rect.right_top() + vec2(-CARD_INSET, CARD_INSET))
+        .constrain_to(rect)
+        .fade_in(false)
+        .show(ui.ctx(), |ui| {
+            card(ui, &t, &font, &rows, &mut unpin);
+        });
+    if unpin {
+        *pin = None;
+        changed = true;
+    }
+    changed
+}
+
+/// The card's frame: a header with Copy and Unpin over the rows, values
+/// selectable.
+fn card(ui: &mut Ui, t: &Tokens, font: &egui::FontId, rows: &[ReadoutRow], unpin: &mut bool) {
+    let c = t.color;
     egui::Frame::new()
         .fill(c.bg_elevated)
         .stroke(Stroke::new(1.0, c.border_strong))
         .corner_radius(t.radius)
         .inner_margin(egui::Margin::symmetric(8, 5))
-        .show(&mut card, |ui| {
-            ui.set_max_width(rect.width() * 0.5);
+        .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.label(RichText::new("Pinned").font(font.clone()).color(c.text_dim));
@@ -78,9 +94,9 @@ pub fn follow(
                     .show(ui)
                     .clicked()
                 {
-                    ui.ctx().copy_text(tab_separated(&rows));
+                    ui.ctx().copy_text(tab_separated(rows));
                 }
-                unpin = IconButton::new(Icon::Close)
+                *unpin = IconButton::new(Icon::Close)
                     .side(CARD_BUTTON_SIDE)
                     .tooltip("Unpin the readout")
                     .show(ui)
@@ -88,9 +104,10 @@ pub fn follow(
             });
             egui::Grid::new("rows")
                 .num_columns(2)
-                .spacing(egui::vec2(10.0, 2.0))
+                .spacing(egui::vec2(10.0, 0.0))
+                .min_row_height(CARD_LINE_HEIGHT)
                 .show(ui, |ui| {
-                    for (name, value) in &rows {
+                    for (name, value) in rows {
                         ui.add(
                             egui::Label::new(
                                 RichText::new(name).font(font.clone()).color(c.text_dim),
@@ -105,11 +122,6 @@ pub fn follow(
                     }
                 });
         });
-    if unpin {
-        *pin = None;
-        changed = true;
-    }
-    changed
 }
 
 /// The rows as the clipboard takes them: one per line, name and value
