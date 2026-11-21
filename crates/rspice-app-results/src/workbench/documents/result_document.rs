@@ -2564,6 +2564,17 @@ fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
 
 pub fn viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> ViewerAvailability {
     let active_run = state.model.simulation.active_run();
+    // The sheet a starting run's plot arrives on is offered before its first
+    // results, so the reader is shown where the run is starting.
+    if let Some(run) = active_run
+        && run.analyses.is_empty()
+        && !run.lifecycle.is_terminal()
+        && starting_sheet(run) == Some(viewer)
+    {
+        return ViewerAvailability::available(
+            "The run is starting; its first results are drawn here",
+        );
+    }
     match viewer {
         ResultViewer::Waves => {
             if active_run.is_some_and(|run| {
