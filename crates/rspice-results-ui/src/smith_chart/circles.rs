@@ -204,9 +204,6 @@ pub fn parse_decibels(text: &str) -> Result<Vec<f64>, String> {
         }
         values.push(value);
     }
-    if values.len() > 8 {
-        return Err("at most eight circles".to_owned());
-    }
     Ok(values)
 }
 
