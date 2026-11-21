@@ -1667,6 +1667,18 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
         }
         "viewer-phase-noise" => super::phase_noise_analysis_is_renderable(analysis),
         "viewer-smith" => super::smith::analysis_is_renderable(analysis),
+        "viewer-polar" => {
+            super::view_context::analysis_supports_viewer(ResultViewer::Polar, analysis)
+        }
+        "viewer-mixed-mode-network" => {
+            super::view_context::analysis_supports_viewer(ResultViewer::NetworkMatrix, analysis)
+        }
+        "viewer-scatter" => {
+            super::view_context::analysis_supports_viewer(ResultViewer::Scatter, analysis)
+        }
+        "viewer-box-violin" => {
+            super::view_context::analysis_supports_viewer(ResultViewer::BoxViolin, analysis)
+        }
         "viewer-table" => {
             !analysis.waveforms.is_empty()
                 || super::view_context::analysis_supports_viewer(ResultViewer::Op, analysis)

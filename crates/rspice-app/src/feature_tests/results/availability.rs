@@ -1007,3 +1007,67 @@ pub(super) fn derive_nyquist(app: &mut RSpiceApp) {
         .analysis
         .bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
 }
+
+/// Every sheet can be made a project result document through the draft a
+/// reader commits in the create-document dialog, and the document draws
+/// that sheet. Polar, Network Matrix, Scatter and Distribution once could
+/// not: the native renderer table had no arm for their viewer documents.
+/// Nyquist is one tab of the catalog's "Bode / Nyquist" document, which
+/// opens on Bode: its locus is loaded for the run the quick view binds. The
+/// contract gives the table document OP, TEMP, PSS and PSTB results, so the
+/// table is opened over a PSS.
+#[test]
+fn every_sheet_opens_as_a_document_pane() {
+    use rspice_app_results::workbench::documents::result_document::{
+        create_document, show_persistent_document,
+    };
+    use rspice_results::document_creation::ResultDocumentFamily;
+    use rspice_results::viewer_catalog::viewer_document;
+    use rspice_results_ui::create_document::CreateResultDocumentDialogState;
+
+    for viewer in ResultViewer::all() {
+        // The manifest is the run's own inventory, not a viewer document.
+        let Some(viewer_id) = viewer.viewer_document_id() else {
+            continue;
+        };
+        let mut app = app_showing(viewer);
+        if viewer == ResultViewer::Table {
+            app.state.model.simulation.retained.runs[0].analyses[0].analysis_type =
+                AnalysisType::Pss;
+        }
+        app.state.results.results.session.viewer = viewer;
+        let definition = viewer_document(viewer_id).expect("a catalogued viewer document");
+        let family = ResultDocumentFamily::ALL
+            .into_iter()
+            .find(|family| *family != ResultDocumentFamily::ReportPage && family.includes(definition))
+            .unwrap_or(ResultDocumentFamily::ReportPage);
+        app.state.results.create_result_document = CreateResultDocumentDialogState {
+            open: true,
+            name: format!("{viewer:?} review"),
+            name_touched: true,
+            dataset_id: app.state.model.simulation.active_run().map(|run| run.dataset_id),
+            family_id: family.id().to_owned(),
+            viewer_id: viewer_id.to_owned(),
+            layout_id: "single-pane".to_owned(),
+            validation_error: None,
+        };
+        let document_id = create_document::commit(&mut app.state.results_parts())
+            .unwrap_or_else(|error| panic!("{viewer:?} cannot be a document pane: {error}"));
+        let ctx = egui::Context::default();
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            super::with_surface_parts(&mut app, |state, run_controller| {
+                show_persistent_document(ui, state, run_controller, document_id);
+            });
+        });
+        let expected = if viewer == ResultViewer::Nyquist {
+            ResultViewer::Bode
+        } else {
+            viewer
+        };
+        assert_eq!(
+            app.state.results.results.session.viewer, expected,
+            "the {viewer:?} document draws another sheet"
+        );
+    }
+}

@@ -3,13 +3,13 @@
 use egui::{RichText, Sense, Ui, UiBuilder, vec2};
 use rspice_results::{
     document_creation::{ResultDocumentFamily, ResultDocumentLayout},
+    result_presentation::ResultViewer,
     viewer_catalog::{
         VIEWER_DOCUMENTS, ViewerCompatibility, ViewerDocumentDefinition, ViewerReleaseClass,
     },
 };
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::product::DatasetId;
-use std::borrow::Cow;
 
 /// Runtime draft for the dataset-driven Create Result Document transaction.
 ///
@@ -105,7 +105,7 @@ pub fn show(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
             ui.label(RichText::new("Result document type").strong());
-            for row in ResultDocumentFamily::ALL.chunks(2) {
+            for row in offered_families().chunks(2) {
                 ui.columns(2, |columns| {
                     for (column, family) in row.iter().copied().enumerate() {
                         let selected = draft.family_id == family.id();
@@ -179,15 +179,7 @@ pub fn show(
             );
 
             ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Complete viewer catalog").strong());
-                ui.separator();
-                ui.label(
-                    RichText::new(format!("{} canonical viewers", VIEWER_DOCUMENTS.len()))
-                        .small()
-                        .color(t.color.text_dim),
-                );
-            });
+            ui.label(RichText::new("Viewer").strong());
 
             let catalog = host.viewer_catalog(draft.dataset_id);
             egui::Grid::new("rspice.create-result-document.viewer-table")
@@ -195,19 +187,19 @@ pub fn show(
                         .striped(true)
                         .min_col_width(120.0)
                         .show(ui, |ui| {
-                            ui.strong("Viewer / family");
+                            ui.strong("Viewer");
                             ui.strong("Required result");
                             ui.strong("Status");
                             ui.end_row();
 
-                            for ViewerChoice { viewer, compatibility, renderer_available } in catalog {
-                                let family = ResultDocumentFamily::from_id(&draft.family_id)
-                                    .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
-                                let belongs_to_family = family.includes(viewer);
-                                let selectable = belongs_to_family
-                                    && viewer.release == ViewerReleaseClass::ReleaseTarget
-                                    && compatibility.is_compatible()
-                                    && renderer_available;
+                            let family = ResultDocumentFamily::from_id(&draft.family_id)
+                                .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
+                            // Only what this build draws, in the chosen type:
+                            // a designed view no sheet draws is not a choice.
+                            for ViewerChoice { viewer, compatibility, renderer_available } in catalog
+                                .filter(|choice| offers_viewer(family, choice.viewer))
+                            {
+                                let selectable = compatibility.is_compatible() && renderer_available;
                                 let selected = draft.viewer_id == viewer.id;
                                 ui.vertical(|ui| {
                                     let response = ui.add_enabled(
@@ -218,12 +210,7 @@ pub fn show(
                                         draft.viewer_id = viewer.id.to_owned();
                                         draft.validation_error = None;
                                     }
-                                    response.on_disabled_hover_text(if !belongs_to_family {
-                                        "Choose a document family that includes this viewer."
-                                            .to_owned()
-                                    } else if viewer.release != ViewerReleaseClass::ReleaseTarget {
-                                        viewer.unavailable_reason().into_owned()
-                                    } else if !compatibility.is_compatible() {
+                                    response.on_disabled_hover_text(if !compatibility.is_compatible() {
                                         viewer_requirement(viewer)
                                     } else {
                                         "Not available for this dataset.".to_owned()
@@ -235,12 +222,10 @@ pub fn show(
                                     );
                                 });
                                 ui.label(viewer_requirement(viewer));
-                                let status = if belongs_to_family {
-                                    viewer_status(viewer, compatibility, renderer_available)
-                                } else {
-                                    Cow::Borrowed("other document family")
-                                };
-                                ui.label(RichText::new(status).color(t.color.text_dim));
+                                ui.label(
+                                    RichText::new(viewer_status(compatibility, renderer_available))
+                                        .color(t.color.text_dim),
+                                );
                                 ui.end_row();
                             }
                         });
@@ -380,25 +365,41 @@ fn result_setting_row(ui: &mut Ui, title: &str, detail: &str, value: impl FnOnce
 /// Why a viewer row cannot be chosen, or nothing when it can: an enabled row
 /// already says it is available. A requirement is a fact about the dataset,
 /// not an alarm, so the caller sets it in neutral text.
-fn viewer_status(
-    viewer: &ViewerDocumentDefinition,
-    compatibility: ViewerCompatibility,
-    renderer_available: bool,
-) -> Cow<'static, str> {
-    if viewer.release != ViewerReleaseClass::ReleaseTarget {
-        return viewer.unavailable_reason();
-    }
+fn viewer_status(compatibility: ViewerCompatibility, renderer_available: bool) -> &'static str {
     if compatibility.is_compatible() && !renderer_available {
-        return Cow::Borrowed("Not available");
+        return "Not available";
     }
     match compatibility {
-        ViewerCompatibility::Compatible => Cow::Borrowed(""),
-        ViewerCompatibility::UnknownDocument => Cow::Borrowed("Not available"),
-        ViewerCompatibility::MissingAnalysis { .. } => Cow::Borrowed("analysis required"),
-        ViewerCompatibility::MissingExternalCapability { .. } => {
-            Cow::Borrowed("specialist dataset required")
-        }
+        ViewerCompatibility::Compatible => "",
+        ViewerCompatibility::UnknownDocument => "Not available",
+        ViewerCompatibility::MissingAnalysis { .. } => "analysis required",
+        ViewerCompatibility::MissingExternalCapability { .. } => "specialist dataset required",
     }
+}
+
+/// Whether this build draws `viewer`: the catalog designs more views than
+/// the sheets that ship.
+fn draws(viewer: &ViewerDocumentDefinition) -> bool {
+    viewer.release == ViewerReleaseClass::ReleaseTarget
+        && ResultViewer::from_viewer_document_id(viewer.id).is_some()
+}
+
+/// Whether the dialog offers `viewer` in a document of `family`.
+fn offers_viewer(family: ResultDocumentFamily, viewer: &ViewerDocumentDefinition) -> bool {
+    family.includes(viewer) && draws(viewer)
+}
+
+/// The document types the dialog offers: those with a viewer this build
+/// draws.
+fn offered_families() -> Vec<ResultDocumentFamily> {
+    ResultDocumentFamily::ALL
+        .into_iter()
+        .filter(|family| {
+            VIEWER_DOCUMENTS
+                .iter()
+                .any(|viewer| offers_viewer(*family, viewer))
+        })
+        .collect()
 }
 
 fn viewer_requirement(viewer: &ViewerDocumentDefinition) -> String {
@@ -414,39 +415,45 @@ fn viewer_requirement(viewer: &ViewerDocumentDefinition) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_results::result_presentation::ResultViewer;
 
-    /// The viewer list publishes every designed view, and most of them this
-    /// build does not draw. The row a reader cannot pick has to say which kind
-    /// of unavailable it is: "analysis required" is an instruction they can
-    /// act on, so a view no sheet draws must not borrow that phrasing — it
-    /// reports the manifest's own release scope instead.
+    /// The dialog offers only what this build draws: every type it lists
+    /// has a sheet behind it, every viewer it lists in a type is one a
+    /// sheet draws, and the types whose views no sheet draws yet are left
+    /// out rather than shown empty.
     #[test]
-    fn a_view_no_sheet_draws_reports_its_release_scope_not_a_data_requirement() {
-        let mut drawable = 0;
-        for definition in VIEWER_DOCUMENTS {
-            let ships_a_renderer = ResultViewer::from_viewer_document_id(definition.id).is_some()
-                && definition.release == ViewerReleaseClass::ReleaseTarget;
-            drawable += usize::from(ships_a_renderer);
-            for compatibility in [
-                ViewerCompatibility::Compatible,
-                ViewerCompatibility::MissingAnalysis {
-                    accepted_analysis_ids: definition.analysis_ids,
-                },
-            ] {
-                let status = viewer_status(definition, compatibility, true);
-                assert_eq!(
-                    status == definition.unavailable_reason(),
-                    !ships_a_renderer,
-                    "{} reports the wrong kind of unavailable: {status}",
-                    definition.id
+    fn the_dialog_offers_only_document_types_and_viewers_a_sheet_draws() {
+        let offered = offered_families();
+        assert!(offered.contains(&ResultDocumentFamily::WaveformWorksheet));
+        assert!(!offered.contains(&ResultDocumentFamily::FieldsAndPhysical));
+        assert!(!offered.contains(&ResultDocumentFamily::Photonics));
+        for family in ResultDocumentFamily::ALL {
+            let viewers: Vec<_> = VIEWER_DOCUMENTS
+                .iter()
+                .filter(|viewer| offers_viewer(family, viewer))
+                .collect();
+            assert_eq!(offered.contains(&family), !viewers.is_empty());
+            for viewer in viewers {
+                assert!(
+                    ResultViewer::from_viewer_document_id(viewer.id).is_some(),
+                    "{} is offered with no sheet to draw it",
+                    viewer.id
                 );
             }
         }
-        assert!(
-            drawable > 0 && drawable < VIEWER_DOCUMENTS.len(),
-            "the catalog and the shipped renderers have stopped disagreeing; \
-             fold this expectation into whichever is now the whole truth"
-        );
+        for viewer in ResultViewer::all() {
+            let Some(id) = viewer.viewer_document_id() else {
+                continue;
+            };
+            let definition = VIEWER_DOCUMENTS
+                .iter()
+                .find(|definition| definition.id == id)
+                .expect("a catalogued viewer document");
+            assert!(
+                offered
+                    .iter()
+                    .any(|family| offers_viewer(*family, definition)),
+                "{viewer:?} is offered in no document type"
+            );
+        }
     }
 }
