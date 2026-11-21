@@ -50,6 +50,13 @@ pub trait EventHistorySource: Send + Sync {
     fn identity(&self) -> Option<([u8; 32], u64)> {
         None
     }
+
+    /// Whether the signal stands in for one of a kept store still waiting for its first check: a
+    /// read of it waits for that check, or fails at once as [`crate::waveform::CHECKING_READ`]
+    /// where nothing may wait, and the host reads the history again once the check ends.
+    fn stands_in(&self) -> bool {
+        false
+    }
 }
 
 /// An event history's points.

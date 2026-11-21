@@ -10,6 +10,12 @@
 //! its long work. A read of the file's samples outside [`opening_unchecked`] joins its check: it
 //! waits for the check under way, or runs the check itself when none has started, so the file
 //! is read whole once.
+//!
+//! The thread that draws the window never waits for a check ([`never_wait_for_checks_here`]): a
+//! read there that meets a file being checked reads as being checked at once, and a file not
+//! checked yet is left for a check of its own, as an open leaves it. The waker
+//! ([`set_check_waker`]) asks for the frame that starts a check left that way and for the one
+//! after each check ends, which reads the file again.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -61,6 +67,8 @@ fn awaiting() -> MutexGuard<'static, BTreeMap<PathBuf, Awaiting>> {
 thread_local! {
     /// How deep this thread is in [`opening_unchecked`].
     static OPENING: Cell<u32> = const { Cell::new(0) };
+    /// Whether this thread never waits for a check: the thread that draws the window.
+    static NEVER_WAITS: Cell<bool> = const { Cell::new(false) };
     /// The files this thread left for a check and has not handed on yet.
     static QUEUED: RefCell<Vec<UncheckedSegment>> = const { RefCell::new(Vec::new()) };
 }
@@ -84,6 +92,34 @@ pub(super) fn deferring() -> bool {
     OPENING.with(Cell::get) > 0
 }
 
+/// Make this thread one that never waits for the check of a kept file: the thread that draws
+/// the window. A read here that meets a file being checked reads as being checked at once, and
+/// a file not checked yet is left for a check of its own instead of read whole here.
+pub fn never_wait_for_checks_here() {
+    NEVER_WAITS.with(|never| never.set(true));
+}
+
+/// Whether a read here leaves each kept file not checked yet for a check of its own and waits
+/// for none: inside [`opening_unchecked`], and on a thread that never waits for a check.
+pub(super) fn leaving_checks() -> bool {
+    deferring() || NEVER_WAITS.with(Cell::get)
+}
+
+/// What asks for a frame when a check is left to start or a check ends.
+static WAKER: Mutex<Option<Box<dyn Fn() + Send + Sync>>> = Mutex::new(None);
+
+/// Ask `waker` for a frame each time a file is left for a check, so the frame starts its job,
+/// and each time a check ends, so the frame reads the file again: what the window installs.
+pub fn set_check_waker(waker: impl Fn() + Send + Sync + 'static) {
+    *WAKER.lock().unwrap_or_else(|p| p.into_inner()) = Some(Box::new(waker));
+}
+
+fn wake() {
+    if let Some(waker) = WAKER.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        waker();
+    }
+}
+
 /// Leave `segment` for a check: queued on this thread, and said to be checked until it is.
 /// A file already waiting is not queued twice.
 pub fn defer_check(segment: UncheckedSegment) {
@@ -102,6 +138,7 @@ pub fn defer_check(segment: UncheckedSegment) {
         );
     }
     QUEUED.with(|queued| queued.borrow_mut().push(segment));
+    wake();
 }
 
 /// The files this thread left for a check since it last asked, each to be checked once.
@@ -119,6 +156,15 @@ pub fn checking(digest: [u8; 32]) -> bool {
     awaiting()
         .values()
         .any(|held| held.segment.digest.0 == digest)
+}
+
+/// The file of digest `digest` waiting for or under its check, if one is: where a save copies
+/// the segment from while the check runs, without reading it first.
+pub fn file_being_checked(digest: [u8; 32]) -> Option<PathBuf> {
+    awaiting()
+        .values()
+        .find(|held| held.segment.digest.0 == digest)
+        .map(|held| held.segment.path.clone())
 }
 
 /// How far the check of a file of digest `digest` got, as work done of work known; `None` when
@@ -171,14 +217,19 @@ impl Drop for Ends<'_> {
     fn drop(&mut self) {
         awaiting().remove(self.0);
         ENDED.notify_all();
+        wake();
     }
 }
 
 /// Wait for the check of the file at `path` to end, running it here when nobody has started it:
-/// what a read of the file's samples does, so the file is read whole once. Returns at once for
-/// a file not waiting for a check.
+/// what a read of the file's samples does off the window's thread, so the file is read whole
+/// once. Returns at once for a file not waiting for a check.
 #[cfg(any(unix, windows))]
 pub(super) fn join(path: &Path) {
+    debug_assert!(
+        !leaving_checks(),
+        "a thread that never waits for a check joined one"
+    );
     if let Claim::Run(segment, shared) = claim(path) {
         let _ = run(&segment, &shared, &mut |_, _| true);
     }

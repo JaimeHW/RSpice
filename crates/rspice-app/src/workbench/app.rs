@@ -288,6 +288,11 @@ impl RSpiceApp {
         // for the frame that draws it.
         let repaint = cc.egui_ctx.clone();
         rspice_app_state::state::run_reader::install_run_reader(move || repaint.request_repaint());
+        // Nor does the frame wait for the first check of a kept results store: its runs read
+        // as being checked meanwhile, and the check's end asks for the frame that reads them.
+        rspice_results::store_reader::never_wait_for_checks_here();
+        let repaint = cc.egui_ctx.clone();
+        rspice_results::store_reader::set_check_waker(move || repaint.request_repaint());
         // Load the persisted session, with the preferences file read over it.
         let mut state = AppState::restore_with_preferences_file(cc.storage);
 

@@ -331,3 +331,293 @@ fn the_navigator_draws_flat_frames_while_a_project_is_packed() {
     }
     std::fs::remove_dir_all(&folder).unwrap();
 }
+
+/// Rows of a kept run's segment the writer is handed at a time.
+const KEPT_CHUNK_ROWS: u64 = 1 << 20;
+
+/// Sample `row` of a kept run's signal: a sine of 64 periods over the run, with noise of a tenth
+/// of its amplitude drawn from the row, so the store's codec keeps about half its bytes.
+fn kept_sample(row: u64, rows: u64) -> f64 {
+    let mut z = row.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    let noise = (z >> 11) as f64 / (1_u64 << 53) as f64 - 0.5;
+    let phase = std::f64::consts::TAU * 64.0 * row as f64 / rows as f64;
+    0.1f64.mul_add(noise, phase.sin())
+}
+
+/// A transient of `rows` rows kept as a project keeps its runs, under its digest's name in
+/// `folder`, and opened as a project opens them: no check has read the file yet, so the run
+/// reads as being checked and a check of its own is left to run. The run's time step is 1 ns.
+fn kept_unchecked_transient(
+    folder: &std::path::Path,
+    rows: u64,
+) -> (
+    crate::state::AnalysisResult,
+    rspice_results::store_reader::SegmentDigest,
+) {
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
+    use rspice_results::store_reader::{ColumnReference, kept_segment_name, opening_unchecked};
+    use rspice_results_store::{
+        Axis, FileIo, RunMeta, RunStatus, Schema, SegmentWriter, Signal, SignalKind,
+    };
+    let written = folder.join("written.rsr");
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: vec![Signal::new("V(out)", "V", SignalKind::Real)],
+    };
+    let io = FileIo::create(&written).expect("the segment is created");
+    let mut writer =
+        SegmentWriter::create(io, &schema, &RunMeta::default()).expect("the segment starts");
+    let (mut x, mut y) = (Vec::new(), Vec::new());
+    for first in (0..rows).step_by(KEPT_CHUNK_ROWS as usize) {
+        let end = (first + KEPT_CHUNK_ROWS).min(rows);
+        x.clear();
+        y.clear();
+        x.extend((first..end).map(|row| row as f64 * 1.0e-9));
+        y.extend((first..end).map(|row| kept_sample(row, rows)));
+        writer.push_rows(&x, &y).expect("the rows are written");
+    }
+    let (receipt, io) = writer.finish(RunStatus::Completed).expect("the run ends");
+    drop(io);
+    // Copied under its name, so no file of the folder is one this process has checked.
+    let kept = folder.join(kept_segment_name(&receipt.digest));
+    std::fs::copy(&written, &kept).expect("the segment is kept");
+    std::fs::remove_file(&written).expect("the written copy goes");
+    rspice_formats::project_results::keep_segments_in(folder);
+    let column = |column: u64| {
+        let reference = ColumnReference {
+            segment: receipt.digest.to_string(),
+            column,
+            column_rows: rows,
+            first: 0,
+            rows,
+            lead: None,
+            ascending: column == 0,
+        };
+        opening_unchecked(|| reference.values()).expect("the window names its segment")
+    };
+    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        RetainedTrace::new("V(out)", column(0), column(1), "#4f81bd").with_unit("V"),
+    ]);
+    (analysis, receipt.digest)
+}
+
+/// Draw the waveform sheet once; how long the frame took.
+fn draw_waves(ctx: &egui::Context, state: &mut ResultsTestHost) -> std::time::Duration {
+    use crate::workbench::documents::result_document::{prepare_viewer_state, waves};
+    let started = std::time::Instant::now();
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1_680.0, 1_020.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            prepare_viewer_state(&mut state.results_parts());
+            egui::CentralPanel::default()
+                .show(ctx, |ui| waves::show(ui, &mut state.results_parts()));
+        },
+    );
+    started.elapsed()
+}
+
+/// The X extent of the strip the sheet drew last, if it knows one.
+fn drawn_x_range(state: &ResultsTestHost) -> Option<(f64, f64)> {
+    state.results.results.models.last_built()?.first()?.x_range
+}
+
+/// A reader service that keeps every read it is asked for waiting: what the window draws while
+/// its service reads elsewhere, and what a frame reads itself.
+struct Waiting;
+
+impl rspice_results::waveform::ReadService for Waiting {
+    fn request(
+        &self,
+        _run: u64,
+        _values: &rspice_results::waveform::WaveformValues,
+        _x: &rspice_results::waveform::WaveformValues,
+        _read: rspice_results::waveform::Read,
+    ) -> Option<rspice_results::waveform::ReadValue> {
+        None
+    }
+}
+
+/// Failures reported for reads of the file at `path`.
+fn failures_of(path: &std::path::Path) -> Vec<String> {
+    rspice_results::waveform::take_column_read_failures()
+        .into_iter()
+        .filter(|failure| std::path::Path::new(&failure.store) == path)
+        .map(|failure| failure.to_string())
+        .collect()
+}
+
+/// A run whose kept segment waits for its first check is opened and plotted on the window's
+/// thread, which never waits for a check: its frames read the run as being checked at once,
+/// report no failure, and leave the check to its job, which no frame starts or runs. The check's
+/// end reads the run again, and the sheet draws it whole.
+#[test]
+fn a_plotted_run_waits_for_no_check_of_its_kept_segment() {
+    use rspice_results::store_reader::{check_progress, kept_segment_name};
+    const ROWS: u64 = 1 << 22;
+    rspice_results::store_reader::never_wait_for_checks_here();
+    let folder =
+        std::env::temp_dir().join(format!("rspice-results-unchecked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let (analysis, digest) = kept_unchecked_transient(&folder, ROWS);
+    let kept = folder.join(kept_segment_name(&digest));
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.start_run().add_analysis(analysis);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+
+    hold_jobs_for_tests(true);
+    let mut checks = Vec::new();
+    crate::io::result_segments::start_segment_checks(&mut checks);
+    hold_jobs_for_tests(false);
+    assert_eq!(checks.len(), 1, "the open left one check");
+    let work = ColumnWork::read();
+    rspice_results::waveform::read_through(&Waiting, || {
+        for _ in 0..FRAMES {
+            draw_waves(&ctx, &mut state);
+        }
+    });
+    assert_eq!(work.since(), ColumnWork::default());
+    assert_eq!(
+        check_progress(digest.0),
+        Some((0, 0)),
+        "no frame started or ran the check"
+    );
+    assert!(!checks[0].is_finished());
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("the run is shown");
+    assert!(run.checking_results().is_some(), "the run is being checked");
+    assert_eq!(run.unread_results(), None);
+    assert_eq!(drawn_x_range(&state), None, "nothing is drawn of it yet");
+    assert_eq!(failures_of(&kept), Vec::<String>::new());
+
+    checks[0].release();
+    assert!(checks[0].wait(std::time::Duration::from_secs(120)));
+    assert!(!crate::io::result_segments::poll_segment_checks(
+        &mut state.model.simulation,
+        &mut checks
+    ));
+    rspice_results::waveform::read_through(&Waiting, || {
+        for _ in 0..2 {
+            draw_waves(&ctx, &mut state);
+        }
+    });
+    assert_eq!(
+        drawn_x_range(&state),
+        Some((0.0, (ROWS - 1) as f64 * 1.0e-9)),
+        "the check's end draws the run"
+    );
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("the run is shown");
+    assert_eq!(run.checking_results(), None);
+    let y = &run.analyses[0].waveforms[0].y;
+    assert_eq!(
+        y.read_range((ROWS - 1) as usize..ROWS as usize).unwrap()[0],
+        kept_sample(ROWS - 1, ROWS)
+    );
+    assert_eq!(failures_of(&kept), Vec::<String>::new());
+    drop(state);
+    std::fs::remove_dir_all(&folder).unwrap();
+}
+
+/// The run above at the size a project open was measured at (a segment of about 377 MB on
+/// disk), drawn through the app's reader service while its check runs as a job, as the window
+/// draws it: no frame waits for the check, and the sheet draws the run once it ends.
+#[test]
+#[ignore = "writes a segment of about 377 MB; run by hand"]
+fn a_plotted_run_of_377_mb_draws_flat_frames_while_its_kept_segment_is_checked() {
+    use std::io::Write as _;
+    use std::time::{Duration, Instant};
+    const ROWS: u64 = 47_000_000;
+    rspice_results::store_reader::never_wait_for_checks_here();
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-results-unchecked-377-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let started = Instant::now();
+    let (analysis, digest) = kept_unchecked_transient(&folder, ROWS);
+    let written = started.elapsed();
+    let kept = folder.join(rspice_results::store_reader::kept_segment_name(&digest));
+    let bytes = std::fs::metadata(&kept).unwrap().len();
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.start_run().add_analysis(analysis);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let reader: &'static crate::state::run_reader::RunReader = Box::leak(Box::new(
+        crate::state::run_reader::RunReader::new(crate::state::run_reader::DEFAULT_BUDGET),
+    ));
+
+    let mut checks = Vec::new();
+    let opened = Instant::now();
+    crate::io::result_segments::start_segment_checks(&mut checks);
+    let mut frames = Vec::new();
+    let mut checked = None;
+    let mut drawn = None;
+    rspice_results::waveform::read_through(reader, || {
+        while drawn.is_none() && opened.elapsed() < Duration::from_secs(600) {
+            let running = crate::io::result_segments::poll_segment_checks(
+                &mut state.model.simulation,
+                &mut checks,
+            );
+            if !running && checked.is_none() {
+                checked = Some(opened.elapsed());
+            }
+            frames.push(draw_waves(&ctx, &mut state));
+            if checked.is_some() && drawn_x_range(&state).is_some() {
+                reader.settle();
+                frames.push(draw_waves(&ctx, &mut state));
+                drawn = Some(opened.elapsed());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+    let checked = checked.expect("the check ended");
+    let drawn = drawn.expect("the sheet drew the run");
+    let mut sorted = frames.clone();
+    sorted.sort_unstable();
+    let worst = *sorted.last().unwrap();
+    let millis = |duration: Duration| duration.as_secs_f64() * 1e3;
+    writeln!(
+        std::io::stdout().lock(),
+        "{ROWS} rows, {bytes} bytes on disk, written in {:.1} s | checked {:.0} ms after the \
+         open, drawn after {:.0} ms | {} frames, median {:.1} ms, worst {:.1} ms",
+        written.as_secs_f64(),
+        millis(checked),
+        millis(drawn),
+        frames.len(),
+        millis(sorted[sorted.len() / 2]),
+        millis(worst),
+    )
+    .unwrap();
+    assert!(
+        worst * 4 < checked,
+        "a frame of {worst:?} waited on a check of {checked:?}"
+    );
+    assert_eq!(
+        drawn_x_range(&state),
+        Some((0.0, (ROWS - 1) as f64 * 1.0e-9))
+    );
+    assert_eq!(failures_of(&kept), Vec::<String>::new());
+    drop(state);
+    std::fs::remove_dir_all(&folder).unwrap();
+}

@@ -34,6 +34,13 @@ pub trait ColumnSource: Send + Sync {
         false
     }
 
+    /// Whether the column stands in for one of a kept store still waiting for its first check.
+    /// A read of it waits for that check, or fails at once as [`CHECKING_READ`] where nothing
+    /// may wait, and the host reads the window again once the check ends.
+    fn stands_in(&self) -> bool {
+        false
+    }
+
     /// The logical digest of the store that holds the column and the column's index in it (its
     /// run's x axis being 0): a column with the same identity holds the same rows. `None` when
     /// the store states no digest, as a run recovered without its end does not.
@@ -199,9 +206,15 @@ impl std::error::Error for ColumnReadFailure {}
 /// them, so the failure is not kept and the window is not shown as unavailable.
 pub const PENDING_READ: &str = "its samples are still being read from this browser's storage";
 
-/// Whether a read failed only because its rows are on their way ([`PENDING_READ`]).
+/// The cause a stand-in for a kept results store gives a read made, while the store waits for its
+/// first check, on a thread that never waits for one: the read fails now and a later one, once
+/// the check ends, finds the rows.
+pub const CHECKING_READ: &str = "its results store is still being checked";
+
+/// Whether a read failed only because its rows are on their way ([`PENDING_READ`]) or their store
+/// is still being checked ([`CHECKING_READ`]).
 pub fn is_pending_read(cause: &str) -> bool {
-    cause == PENDING_READ
+    cause == PENDING_READ || cause == CHECKING_READ
 }
 
 /// Failures of reads that had no caller to return them to, waiting for diagnostics to collect.

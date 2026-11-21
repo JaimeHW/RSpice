@@ -550,6 +550,62 @@ fn a_project_opens_before_its_results_are_checked_and_reads_them_once_they_are()
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// On the window's thread, which never waits for a check, a project opens and its runs read as
+/// being checked; once the checks end the intact run reads every sample, the damaged one reads
+/// as damaged, and no second check is left for the damaged file.
+#[test]
+fn on_the_window_thread_a_failed_check_reads_as_damage_and_is_left_for_no_other() {
+    rspice_results::store_reader::never_wait_for_checks_here();
+    let root = scratch_folder("window-thread-checks");
+    let saved = root.join("pair.rspiceproj");
+    let (json, samples) = saved_and_closed(&saved, &[421, 422]);
+    // Renamed, so no file of the folder is one this process has checked.
+    let file = root.join("moved.rspiceproj");
+    std::fs::rename(
+        root.join("results").join("pair"),
+        root.join("results").join("moved"),
+    )
+    .unwrap();
+    let project: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let damaged = rspice_formats::project_results::segment_folder(&file).join(format!(
+        "{}.rsr",
+        project["simulation_results"]["runs"][1]["analyses"][0]["waveforms"][0]["y"]["segment"]
+            .as_str()
+            .unwrap()
+    ));
+    let mut bytes = std::fs::read(&damaged).unwrap();
+    let middle = bytes.len() / 2;
+    bytes[middle..middle + 64].fill(0xa5);
+    std::fs::write(&damaged, bytes).unwrap();
+
+    let loaded =
+        rspice_results::store_reader::opening_unchecked(|| load_project_text(&json, Some(&file)))
+            .expect("the project opens");
+    let mut restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
+        .expect("the history opens");
+    assert!(
+        restored
+            .retained
+            .runs
+            .iter()
+            .all(|run| run.checking_results().is_some())
+    );
+    run_segment_checks(&mut restored);
+    let [good, bad] = [&restored.retained.runs[0], &restored.retained.runs[1]];
+    assert_eq!(good.checking_results(), None);
+    assert_eq!(run_bits(good), samples[0]);
+    assert_eq!(bad.checking_results(), None);
+    let reason = bad.unread_results().expect("the damaged run cannot read");
+    assert!(reason.contains("is damaged"), "{reason}");
+    assert_eq!(
+        rspice_results::store_reader::take_unchecked_segments(),
+        Vec::new(),
+        "the damaged file is not left for another check"
+    );
+    drop(restored);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A run whose kept segment still waits for its first check is never read as missing. Opened
 /// again while the job that checks it has not started, as a recovery reads a project again, it
 /// reads every sample: the read runs the check itself. The run the open restored reads every

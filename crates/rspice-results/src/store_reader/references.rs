@@ -80,6 +80,10 @@ pub struct ColumnReference {
     pub rows: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lead: Option<LeadReference>,
+    /// Whether the column's rows ascend strictly, as its run checked them: what a reader knows
+    /// of its run's axis while the segment waits for its first check.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ascending: bool,
 }
 
 impl ColumnReference {
@@ -99,6 +103,7 @@ impl ColumnReference {
                 WindowLead::Value(value) => Some(LeadReference::Value(value)),
                 WindowLead::Interpolated(fraction) => Some(LeadReference::Interpolated(fraction)),
             },
+            ascending: source.ascending(),
         })
     }
 
@@ -122,6 +127,7 @@ impl ColumnReference {
                 digest,
                 self.column,
                 self.column_rows,
+                self.ascending,
                 format!("column {} of a results store being checked", self.column),
             ),
             None => MissingSegment::new(

@@ -160,17 +160,19 @@ fn being_checked(identity: Option<([u8; 32], u64)>) -> bool {
 }
 
 /// The waveform `values` reads now that more folders may hold its segment: `None` when it reads
-/// already, or still cannot, or its segment is still being checked.
+/// already, or still cannot, or its segment is still being checked. A segment found that a check
+/// of its own still has to read is read as being checked: its run waits for that check.
 pub fn read_again(values: &WaveformValues) -> Option<WaveformValues> {
-    if values
-        .stored_window()
-        .is_some_and(|(source, _)| being_checked(source.identity()))
-        || readable(values)
-    {
+    let checked = |values: &WaveformValues| {
+        values
+            .stored_window()
+            .is_some_and(|(source, _)| being_checked(source.identity()))
+    };
+    if checked(values) || readable(values) {
         return None;
     }
     let again = self::values(&ColumnReference::of(values)?).ok()?;
-    readable(&again).then_some(again)
+    (checked(&again) || readable(&again)).then_some(again)
 }
 
 /// The waveform `values` reads now that the check of its segment ended: the segment, or what is
@@ -180,8 +182,15 @@ pub fn read_checked(values: &WaveformValues) -> Option<WaveformValues> {
 }
 
 /// The event history `points` reads now that more folders may hold its segment: `None` when it
-/// reads already, or still cannot, or its segment is still being checked.
+/// reads already, or still cannot, or its segment is still being checked. A history that stood in
+/// for its segment while it was checked is read again, as the segment or as missing.
 pub fn read_events_again<P: EventPoint>(points: &EventPoints<P>) -> Option<EventPoints<P>> {
+    if let Some(source) = points.stored_source()
+        && source.stands_in()
+        && !being_checked(source.identity())
+    {
+        return EventsReference::of(points)?.points().ok();
+    }
     let unread = |points: &EventPoints<P>| {
         points.stored_source().is_some_and(|source| {
             !being_checked(source.identity()) && source.before(f64::NEG_INFINITY).is_err()

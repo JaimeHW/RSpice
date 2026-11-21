@@ -57,6 +57,8 @@ pub(super) struct WindowWire {
     rows: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lead: Option<LeadReference>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    ascending: bool,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -114,6 +116,7 @@ impl WindowWire {
             first: self.first,
             rows: self.rows,
             lead: self.lead,
+            ascending: self.ascending,
         };
         (reference, self.held)
     }
@@ -128,6 +131,7 @@ impl From<ColumnReference> for WindowWire {
             first: reference.first,
             rows: reference.rows,
             lead: reference.lead,
+            ascending: reference.ascending,
             held: None,
         }
     }

@@ -7,8 +7,8 @@
 //! checked, never that its samples are missing. Reading one joins the check ([`super::kept_segment`]
 //! waits for the check under way, or runs it when none has started) and then reads the segment,
 //! or says what is wrong with it: the file is read whole once, and its samples are never read as
-//! empty. Inside [`super::opening_unchecked`] a read waits for nothing and says the store is still
-//! being checked.
+//! empty. Inside [`super::opening_unchecked`] and on the window's thread a read waits for nothing
+//! and says the store is still being checked.
 
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
@@ -20,14 +20,6 @@ use super::segments::unread;
 use super::{checks, kept_segment};
 use crate::events::points::EventHistorySource;
 use crate::waveform::{ColumnSource, ColumnTile, RowsAround};
-
-/// Why a store being checked is not read inside a project open.
-fn still_checking(digest: Digest) -> String {
-    format!(
-        "its results store {} is still being checked",
-        rspice_results_store::kept_segment_name(&digest)
-    )
-}
 
 /// What a source of a segment being checked reads once the check ended, opened the first time it
 /// is asked for: the segment's own column or signal, or why there is none.
@@ -45,7 +37,9 @@ impl<S: ?Sized> Opened<S> {
     }
 
     /// The source, opened through `open` once the check of its segment ended. Inside a project
-    /// open nothing waits, and nothing is remembered.
+    /// open nothing waits, and nothing is remembered. On the window's thread nothing waits
+    /// either: until the check ends the source reads as still being checked, remembering
+    /// nothing, and the check's end asks for the frame that reads it again.
     fn get(
         &self,
         open: impl FnOnce(Arc<super::Segment>) -> Result<Arc<S>, String>,
@@ -54,13 +48,17 @@ impl<S: ?Sized> Opened<S> {
             return opened.as_ref().map_err(Clone::clone);
         }
         if checks::deferring() {
-            return Err(still_checking(self.digest));
+            return Err(crate::waveform::CHECKING_READ.to_owned());
         }
+        let opened = match kept_segment(self.digest) {
+            Some(segment) => open(segment),
+            None if checks::checking(self.digest.0) => {
+                return Err(crate::waveform::CHECKING_READ.to_owned());
+            }
+            None => Err(unread(self.digest)),
+        };
         self.opened
-            .get_or_init(|| match kept_segment(self.digest) {
-                Some(segment) => open(segment),
-                None => Err(unread(self.digest)),
-            })
+            .get_or_init(|| opened)
             .as_ref()
             .map_err(Clone::clone)
     }
@@ -71,15 +69,24 @@ pub(super) struct CheckingColumn {
     column: u64,
     /// The rows the saved result stated.
     rows: u64,
+    /// Whether the saved result stated its rows ascend strictly.
+    ascending: bool,
     name: String,
     opened: Opened<dyn ColumnSource>,
 }
 
 impl CheckingColumn {
-    pub(super) fn new(digest: Digest, column: u64, rows: u64, name: String) -> Arc<Self> {
+    pub(super) fn new(
+        digest: Digest,
+        column: u64,
+        rows: u64,
+        ascending: bool,
+        name: String,
+    ) -> Arc<Self> {
         Arc::new(Self {
             column,
             rows,
+            ascending,
             name,
             opened: Opened::new(digest),
         })
@@ -109,8 +116,14 @@ impl ColumnSource for CheckingColumn {
         self.column()?.read(first, out)
     }
 
+    /// What the saved result stated: a reader chooses how to read the run's axis without
+    /// waiting for the check, and a segment that is not the one stated fails its check.
     fn ascending(&self) -> bool {
-        self.column().is_ok_and(|column| column.ascending())
+        self.ascending
+    }
+
+    fn stands_in(&self) -> bool {
+        true
     }
 
     fn identity(&self) -> Option<([u8; 32], u64)> {
@@ -187,5 +200,9 @@ impl EventHistorySource for CheckingEvents {
 
     fn identity(&self) -> Option<([u8; 32], u64)> {
         Some((self.opened.digest.0, self.signal))
+    }
+
+    fn stands_in(&self) -> bool {
+        true
     }
 }

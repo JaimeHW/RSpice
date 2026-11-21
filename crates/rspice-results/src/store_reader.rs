@@ -26,8 +26,8 @@ mod checks;
 #[cfg(any(unix, windows))]
 pub use checks::check;
 pub use checks::{
-    UncheckedSegment, awaiting_check, check_progress, checking, defer_check, opening_unchecked,
-    take_unchecked_segments,
+    UncheckedSegment, awaiting_check, check_progress, checking, defer_check, file_being_checked,
+    never_wait_for_checks_here, opening_unchecked, set_check_waker, take_unchecked_segments,
 };
 mod pending_sources;
 mod references;

@@ -49,7 +49,10 @@ pub fn file_segments(
             continue;
         };
         if segments.iter().all(|segment| segment.digest != digest) {
-            let source = kept_segment(digest).map(|segment| segment.path().to_path_buf());
+            // A file still being checked is copied as it is: the save never waits for its check.
+            let source = kept_segment(digest)
+                .map(|segment| segment.path().to_path_buf())
+                .or_else(|| rspice_results::store_reader::file_being_checked(digest.0));
             segments.push(StoredSegment { digest, source });
         }
     }
@@ -709,11 +712,13 @@ pub fn poll_segment_checks(
     if ended {
         let runs = (0..simulation.retained.runs.len()).collect();
         // A waveform whose segment is still being checked is left as it is: reading it would
-        // wait for that check here.
+        // wait for that check here. One that stood in for its segment while it was checked is
+        // read again, so nothing it showed meanwhile is kept.
         read_runs_again(simulation, runs, &|values| {
-            let digest = values.stored_window()?.0.identity()?.0;
+            let source = values.stored_window()?.0;
+            let digest = source.identity()?.0;
             if rspice_results::store_reader::checking(digest)
-                || rspice_formats::project_results::readable(values)
+                || (!source.stands_in() && rspice_formats::project_results::readable(values))
             {
                 return None;
             }

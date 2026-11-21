@@ -420,11 +420,12 @@ pub fn keep_segments_in(folder: &Path) {
 ///
 /// A file under the digest's name is the segment only when its stored bits hash to the digest
 /// ([`rspice_results_store::verify_segment`]): the first time a file is opened that reads all of
-/// it, on the calling thread, unless the caller is [`super::opening_unchecked`]. Then a file not
-/// checked yet is left for a check of its own, and `None` until it has had it, as is every file
-/// already left for one: its result reads as being checked ([`super::checking`]). Anywhere else, a
-/// file left for a check joins it: this waits for the check under way, or runs it when none has
-/// started, and then opens the file the check found to be the segment.
+/// it, on the calling thread, unless the caller is [`super::opening_unchecked`] or the window's
+/// thread ([`super::never_wait_for_checks_here`]). There a file not checked yet is left for a
+/// check of its own, and `None` until it has had it, as is every file already left for one: its
+/// result reads as being checked ([`super::checking`]). Anywhere else, a file left for a check
+/// joins it: this waits for the check under way, or runs it when none has started, and then
+/// opens the file the check found to be the segment.
 #[cfg(any(unix, windows))]
 pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
     let lock = || KEPT.lock().unwrap_or_else(|p| p.into_inner());
@@ -436,24 +437,41 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
         kept.folders.clone()
     };
     let name = rspice_results_store::kept_segment_name(&digest);
-    let deferring = super::checks::deferring();
+    let leaving = super::checks::leaving_checks();
+    let opening = super::checks::deferring();
     let mut unchecked = None;
     // Checked without holding the lock, so a long first check does not stall other reads.
     let segment = folders.iter().find_map(|folder| {
         let path = folder.join(&name);
         // A job of its own reads it whole; reading it here too would read it twice, so an open
-        // leaves it to that job, and anything else waits for the job or takes its place.
+        // and the window's thread leave it to that job, and anything else waits for the job or
+        // takes its place.
         if super::checks::awaiting_check(&path) {
-            if deferring {
+            if leaving {
                 return None;
             }
             super::checks::join(&path);
         }
-        if deferring && !rspice_results_store::segment_verified(&path, &digest) {
-            if unchecked.is_none() && path.is_file() {
-                unchecked = Some(path);
+        if leaving {
+            // An open reads only the file's metadata. Elsewhere a check stopped before it reads
+            // a block answers what an earlier check found, so a file found damaged is not left
+            // for another check.
+            let found = if opening {
+                rspice_results_store::segment_verified(&path, &digest).then_some(true)
+            } else {
+                rspice_results_store::check_segment(&path, &digest, &mut |_, _| false)
+                    .map(|checked| checked.is_ok())
+            };
+            match found {
+                Some(true) => {}
+                Some(false) => return None,
+                None => {
+                    if unchecked.is_none() && path.is_file() {
+                        unchecked = Some(path);
+                    }
+                    return None;
+                }
             }
-            return None;
         }
         rspice_results_store::verify_segment(&path, &digest).ok()?;
         let reader = StoreReader::open_file(&path).ok()?;
