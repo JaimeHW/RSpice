@@ -5,12 +5,14 @@
 use super::data::{
     FftBuildError, FftData, SpectrumAnalysis, SpectrumAnalysisError, SpectrumNormalization,
 };
-use super::pipeline::FftInputError;
-use super::window::WindowFunction;
+use super::pipeline::{FftInputError, Resampling};
+use super::window::{KaiserBeta, WindowFunction};
+use rspice_results::fft::settings::SpectrumScale;
 use std::sync::Arc;
 use thiserror::Error;
 
 mod data_ops;
+mod settings;
 mod view;
 
 pub use rspice_results::fft::InputFidelity;
@@ -40,6 +42,10 @@ pub struct FftSourceCache {
     pub name: String,
     pub samples: Arc<Vec<f64>>,
     pub sample_rate: f64,
+    /// The record the samples were taken over, `[start, stop)` in seconds.
+    pub record: (f64, f64),
+    /// The record's mean, taken out before the transform.
+    pub dc_level: f64,
 }
 
 // =============================================================================
@@ -81,6 +87,32 @@ pub struct FftState {
     pub sample_count: usize,
     /// Number of harmonics to analyze
     pub num_harmonics: usize,
+    /// The Kaiser window's β, kept while another window is chosen.
+    pub kaiser_beta: KaiserBeta,
+    /// The rate the record is sampled at, when the reader set a rate rather
+    /// than a count.
+    pub sample_rate: Option<f64>,
+    /// How samples off the record's own steps are made.
+    pub resampling: Resampling,
+    /// The transform's length over the record's.
+    pub padding: u32,
+    /// The equal records whose powers are averaged.
+    pub averages: u32,
+    /// The bins either side of a tone claimed for it; `None` is the window's
+    /// main lobe.
+    pub signal_bins: Option<usize>,
+    /// The fundamental the reader named, in hertz; `None` is the largest
+    /// tone.
+    pub fundamental: Option<f64>,
+    /// The band the figures are measured over, in hertz; `None` is DC to
+    /// Nyquist.
+    pub band: Option<(f64, f64)>,
+    /// What the spectrum's ordinate draws.
+    pub scale: SpectrumScale,
+    /// Frequency on a logarithmic axis.
+    pub log_frequency: bool,
+    /// Phase drawn under the level.
+    pub phase: bool,
     /// Runtime spectrum revision for display caches.
     spectrum_revision: u64,
 }
@@ -104,6 +136,17 @@ impl Default for FftState {
             sample_count_auto: true,
             sample_count: DEFAULT_MANUAL_SAMPLE_COUNT,
             num_harmonics: 10,
+            kaiser_beta: KaiserBeta::DEFAULT,
+            sample_rate: None,
+            resampling: Resampling::Linear,
+            padding: 1,
+            averages: 1,
+            signal_bins: None,
+            fundamental: None,
+            band: None,
+            scale: SpectrumScale::Db,
+            log_frequency: false,
+            phase: false,
             spectrum_revision: 0,
         }
     }

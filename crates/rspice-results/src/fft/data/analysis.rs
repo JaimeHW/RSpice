@@ -159,9 +159,12 @@ impl SpectrumAnalysis {
     ) -> Result<Self, SpectrumAnalysisError> {
         let num_harmonics = measurement.harmonics;
         validate_analysis_input(fft, num_harmonics)?;
+        // The bins a tone claims are the record's; a padded transform has
+        // that many more of its own across the same width.
         let guard_bins = measurement
             .signal_bins
-            .unwrap_or_else(|| fft.window.signal_bins());
+            .unwrap_or_else(|| fft.window.signal_bins())
+            .saturating_mul(fft.padding());
         let mut analysis = Self {
             harmonic_coverage: HarmonicCoverage::NoFundamental {
                 requested_order: num_harmonics,
@@ -347,16 +350,24 @@ impl SpectrumAnalysis {
         }
         // Noise lies under the tones too. The bins claimed for the carrier
         // and its harmonics are counted at the noise's typical power: the
-        // median noise bin over ln 2, since a noise bin's power is exponential
-        // and its median sits ln 2 under its mean. The median, not the mean,
-        // so a spur among the noise bins is counted once, not again under
-        // every tone.
+        // median noise bin over its ratio to the mean, ln 2 for one record,
+        // since a noise bin's power is exponential. The power averaged over
+        // k records is a chi-square of 2k degrees, whose median sits
+        // (1 - 1/9k)^3 of its mean (Wilson and Hilferty). The median, not the
+        // mean, so a spur among the noise bins is counted once, not again
+        // under every tone.
         let claimed = band_bins.saturating_sub(noise_log_bins.len());
         if claimed > 0 && !noise_log_bins.is_empty() {
             let middle = noise_log_bins.len() / 2;
             let (_, median, _) = noise_log_bins.select_nth_unstable_by(middle, f64::total_cmp);
+            let records = fft.averages() as f64;
+            let median_to_mean = if fft.averages() <= 1 {
+                std::f64::consts::LN_2
+            } else {
+                (1.0 - 1.0 / (9.0 * records)).powi(3)
+            };
             if median.is_finite() {
-                noise_norm.add_log(*median + 0.5 * (claimed as f64 / std::f64::consts::LN_2).ln());
+                noise_norm.add_log(*median + 0.5 * (claimed as f64 / median_to_mean).ln());
             }
         }
 
@@ -976,6 +987,8 @@ mod tests {
             window: WindowFunction::Rectangular,
             normalization,
             equivalent_noise_bandwidth_bins: 1.0,
+            padding: 1,
+            averages: 1,
         }
     }
 
@@ -1646,5 +1659,71 @@ mod tests {
         )
         .expect("figures");
         assert_eq!(explicit.signal_bins, 6);
+    }
+
+    fn transformed(samples: &[f64], padding: usize, averages: usize) -> FftData {
+        FftData::from_record(
+            "V(out)",
+            samples,
+            samples.len() as f64,
+            &crate::fft::data::SpectrumTransform {
+                padding,
+                averages,
+                ..crate::fft::data::SpectrumTransform::new(
+                    WindowFunction::Hanning,
+                    SpectrumNormalization::Rms,
+                )
+            },
+        )
+        .expect("a spectrum")
+    }
+
+    /// Padding draws the same spectrum on a finer grid: the padded transform
+    /// of a coherent tone through Hann passes through every bin of the
+    /// unpadded one, at its level, and peaks at the tone's −3.0103 dBV rms.
+    #[test]
+    fn a_padded_record_draws_the_record_on_a_finer_grid() {
+        let (samples, _) = coherent_record(4096, 64, 1.0, &[(3, 0.01, 0.2)], 1.0e-3, 5);
+        let plain = transformed(&samples, 1, 1);
+        let padded = transformed(&samples, 4, 1);
+        assert_eq!(padded.frequency_resolution(), 0.25);
+        for (bin, point) in plain.points.iter().enumerate() {
+            let fine = &padded.points[4 * bin];
+            assert_eq!(fine.frequency, point.frequency);
+            assert!(
+                (fine.magnitude - point.magnitude).abs() <= 1.0e-12 * plain.points[64].magnitude,
+                "bin {bin}: {} against {}",
+                fine.magnitude,
+                point.magnitude
+            );
+        }
+        let level = padded.points[256].magnitude_db();
+        assert!((level + 3.010299956639812).abs() < 1.0e-3, "level {level}");
+    }
+
+    /// Averaging the powers of eight records of a tone in noise reads the
+    /// tone's level and numpy's SNR of the whole record, and the noise floor
+    /// of one record of an eighth the length, 10·log10(2σ²·ENBW/1024) through
+    /// Hann.
+    #[test]
+    fn averaged_records_read_the_tone_and_noise_of_the_record() {
+        let (samples, noise_power) = coherent_record(8192, 256, 1.0, &[], 1.0e-3, 9);
+        let fft = transformed(&samples, 1, 8);
+        assert_eq!((fft.fft_size, fft.averages()), (1024, 8));
+        let analysis = SpectrumAnalysis::analyze(&fft, 10).expect("figures");
+        let level = analysis.fundamental_db.unwrap();
+        assert!((level + 3.010299956639812).abs() < 0.01, "level {level}");
+        let snr = 10.0 * (0.5 / noise_power).log10();
+        assert!(
+            (analysis.snr_db.unwrap() - snr).abs() < 0.2,
+            "{analysis:?} against {snr}"
+        );
+        let floor =
+            10.0 * (2.0 * noise_power * fft.equivalent_noise_bandwidth_bins() / 1024.0).log10();
+        let measured = analysis.noise_floor_db.unwrap();
+        assert!(
+            (measured - floor).abs() < 0.2,
+            "floor {measured} against {floor}"
+        );
     }
 }

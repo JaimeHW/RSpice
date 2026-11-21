@@ -261,6 +261,9 @@ pub struct FftInputOptions {
     /// The transform's sample count `N`; `None` takes as many as the record
     /// holds inside its window.
     pub target_samples: Option<usize>,
+    /// The rate the record is sampled at, in hertz, when the reader set a
+    /// rate rather than a count: `N` is the rate times the record's length.
+    pub target_rate: Option<f64>,
     /// How samples off the record's own grid are made.
     pub resampling: Resampling,
 }
@@ -271,6 +274,7 @@ impl Default for FftInputOptions {
             policy: FftInputPolicy::interactive_default(),
             time_window: None,
             target_samples: None,
+            target_rate: None,
             resampling: Resampling::Linear,
         }
     }
@@ -291,6 +295,11 @@ impl FftInputOptions {
 
     pub fn with_target_samples(mut self, target_samples: Option<usize>) -> Self {
         self.target_samples = target_samples;
+        self
+    }
+
+    pub fn with_target_rate(mut self, target_rate: Option<f64>) -> Self {
+        self.target_rate = target_rate;
         self
     }
 
@@ -338,6 +347,10 @@ pub fn prepare_fft_input_with_options(
     let (point_cap, target_samples) = validate_options(options)?;
     validate_source(time, values)?;
     let windowed = select_time_window(time, values, options.time_window)?;
+    let target_samples = target_samples.map_or_else(
+        || target_at_rate(options, &windowed, point_cap),
+        |count| Ok(Some(count)),
+    )?;
     prepare_windowed(
         name,
         windowed,
@@ -361,6 +374,10 @@ pub fn prepare_fft_input_from_columns(
     let (point_cap, target_samples) = validate_options(options)?;
     validate_source_columns(time, values)?;
     let windowed = select_time_window_columns(time, values, options.time_window)?;
+    let target_samples = target_samples.map_or_else(
+        || target_at_rate(options, &windowed, point_cap),
+        |count| Ok(Some(count)),
+    )?;
     prepare_windowed(
         name,
         windowed,
@@ -382,6 +399,32 @@ fn validate_options(
         return Err(FftInputError::TargetExceedsPointCap { target, point_cap });
     }
     Ok((point_cap, target_samples))
+}
+
+/// The sample count a rate the reader set asks of the record: the rate times
+/// the record's length, to the nearest sample.
+fn target_at_rate(
+    options: FftInputOptions,
+    windowed: &WindowedRows,
+    point_cap: Option<usize>,
+) -> Result<Option<usize>, FftInputError> {
+    let Some(rate) = options.target_rate else {
+        return Ok(None);
+    };
+    let count = rate * (windowed.stop - windowed.start);
+    if !(count.is_finite() && count >= 0.0) {
+        return Err(FftInputError::InvalidTimeWindow {
+            start: windowed.start,
+            end: windowed.stop,
+        });
+    }
+    let count = validate_target_count(Some(count.round() as usize))?;
+    if let (Some(point_cap), Some(target)) = (point_cap, count)
+        && target > point_cap
+    {
+        return Err(FftInputError::TargetExceedsPointCap { target, point_cap });
+    }
+    Ok(count)
 }
 
 /// The pipeline from the validated rows of the time window on.

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::super::data::{FftData, SpectrumAnalysis};
+use super::super::data::{FftData, SpectrumAnalysis, SpectrumTransform};
 use super::super::pipeline::{
     FftInputError, FftInputOptions, FftInputPolicy, FftTimeWindow, MAX_REFERENCE_RESAMPLE_POINTS,
     MIN_FFT_SAMPLES, PreparedFftInput,
@@ -33,6 +33,8 @@ impl FftState {
             // Moving the existing Vec avoids Arc<[T]>'s second large copy.
             samples: Arc::new(input.samples),
             sample_rate: input.sample_rate,
+            record: (input.record.start, input.record.end),
+            dc_level: input.dc_level,
         });
         self.sync_sample_count_control_value();
         self.recompute_from_source()
@@ -90,11 +92,12 @@ impl FftState {
         if self.source_cache.is_some() {
             return self.recompute_from_source();
         }
+        let measurement = self.measurement();
         let Some(data) = self.data.as_mut() else {
             return Ok(());
         };
         let result = match data.convert_normalization(normalization) {
-            Ok(()) => SpectrumAnalysis::analyze(data, self.num_harmonics).map_err(FftFailure::from),
+            Ok(()) => SpectrumAnalysis::measure(data, &measurement).map_err(FftFailure::from),
             Err(error) => Err(error.into()),
         };
         match result {
@@ -135,15 +138,17 @@ impl FftState {
             ))
         };
 
-        let target_samples = if self.sample_count_auto {
-            None
-        } else {
-            Some(self.sample_count)
+        let (target_samples, target_rate) = match (self.sample_count_auto, self.sample_rate) {
+            (true, _) => (None, None),
+            (false, Some(rate)) => (None, Some(rate)),
+            (false, None) => (Some(self.sample_count), None),
         };
 
         FftInputOptions::with_policy(self.input_policy())
             .with_time_window(time_window)
             .with_target_samples(target_samples)
+            .with_target_rate(target_rate)
+            .with_resampling(self.resampling)
     }
 
     /// Keep the UI `N` control value synchronized with the effective FFT input.
@@ -172,19 +177,39 @@ impl FftState {
         let Some(source) = self.source_cache.as_ref() else {
             return Ok(());
         };
-        let result = FftData::from_time_domain_with_normalization(
+        let transform = SpectrumTransform {
+            window: self.window,
+            normalization: self.normalization,
+            padding: self.padding.max(1) as usize,
+            averages: self.averages.max(1) as usize,
+        };
+        let measurement = self.measurement();
+        // Padding only draws the spectrum on a finer grid: between the
+        // record's own bins a coherent tone's window sidelobes show, which
+        // are not noise. The figures are measured on the record's own grid.
+        let measured = |data: &FftData| -> Result<SpectrumAnalysis, FftFailure> {
+            if transform.padding == 1 {
+                return SpectrumAnalysis::measure(data, &measurement).map_err(FftFailure::from);
+            }
+            let record = FftData::from_record(
+                &source.name,
+                &source.samples,
+                source.sample_rate,
+                &SpectrumTransform {
+                    padding: 1,
+                    ..transform
+                },
+            )?;
+            SpectrumAnalysis::measure(&record, &measurement).map_err(FftFailure::from)
+        };
+        let result = FftData::from_record(
             &source.name,
             &source.samples,
             source.sample_rate,
-            self.window,
-            self.normalization,
+            &transform,
         )
         .map_err(FftFailure::from)
-        .and_then(|data| {
-            SpectrumAnalysis::analyze(&data, self.num_harmonics)
-                .map(|analysis| (data, analysis))
-                .map_err(FftFailure::from)
-        });
+        .and_then(|data| measured(&data).map(|analysis| (data, analysis)));
         match result {
             Ok((data, analysis)) => {
                 self.data = Some(data);

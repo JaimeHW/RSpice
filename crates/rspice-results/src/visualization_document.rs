@@ -1907,6 +1907,15 @@ where
     deserialize_bounded_vec::<_, _, MAX_PANE_EVENT_LANES>(deserializer)
 }
 
+/// How the reader set a pane's spectrum sheet: the signal, the record, the
+/// window and what its figures are measured over. A later run the view
+/// follows is transformed the same way.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaneSpectrumSettings {
+    pub pane_id: PaneId,
+    pub settings: crate::fft::settings::SpectrumSettings,
+}
+
 /// The X one sheet's readout is pinned at on a pane: the reader clicked the
 /// plot there. It is a place on the X axis, not a sample, so a later run
 /// the view follows reads its own values at the same X.
@@ -2633,6 +2642,7 @@ pub struct VisualizationDocument {
     readout_pins: Vec<ReadoutPin>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     sheet_settings: Vec<SheetSetting>,
+    spectrum_settings: Vec<PaneSpectrumSettings>,
 }
 
 #[derive(Deserialize)]
@@ -2695,6 +2705,7 @@ struct VisualizationDocumentWire {
     readout_pins: Option<BoundedVec<ReadoutPin, MAX_VISUALIZATION_READOUT_PINS>>,
     #[serde(default)]
     sheet_settings: Option<BoundedVec<SheetSetting, MAX_VISUALIZATION_SHEET_SETTINGS>>,
+    spectrum_settings: Option<BoundedVec<PaneSpectrumSettings, MAX_VISUALIZATION_PANES>>,
 }
 
 impl<'de> Deserialize<'de> for VisualizationDocument {
@@ -2739,6 +2750,9 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 .map_or_else(Vec::new, BoundedVec::into_inner),
             sheet_settings: wire
                 .sheet_settings
+                .map_or_else(Vec::new, BoundedVec::into_inner),
+            spectrum_settings: wire
+                .spectrum_settings
                 .map_or_else(Vec::new, BoundedVec::into_inner),
         };
         if document.schema_version != Self::SCHEMA_VERSION {
@@ -2820,6 +2834,7 @@ impl VisualizationDocument {
             xy_plots: Vec::new(),
             readout_pins: Vec::new(),
             sheet_settings: Vec::new(),
+            spectrum_settings: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -3010,6 +3025,18 @@ impl VisualizationDocument {
         &self.sheet_settings
     }
 
+    /// How the reader set `pane_id`'s spectrum sheet, when they changed it.
+    #[must_use]
+    pub fn spectrum_settings(
+        &self,
+        pane_id: PaneId,
+    ) -> Option<&crate::fft::settings::SpectrumSettings> {
+        self.spectrum_settings
+            .iter()
+            .find(|held| held.pane_id == pane_id)
+            .map(|held| &held.settings)
+    }
+
     /// The order one pane draws its event lanes in; empty when it recorded
     /// none.
     #[must_use]
@@ -3133,6 +3160,7 @@ impl VisualizationDocument {
             xy_plots: self.xy_plots.clone(),
             readout_pins: self.readout_pins.clone(),
             sheet_settings: self.sheet_settings.clone(),
+            spectrum_settings: self.spectrum_settings.clone(),
         }))
     }
 

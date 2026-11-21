@@ -6,6 +6,7 @@ pub mod data;
 pub mod pipeline;
 #[cfg(feature = "engine-evidence")]
 pub mod recorded;
+pub mod settings;
 #[cfg(feature = "engine-evidence")]
 pub mod spectrum;
 pub mod window;

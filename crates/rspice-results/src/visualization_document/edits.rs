@@ -332,6 +332,12 @@ pub enum DocumentEdit {
         sheet: crate::result_presentation::ResultViewer,
         setting: Option<super::SheetSettingValue>,
     },
+    /// Set how a pane's spectrum sheet transforms and measures its signal,
+    /// or with `None` put back the sheet's defaults.
+    SetSpectrumSettings {
+        pane_id: PaneId,
+        settings: Option<crate::fft::settings::SpectrumSettings>,
+    },
     MoveCursor {
         cursor_id: CursorId,
         position: TypedValue,

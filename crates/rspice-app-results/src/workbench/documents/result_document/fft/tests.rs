@@ -119,3 +119,94 @@ fn the_spectrum_is_of_the_first_voltage_plotted_and_reads_the_store_by_windows()
     let whole: Vec<u64> = columns.iter().map(|column| column.whole_reads()).collect();
     assert_eq!(whole, [0, 0, 0, 0], "a stored column was read whole");
 }
+
+/// A finished run of `plan` whose transient `analysis` holds 1 ms of a 16 kHz
+/// V(out) in 1024 steps.
+fn plan_run(
+    plan: crate::product::SimulationPlanId,
+    analysis: crate::product::AnalysisInstanceId,
+) -> SimulationRun {
+    use crate::product::ObjectRevision;
+    use crate::state::{AnalysisResult, AnalysisResultProvenance, AnalysisType, RetainedTrace};
+    use crate::workbench::documents::result_document::test_fixtures::{
+        completed_prepared_run, digest,
+    };
+    let time: Vec<f64> = (0..=1024).map(|row| row as f64 * 1.0e-3 / 1024.0).collect();
+    let out: Vec<f64> = time
+        .iter()
+        .map(|t| (std::f64::consts::TAU * 16.0e3 * t).sin())
+        .collect();
+    let mut run = completed_prepared_run(plan, ObjectRevision::INITIAL, digest(0x50));
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![RetainedTrace::new("V(out)", time, out, "#ffbd2e")])
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    analysis,
+                    ObjectRevision::INITIAL,
+                    digest(0x51),
+                    Vec::new(),
+                )
+                .expect("analysis provenance"),
+            ),
+    );
+    run
+}
+
+/// The window, β and harmonic count the reader sets are kept by the plan's
+/// working view, through its one writer: the next run of the plan is
+/// transformed the same way even when nothing but the view remembers them,
+/// and Undo takes the change back.
+#[test]
+fn spectrum_settings_are_kept_by_the_view_across_a_rerun_and_undone() {
+    use super::{adopt_kept_settings, keep_settings};
+    use crate::workbench::documents::result_document::view_edits::{self, Step};
+    use rspice_results::fft::settings::{SpectrumSettings, SpectrumWindow};
+    use rspice_results_ui::fft::{FftState, WindowFunction, window::KaiserBeta};
+
+    let (plan, analysis) = (
+        crate::product::SimulationPlanId::new(),
+        crate::product::AnalysisInstanceId::new(),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs = vec![plan_run(plan, analysis)].into();
+    assert!(state.model.simulation.select_run(0));
+    state.quick_frame();
+    let settings = SpectrumSettings {
+        window: SpectrumWindow::Kaiser,
+        kaiser_beta: 20.0,
+        harmonics: 40,
+        ..SpectrumSettings::default()
+    };
+    keep_settings(&mut state.results_parts(), settings.clone());
+    let view = state.working_view().expect("the run's view");
+    let pane = view.panes()[0].id;
+    assert_eq!(view.spectrum_settings(pane), Some(&settings));
+    assert_eq!(
+        state.results.analysis.fft_state.window,
+        WindowFunction::Kaiser(KaiserBeta::new(20.0).unwrap())
+    );
+
+    // The session forgets the sheet, as a restart does; then the plan runs
+    // again.
+    crate::workbench::documents::result_document::working_view::release(&mut state.results_parts());
+    state.results.analysis.fft_state = FftState::default();
+    state
+        .model
+        .simulation
+        .retained
+        .runs
+        .insert(0, plan_run(plan, analysis));
+    assert!(state.model.simulation.select_run(0));
+    state.quick_frame();
+    adopt_kept_settings(&mut state.results_parts());
+    assert_eq!(state.results.analysis.fft_state.settings(), settings);
+
+    let document = state.working_view().expect("the run's view").id();
+    view_edits::step(&mut state.results_parts(), document, Step::Undo).expect("an undo");
+    adopt_kept_settings(&mut state.results_parts());
+    assert_eq!(
+        state.results.analysis.fft_state.settings(),
+        SpectrumSettings::default()
+    );
+}

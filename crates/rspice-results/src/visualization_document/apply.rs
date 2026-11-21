@@ -1160,6 +1160,17 @@ impl VisualizationDocument {
                 }
                 Ok(())
             }
+            DocumentEdit::SetSpectrumSettings { pane_id, settings } => {
+                self.require_pane(pane_id)?;
+                self.spectrum_settings
+                    .retain(|held| held.pane_id != pane_id);
+                if let Some(settings) = settings {
+                    validate_spectrum_settings(&settings)?;
+                    self.spectrum_settings
+                        .push(PaneSpectrumSettings { pane_id, settings });
+                }
+                Ok(())
+            }
             DocumentEdit::SetEventLaneOrder(order) => {
                 self.validate_event_lane_order(&order)?;
                 self.event_lane_orders
@@ -1874,6 +1885,8 @@ impl VisualizationDocument {
         self.readout_pins.retain(|pin| pin.pane_id != pane_id);
         self.sheet_settings
             .retain(|setting| setting.pane_id != pane_id);
+        self.spectrum_settings
+            .retain(|held| held.pane_id != pane_id);
         let page_id = self
             .panes
             .iter()
@@ -2279,6 +2292,22 @@ impl VisualizationDocument {
                 });
             }
         }
+        for (index, held) in self.spectrum_settings.iter().enumerate() {
+            self.require_pane(held.pane_id)?;
+            validate_spectrum_settings(&held.settings)?;
+            if self.spectrum_settings[..index]
+                .iter()
+                .any(|other| other.pane_id == held.pane_id)
+            {
+                return Err(VisualizationError::InvalidValue {
+                    field: "spectrum-settings.pane-id",
+                    message: format!(
+                        "pane {} keeps its spectrum settings twice",
+                        held.pane_id.get()
+                    ),
+                });
+            }
+        }
         let mut bus_names = HashSet::new();
         for bus in &self.user_buses {
             self.validate_user_bus(bus)?;
@@ -2626,6 +2655,17 @@ pub(super) fn display_predicates_by_name(
 }
 
 /// A pin sits at a finite X: the reader clicked somewhere on the axis.
+fn validate_spectrum_settings(
+    settings: &crate::fft::settings::SpectrumSettings,
+) -> Result<(), VisualizationError> {
+    settings
+        .validate()
+        .map_err(|message| VisualizationError::InvalidValue {
+            field: "spectrum-settings",
+            message,
+        })
+}
+
 fn validate_readout_pin(pin: &ReadoutPin) -> Result<(), VisualizationError> {
     if pin.x.is_finite() {
         Ok(())

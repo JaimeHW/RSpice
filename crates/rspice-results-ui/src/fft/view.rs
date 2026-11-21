@@ -9,6 +9,7 @@ use egui::Ui;
 use super::FftState;
 use crate::presentation::{PlotView, frequency_readout};
 use crate::waves::ReadoutPolicy;
+use rspice_results::fft::settings::{SpectrumAmplitude, SpectrumSettings, SpectrumWindow};
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
@@ -189,28 +190,28 @@ const NO_SOURCE: &str = "The spectrum has no source to transform yet";
 /// and the amplitude normalization. Both recompute from the cached uniformly
 /// sampled source, so they wait for one. Returns whether a setting failed to
 /// rebuild the spectrum, which revokes the host's source authorization.
-pub fn domain_bar(ui: &mut Ui, fft: &mut FftState) -> bool {
-    let mut failed = false;
+/// The transform settings in the sheet bar. Returns the settings the reader
+/// set, when they changed one, for the host to keep in the sheet's view.
+pub fn domain_bar(ui: &mut Ui, fft: &FftState) -> Option<SpectrumSettings> {
+    let before = fft.settings();
+    let mut settings = before.clone();
     ui.add_enabled_ui(fft.source_cache.is_some(), |ui| {
         crate::chrome::bars::bar_label(ui, "Window");
-        let windows = crate::fft::WindowFunction::all();
-        let names = windows
+        let names = SpectrumWindow::ALL
             .iter()
-            .map(|window| window.display_name().to_owned())
+            .map(|window| window.label().to_owned())
             .collect::<Vec<_>>();
         let window = rspice_ui_kit::widgets::select_with_response(
             ui,
             "rspice.fft.window",
             "Window",
-            fft.window.display_name(),
+            settings.window.label(),
             &names,
             TRANSFORM_SELECT_WIDTH,
         );
         window.response.on_disabled_hover_text(NO_SOURCE);
-        if let Some(picked) = window.picked
-            && fft.set_window(windows[picked]).is_err()
-        {
-            failed = true;
+        if let Some(picked) = window.picked {
+            settings.window = SpectrumWindow::ALL[picked];
         }
         ui.add_space(8.0);
         crate::chrome::bars::bar_label(ui, "Normalization");
@@ -228,13 +229,14 @@ pub fn domain_bar(ui: &mut Ui, fft: &mut FftState) -> bool {
             TRANSFORM_SELECT_WIDTH,
         );
         normalization.response.on_disabled_hover_text(NO_SOURCE);
-        if let Some(picked) = normalization.picked
-            && fft.set_normalization(normalizations[picked]).is_err()
-        {
-            failed = true;
+        if let Some(picked) = normalization.picked {
+            settings.amplitude = match normalizations[picked] {
+                crate::fft::data::SpectrumNormalization::Peak => SpectrumAmplitude::Peak,
+                crate::fft::data::SpectrumNormalization::Rms => SpectrumAmplitude::Rms,
+            };
         }
     });
-    failed
+    (settings != before).then_some(settings)
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,6 @@ pub(crate) use error::MIN_FFT_DATA_SAMPLES;
 pub use error::{
     FftAllocationStage, FftBuildError, SpectrumAnalysisAllocationStage, SpectrumAnalysisError,
 };
-pub use fft_data::FftData;
+pub use fft_data::{FftData, SpectrumTransform};
 pub use normalization::SpectrumNormalization;
 pub use point::FftPoint;

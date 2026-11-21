@@ -3,10 +3,81 @@
 #[cfg(test)]
 mod tests;
 
-use super::{ResultViewer, frame_work};
+use super::{AnalysisPresentationKey, ResultViewer, ResultsReads, frame_work, view_edits};
+use crate::results::visualization_document::DocumentEdit;
 use crate::workbench::documents::result_document::ResultsParts;
 use egui::Ui;
+use rspice_results::fft::settings::SpectrumSettings;
 use rspice_results_ui::fft::view;
+use rspice_results_ui::session::PersistentPaneContext;
+
+/// The pane of the result view that keeps the shown analysis' sheets: the
+/// pane of a saved document being drawn, or the run's working view's.
+fn sheet_pane(state: ResultsReads<'_>) -> Option<PersistentPaneContext> {
+    let run = state.model.simulation.active_run()?;
+    let analysis = state.model.simulation.active_analysis()?;
+    state
+        .results
+        .session
+        .pane_for(AnalysisPresentationKey::new(run.dataset_id, analysis))
+}
+
+/// The settings the view keeps for the sheet: the reader's, or the sheet's
+/// defaults until they change one. `None` when no view keeps the sheet.
+fn kept_settings(state: ResultsReads<'_>) -> Option<(PersistentPaneContext, SpectrumSettings)> {
+    let pane = sheet_pane(state)?;
+    let document = state
+        .model
+        .workspace
+        .content
+        .visualization_document(pane.document_id)?;
+    let settings = document
+        .spectrum_settings(pane.pane_id)
+        .cloned()
+        .unwrap_or_default();
+    Some((pane, settings))
+}
+
+/// Take in the settings the view keeps for the sheet, so a re-run, an undo or
+/// another view's pane shows the spectrum as that view was set.
+pub(crate) fn adopt_kept_settings(state: &mut ResultsParts<'_>) {
+    if let Some((_, settings)) = kept_settings(state.results_reads()) {
+        state.analysis.fft_state.adopt_settings(&settings);
+    }
+}
+
+/// Keep `settings` the reader set on the sheet: in the view that keeps the
+/// sheet, through its one writer, as a step the reader can undo. A setting
+/// that fails to rebuild the spectrum revokes the viewer's source
+/// authorization, as it always has.
+pub(crate) fn keep_settings(state: &mut ResultsParts<'_>, settings: SpectrumSettings) {
+    state.analysis.fft_state.adopt_settings(&settings);
+    if state.analysis.fft_state.last_error.is_some() {
+        state.analysis.clear_fft_viewer_cache_authority();
+    }
+    let Some((pane, held)) = kept_settings(state.results_reads()) else {
+        return;
+    };
+    if held == settings {
+        return;
+    }
+    let Some(revision) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(pane.document_id)
+        .map(|document| document.revision())
+    else {
+        return;
+    };
+    let edit = DocumentEdit::SetSpectrumSettings {
+        pane_id: pane.pane_id,
+        settings: (settings != SpectrumSettings::default()).then_some(settings),
+    };
+    if let Err(error) = view_edits::apply(state, pane.document_id, revision, vec![edit]) {
+        state.prompt(format!("Could not keep this change to the view: {error}"));
+    }
+}
 
 /// Keep the sheet's source on what the reader plots: until the reader chooses
 /// a source, the spectrum is of the first voltage plotted, and plotting
@@ -17,6 +88,7 @@ pub(crate) fn follow_plotted(state: &mut ResultsParts<'_>) {
 }
 
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    adopt_kept_settings(state);
     follow_plotted(state);
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let presentation = state.results_reads().presentation_policy().readout();
@@ -58,8 +130,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 /// The transform settings in the sheet bar. A setting that fails to rebuild
 /// the spectrum revokes the viewer's source authorization, as it always has.
 pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
-    if view::domain_bar(ui, &mut state.analysis.fft_state) {
-        state.analysis.clear_fft_viewer_cache_authority();
+    adopt_kept_settings(state);
+    if let Some(settings) = view::domain_bar(ui, &state.analysis.fft_state) {
+        keep_settings(state, settings);
     }
     true
 }

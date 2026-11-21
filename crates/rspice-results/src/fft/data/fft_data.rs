@@ -33,8 +33,39 @@ pub struct FftData {
     pub window: WindowFunction,
     /// Amplitude normalization used for `points`.
     pub normalization: SpectrumNormalization,
-    /// Exact finite-length equivalent noise bandwidth used for this record.
+    /// Exact finite-length equivalent noise bandwidth used for this record,
+    /// in bins of the transform.
     pub(crate) equivalent_noise_bandwidth_bins: f64,
+    /// The transform's length over the record's: 1, or the zero-padding
+    /// factor.
+    pub(crate) padding: usize,
+    /// The equal records whose powers were averaged: 1 unless averaged.
+    pub(crate) averages: usize,
+}
+
+/// How a record is transformed: its window and amplitude, the zeros it is
+/// padded with and the records of equal length whose powers are averaged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpectrumTransform {
+    pub window: WindowFunction,
+    pub normalization: SpectrumNormalization,
+    /// The transform's length over the record's, at least 1.
+    pub padding: usize,
+    /// The equal records the record is cut into, at least 1.
+    pub averages: usize,
+}
+
+impl SpectrumTransform {
+    /// One record through `window`, unpadded.
+    #[must_use]
+    pub const fn new(window: WindowFunction, normalization: SpectrumNormalization) -> Self {
+        Self {
+            window,
+            normalization,
+            padding: 1,
+            averages: 1,
+        }
+    }
 }
 
 impl FftData {
@@ -63,7 +94,103 @@ impl FftData {
         window: WindowFunction,
         normalization: SpectrumNormalization,
     ) -> Result<Self, FftBuildError> {
-        let n = data.len();
+        Self::transform(name, data, sample_rate, window, normalization, 1)
+    }
+
+    /// The spectrum of a uniformly sampled record as `transform` asks.
+    ///
+    /// Averaging cuts the record into equal records and averages their
+    /// powers bin by bin, as Welch's method without overlap does: the noise's
+    /// spread narrows, its level and every tone's stay. Each record's phase
+    /// is its own, so the first record's is kept. Padding appends zeros to
+    /// each windowed record, which draws the same spectrum on a finer grid;
+    /// amplitudes stay calibrated to the record, and the window's noise
+    /// bandwidth is counted in the finer bins.
+    pub fn from_record(
+        name: &str,
+        data: &[f64],
+        sample_rate: f64,
+        transform: &SpectrumTransform,
+    ) -> Result<Self, FftBuildError> {
+        let averages = transform.averages.max(1);
+        let padding = transform.padding.max(1);
+        if averages == 1 {
+            return Self::transform(
+                name,
+                data,
+                sample_rate,
+                transform.window,
+                transform.normalization,
+                padding,
+            );
+        }
+        let length = data.len() / averages;
+        preflight_fft_build(length)?;
+        let mut records = data.chunks_exact(length).take(averages);
+        let first = records.next().unwrap_or(data);
+        let mut spectrum = Self::transform(
+            name,
+            first,
+            sample_rate,
+            transform.window,
+            transform.normalization,
+            padding,
+        )?;
+        let mut powers: Vec<f64> = spectrum
+            .points
+            .iter()
+            .map(|point| point.magnitude * point.magnitude)
+            .collect();
+        for record in records {
+            let next = Self::transform(
+                name,
+                record,
+                sample_rate,
+                transform.window,
+                transform.normalization,
+                padding,
+            )?;
+            for (power, point) in powers.iter_mut().zip(&next.points) {
+                *power += point.magnitude * point.magnitude;
+            }
+        }
+        for (point, power) in spectrum.points.iter_mut().zip(powers) {
+            let magnitude = (power / averages as f64).sqrt();
+            if !magnitude.is_finite() {
+                return Err(FftBuildError::NonFiniteSpectrumPoint {
+                    bin: 0,
+                    frequency: point.frequency,
+                    real: point.magnitude,
+                    imaginary: 0.0,
+                    magnitude,
+                    phase: point.phase,
+                });
+            }
+            point.magnitude = magnitude;
+        }
+        spectrum.averages = averages;
+        Ok(spectrum)
+    }
+
+    /// One windowed record, padded with zeros to `padding` times its length.
+    fn transform(
+        name: &str,
+        data: &[f64],
+        sample_rate: f64,
+        window: WindowFunction,
+        normalization: SpectrumNormalization,
+        padding: usize,
+    ) -> Result<Self, FftBuildError> {
+        let record = data.len();
+        preflight_fft_build(record)?;
+        let n = record
+            .checked_mul(padding)
+            .ok_or(FftBuildError::PlanningQualification(
+                RustfftQualificationError::LengthLimit {
+                    length: usize::MAX,
+                    limit: MAX_QUALIFIED_RUSTFFT_LENGTH,
+                },
+            ))?;
         preflight_fft_build(n)?;
         if !sample_rate.is_finite() || sample_rate <= 0.0 {
             return Err(FftBuildError::InvalidSampleRate { sample_rate });
@@ -90,10 +217,10 @@ impl FftData {
         }
 
         let owned_name = try_owned_name(name)?;
-        let window_entry = cached_window(window, n)?;
-        if window_entry.coefficients.len() != n {
+        let window_entry = cached_window(window, record)?;
+        if window_entry.coefficients.len() != record {
             return Err(FftBuildError::WindowLengthMismatch {
-                expected: n,
+                expected: record,
                 actual: window_entry.coefficients.len(),
             });
         }
@@ -108,7 +235,8 @@ impl FftData {
 
         // Coherent gain from actual generated coefficients, not a table constant.
         let cg = window_entry.coherent_gain;
-        let equivalent_noise_bandwidth_bins = window_entry.equivalent_noise_bandwidth_bins;
+        let equivalent_noise_bandwidth_bins =
+            window_entry.equivalent_noise_bandwidth_bins * padding as f64;
         if !cg.is_finite()
             || cg <= 0.0
             || !equivalent_noise_bandwidth_bins.is_finite()
@@ -139,6 +267,8 @@ impl FftData {
                 window,
                 normalization,
                 equivalent_noise_bandwidth_bins,
+                padding,
+                averages: 1,
             });
         }
 
@@ -170,6 +300,7 @@ impl FftData {
             }
             buffer.push(Complex::new(windowed_sample, 0.0));
         }
+        buffer.resize(n, Complex::new(0.0, 0.0));
 
         // An exact zero record is resolved analytically above and never asks
         // RustFFT to allocate a plan. The nonzero route was qualified before
@@ -202,7 +333,8 @@ impl FftData {
         }
 
         let has_nyquist = n.is_multiple_of(2);
-        let n_as_f64 = n as f64;
+        // Amplitudes are calibrated to the record, not to its padding.
+        let n_as_f64 = record as f64;
 
         for (k, bin) in buffer.iter().take(n_freqs).enumerate() {
             let frequency = frequency_at(k, n, sample_rate);
@@ -256,7 +388,21 @@ impl FftData {
             window,
             normalization,
             equivalent_noise_bandwidth_bins,
+            padding,
+            averages: 1,
         })
+    }
+
+    /// The equal records whose powers were averaged: 1 unless averaged.
+    #[must_use]
+    pub fn averages(&self) -> usize {
+        self.averages
+    }
+
+    /// The transform's length over the record's: 1 unless it was padded.
+    #[must_use]
+    pub fn padding(&self) -> usize {
+        self.padding
     }
 
     /// Convert all spectrum magnitudes to a different normalization mode.
