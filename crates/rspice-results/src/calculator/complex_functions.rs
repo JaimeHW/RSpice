@@ -33,6 +33,9 @@ pub(super) fn dispatch(name: &str, args: Vec<CalcValue>) -> Result<CalcValue, Ev
         return project(args.into_iter().next().unwrap().into_complex(), &name)
             .map(CalcValue::Real);
     }
+    if super::network_functions::is_network_function(&name) {
+        return super::network_functions::dispatch(&name, args);
+    }
     if name == "groupdelay" {
         count(&name, &args, 1)?;
         return group_delay(args.into_iter().next().unwrap());

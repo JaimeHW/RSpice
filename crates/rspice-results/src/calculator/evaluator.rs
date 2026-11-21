@@ -398,6 +398,25 @@ fn function_unit(
             }
         }
         "db10" | "gainmargin" | "snr" | "sinad" | "sfdr" => named("dB"),
+        // A two-port's stability factors and power gains are ratios.
+        "kf" | "b1f" | "mu" | "mu_prime" | "gt" | "ga" | "gp" | "gmax" | "gmsg" | "vswr" => {
+            Ok(Unit::none())
+        }
+        "zp" => named("Ω"),
+        "yp" => named("S"),
+        // h11 is an impedance, h22 an admittance, and the cross terms ratios.
+        "hp" => match (args.first(), args.get(1)) {
+            (Some(CalculatorExpr::Number(row)), Some(CalculatorExpr::Number(column))) => {
+                match (*row as i64, *column as i64) {
+                    (1, 1) => named("Ω"),
+                    (2, 2) => named("S"),
+                    _ => Ok(Unit::none()),
+                }
+            }
+            _ => {
+                Err("hp() reads its unit from the coefficient it names, as two numbers".to_owned())
+            }
+        },
         "enob" => Ok(Unit::none()),
         // The delay of a response swept in hertz is in seconds.
         "groupdelay" => {

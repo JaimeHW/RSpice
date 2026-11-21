@@ -15,6 +15,7 @@ pub mod functions;
 mod jitter;
 mod levels;
 mod measures;
+mod network_functions;
 pub mod parser;
 pub mod retained;
 mod series;

@@ -51,6 +51,22 @@ const fn function(
 use FunctionGroup::{Math, Signal};
 
 const X: &[&str] = &["x"];
+/// A two-port's four scattering coefficients.
+const TWO_PORT: &[&str] = &["s11", "s12", "s21", "s22"];
+
+/// A function of a two-port's coefficients, with `optional` trailing
+/// arguments after them.
+const fn network(
+    name: &'static str,
+    arguments: &'static [&'static str],
+    required: usize,
+    summary: &'static str,
+) -> FunctionSpec {
+    FunctionSpec {
+        required,
+        ..function(name, &[], Signal, arguments, summary)
+    }
+}
 
 pub const FUNCTIONS: &[FunctionSpec] = &[
     function(
@@ -126,6 +142,69 @@ pub const FUNCTIONS: &[FunctionSpec] = &[
         Signal,
         X,
         "-dφ/dω, the delay of a response",
+    ),
+    network(
+        "kf",
+        TWO_PORT,
+        4,
+        "Rollett stability factor K of a two-port",
+    ),
+    network(
+        "b1f",
+        TWO_PORT,
+        4,
+        "stability measure B1, positive when stable",
+    ),
+    network(
+        "mu",
+        TWO_PORT,
+        4,
+        "load-plane stability factor μ, above 1 when stable",
+    ),
+    network("mu_prime", TWO_PORT, 4, "source-plane stability factor μ′"),
+    network(
+        "gt",
+        &["s11", "s12", "s21", "s22", "gs", "gl"],
+        4,
+        "transducer gain at source and load reflections",
+    ),
+    network(
+        "ga",
+        &["s11", "s12", "s21", "s22", "gs"],
+        4,
+        "available gain from a source reflection",
+    ),
+    network(
+        "gp",
+        &["s11", "s12", "s21", "s22", "gl"],
+        4,
+        "operating power gain into a load reflection",
+    ),
+    network("gmax", TWO_PORT, 4, "MAG when stable, otherwise MSG"),
+    network("gmsg", TWO_PORT, 4, "maximum stable gain |S21|/|S12|"),
+    network(
+        "vswr",
+        &["s"],
+        1,
+        "voltage standing-wave ratio of a reflection",
+    ),
+    network(
+        "zp",
+        &["i", "j", "s11", "s12", "s21", "s22", "r1", "r2"],
+        6,
+        "impedance parameter Zij on port references",
+    ),
+    network(
+        "yp",
+        &["i", "j", "s11", "s12", "s21", "s22", "r1", "r2"],
+        6,
+        "admittance parameter Yij on port references",
+    ),
+    network(
+        "hp",
+        &["i", "j", "s11", "s12", "s21", "s22", "r1", "r2"],
+        6,
+        "hybrid parameter Hij on port references",
     ),
     function(
         "clip",
