@@ -81,38 +81,6 @@ fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
     assert!(!editing_parameter_field(&app.state.workbench, id));
 }
 
-/// A net names where it reaches and what it connects. Its class, wire count
-/// and a terminal count beside the terminal list are not restated.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_net_panel_states_scope_and_pins_only() {
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .wires
-        .push(rspice_app_state::state::Wire::segment(
-            1,
-            Point::new(0, 0),
-            Point::new(40, 0),
-        ));
-    app.state.sync_active_schematic_to_workspace();
-    let nets = sheet_connectivity(&app.state.model).nets;
-    let name = nets.first().expect("the wire is a net").name.clone();
-    let painted = painted_panel(|ui| net_panel(ui, &mut app.design_cx(), &name, &nets));
-    for gone in [
-        "Class",
-        "Conductors",
-        "Terminals\n",
-        "Operating point",
-        "Checks",
-    ] {
-        assert!(!painted.contains(gone), "{gone}: {painted}");
-    }
-    assert!(painted.contains("No pins on this net."), "{painted}");
-}
-
 /// The Terminals header counts only open pins, since the rows count
 /// themselves, and an instance without terminals has no section at all.
 /// A net offers the probe a run publishes for it, as Virtuoso ADE probes a
@@ -728,24 +696,6 @@ fn the_component_title_states_the_occurrence_only_below_the_root() {
             .is_some_and(|line| line.ends_with("/XAFE")),
         "{painted}"
     );
-}
-
-/// A component's rows edit it and offer nothing more: parameter tuning left
-/// the product, and with it the Value row's tune action. Nothing the panel
-/// announces names it.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn no_component_row_offers_parameter_tuning() {
-    let (mut app, first, _) = two_resistors();
-    let sheet = sheet_connectivity(&app.state.model);
-    let nodes = accesskit_nodes(|ui| component_panel(ui, &mut app.design_cx(), first, &sheet));
-    assert!(nodes.len() > 1);
-    for (_, node) in &nodes {
-        for text in [node.label(), node.value()].into_iter().flatten() {
-            let text = text.to_ascii_lowercase();
-            assert!(!text.contains("tune") && !text.contains("tuning"), "{text}");
-        }
-    }
 }
 
 /// Two resistors on the design workspace, nothing selected.

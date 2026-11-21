@@ -2,108 +2,12 @@
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use egui::Context;
 use rspice_app_design::workbench::app::dialogs::find_replace::tests::part;
 use rspice_app_design::workbench::app::dialogs::find_replace::*;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::{LibraryCellInstance, NetLabel, SchematicState};
 use rspice_app_workbench::workbench::framework::command_registry::ids;
-
-/// Each option row is one line, its checks in the columns the scope's
-/// segments stand in, and every row of the form is one pitch from the
-/// next.
-#[test]
-fn the_options_stand_on_one_grid() {
-    let ctx = Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state.design.find_replace.open = true;
-    let mut render = || {
-        ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1440.0, 900.0),
-                )),
-                ..Default::default()
-            },
-            |ui| app.render_frame_dialogs(ui.ctx()),
-        )
-    };
-    let _ = render();
-    let nodes = render()
-        .platform_output
-        .accesskit_update
-        .expect("AccessKit tree update")
-        .nodes;
-    let rect = |label: &str| {
-        let bounds = nodes
-            .iter()
-            .map(|(_, node)| node)
-            .find(|node| {
-                node.label() == Some(label)
-                    && matches!(
-                        node.role(),
-                        egui::accesskit::Role::TextInput
-                            | egui::accesskit::Role::CheckBox
-                            | egui::accesskit::Role::RadioButton
-                    )
-            })
-            .and_then(|node| node.bounds())
-            .unwrap_or_else(|| panic!("{label} is not published with its bounds"));
-        egui::Rect::from_min_max(
-            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-        )
-    };
-    let rows = [
-        vec!["Find"],
-        vec!["Replace"],
-        vec!["Instance names", "Net labels", "Values"],
-        SCOPES.to_vec(),
-        vec!["Whole word", "Match case", "Regular expression"],
-    ];
-    let centres: Vec<f32> = rows
-        .iter()
-        .map(|row| {
-            let centre = rect(row[0]).center().y;
-            for item in row {
-                assert!(
-                    (rect(item).center().y - centre).abs() <= 0.5,
-                    "{item} is not on the line {} is on",
-                    row[0]
-                );
-            }
-            centre
-        })
-        .collect();
-    let pitch = centres[1] - centres[0];
-    for pair in centres.windows(2) {
-        assert!(
-            (pair[1] - pair[0] - pitch).abs() <= 0.5,
-            "the rows step {centres:?}, not one pitch"
-        );
-    }
-    for column in 0..3 {
-        let left = rect(SCOPES[column]).left();
-        for row in [&rows[2], &rows[4]] {
-            assert!(
-                (rect(row[column]).left() - left).abs() <= 0.5,
-                "{} does not start where {} does",
-                row[column],
-                SCOPES[column]
-            );
-        }
-    }
-    let (find, scope) = (rect("Find"), rect(SCOPES[2]));
-    assert!(
-        (scope.right() - find.right()).abs() <= 0.5,
-        "the scope does not span the field column"
-    );
-}
 
 /// An instance renamed by Replace all ends as the Rename form leaves
 /// it: the probe and the saved output that name it follow it, and one

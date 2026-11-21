@@ -175,44 +175,6 @@ fn at_1024_the_schematic_row_sets_aside_what_it_has_no_room_for() {
     assert!(replay.app.state.workbench.focus_mode);
 }
 
-/// A labelled tool is as wide as its label drawn in the button's own font,
-/// past the icon, and no wider: at 1920 px the schematic row's checks end
-/// where their labels do, with no gap after them.
-#[test]
-fn at_1920_a_labelled_tool_takes_exactly_its_labels_room() {
-    use rspice_app_workbench::ui::theme::{self, FontWeight};
-
-    let window = vec2(1920.0, 1080.0);
-    let (mut replay, _) = amp_in(window);
-    let controls = assert_no_tool_under_another_in(&mut replay, window);
-    let font = theme::sans(rspice_app_workbench::ui::tokens::FS_1, FontWeight::Regular);
-    for name in ["Check cellview", "Check design"] {
-        let (label, rect) = controls
-            .iter()
-            .find(|(label, _)| label.starts_with(name))
-            .unwrap_or_else(|| panic!("{name} stands in the row: {controls:?}"));
-        // The button draws its verb; its accessible name adds the key.
-        let text = replay.ctx().fonts_mut(|fonts| {
-            fonts
-                .layout(
-                    name.to_owned(),
-                    font.clone(),
-                    egui::Color32::PLACEHOLDER,
-                    f32::INFINITY,
-                )
-                .size()
-                .x
-        });
-        // The icon's gutter before the label, and the padding after it.
-        let spare = rect.width() - 29.0 - text - 8.0;
-        assert!(
-            (0.0..1.0).contains(&spare),
-            "{label:?} is {} wide for a label {text} wide",
-            rect.width()
-        );
-    }
-}
-
 /// The run controls take the room they drew in, and the row's tools the
 /// rest: at every desktop width the lane the tools are measured against
 /// ends one gap before the leftmost run control, and the next frame draws

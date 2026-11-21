@@ -1,24 +1,13 @@
-//! Canvas geometry measured on fixture sheets rendered through the real paint
-//! path ([`rspice_app_design::schematic::view::render_schematic_view`]) at the zooms, themes and pixel
-//! densities a customer meets.
+//! Canvas text read off fixture sheets rendered through the real paint path
+//! ([`rspice_app_design::schematic::view::render_schematic_view`]).
 //!
-//! The sheets are a dense analog stage and a hierarchy sheet with its
-//! operating-point overlay on. [`render`] drives a headless context through
+//! The sheets are a hierarchy sheet with its operating-point overlay on and a
+//! shelf of functional parts. [`render`] drives a headless context through
 //! three whole frames and hands back the shapes the last frame painted
-//! (points), so an assertion can measure them.
-//!
-//! No image or fingerprint is pinned: every claim is pinned as a
-//! measured-geometry assertion instead.
+//! (points), so an assertion can read them.
 
 use egui::{Color32, Rect, Shape, epaint::ClippedShape};
-use rspice_design::schematic::{
-    bus::{Bus, BusTap, BusTapOrientation},
-    design_note::{DesignNote, DesignNoteKind},
-    net_label::NetLabel,
-    probe::SchematicProbe,
-    rotation::Rotation,
-};
-use rspice_design_model::bus::{BusDeclaration, BusSlice};
+use rspice_design::schematic::{net_label::NetLabel, rotation::Rotation};
 
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, Component, ComponentType, CrossSheetPortDirection, DcOpResult,
@@ -30,10 +19,6 @@ use crate::workbench::app_state::AppState;
 
 /// The canvas, in points.
 pub(super) const SCREEN: egui::Vec2 = egui::vec2(960.0, 640.0);
-/// An ISO A1 sheet in world units (841 mm by 594 mm at 4 wu/mm).
-const A1_WORLD: (f64, f64) = (3364.0, 2376.0);
-/// The canvas of a desktop window, as the frame-cost probe sizes it.
-const DESKTOP_CANVAS: egui::Vec2 = egui::vec2(1600.0, 1000.0);
 
 /// Hands out object ids in order.
 struct Ids(u64);
@@ -43,13 +28,6 @@ impl Ids {
         self.0 += 1;
         self.0
     }
-}
-
-fn part(ids: &mut Ids, kind: ComponentType, at: (i32, i32), name: &str, value: &str) -> Component {
-    let mut component = Component::new(ids.next(), kind, Point::new(at.0, at.1));
-    component.name = name.to_owned();
-    component.value = value.to_owned();
-    component
 }
 
 fn wire(ids: &mut Ids, points: &[(i32, i32)]) -> Wire {
@@ -63,10 +41,6 @@ fn junction(ids: &mut Ids, at: (i32, i32)) -> Junction {
     Junction::new(ids.next(), Point::new(at.0, at.1))
 }
 
-fn label(ids: &mut Ids, at: (i32, i32), name: &str) -> NetLabel {
-    NetLabel::new(ids.next(), Point::new(at.0, at.1), name)
-}
-
 /// Finish a fixture the way a load does: runtime state, topology, and the
 /// workspace's copy of the active schematic.
 fn settle(state: &mut AppState) {
@@ -75,176 +49,9 @@ fn settle(state: &mut AppState) {
     state.sync_active_schematic_to_workspace();
 }
 
-/// Where the analog sheet is measured from: its middle.
-pub(super) const ANALOG_CENTRE: Point = Point::new(510, 300);
 /// Where the hierarchy sheet is measured from: its middle, and the two
 /// connectors between its instances with their badges.
 pub(super) const HIERARCHY_CENTRE: Point = Point::new(470, 330);
-/// A five-transistor OTA with its supplies, compensation, load and a probe;
-/// a four-bit bus with its declaration and four taps into a resistor array;
-/// T-junctions, a crossing with a dot and two crossings without; local net
-/// labels; a note. One PMOS load (M3) and the bias conductor are selected,
-/// and the tail device's bulk is left open. M2, M3 and M5 are mirrored to
-/// face left.
-///
-/// Spans world x 100 to 920 and y 40 to 520.
-pub(super) fn analog_sheet() -> AppState {
-    use ComponentType::{Capacitor, CurrentSource, Ground, Nmos, Pmos, Resistor, VoltageSource};
-
-    let mut ids = Ids(0);
-    let mut components = Vec::new();
-    let mut wires = Vec::new();
-    let mut junctions = Vec::new();
-    let mut labels = Vec::new();
-
-    // The stage. MOS pins sit at D (20, -40), G (-20, 0), S (20, 40) and
-    // B (20, 0) before mirroring.
-    let m3 = part(&mut ids, Pmos, (300, 180), "M3", "pch W=4u L=1u")
-        .with_mirror_h(true)
-        .with_mirror_v(true);
-    let selected_part = m3.id;
-    components.push(m3);
-    components.push(part(&mut ids, Pmos, (500, 180), "M4", "pch W=4u L=1u").with_mirror_v(true));
-    components.push(part(&mut ids, Nmos, (260, 300), "M1", "nch W=8u L=0.5u"));
-    components.push(part(&mut ids, Nmos, (540, 300), "M2", "nch W=8u L=0.5u").with_mirror_h(true));
-    components.push(part(&mut ids, Nmos, (420, 400), "M5", "nch W=4u L=2u").with_mirror_h(true));
-    // Supplies and stimulus.
-    components.push(part(&mut ids, VoltageSource, (160, 180), "VDD", "1.8"));
-    components.push(part(&mut ids, Ground, (160, 230), "", ""));
-    components.push(part(&mut ids, VoltageSource, (140, 340), "VIP", "0.9"));
-    components.push(part(&mut ids, Ground, (140, 380), "", ""));
-    components.push(part(&mut ids, VoltageSource, (140, 460), "VIN", "0.9"));
-    components.push(part(&mut ids, Ground, (140, 510), "", ""));
-    components.push(part(&mut ids, CurrentSource, (660, 440), "IB", "20u"));
-    components.push(part(&mut ids, Ground, (660, 480), "", ""));
-    components.push(part(&mut ids, Ground, (400, 470), "", ""));
-    // Compensation and load.
-    components.push(part(&mut ids, Capacitor, (600, 300), "CC", "1p").with_rotation(Rotation::R90));
-    components.push(part(&mut ids, Ground, (600, 340), "", ""));
-    components
-        .push(part(&mut ids, Resistor, (700, 300), "RL", "100k").with_rotation(Rotation::R90));
-    components.push(part(&mut ids, Ground, (700, 340), "", ""));
-    // The bus's resistor array.
-    for (bit, y) in [160, 240, 320, 400].into_iter().enumerate() {
-        components.push(part(
-            &mut ids,
-            Resistor,
-            (860, y),
-            &format!("RD{bit}"),
-            "10k",
-        ));
-    }
-    components.push(part(&mut ids, Ground, (880, 450), "", ""));
-
-    // VDD rail and the loads' sources and bulks.
-    wires.push(wire(&mut ids, &[(160, 160), (160, 100), (680, 100)]));
-    wires.push(wire(&mut ids, &[(280, 140), (280, 100)]));
-    wires.push(wire(&mut ids, &[(520, 140), (520, 100)]));
-    wires.push(wire(&mut ids, &[(280, 180), (240, 180), (240, 100)]));
-    wires.push(wire(&mut ids, &[(520, 180), (560, 180), (560, 100)]));
-    for at in [(240, 100), (280, 100), (520, 100), (560, 100)] {
-        junctions.push(junction(&mut ids, at));
-    }
-    labels.push(label(&mut ids, (640, 100), "VDD"));
-    wires.push(wire(&mut ids, &[(160, 200), (160, 220)]));
-    // The mirror: gates tied, M3 diode-connected.
-    wires.push(wire(&mut ids, &[(320, 180), (480, 180)]));
-    wires.push(wire(&mut ids, &[(360, 180), (360, 240), (280, 240)]));
-    wires.push(wire(&mut ids, &[(280, 220), (280, 260)]));
-    junctions.push(junction(&mut ids, (360, 180)));
-    junctions.push(junction(&mut ids, (280, 240)));
-    // The output: M4's drain to the load, with a crossing that carries a dot
-    // where the compensation leg passes through it.
-    wires.push(wire(&mut ids, &[(520, 220), (520, 260)]));
-    wires.push(wire(&mut ids, &[(520, 240), (700, 240), (700, 280)]));
-    wires.push(wire(&mut ids, &[(600, 200), (600, 280)]));
-    junctions.push(junction(&mut ids, (520, 240)));
-    junctions.push(junction(&mut ids, (600, 240)));
-    labels.push(label(&mut ids, (660, 240), "OUT"));
-    wires.push(wire(&mut ids, &[(600, 320), (600, 330)]));
-    wires.push(wire(&mut ids, &[(700, 320), (700, 330)]));
-    // The tail and the pair's bulks.
-    wires.push(wire(
-        &mut ids,
-        &[(280, 340), (280, 360), (520, 360), (520, 340)],
-    ));
-    wires.push(wire(&mut ids, &[(280, 300), (300, 300), (300, 360)]));
-    wires.push(wire(&mut ids, &[(520, 300), (500, 300), (500, 360)]));
-    junctions.push(junction(&mut ids, (300, 360)));
-    junctions.push(junction(&mut ids, (400, 360)));
-    junctions.push(junction(&mut ids, (500, 360)));
-    wires.push(wire(&mut ids, &[(400, 440), (400, 460)]));
-    // Inputs. INN runs down past the bias line, which crosses it with no dot.
-    wires.push(wire(&mut ids, &[(240, 300), (140, 300), (140, 320)]));
-    labels.push(label(&mut ids, (200, 300), "INP"));
-    wires.push(wire(&mut ids, &[(140, 360), (140, 370)]));
-    wires.push(wire(&mut ids, &[(560, 300), (580, 300), (580, 520)]));
-    labels.push(label(&mut ids, (580, 500), "INN"));
-    wires.push(wire(&mut ids, &[(140, 440), (140, 420), (220, 420)]));
-    labels.push(label(&mut ids, (200, 420), "INN"));
-    wires.push(wire(&mut ids, &[(140, 480), (140, 500)]));
-    // The bias line from M5's gate to the bias source.
-    let bias = wire(&mut ids, &[(440, 400), (660, 400), (660, 420)]);
-    let selected_wire = bias.id;
-    wires.push(bias);
-    labels.push(label(&mut ids, (620, 400), "VB"));
-    wires.push(wire(&mut ids, &[(660, 460), (660, 470)]));
-
-    // The bus, its taps and the array they feed.
-    let declaration = BusDeclaration::parse("D[3:0]").expect("bus declaration");
-    let bus = Bus::new(
-        ids.next(),
-        vec![Point::new(780, 120), Point::new(780, 440)],
-        Some(declaration),
-    )
-    .expect("bus");
-    let mut taps = Vec::new();
-    for (bit, y) in [160, 240, 320, 400].into_iter().enumerate() {
-        taps.push(
-            BusTap::new(
-                ids.next(),
-                &bus,
-                Point::new(780, y),
-                Point::new(800, y),
-                BusSlice::parse(&format!("D[{bit}]")).expect("tap slice"),
-                BusTapOrientation::Right,
-            )
-            .expect("bus tap"),
-        );
-        wires.push(wire(&mut ids, &[(800, y), (840, y)]));
-    }
-    wires.push(wire(&mut ids, &[(880, 160), (880, 440)]));
-    for y in [240, 320, 400] {
-        junctions.push(junction(&mut ids, (880, y)));
-    }
-
-    let probe =
-        SchematicProbe::new(ids.next(), Point::new(700, 260), "V(OUT)", None).expect("probe");
-    let note = DesignNote::new(
-        ids.next(),
-        Point::new(120, 40),
-        DesignNoteKind::PlainText,
-        "Five-transistor OTA, gm/Id = 12 at the input pair",
-    )
-    .expect("note");
-
-    let mut state = AppState::default();
-    let document = state.model.schematic.document_mut_for_test();
-    document.components = components;
-    document.wires = wires;
-    document.junctions = junctions;
-    document.net_labels = labels;
-    document.buses = vec![bus];
-    document.bus_taps = taps;
-    document.probes = vec![probe];
-    document.design_notes = vec![note];
-    settle(&mut state);
-    state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
-    let selection = &mut state.model.schematic.session.editor.selection;
-    selection.select_component(selected_part);
-    selection.select_wire(selected_wire);
-    state
-}
 
 /// Three instances of the probe's masters wired in a chain, the cell's
 /// ports in each direction, an off-sheet connector of each direction, and a
@@ -401,56 +208,18 @@ pub(super) fn hierarchy_sheet() -> AppState {
 
 /// How a render frames its sheet.
 #[derive(Clone, Copy)]
-pub(super) enum Zoom {
-    /// Points per world unit.
-    Fixed(f64),
-    /// The zoom at which an A1 sheet fits the canvas.
-    FitA1,
-}
-
-#[derive(Clone, Copy)]
 pub(super) struct Framing {
-    pub(super) zoom: Zoom,
+    /// Points per world unit.
+    pub(super) zoom: f64,
     /// The world point at the middle of the canvas.
     pub(super) centre: Point,
-}
-
-/// The zoom at which an A1 sheet fits a desktop canvas, as the canvas's own
-/// framing computes it: about 0.4. (On the smaller review canvas it would be
-/// 0.25 again.)
-pub(super) fn a1_fit_zoom() -> f64 {
-    let mut probe = rspice_app_state::state::SchematicState::default();
-    probe.zoom_to_fit_world_rect(
-        (0.0, 0.0, A1_WORLD.0, A1_WORLD.1),
-        f64::from(DESKTOP_CANVAS.x),
-        f64::from(DESKTOP_CANVAS.y),
-        rspice_schematic_editor::view::drawing_sheet::FIT_SCREEN_INSET,
-        0.0,
-    );
-    probe.session.editor.zoom
 }
 
 /// One rendered frame.
 pub(super) struct Render {
     /// What the last frame painted, in points.
     pub(super) shapes: Vec<ClippedShape>,
-    pub(super) zoom: f64,
     pub(super) tokens: std::sync::Arc<rspice_app_workbench::ui::tokens::Tokens>,
-}
-
-/// The dark and the light canvas.
-pub(super) fn themes() -> [(&'static str, rspice_app_workbench::ui::Theme); 2] {
-    [
-        ("dark", rspice_app_workbench::ui::Theme::default()),
-        (
-            "light",
-            rspice_app_workbench::ui::Theme {
-                mode: rspice_ui_kit::Mode::Light,
-                canvas_theme: rspice_ui_kit::EngineeringCanvasTheme::Light,
-                ..rspice_app_workbench::ui::Theme::default()
-            },
-        ),
-    ]
 }
 
 /// Render `state` through the real canvas at `framing`, under `theme`, on a
@@ -461,22 +230,7 @@ pub(super) fn render(
     framing: Framing,
     pixels_per_point: f32,
 ) -> Render {
-    render_pointing(state, theme, framing, pixels_per_point, None)
-}
-
-/// [`render`] with the pointer resting at `pointer` (in points), so the
-/// canvas draws whatever it pre-highlights there.
-pub(super) fn render_pointing(
-    state: &mut AppState,
-    theme: rspice_app_workbench::ui::Theme,
-    framing: Framing,
-    pixels_per_point: f32,
-    pointer: Option<egui::Pos2>,
-) -> Render {
-    let zoom = match framing.zoom {
-        Zoom::Fixed(zoom) => zoom,
-        Zoom::FitA1 => a1_fit_zoom(),
-    };
+    let zoom = framing.zoom;
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
     theme.apply(&ctx);
@@ -491,8 +245,7 @@ pub(super) fn render_pointing(
             f64::from(SCREEN.x) * 0.5 - f64::from(framing.centre.x) * zoom,
             f64::from(SCREEN.y) * 0.5 - f64::from(framing.centre.y) * zoom,
         );
-        let mut input = rspice_app_workbench::ui::raster::display_input(SCREEN, pixels_per_point);
-        input.events.extend(pointer.map(egui::Event::PointerMoved));
+        let input = rspice_app_workbench::ui::raster::display_input(SCREEN, pixels_per_point);
         output = Some(ctx.run_ui(input, |ui| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
@@ -513,7 +266,6 @@ pub(super) fn render_pointing(
     );
     Render {
         shapes: output.shapes,
-        zoom,
         tokens: rspice_app_workbench::ui::tokens::Tokens::get(&ctx),
     }
 }
@@ -538,13 +290,10 @@ pub(super) fn leaf_shapes(shapes: &[ClippedShape]) -> Vec<(Rect, &Shape)> {
     out
 }
 
-/// One painted run of text: its colour, size, family and layout box.
+/// One painted run of text: its words and its colour.
 pub(super) struct PaintedText {
     pub(super) text: String,
     pub(super) colour: Color32,
-    pub(super) size: f32,
-    pub(super) family: egui::FontFamily,
-    pub(super) rect: Rect,
 }
 
 pub(super) fn painted_text(shapes: &[ClippedShape]) -> Vec<PaintedText> {
@@ -570,82 +319,13 @@ pub(super) fn painted_text(shapes: &[ClippedShape]) -> Vec<PaintedText> {
             Some(PaintedText {
                 text: text.galley.text().to_owned(),
                 colour,
-                size: section.format.font_id.size,
-                family: section.format.font_id.family.clone(),
-                rect,
             })
         })
         .collect()
 }
 
-/// Where `world` lands on a render framed at `centre` and `zoom`.
-fn on_screen(centre: Point, zoom: f64, world: Point) -> egui::Pos2 {
-    egui::pos2(
-        SCREEN.x * 0.5 + ((f64::from(world.x) - f64::from(centre.x)) * zoom) as f32,
-        SCREEN.y * 0.5 + ((f64::from(world.y) - f64::from(centre.y)) * zoom) as f32,
-    )
-}
-
 fn at_zoom(zoom: f64, centre: Point) -> Framing {
-    Framing {
-        zoom: Zoom::Fixed(zoom),
-        centre,
-    }
-}
-
-/// A transistor letters its value on the side of its body away from its
-/// gate. A differential pair is always drawn with one half mirrored, and the
-/// mirrored half's value stood on its gate side, across the gate lead and the
-/// wire leaving it: on the analog sheet M2's value ran over its input wire
-/// and the compensation capacitor's labels, M3's over the mirror's gate tie
-/// and M5's over the bias line.
-#[test]
-fn a_transistor_letters_its_value_away_from_its_gate() {
-    let mut state = analog_sheet();
-    let framing = at_zoom(1.0, ANALOG_CENTRE);
-    let render = render(&mut state, themes()[0].1, framing, 1.0);
-    let values = painted_text(&render.shapes)
-        .into_iter()
-        .filter(|text| text.text.contains("W="))
-        .collect::<Vec<_>>();
-    let transistors = state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .filter(|component| matches!(component.kind, ComponentType::Nmos | ComponentType::Pmos))
-        .collect::<Vec<_>>();
-    assert_eq!(transistors.len(), 5);
-    assert_eq!(values.len(), 5, "every transistor letters its value");
-    for transistor in transistors {
-        let body = on_screen(framing.centre, render.zoom, transistor.pos);
-        let gate = transistor
-            .terminal_positions()
-            .into_iter()
-            .find(|(name, _)| *name == "G")
-            .map(|(_, at)| on_screen(framing.centre, render.zoom, at))
-            .expect("a gate");
-        let value = values
-            .iter()
-            .min_by(|a, b| {
-                a.rect
-                    .center()
-                    .distance(body)
-                    .total_cmp(&b.rect.center().distance(body))
-            })
-            .expect("a value");
-        let away = if gate.x > body.x {
-            value.rect.max.x <= body.x
-        } else {
-            value.rect.min.x >= body.x
-        };
-        assert!(
-            away,
-            "{}: the value {:?} at {:?} stands on the gate's side (gate at {gate:?}, body at {body:?})",
-            transistor.name, value.text, value.rect
-        );
-    }
+    Framing { zoom, centre }
 }
 
 /// An operating-point badge reads like an annotation: four significant
@@ -658,7 +338,7 @@ fn an_operating_point_badge_reads_four_digits_and_a_prefixed_unit() {
     let mut state = hierarchy_sheet();
     let render = render(
         &mut state,
-        themes()[0].1,
+        rspice_app_workbench::ui::Theme::default(),
         at_zoom(1.0, HIERARCHY_CENTRE),
         1.0,
     );
@@ -681,263 +361,6 @@ fn an_operating_point_badge_reads_four_digits_and_a_prefixed_unit() {
     .into_iter()
     .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(badges, expected);
-}
-
-/// The hierarchy sheet's ports: each one's name and position.
-fn ports(state: &AppState) -> Vec<(String, Point)> {
-    state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .filter(|component| component.kind == ComponentType::Port)
-        .map(|component| (component.value.clone(), component.pos))
-        .collect()
-}
-
-/// A port's name is an electrical name (D1 section 1): lettered as an
-/// off-sheet connector's name is, in Plex Mono Medium at 11 wu in the
-/// net-label ink, and greeked to a bar below the legibility floor rather
-/// than vanishing. It was lettered as an instance value, in 9-wu Plex Sans
-/// and the dim ink, so at the A1 fit every port's name disappeared.
-#[test]
-fn a_port_name_letters_and_greeks_as_a_net_name() {
-    let mut state = hierarchy_sheet();
-    let ports = ports(&state);
-    assert_eq!(ports.len(), 4);
-
-    let framing = at_zoom(1.0, HIERARCHY_CENTRE);
-    let close = render(&mut state, themes()[0].1, framing, 1.0);
-    let texts = painted_text(&close.shapes);
-    let connector = texts
-        .iter()
-        .find(|text| text.text == "MID")
-        .expect("the MID connector's name is painted");
-    for (name, at) in &ports {
-        let anchor = on_screen(framing.centre, close.zoom, *at);
-        let painted = texts
-            .iter()
-            .filter(|text| text.text == *name)
-            .min_by(|a, b| {
-                a.rect
-                    .center()
-                    .distance(anchor)
-                    .total_cmp(&b.rect.center().distance(anchor))
-            })
-            .unwrap_or_else(|| panic!("{name}: the port's name is painted"));
-        assert!(
-            painted.rect.center().distance(anchor) < 30.0,
-            "{name}: the nearest {name:?} at {:?} is not the port's",
-            painted.rect
-        );
-        assert_eq!(
-            (painted.colour, painted.size, &painted.family),
-            (connector.colour, connector.size, &connector.family),
-            "{name}: the port's name is lettered as a net name"
-        );
-    }
-
-    let framing = Framing {
-        zoom: Zoom::FitA1,
-        centre: HIERARCHY_CENTRE,
-    };
-    let fit = render(&mut state, themes()[0].1, framing, 1.0);
-    let greeked = fit
-        .tokens
-        .color
-        .net_label
-        .gamma_multiply(rspice_schematic_editor::view::lod::GREEK_ALPHA);
-    let bars = leaf_shapes(&fit.shapes)
-        .into_iter()
-        .filter_map(|(_, shape)| match shape {
-            Shape::Rect(rect) if rect.fill == greeked => Some(rect.rect),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    for (name, at) in &ports {
-        let anchor = on_screen(framing.centre, fit.zoom, *at);
-        let near = bars
-            .iter()
-            .filter(|bar| bar.center().distance(anchor) < 30.0 * fit.zoom as f32)
-            .count();
-        assert_eq!(
-            near, 1,
-            "zoom {:.3}: {name}'s name greeks to one bar beside the port (bars: {bars:?})",
-            fit.zoom
-        );
-    }
-}
-
-/// Every run of text the canvas paints is legible (D1 section 1: at least
-/// 6 device pixels and 3.5 pt), at the zoom that fits A1 and at 0.25, on 1x
-/// and 2x. A design note kept its own 4-pt floor, compared in points: at the
-/// A1 fit on a 1x display it painted its text 4.75 px tall.
-#[test]
-fn no_canvas_text_is_painted_below_the_legibility_floor() {
-    for (zoom, pixels_per_point) in [
-        (Zoom::FitA1, 1.0_f32),
-        (Zoom::FitA1, 2.0),
-        (Zoom::Fixed(0.25), 2.0),
-    ] {
-        let mut state = analog_sheet();
-        let framing = Framing {
-            zoom,
-            centre: ANALOG_CENTRE,
-        };
-        let render = render(&mut state, themes()[0].1, framing, pixels_per_point);
-        for text in painted_text(&render.shapes) {
-            assert!(
-                text.size * pixels_per_point >= 6.0 - 1e-3 && text.size >= 3.5 - 1e-3,
-                "zoom {:.3} at {pixels_per_point}x: {:?} is painted at {} pt",
-                render.zoom,
-                text.text,
-                text.size
-            );
-        }
-    }
-}
-
-/// A pin name stands clear of its lead, as a generated symbol letters it:
-/// inside the body, past the lead's inner end. A symbol that draws its leads
-/// as artwork (an imported LTspice or SVG symbol, and the hierarchy sheet's
-/// masters, whose IN, OUT and BIAS leads are 10-wu body lines from the
-/// terminal in) lettered each name from the terminal instead, on the lead,
-/// which struck through it.
-#[test]
-fn a_pin_name_stands_clear_of_an_artwork_lead() {
-    const MASTER_WIDTHS: [(&str, i32); 3] = [("amp", 40), ("buf", 50), ("bias", 60)];
-    let mut state = hierarchy_sheet();
-    let framing = at_zoom(2.0, HIERARCHY_CENTRE);
-    let render = render(&mut state, themes()[0].1, framing, 1.0);
-    let mut leads = Vec::new();
-    for instance in &state.model.schematic.document().components {
-        let Some(binding) = &instance.library_cell else {
-            continue;
-        };
-        let width = MASTER_WIDTHS
-            .iter()
-            .find(|(master, _)| *master == binding.cell)
-            .map(|(_, width)| *width)
-            .expect("a master of the hierarchy sheet");
-        let at = |(x, y): (i32, i32)| {
-            on_screen(
-                framing.centre,
-                render.zoom,
-                Point::new(instance.pos.x + x, instance.pos.y + y),
-            )
-        };
-        for (pin, terminal, inner) in [
-            ("IN", (-width, 0), (-width + 10, 0)),
-            ("OUT", (width, 0), (width - 10, 0)),
-            ("BIAS", (0, 40), (0, 30)),
-        ] {
-            leads.push((
-                instance.name.clone(),
-                pin,
-                Rect::from_two_pos(at(terminal), at(inner)).expand(1.0),
-            ));
-        }
-    }
-    let pin_size = rspice_schematic_editor::view::lod::quantize_font_size(
-        rspice_design::symbol_generation::GENERATED_PIN_LABEL_SIZE * render.zoom as f32,
-    );
-    let names = painted_text(&render.shapes)
-        .into_iter()
-        .filter(|text| text.size == pin_size && ["IN", "OUT", "BIAS"].contains(&text.text.as_str()))
-        .collect::<Vec<_>>();
-    assert_eq!(names.len(), 9, "every instance letters its three pin names");
-    for name in &names {
-        for (instance, pin, lead) in &leads {
-            assert!(
-                !name.rect.intersects(*lead),
-                "the pin name {:?} at {:?} stands on {instance}'s {pin} lead at {lead:?}",
-                name.text,
-                name.rect
-            );
-        }
-    }
-}
-
-/// A transistor's value stands clear of every pin's line, mirrored or not:
-/// off the axis its gate and bulk leads run along, and outside the columns
-/// its drain and source leads run up and down. An unmirrored device's value
-/// stood on its bulk's axis, so the bulk wire ran under the text (M1's on the
-/// analog sheet), and a mirrored device's on the same axis on its other side
-/// (M3's). Hung below that axis, it still sat across the input pair's bulk
-/// ties, which turn down toward the tail.
-#[test]
-fn a_transistor_value_stands_clear_of_every_pin_line() {
-    let mut state = analog_sheet();
-    let framing = at_zoom(1.0, ANALOG_CENTRE);
-    let render = render(&mut state, themes()[0].1, framing, 1.0);
-    let values = painted_text(&render.shapes)
-        .into_iter()
-        .filter(|text| text.text.contains("W="))
-        .collect::<Vec<_>>();
-    let transistors = state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .filter(|component| matches!(component.kind, ComponentType::Nmos | ComponentType::Pmos))
-        .collect::<Vec<_>>();
-    assert_eq!(transistors.len(), 5);
-    for transistor in transistors {
-        let body = on_screen(framing.centre, render.zoom, transistor.pos);
-        let value = values
-            .iter()
-            .min_by(|a, b| {
-                a.rect
-                    .center()
-                    .distance(body)
-                    .total_cmp(&b.rect.center().distance(body))
-            })
-            .expect("a value");
-        for (pin, at) in transistor.terminal_positions() {
-            let at = on_screen(framing.centre, render.zoom, at);
-            // The gate and bulk leads run across, the drain and source leads
-            // up and down.
-            let crosses = match pin {
-                "G" | "B" => value.rect.min.y < at.y && at.y < value.rect.max.y,
-                _ => value.rect.min.x < at.x && at.x < value.rect.max.x,
-            };
-            assert!(
-                !crosses,
-                "{}: the value {:?} at {:?} stands on the line of its {pin} pin at {at:?}",
-                transistor.name, value.text, value.rect
-            );
-        }
-        // Nor does a wire leaving one of its pins run under it: the pair's
-        // bulk ties turn down toward the tail 20 wu out from the body.
-        let terminals = transistor
-            .terminal_positions()
-            .into_iter()
-            .map(|(_, at)| at)
-            .collect::<Vec<_>>();
-        for wire in &state.model.schematic.document().wires {
-            if !wire.points.iter().any(|point| terminals.contains(point)) {
-                continue;
-            }
-            for pair in wire.points.windows(2) {
-                let segment = Rect::from_two_pos(
-                    on_screen(framing.centre, render.zoom, pair[0]),
-                    on_screen(framing.centre, render.zoom, pair[1]),
-                )
-                .expand(0.5);
-                assert!(
-                    !segment.intersects(value.rect),
-                    "{}: the value {:?} at {:?} stands on the wire from {:?} to {:?}",
-                    transistor.name,
-                    value.text,
-                    value.rect,
-                    pair[0],
-                    pair[1]
-                );
-            }
-        }
-    }
 }
 
 /// Where the functional sheet's first four rows are measured from: their

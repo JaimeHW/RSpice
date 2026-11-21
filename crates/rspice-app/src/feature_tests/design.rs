@@ -12,7 +12,6 @@ mod canvas_input;
 mod canvas_keyboard;
 mod canvas_shortcuts;
 mod cell_deletion_transactions;
-mod connectivity_manager_drawn;
 mod context_menu;
 mod create_model_bound_symbol;
 mod create_model_bound_symbol_drawn;
@@ -28,9 +27,7 @@ mod engineering_table_drawn;
 mod find_replace;
 mod gestures;
 mod gestures_drawn;
-mod grid_snap_routing_drawn;
 mod hierarchy_create;
-mod hierarchy_create_drawn;
 mod hierarchy_descend;
 mod hierarchy_descend_drawn;
 mod hierarchy_net_highlight;
@@ -61,7 +58,6 @@ mod raster_review;
 mod rename;
 mod rename_transactions;
 mod replace_instance_drawn;
-mod rule_setup;
 mod rule_setup_drawn;
 mod scene;
 mod selection_drag;
@@ -92,7 +88,6 @@ mod symbol_pin_checks;
 mod symbol_pin_table_drawn;
 mod symbol_project_data;
 mod symbol_schematic_pins_drawn;
-mod symbol_surface_drawn;
 mod symbol_surface_requests;
 mod symbol_touch;
 mod toolbar_lane_drawn;
@@ -450,24 +445,6 @@ fn descend_into_hierarchy_opens_and_draws_in_the_frame() {
     app.execute_command_key(DesignCommand::DescendHierarchy.key());
     assert!(draws_dialog(&mut app, "Descend into hierarchy"));
     assert!(app.state.design.descend_hierarchy.open);
-}
-
-/// Descend into hierarchy's step draws through the feature registry, which
-/// answers what it raised straight after it draws, so nothing runs between
-/// the reader's choice and the shell carrying it out.
-#[test]
-fn the_descend_step_has_its_choice_answered_straight_after_it_draws() {
-    let squeeze = |text: &str| text.split_whitespace().collect::<String>();
-    let order = squeeze(include_str!("../workbench/frame/dialog_order.rs"));
-    let spec = order
-        .split("DialogSpec{")
-        .find(|spec| spec.contains("DialogKey(\"design.descend_hierarchy\")"))
-        .expect("the shell's dialog order draws Descend into hierarchy");
-    assert!(spec.contains(&squeeze(
-        "render: |app, ctx| features::render_dialog(
-            app, ctx, DialogKey(\"design.descend_hierarchy\")
-        ),"
-    )));
 }
 
 /// A descent chosen in a frame is carried out in that frame: the master

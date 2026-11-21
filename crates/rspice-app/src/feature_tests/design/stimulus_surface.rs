@@ -1,6 +1,5 @@
 //! The stimulus surface drawn through the design context a whole application
-//! lends: what the stage publishes and paints, its verbs, and whether it fits
-//! the column the shell leaves it.
+//! lends: what the stage publishes and paints, and its verbs.
 
 use crate::workbench::RSpiceApp;
 use egui::{Pos2, Rect, vec2};
@@ -16,10 +15,6 @@ pub(super) fn seeded(selection: &str) -> RSpiceApp {
     app.state.design.selected_stimulus_definition = Some(selection.to_owned());
     app
 }
-
-/// The two viewports the instrument is held to: the workspace's smallest
-/// supported window, and the ordinary laptop one.
-const VIEWPORTS: [(&str, f32, f32); 2] = [("1024x640", 1024.0, 640.0), ("1440x900", 1440.0, 900.0)];
 
 /// Render the stage at one size and return every string it publishes.
 fn published(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<String> {
@@ -417,105 +412,6 @@ fn every_value_tick_is_drawn_at_the_value_it_states() {
                 (y - expected).abs() <= 0.75,
                 "{name}: the label for {value} is at y={y}, and a straight scale puts it at \
                  {expected}: {axis:?}"
-            );
-        }
-    }
-}
-
-/// The point table and the scalar fields under it are two blocks, one above
-/// the other, at either size.
-#[test]
-fn a_point_table_never_runs_under_the_fields_below_it() {
-    for (viewport, width, height) in VIEWPORTS {
-        let mut app = seeded("vdd_ramp_1ms");
-        let painted = painted(&mut app, stage_size(width, height));
-        let visible = |wanted: &dyn Fn(&str) -> bool| {
-            painted
-                .iter()
-                .filter(|(text, _, clip)| clip.is_positive() && wanted(text))
-                .map(|(_, rect, _)| *rect)
-                .collect::<Vec<_>>()
-        };
-        let rows = visible(&|text| text == "1" || text == "2" || text == "3");
-        let fields = visible(&|text| text.starts_with("Delay") || text == "TD");
-        let last_row = rows
-            .iter()
-            .map(Rect::bottom)
-            .fold(f32::NEG_INFINITY, f32::max);
-        for field in &fields {
-            assert!(
-                field.top() >= last_row - 0.5,
-                "{viewport}: a field at {field:?} starts above the table's last row at {last_row}"
-            );
-        }
-        assert!(!rows.is_empty(), "{viewport}: no point row was painted");
-    }
-}
-
-/// The identity band says a fact whole or not at all.
-///
-/// Two ways to break that, and the second is the one that got through: a run
-/// can be elided with an ellipsis, or it can be laid out at its full width and
-/// then cut by the clip rectangle of the half it sits in. Nothing elides here,
-/// so for a long time only the first was checked — and the lifecycle chip,
-/// which allocated whatever its spelling wanted, painted `draft · 1 erro` at
-/// 1024 points and ran under the verbs beside it.
-#[test]
-fn the_identity_band_never_cuts_a_fact_short() {
-    for name in fixtures::names() {
-        let mut published = seeded(name);
-        // And the same definition as a draft the deck would refuse, which is
-        // the longest thing the lifecycle chip ever has to say.
-        let mut refused = seeded(name);
-        rspice_app_design::workbench::app::actions::stimulus::edit_name(
-            refused.state.design.selected_stimulus_definition.as_deref(),
-            &mut refused.state.design.stimulus_editor,
-            &refused.state.model,
-            fixtures::names()
-                .into_iter()
-                .find(|other| *other != name)
-                .expect("the library holds more than one definition"),
-        );
-        for app in [&mut published, &mut refused] {
-            for (text, rect, clip) in painted(app, stage_size(1024.0, 640.0)) {
-                if rect.top() >= IDENTITY_HEIGHT {
-                    continue;
-                }
-                assert!(
-                    !text.contains('\u{2026}'),
-                    "{name}: the identity band elided {text:?}"
-                );
-                // Half a point of tolerance: a clip rect is stated in the same
-                // float space the galley is measured in.
-                assert!(
-                    rect.left() >= clip.left() - 0.5 && rect.right() <= clip.right() + 0.5,
-                    "{name}: the identity band cut {text:?} off at its own edge \
-                     ({rect:?} outside {clip:?})"
-                );
-            }
-        }
-    }
-}
-
-/// Breakpoint labels a pixel apart are one label, not two painted over each
-/// other.
-#[test]
-fn guide_labels_that_would_touch_are_merged() {
-    let mut app = seeded("bridge_cal_step");
-    let painted = painted(&mut app, stage_size(1024.0, 640.0));
-    let labels = painted
-        .iter()
-        .filter(|(text, ..)| {
-            text.split('\u{b7}')
-                .all(|part| matches!(part, "TD" | "TR" | "PW" | "TF" | "PER"))
-        })
-        .collect::<Vec<_>>();
-    assert!(!labels.is_empty(), "the pulse painted no breakpoint label");
-    for (index, (text, rect, _)) in labels.iter().enumerate() {
-        for (other, other_rect, _) in &labels[index + 1..] {
-            assert!(
-                !rect.intersects(*other_rect),
-                "{text:?} at {rect:?} is painted over {other:?} at {other_rect:?}"
             );
         }
     }

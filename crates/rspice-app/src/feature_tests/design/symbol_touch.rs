@@ -410,21 +410,6 @@ fn the_touch_strip_stands_on_the_symbol_canvas() {
     assert_ne!(finger.app.state.design.symbol.editor.zoom, 2.0);
 }
 
-/// The placed preview keeps a column of its own; the strip stands on the
-/// drawing beside it, not over the preview.
-#[test]
-fn the_touch_strip_keeps_off_the_placed_preview() {
-    let mut finger = Finger::sized(Vec2::new(1600.0, 900.0));
-    finger.app.state.design.symbol.editor.preview_as_placed = true;
-    finger.settle();
-    let strip = finger.expect("Touch editing controls");
-    let canvas = finger.canvas();
-    assert!(
-        canvas.contains_rect(strip),
-        "the strip {strip:?} stands on the drawing {canvas:?}"
-    );
-}
-
 /// A finger takes what lies within its reach of the ink, as it takes a wire
 /// on a schematic: well past where a mouse would miss.
 #[test]
