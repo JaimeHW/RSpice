@@ -233,21 +233,44 @@ pub async fn preload(bytes: &[u8]) {
     repaint();
 }
 
-/// The project a file names (its id) and every segment digest it spells.
+/// The project a file names (its id) and every segment it reads: the `segment` a stored window or
+/// event history names, and the `segments` an archived run lists. Other digests a file spells,
+/// a snapshot's or a revision's, name no segment.
 fn names_in(bytes: &[u8]) -> Option<(String, HashSet<[u8; 32]>)> {
-    let file: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    use serde_json::Value;
+
+    let file: Value = serde_json::from_slice(bytes).ok()?;
     let project = file.pointer("/workspace/project/id")?.as_str()?.to_owned();
     let mut digests = HashSet::new();
+    let mut add = |value: &Value| {
+        if let Some(digest) = value
+            .as_str()
+            .and_then(|text| rspice_results::store_reader::parse_digest(text).ok())
+        {
+            digests.insert(digest.0);
+        }
+    };
     let mut pending = vec![&file];
     while let Some(value) = pending.pop() {
         match value {
-            serde_json::Value::String(text) if text.len() == 64 => {
-                if let Ok(digest) = rspice_results::store_reader::parse_digest(text) {
-                    digests.insert(digest.0);
+            Value::Array(values) => pending.extend(values),
+            Value::Object(fields) => {
+                for (key, field) in fields {
+                    match (key.as_str(), field) {
+                        ("segment", _) => add(field),
+                        ("segments", Value::Array(listed)) => {
+                            for item in listed {
+                                if item.is_string() {
+                                    add(item);
+                                } else {
+                                    pending.push(item);
+                                }
+                            }
+                        }
+                        _ => pending.push(field),
+                    }
                 }
             }
-            serde_json::Value::Array(values) => pending.extend(values),
-            serde_json::Value::Object(fields) => pending.extend(fields.values()),
             _ => {}
         }
     }
