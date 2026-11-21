@@ -1039,13 +1039,20 @@ fn every_sheet_opens_as_a_document_pane() {
         let definition = viewer_document(viewer_id).expect("a catalogued viewer document");
         let family = ResultDocumentFamily::ALL
             .into_iter()
-            .find(|family| *family != ResultDocumentFamily::ReportPage && family.includes(definition))
+            .find(|family| {
+                *family != ResultDocumentFamily::ReportPage && family.includes(definition)
+            })
             .unwrap_or(ResultDocumentFamily::ReportPage);
         app.state.results.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: format!("{viewer:?} review"),
             name_touched: true,
-            dataset_id: app.state.model.simulation.active_run().map(|run| run.dataset_id),
+            dataset_id: app
+                .state
+                .model
+                .simulation
+                .active_run()
+                .map(|run| run.dataset_id),
             family_id: family.id().to_owned(),
             viewer_id: viewer_id.to_owned(),
             layout_id: "single-pane".to_owned(),
