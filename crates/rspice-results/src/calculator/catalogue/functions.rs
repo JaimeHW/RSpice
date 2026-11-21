@@ -82,7 +82,7 @@ pub const FUNCTIONS: &[FunctionSpec] = &[
         &[],
         Math,
         &["x", "lo", "hi"],
-        "each value held between two bounds",
+        "clamped between bounds",
     ),
     function(
         "if",
