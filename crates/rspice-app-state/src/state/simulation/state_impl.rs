@@ -778,7 +778,8 @@ impl SimulationState {
         }
         let cleared = std::mem::take(&mut *self.retained.runs);
         self.retained.deleted_runs.extend(cleared);
-        self.retained.executed_decks = ExecutedDeckArchive::default();
+        let decks = std::mem::take(&mut self.retained.executed_decks);
+        self.retained.deleted_decks.extend(decks.iter().cloned());
         self.view.active_run_idx = None;
         self.view.active_analysis_idx = None;
         self.view.overlay_dataset_ids.clear();
@@ -805,6 +806,12 @@ impl SimulationState {
             .partition(|run| keep(run));
         *self.retained.runs = kept;
         let deleted = gone.len();
+        let decks = &self.retained.executed_decks;
+        let held: Vec<ExecutedDeck> = gone
+            .iter()
+            .filter_map(|run| decks.get(run.id).cloned())
+            .collect();
+        self.retained.deleted_decks.extend(held);
         self.retained.deleted_runs.extend(gone);
         self.prune_overlay_dataset_ids();
         self.prune_executed_decks();
@@ -825,9 +832,10 @@ impl SimulationState {
 
     /// Put every run deleted or cleared since the project opened back into
     /// the history, each where its sequence places it among the runs there,
-    /// with its samples; return how many came back. Its executed decks went
-    /// with the delete, as the archive's ceiling and storage are spent only
-    /// on the history.
+    /// with its samples and the decks it executed; return how many came
+    /// back. The decks rejoin the archive in run order under its ceilings, as
+    /// if never deleted. Yield evidence needs no holding: it is judged again
+    /// from the run shown.
     /// Nothing is restored while an execution owns the history.
     pub fn restore_deleted_runs(&mut self) -> usize {
         if self.execution.has_active_execution() || self.retained.deleted_runs.is_empty() {
@@ -835,6 +843,22 @@ impl SimulationState {
         }
         let restored = std::mem::take(&mut self.retained.deleted_runs);
         let count = restored.len();
+        let held = std::mem::take(&mut self.retained.deleted_decks);
+        if !held.is_empty() {
+            let mut decks: Vec<ExecutedDeck> = self
+                .retained
+                .executed_decks
+                .iter()
+                .cloned()
+                .chain(held)
+                .collect();
+            decks.sort_by_key(|deck| deck.run_id);
+            let mut archive = ExecutedDeckArchive::default();
+            for deck in decks {
+                archive.retain(deck);
+            }
+            self.retained.executed_decks = archive;
+        }
         for run in restored {
             let at = self
                 .retained
@@ -889,6 +913,7 @@ impl SimulationState {
     ) {
         self.retained.runs = runs.into();
         self.retained.deleted_runs.clear();
+        self.retained.deleted_decks.clear();
         // Loading a project must not apply the retired project-global limit to
         // a history now owned by multiple simulation plans. Each plan applies
         // its own policy when it next creates or explicitly edits retention.
@@ -1296,8 +1321,13 @@ mod tests {
         assert!(snapshot.retained.executed_decks.get(sequence).is_some());
         drop(snapshot);
         assert!(
+            storage.upgrade().is_some(),
+            "the holding area keeps the cleared run's deck for a restore"
+        );
+        state.restore_run_history(Vec::new(), sequence, None, None, None, Vec::new());
+        assert!(
             storage.upgrade().is_none(),
-            "no orphaned deck storage remains"
+            "once the holding area empties, no orphaned deck storage remains"
         );
         state.clear_runs();
         assert_eq!(state.start_run().id, sequence + 1);
@@ -1554,15 +1584,45 @@ mod tests {
         };
         let before = order(&state);
         let middle = state.retained.runs[1].run_id;
+        let sequences: Vec<u64> = state.retained.runs.iter().map(|run| run.id).collect();
+        // The archive holds decks oldest first, as runs seal them.
+        for &run_id in sequences.iter().rev() {
+            state
+                .retained
+                .executed_decks
+                .retain(crate::state::ExecutedDeck {
+                    run_id,
+                    points: vec![crate::state::ExecutedDeckPoint {
+                        label: "TT".to_owned(),
+                        model_sources: Vec::new(),
+                        deck: std::sync::Arc::from(format!("run {run_id}\n.end\n")),
+                    }],
+                });
+        }
+        let decks = |state: &SimulationState| {
+            state
+                .retained
+                .executed_decks
+                .iter()
+                .map(|deck| (deck.run_id, deck.points[0].deck.to_string()))
+                .collect::<Vec<_>>()
+        };
+        let all_decks = decks(&state);
 
         assert_eq!(state.delete_runs(|run| run.run_id != middle), 1);
         assert_eq!(state.retained.runs.len(), 2);
         assert_eq!(state.retained.deleted_runs.len(), 1);
+        assert_eq!(decks(&state).len(), 2, "the deleted run's deck leaves");
         assert_eq!(state.restore_deleted_runs(), 1);
         assert_eq!(
             order(&state),
             before,
             "the run is back between its neighbours"
+        );
+        assert_eq!(
+            decks(&state),
+            all_decks,
+            "with the deck it ran, in run order"
         );
         let y = &state.retained.runs[1].analyses[0].waveforms[0].y;
         assert!(y.is_stored());
@@ -1575,12 +1635,13 @@ mod tests {
         assert!(state.retained.runs.is_empty());
         assert_eq!(state.restore_deleted_runs(), 3);
         assert_eq!(order(&state), before, "a cleared history comes back whole");
+        assert_eq!(decks(&state), all_decks, "decks and all");
         assert_eq!(state.restore_deleted_runs(), 0, "nothing is held twice");
 
         state.delete_runs(|_| false);
         state.restore_run_history(Vec::new(), 3, None, None, None, Vec::new());
         assert!(
-            state.retained.deleted_runs.is_empty(),
+            state.retained.deleted_runs.is_empty() && state.retained.deleted_decks.is_empty(),
             "another history empties the holding area"
         );
     }

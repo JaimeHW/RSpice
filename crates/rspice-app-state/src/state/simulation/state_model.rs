@@ -72,6 +72,10 @@ pub struct RetainedSimulationState {
     /// which empties it with the rest of the state. Never saved.
     pub deleted_runs: Vec<SimulationRun>,
 
+    /// The executed decks of the runs in [`Self::deleted_runs`], so a run
+    /// restored comes back with the deck it ran. Never saved.
+    pub deleted_decks: Vec<ExecutedDeck>,
+
     /// Imported resume inputs, preserved independently of dataset pruning.
     pub imported_monte_carlo_checkpoints: MonteCarloCheckpointLibrary,
     pub imported_transient_checkpoints:

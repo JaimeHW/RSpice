@@ -58,6 +58,7 @@ impl CachedResults {
                     held_by_documents: _,
                     // Runtime: restorable until the project closes, never saved.
                     deleted_runs: _,
+                    deleted_decks: _,
                 },
             view:
                 crate::state::SimulationViewState {
