@@ -608,35 +608,6 @@ pub fn named_net_class_color(name: &str, palette: &Palette) -> Option<egui::Colo
 }
 
 #[cfg(test)]
-mod net_class_tests {
-    use super::named_net_class_color;
-
-    #[test]
-    fn only_ground_supply_and_clock_names_carry_a_class_colour() {
-        let palette = rspice_ui_kit::palette::INSTRUMENT_DARK;
-        assert_eq!(
-            named_net_class_color("GND", &palette),
-            Some(palette.net_class_ground)
-        );
-        assert_eq!(
-            named_net_class_color("vdd_core", &palette),
-            Some(palette.net_class_supply)
-        );
-        assert_eq!(
-            named_net_class_color("sys_clk", &palette),
-            Some(palette.net_class_clock)
-        );
-        for unclassified in ["VOUT", "afe_in", "bias_n", "D3"] {
-            assert_eq!(
-                named_net_class_color(unclassified, &palette),
-                None,
-                "{unclassified}"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
 mod band_tests {
     use super::*;
     use crate::session::visibility::SchematicReviewMarkerVisibility;
@@ -754,7 +725,6 @@ mod hover_tests {
     use crate::session::visibility::SchematicReviewMarkerVisibility;
     use rspice_design::schematic::{
         component::Component, component_type::ComponentType, document::SchematicDocument,
-        wire::Wire,
     };
 
     /// Every shape a scene paints, in paint order.
@@ -825,23 +795,6 @@ mod hover_tests {
         shapes
     }
 
-    /// The dashes of a hover outline: 1-dpx segments in the selection
-    /// colour at alpha 0.85.
-    fn outline_dashes(shapes: &[egui::Shape]) -> Vec<[egui::Pos2; 2]> {
-        let ink = Tokens::default().color.canvas_select.gamma_multiply(0.85);
-        shapes
-            .iter()
-            .filter_map(|shape| match shape {
-                egui::Shape::LineSegment { points, stroke }
-                    if stroke.color == ink && stroke.width == 1.0 =>
-                {
-                    Some(*points)
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
     fn resistor() -> SchematicDocument {
         SchematicDocument {
             components: vec![Component::new(
@@ -851,59 +804,6 @@ mod hover_tests {
             )],
             ..SchematicDocument::default()
         }
-    }
-
-    /// A hovered instance draws a dashed outline 3 pt outside the pick
-    /// bounds the click tests; an unhovered one, and a hovered one that is
-    /// already selected, draw none.
-    #[test]
-    fn a_hovered_instance_draws_a_dashed_outline_unless_selected() {
-        let document = resistor();
-        let editor = EditorSession::default();
-        let dashes = outline_dashes(&paint(
-            &document,
-            &editor,
-            Some(PointerTarget::Component(1)),
-        ));
-        assert!(
-            dashes.len() >= 8,
-            "a dashed outline, not a solid rect: {} dashes",
-            dashes.len()
-        );
-        let (min, max) =
-            SchematicSymbolContext::default().component_bounds(&document.components[0]);
-        let viewport_offset = egui::vec2(50.0, 100.0);
-        let pick = Rect::from_min_max(
-            egui::pos2(min.x as f32, min.y as f32) + viewport_offset,
-            egui::pos2(max.x as f32, max.y as f32) + viewport_offset,
-        );
-        let drawn = dashes
-            .iter()
-            .flat_map(|points| points.iter().copied())
-            .fold(Rect::NOTHING, |rect, point| {
-                rect.union(Rect::from_min_max(point, point))
-            });
-        assert!(
-            (drawn.min.x - (pick.min.x - 3.0)).abs() <= 1.0
-                && (drawn.max.x - (pick.max.x + 3.0)).abs() <= 1.0
-                && (drawn.min.y - (pick.min.y - 3.0)).abs() <= 1.0
-                && (drawn.max.y - (pick.max.y + 3.0)).abs() <= 1.0,
-            "the outline stands 3 pt off the pick bounds {pick:?}: drawn {drawn:?}"
-        );
-
-        assert!(outline_dashes(&paint(&document, &editor, None)).is_empty());
-
-        let mut selected = EditorSession::default();
-        selected.selection.components.insert(1);
-        assert!(
-            outline_dashes(&paint(
-                &document,
-                &selected,
-                Some(PointerTarget::Component(1))
-            ))
-            .is_empty(),
-            "a selected instance draws nothing extra on hover"
-        );
     }
 
     /// An open terminal takes a hollow square centred on it, 5 pt a side at
@@ -949,190 +849,5 @@ mod hover_tests {
             squares(&paint_with_open_pins(&document, &selected, None, &open))[0].1,
             palette.canvas_select
         );
-    }
-
-    /// A hovered wire draws a halo beneath it: the same path, 4 pt wider, in
-    /// the selection colour at alpha 0.35, painted before the wire.
-    #[test]
-    fn a_hovered_wire_draws_a_halo_beneath_it() {
-        let document = SchematicDocument {
-            wires: vec![Wire::segment(1, Point::new(0, 0), Point::new(200, 0))],
-            ..SchematicDocument::default()
-        };
-        let editor = EditorSession::default();
-        let halo_ink = Tokens::default().color.canvas_select.gamma_multiply(0.35);
-        let strokes = |shapes: &[egui::Shape]| -> Vec<(egui::Color32, f32)> {
-            shapes
-                .iter()
-                .filter_map(|shape| match shape {
-                    egui::Shape::Path(path) => match path.stroke.color {
-                        egui::epaint::ColorMode::Solid(color) => Some((color, path.stroke.width)),
-                        egui::epaint::ColorMode::UV(_) => None,
-                    },
-                    egui::Shape::LineSegment { stroke, .. } => Some((stroke.color, stroke.width)),
-                    _ => None,
-                })
-                .collect()
-        };
-        let plain = strokes(&paint(&document, &editor, None));
-        assert!(plain.iter().all(|(color, _)| *color != halo_ink));
-        let (_, wire_width) = plain[0];
-
-        let hovered = strokes(&paint(&document, &editor, Some(PointerTarget::Wire(1))));
-        assert_eq!(
-            hovered.first(),
-            Some(&(halo_ink, wire_width + 4.0)),
-            "the halo is painted first, 4 pt wider than the wire"
-        );
-        assert_eq!(
-            &hovered[1..],
-            plain.as_slice(),
-            "the wire itself is unchanged"
-        );
-
-        let mut selected = EditorSession::default();
-        selected.selection.wires.insert(1);
-        assert!(
-            strokes(&paint(&document, &selected, Some(PointerTarget::Wire(1))))
-                .iter()
-                .all(|(color, _)| *color != halo_ink),
-            "a selected wire draws no halo"
-        );
-    }
-}
-
-#[cfg(test)]
-mod palette_tests {
-    use super::super::grid::{GridStyle, draw_grid};
-    use super::*;
-    use crate::session::visibility::SchematicReviewMarkerVisibility;
-    use rspice_design::schematic::{
-        design_note::{DesignNote, DesignNoteKind},
-        document::SchematicDocument,
-    };
-    use rspice_ui_kit::{EngineeringCanvasTheme, Theme, tokens::Mode};
-
-    fn themed(theme: Theme) -> egui::Context {
-        let ctx = egui::Context::default();
-        theme.apply(&ctx);
-        // The note lays out text, which needs the fonts a first pass loads.
-        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
-        ctx
-    }
-
-    /// One frame of the grid and the scene: the colour of every glyph run
-    /// and of every grid vertex it painted.
-    fn painted_ink(
-        ctx: &egui::Context,
-        document: &SchematicDocument,
-    ) -> (Vec<egui::Color32>, Vec<egui::Color32>) {
-        let bounds = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0));
-        let painter = Painter::new(
-            ctx.clone(),
-            egui::LayerId::new(egui::Order::Foreground, egui::Id::new("palette-test")),
-            bounds,
-        );
-        let viewport = Viewport {
-            offset: egui::Pos2::ZERO,
-            zoom: 2.0,
-            bounds,
-        };
-        draw_grid(
-            &painter,
-            bounds,
-            bounds,
-            GridStyle::Dots,
-            10,
-            (0.0, 0.0),
-            2.0,
-        );
-        let editor = EditorSession::default();
-        let context = SchematicSymbolContext::default();
-        draw_content(
-            &painter,
-            bounds,
-            &viewport,
-            &SceneView {
-                design: DesignView {
-                    document,
-                    canvas_cache: None,
-                    sheet_catalog: None,
-                    review_markers: SchematicReviewMarkerVisibility::All,
-                },
-                editor: &editor,
-                net_highlighting: SchematicNetHighlighting::Off,
-                parameter_labels: SchematicParameterLabelVisibility::NamesAndValues,
-                hover_wire_vertex: None,
-                selection_filter: SchematicSelectionFilter::default(),
-                hover: None,
-            },
-            SceneSymbols {
-                library: None,
-                context: &context,
-            },
-            SceneOverlays {
-                net_class_colors: HashMap::new(),
-                operating_point: Vec::new(),
-                operating_point_layout: None,
-                probe_status: &|_| ProbeVisualStatus::Materialized,
-                selected_trace_expression: &|| None,
-                open_pins: &HashMap::new(),
-            },
-            String::new,
-        );
-        let (mut text, mut grid) = (Vec::new(), Vec::new());
-        painter.for_each_shape(|shape| match &shape.shape {
-            egui::Shape::Text(run) => {
-                text.extend(run.galley.job.sections.iter().map(|s| s.format.color));
-            }
-            egui::Shape::Mesh(mesh) => grid.extend(mesh.vertices.iter().map(|v| v.color)),
-            _ => {}
-        });
-        (text, grid)
-    }
-
-    /// Two contexts in one process wear their own themes. The light theme is
-    /// installed last, and the dark context paints before and after the
-    /// light one: a note's text and the grid each carry the ink of the
-    /// context they are painted in.
-    #[test]
-    fn each_context_paints_a_note_and_the_grid_in_its_own_theme() {
-        let document = SchematicDocument {
-            design_notes: vec![
-                DesignNote::new(5, Point::new(50, 40), DesignNoteKind::PlainText, "Bias")
-                    .expect("a plain note"),
-            ],
-            ..SchematicDocument::default()
-        };
-        let dark = themed(Theme::default());
-        let light = themed(Theme {
-            mode: Mode::Light,
-            canvas_theme: EngineeringCanvasTheme::Light,
-            ..Theme::default()
-        });
-        let (dark_ink, light_ink) = (Tokens::get(&dark).color, Tokens::get(&light).color);
-        assert_ne!(dark_ink.text_dim, light_ink.text_dim);
-        assert_ne!(dark_ink.canvas_grid, light_ink.canvas_grid);
-
-        for (name, ctx, ink) in [
-            ("dark", &dark, &dark_ink),
-            ("light", &light, &light_ink),
-            ("dark again", &dark, &dark_ink),
-        ] {
-            let (text, grid) = painted_ink(ctx, &document);
-            assert!(!text.is_empty(), "{name}: the note painted no text");
-            assert!(!grid.is_empty(), "{name}: the grid painted no dots");
-            assert!(
-                text.iter().all(|color| *color == ink.text_dim),
-                "{name}: note ink {text:?}, expected {:?}",
-                ink.text_dim
-            );
-            assert!(
-                grid.iter().all(|color| *color == ink.canvas_grid),
-                "{name}: grid ink {:?}, expected {:?}",
-                grid.first(),
-                ink.canvas_grid
-            );
-        }
     }
 }

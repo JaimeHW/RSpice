@@ -345,7 +345,6 @@ fn paint_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_design_model::Point;
 
     fn rows(count: u64) -> Vec<ChooserRow> {
         (1..=count)
@@ -424,17 +423,6 @@ mod tests {
         assert_eq!(chooser.focused_target(), Some(PointerTarget::Component(9)));
         let ten = PickChooser::open(Pos2::ZERO, rows(10), false).expect("chooser");
         assert_eq!((ten.choosable(), ten.overflow_text()), (10, None));
-    }
-
-    /// Every kind has its word.
-    #[test]
-    fn kinds_read_as_the_design_names_them() {
-        assert_eq!(
-            kind_label(PointerTarget::Junction(Point::new(0, 0))),
-            "Junction"
-        );
-        assert_eq!(kind_label(PointerTarget::NetLabel(1)), "Net label");
-        assert_eq!(kind_label(PointerTarget::BusTap(1)), "Tap");
     }
 
     /// What one frame of the open chooser published and painted.

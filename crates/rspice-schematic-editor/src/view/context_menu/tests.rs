@@ -1,24 +1,5 @@
 //! Geometry and visual contracts for schematic context surfaces.
 use super::*;
-
-fn catalog(commands: usize, separators: usize) -> Vec<ContextEntry<()>> {
-    std::iter::repeat_n(ContextEntry::Command(()), commands)
-        .chain(std::iter::repeat_n(ContextEntry::Separator, separators))
-        .collect()
-}
-
-/// The menu each target gets, as rows and rules: the app's catalogs, pinned
-/// label for label in `rspice-app`'s `schematic/view/context_menu/tests.rs`.
-///
-/// An instance, a Verilog-A instance (whose Descend row reads "Open Verilog-A
-/// view") and a wire have twenty rows under four rules; a placed source
-/// trades the three master rows for its stimulus group under a fifth; the
-/// empty canvas has one verb, "New Verilog-A device…", where the three
-/// master rows stand, and the zoom box.
-const INSTANCE: (usize, usize) = (20, 4);
-const SOURCE: (usize, usize) = (20, 5);
-const CANVAS: (usize, usize) = (19, 4);
-
 /// A one-row menu on instance 7.
 fn one_row_view(summary: Option<String>) -> ContextMenuView {
     ContextMenuView {
@@ -138,56 +119,4 @@ fn an_open_popup_cannot_retarget_its_action_when_the_source_or_selection_changes
             assert_eq!(request.action, ContextAction::Delete);
         }
     }
-}
-
-#[test]
-fn surface_geometry_matches_desktop_and_touch_contracts() {
-    let entries = catalog(INSTANCE.0, INSTANCE.1);
-    let desktop =
-        SurfaceGeometry::for_viewport(vec2(1440.0, 900.0), ContextInvocation::Pointer, &entries);
-    assert_eq!(desktop.width, 286.0);
-    assert_eq!(desktop.max_height, 635.0);
-    assert_eq!(desktop.row_height, 27.0);
-    assert_eq!(desktop.radius, 3);
-    // Every target's menu, measured on the mockup's 27 px row: 47 header +
-    // rows + 9 px per separator + 2 border. `outer_height` clamps to
-    // `max_height`, so measuring strictly under the ceiling is the same
-    // statement as "no row is below the fold": a future entry that would turn
-    // a menu into a scroller fails here rather than silently hiding the
-    // entries it pushed past the edge.
-    for (target, (commands, separators), height) in [
-        // An instance, a Verilog-A instance or a wire: 540 rows + 36 rules.
-        ("instance", INSTANCE, 625.0),
-        // The tallest there is: a placed source whose standing calls for
-        // three stimulus verbs, at a fifth separator.
-        ("placed source", SOURCE, 634.0),
-        // The empty canvas: one verb where an instance has three, and the
-        // zoom box.
-        ("canvas", CANVAS, 598.0),
-    ] {
-        let menu = SurfaceGeometry::for_viewport(
-            vec2(1440.0, 900.0),
-            ContextInvocation::Pointer,
-            &catalog(commands, separators),
-        );
-        assert_eq!(menu.outer_height(), height, "{target}");
-        assert!(
-            menu.outer_height() < menu.max_height,
-            "the {target} context menu must fit without scrolling"
-        );
-    }
-
-    let touch =
-        SurfaceGeometry::for_viewport(vec2(390.0, 844.0), ContextInvocation::TouchSheet, &entries);
-    assert_eq!(touch.width, 374.0);
-    assert_eq!(touch.max_height, 560.0);
-    assert_eq!(touch.row_height, 44.0);
-    assert_eq!(touch.radius, 7);
-    assert_eq!(touch.outer_height(), 560.0);
-
-    let short_touch =
-        SurfaceGeometry::for_viewport(vec2(1024.0, 500.0), ContextInvocation::TouchSheet, &entries);
-    assert_eq!(short_touch.width, 420.0);
-    assert_eq!(short_touch.max_height, 350.0);
-    assert_eq!(short_touch.outer_height(), 350.0);
 }

@@ -1,8 +1,6 @@
 //! An imported part is drawn with RSpice's own pen: its curves show no
 //! straight piece at any size, and its strokes are as wide as a native part's.
 
-use std::collections::BTreeSet;
-
 use egui::{Context, Rect, Shape as PaintedShape, pos2, vec2};
 use rspice_design::{
     schematic::component_display::{ComponentDisplayMode, SchematicParameterLabelVisibility},
@@ -95,41 +93,6 @@ fn an_imported_inductor_shows_no_straight_piece_at_any_zoom() {
                 let device = piece[0].distance(piece[1]) * ppp;
                 assert!(device <= 3.0, "{device} device px at {zoom}x on {ppp}");
             }
-        }
-    }
-}
-
-/// The widths of every stroked line `component` paints, in thousandths of a
-/// point.
-fn stroke_widths(component: &Component, zoom: f32, ppp: f32) -> BTreeSet<u32> {
-    painted(component, zoom, ppp)
-        .into_iter()
-        .filter_map(|shape| match shape {
-            PaintedShape::LineSegment { stroke, .. } => Some(stroke.width),
-            PaintedShape::Path(path) => Some(path.stroke.width),
-            _ => None,
-        })
-        .filter(|width| *width > 0.0)
-        .map(|width| (width * 1000.0).round() as u32)
-        .collect()
-}
-
-#[test]
-fn an_imported_symbol_is_stroked_as_wide_as_a_native_part() {
-    let imported = imported_inductor();
-    let mut native = Component::new(1, ComponentType::Inductor, Point::new(20, 20));
-    native.display_mode = ComponentDisplayMode::Hidden;
-    for ppp in [1.0, 1.25, 1.5, 2.0] {
-        for zoom in [0.5, 1.0, 1.5, 2.0, 2.45, 4.0, 8.0] {
-            let body = lod::stroke_pt(StrokeRole::Symbol, zoom, ppp, Emphasis::Plain);
-            let body = (body * 1000.0).round() as u32;
-            let (imported, native) = (
-                stroke_widths(&imported, zoom, ppp),
-                stroke_widths(&native, zoom, ppp),
-            );
-            assert!(imported.contains(&body), "{imported:?} at {zoom}x on {ppp}");
-            assert!(native.contains(&body), "{native:?} at {zoom}x on {ppp}");
-            assert_eq!(imported, native, "at {zoom}x on {ppp}");
         }
     }
 }

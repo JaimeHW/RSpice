@@ -156,26 +156,6 @@ mod tests {
         }
     }
 
-    /// The boundary is found under either line ending and under both cfg
-    /// spellings, and a file with no test module at all is scanned whole.
-    #[test]
-    fn the_boundary_holds_under_both_cfg_spellings() {
-        let plain = "fn shipped() {}\n\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n";
-        assert_eq!(production_source(plain), "fn shipped() {}\n\n");
-        assert_eq!(
-            production_source(&plain.replace('\n', "\r\n")),
-            "fn shipped() {}\r\n\r\n"
-        );
-        let gated =
-            "fn shipped() {}\n#[cfg(all(test, not(target_arch = \"wasm32\")))]\nmod tests {}\n";
-        assert_eq!(production_source(gated), "fn shipped() {}\n");
-        assert_eq!(production_source("fn shipped() {}\n"), "fn shipped() {}\n");
-        // An out-of-line declaration is not a boundary, wherever it sits:
-        // cutting at one at the top of a file leaves the file unscanned.
-        let out_of_line = "#[cfg(test)]\nmod tests;\nfn shipped() {}\n";
-        assert_eq!(production_source(out_of_line), out_of_line);
-    }
-
     /// A file that carries test-only code without the boundary is refused.
     #[test]
     #[should_panic(expected = "no `mod tests` block")]

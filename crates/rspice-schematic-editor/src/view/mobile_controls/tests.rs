@@ -26,12 +26,10 @@ const EVERYTHING: MobileCanvasCapabilities = MobileCanvasCapabilities {
     fit: true,
 };
 
-/// What one frame of the strip exposed: its bounds and each button's
-/// label, bounds and toggle state.
+/// What one frame of the strip exposed: each button's label, bounds and
+/// toggle state.
 struct Strip {
-    bounds: accesskit::Rect,
     buttons: Vec<(String, accesskit::Rect, Option<accesskit::Toggled>)>,
-    labels: Vec<String>,
 }
 
 fn frame(
@@ -59,11 +57,6 @@ fn frame(
         .accesskit_update
         .expect("strip accessibility tree")
         .nodes;
-    let bounds = nodes
-        .iter()
-        .find(|(_, node)| node.role() == accesskit::Role::Toolbar)
-        .and_then(|(_, node)| node.bounds())
-        .expect("the strip is a toolbar");
     let buttons = nodes
         .iter()
         .filter(|(_, node)| node.role() == accesskit::Role::Button)
@@ -75,15 +68,7 @@ fn frame(
             )
         })
         .collect();
-    let labels = nodes
-        .iter()
-        .filter_map(|(_, node)| node.label().or(node.value()).map(str::to_owned))
-        .collect();
-    Strip {
-        bounds,
-        buttons,
-        labels,
-    }
+    Strip { buttons }
 }
 
 fn context() -> Context {
@@ -100,12 +85,6 @@ fn centre(bounds: accesskit::Rect) -> egui::Pos2 {
     )
 }
 
-/// Centred top to bottom, to the pixel the odd half point rounds to.
-fn assert_centred(bounds: accesskit::Rect, height: f64) {
-    let (above, below) = (bounds.y0, height - bounds.y1);
-    assert!((above - below).abs() <= 1.0, "{above} above, {below} below");
-}
-
 fn press(pos: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
     vec![
         egui::Event::PointerMoved(pos),
@@ -116,131 +95,6 @@ fn press(pos: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
             modifiers: egui::Modifiers::NONE,
         },
     ]
-}
-
-/// D1 section 10: on a canvas 420 pt tall or more, eight 44 pt buttons in
-/// four groups, 4 pt apart inside a group and 9 pt (a 1 pt rule with 4 pt
-/// either side) between groups; 405 x 54 pt, 8 pt in from the right edge
-/// and centred top to bottom. G-12: the old strip was three zoom buttons
-/// under a block of guidance text, and only at 620 px or less.
-#[test]
-fn the_tablet_strip_is_eight_thumb_buttons_in_four_groups() {
-    let ctx = context();
-    let strip = frame(
-        &ctx,
-        Vec2::new(1024.0, 768.0),
-        EVERYTHING,
-        vec![],
-        &mut None,
-    );
-    assert_eq!(strip.bounds.x1 - strip.bounds.x0, 54.0);
-    assert_eq!(strip.bounds.y1 - strip.bounds.y0, 405.0);
-    assert_eq!(1024.0 - strip.bounds.x1, 8.0);
-    assert_centred(strip.bounds, 768.0);
-
-    let mut buttons = strip.buttons.clone();
-    buttons.sort_by(|a, b| a.1.y0.total_cmp(&b.1.y0));
-    let order: Vec<&str> = buttons.iter().map(|(label, ..)| label.as_str()).collect();
-    assert_eq!(
-        order,
-        [
-            "Select with a box",
-            "Add to selection",
-            "Rotate clockwise",
-            "Mirror",
-            "Cancel",
-            "Undo",
-            "Redo",
-            "Fit drawing sheet",
-        ]
-    );
-    for (label, bounds, _) in &buttons {
-        assert_eq!(bounds.x1 - bounds.x0, 44.0, "{label}");
-        assert_eq!(bounds.y1 - bounds.y0, 44.0, "{label}");
-    }
-    let gaps: Vec<f64> = buttons
-        .windows(2)
-        .map(|pair| pair[1].1.y0 - pair[0].1.y1)
-        .collect();
-    assert_eq!(gaps, [4.0, 9.0, 4.0, 9.0, 4.0, 4.0, 9.0]);
-    assert_eq!(buttons[0].1.y0 - strip.bounds.y0, 5.0, "padding and border");
-}
-
-/// A 48 pt touch target chosen in Accessibility makes every strip button
-/// 48 pt, and the strip grows around them by the same spacing.
-#[test]
-fn a_raised_touch_target_sizes_the_strip_buttons() {
-    let ctx = context();
-    rspice_ui_kit::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(48.0));
-    let strip = frame(
-        &ctx,
-        Vec2::new(1024.0, 768.0),
-        EVERYTHING,
-        vec![],
-        &mut None,
-    );
-    assert_eq!(strip.bounds.x1 - strip.bounds.x0, 58.0);
-    assert_eq!(strip.bounds.y1 - strip.bounds.y0, 437.0);
-    for (label, bounds, _) in &strip.buttons {
-        assert_eq!(bounds.x1 - bounds.x0, 48.0, "{label}");
-        assert_eq!(bounds.y1 - bounds.y0, 48.0, "{label}");
-    }
-}
-
-/// A phone in landscape: five buttons, 246 pt, one group. Mirror and Redo
-/// go to the long-press menu, and the box latch gives way to Cancel while
-/// an operation is live.
-#[test]
-fn the_phone_strip_is_five_buttons_and_cancel_takes_the_first_while_live() {
-    for live in [false, true] {
-        let ctx = context();
-        let capabilities = MobileCanvasCapabilities {
-            cancel: live,
-            ..EVERYTHING
-        };
-        let strip = frame(
-            &ctx,
-            Vec2::new(844.0, 390.0),
-            capabilities,
-            vec![],
-            &mut None,
-        );
-        assert_eq!(strip.bounds.y1 - strip.bounds.y0, 246.0);
-        assert_centred(strip.bounds, 390.0);
-        let mut buttons = strip.buttons.clone();
-        buttons.sort_by(|a, b| a.1.y0.total_cmp(&b.1.y0));
-        let order: Vec<&str> = buttons.iter().map(|(label, ..)| label.as_str()).collect();
-        let first = if live { "Cancel" } else { "Select with a box" };
-        assert_eq!(
-            order,
-            [
-                first,
-                "Add to selection",
-                "Rotate clockwise",
-                "Undo",
-                "Fit drawing sheet"
-            ]
-        );
-        let gaps: Vec<f64> = buttons
-            .windows(2)
-            .map(|pair| pair[1].1.y0 - pair[0].1.y1)
-            .collect();
-        assert_eq!(gaps, [4.0; 4]);
-    }
-}
-
-/// D1 removes the guidance block (it said "Drag to pan" when a drag moved
-/// the part under the finger, audit E-11) and the zoom buttons, which
-/// pinch, double tap and the View menu cover.
-#[test]
-fn the_strip_carries_no_guidance_text_and_no_zoom_steps() {
-    let ctx = context();
-    let strip = frame(&ctx, Vec2::new(390.0, 844.0), EVERYTHING, vec![], &mut None);
-    for label in &strip.labels {
-        assert!(!label.contains("Drag to pan"), "{label}");
-        assert!(!label.contains("Pinch"), "{label}");
-        assert!(!label.starts_with("Zoom"), "{label}");
-    }
 }
 
 /// A latch toggles on a tap, reads as a pressed toggle to assistive

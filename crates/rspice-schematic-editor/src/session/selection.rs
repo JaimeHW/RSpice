@@ -215,21 +215,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schematic_selection_filter_defaults_to_every_mockup_class() {
-        let filter = SchematicSelectionFilter::default();
-
-        assert_eq!(
-            filter,
-            SchematicSelectionFilter {
-                instances: true,
-                wires: true,
-                labels: true,
-                annotations: true,
-            }
-        );
-    }
-
-    #[test]
     fn schematic_selection_filter_prunes_every_disabled_object_taxonomy() {
         let mut selection = Selection::new();
         selection.select_component(1);

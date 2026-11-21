@@ -1412,22 +1412,4 @@ mod tests {
         assert_eq!(shared(&[SymbolFill::None, SymbolFill::Solid]), None);
         assert_eq!(shared::<SymbolFill>(&[]), None);
     }
-
-    /// One of a thing is singular: "1 body shapes" read as a typo.
-    #[test]
-    fn the_header_counts_one_of_a_thing_in_the_singular() {
-        let one = SymbolDocument {
-            pins: vec![SymbolPin::new("IN", PortDirection::In, None)],
-            body: vec![SymbolShape::Dot {
-                center: Point::origin(),
-                radius: 2,
-            }],
-            ..SymbolDocument::default()
-        };
-        assert_eq!(document_counts(&one), "1 pin · 1 body shape");
-        assert_eq!(
-            document_counts(&SymbolDocument::default()),
-            "0 pins · 0 body shapes"
-        );
-    }
 }

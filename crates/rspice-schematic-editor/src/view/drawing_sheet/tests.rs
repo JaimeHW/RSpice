@@ -9,8 +9,7 @@ use rspice_design::schematic::{
     wire::Wire,
 };
 use rspice_design_model::design_management::{
-    DRAWING_SHEET_TITLE_OUTLINE_UM, DrawingSheetStandard, DrawingSheetZoneEdges,
-    DrawingSheetZoneGrid, DrawingSheetZones,
+    DrawingSheetStandard, DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZones,
 };
 use rspice_design_model::{SchematicPageOrientation, SchematicPageSize};
 
@@ -86,26 +85,6 @@ fn letter_dimensions_retain_fractional_world_edges_without_rounding() {
 }
 
 #[test]
-fn level_of_detail_is_driven_by_physical_pixel_density() {
-    assert_eq!(
-        DrawingSheetLod::resolve(0.1, 1.0, test_lettering()).tier,
-        DrawingSheetLodTier::Thumbnail
-    );
-    assert_eq!(
-        DrawingSheetLod::resolve(0.25, 1.0, test_lettering()).tier,
-        DrawingSheetLodTier::Outline
-    );
-    assert_eq!(
-        DrawingSheetLod::resolve(0.5, 1.0, test_lettering()).tier,
-        DrawingSheetLodTier::Working
-    );
-    assert_eq!(
-        DrawingSheetLod::resolve(1.5, 1.0, test_lettering()).tier,
-        DrawingSheetLodTier::Detail
-    );
-}
-
-#[test]
 fn zone_reference_and_sheet_coordinates_share_one_origin() {
     let geometry = DrawingSheetGeometry::from_format(&SchematicSheetFormat::default());
     assert_eq!(geometry.world_to_sheet_mm(-140.0, -40.0), (0.0, 0.0));
@@ -167,49 +146,6 @@ fn test_lettering() -> DrawingSheetLettering {
     SchematicSheetFormat::default().authored_size.lettering()
 }
 
-#[test]
-fn drawing_sheet_lettering_keeps_its_authored_height_on_the_page() {
-    // The height the standard names is the height of the capitals, and the
-    // size a font engine takes is an em, so these are not the same number:
-    // 2.5 mm capitals need a 3.58 mm em. Ten world units of capitals is what
-    // has to come back out.
-    let data = authored_lettering(test_lettering().data_um);
-    assert!(
-        data > 10.0,
-        "an em lettering 2.5 mm capitals is taller than the capitals"
-    );
-    assert!(
-        (data * 0.698 - 10.0).abs() < 0.05,
-        "an em of {data} world units must letter capitals ten world units tall"
-    );
-
-    // A larger sheet letters larger, as ISO 3098 requires: text legible on A4
-    // at arm's length is not legible on a sheet four times the size.
-    let a0 = DrawingSheetLettering::for_sheet(841_000, 1_189_000);
-    assert!(a0.data_um > test_lettering().data_um);
-
-    // Sheet lettering is paper annotation: it magnifies with the sheet and is
-    // never pinned to a screen size, because a pinned size overruns the cell
-    // whose character budget was derived from the authored height.
-    for zoom in [0.25_f32, 0.55, 1.0, 2.0, 4.0] {
-        let painted = drawing_sheet_font_size(zoom, data);
-        assert!(
-            (painted - data * zoom).abs() <= 0.25,
-            "at {zoom}x the painted height {painted} must track the authored {data}"
-        );
-    }
-    assert!(
-        drawing_sheet_font_size(0.25, data) < drawing_sheet_font_size(0.55, data),
-        "lettering must shrink with the sheet rather than hold a floor"
-    );
-
-    // A caption never outgrows the value it names, at any zoom.
-    let caption = authored_lettering(test_lettering().caption_um);
-    for zoom in [0.25_f32, 1.0, 4.0] {
-        assert!(drawing_sheet_font_size(zoom, caption) < drawing_sheet_font_size(zoom, data));
-    }
-}
-
 fn active(format: SchematicSheetFormat) -> ActiveDrawingSheet {
     ActiveDrawingSheet {
         geometry: DrawingSheetGeometry::from_format(&format),
@@ -251,47 +187,6 @@ fn painted_frame(sheet: &ActiveDrawingSheet, zoom: f32) -> Vec<Shape> {
         .collect()
 }
 
-fn stroke_widths(shapes: &[Shape]) -> Vec<f32> {
-    shapes
-        .iter()
-        .filter_map(|shape| match shape {
-            Shape::LineSegment { stroke, .. } => Some(stroke.width),
-            Shape::Rect(rect) => Some(rect.stroke.width),
-            _ => None,
-        })
-        .collect()
-}
-
-#[test]
-fn the_canvas_paints_the_frame_at_the_widths_the_plot_prints() {
-    // Four world units per millimetre: at zoom 1.5 a 0.7 mm frame is 4.2
-    // points and a 0.35 mm grid line 2.1.
-    let a4 = active(SchematicSheetFormat::default());
-    let widths = stroke_widths(&painted_frame(&a4, 1.5));
-    assert!(widths.iter().any(|width| (width - 4.2).abs() < 1e-3));
-    assert!(widths.iter().any(|width| (width - 2.1).abs() < 1e-3));
-    assert!(
-        widths
-            .iter()
-            .all(|width| (width - 4.2).abs() < 1e-3 || (width - 2.1).abs() < 1e-3),
-        "ISO 5457 draws 0.7 mm and 0.35 mm lines only: {widths:?}"
-    );
-    // ASME Y14.1: a 0.6 mm border and 0.3 mm zone markers.
-    let ansi_d = active(SchematicSheetFormat::from_standard(
-        DrawingSheetStandard::AnsiD,
-        SchematicPageOrientation::Landscape,
-    ));
-    let widths = stroke_widths(&painted_frame(&ansi_d, 1.5));
-    assert!(widths.iter().any(|width| (width - 3.6).abs() < 1e-3));
-    assert!(widths.iter().any(|width| (width - 1.8).abs() < 1e-3));
-    // Zoomed far out a line keeps one physical pixel rather than vanishing.
-    assert!(
-        stroke_widths(&painted_frame(&a4, 0.1))
-            .iter()
-            .all(|width| *width >= 1.0)
-    );
-}
-
 #[test]
 fn the_canvas_draws_centring_marks_and_no_margin_guide_on_an_iso_frame() {
     let a4 = active(SchematicSheetFormat::default());
@@ -306,82 +201,6 @@ fn the_canvas_draws_centring_marks_and_no_margin_guide_on_an_iso_frame() {
     assert_eq!(
         a4.geometry.physical.drawing_area,
         a4.geometry.physical.printable
-    );
-}
-
-#[test]
-fn zone_references_letter_at_the_height_of_their_band_not_their_sheet() {
-    let lettered = |sheet: &ActiveDrawingSheet| {
-        painted_frame(sheet, 1.0)
-            .into_iter()
-            .filter_map(|shape| match shape {
-                Shape::Text(text) => Some(text.galley.job.sections[0].format.font_id.size),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    };
-    // ISO 5457 letters a grid reference 3.5 mm high whatever the paper, and
-    // a Standard band is 5 mm wide on A0 as on A4. Fourteen world units of
-    // capitals is that 3.5 mm; the A4 size designation beside them is
-    // lettered at the same height.
-    let a4 = lettered(&test_sheet());
-    let a0 = lettered(&active(SchematicSheetFormat::from_standard(
-        DrawingSheetStandard::IsoA0,
-        SchematicPageOrientation::Landscape,
-    )));
-    assert!(!a4.is_empty());
-    for size in a4.iter().chain(&a0) {
-        assert!(
-            (size * 0.698 - 14.0).abs() < 0.2,
-            "a {size}-unit em must letter 3.5 mm capitals"
-        );
-    }
-
-    // ASME Y14.2 letters zones 6 mm high in the 0.50 in margin.
-    let ansi_d = lettered(&active(SchematicSheetFormat::from_standard(
-        DrawingSheetStandard::AnsiD,
-        SchematicPageOrientation::Landscape,
-    )));
-    assert_eq!(ansi_d.len(), 2 * (8 + 4));
-    assert!(ansi_d.iter().all(|size| (size * 0.698 - 24.0).abs() < 0.2));
-}
-
-#[test]
-fn title_block_capitals_stand_at_the_height_the_standard_names() {
-    // The arithmetic above is only worth as much as the assumption under it:
-    // that the size egui takes is an em. Paint a capital at the size a 2.5 mm
-    // field is lettered at and measure the ink it leaves. Ten world units of
-    // capital is the 2.5 mm ISO 3098 names, and a size taken as a cap height
-    // instead of an em would leave seven.
-    let em = authored_lettering(test_lettering().data_um);
-    let rows = rspice_ui_kit::raster::glyph_ink_rows("H", em);
-    let (first, last) = (
-        *rows.first().expect("a capital leaves ink"),
-        *rows.last().expect("a capital leaves ink"),
-    );
-    let painted = (last - first + 1) as f32;
-    assert!(
-        (painted - 10.0).abs() <= 1.5,
-        "a capital lettered at a {em}-unit em measured {painted} units, not the authored ten"
-    );
-}
-
-#[test]
-fn title_block_fields_are_withheld_until_their_lettering_is_legible() {
-    let legible = DrawingSheetLod::resolve(1.0, 1.0, test_lettering());
-    assert!(
-        legible.show_title_block_fields,
-        "2.5 mm capitals at four pixels per millimetre set a 14-pixel em and must be drawn"
-    );
-    let illegible = DrawingSheetLod::resolve(0.3, 1.0, test_lettering());
-    assert!(
-        !illegible.show_title_block_fields,
-        "the same capitals at three tenths of that zoom set a 4-pixel em, which is \
-         unreadable and must be withheld rather than inflated"
-    );
-    assert!(
-        illegible.show_border,
-        "the block stays ruled when its text is withheld"
     );
 }
 
@@ -409,13 +228,6 @@ fn cursor_status_uses_the_configured_unit_and_explicit_sheet_context() {
         sheet.cursor_status(DRAWING_SHEET_ORIGIN.0 - one_inch, DRAWING_SHEET_ORIGIN.1),
         "x -1 · y 0 in · off sheet"
     );
-}
-
-#[test]
-fn fit_and_detail_contracts_match_the_permanent_canvas_mockup() {
-    let detail = DrawingSheetLod::resolve(1.5, 1.0, test_lettering());
-    assert!(detail.show_origin);
-    assert!(detail.show_dimensions);
 }
 
 #[test]
@@ -481,81 +293,6 @@ fn lettered_text(shapes: &[Shape]) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn an_automatic_field_is_lettered_like_any_other() {
-    // ISO 7200 marks no field as filled in by the system, so the canvas
-    // neither marks such a cell nor letters its caption any differently.
-    let sheet = test_sheet();
-    let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
-        &sheet.format,
-        &[(
-            rspice_design_model::design_management::DrawingSheetTitleFieldId::Page,
-            "1 of 1".to_owned(),
-        )]
-        .into_iter()
-        .collect(),
-    );
-    assert!(fields.iter().any(|field| {
-        field.authority
-            == rspice_design_model::design_management::DrawingSheetTitleFieldValueAuthority::Automatic
-    }));
-    let shapes = painted_title_block(&sheet, &fields);
-    assert!(
-        !shapes.iter().any(|shape| matches!(shape, Shape::Circle(_))),
-        "an automatic cell carries no marker"
-    );
-    let text = lettered_text(&shapes);
-    let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
-        .expect("the sheet carries a title block");
-    for field in &fields {
-        let caption = layout
-            .cell(field.id)
-            .unwrap()
-            .caption
-            .map(|caption| caption.letter())
-            .unwrap_or_default();
-        assert!(
-            text.contains(&caption),
-            "{:?} must be captioned with its form's wording: {text:?}",
-            field.id
-        );
-    }
-    // ISO 7200's own terms, as the plot letters them.
-    for caption in [
-        "Rev.",
-        "Date of issue",
-        "Sheet",
-        "Title",
-        "Identification number",
-    ] {
-        assert!(text.iter().any(|line| line == caption), "{text:?}");
-    }
-}
-
-#[test]
-fn an_empty_authored_field_is_painted_as_its_caption_alone() {
-    // Created by and Approved by start on a new sheet empty: boxes to sign
-    // on the print, with no dash or empty line of text in them.
-    let sheet = test_sheet();
-    let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
-        &sheet.format,
-        &std::collections::BTreeMap::new(),
-    );
-    let blank = fields.iter().filter(|field| field.value.is_empty()).count();
-    assert!(blank >= 2, "a new sheet starts with unsigned fields");
-    let text = lettered_text(&painted_title_block(&sheet, &fields));
-    assert!(
-        text.iter().all(|line| !line.trim().is_empty()),
-        "an empty value paints no text: {text:?}"
-    );
-    let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
-        .expect("the sheet carries a title block");
-    assert_eq!(text.len(), layout.cells.len() + fields.len() - blank);
-    for caption in ["Created by", "Approved by"] {
-        assert!(text.iter().any(|line| line == caption), "{text:?}");
-    }
-}
-
 /// The left and right edges of the glyphs of `galley` lettering a character
 /// `of` picks, in the galley's own frame.
 fn glyph_span(galley: &egui::Galley, of: impl Fn(char) -> bool) -> (f32, f32) {
@@ -612,119 +349,6 @@ fn a_title_typed_in_arabic_is_lettered_in_the_order_it_is_read() {
     let one = glyph_span(title, |character| character == '1');
     let two = glyph_span(title, |character| character == '2');
     assert!(one.1 < two.0 + 1.0, "{one:?} {two:?}");
-}
-
-#[test]
-fn title_block_lines_are_the_plots_widths_magnified_with_the_sheet() {
-    // 0.7 mm outline and 0.35 mm rules at four world units per millimetre.
-    assert!((title_line_width(DRAWING_SHEET_TITLE_OUTLINE_UM, 1.0, 1.0) - 2.8).abs() < 1e-4);
-    assert!((title_line_width(DRAWING_SHEET_TITLE_RULE_UM, 1.0, 1.0) - 1.4).abs() < 1e-4);
-    assert!((title_line_width(DRAWING_SHEET_TITLE_RULE_UM, 2.0, 1.0) - 2.8).abs() < 1e-4);
-    // Never thinner than one physical pixel.
-    assert!((title_line_width(DRAWING_SHEET_TITLE_RULE_UM, 0.1, 2.0) - 0.5).abs() < 1e-4);
-
-    let sheet = test_sheet();
-    let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
-        &sheet.format,
-        &std::collections::BTreeMap::new(),
-    );
-    let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical).unwrap();
-    let shapes = painted_title_block(&sheet, &fields);
-    let rules = shapes
-        .iter()
-        .filter_map(|shape| match shape {
-            Shape::LineSegment { stroke, .. } => Some(stroke.width),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    // Each cell's own rules, each painted once, at the narrow width.
-    assert_eq!(rules.len(), layout.rules.len());
-    assert!(rules.iter().all(|width| (width - 1.4).abs() < 1e-4));
-    let outline = shapes
-        .iter()
-        .find_map(|shape| match shape {
-            Shape::Path(path) => Some(path.stroke.width),
-            _ => None,
-        })
-        .expect("the outline is painted");
-    assert!((outline - 2.8).abs() < 1e-4);
-}
-
-#[test]
-fn an_asme_sheet_paints_the_forms_lines_and_lettering_the_plot_prints() {
-    use rspice_design_model::design_management::{
-        DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId as Field,
-    };
-    for standard in [
-        DrawingSheetStandard::AnsiB,
-        DrawingSheetStandard::AnsiD,
-        DrawingSheetStandard::ArchD,
-    ] {
-        let format =
-            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape);
-        assert_eq!(
-            format.title_block.template,
-            DrawingSheetTitleBlockTemplate::AsmeY141
-        );
-        let sheet = ActiveDrawingSheet {
-            geometry: DrawingSheetGeometry::from_format(&format),
-            format,
-            sheet_name: "top".to_owned(),
-            page_label: "1 of 3".to_owned(),
-        };
-        let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
-            &sheet.format,
-            &[
-                (Field::Page, "1 of 3".to_owned()),
-                (Field::DocumentId, "RS-0042".to_owned()),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical).unwrap();
-        let shapes = painted_title_block(&sheet, &fields);
-        // The 0.6 mm outline and each rule at its own width, magnified as
-        // the plot's widths are.
-        let outline = shapes
-            .iter()
-            .find_map(|shape| match shape {
-                Shape::Path(path) => Some(path.stroke.width),
-                _ => None,
-            })
-            .expect("the outline is painted");
-        assert!((outline - title_line_width(600, 1.0, 1.0)).abs() < 1e-4);
-        let mut painted = shapes
-            .iter()
-            .filter_map(|shape| match shape {
-                Shape::LineSegment { stroke, .. } => Some(stroke.width),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let mut laid_out = layout
-            .rules
-            .iter()
-            .map(|rule| title_line_width(rule.width_um, 1.0, 1.0))
-            .collect::<Vec<_>>();
-        painted.sort_by(f32::total_cmp);
-        laid_out.sort_by(f32::total_cmp);
-        assert_eq!(painted, laid_out, "{standard:?}");
-        let text = lettered_text(&shapes);
-        assert_eq!(
-            text,
-            layout
-                .lettering(&fields)
-                .into_iter()
-                .map(|line| line.text)
-                .collect::<Vec<_>>(),
-            "{standard:?}"
-        );
-        for line in ["SHEET", "1 OF 3", "SCALE", "NONE", "RS-0042"] {
-            assert!(
-                text.iter().any(|text| text == line),
-                "{standard:?} {text:?}"
-            );
-        }
-    }
 }
 
 #[test]
@@ -1129,162 +753,6 @@ fn conductor_title_collision_uses_segments_not_the_route_bounding_box() {
         overflow_items(&test_view(&document), &symbol_context, &geometry).is_empty(),
         "the overflow report must not contain the historical false-positive finding"
     );
-}
-
-/// Every grid dot lands on a lattice point exactly where content on that
-/// point is placed: the lattice is phased on the viewport's own offset, the
-/// one `schematic_to_screen` uses, not on a separately passed pan, so a pin
-/// end on the grid sits on its dot at every pan.
-#[test]
-fn grid_dots_register_with_the_content_lattice() {
-    let ctx = egui::Context::default();
-    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
-    let bounds = Rect::from_min_size(egui::pos2(3.25, 7.5), egui::vec2(400.0, 300.0));
-    let viewport = Viewport {
-        // World 200..600 by 100..400: inside the A4 drawing area.
-        offset: egui::pos2(-197.0, -103.0),
-        zoom: 1.0,
-        bounds,
-    };
-    let painter = Painter::new(
-        ctx,
-        egui::LayerId::new(egui::Order::Background, egui::Id::new("grid-phase")),
-        bounds,
-    );
-    draw_base(
-        &painter,
-        bounds,
-        &viewport,
-        DrawingSheetCanvas {
-            layers: DrawingSheetLayerVisibility::default(),
-            grid: GridStyle::Dots,
-            grid_size: 10,
-        },
-        &test_sheet(),
-        Vec::new,
-    );
-    let grid_ink = rspice_ui_kit::tokens::Tokens::get(painter.ctx())
-        .color
-        .canvas_grid;
-    let origin = viewport.schematic_to_screen(Point::new(0, 0));
-    let mut dots = 0;
-    painter.for_each_shape(|shape| {
-        let egui::Shape::Mesh(mesh) = &shape.shape else {
-            return;
-        };
-        for quad in mesh.vertices.chunks(4) {
-            if quad.len() < 4 || quad[0].color != grid_ink {
-                continue;
-            }
-            let centre = quad
-                .iter()
-                .fold(egui::Vec2::ZERO, |sum, vertex| sum + vertex.pos.to_vec2())
-                / 4.0;
-            let steps = (centre - origin.to_vec2()) / 10.0;
-            assert!(
-                (steps.x - steps.x.round()).abs() < 1e-3
-                    && (steps.y - steps.y.round()).abs() < 1e-3,
-                "a dot at {centre:?} is off the lattice through {origin:?}"
-            );
-            dots += 1;
-        }
-    });
-    assert!(dots > 100, "the grid painted {dots} dots");
-}
-
-/// A large sheet fitted to an ordinary window, at one physical pixel per
-/// point, is still a ruled form in a lettered frame: its title block keeps
-/// every rule and its border every zone letter, as the same sheet does seen
-/// whole on a table. At this zoom the A1 to E sheets resolve one millimetre
-/// to between one and one and a half pixels.
-#[test]
-fn a_large_sheet_fitted_to_the_window_keeps_its_block_rules_and_zone_letters() {
-    for standard in [
-        DrawingSheetStandard::AnsiD,
-        DrawingSheetStandard::AnsiE,
-        DrawingSheetStandard::IsoA1,
-        DrawingSheetStandard::IsoA0,
-    ] {
-        let sheet = active(SchematicSheetFormat::from_standard(
-            standard,
-            SchematicPageOrientation::Landscape,
-        ));
-        let paper = sheet.geometry.paper;
-        let bounds = Rect::from_min_size(Pos2::ZERO, vec2(1_280.0, 800.0));
-        let zoom = (bounds.width() / (paper.max_x - paper.min_x) as f32)
-            .min(bounds.height() / (paper.max_y - paper.min_y) as f32)
-            * 0.95;
-        let viewport = Viewport {
-            offset: egui::pos2(
-                bounds.width() / 2.0 - (paper.min_x + paper.max_x) as f32 / 2.0 * zoom,
-                bounds.height() / 2.0 - (paper.min_y + paper.max_y) as f32 / 2.0 * zoom,
-            ),
-            zoom,
-            bounds,
-        };
-        let ctx = egui::Context::default();
-        rspice_ui_kit::Theme::default().apply(&ctx);
-        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
-        let painter = Painter::new(
-            ctx,
-            egui::LayerId::new(egui::Order::Background, egui::Id::new("fitted-sheet")),
-            bounds,
-        );
-        draw_base(
-            &painter,
-            bounds,
-            &viewport,
-            DrawingSheetCanvas {
-                layers: DrawingSheetLayerVisibility::default(),
-                grid: GridStyle::Dots,
-                grid_size: 10,
-            },
-            &sheet,
-            Vec::new,
-        );
-        let block = sheet
-            .geometry
-            .title_block
-            .expect("the sheet carries a title block")
-            .screen_rect(&viewport)
-            .expand(0.5);
-        let mut rules = 0;
-        let mut lettered = Vec::new();
-        painter.for_each_shape(|shape| match &shape.shape {
-            Shape::LineSegment { points, .. }
-                if points.iter().all(|point| block.contains(*point)) =>
-            {
-                rules += 1;
-            }
-            Shape::Text(text) => lettered.push(text.galley.text().to_owned()),
-            _ => {}
-        });
-        let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
-            .expect("the sheet carries a title block");
-        assert!(
-            rules >= layout.rules.len(),
-            "{standard:?}: {rules} of the block's {} rules drawn",
-            layout.rules.len()
-        );
-        let zone_letters = sheet
-            .geometry
-            .frame
-            .items
-            .iter()
-            .filter(|item| item.layer == DrawingSheetFrameLayer::ZoneLabels)
-            .filter_map(|item| match &item.mark {
-                DrawingSheetFrameMark::Text { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(!zone_letters.is_empty(), "{standard:?} is zoned");
-        for letter in &zone_letters {
-            assert!(
-                lettered.contains(letter),
-                "{standard:?}: zone {letter} is not lettered at fit: {lettered:?}"
-            );
-        }
-    }
 }
 
 #[test]

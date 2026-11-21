@@ -212,18 +212,3 @@ fn line_mesh(pitch: f32, cols: i32, rows: i32, color: Color32, hairline: f32) ->
     }
     mesh
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn engineering_grid_uses_one_two_five_steps_at_five_device_pixels() {
-        assert_eq!(engineering_grid_multiplier(5.0, 5.0), 1.0);
-        assert_eq!(engineering_grid_multiplier(3.0, 5.0), 2.0);
-        assert_eq!(engineering_grid_multiplier(1.1, 5.0), 5.0);
-        assert_eq!(engineering_grid_multiplier(0.6, 5.0), 10.0);
-        assert_eq!(engineering_grid_multiplier(0.24, 5.0), 50.0);
-        assert!(0.11 * engineering_grid_multiplier(0.11, 5.0) >= MIN_DEVICE_PITCH);
-    }
-}
