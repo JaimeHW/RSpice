@@ -18,7 +18,7 @@ default = []
 generated-veriloga-catalog = ["rspice-simulation/generated-veriloga-catalog"]
 
 [dependencies]
-rspice-formats = { path = "../rspice-formats", version = "0.1.0", default-features = false, features = ["project-results"] }
+rspice-formats = { path = "../rspice-formats", version = "0.1.0", default-features = false, features = ["project-results", "spice-raw"] }
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 rspice-veriloga-runtime.workspace = true
 clap.workspace = true
