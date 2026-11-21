@@ -20,6 +20,7 @@ use rspice_app_workbench::workbench::framework::command_registry::{
     CommandAvailability, WorkbenchCommand,
 };
 use rspice_app_workbench::workbench::framework::host::Host;
+use rspice_app_workbench::workbench::state::pane_focus::Pane;
 
 /// Every command row the menus show, submenus included.
 fn command_rows(rows: &[MenuRow], out: &mut Vec<menu_entries::CommandRow>) {
@@ -132,21 +133,31 @@ struct Desk {
     ctx: Context,
     app: RSpiceApp,
     time: f64,
+    /// Whether a navigator stands beside the document, a pane F6 goes to.
+    navigator: bool,
 }
+
+/// The one control of the navigator a [`Desk`] may draw.
+const NAVIGATOR_CONTROL: &str = "Navigator control";
 
 impl Desk {
     fn new() -> Self {
+        Self::with(peaked_run(), false)
+    }
+
+    fn with(run: SimulationRun, navigator: bool) -> Self {
         let ctx = Context::default();
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.state.model.simulation.retained.runs = vec![peaked_run()].into();
+        app.state.model.simulation.retained.runs = vec![run].into();
         assert!(app.state.model.simulation.select_run(0));
         app.state.workbench.activate(Workspace::Results);
         let mut desk = Self {
             ctx,
             app,
             time: 0.0,
+            navigator,
         };
         desk.frame(Vec::new());
         desk.frame(Vec::new());
@@ -157,6 +168,7 @@ impl Desk {
     fn frame(&mut self, events: Vec<Event>) -> Option<String> {
         self.time += 0.02;
         let app = &mut self.app;
+        let navigator = self.navigator;
         let output = self.ctx.run_ui(
             RawInput {
                 events,
@@ -169,14 +181,30 @@ impl Desk {
                 ..Default::default()
             },
             |ui| {
+                app.state.workbench.pane_focus.begin_frame();
                 app.handle_shortcuts(ui.ctx());
-                egui::CentralPanel::default().show(ui, |ui| {
+                if navigator {
+                    let panel = egui::Panel::left("navigator").show(ui, |ui| {
+                        let _ = ui.button(NAVIGATOR_CONTROL);
+                    });
+                    app.state.workbench.pane_focus.record(
+                        ui.ctx(),
+                        Pane::Navigator,
+                        &panel.response,
+                    );
+                }
+                let document = egui::CentralPanel::default().show(ui, |ui| {
                     super::with_surface_parts(app, |state, controller| {
                         rspice_app_results::workbench::documents::result_document::show(
                             ui, state, controller,
                         );
                     });
                 });
+                app.state
+                    .workbench
+                    .pane_focus
+                    .record(ui.ctx(), Pane::Document, &document.response);
+                app.state.take_pane_focus_step(ui.ctx());
             },
         );
         let update = output.platform_output.accesskit_update?;
@@ -339,5 +367,60 @@ fn shift_f10_opens_the_trace_menu() {
     assert!(
         egui::Popup::is_any_open(&desk.ctx),
         "Shift+F10 opens the trace's menu"
+    );
+}
+
+/// F6 steps from one pane's plot to the next before it goes on to the next
+/// part of the workbench, and Shift+F6 comes back the same way: a strip's
+/// panes took the pointer alone to reach before.
+#[test]
+fn f6_steps_through_the_panes_then_on_to_the_navigator() {
+    let mut run = peaked_run();
+    run.analyses[0].waveforms.push(
+        RetainedTrace::new(
+            "I(V1)",
+            TIME.to_vec(),
+            vec![0.0, 1.0, 2.0, 1.0, 0.0],
+            "#ff8800",
+        )
+        .with_unit("A"),
+    );
+    let mut desk = Desk::with(run, true);
+    let plot = |label: &Option<String>| {
+        label
+            .as_deref()
+            .is_some_and(|label| label.contains("Drag to pan"))
+    };
+    let mut focus = None;
+    for _ in 0..80 {
+        focus = desk.press(Key::Tab, Modifiers::NONE);
+        if plot(&focus) {
+            break;
+        }
+    }
+    let first = focus.expect("Tab reaches a plot");
+    assert!(plot(&Some(first.clone())), "Tab reaches a plot: {first}");
+
+    let second = desk.press(Key::F6, Modifiers::NONE);
+    assert!(plot(&second), "F6 goes to the next pane's plot: {second:?}");
+    assert_ne!(second.as_deref(), Some(first.as_str()));
+    assert_eq!(
+        desk.press(Key::F6, Modifiers::NONE).as_deref(),
+        Some(NAVIGATOR_CONTROL),
+        "after the last pane, F6 goes on to the next part"
+    );
+    assert_eq!(
+        desk.press(Key::F6, Modifiers::NONE).as_deref(),
+        Some(first.as_str()),
+        "and comes back into the document at its first pane"
+    );
+    assert_eq!(
+        desk.press(Key::F6, Modifiers::SHIFT).as_deref(),
+        Some(NAVIGATOR_CONTROL)
+    );
+    assert_eq!(
+        desk.press(Key::F6, Modifiers::SHIFT),
+        second,
+        "Shift+F6 comes back into the document at its last pane"
     );
 }

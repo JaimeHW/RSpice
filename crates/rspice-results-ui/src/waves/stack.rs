@@ -1799,6 +1799,7 @@ fn show_unit_pane(
     };
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
     let response = drawn.response;
+    note_plot_stop(ui.ctx(), response.response.id);
     // A pane becomes the active one when the reader acts on it: a click, a
     // drag, a cursor placed. Pointing at it is not acting on it, and a pane
     // that took the instrument's actions as the pointer crossed it handed
@@ -1994,3 +1995,41 @@ fn paint_active_rail(
 
 #[cfg(test)]
 mod tests;
+
+/// The plots the stack drew in one pass, top to bottom.
+#[derive(Clone, Default)]
+struct PlotStops {
+    pass: u64,
+    plots: Vec<egui::Id>,
+}
+
+fn plot_stops_id() -> egui::Id {
+    egui::Id::new("rspice.results.plot-stops")
+}
+
+/// Note a plot the stack drew this pass, after the ones above it.
+pub(crate) fn note_plot_stop(ctx: &egui::Context, plot: egui::Id) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| {
+        let stops = data.get_temp_mut_or_default::<PlotStops>(plot_stops_id());
+        if stops.pass != pass {
+            *stops = PlotStops {
+                pass,
+                plots: Vec::new(),
+            };
+        }
+        stops.plots.push(plot);
+    });
+}
+
+/// The plots of every strip and pane the stack drew this pass, top to
+/// bottom: where F6 and Shift+F6 step inside the Results document before
+/// they go on to the next part of the workbench. Empty in a pass that drew
+/// no stack.
+pub fn plot_stops(ctx: &egui::Context) -> Vec<egui::Id> {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<PlotStops>(plot_stops_id()))
+        .filter(|stops| stops.pass == pass)
+        .map(|stops| stops.plots)
+        .unwrap_or_default()
+}

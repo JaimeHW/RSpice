@@ -6,7 +6,9 @@
 //! its next-part and previous-part commands. A pane that is not drawn is passed
 //! over, as is one with nothing in it to focus. Focus lands on the pane's first
 //! control, or on the document's own editor or canvas when the document has
-//! one, because that is what the reader came back to the document for.
+//! one, because that is what the reader came back to the document for. A
+//! document with several, as Results' strips and panes are, is stepped
+//! through one at a time before the keys go on to the next pane.
 
 use egui::{Context, Id, LayerId, Rect, Response};
 
@@ -85,19 +87,19 @@ impl PaneFocus {
 
     /// Take the waiting step. Runs after every pane has drawn, so the target
     /// is chosen from the controls actually on screen this frame.
-    /// `document_control` is the document's own editor or canvas, if it has
-    /// one.
-    pub fn apply(&mut self, ctx: &Context, document_control: Option<Id>) {
+    /// `document_stops` are the document's own editors or canvases in the
+    /// order the keys visit them; none when it has none.
+    pub fn apply(&mut self, ctx: &Context, document_stops: &[Id]) {
         let Some(step) = self.pending.take() else {
             return;
         };
-        if let Some(target) = self.target(ctx, step, document_control) {
+        if let Some(target) = self.target(ctx, step, document_stops) {
             ctx.memory_mut(|memory| memory.request_focus(target));
             ctx.request_repaint();
         }
     }
 
-    fn target(&self, ctx: &Context, step: PaneStep, document_control: Option<Id>) -> Option<Id> {
+    fn target(&self, ctx: &Context, step: PaneStep, document_stops: &[Id]) -> Option<Id> {
         let panes: Vec<DrawnPane> = PANE_ORDER
             .iter()
             .filter_map(|pane| self.drawn.iter().find(|drawn| drawn.pane == *pane).copied())
@@ -106,6 +108,24 @@ impl PaneFocus {
             return None;
         }
         let focused = ctx.memory(|memory| memory.focused());
+        // On one of the document's stops, the keys take the next stop first.
+        if let Some(document) = panes.iter().find(|drawn| drawn.pane == Pane::Document)
+            && let Some(at) =
+                focused.and_then(|id| document_stops.iter().position(|stop| *stop == id))
+        {
+            let further = match step {
+                PaneStep::Next => &document_stops[at + 1..],
+                PaneStep::Previous => &document_stops[..at],
+            };
+            let mut further = further.iter();
+            let next = match step {
+                PaneStep::Next => further.find(|stop| Self::usable(ctx, *document, **stop)),
+                PaneStep::Previous => further.rfind(|stop| Self::usable(ctx, *document, **stop)),
+            };
+            if let Some(next) = next {
+                return Some(*next);
+            }
+        }
         let current = focused.and_then(|id| Self::pane_holding(ctx, &panes, id));
         let count = panes.len();
         // With the keyboard nowhere in the panes, the first press goes to the
@@ -127,7 +147,26 @@ impl PaneFocus {
                 PaneStep::Previous => (start + count - offset) % count,
             })
             .chain(current.is_none().then_some(start))
-            .find_map(|index| Self::landing_control(ctx, panes[index], document_control))
+            .find_map(|index| Self::landing_control(ctx, panes[index], step, document_stops))
+    }
+
+    /// Whether `id` is a control of `drawn` the keys can land on.
+    fn usable(ctx: &Context, drawn: DrawnPane, id: Id) -> bool {
+        ctx.viewport(|viewport| {
+            viewport
+                .this_pass
+                .widgets
+                .get(id)
+                .is_some_and(|widget| Self::lands_in(drawn, widget))
+        })
+    }
+
+    fn lands_in(drawn: DrawnPane, widget: &egui::WidgetRect) -> bool {
+        widget.enabled
+            && widget.sense.is_focusable()
+            && widget.interact_rect.is_positive()
+            // A splitter straddles the pane's edge; it is not inside.
+            && drawn.rect.contains_rect(widget.interact_rect)
     }
 
     fn pane_holding(ctx: &Context, panes: &[DrawnPane], id: Id) -> Option<usize> {
@@ -137,25 +176,26 @@ impl PaneFocus {
         })
     }
 
+    /// Where a step into `drawn` lands: the document's first stop going on,
+    /// its last coming back, or else the pane's first control.
     fn landing_control(
         ctx: &Context,
         drawn: DrawnPane,
-        document_control: Option<Id>,
+        step: PaneStep,
+        document_stops: &[Id],
     ) -> Option<Id> {
         ctx.viewport(|viewport| {
             let widgets = &viewport.this_pass.widgets;
-            let usable = |widget: &egui::WidgetRect| {
-                widget.enabled
-                    && widget.sense.is_focusable()
-                    && widget.interact_rect.is_positive()
-                    // A splitter straddles the pane's edge; it is not inside.
-                    && drawn.rect.contains_rect(widget.interact_rect)
-            };
-            document_control
+            let usable = |widget: &&egui::WidgetRect| Self::lands_in(drawn, widget);
+            let stops = document_stops
+                .iter()
                 .filter(|_| drawn.pane == Pane::Document)
-                .and_then(|id| widgets.get(id))
-                .filter(|widget| usable(widget))
-                .or_else(|| widgets.get_layer(drawn.layer).find(|widget| usable(widget)))
+                .filter_map(|id| widgets.get(*id));
+            let stop = match step {
+                PaneStep::Next => stops.filter(usable).next(),
+                PaneStep::Previous => stops.filter(usable).last(),
+            };
+            stop.or_else(|| widgets.get_layer(drawn.layer).find(usable))
                 .map(|widget| widget.id)
         })
     }
@@ -196,7 +236,7 @@ mod tests {
                     ids[1] = Some(ui.button("middle").id);
                 });
                 panes.record(ui.ctx(), Pane::Document, &middle.response);
-                panes.apply(ui.ctx(), None);
+                panes.apply(ui.ctx(), &[]);
             });
             let focused = ctx.memory(|memory| memory.focused());
             landed = if focused.is_some() && focused == ids[0] {

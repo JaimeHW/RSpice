@@ -212,7 +212,8 @@ impl AppState {
     }
 
     /// Take the step the F6 keys asked for, once every pane has drawn. The
-    /// document's own editor or canvas is where a step into the document lands.
+    /// document's own editor or canvas is where a step into the document
+    /// lands; in Results each strip's and pane's plot is a stop of its own.
     pub(crate) fn take_pane_focus_step(&mut self, ctx: &egui::Context) {
         let document_control = self
             .workbench
@@ -225,7 +226,16 @@ impl AppState {
                     self.model.workspace.content.active_view_type(),
                 )
             });
-        self.workbench.pane_focus.apply(ctx, document_control);
+        let document_stops = match document_control {
+            Some(control) => vec![control],
+            None if self.workbench.workspace
+                == rspice_app_state::workbench::workspace::Workspace::Results =>
+            {
+                rspice_results_ui::waves::stack::plot_stops(ctx)
+            }
+            None => Vec::new(),
+        };
+        self.workbench.pane_focus.apply(ctx, &document_stops);
     }
 
     /// Close a route-owned transient surface without stranding its canonical

@@ -1245,6 +1245,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         None,
         Some(&readout),
     );
+    super::stack::note_plot_stop(ui.ctx(), response.response.id);
 
     // A cursor point is taken hold of and dragged along its curve: the
     // cursor moves to the instant of the sample nearest the pointer, so the
