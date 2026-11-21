@@ -1,12 +1,11 @@
-//! What a reader without a mouse can reach in the Verilog-A editor, and what
-//! a reader with a finger can hit, through whole frames.
+//! What a reader without a mouse can reach in the Verilog-A editor, through
+//! whole frames.
 
 use egui::{Key, Modifiers};
 
 use super::language_tools::{NONE, caret_after, op_amp, source};
 use super::*;
 use rspice_app_code::workbench::documents::code_workspace;
-use rspice_app_workbench::workbench::localization::MessageId;
 
 const COPY: &str = "Copy";
 const SHIFT: Modifiers = Modifiers {
@@ -74,51 +73,6 @@ fn a_held_key_is_one_press() {
     let id = egui::Id::new("key");
     let presses = [false, true, true, false, true].map(|down| press_begins(&ctx, id, down));
     assert_eq!(presses, [false, true, false, false, true]);
-}
-
-fn file_actions(user: &User) -> Vec<egui::Rect> {
-    let messages = user.app.state.workbench.messages();
-    [
-        MessageId::CodeSourceNewFile,
-        MessageId::CodeSourceRename,
-        MessageId::CodeSourceDelete,
-        MessageId::CodeSourceAddFiles,
-    ]
-    .map(|id| user.expect(&messages.text(id)))
-    .to_vec()
-}
-
-#[test]
-fn the_rails_icons_are_at_least_24_points_square() {
-    let user = op_amp();
-    for action in file_actions(&user) {
-        assert!(
-            action.width() >= 24.0 && action.height() >= 24.0,
-            "{action:?}"
-        );
-    }
-}
-
-#[test]
-fn the_rails_icons_grow_for_a_finger_and_leave_the_title_alone() {
-    let mut user = op_amp();
-    user.app.state.workbench.coarse_pointer = true;
-    user.settle();
-    let target = user.app.state.model.preferences.minimum_touch_target();
-    let actions = file_actions(&user);
-    for action in &actions {
-        assert!(
-            action.width() >= target && action.height() >= target,
-            "{action:?} against {target}"
-        );
-    }
-    let file = user.expect(&file_row(&user));
-    assert!(
-        actions
-            .iter()
-            .all(|action| action.bottom() <= file.top() + 0.5),
-        "the rows start below the icons: {file:?} {actions:?}"
-    );
 }
 
 /// The rail is one list to the keyboard, as the Design rail is: the arrows

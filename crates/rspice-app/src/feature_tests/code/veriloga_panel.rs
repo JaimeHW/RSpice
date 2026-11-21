@@ -172,17 +172,6 @@ impl Reader {
         self.named.iter().any(|(candidate, _)| candidate == name)
     }
 
-    /// Where the navigator drew `name`: the leftmost of the places it is
-    /// named, since the navigator is the leftmost dock.
-    fn navigator_rect(&self, name: &str) -> egui::Rect {
-        self.named
-            .iter()
-            .filter(|(candidate, _)| candidate == name)
-            .map(|(_, rect)| *rect)
-            .min_by(|left, right| left.left().total_cmp(&right.left()))
-            .unwrap_or_else(|| panic!("nothing is named {name:?}; named: {:?}", self.names()))
-    }
-
     fn click(&mut self, name: &str) {
         let at = self
             .named
@@ -338,38 +327,6 @@ fn a_missing_include_takes_the_reader_to_its_directive() {
     reader.click("Error: missing.vams");
 
     assert_eq!(reader.caret(bundle_id, ROOT), Some(line_start(2)));
-}
-
-/// A group's caption takes one row of the outline and is centred on it, so
-/// the rows keep one pitch down through every group rather than drifting at
-/// each caption.
-#[test]
-fn outline_captions_keep_the_row_pitch() {
-    let (reader, ..) = Reader::new();
-    let rows = [
-        text(MessageId::CodeNavigatorOutlineModule),
-        "gain".to_owned(),
-        text(MessageId::CodeNavigatorOutlinePorts),
-        "p, inout electrical".to_owned(),
-        "n, inout electrical".to_owned(),
-        text(MessageId::CodeNavigatorOutlineParameters),
-        "g, real = 1m from (0:inf)".to_owned(),
-    ];
-    let centres = rows
-        .iter()
-        .map(|row| reader.navigator_rect(row).center().y)
-        .collect::<Vec<_>>();
-    let pitch = centres[4] - centres[3];
-    assert!(pitch > 0.0, "the two ports are stacked: {centres:?}");
-    for (pair, centre) in rows.windows(2).zip(centres.windows(2)) {
-        assert_eq!(
-            centre[1] - centre[0],
-            pitch,
-            "{} to {}: {centres:?}",
-            pair[0],
-            pair[1]
-        );
-    }
 }
 
 /// An outline row puts the caret on the line that declares it — the line

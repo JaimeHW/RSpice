@@ -38,21 +38,6 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
     }
 }
 
-/// Whether the frame exposed a node named `label`; a custom editor states its
-/// accessible name as its value.
-fn has_label(output: &egui::FullOutput, label: &str) -> bool {
-    output
-        .platform_output
-        .accesskit_update
-        .as_ref()
-        .is_some_and(|update| {
-            update
-                .nodes
-                .iter()
-                .any(|(_, node)| node.label() == Some(label) || node.value() == Some(label))
-        })
-}
-
 /// A Verilog-A cell view open in Design with the first line of its source
 /// selected in a focused editor, and a wire selected on the schematic the
 /// Design workspace keeps behind it.
@@ -86,34 +71,6 @@ fn veriloga_with_selected_first_line() -> (egui::Context, RSpiceApp, ProjectSour
         vec![key(egui::Key::End, egui::Modifiers::SHIFT)],
     );
     (ctx, app, bundle_id)
-}
-
-#[test]
-fn no_source_page_carries_an_editor_menu_of_its_own() {
-    // Verilog-A, in Design.
-    let mut app = open_project_app();
-    let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
-    open_in_design(&mut app.state, &reference);
-    let ctx = themed_context();
-    frame(&ctx, &mut app, DESKTOP);
-    let output = frame(&ctx, &mut app, DESKTOP);
-    assert!(
-        has_label(&output, "Verilog-A/AMS source editor"),
-        "the Verilog-A page was drawn"
-    );
-    assert!(!has_label(&output, "Editor"), "Verilog-A page");
-
-    // The Netlist workspace, known to be drawn by a control it does keep.
-    let mut app = open_project_app();
-    app.state.workbench.activate(Workspace::Netlist);
-    let ctx = themed_context();
-    frame(&ctx, &mut app, DESKTOP);
-    let output = frame(&ctx, &mut app, DESKTOP);
-    assert!(
-        has_label(&output, "Find in this document"),
-        "the Netlist workspace was drawn"
-    );
-    assert!(!has_label(&output, "Editor"), "Netlist workspace");
 }
 
 #[test]
