@@ -286,10 +286,10 @@ class BrowserWorkbenchTests(unittest.TestCase):
 
     def test_a_quota_stop_must_keep_rows_that_read_back_within_the_quota(self):
         kept = {"chunks": 3, "full": True, "record": {"rows": 524288},
-                "checked": {"kind": "checked", "len": 9 << 20}}
+                "checked": {"op": "checked", "len": 9 << 20}}
         self.assertEqual(verify_quota_stop(kept, 24 << 20)["rows_kept"], 524288)
         for wrong in ({**kept, "full": False}, {**kept, "record": {"rows": 0}},
-                      {**kept, "checked": {"kind": "failed", "reason": "damaged"}},
+                      {**kept, "checked": {"op": "failed", "reason": "damaged"}},
                       {"error": "QuotaExceededError"}):
             with self.assertRaises(AssertionError):
                 verify_quota_stop(wrong, 24 << 20)

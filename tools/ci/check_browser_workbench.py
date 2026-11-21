@@ -944,14 +944,14 @@ QUOTA_WRITE = """
         const store = 'quota-' + crypto.randomUUID();
         try {
             const opened = await ask({op: 'open', store});
-            if (opened.standing.kind !== 'held') throw new Error(JSON.stringify(opened));
+            if (opened.op !== 'opened' || opened.standing.kind !== 'held') throw new Error(JSON.stringify(opened));
             const signals = 3, rows = (8 << 20) / ((signals + 1) * 8);
             const begun = await ask({op: 'begin', digest: '0'.repeat(64), schema: {
                 x: ['time', 's'], analysis: 'tran', sweep: [], seed: null, options: [],
                 signals: [0, 1, 2].map(signal => ({
                     name: 'v(n' + signal + ')', unit: 'V', complex: false, quantity: '', path: ''}))
             }});
-            if (begun.kind !== 'begun') throw new Error(JSON.stringify(begun));
+            if (begun.op !== 'begun') throw new Error(JSON.stringify(begun));
             let state = 7, chunks = 0, full = false;
             const random = () => {
                 state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
@@ -962,12 +962,12 @@ QUOTA_WRITE = """
                 for (let row = 0; row < rows; row++) x[row] = (chunks * rows + row) * 1e-9;
                 for (let i = 0; i < values.length; i++) values[i] = random();
                 const taken = await ask({op: 'rows', write: begun.write}, [x, values]);
-                if (taken.kind !== 'taken') throw new Error(JSON.stringify(taken));
+                if (taken.op !== 'taken') throw new Error(JSON.stringify(taken));
                 full = taken.full;
                 chunks++;
             }
             const finished = await ask({op: 'finish', write: begun.write});
-            if (finished.kind !== 'finished') throw new Error(JSON.stringify(finished));
+            if (finished.op !== 'finished') throw new Error(JSON.stringify(finished));
             await ask({op: 'close'});
             await ask({op: 'open', store});
             const checked = await ask({op: 'check', digest: finished.record.digest});
@@ -988,7 +988,7 @@ def verify_quota_stop(result, quota):
         raise AssertionError("The quota write failed: " + result["error"])
     if not result["full"] or result["record"]["rows"] <= 0:
         raise AssertionError(f"The quota did not stop the write on rows it kept: {result}")
-    if result["checked"].get("kind") != "checked" or result["checked"]["len"] <= 0:
+    if result["checked"].get("op") != "checked" or result["checked"]["len"] <= 0:
         raise AssertionError(f"The rows the full store kept did not read back: {result}")
     if result["checked"]["len"] > quota:
         raise AssertionError(f"The full store kept more than the quota allows: {result}")
