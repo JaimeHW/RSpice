@@ -155,6 +155,13 @@ pub const LOOP_GAIN_REAL_TRACE: &str = "Re(Loop Gain)";
 /// The trace a stability run keeps the imaginary part of its loop gain under.
 pub const LOOP_GAIN_IMAGINARY_TRACE: &str = "Im(Loop Gain)";
 
+/// The trace a stability run keeps its loop gain's magnitude under, in
+/// decibels: the unit is the trace's, not its name's.
+pub const LOOP_GAIN_DECIBELS_TRACE: &str = "Loop Gain";
+
+/// The trace a stability run keeps its loop gain's phase under, in degrees.
+pub const LOOP_PHASE_TRACE: &str = "Loop Phase";
+
 /// What a loop gain's locus is called on the sheet that draws it.
 pub const LOOP_GAIN_LOCUS_LABEL: &str = "L(jω)";
 

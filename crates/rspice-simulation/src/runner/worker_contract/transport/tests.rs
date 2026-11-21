@@ -99,17 +99,12 @@ fn stb_worker_retains_zero_samples_and_rejects_invalid_availability() {
     assert_eq!(retained.validate_retained_evidence(), Ok(()));
     let json = serde_json::to_string(&retained.result_payload).unwrap();
     assert!(json.contains("DC loop gain was not measured"));
-    assert!(
-        !retained
-            .waveforms
-            .iter()
-            .any(|w| w.name == "Loop Phase (deg)")
-    );
+    assert!(!retained.waveforms.iter().any(|w| w.name == "Loop Phase"));
     assert_eq!(
         retained
             .waveforms
             .iter()
-            .filter(|w| w.name.starts_with("Loop Phase (deg) [segment"))
+            .filter(|w| w.name.starts_with("Loop Phase [segment"))
             .count(),
         2
     );

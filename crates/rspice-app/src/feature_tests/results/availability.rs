@@ -794,24 +794,28 @@ pub(super) fn stability_analysis() -> AnalysisResult {
             (4.0 / (1.0 + x * x).powf(1.5), -3.0 * x.atan())
         })
         .collect();
-    let trace = |name: &str, values: Vec<f64>| {
-        RetainedTrace::new(name, frequency.clone(), values, "#00aaff")
+    let trace = |name: &str, unit: &str, values: Vec<f64>| {
+        RetainedTrace::new(name, frequency.clone(), values, "#00aaff").with_unit(unit)
     };
     AnalysisResult::new(1, AnalysisType::Stb, "STB").with_waveforms(vec![
         trace(
             rspice_results::nyquist::LOOP_GAIN_REAL_TRACE,
+            "1",
             polar.iter().map(|(m, p)| m * p.cos()).collect(),
         ),
         trace(
             rspice_results::nyquist::LOOP_GAIN_IMAGINARY_TRACE,
+            "1",
             polar.iter().map(|(m, p)| m * p.sin()).collect(),
         ),
         trace(
-            "Loop Gain (dB)",
+            rspice_results::nyquist::LOOP_GAIN_DECIBELS_TRACE,
+            "dB",
             polar.iter().map(|(m, _)| 20.0 * m.log10()).collect(),
         ),
         trace(
-            "Loop Phase (deg)",
+            rspice_results::nyquist::LOOP_PHASE_TRACE,
+            "°",
             polar
                 .iter()
                 .map(|(_, p)| {

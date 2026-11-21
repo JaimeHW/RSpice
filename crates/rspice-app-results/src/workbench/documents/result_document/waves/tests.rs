@@ -1596,15 +1596,10 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
     }
     run.add_analysis(
         AnalysisResult::new(3, AnalysisType::Stb, "STB").with_waveforms(vec![
-            RetainedTrace::new("Loop Gain (dB)", vec![1.0, 10.0], vec![40.0, 0.0], "#0af")
+            RetainedTrace::new("Loop Gain", vec![1.0, 10.0], vec![40.0, 0.0], "#0af")
                 .with_unit("dB"),
-            RetainedTrace::new(
-                "Loop Phase (deg)",
-                vec![1.0, 10.0],
-                vec![-90.0, -135.0],
-                "#fa0",
-            )
-            .with_unit("°"),
+            RetainedTrace::new("Loop Phase", vec![1.0, 10.0], vec![-90.0, -135.0], "#fa0")
+                .with_unit("°"),
             RetainedTrace::new("|Nyquist L(jw)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
         ]),
     );
@@ -1637,7 +1632,7 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
     );
     let stb = models.last().expect("STB model");
     assert!(stb.traces.iter().any(|trace| {
-        trace.source_waveform_name == "Loop Gain (dB)" && trace.kind == TraceKind::Value
+        trace.source_waveform_name == "Loop Gain" && trace.kind == TraceKind::Value
     }));
     assert!(
         stb.traces

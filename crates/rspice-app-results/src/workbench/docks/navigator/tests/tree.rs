@@ -184,5 +184,9 @@ fn every_row_states_its_kind() {
     assert_eq!(SignalKind::of_waveform("D(x1.q)", "Voltage").glyph(), "D");
     assert_eq!(SignalKind::of_waveform("E(vref)", "Quantity").glyph(), "R");
     assert_eq!(SignalKind::of_waveform("VP(out)", "Phase").glyph(), "°");
+    assert_eq!(
+        SignalKind::of_waveform("Re(Loop Gain)", "Ratio").glyph(),
+        "÷"
+    );
     assert_eq!(SignalKind::Bus.label(), "Digital bus");
 }

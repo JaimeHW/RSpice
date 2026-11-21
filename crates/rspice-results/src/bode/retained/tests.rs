@@ -627,12 +627,8 @@ fn stb_summary_preserves_retained_decibels_without_double_conversion() {
     let analysis = response_analysis(
         AnalysisType::Stb,
         vec![
-            wave("Loop Gain (dB)", &[1.0, 10.0, 100.0], &[40.0, 0.0, -20.0]),
-            wave(
-                "Loop Phase (deg)",
-                &[1.0, 10.0, 100.0],
-                &[-90.0, -135.0, -180.0],
-            ),
+            wave("Loop Gain", &[1.0, 10.0, 100.0], &[40.0, 0.0, -20.0]),
+            wave("Loop Phase", &[1.0, 10.0, 100.0], &[-90.0, -135.0, -180.0]),
         ],
     );
 
@@ -773,9 +769,9 @@ fn every_response_is_offered_by_name_and_the_chosen_one_is_measured() {
     let stb = response_analysis(
         AnalysisType::Stb,
         vec![
-            wave("Loop Gain (dB) [segment 1]", &x, &[20.0, 0.0, -20.0]),
-            wave("Loop Gain (dB) [segment 2]", &x, &[20.0, 0.0, -20.0]),
-            wave("Loop Phase (deg) [segment 1]", &x, &[0.0, -90.0, -180.0]),
+            wave("Loop Gain [segment 1]", &x, &[20.0, 0.0, -20.0]),
+            wave("Loop Gain [segment 2]", &x, &[20.0, 0.0, -20.0]),
+            wave("Loop Phase [segment 1]", &x, &[0.0, -90.0, -180.0]),
             wave("Re(Loop Gain)", &x, &[1.0, 1.0, 1.0]),
         ],
     );

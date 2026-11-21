@@ -28,12 +28,20 @@ impl AnalysisResultPayload {
             )
             .with_unit("1"),
         ];
-        append_segments(&mut traces, points, "Loop Gain (dB)", "dB", |p| {
-            p.magnitude_db
-        });
-        append_segments(&mut traces, points, "Loop Phase (deg)", "deg", |p| {
-            p.phase_deg
-        });
+        append_segments(
+            &mut traces,
+            points,
+            crate::nyquist::LOOP_GAIN_DECIBELS_TRACE,
+            "dB",
+            |p| p.magnitude_db,
+        );
+        append_segments(
+            &mut traces,
+            points,
+            crate::nyquist::LOOP_PHASE_TRACE,
+            "°",
+            |p| p.phase_deg,
+        );
         traces.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(traces)
     }

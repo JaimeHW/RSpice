@@ -2,6 +2,7 @@
 
 use super::{AcBodeMetrics, metrics_from_curves};
 use crate::analysis_type::AnalysisType;
+use crate::nyquist::{LOOP_GAIN_DECIBELS_TRACE, LOOP_PHASE_TRACE};
 use crate::waveform::{RetainedWaveform, SharedWaveformValues};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,17 +52,17 @@ fn stb_trace_suffix<'a>(name: &'a str, prefix: &str) -> Option<&'a str> {
 
 /// Identify the core's complete Bode traces and its separately retained defined segments.
 pub fn is_stb_bode_trace(name: &str) -> bool {
-    stb_trace_suffix(name, "Loop Gain (dB)").is_some()
-        || stb_trace_suffix(name, "Loop Phase (deg)").is_some()
+    stb_trace_suffix(name, LOOP_GAIN_DECIBELS_TRACE).is_some()
+        || stb_trace_suffix(name, LOOP_PHASE_TRACE).is_some()
 }
 
 /// The response one retained trace measures, by the name a Bode card gives
 /// it, when the trace is a response's magnitude: a stability analysis's
-/// `Loop Gain (dB)` (or one of its segments) is the `Loop Gain`, and any
+/// `Loop Gain` (or one of its segments) is named as it is retained, and any
 /// other response's `|V(out)|` is `V(out)`.
 pub fn response_signal(analysis_type: AnalysisType, trace: &str) -> Option<String> {
     if analysis_type == AnalysisType::Stb {
-        stb_trace_suffix(trace, "Loop Gain (dB)").map(|suffix| format!("Loop Gain{suffix}"))
+        stb_trace_suffix(trace, LOOP_GAIN_DECIBELS_TRACE).map(|_| trace.to_owned())
     } else {
         trace.starts_with('|').then(|| {
             trace
@@ -102,15 +103,16 @@ pub fn ac_bode_shape_for_analysis<W: AsRef<RetainedWaveform>>(
         let mag_index = waveforms
             .iter()
             .enumerate()
-            .filter(|(_, w)| stb_trace_suffix(&w.as_ref().name, "Loop Gain (dB)").is_some())
+            .filter(|(_, w)| stb_trace_suffix(&w.as_ref().name, LOOP_GAIN_DECIBELS_TRACE).is_some())
             .max_by_key(|(_, w)| prefer_magnitude(w))?
             .0;
-        let suffix = stb_trace_suffix(&waveforms[mag_index].as_ref().name, "Loop Gain (dB)")?;
-        let phase_name = format!("Loop Phase (deg){suffix}");
+        let magnitude = &waveforms[mag_index].as_ref().name;
+        let suffix = stb_trace_suffix(magnitude, LOOP_GAIN_DECIBELS_TRACE)?;
+        let phase_name = format!("{LOOP_PHASE_TRACE}{suffix}");
         let phase_index = waveforms
             .iter()
             .position(|waveform| waveform.as_ref().name == phase_name);
-        (format!("Loop Gain{suffix}"), mag_index, phase_index)
+        (magnitude.clone(), mag_index, phase_index)
     } else {
         let (mag_index, mag) = select_magnitude_trace(waveforms, prefer_magnitude)?;
         let signal = mag

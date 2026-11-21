@@ -1695,6 +1695,7 @@ pub fn result_quantity_kind_label(name: &str, unit: &str) -> &'static str {
         "°" => "Phase",
         "W" => "Power",
         "dB" => "Magnitude",
+        "1" => "Ratio",
         "A" => "Current",
         "V^2/Hz" => "Noise PSD",
         _ => "Quantity",

@@ -310,7 +310,8 @@ pub(super) enum SignalKind {
     Real,
     Bus,
     /// Any other quantity, by its own short mark: `°` for a phase, `dB` for
-    /// a magnitude, `P` for a power, `N` for a noise density.
+    /// a magnitude, `÷` for a dimensionless ratio such as a loop gain, `P`
+    /// for a power, `N` for a noise density.
     Other(&'static str),
 }
 
@@ -330,6 +331,7 @@ impl SignalKind {
             "Phase" => Self::Other("°"),
             "Power" => Self::Other("P"),
             "Magnitude" => Self::Other("dB"),
+            "Ratio" => Self::Other("÷"),
             "Noise PSD" => Self::Other("N"),
             _ => Self::Other("~"),
         }
@@ -371,6 +373,7 @@ impl SignalKind {
             Self::Other("°") => "Phase",
             Self::Other("P") => "Power",
             Self::Other("dB") => "Magnitude",
+            Self::Other("÷") => "Ratio",
             Self::Other("N") => "Noise density",
             Self::Other(_) => "Quantity",
         }

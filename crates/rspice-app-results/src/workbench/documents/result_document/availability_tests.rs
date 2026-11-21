@@ -372,15 +372,10 @@ fn periodic_and_stability_responses_enable_bode_but_pstb_modes_do_not() {
 
     let stb = state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Stb, "STB").with_waveforms(vec![
+            RetainedTrace::new("Loop Gain", vec![1.0, 10.0], vec![40.0, 0.0], "#00aaff")
+                .with_unit("dB"),
             RetainedTrace::new(
-                "Loop Gain (dB)",
-                vec![1.0, 10.0],
-                vec![40.0, 0.0],
-                "#00aaff",
-            )
-            .with_unit("dB"),
-            RetainedTrace::new(
-                "Loop Phase (deg)",
+                "Loop Phase",
                 vec![1.0, 10.0],
                 vec![-90.0, -135.0],
                 "#ffbd2e",
