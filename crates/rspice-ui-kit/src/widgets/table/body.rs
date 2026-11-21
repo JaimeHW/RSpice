@@ -270,6 +270,11 @@ impl DataTable<'_> {
             };
             let (cell_rect, region) = view.cell(geometry, column_index, y);
             let clip = region.intersect(ui.clip_rect());
+            if let Some(wash) = cell.wash {
+                ui.painter()
+                    .with_clip_rect(clip)
+                    .rect_filled(cell_rect.shrink(1.0), 0.0, wash);
+            }
             #[cfg(any(test, feature = "test-support"))]
             crate::probe::probe(
                 ui,

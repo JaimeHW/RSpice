@@ -291,6 +291,8 @@ pub struct Cell {
     /// What the row names has unsaved changes: the document tab's neutral
     /// dot follows the words.
     unsaved: bool,
+    /// A fill behind the words, for a cell whose colour states a value.
+    wash: Option<egui::Color32>,
 }
 
 /// Whether a cell's row opens and closes in a tree.
@@ -318,6 +320,7 @@ impl Cell {
             indent: 0,
             twist: Twist::None,
             unsaved: false,
+            wash: None,
         }
     }
 
@@ -404,6 +407,14 @@ impl Cell {
     /// that the saved version differs.
     pub fn unsaved(mut self) -> Self {
         self.unsaved = true;
+        self
+    }
+
+    /// The same words over `wash`: a heat map's cell, whose colour states
+    /// its magnitude. The words keep their ink, so the wash must stay faint
+    /// enough to read them on.
+    pub fn wash(mut self, wash: egui::Color32) -> Self {
+        self.wash = Some(wash);
         self
     }
 
@@ -560,6 +571,8 @@ pub struct DataTable<'a> {
     drops: bool,
     /// Bring the selected row into view this frame.
     reveal: bool,
+    /// The revision of the rows' contents, when the page keeps one.
+    revision: Option<u64>,
 }
 
 /// A row dragged out of a table: the table, by the name it was built with,
@@ -738,30 +751,67 @@ impl Keys {
 /// at all of them. Rows are read on first use otherwise, so a table that only
 /// shows its rows reads only the rows in view.
 struct Rows<'f> {
-    read: Vec<Option<Vec<Cell>>>,
+    /// The rows this frame read, by index: only the ones it needed, so a
+    /// table of a million rows costs what its viewport shows.
+    read: std::collections::HashMap<usize, Vec<Cell>>,
+    rows: usize,
     row_at: &'f mut dyn FnMut(usize) -> Vec<Cell>,
 }
 
 impl<'f> Rows<'f> {
     fn new(rows: usize, row_at: &'f mut dyn FnMut(usize) -> Vec<Cell>) -> Self {
         Self {
-            read: vec![None; rows],
+            read: std::collections::HashMap::new(),
+            rows,
             row_at,
         }
     }
 
     fn get(&mut self, row: usize) -> &[Cell] {
-        let slot = &mut self.read[row];
-        if slot.is_none() {
-            *slot = Some((self.row_at)(row));
+        if row >= self.rows {
+            return &[];
         }
-        slot.as_deref().unwrap_or_default()
+        let row_at = &mut self.row_at;
+        self.read.entry(row).or_insert_with(|| row_at(row))
     }
 
     /// The cells a frame already read for `row`, without reading it.
     fn known(&self, row: usize) -> Option<&[Cell]> {
-        self.read.get(row)?.as_deref()
+        self.read.get(&row).map(Vec::as_slice)
     }
+}
+
+/// The lines a table shows and the rows among them, in the order shown, kept
+/// under the key of what they were arranged from.
+struct Arrangement {
+    key: u64,
+    lines: Vec<Line>,
+    shown: Vec<usize>,
+}
+
+/// What an arrangement was made from: the row count, the groups and which
+/// are folded, the filter, the sort and the rows' revision.
+fn arrangement_key(
+    rows: usize,
+    groups: &[Group],
+    folded: &BTreeSet<String>,
+    filter: Option<&str>,
+    sort: Option<Sort>,
+    revision: Option<u64>,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    rows.hash(&mut hasher);
+    for group in groups {
+        group.label.hash(&mut hasher);
+        group.first_row.hash(&mut hasher);
+    }
+    folded.hash(&mut hasher);
+    filter.hash(&mut hasher);
+    sort.map(|sort| (sort.column, sort.direction == SortDirection::Ascending))
+        .hash(&mut hasher);
+    revision.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl<'a> DataTable<'a> {
@@ -789,6 +839,7 @@ impl<'a> DataTable<'a> {
             drags: false,
             drops: false,
             reveal: false,
+            revision: None,
         }
     }
 
@@ -907,6 +958,16 @@ impl<'a> DataTable<'a> {
         self
     }
 
+    /// The revision of the rows' contents, which the page moves whenever a
+    /// row's words change. A sorted or filtered table reads every row once
+    /// per revision, sort and filter rather than on every frame, so a table
+    /// of a run's events costs only its viewport while the reader looks at
+    /// it. A page that gives none is read again each frame it is sorted.
+    pub fn revision(mut self, revision: u64) -> Self {
+        self.revision = Some(revision);
+        self
+    }
+
     pub fn show(
         mut self,
         ui: &mut Ui,
@@ -986,7 +1047,10 @@ impl<'a> DataTable<'a> {
         };
         let mut rows = Rows::new(self.rows, &mut shown_row);
 
-        // Which rows show, in what order.
+        // Which rows show, in what order. The order is kept between frames
+        // under what it was made from, so reading every row to sort or filter
+        // it happens when the rows, the sort or the filter change, never on
+        // a frame that changes none of them.
         let filter = state
             .as_deref()
             .map(|state| state.filter.trim().to_lowercase())
@@ -999,46 +1063,81 @@ impl<'a> DataTable<'a> {
                     .get(sort.column)
                     .is_some_and(|column| column.sortable)
             });
-        if filter.is_some() || sort.is_some() {
-            for row in 0..self.rows {
-                let _ = rows.get(row);
-            }
-        }
-        let sort_keys = sort.map(|sort| {
-            let keys = (0..self.rows)
-                .map(|row| {
-                    rows.known(row)
-                        .and_then(|cells| cells.get(sort.column))
-                        .map_or(SortKey::Missing, Cell::sort_key)
-                })
-                .collect::<Vec<_>>();
-            (keys, sort.direction)
-        });
-        let order = sort_keys.as_ref().map(|(keys, direction)| {
-            move |left: usize, right: usize| keys[left].order(&keys[right], *direction)
-        });
         let no_folds = BTreeSet::new();
-        let lines = arrange(
-            self.rows,
-            self.groups,
-            state.as_deref().map_or(&no_folds, |state| &state.folded),
-            |row| {
-                filter.as_deref().is_none_or(|needle| {
-                    rows.known(row)
-                        .is_some_and(|cells| cells.iter().any(|cell| cell.contains(needle)))
-                })
-            },
-            order
-                .as_ref()
-                .map(|order| order as &dyn Fn(usize, usize) -> Ordering),
-        );
-        let shown = lines
-            .iter()
-            .filter_map(|line| match line {
-                Line::Row(row) => Some(*row),
-                Line::Group { .. } => None,
-            })
-            .collect::<Vec<_>>();
+        let folded = state.as_deref().map_or(&no_folds, |state| &state.folded);
+        let reads_cells = filter.is_some() || sort.is_some();
+        let arrangement_key = (!reads_cells || self.revision.is_some()).then(|| {
+            arrangement_key(
+                self.rows,
+                self.groups,
+                folded,
+                filter.as_deref(),
+                sort,
+                self.revision,
+            )
+        });
+        let arrangement_id = ui.id().with((self.id, "arrangement"));
+        let kept = arrangement_key.and_then(|key| {
+            ui.ctx()
+                .data(|data| data.get_temp::<std::sync::Arc<Arrangement>>(arrangement_id))
+                .filter(|kept| kept.key == key)
+        });
+        let arrangement = match kept {
+            Some(kept) => kept,
+            None => {
+                if reads_cells {
+                    for row in 0..self.rows {
+                        let _ = rows.get(row);
+                    }
+                }
+                let sort_keys = sort.map(|sort| {
+                    let keys = (0..self.rows)
+                        .map(|row| {
+                            rows.known(row)
+                                .and_then(|cells| cells.get(sort.column))
+                                .map_or(SortKey::Missing, Cell::sort_key)
+                        })
+                        .collect::<Vec<_>>();
+                    (keys, sort.direction)
+                });
+                let order = sort_keys.as_ref().map(|(keys, direction)| {
+                    move |left: usize, right: usize| keys[left].order(&keys[right], *direction)
+                });
+                let lines = arrange(
+                    self.rows,
+                    self.groups,
+                    folded,
+                    |row| {
+                        filter.as_deref().is_none_or(|needle| {
+                            rows.known(row)
+                                .is_some_and(|cells| cells.iter().any(|cell| cell.contains(needle)))
+                        })
+                    },
+                    order
+                        .as_ref()
+                        .map(|order| order as &dyn Fn(usize, usize) -> Ordering),
+                );
+                let shown = lines
+                    .iter()
+                    .filter_map(|line| match line {
+                        Line::Row(row) => Some(*row),
+                        Line::Group { .. } => None,
+                    })
+                    .collect::<Vec<_>>();
+                let made = std::sync::Arc::new(Arrangement {
+                    key: arrangement_key.unwrap_or_default(),
+                    lines,
+                    shown,
+                });
+                if arrangement_key.is_some() {
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(arrangement_id, made.clone()));
+                }
+                made
+            }
+        };
+        let lines = &arrangement.lines;
+        let shown = &arrangement.shown;
 
         // Where the columns go.
         let bands_h = band_h * self.bands.len() as f32;

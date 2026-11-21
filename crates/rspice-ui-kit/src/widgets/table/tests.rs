@@ -429,6 +429,51 @@ fn a_head_click_sorts_stably_a_status_worst_first_and_the_third_restores_the_ord
     assert_eq!(shown(&geometry, 7), (0..7).collect::<Vec<_>>());
 }
 
+/// A sorted table of many rows reads them all once per revision of its
+/// rows, and after that only the rows in view: an idle frame over a run's
+/// event history reads a screenful, not the history.
+#[test]
+fn a_sorted_table_reads_every_row_once_per_revision_and_then_only_its_view() {
+    const ROWS: usize = 5_000;
+    let ctx = context();
+    let columns = named_columns();
+    let mut state = TableState {
+        sort: Some(Sort {
+            column: 1,
+            direction: SortDirection::Descending,
+        }),
+        ..TableState::default()
+    };
+    let reads = Counter::new(0usize);
+    let draw = |revision: u64, state: &mut TableState| {
+        frame(&ctx, WIDTH, Vec::new(), |ui| {
+            DataTable::new("sorted", &columns, ROWS)
+                .state(state)
+                .revision(revision)
+                .show(ui, |row| {
+                    reads.set(reads.get() + 1);
+                    named_row(row)
+                })
+        })
+        .1
+    };
+
+    let geometry = draw(1, &mut state);
+    assert!(reads.get() >= ROWS, "the sort read {} rows", reads.get());
+    assert_eq!(shown(&geometry, ROWS)[..3], [ROWS - 1, ROWS - 2, ROWS - 3]);
+    reads.set(0);
+    let geometry = draw(1, &mut state);
+    assert!(reads.get() < 100, "an idle frame read {} rows", reads.get());
+    assert_eq!(shown(&geometry, ROWS)[..3], [ROWS - 1, ROWS - 2, ROWS - 3]);
+    reads.set(0);
+    let _ = draw(2, &mut state);
+    assert!(
+        reads.get() >= ROWS,
+        "a new revision read {} rows",
+        reads.get()
+    );
+}
+
 #[test]
 fn an_unsortable_column_and_a_table_without_state_keep_the_page_order() {
     let ctx = context();
