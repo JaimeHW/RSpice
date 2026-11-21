@@ -997,7 +997,8 @@ fn settling_time(name: &str, trace: &Series, args: &[Argument]) -> Result<f64, E
     // dip through it says nothing about when the response finally stayed put.
     // Kept: the first sample's x, and the last sample outside the band with the one after it.
     let mut origin = None;
-    let mut last_outside: Option<((f64, f64), Option<(f64, f64)>)> = None;
+    type Sample = (f64, f64);
+    let mut last_outside: Option<(Sample, Option<Sample>)> = None;
     for (x, value) in from_start(trace, opening) {
         origin.get_or_insert(x);
         if let Some((_, after @ None)) = &mut last_outside {
