@@ -49,7 +49,7 @@ pub trait ColumnSource: Send + Sync {
     }
 
     /// The digest of the whole column, as its store states it: the
-    /// [`rspice_results_store::ColumnDigest`] of its rows, which the same column held in memory
+    /// `rspice_results_store::ColumnDigest` of its rows, which the same column held in memory
     /// has too. `None` when the store states none, as a run recovered without its end does not.
     fn column_digest(&self) -> Option<[u8; 32]> {
         None
@@ -173,11 +173,38 @@ pub enum WindowLead {
     Interpolated(f64),
 }
 
+/// The digest of a column held in memory, as a results store digests each column it stores
+/// (`rspice_results_store::ColumnDigest`, which this build may not link): the SHA-256 of its rows
+/// as little-endian binary64, in row order.
+#[derive(Default)]
+struct ColumnHasher(sha2::Sha256);
+
+impl ColumnHasher {
+    fn values(&mut self, values: &[f64]) {
+        use sha2::Digest as _;
+        let mut staged = [0u8; 4096];
+        for block in values.chunks(staged.len() / 8) {
+            let bytes = &mut staged[..8 * block.len()];
+            for (out, value) in bytes.chunks_exact_mut(8).zip(block) {
+                out.copy_from_slice(&value.to_le_bytes());
+            }
+            self.0.update(bytes);
+        }
+    }
+
+    fn finish(self) -> [u8; 32] {
+        use sha2::Digest as _;
+        self.0.finalize().into()
+    }
+}
+
 /// What identifies a waveform's samples wherever they are held
 /// ([`WaveformValues::samples_identity`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SamplesIdentity {
-    /// The [`rspice_results_store::ColumnDigest`] of the column the samples are a window of.
+    /// The digest of the column the samples are a window of: the SHA-256 of its rows as
+    /// little-endian binary64, as a results store digests each column it stores
+    /// (`rspice_results_store::ColumnDigest`).
     pub column: [u8; 32],
     /// The rows that column holds.
     pub column_rows: u64,
@@ -543,10 +570,10 @@ impl WaveformValues {
                 window,
             };
         }
-        let column = match self.in_memory() {
-            Some(values) => rspice_results_store::ColumnDigest::of(values),
+        let mut digest = ColumnHasher::default();
+        match self.in_memory() {
+            Some(values) => digest.values(values),
             None => {
-                let mut digest = rspice_results_store::ColumnDigest::new();
                 let mut staged = Vec::with_capacity(BLOCK_SAMPLES.min(self.len()));
                 for value in self.samples(..) {
                     staged.push(value);
@@ -556,12 +583,11 @@ impl WaveformValues {
                     }
                 }
                 digest.values(&staged);
-                digest.finish()
             }
-        };
+        }
         let rows = self.len() as u64;
         SamplesIdentity {
-            column: column.0,
+            column: digest.finish(),
             column_rows: rows,
             window: StoredWindow {
                 first: 0,
