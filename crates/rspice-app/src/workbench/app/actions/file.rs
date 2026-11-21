@@ -322,7 +322,11 @@ impl RSpiceApp {
                 // Signal exit request - this will be handled by the frame update
                 self.state.shell.exit_requested = true;
             }
-            ConfirmationAction::PackWithResults => self.state.pack_project_with_results(),
+            // The browser never asks: it packs nothing, having no results folder.
+            ConfirmationAction::PackWithResults => {
+                #[cfg(not(target_arch = "wasm32"))]
+                self.state.pack_project_with_results();
+            }
         }
     }
 
