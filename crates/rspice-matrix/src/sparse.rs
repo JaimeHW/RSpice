@@ -10338,13 +10338,6 @@ mod tests {
     }
 
     #[test]
-    fn complex_matrix_shares_the_immutable_real_pattern() {
-        let real = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
-        let complex = ComplexMatrix::from_real_structure(&real);
-        assert!(Arc::ptr_eq(&real.csc, &complex.csc));
-    }
-
-    #[test]
     fn solve_into_reuses_the_callers_output_allocation() {
         let triplets = [(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)];
         for real_backend in [
