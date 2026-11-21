@@ -395,3 +395,38 @@ fn a_run_plots_the_outputs_its_plan_marks_and_a_rerun_plots_a_new_one() {
         "the new output is plotted and the one taken off stays off"
     );
 }
+
+/// A plan's run opens on the sheet its plot arrives on: while it has written
+/// nothing yet, a reader left on the run inventory is taken to the Waves
+/// sheet its transient draws on, where the sheet says the run is starting.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_starting_run_opens_on_the_sheet_its_plot_arrives_on() {
+    use rspice_app_results::workbench::documents::result_document::{
+        ResultViewer, prepare_viewer_state,
+    };
+    let host = state_with_current_clean_drc();
+    let mut state = AppState::default();
+    state.model = host.model;
+    state.runs = host.runs;
+    state.workbench.activate(Workspace::Results);
+    let mut controller = SimulationController::new();
+    controller
+        .preflight_run_set(&state)
+        .expect("clean plan preflight");
+    state.model.simulation.execution.request_simulate_run_set();
+    controller.start_simulation(&mut state);
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("the starting run");
+    assert!(run.analyses.is_empty(), "the run has written nothing yet");
+    assert!(!run.lifecycle.is_terminal());
+    state.results.results.session.viewer = ResultViewer::Manifest;
+
+    prepare_viewer_state(&mut state.results_parts());
+
+    assert_eq!(state.results.results.session.viewer, ResultViewer::Waves);
+    controller.abort();
+}

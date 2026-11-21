@@ -2020,6 +2020,31 @@ struct ShownSelection {
     kind: Option<crate::state::AnalysisType>,
 }
 
+/// The sheet a run that has written nothing yet draws its first results
+/// on: the one its plan's first plotted analysis is drawn on, as its
+/// prepared tasks say, so the run opens where its plot arrives. A run with
+/// no prepared tasks (a deck run) says nothing.
+fn starting_sheet(run: &SimulationRun) -> Option<ResultViewer> {
+    use crate::state::AnalysisType;
+    run.prepared_receipt()?.tasks().iter().find_map(|task| {
+        let kind = task.result_analysis_type();
+        if kind.is_time_domain() {
+            Some(ResultViewer::Waves)
+        } else if kind == AnalysisType::DcSweep {
+            Some(ResultViewer::DcSweep)
+        } else if kind.is_bode_response() {
+            Some(ResultViewer::Bode)
+        } else if matches!(
+            kind,
+            AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Qpnoise
+        ) {
+            Some(ResultViewer::NoiseContrib)
+        } else {
+            None
+        }
+    })
+}
+
 fn shown_selection(simulation: &crate::state::SimulationState) -> Option<ShownSelection> {
     let run = simulation.active_run()?;
     let analysis = simulation.active_analysis();
@@ -2502,6 +2527,17 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
 }
 
 fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
+    // A run that has written nothing yet opens on the sheet its plot arrives
+    // on, not on its inventory, which has nothing to say about it yet.
+    if state.results.session.viewer == ResultViewer::Manifest
+        && let Some(run) = state.model.simulation.active_run()
+        && run.analyses.is_empty()
+        && !run.lifecycle.is_terminal()
+        && let Some(sheet) = starting_sheet(run)
+    {
+        state.results.session.viewer = sheet;
+        return;
+    }
     if viewer_availability(state.results_reads(), state.results.session.viewer).available {
         return;
     }
