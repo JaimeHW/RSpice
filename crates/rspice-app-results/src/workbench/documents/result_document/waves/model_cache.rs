@@ -55,6 +55,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
         .map(|(key, _)| key.clone())
         .collect();
     let session = &mut results.session;
+    let strips = &session.strip_layouts;
     let overlaid = simulation.overlaid_dataset_ids();
     results.models.get_or_build(
         ModelCacheInput {
@@ -73,7 +74,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
             waveform_looks: &session.waveform_looks,
             expressions,
             x_scales: &session.x_scales,
-            strips: &session.strip_layouts,
+            strips,
         },
         &simulation.retained.executed_decks,
         t,
@@ -89,6 +90,10 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 projection.selection,
                 projection.hidden_family_traces,
             );
+            // The forms the reader's strips show a complex signal in.
+            if let Some(run) = simulation.display_runs().first() {
+                rspice_results_ui::waves::project_strips(&mut built, run, strips);
+            }
             // A running transient's strip frames its run from start to stop while it runs.
             if let Some(run) = simulation.active_run() {
                 for model in &mut built {

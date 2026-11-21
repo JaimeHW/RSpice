@@ -8,6 +8,8 @@ use super::{
 };
 use crate::derived::DerivedSeries;
 use crate::waveform::waveform_color;
+
+mod strip_projection;
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
@@ -22,6 +24,10 @@ use rspice_results::waveform::RetainedTrace;
 use rspice_ui_kit::tokens::Tokens;
 use std::collections::HashSet;
 use std::sync::Arc;
+pub(crate) use strip_projection::projection_menu;
+pub use strip_projection::{
+    ComplexSource, StripProjection, drawn_projection, project_strips, set_projection,
+};
 
 mod member_family;
 
@@ -909,6 +915,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             phase_continuous,
             signal_trace_count,
             traces,
+            complex_sources: strip_projection::complex_sources(analysis),
             grid_ascending: false,
             x_range: None,
             x_bounds: None,

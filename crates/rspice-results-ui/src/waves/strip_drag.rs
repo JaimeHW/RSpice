@@ -345,6 +345,9 @@ pub(crate) fn strip_menu(ui: &mut Ui, model: &StripModel, index: usize) -> Optio
         strip_layout::equalise(model),
         &mut chosen,
     );
+    if let Some(strips) = super::projection::projection_menu(ui, model, index) {
+        chosen = Some(strips);
+    }
     chosen
 }
 

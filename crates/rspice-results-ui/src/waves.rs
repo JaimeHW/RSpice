@@ -38,7 +38,8 @@ pub mod xy;
 pub use policy::{ReadoutPolicy, cursor_interpolation};
 mod units;
 pub use projection::{
-    AcDisplay, ProjectionOptions, build_models, family_color, matching_overlay_analysis,
+    AcDisplay, ComplexSource, ProjectionOptions, StripProjection, build_models, drawn_projection,
+    family_color, matching_overlay_analysis, project_strips, set_projection,
 };
 pub use rspice_ui_kit::plot::format::unit_carries_its_decade;
 use units::signal_unit;
@@ -75,6 +76,8 @@ pub enum TraceKind {
     Imaginary = 5,
     /// nV/√Hz projection of a retained V²/Hz noise PSD.
     NoiseDensity = 6,
+    /// Group delay of a complex response, in seconds.
+    GroupDelay = 7,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -251,6 +254,9 @@ pub struct StripModel {
     /// hue — one chip per signal, all runs).
     pub signal_trace_count: usize,
     pub traces: Vec<StripTrace>,
+    /// The analysis' complex signals, which a strip may show in any
+    /// projection.
+    pub complex_sources: Vec<ComplexSource>,
     /// Whether the sample grid is finite and non-decreasing, which is what
     /// lets a cursor be mapped to a retained sample by bisection.
     pub grid_ascending: bool,
@@ -427,7 +433,7 @@ impl StripModel {
             // A strip mixing voltages and currents has no single Y unit, so
             // a value is named by the unit its own signal is measured in —
             // the same unit that decided which pane draws it.
-            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
+            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary | TraceKind::GroupDelay => {
                 fmt_si_significant(value, self.trace_unit(trace), significant_digits)
             }
             TraceKind::MagnitudeDb => {
@@ -1065,6 +1071,7 @@ pub const fn signal_form(kind: TraceKind) -> SignalForm {
         TraceKind::Real => SignalForm::Real,
         TraceKind::Imaginary => SignalForm::Imaginary,
         TraceKind::NoiseDensity => SignalForm::NoiseDensity,
+        TraceKind::GroupDelay => SignalForm::GroupDelay,
     }
 }
 
