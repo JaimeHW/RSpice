@@ -6,8 +6,9 @@
 //! in the data browser.
 //!
 //! The run's manifest is projected once, when the dialog opens. Its dataset
-//! digest reads every sample the run retained, so it is computed off the
-//! frame and its row fills in when it is known: the dialog shows at once.
+//! digest reads every sample the run holds in memory (a run kept in a results
+//! store is named by the store's own digest), so it is computed on a Results
+//! job and its row fills in when it is known: the dialog shows at once.
 
 mod executed_deck;
 
@@ -23,8 +24,7 @@ use crate::workbench::app_state::Model;
 use rspice_results::number_format::fmt_si_significant;
 
 /// The run Run details… is open on, with its manifest taken once when the
-/// dialog opened, and its dataset digest once a background thread has read
-/// every sample the run retained.
+/// dialog opened, and its dataset digest once a Results job has computed it.
 #[derive(Debug, Clone)]
 pub struct RunDetailsDialogState {
     pub run_id: u64,
@@ -34,18 +34,19 @@ pub struct RunDetailsDialogState {
 
 impl RunDetailsDialogState {
     /// Run details… on `run`: its manifest at once, and its dataset digest
-    /// computed on a background thread.
+    /// computed on a Results job.
     pub fn new(run: &crate::state::SimulationRun) -> Self {
         use crate::workbench::documents::result_document::{frame_work, manifest};
         use rspice_results::result_digest::ResultDigestEncoding;
 
         let dataset_digest = std::sync::Arc::<std::sync::OnceLock<String>>::default();
         let (slot, retained) = (std::sync::Arc::clone(&dataset_digest), run.data.clone());
-        rspice_app_services::workbench::platform::spawn_or_inline(move || {
+        let _ = crate::workbench::results_job::ResultsJob::start("run-digest", move |_| {
             frame_work::note(frame_work::DatasetWalk::DatasetDigest);
             let digest =
                 retained.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT);
             let _ = slot.set(digest.to_string());
+            Ok(())
         });
         Self {
             run_id: run.id,
