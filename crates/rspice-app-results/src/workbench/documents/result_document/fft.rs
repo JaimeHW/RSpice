@@ -9,6 +9,8 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let presentation = state.results_reads().presentation_policy().readout();
     let plot_view = state.results.session.plot_view(ResultViewer::Fft, 0);
+    let mut pin = super::readout_pins::pinned(state.results_reads(), ResultViewer::Fft);
+    let pinned = pin;
     let out = view::show(
         ui,
         &mut state.analysis.fft_state,
@@ -17,7 +19,11 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &mut state.results.session.cache,
         &quantity_policy,
         presentation,
+        &mut pin,
     );
+    if pin != pinned {
+        super::readout_pins::keep(state, ResultViewer::Fft, pin);
+    }
     if out.fit_requested {
         state.results.session.reset_plot_view(ResultViewer::Fft, 0);
     }

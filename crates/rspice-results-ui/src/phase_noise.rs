@@ -60,6 +60,7 @@ pub fn show(
     quantities: &QuantityPresentationPolicy,
     presentation: ReadoutPolicy,
     cache: &mut plot::DecimationCache,
+    pin: &mut Option<f64>,
 ) -> PhaseNoiseResponse {
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let colors = Tokens::get(ui.ctx()).color;
@@ -139,6 +140,7 @@ pub fn show(
         ]
     };
     let response = plot::show(ui, &spec, cache, None, Some(&readout));
+    crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
     PhaseNoiseResponse {
         plot: Some(response),
         ..requested

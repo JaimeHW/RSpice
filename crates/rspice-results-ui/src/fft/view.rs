@@ -199,6 +199,7 @@ pub fn show(
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
     presentation: ReadoutPolicy,
+    pin: &mut Option<f64>,
 ) -> FftViewResponse {
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let mut out = FftViewResponse::default();
@@ -385,6 +386,7 @@ pub fn show(
     };
 
     let response = plot::show(ui, &spec, cache, None, Some(&readout));
+    crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
     out.plot = Some(response);
     out
 }
@@ -632,6 +634,7 @@ mod tests {
                             &mut cache,
                             &QuantityPresentationPolicy::default(),
                             ReadoutPolicy::default(),
+                            &mut None,
                         )
                     });
             },

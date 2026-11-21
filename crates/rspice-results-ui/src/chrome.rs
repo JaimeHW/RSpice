@@ -3,6 +3,7 @@
 pub mod bars;
 pub mod instrument;
 pub mod persistent;
+pub mod pinned_readout;
 
 use egui::{Ui, WidgetInfo, WidgetType};
 use rspice_results::result_presentation::ResultViewer;

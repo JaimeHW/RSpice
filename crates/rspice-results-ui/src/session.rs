@@ -748,6 +748,10 @@ pub struct ResultViewerState {
     /// Pinned data point per XY viewer (trace slot, point index) — the
     /// Smith/Nyquist/PZ click-to-pin readout.
     pub rf_pin: std::collections::HashMap<ResultViewer, (usize, usize)>,
+    /// The X a sheet's readout is pinned at, per authored analysis: a click
+    /// on a spectrum or phase-noise plot pins its readout there. The run's
+    /// working view keeps it, so the next run reads at the same X.
+    pub readout_pins: HashMap<(AnalysisPresentationSource, ResultViewer), f64>,
     /// Display AC phase traces unwrapped into a continuous curve instead of
     /// wrapped to ±180°. Applies to the BODE phase trace and the waves
     /// strips' phase traces; the margin math always reads the raw wrapped

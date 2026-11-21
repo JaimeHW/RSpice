@@ -232,6 +232,80 @@ fn following_a_run_moves_each_pane_onto_its_own_analysis() {
     assert_eq!(document.datasets().len(), 1, "the earlier run is let go");
 }
 
+/// A readout pinned on a pane's sheet is a place on its X axis: it stays
+/// where it was when the view follows a re-run and across a save, one pin
+/// per pane and sheet, and a pin at no finite X is refused.
+#[test]
+fn a_pinned_readout_stays_at_its_x_across_a_rerun_and_a_reload() {
+    use crate::result_presentation::ResultViewer;
+    let TwoAnalyses {
+        mut document,
+        tran,
+        ac,
+    } = two_analyses();
+    let tran_pane = document.pane_of_analysis(tran).unwrap().id;
+    let pin = |sheet, x| DocumentEdit::SetReadoutPin {
+        pane_id: tran_pane,
+        sheet,
+        x,
+    };
+    document
+        .transact(
+            document.revision(),
+            vec![
+                pin(ResultViewer::Fft, Some(1.0e3)),
+                pin(ResultViewer::Fft, Some(2.5e3)),
+                pin(ResultViewer::HarmonicBalance, Some(5.0e3)),
+            ],
+        )
+        .expect("the readouts pin");
+    assert!(
+        document
+            .transact(
+                document.revision(),
+                vec![pin(ResultViewer::Fft, Some(f64::NAN))]
+            )
+            .is_err()
+    );
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::FollowRun {
+                next: run(
+                    binding(2),
+                    &[
+                        (tran, AnalysisType::Transient, &["V(in)", "V(out)", "I(R1)"]),
+                        (ac, AnalysisType::Ac, &["V(out)", "V(mid)"]),
+                    ],
+                ),
+            }],
+        )
+        .expect("the view follows the re-run");
+    let json = serde_json::to_string(&document).unwrap();
+    let back: VisualizationDocument = serde_json::from_str(&json).unwrap();
+    let pins = |document: &VisualizationDocument| {
+        document
+            .readout_pins()
+            .iter()
+            .map(|pin| (pin.pane_id, pin.sheet, pin.x))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        pins(&back),
+        [
+            (tran_pane, ResultViewer::Fft, 2.5e3),
+            (tran_pane, ResultViewer::HarmonicBalance, 5.0e3)
+        ]
+    );
+    document
+        .transact(document.revision(), vec![pin(ResultViewer::Fft, None)])
+        .unwrap();
+    assert_eq!(
+        pins(&document),
+        [(tran_pane, ResultViewer::HarmonicBalance, 5.0e3)]
+    );
+}
+
 /// The run a view reads, grown since (it was shown while still running and
 /// has more signals now, and a digest of its finished samples): the view
 /// reads it again in place, its traces kept, and plots the new signals.

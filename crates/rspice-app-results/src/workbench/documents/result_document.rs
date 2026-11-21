@@ -33,6 +33,7 @@ mod phase_noise;
 mod polar;
 mod population;
 mod pz;
+mod readout_pins;
 mod retained_memo;
 mod scatter;
 mod sensitivity;

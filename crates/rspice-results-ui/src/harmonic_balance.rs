@@ -110,6 +110,7 @@ pub fn show(
     quantity_policy: &QuantityPresentationPolicy,
     presentation: ReadoutPolicy,
     cache: &mut plot::DecimationCache,
+    pin: &mut Option<f64>,
 ) -> SpectrumResponse {
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let legend = model
@@ -249,6 +250,7 @@ pub fn show(
         rows
     };
     let response = plot::show(ui, &spec, cache, None, Some(&readout));
+    crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
     SpectrumResponse {
         plot: Some(response),
         ..requested

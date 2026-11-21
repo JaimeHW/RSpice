@@ -301,6 +301,13 @@ pub enum DocumentEdit {
     /// Replace the order one pane draws its event lanes in. An empty order
     /// forgets the pane's recorded order.
     SetEventLaneOrder(EventLaneOrder),
+    /// Pin `sheet`'s readout on a pane at `x`, or with `None` take the pin
+    /// away.
+    SetReadoutPin {
+        pane_id: PaneId,
+        sheet: crate::result_presentation::ResultViewer,
+        x: Option<f64>,
+    },
     MoveCursor {
         cursor_id: CursorId,
         position: TypedValue,

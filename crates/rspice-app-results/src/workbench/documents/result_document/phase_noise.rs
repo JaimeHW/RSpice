@@ -144,6 +144,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .session
         .plot_view(super::ResultViewer::PhaseNoise, 0);
     let level_range = finite_range(&model.level_dbc_per_hz);
+    let sheet = super::ResultViewer::PhaseNoise;
+    let mut pin = super::readout_pins::pinned(state.results_reads(), sheet);
+    let pinned = pin;
     let response = view::show(
         ui,
         &model.trace(),
@@ -152,7 +155,11 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &quantities,
         presentation,
         &mut state.results.session.cache,
+        &mut pin,
     );
+    if pin != pinned {
+        super::readout_pins::keep(state, sheet, pin);
+    }
     if response.fit {
         state
             .results

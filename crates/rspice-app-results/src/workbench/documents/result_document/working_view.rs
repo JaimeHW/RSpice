@@ -31,6 +31,7 @@ use crate::state::SimulationRun;
 use crate::ui::plot::XScale;
 
 use super::persistent_document::lanes;
+use super::readout_pins;
 use super::{
     AnalysisPresentationKey, DocumentMarker, ExprTrace, ResultsParts, ResultsReads,
     SourceWaveformPresentationKey, WavePanePresentationKey, view_edits,
@@ -48,6 +49,7 @@ struct ViewScratch {
     log_y: HashSet<WavePanePresentationKey>,
     hidden: HashSet<AnalysisPresentationKey>,
     lanes: HashMap<AnalysisPresentationKey, EventLaneLayout>,
+    pins: readout_pins::Pins,
 }
 
 /// The view the quick view last drew, the run it drew it over, and the
@@ -762,6 +764,7 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
         } else {
             session.hidden_strips.remove(&key);
         }
+        readout_pins::project(&mut session.readout_pins, &document, key, pane_id);
 
         for marker in document
             .markers()
@@ -866,6 +869,7 @@ fn scratch_of(state: ResultsReads<'_>, keys: &[(AnalysisPresentationKey, PaneId)
             .filter(|(key, _)| shown(key))
             .map(|(key, layout)| (*key, layout.clone()))
             .collect(),
+        pins: readout_pins::scratch(&session.readout_pins, keys),
     }
 }
 
@@ -962,6 +966,12 @@ fn capture_edits(state: &ResultsParts<'_>, binding: &QuickViewBinding) -> Vec<Do
         if hidden != pane.hidden {
             edits.push(DocumentEdit::SetPaneHidden { pane_id, hidden });
         }
+        edits.extend(readout_pins::edits_for(
+            &session.readout_pins,
+            document,
+            key,
+            pane_id,
+        ));
     }
     edits
 }

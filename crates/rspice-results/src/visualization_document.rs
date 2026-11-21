@@ -91,6 +91,8 @@ pub const MAX_VISUALIZATION_EXPRESSION_TRACES: usize = 1_024;
 pub const MAX_EXPRESSION_TRACE_DATASETS: usize = 16;
 /// Maximum plots of a unit axis against a chosen abscissa in one document.
 pub const MAX_VISUALIZATION_XY_PLOTS: usize = 1_024;
+/// Maximum readouts pinned across all panes and sheets of one document.
+pub const MAX_VISUALIZATION_READOUT_PINS: usize = 1_024;
 /// Maximum rows one pane's event-lane order names.
 pub const MAX_PANE_EVENT_LANES: usize = 4_096;
 /// Maximum event-lane rows ordered across all panes of one document.
@@ -1886,6 +1888,16 @@ where
     deserialize_bounded_vec::<_, _, MAX_PANE_EVENT_LANES>(deserializer)
 }
 
+/// The X one sheet's readout is pinned at on a pane: the reader clicked the
+/// plot there. It is a place on the X axis, not a sample, so a later run
+/// the view follows reads its own values at the same X.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ReadoutPin {
+    pub pane_id: PaneId,
+    pub sheet: crate::result_presentation::ResultViewer,
+    pub x: f64,
+}
+
 impl Trace {
     /// The result vector this trace was provisioned from, as its own row
     /// predicates record it.
@@ -2512,6 +2524,8 @@ pub struct VisualizationDocument {
     expression_traces: Vec<ExpressionTrace>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     xy_plots: Vec<XyPlot>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    readout_pins: Vec<ReadoutPin>,
 }
 
 #[derive(Deserialize)]
@@ -2570,6 +2584,8 @@ struct VisualizationDocumentWire {
     expression_traces: Option<BoundedVec<ExpressionTrace, MAX_VISUALIZATION_EXPRESSION_TRACES>>,
     #[serde(default)]
     xy_plots: Option<BoundedVec<XyPlot, MAX_VISUALIZATION_XY_PLOTS>>,
+    #[serde(default)]
+    readout_pins: Option<BoundedVec<ReadoutPin, MAX_VISUALIZATION_READOUT_PINS>>,
 }
 
 impl<'de> Deserialize<'de> for VisualizationDocument {
@@ -2609,6 +2625,9 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 .expression_traces
                 .map_or_else(Vec::new, BoundedVec::into_inner),
             xy_plots: wire.xy_plots.map_or_else(Vec::new, BoundedVec::into_inner),
+            readout_pins: wire
+                .readout_pins
+                .map_or_else(Vec::new, BoundedVec::into_inner),
         };
         if document.schema_version != Self::SCHEMA_VERSION {
             return Err(serde::de::Error::custom(format!(
@@ -2685,6 +2704,7 @@ impl VisualizationDocument {
             event_lane_orders: Vec::new(),
             expression_traces: Vec::new(),
             xy_plots: Vec::new(),
+            readout_pins: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -2865,6 +2885,11 @@ impl VisualizationDocument {
         &self.xy_plots
     }
 
+    /// The readouts pinned on the document's panes, one per pane and sheet.
+    pub fn readout_pins(&self) -> &[ReadoutPin] {
+        &self.readout_pins
+    }
+
     /// The order one pane draws its event lanes in; empty when it recorded
     /// none.
     #[must_use]
@@ -2986,6 +3011,7 @@ impl VisualizationDocument {
             event_lane_orders: self.event_lane_orders.clone(),
             expression_traces: self.expression_traces.clone(),
             xy_plots: self.xy_plots.clone(),
+            readout_pins: self.readout_pins.clone(),
         }))
     }
 

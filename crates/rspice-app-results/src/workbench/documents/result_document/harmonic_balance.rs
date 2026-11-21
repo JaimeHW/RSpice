@@ -178,6 +178,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .results
         .session
         .plot_view(super::ResultViewer::HarmonicBalance, 0);
+    let sheet = super::ResultViewer::HarmonicBalance;
+    let mut pin = super::readout_pins::pinned(state.results_reads(), sheet);
+    let pinned = pin;
     let response = view::show(
         ui,
         &model,
@@ -185,7 +188,11 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &quantity_policy,
         presentation,
         &mut state.results.session.cache,
+        &mut pin,
     );
+    if pin != pinned {
+        super::readout_pins::keep(state, sheet, pin);
+    }
     if response.fit {
         state
             .results

@@ -1100,6 +1100,22 @@ impl VisualizationDocument {
                 self.xy_plots.extend(plots);
                 Ok(())
             }
+            DocumentEdit::SetReadoutPin { pane_id, sheet, x } => {
+                self.require_pane(pane_id)?;
+                self.readout_pins
+                    .retain(|pin| pin.pane_id != pane_id || pin.sheet != sheet);
+                if let Some(x) = x {
+                    let pin = ReadoutPin { pane_id, sheet, x };
+                    validate_readout_pin(&pin)?;
+                    ensure_maximum_len(
+                        "visualization-document.readout-pins",
+                        self.readout_pins.len() + 1,
+                        MAX_VISUALIZATION_READOUT_PINS,
+                    )?;
+                    self.readout_pins.push(pin);
+                }
+                Ok(())
+            }
             DocumentEdit::SetEventLaneOrder(order) => {
                 self.validate_event_lane_order(&order)?;
                 self.event_lane_orders
@@ -1810,6 +1826,7 @@ impl VisualizationDocument {
         self.expression_traces
             .retain(|trace| trace.pane_id != pane_id);
         self.xy_plots.retain(|plot| plot.pane_id != pane_id);
+        self.readout_pins.retain(|pin| pin.pane_id != pane_id);
         let page_id = self
             .panes
             .iter()
@@ -2171,6 +2188,28 @@ impl VisualizationDocument {
                 return Err(duplicate_xy_plot(plot));
             }
         }
+        ensure_maximum_len(
+            "visualization-document.readout-pins",
+            self.readout_pins.len(),
+            MAX_VISUALIZATION_READOUT_PINS,
+        )?;
+        for (index, pin) in self.readout_pins.iter().enumerate() {
+            self.require_pane(pin.pane_id)?;
+            validate_readout_pin(pin)?;
+            if self.readout_pins[..index]
+                .iter()
+                .any(|held| held.pane_id == pin.pane_id && held.sheet == pin.sheet)
+            {
+                return Err(VisualizationError::InvalidValue {
+                    field: "readout-pin.sheet",
+                    message: format!(
+                        "pane {} pins its {:?} readout twice",
+                        pin.pane_id.get(),
+                        pin.sheet
+                    ),
+                });
+            }
+        }
         let mut bus_names = HashSet::new();
         for bus in &self.user_buses {
             self.validate_user_bus(bus)?;
@@ -2515,6 +2554,18 @@ pub(super) fn display_predicates_by_name(
         }
     }
     Ok((by_name, true))
+}
+
+/// A pin sits at a finite X: the reader clicked somewhere on the axis.
+fn validate_readout_pin(pin: &ReadoutPin) -> Result<(), VisualizationError> {
+    if pin.x.is_finite() {
+        Ok(())
+    } else {
+        Err(VisualizationError::InvalidValue {
+            field: "readout-pin.x",
+            message: format!("a readout cannot be pinned at {}", pin.x),
+        })
+    }
 }
 
 fn duplicate_xy_plot(plot: &XyPlot) -> VisualizationError {
