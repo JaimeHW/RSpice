@@ -2339,6 +2339,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     match viewer {
         ResultViewer::Smith => return smith::domain_bar(ui, state),
         ResultViewer::Fft => return fft::domain_bar(ui, state),
+        ResultViewer::Soa => return soa::domain_bar(ui, state),
         _ => {}
     }
     let mut context = SheetContext::of(state);

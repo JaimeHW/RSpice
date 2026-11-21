@@ -288,7 +288,6 @@ pub struct SoaControls<'a> {
 }
 
 pub struct SoaResponse {
-    pub filter: SoaRuleFilter,
     pub trace_open: bool,
     pub selection: Option<SoaRuleSelection>,
     pub cross_probe: Option<SoaRuleSelection>,
@@ -337,6 +336,82 @@ pub fn selection_note(ui: &mut Ui, reason: SoaSelectionAbsence) {
     );
 }
 
+/// What the SOA sheet's bar changed.
+pub struct SoaBarResponse {
+    pub filter: SoaRuleFilter,
+    pub trace_open: bool,
+    /// The new filter hides the selected rule, so the selection goes.
+    pub deselect: bool,
+}
+
+/// Width of the rule filter: its longest choice.
+const SOA_FILTER_WIDTH: f32 = 112.0;
+
+/// The SOA sheet's own controls in its bar: which rules the table lists,
+/// how many rules need attention and how many pass (the two make the
+/// whole), and closing the stress trace while one is open.
+pub fn domain_bar(
+    ui: &mut Ui,
+    source: &SoaSource<'_>,
+    selected: Option<&SoaRuleSelection>,
+    filter: SoaRuleFilter,
+    trace_open: bool,
+) -> SoaBarResponse {
+    let mut out = SoaBarResponse {
+        filter,
+        trace_open,
+        deselect: false,
+    };
+    crate::chrome::bars::bar_label(ui, "Show");
+    let names = SoaRuleFilter::ALL
+        .iter()
+        .map(|candidate| candidate.label().to_owned())
+        .collect::<Vec<_>>();
+    if let Some(picked) = rspice_ui_kit::widgets::select(
+        ui,
+        "rspice.results.soa-filter",
+        "Rules shown",
+        filter.label(),
+        &names,
+        SOA_FILTER_WIDTH,
+    ) {
+        out.filter = SoaRuleFilter::ALL[picked];
+    }
+    let attention = source.plan.visible(SoaRuleFilter::Violations).len();
+    let passing = source.evaluations.len().saturating_sub(attention);
+    ui.add_space(8.0);
+    ui.label(
+        RichText::new(format!("{attention} attention · {passing} passing"))
+            .font(rspice_ui_kit::theme::sans(
+                rspice_ui_kit::tokens::FS_0,
+                rspice_ui_kit::theme::FontWeight::Regular,
+            ))
+            .color(Tokens::get(ui.ctx()).color.text),
+    );
+    if trace_open {
+        ui.add_space(8.0);
+        if rspice_ui_kit::widgets::Button::new("Close stress trace")
+            .show(ui)
+            .clicked()
+        {
+            out.trace_open = false;
+        }
+    }
+    if out.filter != filter
+        && let Some(selection) = selected
+        && let Some(evaluation) = source.evaluations.iter().find(|evaluation| {
+            selection.analysis == source.analysis_key
+                && selection.device_id == evaluation.device_id
+                && selection.parameter == evaluation.parameter
+        })
+        && !out.filter.matches(evaluation.verdict)
+    {
+        out.deselect = true;
+        out.trace_open = false;
+    }
+    out
+}
+
 pub fn show(
     ui: &mut Ui,
     source: SoaSource<'_>,
@@ -348,7 +423,7 @@ pub fn show(
         analysis,
         analysis_key,
         evaluations,
-        violation_count,
+        violation_count: _,
         plan,
     } = source;
     let mut plot = StressPlot {
@@ -360,72 +435,11 @@ pub fn show(
     let mut open_check = false;
     let numbers = controls.numbers;
     let selected = controls.selected;
-    let initial_filter = controls.filter;
-    let mut filter = initial_filter;
+    let filter = controls.filter;
     let mut trace_open = controls.trace_open;
     let mut requested = selected.cloned();
     let mut cross_probe = None;
-
-    let stress_view = controls.stress_view;
-    let header = StripHeader::new(
-        "SOA",
-        &format!(
-            "{} · {} evaluated rules · {} retained violation events",
-            analysis.label,
-            evaluations.len(),
-            violation_count
-        ),
-        &[],
-    )
-    .zoomed(trace_open && stress_view.is_zoomed())
-    .show(ui);
-    if header.fit_clicked {
-        plot.view = PlotView::default();
-    }
-
-    let attention_count = plan.visible(SoaRuleFilter::Violations).len();
-    let passing_count = evaluations.len().saturating_sub(attention_count);
-    egui::Frame::new()
-        .fill(Tokens::get(ui.ctx()).color.bg_panel)
-        .stroke(egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border))
-        .inner_margin(egui::Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("SHOW").strong());
-                rspice_ui_kit::widgets::Combo::from_id_salt("rspice.results.soa-filter")
-                    .selected_text(filter.label())
-                    .show_ui(ui, |ui| {
-                        for candidate in SoaRuleFilter::ALL {
-                            ui.selectable_value(&mut filter, candidate, candidate.label());
-                        }
-                    });
-                ui.separator();
-                ui.label(format!(
-                    "{attention_count} attention · {passing_count} passing · {} total",
-                    evaluations.len()
-                ));
-                if trace_open {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Close stress trace").clicked() {
-                            trace_open = false;
-                        }
-                    });
-                }
-            });
-        });
-
-    if filter != initial_filter
-        && let Some(selection) = requested.as_ref()
-        && let Some(evaluation) = evaluations.iter().find(|evaluation| {
-            selection.analysis == analysis_key
-                && selection.device_id == evaluation.device_id
-                && selection.parameter == evaluation.parameter
-        })
-        && !filter.matches(evaluation.verdict)
-    {
-        requested = None;
-        trace_open = false;
-    }
+    let mut fit_clicked = false;
 
     if trace_open
         && let Some(selection) = requested.as_ref()
@@ -443,7 +457,7 @@ pub fn show(
                 .and_then(|index| evidence_trace(analysis, index))
                 .map(|waveform| (facts, waveform))
         }) {
-            (stress_view_change, open_check) = stress_trace_card(
+            let card = stress_trace_card(
                 ui,
                 &mut plot,
                 waveform,
@@ -456,6 +470,9 @@ pub fn show(
                     .temperature_waveform
                     .and_then(|i| evidence_trace(analysis, i)),
             );
+            stress_view_change = card.view_change;
+            open_check = card.open_check;
+            fit_clicked = card.fit_clicked;
         } else {
             legacy_stress_history_note(ui);
         }
@@ -612,11 +629,10 @@ pub fn show(
     }
 
     SoaResponse {
-        filter,
         trace_open,
         selection: requested,
         cross_probe,
-        fit_clicked: header.fit_clicked,
+        fit_clicked,
         stress_view_change,
         open_check,
     }
@@ -994,6 +1010,17 @@ fn legacy_stress_history_note(ui: &mut Ui) {
         });
 }
 
+/// What the reader did on the open stress trace.
+struct StressCard {
+    view_change: Option<plot::ViewChange>,
+    open_check: bool,
+    fit_clicked: bool,
+}
+
+/// Head room over the stress history, as a share of its span: the limit's
+/// words and the worst point's tag stand above the curve, not on it.
+const STRESS_HEAD_ROOM: f64 = 0.12;
+
 fn stress_trace_card(
     ui: &mut Ui,
     plot: &mut StressPlot<'_>,
@@ -1002,40 +1029,35 @@ fn stress_trace_card(
     facts: &SoaRuleFacts,
     limits: Option<SoaTrace<'_>>,
     temperatures: Option<SoaTrace<'_>>,
-) -> (Option<plot::ViewChange>, bool) {
+) -> StressCard {
     let unit = evaluation.unit.as_str();
     let numbers = plot.numbers;
     let t = Tokens::get(ui.ctx());
+    let subtitle = format!(
+        "{} · {} · worst {} at {} · limit {} · {} exact samples",
+        evaluation.device_id,
+        parameter_label(evaluation.parameter),
+        numbers.value(evaluation.worst_actual_value, unit),
+        numbers.value(evaluation.worst_time_s, "s"),
+        numbers.value(evaluation.limit_value, unit),
+        waveform.x.len()
+    );
+    let header = StripHeader::new("Stress", &subtitle, &[])
+        .id_salt("rspice.results.soa-stress")
+        .maximizable(false)
+        .zoomed(plot.view.is_zoomed())
+        .show(ui);
+    if header.fit_clicked {
+        plot.view = PlotView::default();
+    }
+    let fit_clicked = header.fit_clicked;
     egui::Frame::new()
         .fill(t.color.canvas_bg)
-        .stroke(egui::Stroke::new(1.0, t.color.border_strong))
         .inner_margin(egui::Margin::symmetric(8, 7))
         .show(ui, |ui| {
             // The card is a canvas: its text takes the canvas theme's inks,
             // which a light interface over a dark canvas does not share.
             ui.visuals_mut().override_text_color = Some(t.color.canvas_text);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "{} · {}",
-                        evaluation.device_id,
-                        parameter_label(evaluation.parameter)
-                    ))
-                    .strong()
-                    .color(t.color.canvas_text),
-                );
-                ui.separator();
-                mono(
-                    ui,
-                    &format!(
-                        "worst {} at {} · limit {} · {} exact samples",
-                        numbers.value(evaluation.worst_actual_value, unit),
-                        numbers.value(evaluation.worst_time_s, "s"),
-                        numbers.value(evaluation.limit_value, unit),
-                        waveform.x.len()
-                    ),
-                );
-            });
 
             // The card's own extents are resolved with the plan; deriving
             // them here walked the whole history twice per frame.
@@ -1043,7 +1065,9 @@ fn stress_trace_card(
                 facts.stress_axes.unwrap_or(((0.0, 1.0), (0.0, 1.0)));
             let view = plot.view;
             let (x_min, x_max) = view.x.unwrap_or((x_min, x_max));
-            let (y_min, y_max) = view.y.unwrap_or((y_min, y_max));
+            let (y_min, y_max) = view
+                .y
+                .unwrap_or((y_min, y_max + (y_max - y_min) * STRESS_HEAD_ROOM));
             let title = format!(
                 "SOA stress history for {} {}",
                 evaluation.device_id,
@@ -1137,7 +1161,11 @@ fn stress_trace_card(
                     &[(RequirementLine::across(evaluation.limit_value), action)],
                 )
                 .is_some();
-            (response.view.any().then_some(response.view), open_check)
+            StressCard {
+                view_change: response.view.any().then_some(response.view),
+                open_check,
+                fit_clicked,
+            }
         }).inner
 }
 

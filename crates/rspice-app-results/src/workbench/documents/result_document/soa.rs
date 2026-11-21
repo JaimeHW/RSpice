@@ -203,7 +203,6 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .plot_view_mut(super::ResultViewer::Soa, 0)
             .apply(&change);
     }
-    state.results.session.soa_rule_filter = response.filter;
     if response.open_check {
         let check = response
             .selection
@@ -231,6 +230,57 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if let Some(selection) = response.cross_probe {
         apply_schematic_cross_probe(state, &selection);
     }
+}
+
+/// The SOA sheet's own controls in its bar: the rule filter, the counts and
+/// closing the stress trace. A filter that hides the selected rule lets go
+/// of it, as the table does.
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    let Some(dataset_id) = state
+        .model
+        .simulation
+        .active_run()
+        .map(|run| run.dataset_id)
+    else {
+        return false;
+    };
+    let Some(analysis_key) = state
+        .model
+        .simulation
+        .active_analysis()
+        .map(|analysis| AnalysisPresentationKey::new(dataset_id, analysis))
+    else {
+        return false;
+    };
+    let Some(plan) = soa_plan(state, analysis_key) else {
+        return false;
+    };
+    let evidence_is_valid = active_evidence_is_valid(state.results_reads());
+    let Some((analysis, evaluations, violation_count)) =
+        active_soa(&state.model.simulation, evidence_is_valid)
+    else {
+        return false;
+    };
+    let bar = viewer::domain_bar(
+        ui,
+        &viewer::SoaSource {
+            analysis: &analysis.data,
+            analysis_key,
+            evaluations,
+            violation_count,
+            plan: &plan.presentation,
+        },
+        state.results.session.selected_soa_rule.as_ref(),
+        state.results.session.soa_rule_filter,
+        state.results.session.soa_stress_trace_open,
+    );
+    let session = &mut state.results.session;
+    session.soa_rule_filter = bar.filter;
+    session.soa_stress_trace_open = bar.trace_open;
+    if bar.deselect {
+        session.selected_soa_rule = None;
+    }
+    true
 }
 
 /// The check Verify lists for the rule `selection` names, when it is a rule
