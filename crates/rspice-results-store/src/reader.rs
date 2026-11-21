@@ -360,7 +360,8 @@ impl<I: SegmentIo> SegmentReader<I> {
     }
 
     /// Every column's digest as `END` states it, the run's x first: what [`Self::held_digests`]
-    /// must find the rows hash to.
+    /// must find the rows hash to. Only the file check reads it, and a browser has no files.
+    #[cfg(any(unix, windows))]
     pub(crate) fn stated_column_digests(&self) -> &[Digest] {
         &self.column_digests
     }
