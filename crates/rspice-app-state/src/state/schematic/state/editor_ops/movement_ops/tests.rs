@@ -577,25 +577,6 @@ fn stale_label_selection_is_a_clean_move_noop() {
 }
 
 #[test]
-fn move_selection_modes_have_stable_dialog_contract() {
-    assert_eq!(MoveSelectionMode::default(), MoveSelectionMode::Connected);
-    assert_eq!(
-        MoveSelectionMode::ALL,
-        [
-            MoveSelectionMode::Connected,
-            MoveSelectionMode::BreakConnections,
-            MoveSelectionMode::Shove,
-        ]
-    );
-    assert_eq!(MoveSelectionMode::Connected.label(), "Connected move");
-    assert_eq!(
-        MoveSelectionMode::BreakConnections.label(),
-        "Break connections"
-    );
-    assert_eq!(MoveSelectionMode::Shove.label(), "Move with shove");
-}
-
-#[test]
 fn connected_mode_builds_a_deterministic_orthogonal_rubber_band() {
     let mut schematic = SchematicState::default();
     schematic

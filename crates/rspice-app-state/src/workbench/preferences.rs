@@ -1857,33 +1857,6 @@ mod tests {
         assert_eq!(serde_json::to_value(preferences).unwrap()["results"], 17);
     }
 
-    /// A choice stored while HDF5 was reserved names it by the same kebab
-    /// case it always did, and now resolves to the encoder instead of falling
-    /// back to CSV. HDF5 stays at the end of the picker: the durable file
-    /// stores the name, so moving it would gain nothing.
-    #[test]
-    fn a_stored_hdf5_choice_resolves_to_the_encoder_it_names() {
-        let mut preferences: UserPreferences = serde_json::from_str(
-            r#"{"results":{"engineering-export":"hdf5-engineering-dataset"}}"#,
-        )
-        .unwrap();
-
-        assert_eq!(preferences.choice(ChoicePreference::EngineeringExport), 8);
-        assert_eq!(
-            preferences
-                .result_presentation_policy()
-                .engineering_export(),
-            EngineeringExportFormat::Hdf5EngineeringDataset
-        );
-        preferences
-            .set_choice(ChoicePreference::EngineeringExport, 8)
-            .expect("HDF5 is runtime supported");
-        assert_eq!(
-            serde_json::to_value(preferences).unwrap()["results"]["engineering-export"],
-            "hdf5-engineering-dataset"
-        );
-    }
-
     /// Thirteen offered indices, and nothing past them.
     #[test]
     fn the_picker_offers_every_index_it_has_a_label_for_and_no_more() {

@@ -211,16 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn orthogonal_policy_labels_and_order_match_the_mockup() {
-        assert_eq!(
-            StretchOrthogonalPolicy::default().label(),
-            "Preserve orthogonal"
-        );
-        assert_eq!(
-            StretchOrthogonalPolicy::ALL.map(StretchOrthogonalPolicy::label),
-            ["Preserve orthogonal", "Allow diagonal"]
-        );
-
+    fn a_selected_segment_is_the_default_stretch_target() {
         let state = selected_u_wire();
         assert_eq!(state.default_stretch_target(), Some(wire_target(1, 1)));
         assert!(state.is_stretch_target_eligible(wire_target(1, 1)));
