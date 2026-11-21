@@ -12,7 +12,7 @@ use rspice_app_state::workbench::workspace::Workspace;
 
 /// The loop gain L = 4/(1 + jf/1 kHz)³ at five points a decade from 1 Hz to
 /// 1 MHz, retained as a stability analysis retains it: its Re and Im, and
-/// its gain in decibels and its phase folded into one turn.
+/// its gain in decibels and its phase in degrees, continuous past −180°.
 fn stability_traces() -> Vec<RetainedTrace> {
     let frequency: Vec<f64> = (0..=30).map(|i| 10f64.powf(f64::from(i) / 5.0)).collect();
     let polar: Vec<(f64, f64)> = frequency
@@ -44,17 +44,7 @@ fn stability_traces() -> Vec<RetainedTrace> {
         trace(
             rspice_results::nyquist::LOOP_PHASE_TRACE,
             "°",
-            polar
-                .iter()
-                .map(|(_, a)| {
-                    let degrees = a.to_degrees();
-                    if degrees <= -180.0 {
-                        degrees + 360.0
-                    } else {
-                        degrees
-                    }
-                })
-                .collect(),
+            polar.iter().map(|(_, a)| a.to_degrees()).collect(),
         ),
     ]
 }

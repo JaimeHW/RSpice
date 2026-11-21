@@ -816,18 +816,8 @@ pub(super) fn stability_analysis() -> AnalysisResult {
         trace(
             rspice_results::nyquist::LOOP_PHASE_TRACE,
             "°",
-            polar
-                .iter()
-                .map(|(_, p)| {
-                    let degrees = p.to_degrees();
-                    // Retained phase is folded into (−180°, 180°].
-                    if degrees <= -180.0 {
-                        degrees + 360.0
-                    } else {
-                        degrees
-                    }
-                })
-                .collect(),
+            // Retained phase is continuous: it runs on past −180° to −270°.
+            polar.iter().map(|(_, p)| p.to_degrees()).collect(),
         ),
     ])
 }

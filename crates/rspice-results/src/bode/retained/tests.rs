@@ -681,6 +681,34 @@ fn stb_segment_selection_never_pairs_across_an_undefined_sample() {
     );
 }
 
+/// A stability view reads its loop's phase continuous: a loop whose phase
+/// runs past −180° keeps it on to −270°, never folded back to +180°, so the
+/// strip, the table and the stability card read the same samples.
+#[cfg(feature = "engine-evidence")]
+#[test]
+fn a_loop_phase_past_the_inversion_is_retained_continuous() {
+    let frequency: Vec<f64> = (0..=30).map(|i| 10f64.powf(f64::from(i) / 5.0)).collect();
+    let loop_gain: Vec<_> = frequency
+        .iter()
+        .map(|&f| 4.0 / rspice_core::Complex64::new(1.0, f / 1.0e3).powi(3))
+        .collect();
+    let response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
+        .analyze_with_abort(&frequency, &loop_gain, &rspice_core::NoAbort)
+        .unwrap();
+    let waveforms =
+        crate::analysis_payload::AnalysisResultPayload::stb_waveforms(&response).unwrap();
+    let summary = ac_bode_summary_for_analysis(AnalysisType::Stb, &waveforms, 0, |w| {
+        w.name == crate::nyquist::LOOP_GAIN_DECIBELS_TRACE
+    })
+    .unwrap();
+    let phase = summary.phase_deg.unwrap().into_vec();
+    assert_eq!(phase.len(), frequency.len());
+    for (&f, &degrees) in frequency.iter().zip(phase.iter()) {
+        assert!((degrees + 3.0 * (f / 1.0e3).atan().to_degrees()).abs() < 1e-9);
+    }
+    assert!(phase[phase.len() - 1] < -269.0);
+}
+
 #[test]
 fn pstb_mode_samples_never_impersonate_a_frequency_response() {
     let analysis = response_analysis(
