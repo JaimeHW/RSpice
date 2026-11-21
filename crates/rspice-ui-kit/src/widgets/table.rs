@@ -1452,7 +1452,7 @@ impl<'a> DataTable<'a> {
                                 Pressed {
                                     index,
                                     modifiers,
-                                    shown: shown,
+                                    shown,
                                 },
                                 row,
                             );
