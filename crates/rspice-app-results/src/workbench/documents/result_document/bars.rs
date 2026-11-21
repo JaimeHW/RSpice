@@ -10,13 +10,26 @@ use rspice_results_ui::chrome::{
 };
 
 pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    bars::show(ui, &mut Host(state));
+    bars::show(ui, &mut Host(state, ui.ctx().clone()));
 }
 
-/// Raise what a result document's export control asked for. The dataset
-/// export needs the application's IO, and the figure goes through the
-/// hardcopy workflow, so neither is done here.
-pub(super) fn raise_exports(state: &mut ResultsParts<'_>, requests: ExportRequests) {
+/// Carry out what a result document's export control asked for. Copying
+/// the values is done here, onto `ctx`'s clipboard; the dataset export
+/// needs the application's IO, and the figure goes through the hardcopy
+/// workflow, so those two are raised.
+pub(super) fn raise_exports(
+    ctx: &egui::Context,
+    state: &mut ResultsParts<'_>,
+    requests: ExportRequests,
+) {
+    if requests.copy {
+        match crate::workbench::menu_bar::waveform_export::active_sheet_values(
+            state.results_reads(),
+        ) {
+            Ok(values) => ctx.copy_text(values),
+            Err(reason) => state.prompt(reason),
+        }
+    }
     if requests.csv {
         state.workbench.outbox.push(ExportCsv);
     }
@@ -25,13 +38,13 @@ pub(super) fn raise_exports(state: &mut ResultsParts<'_>, requests: ExportReques
     }
 }
 
-struct Host<'a, 'p>(&'a mut ResultsParts<'p>);
+struct Host<'a, 'p>(&'a mut ResultsParts<'p>, egui::Context);
 impl SheetBarHost for Host<'_, '_> {
     fn viewer(&self) -> ResultViewer {
         self.0.results.session.viewer
     }
     fn export(&mut self, requests: ExportRequests) {
-        raise_exports(self.0, requests);
+        raise_exports(&self.1, self.0, requests);
     }
     fn fft_summary(&self) -> Option<String> {
         self.0

@@ -459,6 +459,8 @@ pub fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool) -> bool {
 /// Export targets requested by the Results menu.
 #[derive(Default)]
 pub struct ExportRequests {
+    /// The sheet's values onto the clipboard, as tab-separated text.
+    pub copy: bool,
     pub csv: bool,
     pub figure: bool,
 }
@@ -466,6 +468,12 @@ pub struct ExportRequests {
 pub fn export_menu(ui: &mut Ui) -> ExportRequests {
     let mut requests = ExportRequests::default();
     rspice_ui_kit::widgets::menu_button(ui, "Export…", |ui| {
+        // The same table the data export writes, for pasting into a
+        // spreadsheet or a report without a file in between.
+        if ui.button("Copy values").clicked() {
+            requests.copy = true;
+            ui.close();
+        }
         // Not "waveform data": the export routes on the active sheet and then
         // on the retained payload, so it writes a spectrum here and SOA rules,
         // SOA observations, optimizer candidates or an event history there —

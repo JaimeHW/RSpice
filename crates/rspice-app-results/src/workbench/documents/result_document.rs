@@ -191,7 +191,6 @@ use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, SourceWaveformPresentationKey,
 };
 use rspice_results_ui::chrome;
-use rspice_results_ui::chrome::bars::viewer_has_sheet_bar;
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;
@@ -1827,18 +1826,17 @@ fn show_with_chrome(
     working_view::capture(state);
 }
 
-/// Whether the active viewer owns a stage-local bar below the viewer tabs.
-///
-/// Plot and custom-canvas sheets use the 31 px instrument/purpose bar. OP and
-/// Table use the mockup's 40 px structured-document strip. XF and Manifest
-/// own no controls there and therefore collapse the row completely.
+/// Whether the stage shows its bar below the viewer tabs: whenever the run
+/// has results. Plot and custom-canvas sheets use the 31 px
+/// instrument/purpose bar; OP and Table use the 40 px structured-document
+/// strip. Every sheet's bar carries its copy and export outputs in the same
+/// place, so no sheet goes without one.
 fn result_stage_bar_visible(state: ResultsReads<'_>) -> bool {
     state
         .model
         .simulation
         .active_run()
         .is_some_and(|run| !run.analyses.is_empty())
-        && viewer_has_sheet_bar(state.results.session.viewer)
 }
 
 /// Height of the stage's readout strip for the active viewer, or zero.
@@ -2423,13 +2421,64 @@ pub fn active_incomplete_evidence_reason(state: ResultsReads<'_>) -> Option<&'st
     )
 }
 
+/// What the sheet bar says: the sheet and what it reads (the run for the
+/// wave stack, the analysis otherwise), why it cannot draw it when it
+/// cannot, a caution when the evidence is incomplete, and, when a finished
+/// run's analysis has none of its own sheets to show it, one sentence
+/// naming what is missing. The gate's own wording for an available sheet
+/// ("... is available") says nothing the drawn sheet does not.
 pub fn sheet_purpose(state: ResultsReads<'_>) -> String {
     let viewer = state.results.session.viewer;
-    let detail = viewer_availability(state, viewer).reason;
-    match active_incomplete_evidence_reason(state) {
-        Some(caution) => format!("{} · {detail} · {caution}", viewer.tab_label()),
-        None => format!("{} · {detail}", viewer.tab_label()),
+    let simulation = &state.model.simulation;
+    let subject = if viewer_uses_wave_stack(viewer) {
+        simulation.active_run().map(|run| run.label.as_str())
+    } else {
+        simulation
+            .active_analysis()
+            .map(|analysis| analysis.label.as_str())
+    };
+    let availability = viewer_availability(state, viewer);
+    let mut parts = vec![viewer.tab_label().to_owned()];
+    parts.extend(
+        subject
+            .filter(|subject| !subject.is_empty())
+            .map(str::to_owned),
+    );
+    if !availability.available {
+        parts.push(availability.reason.to_owned());
     }
+    parts.extend(active_incomplete_evidence_reason(state).map(str::to_owned));
+    parts.extend(
+        unfilled_sheet(state)
+            .filter(|(sheet, _)| *sheet != viewer)
+            .map(|(sheet, reason)| format!("{}: {reason}", sheet.tab_label())),
+    );
+    parts.join(" · ")
+}
+
+/// The sheet the active analysis of a finished run opens on, with what it
+/// needs, when none of that analysis' own sheets (the table aside, which
+/// reads anything) can draw it.
+fn unfilled_sheet(state: ResultsReads<'_>) -> Option<(ResultViewer, &'static str)> {
+    let simulation = &state.model.simulation;
+    // A run still solving has not said what it cannot fill yet.
+    simulation.active_run().filter(|run| {
+        !matches!(
+            run.lifecycle,
+            crate::state::SimulationRunLifecycle::Preparing
+                | crate::state::SimulationRunLifecycle::Running
+                | crate::state::SimulationRunLifecycle::Cancelling
+        )
+    })?;
+    let sheets = ResultViewer::default_sheets(simulation.active_analysis()?.analysis_type);
+    let first = *sheets
+        .first()
+        .filter(|first| **first != ResultViewer::Table)?;
+    let drawn = sheets
+        .iter()
+        .filter(|sheet| **sheet != ResultViewer::Table)
+        .any(|sheet| viewer_is_available(state, *sheet));
+    (!drawn).then(|| (first, viewer_availability(state, first).reason))
 }
 
 #[cfg(test)]

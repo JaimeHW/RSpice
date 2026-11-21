@@ -28,13 +28,18 @@ pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             envelope_available,
             marker_available,
         },
-        &mut Host { state, tokens: &t },
+        &mut Host {
+            state,
+            tokens: &t,
+            ctx: ui.ctx().clone(),
+        },
     );
 }
 
 struct Host<'a, 'p> {
     state: &'a mut ResultsParts<'p>,
     tokens: &'a Tokens,
+    ctx: egui::Context,
 }
 
 impl WaveInstrumentHost for Host<'_, '_> {
@@ -86,7 +91,7 @@ impl WaveInstrumentHost for Host<'_, '_> {
     }
 
     fn export(&mut self, requests: ExportRequests) {
-        super::bars::raise_exports(self.state, requests);
+        super::bars::raise_exports(&self.ctx, self.state, requests);
     }
 
     fn inline_cursor_readout(&mut self) -> Option<String> {

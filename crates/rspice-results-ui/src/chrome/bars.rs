@@ -54,13 +54,6 @@ pub trait SheetBarHost {
     fn domain_controls(&mut self, ui: &mut Ui) -> bool;
     fn purpose(&self) -> String;
 }
-pub const fn viewer_has_sheet_bar(viewer: ResultViewer) -> bool {
-    !matches!(
-        viewer,
-        ResultViewer::TransferFunction | ResultViewer::Manifest
-    )
-}
-
 pub const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
     matches!(viewer, ResultViewer::Op | ResultViewer::Table)
 }

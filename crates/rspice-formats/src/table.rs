@@ -156,6 +156,68 @@ pub fn csv_to_tsv(contents: &str) -> Result<String, TsvConversionError> {
     String::from_utf8(bytes).map_err(TsvConversionError::Utf8)
 }
 
+/// Convert a typed-result CSV document made of sections into TSV without
+/// changing its cells. The optimizer history stacks a field/value summary
+/// over its iteration table: each row keeps its own width, and the blank
+/// line between two sections stays, so a spreadsheet takes it as written.
+pub fn sectioned_csv_to_tsv(contents: &str) -> Result<String, TsvConversionError> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(contents.as_bytes());
+    let bytes = contents.as_bytes();
+    let mut tsv = String::new();
+    let mut section = Vec::new();
+    for record in reader.records() {
+        let record = record.map_err(TsvConversionError::Read)?;
+        // A record's position is where the reader began reading it, before
+        // the blank lines it skipped; those end a section.
+        let blank = record
+            .position()
+            .map_or(0, |position| blank_lines(bytes, position.byte() as usize));
+        if blank > 0 {
+            tsv.push_str(&tsv_rows(&section)?);
+            section.clear();
+            tsv.push_str(&"\n".repeat(blank));
+        }
+        section.push(record);
+    }
+    tsv.push_str(&tsv_rows(&section)?);
+    Ok(tsv)
+}
+
+/// How many blank lines `bytes` holds from `start`. A line feed right after
+/// a carriage return ends the line before, not a blank one.
+fn blank_lines(bytes: &[u8], start: usize) -> usize {
+    let mut rest = bytes.get(start..).unwrap_or_default();
+    if start > 0 && bytes.get(start - 1) == Some(&b'\r') {
+        rest = rest.strip_prefix(b"\n").unwrap_or(rest);
+    }
+    let mut count = 0;
+    while let [b'\r', b'\n', tail @ ..] | [b'\n' | b'\r', tail @ ..] = rest {
+        count += 1;
+        rest = tail;
+    }
+    count
+}
+
+/// `records` as TSV rows, each keeping its own width.
+fn tsv_rows(records: &[csv::StringRecord]) -> Result<String, TsvConversionError> {
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .flexible(true)
+        .from_writer(Vec::new());
+    for record in records {
+        writer
+            .write_record(record)
+            .map_err(TsvConversionError::Write)?;
+    }
+    let bytes = writer
+        .into_inner()
+        .map_err(|error| TsvConversionError::Finalize(error.into_error()))?;
+    String::from_utf8(bytes).map_err(TsvConversionError::Utf8)
+}
+
 struct ParsedLabeledCsvTable {
     sequence: String,
     label: String,
@@ -255,7 +317,7 @@ impl CsvTableMerger {
 mod tests {
     use super::{
         CsvTableMerger, DelimitedTableError, EngineeringTableSource, TsvConversionError,
-        csv_to_tsv, encode_delimited_table, escape_csv_field,
+        csv_to_tsv, encode_delimited_table, escape_csv_field, sectioned_csv_to_tsv,
     };
 
     struct SelectedTable;
@@ -305,6 +367,22 @@ mod tests {
         assert_eq!(
             csv_to_tsv(&csv).unwrap(),
             "name\tvalue\na,b\t\"one\"\"two\nthree\"\n"
+        );
+    }
+
+    #[test]
+    fn sectioned_csv_to_tsv_keeps_each_row_width_and_the_blank_lines() {
+        let csv = format!(
+            "field,value\nnote,{}\n\n\niteration,cost,w\n0,1,2\n",
+            escape_csv_field("one\ntwo")
+        );
+        assert_eq!(
+            sectioned_csv_to_tsv(&csv).unwrap(),
+            "field\tvalue\nnote\t\"one\ntwo\"\n\n\niteration\tcost\tw\n0\t1\t2\n"
+        );
+        assert_eq!(
+            sectioned_csv_to_tsv("a,b\r\nc,d\r\n\r\ne\r\n").unwrap(),
+            "a\tb\nc\td\n\ne\n"
         );
     }
 

@@ -15,7 +15,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use rspice_formats::table::csv_to_tsv;
+use rspice_formats::table::sectioned_csv_to_tsv;
 use rspice_formats::waveform_io::result::{
     WaveformProjectionError, project_waveforms as prepare_single_analysis_dataset,
 };
@@ -470,6 +470,22 @@ struct PreparedTypedResultCsv {
     detail: String,
 }
 
+/// The values the displayed sheet shows, as the clipboard takes them: what
+/// its TSV data export writes, with the plotted signals.
+pub(crate) fn active_sheet_values(state: ResultsReads<'_>) -> Result<String, String> {
+    let displayed =
+        crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
+            state,
+        )?;
+    if let Some(table) = prepare_displayed_table(state, &displayed, ExportedSignals::Plotted) {
+        return sectioned_csv_to_tsv(&table?.0.contents).map_err(|error| error.to_string());
+    }
+    let dataset = prepare_waveform_dataset(state, &displayed, false, ExportedSignals::Plotted)?;
+    crate::io::WaveformWriter::new(crate::io::WaveformFormat::Tsv)
+        .write_text(&dataset)
+        .map_err(|error| error.to_string())
+}
+
 /// The one table the displayed view publishes, and the sentence Touchstone
 /// refuses that table with.
 ///
@@ -770,7 +786,7 @@ fn export_typed_result_tsv(
     io: &(impl ExportWorkflowIo + ?Sized),
     prepared: &PreparedTypedResultCsv,
 ) {
-    let contents = match csv_to_tsv(&prepared.contents) {
+    let contents = match sectioned_csv_to_tsv(&prepared.contents) {
         Ok(contents) => contents,
         Err(error) => {
             state.report_failure("TSV export failed", error.to_string());

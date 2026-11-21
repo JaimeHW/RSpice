@@ -187,9 +187,7 @@ pub fn show(
             unavailable_surface(ui, &active_pane.title, &reason);
             return;
         }
-        if super::viewer_has_sheet_bar(viewer) {
-            super::show_sheet_bar(ui, state);
-        }
+        super::show_sheet_bar(ui, state);
         crate::ui::plot::set_interaction_mode(
             ui.ctx(),
             state.results.session.plot_tool.interaction_mode(),

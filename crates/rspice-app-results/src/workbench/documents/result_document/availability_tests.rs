@@ -647,6 +647,40 @@ fn each_analysis_kind_opens_on_the_sheet_the_table_names() {
     }
 }
 
+/// The sheet bar names the sheet and what it reads, never the gate's own
+/// "is available" wording; an analysis of a finished run that none of its
+/// sheets can draw says in one sentence what is missing, while a run still
+/// solving says nothing yet.
+#[test]
+fn the_sheet_bar_names_its_subject_and_what_an_unfilled_sheet_needs() {
+    let mut state = transient_state();
+    state.results.results.session.viewer = ResultViewer::Waves;
+    let purpose = sheet_purpose(state.results_reads());
+    assert!(purpose.starts_with("Waves"), "{purpose}");
+    assert!(
+        !purpose.contains("available") && !purpose.contains("present"),
+        "{purpose}"
+    );
+
+    // An AC analysis that kept no usable response.
+    let mut state = state_with_analysis(AnalysisResult::new(1, AnalysisType::Ac, "AC1"));
+    state.model.simulation.retained.runs[0].lifecycle =
+        crate::state::SimulationRunLifecycle::Completed;
+    state.results.results.session.viewer = ResultViewer::Table;
+    let purpose = sheet_purpose(state.results_reads());
+    assert!(purpose.starts_with("Table · AC1"), "{purpose}");
+    assert!(
+        purpose.contains(&format!(
+            "Bode: {}",
+            viewer_availability(state.results_reads(), ResultViewer::Bode).reason
+        )),
+        "{purpose}"
+    );
+    state.model.simulation.retained.runs[0].lifecycle =
+        crate::state::SimulationRunLifecycle::Running;
+    assert!(!sheet_purpose(state.results_reads()).contains("Bode"));
+}
+
 /// A running run that has written nothing yet keeps the reader on the sheet its results
 /// arrive on, so a transient's live plot appears where the reader is looking; a run that
 /// ended with nothing to show still falls back to its inventory.

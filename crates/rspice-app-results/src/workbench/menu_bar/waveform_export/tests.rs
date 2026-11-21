@@ -238,6 +238,56 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
     assert!(optimization.contains("1.00000000000000000e0,2.50000000000000000e-1"));
 }
 
+/// Copy values puts on the clipboard what the sheet's TSV data export
+/// writes: the same rows, nothing rounded, for a sheet that owns its table
+/// (the optimizer's stacked sections and the blank line between them
+/// included) and for a plain wave stack alike.
+#[test]
+fn copied_values_are_what_the_tsv_export_writes() {
+    for (analysis, shown) in
+        [
+            (
+                AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
+                    .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+                        best_objectives: Vec::new(),
+                        best_constraints: Vec::new(),
+                        iterations: vec![0.0, 1.0],
+                        best_cost: 0.25,
+                        best_variables: [("w".to_owned(), 1.5e-6)].into_iter().collect(),
+                        converged: true,
+                    })
+                    .with_waveforms(vec![
+                        waveform("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25]),
+                        waveform("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6]),
+                    ]),
+                "\n\niteration\tcost\tw\n",
+            ),
+            (
+                AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+                    .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]),
+                "V(out)",
+            ),
+        ]
+    {
+        let mut state = state_with_typed_result(analysis);
+        let copied = active_sheet_values(state.results_reads()).expect("the sheet copies");
+        assert!(copied.contains(shown), "{copied}");
+        assert!(copied.lines().next().unwrap().contains('\t'), "{copied}");
+        state
+            .model
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 2)
+            .expect("TSV preference");
+        let io = MockExportWorkflowIo::default();
+        action_export_dataset_with_io(
+            &mut state.results_parts(),
+            &io,
+            &DatasetExportChoice::default(),
+        );
+        assert_eq!(io.text_files.borrow()[0].1, copied);
+    }
+}
+
 /// A derived sheet must export the curve it drew, not the samples it was
 /// derived from.
 ///
