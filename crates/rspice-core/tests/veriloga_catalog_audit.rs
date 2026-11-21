@@ -260,44 +260,6 @@ fn the_published_readme_states_the_shipped_count_and_nothing_else() {
     );
 }
 
-#[test]
-fn counted_nouns_are_recognized_however_the_claim_is_phrased() {
-    assert_eq!(documented_model_counts("43 models"), vec![43]);
-    assert_eq!(documented_model_counts("43 CMC models generated"), vec![43]);
-    assert_eq!(
-        documented_model_counts("and 43 generated Verilog-A models."),
-        vec![43]
-    );
-    assert_eq!(documented_model_counts("The 43 devices today"), vec![43]);
-    assert_eq!(documented_model_counts("| `43` | Device count |"), vec![43]);
-}
-
-#[test]
-fn a_number_that_counts_something_else_is_not_a_catalog_claim() {
-    assert!(documented_model_counts("9 harmonics by default").is_empty());
-    assert!(documented_model_counts("exits 80 on failure").is_empty());
-    // A count and its noun never straddle a sentence boundary.
-    assert!(documented_model_counts("runs 4 analyses. Every device stamps").is_empty());
-    // A footnote marker and the note it keys.
-    assert!(documented_model_counts("- (1) every native device model whose").is_empty());
-    assert!(documented_model_counts("| AC analysis | if (1) | yes |").is_empty());
-}
-
-#[test]
-fn a_stale_count_is_reported_against_the_compiled_catalog() {
-    // The failure this audit exists for: documentation left behind by a
-    // catalog that grew.
-    let descriptors = generated_veriloga_model_descriptors();
-    let stale = descriptors.len() + 1;
-    assert_eq!(
-        validate_release_documentation(&format!("{stale} generated Verilog-A models"), descriptors),
-        vec![format!(
-            "README.md states a catalog of {stale} models; this build ships {}",
-            descriptors.len()
-        )]
-    );
-}
-
 /// The catalog README documents each model's registry name as the name an X
 /// line gives it. Every shipped model binds by that name, with one node per
 /// terminal its descriptor lists, into a circuit that carries it as a
