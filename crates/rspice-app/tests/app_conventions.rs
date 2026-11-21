@@ -1511,6 +1511,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "waveform_export"),
             ("lib.rs", "workbench"),
             ("lib.rs", "workflows"),
+            ("workbench/chrome/toolbar/results.rs", "run_selector"),
             ("workbench/documents/result_document.rs", "create_document"),
             ("workbench/documents/result_document.rs", "document_edit"),
             ("workbench/documents/result_document.rs", "frame_work"),
