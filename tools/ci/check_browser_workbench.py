@@ -765,9 +765,8 @@ def results_store_files(browser, store):
 
 
 def stated_storage(browser, wanted, description, timeout=120):
-    """The Save page's statement once it says `wanted`. A page just loaded may still be reading
-    its project's segments, and the project opening closes a palette or page opened before it,
-    so the page is opened again until it states the storage."""
+    """The Save page's statement once it says `wanted`. A page just loaded may still be opening
+    its project's store, so the page is opened again until it states the storage."""
     deadline = time.monotonic() + timeout
 
     def statement():
@@ -789,6 +788,7 @@ def results_survive_reload(browser):
     reloaded and reopened, the project's run reads them, and nothing says they cannot be read."""
     before = stated_storage(browser, KEPT, "the run's results kept in this browser's storage")
     browser.capture("results-kept")
+    held(before)
     # The document tab that states whether the project is saved shows on the schematic.
     browser.click("Schematic", "button")
     choose_command(browser, "Save all")
@@ -810,9 +810,11 @@ def results_survive_reload(browser):
     browser.call("POST", "/refresh", {})
     wait_until_ready(browser)
     browser.click("Schematic canvas", "canvas")
+    palette_stays_open(browser, "as the saved project reopens")
     after = stated_storage(browser, KEPT, "the reopened run's results read from this browser's storage")
     if after.split(" · ")[-1] != before.split(" · ")[-1]:
         raise AssertionError(f"The reopened store states other results than it kept: {before!r}, then {after!r}")
+    held(after)
     browser.click("Expand console", "button")
     reopened = browser.capture("results-reopened")
     browser.click("Collapse console", "button")
@@ -823,6 +825,34 @@ def results_survive_reload(browser):
     samples = verify_exported_samples(exported_dataset(browser))
     return {"store": store, "segments": sorted(named), "store_files": kept,
             "before_reload": before, "after_reload": after, "exported_samples": samples}
+
+
+def held(statement):
+    """The Save page's statement counts the run the page reads: its figure for the page's memory
+    is not nothing while the page holds the run's samples."""
+    if statement.startswith("0 B of "):
+        raise AssertionError(f"The page states it holds nothing of the run it reads: {statement!r}")
+
+
+def palette_stays_open(browser, when):
+    """The command palette opened as the page's project opens stays open: the project opening does
+    not close what the reader opened."""
+    browser.keys("k", modifiers=("\ue009",))
+
+    def search():
+        return any(control["label"] == "Command search" and control["role"] == "comboBox"
+                   for control in controls(browser.snapshot()))
+
+    wait_for(search, "the command palette search field")
+    browser.capture("palette-opened")
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if not search():
+            browser.capture("palette-closed")
+            raise AssertionError(f"The command palette opened {when} closed by itself")
+        time.sleep(0.25)
+    browser.keys("\ue00c")
+    wait_for(lambda: not search(), "the command palette closed")
 
 
 def restored_checkpoint_reads_its_run(browser, store):
