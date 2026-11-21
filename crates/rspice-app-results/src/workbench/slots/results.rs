@@ -340,8 +340,7 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
 
     fn saved_presentation(
         &self,
-    ) -> &dyn rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource
-    {
+    ) -> &dyn rspice_app_services::workbench::lifecycle::project_lifecycle::SignalSetSource {
         &*self.results
     }
 

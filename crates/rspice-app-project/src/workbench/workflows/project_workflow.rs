@@ -1380,7 +1380,7 @@ pub struct LoadedProjectInstall {
 /// What a loaded project brings back once it is installed.
 pub struct LoadedProjectRestore {
     simulation_results: crate::io::ProjectSimulationResults,
-    result_presentation: crate::state::result_presentation::ResultPresentation,
+    result_signal_sets: Vec<crate::state::result_presentation::SignalSet>,
     accepted_baseline: ProjectSnapshot,
     simulation_results_warning: Option<String>,
     workspace_migration_warning: Option<String>,
@@ -1531,7 +1531,7 @@ pub fn prepare_loaded_project(
         },
         restore: LoadedProjectRestore {
             simulation_results: project.file.simulation_results,
-            result_presentation: project.file.result_presentation,
+            result_signal_sets: project.file.result_signal_sets,
             accepted_baseline,
             simulation_results_warning: project.file.simulation_results_warning,
             workspace_migration_warning: project.file.workspace_migration_warning,
@@ -1555,7 +1555,7 @@ pub fn install_loaded_project(model: &mut Model, install: LoadedProjectInstall) 
 
 /// What an installed project's restore leaves for the shell and the report.
 pub struct OpenedProject {
-    pub result_presentation: crate::state::result_presentation::ResultPresentation,
+    pub result_signal_sets: Vec<crate::state::result_presentation::SignalSet>,
     pub accepted_baseline: ProjectSnapshot,
     pub report: OpenedProjectReport,
 }
@@ -1577,7 +1577,7 @@ pub fn restore_loaded_simulation(
 ) -> OpenedProject {
     let LoadedProjectRestore {
         simulation_results,
-        result_presentation,
+        result_signal_sets,
         accepted_baseline,
         mut simulation_results_warning,
         workspace_migration_warning,
@@ -1601,7 +1601,7 @@ pub fn restore_loaded_simulation(
         ));
     }
     OpenedProject {
-        result_presentation,
+        result_signal_sets,
         accepted_baseline,
         report: OpenedProjectReport {
             technology_block,

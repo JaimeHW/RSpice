@@ -165,10 +165,15 @@ pub struct ProjectFile {
     pub libraries: ProjectLibraries,
     #[serde(default, skip_serializing_if = "ProjectSimulationResults::is_empty")]
     pub simulation_results: ProjectSimulationResults,
-    /// Project-owned annotations, separate from immutable numerical evidence.
-    /// Flattening preserves the existing project JSON field names.
-    #[serde(flatten)]
-    pub result_presentation: rspice_results::result_presentation::ResultPresentation,
+    /// The reader's saved signal sets, in the order the browser lists them.
+    /// What the reader made of a run is its view's, among the workspace's
+    /// visualization documents.
+    #[serde(
+        default,
+        rename = "result_signal_sets",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub result_signal_sets: Vec<rspice_results::result_presentation::SignalSet>,
     /// Authoritative execution inputs. Absent only in projects written before
     /// project-owned simulation plans were introduced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -189,11 +194,6 @@ pub struct ProjectFile {
     pub unsaved_library_files: Vec<crate::UnsavedLibraryFile>,
 }
 
-const MAX_PROJECT_RESULT_EXPRESSION_GROUPS: usize = 4_096;
-const MAX_PROJECT_RESULT_EXPRESSIONS_TOTAL: usize = 16_384;
-const MAX_PROJECT_RESULT_EXPRESSIONS_PER_ANALYSIS: usize = 512;
-const MAX_PROJECT_RESULT_EXPRESSION_BYTES: usize = 4_096;
-
 impl ProjectFile {
     pub fn new(workspace: ProjectWorkspace, libraries: ProjectLibraries) -> Self {
         Self {
@@ -201,7 +201,7 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results: ProjectSimulationResults::default(),
-            result_presentation: Default::default(),
+            result_signal_sets: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
             workspace_migration_warning: None,
@@ -220,7 +220,7 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results,
-            result_presentation: Default::default(),
+            result_signal_sets: Vec::new(),
             execution_context: None,
             simulation_results_warning: None,
             workspace_migration_warning: None,
@@ -240,7 +240,7 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results,
-            result_presentation: Default::default(),
+            result_signal_sets: Vec::new(),
             execution_context: Some(execution_context),
             simulation_results_warning: None,
             workspace_migration_warning: None,
@@ -248,13 +248,13 @@ impl ProjectFile {
         }
     }
 
-    /// Attach all project-owned result annotations to a snapshot.
+    /// Attach the reader's saved signal sets to a snapshot.
     #[must_use]
-    pub fn with_result_presentation(
+    pub fn with_result_signal_sets(
         mut self,
-        presentation: rspice_results::result_presentation::ResultPresentation,
+        signal_sets: Vec<rspice_results::result_presentation::SignalSet>,
     ) -> Self {
-        self.result_presentation = presentation;
+        self.result_signal_sets = signal_sets;
         self
     }
 
@@ -272,10 +272,6 @@ impl ProjectFile {
         self.workspace
             .validate_simulation_configuration()
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
-        self.validate_result_expression_groups()?;
-        self.result_presentation
-            .validate_markers()
-            .map_err(ProjectIoError::InvalidData)?;
         let view_index = self.validate_library_tree()?;
         self.validate_project_source_owners(&view_index)?;
         self.validate_workspace_references(&view_index)?;
@@ -300,55 +296,6 @@ impl ProjectFile {
                 })?;
         }
         self.validate_simulation_configuration_references()?;
-        Ok(())
-    }
-
-    fn validate_result_expression_groups(&self) -> Result<(), ProjectIoError> {
-        if self.result_presentation.expression_groups.len() > MAX_PROJECT_RESULT_EXPRESSION_GROUPS {
-            return Err(ProjectIoError::InvalidData(format!(
-                "result expression group count {} exceeds the supported limit of {MAX_PROJECT_RESULT_EXPRESSION_GROUPS}",
-                self.result_presentation.expression_groups.len()
-            )));
-        }
-        let mut analyses = HashSet::new();
-        let mut total = 0_usize;
-        for group in &self.result_presentation.expression_groups {
-            if !analyses.insert(group.analysis) {
-                return Err(ProjectIoError::InvalidData(
-                    "result expression groups contain a duplicate stable analysis identity"
-                        .to_owned(),
-                ));
-            }
-            if group.traces.is_empty()
-                || group.traces.len() > MAX_PROJECT_RESULT_EXPRESSIONS_PER_ANALYSIS
-            {
-                return Err(ProjectIoError::InvalidData(format!(
-                    "each result expression group must contain 1 to {MAX_PROJECT_RESULT_EXPRESSIONS_PER_ANALYSIS} traces"
-                )));
-            }
-            total = total.saturating_add(group.traces.len());
-            if total > MAX_PROJECT_RESULT_EXPRESSIONS_TOTAL {
-                return Err(ProjectIoError::InvalidData(format!(
-                    "result expression count exceeds the supported limit of {MAX_PROJECT_RESULT_EXPRESSIONS_TOTAL}"
-                )));
-            }
-            let mut expressions = HashSet::new();
-            for trace in &group.traces {
-                if trace.text.is_empty()
-                    || trace.text.len() > MAX_PROJECT_RESULT_EXPRESSION_BYTES
-                    || trace.text.chars().any(char::is_control)
-                {
-                    return Err(ProjectIoError::InvalidData(format!(
-                        "result expressions must contain 1 to {MAX_PROJECT_RESULT_EXPRESSION_BYTES} non-control UTF-8 bytes"
-                    )));
-                }
-                if !expressions.insert(trace.text.as_str()) {
-                    return Err(ProjectIoError::InvalidData(
-                        "a result expression group contains duplicate expression text".to_owned(),
-                    ));
-                }
-            }
-        }
         Ok(())
     }
 
@@ -1750,15 +1697,6 @@ pub(crate) fn finish_decoding(
     source_files: impl rspice_design::hierarchy::HierarchySourceFiles,
 ) -> Result<DecodedProject, ProjectIoError> {
     let mut load_repairs = Vec::new();
-    let repaired_markers = project
-        .result_presentation
-        .repair_duplicate_marker_ids()
-        .map_err(ProjectIoError::InvalidData)?;
-    if repaired_markers > 0 {
-        load_repairs.push(format!(
-            "Assigned distinct IDs to {repaired_markers} result marker(s) with duplicate IDs; all annotation positions, labels, and dataset bindings were preserved."
-        ));
-    }
     project.workspace.restore_occurrences();
     let unresolved_generated_bindings: usize = project
         .workspace

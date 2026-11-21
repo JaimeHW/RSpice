@@ -743,32 +743,97 @@ fn an_edit_marks_only_its_own_document_tab_until_the_project_is_saved() {
     );
 }
 
-/// An expression trace edits the results session's presentation, not a saved
-/// document: no document's tab is marked, and the project still reads
-/// unsaved.
+/// Press the calculator's Plot on `expression`.
+#[cfg(not(target_arch = "wasm32"))]
+fn plot(state: &mut crate::workbench::app_state::AppState, expression: &str) {
+    state.results.calculator_panel.expression = expression.to_owned();
+    let mut panel = std::mem::take(&mut state.results.calculator_panel);
+    rspice_app_results::workbench::results::calculator::plot_expression(
+        &mut panel,
+        &mut state.results_parts(),
+    );
+    state.results.calculator_panel = panel;
+}
+
+/// An expression the calculator plots is kept by the view in front. On the
+/// dataset's tab the run's working view keeps it: no document tab is marked
+/// and the project reads unsaved. On a saved document's tab that document
+/// keeps it, and its tab alone is marked.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn an_expression_trace_marks_no_document_tab_but_leaves_the_project_unsaved() {
+fn a_plotted_expression_is_kept_by_the_view_in_front() {
+    use egui::Event;
+    use egui::accesskit::{Action, ActionRequest, TreeId};
+
     let mut window = ResultsWindow::new();
-    window.create("Review A").expect("A commits");
+    let document_id = window.create("Review A").expect("A commits");
+    let dataset = window.app.state.model.simulation.retained.runs[0]
+        .label
+        .clone();
+    let choose_tab = |window: &mut ResultsWindow, index: usize| {
+        let (tab, _) = document_tabs(&window.frames(Vec::new()))[index].clone();
+        window.frames(vec![Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: tab,
+            data: None,
+        })]);
+        window.frames(Vec::new());
+    };
+    choose_tab(&mut window, 0);
+    assert!(
+        window
+            .app
+            .state
+            .results
+            .results
+            .session
+            .persistent_pane_context
+            .is_none(),
+        "the dataset's tab shows the run's own view"
+    );
     window.save();
     assert!(!window.project_unsaved());
 
-    let state = &mut window.app.state;
-    state.results.calculator_panel.expression = "V(out)*2".to_owned();
-    rspice_app_results::workbench::results::calculator::plot_expression(
-        &mut state.results,
-        &mut state.model,
-        &mut state.workbench,
-    );
-    assert_eq!(state.prompt_text(), Some("Plotted V(out)*2"));
-
+    plot(&mut window.app.state, "V(out)*2");
+    assert_eq!(window.app.state.prompt_text(), Some("Plotted V(out)*2"));
     assert!(window.project_unsaved(), "the plotted trace is not unsaved");
+    assert_eq!(
+        tab_marks(&window.frames(Vec::new())),
+        [(dataset.clone(), false), ("Review A".to_owned(), false)],
+        "an expression on the run's own view marked a document tab"
+    );
+
+    window.save();
+    choose_tab(&mut window, 1);
+    window.save();
+    window
+        .app
+        .state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
+    window.frames(Vec::new());
+    plot(&mut window.app.state, "V(out)*3");
+    assert_eq!(window.app.state.prompt_text(), Some("Plotted V(out)*3"));
     assert!(
-        tab_marks(&window.frames(Vec::new()))
+        window
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .expect("the saved document")
+            .expression_traces()
             .iter()
-            .all(|(_, marked)| !marked),
-        "an expression trace marked a document tab"
+            .any(|trace| trace.text == "V(out)*3"),
+        "the document in front keeps the expression"
+    );
+    assert_eq!(
+        tab_marks(&window.frames(Vec::new())),
+        [(dataset, false), ("Review A".to_owned(), true)],
+        "only the document in front is marked"
     );
 }
 

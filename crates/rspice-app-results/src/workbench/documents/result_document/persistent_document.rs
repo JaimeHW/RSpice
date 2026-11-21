@@ -1458,6 +1458,68 @@ pub(super) fn expression_edits_for(
 /// baseline and each run it names as `Run 3`, where the document holds
 /// them. A run named and not attached is read while it is retained and not
 /// kept with the document.
+/// Keep `text`, an expression the calculator plotted, in the pane the reader
+/// works in on `document_id`, beside the expressions it already keeps.
+/// `false` when the pane already keeps it.
+pub(super) fn keep_plotted_expression(
+    state: &mut ResultsParts<'_>,
+    document_id: ResultDocumentId,
+    text: &str,
+) -> Result<bool, String> {
+    let projected = projection(state.results_reads(), document_id)
+        .ok_or_else(|| "The result document is no longer in the project.".to_owned())?;
+    let working_in = state.results.session.persistent_document_pane(document_id);
+    let panes = || projected.pages.iter().flat_map(|page| page.panes.iter());
+    let pane = panes()
+        .find(|pane| Some(pane.id) == working_in)
+        .or_else(|| panes().next())
+        .ok_or_else(|| "The result document has no pane to keep the expression.".to_owned())?;
+    let binding = pane.binding.ok_or_else(|| {
+        format!(
+            "'{}' reads no run to evaluate the expression on.",
+            pane.title
+        )
+    })?;
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .cloned()
+        .ok_or_else(|| {
+            "Select a retained result dataset before plotting an expression.".to_owned()
+        })?;
+    let document = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .ok_or_else(|| "The result document is no longer in the project.".to_owned())?;
+    if document
+        .expression_traces()
+        .iter()
+        .any(|trace| trace.pane_id == pane.id && trace.text == text)
+    {
+        return Ok(false);
+    }
+    let mut datasets = vec![binding.dataset];
+    for read in named_datasets(state.results_reads(), document, &run, text) {
+        if !datasets.contains(&read) {
+            datasets.push(read);
+        }
+    }
+    let edit = DocumentEdit::AddExpressionTrace(ExpressionTrace {
+        pane_id: pane.id,
+        text: text.to_owned(),
+        datasets,
+        unit: None,
+        visible: true,
+    });
+    let revision = document.revision();
+    super::view_edits::apply(state, document_id, revision, vec![edit])
+        .map(|_| true)
+        .map_err(|error| error.to_string())
+}
+
 fn named_datasets(
     state: ResultsReads<'_>,
     document: &VisualizationDocument,

@@ -59,7 +59,7 @@ impl ProjectFile {
             }
             ProjectDocumentId::ResultHistory => {
                 self.simulation_results = working.simulation_results.clone();
-                self.result_presentation = working.result_presentation.clone();
+                self.result_signal_sets = working.result_signal_sets.clone();
                 self.workspace.report_documents = working.workspace.report_documents.clone();
                 self.workspace.visualization_documents =
                     working.workspace.visualization_documents.clone();

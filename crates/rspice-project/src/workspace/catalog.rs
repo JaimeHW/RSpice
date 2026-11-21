@@ -401,6 +401,20 @@ impl ProjectWorkspace {
         Ok(receipt)
     }
 
+    /// Drop one result document from the project: a run's working view once
+    /// nothing can draw it again. Whether there was one to drop.
+    pub fn remove_visualization_document(&mut self, document_id: ResultDocumentId) -> bool {
+        let before = self.visualization_documents.len();
+        self.visualization_documents
+            .retain(|document| document.id() != document_id);
+        let removed = self.visualization_documents.len() != before;
+        if removed {
+            self.visualization_documents_dirty = true;
+            self.visualization_documents_modified.remove(&document_id);
+        }
+        removed
+    }
+
     /// Put back one result document's view as `snapshot` held it, as a
     /// revision-checked step like [`Self::transact_visualization_document`].
     pub fn restore_visualization_document_view(

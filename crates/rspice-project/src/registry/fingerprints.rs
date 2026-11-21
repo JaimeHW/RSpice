@@ -129,13 +129,13 @@ fn document_digests_with_results_cache(
                 &project.simulation_results,
                 &workspace.report_documents,
                 &workspace.visualization_documents,
-                &project.result_presentation,
+                &project.result_signal_sets,
             )?,
             None => result_fingerprint::digest(
                 &project.simulation_results,
                 &workspace.report_documents,
                 &workspace.visualization_documents,
-                &project.result_presentation,
+                &project.result_signal_sets,
             )?,
         },
     );

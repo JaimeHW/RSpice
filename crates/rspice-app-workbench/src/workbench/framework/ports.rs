@@ -5,7 +5,7 @@
 //! feature's, so the code that answers from a feature's reads, wherever it
 //! sits above the session, takes the port and not the feature.
 
-use rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::SignalSetSource;
 use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_results::result_presentation::{
@@ -208,7 +208,7 @@ pub trait ResultsPort {
     /// What a project file saves of the workspace's presentation, as the
     /// project lifecycle reads it beside the model when it captures the
     /// project: whether the project holds unsaved work asks it.
-    fn saved_presentation(&self) -> &dyn ResultPresentationSource;
+    fn saved_presentation(&self) -> &dyn SignalSetSource;
 
     /// The workspace as it stands now, as a copy that owns everything it
     /// holds. A campaign's frozen host reports into the copy and reads it

@@ -34,7 +34,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::feature::DesignPort;
 use crate::workbench::framework::requests::{CloseForLiveMirror, LiveMirrorEntry, Outbox};
 use crate::workbench::lifecycle::project_lifecycle::{
-    LifecycleSource, LifecycleView, ResultPresentationSource,
+    LifecycleSource, LifecycleView, SignalSetSource,
 };
 use crate::workbench::state::WorkbenchSession;
 
@@ -205,7 +205,7 @@ pub struct LiveHost<'a> {
     pub model: &'a mut Model,
     pub workbench: &'a mut WorkbenchSession,
     pub platform: &'a PlatformState,
-    pub presentation: &'a dyn ResultPresentationSource,
+    pub presentation: &'a dyn SignalSetSource,
     pub design: &'a dyn DesignPort,
 }
 
@@ -1845,9 +1845,8 @@ fn serialize_host_document(state: &LiveHost<'_>, doc: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::services::live_protocol::LiveRelayIdentity;
-    use crate::state::SimulationState;
     use crate::state::pdk_config::PdkConfig;
-    use crate::state::result_presentation::ResultPresentation;
+    use crate::state::result_presentation::SignalSet;
     use rspice_app_state::workbench::workspace::restore_model_library_manager;
     use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
@@ -1912,9 +1911,9 @@ mod tests {
         }
     }
 
-    impl ResultPresentationSource for NoReads {
-        fn project_presentation(&self, _simulation: &SimulationState) -> ResultPresentation {
-            ResultPresentation::default()
+    impl SignalSetSource for NoReads {
+        fn saved_signal_sets(&self) -> Vec<SignalSet> {
+            Vec::new()
         }
     }
 

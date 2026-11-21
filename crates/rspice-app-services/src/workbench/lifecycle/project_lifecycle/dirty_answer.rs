@@ -86,9 +86,7 @@ impl WorkingStamp {
                 .project_lifecycle
                 .result_cache
                 .stamp(&model.simulation),
-            presentation: rspice_project::registry::digest(
-                &state.presentation.project_presentation(&model.simulation),
-            ),
+            presentation: rspice_project::registry::digest(&state.presentation.saved_signal_sets()),
             in_place_layout: model.symbol_in_place_layout.clone(),
         }
     }
@@ -401,9 +399,7 @@ fn compare(
                             &lifecycle.result_cache.capture(&state.model.simulation),
                             &workspace.report_documents,
                             &workspace.visualization_documents,
-                            &state
-                                .presentation
-                                .project_presentation(&state.model.simulation),
+                            &state.presentation.saved_signal_sets(),
                         )
                     },
                 )

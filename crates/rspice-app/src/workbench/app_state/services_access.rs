@@ -217,8 +217,8 @@ fn revert_document_in_place(
         RevertFollowUp::CellView(baseline, reference) => {
             revert_cell_view(state, &baseline, &reference)?;
         }
-        RevertFollowUp::ResultHistory(presentation) => {
-            state.restore_result_presentation(presentation);
+        RevertFollowUp::ResultHistory(signal_sets) => {
+            state.restore_result_signal_sets(signal_sets);
             state.results.analysis.clear_specialized_viewer_data();
         }
         RevertFollowUp::StimulusLibrary => state.design.on_project_changed(),

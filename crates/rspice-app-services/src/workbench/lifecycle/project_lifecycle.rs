@@ -61,7 +61,7 @@ use rspice_project::lifecycle::{PreparedBrowserSave, StagedBrowserSave};
 pub use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
 pub use source::{
     LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView,
-    ResultPresentationSource,
+    SignalSetSource,
 };
 
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -254,11 +254,7 @@ pub fn capture_snapshot(
             )
             .map_err(ProjectLifecycleError::InvalidState)
         },
-        || {
-            state
-                .presentation
-                .project_presentation(&state.model.simulation)
-        },
+        || state.presentation.saved_signal_sets(),
     )?;
     let mut file = file;
     // A symbol edited in place leaves the sheet it is edited on in front of
@@ -2184,9 +2180,9 @@ pub enum RevertFollowUp {
     /// One cell view goes back to the accepted one; [`revert_cell_view`] does
     /// the model's part.
     CellView(Box<ProjectSnapshot>, CellViewRef),
-    /// The result history is the accepted one; its saved presentation goes
-    /// back to the results, and their derived viewers are cleared.
-    ResultHistory(crate::state::result_presentation::ResultPresentation),
+    /// The result history is the accepted one; its saved signal sets go back
+    /// to the results, and their derived viewers are cleared.
+    ResultHistory(Vec<crate::state::result_presentation::SignalSet>),
     /// The stimulus library is the accepted one.
     StimulusLibrary,
     /// The netlist source is the accepted one; [`finish_netlist_source_revert`]
@@ -2277,7 +2273,7 @@ pub fn revert_document_model(
                 .content
                 .visualization_documents_modified
                 .clear();
-            RevertFollowUp::ResultHistory(baseline.file.result_presentation)
+            RevertFollowUp::ResultHistory(baseline.file.result_signal_sets)
         }
         ProjectDocumentId::StimulusLibrary => {
             state.model.workspace.content.stimulus_library =

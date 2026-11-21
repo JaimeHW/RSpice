@@ -911,6 +911,36 @@ fn transient_state() -> ResultsTestHost {
     )
 }
 
+/// An imported run's working view goes with the run: once the history no
+/// longer keeps it, nothing can draw the view again.
+#[test]
+fn an_imported_runs_view_goes_with_the_run() {
+    let mut state = transient_state();
+    state.quick_frame();
+    assert!(state.working_view().is_some());
+    let mut second = SimulationRun::new(2);
+    second.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![1.0, 0.0], "#ffbd2e"),
+        ]),
+    );
+    state.model.simulation.retained.runs = vec![second].into();
+    assert!(state.model.simulation.select_run(0));
+
+    state.quick_frame();
+
+    let views = &state.model.workspace.content.visualization_documents;
+    assert_eq!(views.len(), 1, "the removed run's view is forgotten");
+    assert_eq!(
+        views[0].working_view(),
+        Some(
+            crate::results::visualization_document::WorkingViewSource::Imported {
+                dataset_id: state.model.simulation.retained.runs[0].dataset_id,
+            }
+        )
+    );
+}
+
 fn active_analysis_key(state: &ResultsTestHost) -> AnalysisPresentationKey {
     let run = state
         .model

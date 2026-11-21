@@ -13,10 +13,10 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, IconButton};
-use crate::workbench::app_state::Model;
+use crate::workbench::app_state::session::calculator::CalculatorPanel;
+use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::results::ResultsFeature;
-use crate::workbench::slots::ResultsState;
 use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Waveform calculator";
@@ -186,7 +186,10 @@ fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>, body_width: f32) {
                         .show(ui)
                         .clicked()
                     {
-                        plot_expression(cx.state, cx.model, cx.wb);
+                        // The panel stands beside the parts it plots into.
+                        let mut panel = std::mem::take(&mut cx.state.calculator_panel);
+                        plot_expression(&mut panel, &mut super::results_parts(cx));
+                        cx.state.calculator_panel = panel;
                     }
                     if Button::new("Evaluate")
                         .enabled(!expression_empty)
@@ -210,16 +213,18 @@ fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>, body_width: f32) {
 ///
 /// The tool stays open: plotting is a step in composing an expression, not
 /// the end of the task.
-pub fn plot_expression(results: &mut ResultsState, model: &mut Model, wb: &mut WorkbenchSession) {
-    let expression = results.calculator_panel.expression.trim().to_owned();
+pub fn plot_expression(panel: &mut CalculatorPanel, state: &mut ResultsParts<'_>) {
+    let expression = panel.expression.trim().to_owned();
     if expression.is_empty() {
         return;
     }
-    let Some(analysis_index) = model.simulation.view.active_analysis_idx else {
-        wb.prompt("Select a retained result analysis before plotting an expression.");
+    let Some(analysis_index) = state.model.simulation.view.active_analysis_idx else {
+        state
+            .workbench
+            .prompt("Select a retained result analysis before plotting an expression.");
         return;
     };
-    let Some(run) = model.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return;
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {
@@ -229,27 +234,26 @@ pub fn plot_expression(results: &mut ResultsState, model: &mut Model, wb: &mut W
         run.dataset_id,
         analysis,
     );
-    results.calculator_panel.evaluate(&model.simulation);
-    if let Some(Err(error)) = results.calculator_panel.outcome.as_ref() {
-        wb.prompt(format!("Expression was not plotted: {error}"));
+    panel.evaluate(&state.model.simulation);
+    if let Some(Err(error)) = panel.outcome.as_ref() {
+        let error = format!("Expression was not plotted: {error}");
+        state.workbench.prompt(error);
         return;
     }
-    let added =
-        results
-            .results
-            .add_expression_trace(&model.simulation, analysis_key, expression.clone());
+    let added = crate::workbench::documents::result_document::keep_plotted_expression(
+        state,
+        analysis_key,
+        expression.clone(),
+    );
     let added = match added {
         Ok(added) => added,
         Err(error) => {
-            wb.prompt(error);
+            state.workbench.prompt(error);
             return;
         }
     };
-    if added {
-        model.workspace.content.visualization_documents_dirty = true;
-    }
-    results.results.session.viewer =
-        crate::workbench::documents::result_document::ResultViewer::Waves;
+    let (results, wb) = (&mut *state.results, &mut *state.workbench);
+    results.session.viewer = crate::workbench::documents::result_document::ResultViewer::Waves;
     wb.activate(crate::workbench::state::Workspace::Results);
     // The strips are in front of the reader now; the status bar confirms it.
     wb.prompt(if added {

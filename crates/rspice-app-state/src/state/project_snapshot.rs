@@ -67,15 +67,6 @@ impl ProjectSnapshot {
             workspace_session,
         }
     }
-    #[cfg(any(test, feature = "test-support"))]
-    #[must_use]
-    pub fn with_result_presentation(
-        mut self,
-        presentation: rspice_results::result_presentation::ResultPresentation,
-    ) -> Self {
-        self.file = self.file.with_result_presentation(presentation);
-        self
-    }
     pub fn from_decoded(decoded: rspice_project::DecodedProject) -> Self {
         let mut workspace_session = WorkspaceSession::default();
         for key in decoded.restored_schematic_documents {

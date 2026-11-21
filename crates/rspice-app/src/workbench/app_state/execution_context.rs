@@ -77,18 +77,15 @@ impl AppState {
         self.results.analysis.clear_specialized_viewer_data();
     }
 
-    /// Restore the result presentation a project retained, when it is opened
-    /// or its result history is reverted: the markers, log-scaled panes and
-    /// expression groups. It runs once the datasets and visualization
-    /// documents it annotates are loaded, so a marker is kept only where its
-    /// analysis still is.
-    pub(crate) fn restore_result_presentation(
+    /// Restore the signal sets a project saved, when it is opened or its
+    /// result history is reverted.
+    pub(crate) fn restore_result_signal_sets(
         &mut self,
-        presentation: rspice_app_state::state::result_presentation::ResultPresentation,
+        signal_sets: Vec<rspice_app_state::state::result_presentation::SignalSet>,
     ) {
-        rspice_app_results::workbench::documents::result_document::restore_presentation(
+        rspice_app_results::workbench::documents::result_document::restore_signal_sets(
             &mut self.results_parts(),
-            presentation,
+            signal_sets,
         );
     }
 }

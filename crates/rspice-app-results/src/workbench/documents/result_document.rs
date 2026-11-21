@@ -166,13 +166,10 @@ use std::collections::{HashMap, HashSet};
 
 use egui::{Ui, WidgetInfo, WidgetType};
 
-use crate::state::result_presentation::ResultPresentation;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use crate::state::result_presentation::TracePresentationKey;
 pub use crate::state::result_presentation::{AnalysisPresentationKey, WaveformPresentationKey};
-pub use crate::state::result_presentation::{
-    ExprTrace, MarkerKind, ResultMarker, WavePanePresentationKey,
-};
+pub use crate::state::result_presentation::{ExprTrace, MarkerKind, WavePanePresentationKey};
 
 use crate::product::{AnalysisInstanceId, DatasetId};
 
@@ -830,6 +827,44 @@ pub(crate) fn marker_note(label: &str, trace_name: &str) -> String {
     }
 }
 
+/// Keep an expression the calculator plotted on `analysis` in the view in
+/// front: the saved document whose tab is active, or else the shown run's
+/// working view, which the quick view draws.
+pub fn keep_plotted_expression(
+    state: &mut ResultsParts<'_>,
+    analysis: AnalysisPresentationKey,
+    text: String,
+) -> Result<bool, String> {
+    let in_front = crate::workbench::chrome::document_bar::results::active_result_document(
+        state.model,
+        state.workbench,
+    );
+    if let Some(crate::workbench::state::WorkspaceDocumentId::VisualizationDocument(document)) =
+        in_front
+    {
+        return persistent_document::keep_plotted_expression(state, document, &text);
+    }
+    // The run's view is made, or followed, and drawn into the quick view's
+    // state first, so the expression is kept by it rather than drawn over.
+    working_view::sync(state);
+    let added = state
+        .results
+        .add_expression_trace(&state.model.simulation, analysis, text)?;
+    working_view::capture(state);
+    Ok(added)
+}
+
+/// A marker sits at a finite X on a trace of its own strip.
+fn validate_marker_placement(placement: &MarkerPlacement<'_>) -> Result<(), &'static str> {
+    if !placement.x.is_finite() {
+        return Err("marker position must be finite");
+    }
+    if placement.anchor.analysis != placement.analysis {
+        return Err("marker anchor belongs to a different analysis or dataset");
+    }
+    Ok(())
+}
+
 /// Place a marker on the view that keeps the strip being drawn: the saved
 /// document's pane, or the working view's pane for the strip's analysis.
 ///
@@ -842,9 +877,7 @@ pub fn place_marker(
     state: &mut ResultsParts<'_>,
     placement: MarkerPlacement<'_>,
 ) -> Option<MarkerSelector> {
-    if let Err(error) =
-        ResultMarker::validate_placement(placement.analysis, &placement.anchor, placement.x)
-    {
+    if let Err(error) = validate_marker_placement(&placement) {
         state.prompt(format!("Could not place marker: {error}"));
         return None;
     }
@@ -1095,12 +1128,12 @@ pub fn forget_replaced_project(state: &mut ResultsParts<'_>) {
     state.results.view_edits = view_edits::ViewHistories::default();
 }
 
-/// Restore what a project keeps of Results beside its visualization
-/// documents, once its datasets have loaded.
-pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPresentation) {
-    // What the reader made of a run is its view's, restored with the
-    // project's visualization documents; only the signal sets are kept here.
-    let ResultPresentation { signal_sets, .. } = presentation;
+/// Restore the signal sets a project kept, repaired as the browser keeps
+/// them.
+pub fn restore_signal_sets(
+    state: &mut ResultsParts<'_>,
+    signal_sets: Vec<rspice_results::result_presentation::SignalSet>,
+) {
     state.results.signal_sets = signal_sets::sanitize_signal_sets(signal_sets);
 }
 

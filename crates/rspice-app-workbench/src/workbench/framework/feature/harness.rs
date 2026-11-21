@@ -13,11 +13,11 @@
 use std::sync::LazyLock;
 
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
-    LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView, ResultPresentationSource,
+    LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView, SignalSetSource,
     close_project_session_for_test, open_project_session_for_test,
 };
 use rspice_results::result_presentation::{
-    AnalysisPresentationKey, ResultPresentation, ResultViewer, SourceWaveformPresentationKey,
+    AnalysisPresentationKey, ResultViewer, SignalSet, SourceWaveformPresentationKey,
 };
 use rspice_results::visualization_document::{PageId, PaneId};
 use rspice_results_ui::fft::FftState;
@@ -31,7 +31,6 @@ use rspice_schematic_editor::session::visibility::{
 use rspice_ui_kit::plot::CursorPair;
 use rspice_vocabulary::product::ResultDocumentId;
 
-use crate::state::SimulationState;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::command_registry::{CommandAvailability, Registry};
@@ -315,7 +314,7 @@ impl ResultsPort for NullPorts {
         None
     }
 
-    fn saved_presentation(&self) -> &dyn ResultPresentationSource {
+    fn saved_presentation(&self) -> &dyn SignalSetSource {
         self
     }
 
@@ -339,14 +338,10 @@ impl RunEventPort for NullPorts {
     }
 }
 
-/// What a fresh session saves of the results workspace: no markers, panes or
-/// expression groups, and a marker high-water mark of zero.
-impl ResultPresentationSource for NullPorts {
-    fn project_presentation(&self, _simulation: &SimulationState) -> ResultPresentation {
-        ResultPresentation {
-            marker_id_high_water: Some(0),
-            ..ResultPresentation::default()
-        }
+/// What a fresh session saves of the results workspace: no signal sets.
+impl SignalSetSource for NullPorts {
+    fn saved_signal_sets(&self) -> Vec<SignalSet> {
+        Vec::new()
     }
 }
 

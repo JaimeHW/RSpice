@@ -278,3 +278,71 @@ fn a_pane_whose_analysis_the_new_run_lacks_stays_on_its_run() {
         "the run the AC pane reads stays"
     );
 }
+
+/// Saving a working view as a document copies the whole view: a hidden
+/// trace stays hidden, the log axis and the marker stay, and so does the
+/// choice to follow the plan's newest run. The copy is a saved document of
+/// its own, which no run's view is.
+#[test]
+fn a_working_view_saved_as_a_document_is_copied_whole() {
+    let TwoAnalyses {
+        mut document, tran, ..
+    } = two_analyses();
+    let pane_id = document.pane_of_analysis(tran).unwrap().id;
+    let plan_id = SimulationPlanId::new();
+    let trace = document
+        .traces()
+        .iter()
+        .find(|trace| trace.pane_id == pane_id)
+        .unwrap()
+        .clone();
+    let axis = document
+        .axes()
+        .iter()
+        .find(|axis| axis.pane_id == pane_id && axis.orientation == AxisOrientation::VerticalLeft)
+        .unwrap()
+        .id;
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::SetTraceVisibility {
+                    trace_id: trace.id,
+                    visible: false,
+                },
+                DocumentEdit::SetAxisScale {
+                    axis_id: axis,
+                    scale: AxisScale::Logarithmic,
+                },
+                DocumentEdit::SetTracking(ResultDocumentTracking::for_plan(
+                    ResultDocumentTrackingMode::Latest,
+                    plan_id,
+                    tran,
+                )),
+            ],
+        )
+        .expect("the reader's changes apply");
+
+    let saved = document.saved_copy("Review").expect("the view is saved");
+
+    assert_eq!(saved.working_view(), None);
+    assert_ne!(saved.id(), document.id());
+    assert_eq!(saved.title(), "Review");
+    assert_eq!(saved.revision(), ObjectRevision::INITIAL);
+    assert_eq!(saved.tracking(), document.tracking());
+    assert_eq!(saved.tracking().mode, ResultDocumentTrackingMode::Latest);
+    assert_eq!(saved.panes(), document.panes());
+    assert_eq!(saved.traces(), document.traces());
+    assert!(
+        !saved
+            .traces()
+            .iter()
+            .any(|kept| kept.id == trace.id && kept.visible)
+    );
+    assert_eq!(saved.axes(), document.axes());
+    assert_eq!(saved.markers(), document.markers());
+    assert!(
+        saved.saved_copy("Again").is_err(),
+        "only a working view is saved as a document"
+    );
+}

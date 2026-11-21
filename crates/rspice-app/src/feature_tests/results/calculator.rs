@@ -2,6 +2,13 @@
 
 use rspice_app_results::workbench::results::calculator::*;
 
+/// Press the calculator's Plot.
+fn plot(state: &mut crate::workbench::app_state::AppState) {
+    let mut panel = std::mem::take(&mut state.results.calculator_panel);
+    plot_expression(&mut panel, &mut state.results_parts());
+    state.results.calculator_panel = panel;
+}
+
 #[test]
 fn plotting_keeps_the_tool_open_and_never_duplicates_a_trace() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
@@ -31,17 +38,9 @@ fn plotting_keeps_the_tool_open_and_never_duplicates_a_trace() {
     app.state.results.waveform_calculator_dialog = true;
     app.state.results.calculator_panel.expression = "V(out)/V(in)".to_owned();
 
-    plot_expression(
-        &mut app.state.results,
-        &mut app.state.model,
-        &mut app.state.workbench,
-    );
+    plot(&mut app.state);
     assert_eq!(app.state.prompt_text(), Some("Plotted V(out)/V(in)"));
-    plot_expression(
-        &mut app.state.results,
-        &mut app.state.model,
-        &mut app.state.workbench,
-    );
+    plot(&mut app.state);
     app.state.drain_notices(&egui::Context::default());
     // The reader is looking at the strips: the answer is the status
     // bar's, and nothing is interrupted for it.
@@ -79,11 +78,7 @@ fn an_empty_expression_plots_nothing() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state.results.calculator_panel.expression = "   ".to_owned();
 
-    plot_expression(
-        &mut app.state.results,
-        &mut app.state.model,
-        &mut app.state.workbench,
-    );
+    plot(&mut app.state);
 
     assert!(app.state.results.results.session.exprs.is_empty());
 }

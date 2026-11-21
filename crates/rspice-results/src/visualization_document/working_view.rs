@@ -95,6 +95,28 @@ impl VisualizationDocument {
         self.working_view
     }
 
+    /// A saved document copied whole from this working view under `title`:
+    /// every pane, trace (a hidden one stays hidden), marker, axis, cursor
+    /// and expression, and whether it follows its plan's newest run or stays
+    /// on the run it shows.
+    pub fn saved_copy(&self, title: impl Into<String>) -> Result<Self, VisualizationError> {
+        if self.working_view.is_none() {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.working-view",
+                message: "only a working view is saved as a document".to_owned(),
+            });
+        }
+        let title = title.into();
+        validate_label("visualization-document.title", &title)?;
+        let mut document = self.clone();
+        document.id = ResultDocumentId::new();
+        document.revision = ObjectRevision::INITIAL;
+        document.title = title;
+        document.working_view = None;
+        document.validate()?;
+        Ok(document)
+    }
+
     /// The pane that draws `analysis_id`, the authored analysis every run of
     /// a plan solves under the same identity.
     #[must_use]

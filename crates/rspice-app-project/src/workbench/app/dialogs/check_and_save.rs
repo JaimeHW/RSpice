@@ -13,7 +13,7 @@ use crate::workbench::app::dialogs::check_and_save_validation::{
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::framework::command_registry::{Registry, ids};
 use crate::workbench::framework::feature::{CodePort, DesignPort};
-use crate::workbench::lifecycle::project_lifecycle::ResultPresentationSource;
+use crate::workbench::lifecycle::project_lifecycle::SignalSetSource;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::state::WorkbenchSession;
 
@@ -144,7 +144,7 @@ pub struct CheckAndSaveParts<'a> {
     pub(crate) platform: &'a PlatformState,
     pub(crate) wb: &'a mut WorkbenchSession,
     pub(crate) facts: SlotFacts,
-    pub(crate) presentation: &'a dyn ResultPresentationSource,
+    pub(crate) presentation: &'a dyn SignalSetSource,
     pub(crate) design: &'a dyn DesignPort,
     pub(crate) code: &'a dyn CodePort,
     /// Every command, for the label of the design feature's repair.

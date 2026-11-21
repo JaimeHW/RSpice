@@ -102,6 +102,7 @@ pub fn view_of_run(state: ResultsReads<'_>, dataset_id: DatasetId) -> Option<Res
 /// drew, make or follow the shown run's view, and draw from it.
 pub fn sync(state: &mut ResultsParts<'_>) {
     capture(state);
+    prune(state);
     let Some(run) = state.model.simulation.active_run().cloned() else {
         state.results.session.working_view_panes.clear();
         return;
@@ -147,6 +148,29 @@ pub(crate) fn release(state: &mut ResultsParts<'_>) {
     state.results.session.working_view_panes.clear();
 }
 
+/// Forget the working views of imported runs the history no longer keeps:
+/// nothing can draw them again. A plan's view stays for its next run.
+fn prune(state: &mut ResultsParts<'_>) {
+    let runs = &state.model.simulation.retained.runs;
+    let gone: Vec<ResultDocumentId> = state
+        .model
+        .workspace
+        .content
+        .visualization_documents
+        .iter()
+        .filter(|document| match document.working_view() {
+            Some(WorkingViewSource::Imported { dataset_id }) => {
+                !runs.iter().any(|run| run.dataset_id == dataset_id)
+            }
+            _ => false,
+        })
+        .map(VisualizationDocument::id)
+        .collect();
+    for view in gone {
+        view_edits::forget(state, view);
+    }
+}
+
 /// The working view `run` is drawn through, made the first time a run of
 /// its plan, or the imported run itself, is shown.
 fn ensure(state: &mut ResultsParts<'_>, run: &SimulationRun) -> Option<ResultDocumentId> {
@@ -165,7 +189,7 @@ fn ensure(state: &mut ResultsParts<'_>, run: &SimulationRun) -> Option<ResultDoc
                 kind: super::create_document::pane_kind(viewer.art),
                 viewer_id: viewer.id.to_owned(),
                 analysis_id: super::create_document::source_analysis_identity(run, analysis),
-                plotted: first_plotted(analysis),
+                plotted: first_plotted(&state.results.session, run, analysis),
             })
         })
         .collect();
@@ -200,12 +224,24 @@ fn ensure(state: &mut ResultsParts<'_>, run: &SimulationRun) -> Option<ResultDoc
     }
 }
 
-/// The signals a plan's first run plots: the outputs it marks for plotting.
-fn first_plotted(analysis: &crate::state::AnalysisResult) -> Vec<String> {
+/// The signals a plan's first run plots: the outputs it marks for plotting,
+/// and any the reader plotted or took off before the run was first shown
+/// (from a deck's Plot command, say).
+fn first_plotted(
+    session: &rspice_results_ui::session::ResultViewerState,
+    run: &SimulationRun,
+    analysis: &crate::state::AnalysisResult,
+) -> Vec<String> {
+    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     analysis
         .waveforms
         .iter()
-        .filter(|waveform| waveform.visible)
+        .filter(|waveform| {
+            session.waveform_visibility(
+                &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
+                waveform.visible,
+            )
+        })
         .map(|waveform| waveform.name.clone())
         .collect()
 }
@@ -329,8 +365,8 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulati
     }
 }
 
-/// Choose the run `view` reads: `Some` keeps it on that run, `None` makes
-/// it follow its plan's newest run again.
+/// Choose the run `view` reads and show it: `Some` keeps the view on that
+/// run, `None` makes it follow its plan's newest run again.
 pub fn choose_run(
     state: &mut ResultsParts<'_>,
     view: ResultDocumentId,
@@ -378,7 +414,37 @@ pub fn choose_run(
         }
     }
     show_run(state, view, &target);
+    let simulation = &mut state.model.simulation;
+    if let Some(index) = simulation
+        .retained
+        .runs
+        .iter()
+        .position(|run| run.dataset_id == target.dataset_id)
+    {
+        simulation.select_run(index);
+    }
     Ok(())
+}
+
+/// Save the working view `view` as a document named `title`, copied whole:
+/// its hidden traces, markers, axes and expressions, and whether it follows
+/// its plan's newest run or stays on the run it shows. What the reader did in
+/// the quick view since it last drew is kept in the view first.
+pub fn save_as_document(
+    state: &mut ResultsParts<'_>,
+    view: ResultDocumentId,
+    title: &str,
+) -> Result<ResultDocumentId, String> {
+    capture(state);
+    let saved = state
+        .model
+        .workspace
+        .content
+        .visualization_document(view)
+        .ok_or_else(|| "The view is no longer in the project.".to_owned())?
+        .saved_copy(title.trim())
+        .map_err(|error| error.to_string())?;
+    view_edits::create(state, saved).map_err(|error| error.to_string())
 }
 
 /// The analyses of `run` and the panes of `view` that draw them.

@@ -1,11 +1,11 @@
 //! Signal sets: saved, renamed, deleted and applied, and kept with the
 //! project rather than the session.
 
-use rspice_results::result_presentation::{ResultPresentation, SourceWaveformPresentationKey};
+use rspice_results::result_presentation::SourceWaveformPresentationKey;
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, ResultsTestHost, restore_presentation,
+    AnalysisPresentationKey, ResultsTestHost, restore_signal_sets,
 };
 
 use super::super::results_actions::set_result_quantity_ticked;
@@ -62,32 +62,18 @@ fn a_signal_set_is_saved_with_the_project_and_reopens_with_it() {
     );
     rename_signal_set(&mut host.results_parts(), 1, "Inner node").unwrap();
 
-    // The project file carries the sets beside the run, under their own key.
-    let presentation = host
-        .results
-        .results
-        .project_presentation(&host.model.simulation);
-    let json = serde_json::to_value(&presentation).unwrap();
-    assert_eq!(json["result_signal_sets"][1]["name"], "Inner node");
-    assert_eq!(
-        json["result_signal_sets"][0]["members"][1]["name"],
-        "V(x1.a)"
-    );
-    let presentation: ResultPresentation = serde_json::from_value(json).unwrap();
+    // The project saves the sets beside the run.
+    let saved = host.results.results.saved_signal_sets();
+    assert_eq!(saved[1].name, "Inner node");
+    assert_eq!(saved[0].members[1].name, "V(x1.a)");
 
-    // A project without sets writes no key at all.
+    // A project without sets saves none.
     let mut bare = hierarchical_run();
-    let bare_json = serde_json::to_value(
-        bare.results
-            .results
-            .project_presentation(&bare.model.simulation),
-    )
-    .unwrap();
-    assert!(bare_json.get("result_signal_sets").is_none());
+    assert!(bare.results.results.saved_signal_sets().is_empty());
 
     // Reopened, the sets are there and apply to the run.
     bare.model.simulation = host.model.simulation.clone();
-    restore_presentation(&mut bare.results_parts(), presentation);
+    restore_signal_sets(&mut bare.results_parts(), saved);
     let names = bare
         .results
         .results
@@ -136,29 +122,26 @@ fn a_project_file_s_sets_are_repaired_when_it_opens() {
         artifact: false,
     };
     let mut host = hierarchical_run();
-    restore_presentation(
+    restore_signal_sets(
         &mut host.results_parts(),
-        ResultPresentation {
-            signal_sets: vec![
-                SignalSet {
-                    name: " A ".to_owned(),
-                    members: vec![member("V(out)"), member("V(out)")],
-                },
-                SignalSet {
-                    name: "a".to_owned(),
-                    members: vec![member("V(in)")],
-                },
-                SignalSet {
-                    name: "   ".to_owned(),
-                    members: vec![member("V(in)")],
-                },
-                SignalSet {
-                    name: "Empty".to_owned(),
-                    members: Vec::new(),
-                },
-            ],
-            ..Default::default()
-        },
+        vec![
+            SignalSet {
+                name: " A ".to_owned(),
+                members: vec![member("V(out)"), member("V(out)")],
+            },
+            SignalSet {
+                name: "a".to_owned(),
+                members: vec![member("V(in)")],
+            },
+            SignalSet {
+                name: "   ".to_owned(),
+                members: vec![member("V(in)")],
+            },
+            SignalSet {
+                name: "Empty".to_owned(),
+                members: Vec::new(),
+            },
+        ],
     );
     let sets = &host.results.results.signal_sets;
     assert_eq!(sets.len(), 1);

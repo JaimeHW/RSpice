@@ -2,22 +2,22 @@
 //!
 //! The lifecycle owns the platform state and reads and writes the shared
 //! model. Two values it reads belong to the features above it: the workspace
-//! in front, which names the active document, and the result presentation a
-//! project file saves. They come in beside the model, read through these
+//! in front, which names the active document, and the signal sets a project
+//! file saves. They come in beside the model, read through these
 //! traits by whoever holds the whole application; the lifecycle never reaches
 //! into a feature for them.
 
 use rspice_design::drc::DrcResult;
 
 use super::{Model, PlatformState};
-use crate::state::SimulationState;
-use crate::state::result_presentation::ResultPresentation;
+use crate::state::result_presentation::SignalSet;
 use rspice_app_state::workbench::workspace::Workspace;
 
-/// The result presentation a project file saves: the reader's markers, panes
-/// and expression groups about the datasets the project still holds.
-pub trait ResultPresentationSource {
-    fn project_presentation(&self, simulation: &SimulationState) -> ResultPresentation;
+/// What a project file saves of Results' own: the reader's signal sets.
+/// What the reader made of a run is its view's, among the model's
+/// visualization documents.
+pub trait SignalSetSource {
+    fn saved_signal_sets(&self) -> Vec<SignalSet>;
 }
 
 /// What the lifecycle reads.
@@ -28,7 +28,7 @@ pub struct LifecycleView<'a> {
     /// The workspace in front; it names the active document.
     pub workspace: Workspace,
     /// Asked only when a snapshot is captured, after the project's inputs.
-    pub presentation: &'a dyn ResultPresentationSource,
+    pub presentation: &'a dyn SignalSetSource,
 }
 
 /// What the lifecycle writes, with the values it reads beside them.
@@ -38,7 +38,7 @@ pub struct LifecycleParts<'a> {
     /// The workspace in front; it names the active document.
     pub workspace: Workspace,
     /// Asked only when a snapshot is captured, after the project's inputs.
-    pub presentation: &'a dyn ResultPresentationSource,
+    pub presentation: &'a dyn SignalSetSource,
 }
 
 /// Where the lifecycle reads the project from.

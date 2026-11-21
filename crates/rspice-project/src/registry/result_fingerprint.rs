@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use super::*;
 use crate::results::ProjectSimulationResults;
 use rspice_results::report_document::ReportDocument;
-use rspice_results::result_presentation::{ResultFingerprintFields, ResultPresentation};
+use rspice_results::result_presentation::SignalSet;
 use rspice_results::visualization_document::VisualizationDocument;
 
 #[cfg(any(test, feature = "document-fingerprint-observation"))]
@@ -29,23 +29,12 @@ impl ResultFingerprintCache {
         results: &ProjectSimulationResults,
         reports: &[ReportDocument],
         visualizations: &[VisualizationDocument],
-        presentation: &ResultPresentation,
+        signal_sets: &[SignalSet],
     ) -> Result<ContentDigest, String> {
-        let fields = presentation.fingerprint_fields()?;
         // These owners are still mutable without revisions. Compare their
         // exact canonical encoding, including signed zero, before reusing a
         // digest that includes them. Retained samples are absent from this key.
-        let presentation = super::digest(&(
-            reports,
-            visualizations,
-            fields.markers,
-            fields.log_y_panes,
-            fields.expression_groups,
-            fields.marker_history,
-            fields.signal_sets,
-            fields.x_scales,
-            fields.xy_plots,
-        ))?;
+        let presentation = super::digest(&(reports, visualizations, signal_sets))?;
         let mut cache = self.0.borrow_mut();
         if let Some(held) = cache.as_ref()
             && held.results.shares_content_with(results)
@@ -53,7 +42,7 @@ impl ResultFingerprintCache {
         {
             return Ok(held.digest);
         }
-        let digest = full_digest(results, reports, visualizations, fields)?;
+        let digest = digest(results, reports, visualizations, signal_sets)?;
         *cache = Some(CachedFingerprint {
             results: results.clone(),
             presentation,
@@ -63,69 +52,25 @@ impl ResultFingerprintCache {
     }
 }
 
+/// The result history's fingerprint: the retained runs without their logs,
+/// the reports, the views (what the reader made of the runs among them) and
+/// the saved signal sets.
 pub fn digest(
     results: &ProjectSimulationResults,
     reports: &[ReportDocument],
     visualizations: &[VisualizationDocument],
-    presentation: &ResultPresentation,
-) -> Result<ContentDigest, String> {
-    full_digest(
-        results,
-        reports,
-        visualizations,
-        presentation.fingerprint_fields()?,
-    )
-}
-
-fn full_digest(
-    results: &ProjectSimulationResults,
-    reports: &[ReportDocument],
-    visualizations: &[VisualizationDocument],
-    fields: ResultFingerprintFields<'_>,
+    signal_sets: &[SignalSet],
 ) -> Result<ContentDigest, String> {
     #[cfg(any(test, feature = "document-fingerprint-observation"))]
     super::fingerprints::observe(&RESULT_FINGERPRINT_PASSES);
-    let ResultFingerprintFields {
-        markers,
-        log_y_panes,
-        expression_groups,
-        marker_history,
-        signal_sets,
-        x_scales,
-        xy_plots,
-    } = fields;
     let results = results.without_run_logs();
-    let result_fields = (
+    super::digest(&(
+        "result-history-v2",
         &*results,
         reports,
         visualizations,
-        markers,
-        log_y_panes,
-        expression_groups,
-    );
-    // Preserve the published six-element digest and its allocation extension.
-    let digest = match marker_history {
-        Some(highest) => super::digest(&("result-marker-allocation-v1", result_fields, highest)),
-        None => super::digest(&result_fields),
-    }?;
-    // Signal sets extend it the same way, and only when a project has any.
-    let digest = if signal_sets.is_empty() {
-        digest
-    } else {
-        super::digest(&("result-signal-sets-v1", digest, signal_sets))?
-    };
-    // And the reader's X scales, only when a project has any.
-    let digest = if x_scales.is_empty() {
-        digest
-    } else {
-        super::digest(&("result-x-scales-v1", digest, x_scales))?
-    };
-    // And the strips drawn against a signal, only when there are any.
-    if xy_plots.is_empty() {
-        Ok(digest)
-    } else {
-        super::digest(&("result-xy-plots-v1", digest, xy_plots))
-    }
+        signal_sets,
+    ))
 }
 
 #[cfg(test)]
@@ -168,71 +113,9 @@ mod tests {
                 ..ProjectSimulationResultsData::default()
             })
         };
-        let presentation = ResultPresentation::default();
         let fingerprint = |results: &ProjectSimulationResults| {
-            digest(results, &[], &[], &presentation).expect("the history fingerprints")
+            digest(results, &[], &[], &[]).expect("the history fingerprints")
         };
         assert_eq!(fingerprint(&history(quiet)), fingerprint(&history(logged)));
-    }
-
-    /// A strip drawn against a signal is part of the project's result
-    /// content, so making one or narrowing its sweep span dirties the
-    /// project; a project with none keeps the digest it had before such
-    /// strips existed.
-    #[test]
-    fn a_strip_drawn_against_a_signal_changes_the_fingerprint() {
-        use rspice_results::result_presentation::{AnalysisPresentationKey, StripXyPlot};
-        use rspice_results::visualization_document::Abscissa;
-        use rspice_vocabulary::product::DatasetId;
-        let results = ProjectSimulationResults::from(ProjectSimulationResultsData::default());
-        let plain = ResultPresentation::default();
-        let before = full_digest(&results, &[], &[], plain.fingerprint_fields().unwrap()).unwrap();
-        assert_eq!(digest(&results, &[], &[], &plain).unwrap(), before);
-        let plot = StripXyPlot {
-            analysis: serde_json::from_value::<AnalysisPresentationKey>(serde_json::json!({
-                "dataset_id": DatasetId::new(),
-                "source": {"Legacy": 1},
-            }))
-            .unwrap(),
-            unit: "V".to_owned(),
-            abscissa: Abscissa::Signal {
-                name: "V(in)".to_owned(),
-            },
-            sweep_range: None,
-            follow_sweep_view: false,
-            log_abscissa: false,
-        };
-        let presentation = |plot: &StripXyPlot| ResultPresentation {
-            xy_plots: vec![plot.clone()],
-            ..ResultPresentation::default()
-        };
-        let whole = digest(&results, &[], &[], &presentation(&plot)).unwrap();
-        assert_ne!(whole, before);
-        let narrowed = StripXyPlot {
-            sweep_range: Some(
-                rspice_results::visualization_document::AxisRange::new(0.5e-3, 1.0e-3).unwrap(),
-            ),
-            ..plot
-        };
-        assert_ne!(
-            digest(&results, &[], &[], &presentation(&narrowed)).unwrap(),
-            whole
-        );
-        let following = StripXyPlot {
-            follow_sweep_view: true,
-            ..narrowed.clone()
-        };
-        assert_ne!(
-            digest(&results, &[], &[], &presentation(&following)).unwrap(),
-            digest(&results, &[], &[], &presentation(&narrowed)).unwrap()
-        );
-        let logarithmic = StripXyPlot {
-            log_abscissa: true,
-            ..narrowed.clone()
-        };
-        assert_ne!(
-            digest(&results, &[], &[], &presentation(&logarithmic)).unwrap(),
-            digest(&results, &[], &[], &presentation(&narrowed)).unwrap()
-        );
     }
 }

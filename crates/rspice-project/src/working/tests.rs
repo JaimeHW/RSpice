@@ -129,7 +129,7 @@ fn committed_and_current_captures_use_active_authority_without_consuming_live_ed
             },
             || {
                 assert_eq!(stage.replace(3), 2);
-                ResultPresentation::default()
+                Vec::new()
             },
         )
         .unwrap();
@@ -246,7 +246,7 @@ fn symbol_capture_keeps_buffered_designs_and_stops_at_invalid_execution_inputs()
         &mut Sessions::default(),
         ProjectSimulationResults::default,
         execution_context,
-        ResultPresentation::default,
+        Vec::new,
     )
     .unwrap();
     assert_eq!(capture.workspace.schematic_buffers.len(), 1);
@@ -277,7 +277,7 @@ fn captured(
         &mut Sessions::default(),
         ProjectSimulationResults::default,
         || Ok(context.clone()),
-        ResultPresentation::default,
+        Vec::new,
     )
     .unwrap();
     crate::registry::document_digests(&file).unwrap()
@@ -316,7 +316,7 @@ fn held_document_digests_follow_each_edit_as_a_capture_would() {
     let mut context = execution_context().unwrap();
     let mut stamps = (1_u64, [1_u64; 4]);
     let mut held = WorkingDocuments::default();
-    let presentation = crate::registry::digest(&ResultPresentation::default()).unwrap();
+    let presentation = crate::registry::digest(&Vec::<SignalSet>::new()).unwrap();
     let mut step = |workspace: &ProjectWorkspace,
                     active: &Schematic,
                     libraries: &ProjectLibraries,
@@ -339,7 +339,7 @@ fn held_document_digests_follow_each_edit_as_a_capture_would() {
                         &ProjectSimulationResults::default(),
                         &workspace.report_documents,
                         &workspace.visualization_documents,
-                        &ResultPresentation::default(),
+                        &[],
                     )
                 },
             )

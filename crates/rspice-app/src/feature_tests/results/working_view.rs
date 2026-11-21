@@ -8,6 +8,7 @@ use rspice_app_results::workbench::documents::result_document::{
 };
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
+use rspice_app_state::results::visualization_document::ResultDocumentTrackingMode;
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, RetainedTrace, SimulationRunLifecycle,
 };
@@ -200,4 +201,93 @@ fn a_working_view_keeps_the_readers_changes_through_a_rerun_a_restart_and_a_reop
     let rerun = show_newest(&mut state);
     quick_frame(&mut state);
     assert_kept(&state, rerun, "after a save and reopen");
+}
+
+/// The view of `state`'s plan, which every run of it is drawn through.
+fn plan_view(state: &AppState) -> rspice_app_state::product::ResultDocumentId {
+    let run = state.model.simulation.active_run().expect("a shown run");
+    working_view::view_of_run(state.results_reads(), run.dataset_id).expect("the plan's view")
+}
+
+/// Whether the shown analysis draws `V(in)`.
+fn input_shown(state: &AppState, analysis: AnalysisPresentationKey) -> Option<bool> {
+    state
+        .results
+        .results
+        .session
+        .waveform_visibility
+        .get(&SourceWaveformPresentationKey::new(analysis, "V(in)"))
+        .copied()
+}
+
+/// An older run is shown through the same view, which stays on it; a
+/// document saved from the view then stays on that run too, while the view
+/// goes back to following the plan's newest run.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_older_run_is_shown_through_the_same_view_and_back_to_latest() {
+    let host = state_with_current_clean_drc();
+    let mut state = AppState::default();
+    state.model = host.model;
+    state.runs = host.runs;
+    state.workbench.activate(Workspace::Results);
+    run_plan(&mut state, FIRST_OUT);
+    let first_run = state.model.simulation.retained.runs[0].dataset_id;
+    run_plan(&mut state, RERUN_OUT);
+    show_newest(&mut state);
+    quick_frame(&mut state);
+    let view = plan_view(&state);
+    let rerun = show_newest(&mut state);
+    state
+        .results
+        .results
+        .session
+        .waveform_visibility
+        .insert(SourceWaveformPresentationKey::new(rerun, "V(in)"), false);
+    quick_frame(&mut state);
+
+    working_view::choose_run(&mut state.results_parts(), view, Some(first_run))
+        .expect("the older run is one of the plan's");
+    quick_frame(&mut state);
+    let shown = state.model.simulation.active_run().expect("a shown run");
+    assert_eq!(shown.dataset_id, first_run, "the older run is shown");
+    let first = AnalysisPresentationKey::new(shown.dataset_id, &shown.analyses[0]);
+    assert_eq!(plan_view(&state), view, "through the same view");
+    assert_eq!(
+        input_shown(&state, first),
+        Some(false),
+        "the hidden trace stays hidden"
+    );
+    let document = |state: &AppState, id| {
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(id)
+            .expect("the document")
+            .clone()
+    };
+    assert_eq!(
+        document(&state, view).tracking().mode,
+        ResultDocumentTrackingMode::Pinned
+    );
+
+    let saved = working_view::save_as_document(&mut state.results_parts(), view, "Older run")
+        .expect("the view is saved as a document");
+    let saved = document(&state, saved);
+    assert_eq!(saved.working_view(), None);
+    assert_eq!(saved.title(), "Older run");
+    assert_eq!(saved.tracking().mode, ResultDocumentTrackingMode::Pinned);
+    assert_eq!(saved.traces(), document(&state, view).traces());
+
+    working_view::choose_run(&mut state.results_parts(), view, None)
+        .expect("the view follows the plan again");
+    quick_frame(&mut state);
+    let shown = state.model.simulation.active_run().expect("a shown run");
+    assert_ne!(shown.dataset_id, first_run, "the newest run is shown again");
+    assert_eq!(
+        document(&state, view).tracking().mode,
+        ResultDocumentTrackingMode::Latest
+    );
+    assert_eq!(input_shown(&state, rerun), Some(false));
 }

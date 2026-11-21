@@ -1,6 +1,7 @@
 //! Result viewer interaction state and retained presentation mutations.
 
 use super::*;
+use rspice_results::result_presentation::SignalSet;
 use rspice_results_ui::derived::DerivedSeries;
 
 impl ResultsState {
@@ -380,17 +381,11 @@ impl ResultsState {
         Ok(())
     }
 
-    /// Capture what the project keeps of Results beside its visualization
+    /// What the project keeps of Results beside its visualization
     /// documents: the reader's signal sets. What the reader made of a run is
     /// its view's.
-    pub(crate) fn project_presentation(
-        &self,
-        _simulation: &crate::state::SimulationState,
-    ) -> ResultPresentation {
-        ResultPresentation {
-            signal_sets: self.signal_sets.clone(),
-            ..ResultPresentation::default()
-        }
+    pub(crate) fn saved_signal_sets(&self) -> Vec<SignalSet> {
+        self.signal_sets.clone()
     }
 
     /// Release discarded local state and source-derived caches together.
@@ -516,16 +511,12 @@ impl ResultsState {
     }
 }
 
-/// The project lifecycle captures the Results presentation it saves through
-/// this.
-impl rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource
+/// The project lifecycle captures the signal sets it saves through this.
+impl rspice_app_services::workbench::lifecycle::project_lifecycle::SignalSetSource
     for ResultsState
 {
-    fn project_presentation(
-        &self,
-        simulation: &crate::state::SimulationState,
-    ) -> ResultPresentation {
-        Self::project_presentation(self, simulation)
+    fn saved_signal_sets(&self) -> Vec<SignalSet> {
+        Self::saved_signal_sets(self)
     }
 }
 

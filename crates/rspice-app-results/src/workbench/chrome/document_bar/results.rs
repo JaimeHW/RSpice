@@ -9,7 +9,8 @@ use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// One tab per retained result dataset, then one per saved result document
-/// in the order the project made them.
+/// in the order the project made them. A run's working view is drawn
+/// through its dataset's tab and has none of its own.
 pub fn result_documents(model: &Model) -> Vec<WorkspaceDocument> {
     let content = &model.workspace.content;
     let datasets = model
@@ -26,13 +27,14 @@ pub fn result_documents(model: &Model) -> Vec<WorkspaceDocument> {
     let documents = content
         .visualization_documents
         .iter()
+        .filter(|document| document.working_view().is_none())
         .map(|document| WorkspaceDocument {
             id: WorkspaceDocumentId::VisualizationDocument(document.id()),
             label: document.title().to_owned(),
             icon: WorkbenchIcon::Results,
-            // Only this document's own edits mark its tab. An expression
-            // trace edits the results session's presentation, not a saved
-            // document, so it marks none; the project's unsaved state shows it.
+            // Only this document's own edits mark its tab. What the reader
+            // does in the quick view edits its run's working view, which has
+            // no tab to mark; the project's unsaved state shows it.
             dirty: content
                 .visualization_documents_modified
                 .contains(&document.id()),

@@ -708,18 +708,12 @@ fn save_and_reopen(state: &RunTestHost, name: &str) -> RunTestHost {
 /// Write `state` to `path` as File > Save writes a project.
 fn save(state: &RunTestHost, path: &Path) {
     use rspice_app_services::workbench::lifecycle::project_lifecycle::{
-        LifecycleView, ResultPresentationSource, snapshot,
+        LifecycleView, SignalSetSource, snapshot,
     };
     struct NoPresentation;
-    impl ResultPresentationSource for NoPresentation {
-        fn project_presentation(
-            &self,
-            _: &crate::state::SimulationState,
-        ) -> crate::state::result_presentation::ResultPresentation {
-            crate::state::result_presentation::ResultPresentation {
-                marker_id_high_water: Some(0),
-                ..Default::default()
-            }
+    impl SignalSetSource for NoPresentation {
+        fn saved_signal_sets(&self) -> Vec<crate::state::result_presentation::SignalSet> {
+            Vec::new()
         }
     }
     let platform = rspice_app_services::workbench::slots::platform::PlatformState::default();

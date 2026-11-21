@@ -7,7 +7,7 @@ pub(super) use rspice_project::registry::FINGERPRINT_PASSES;
 pub(super) use rspice_project::registry::content_digest;
 pub use rspice_project::registry::{DocumentRegistry, ProjectDocumentId};
 #[cfg(test)]
-use rspice_project::registry::{digest, document_digests, document_fingerprints};
+use rspice_project::registry::{document_digests, document_fingerprints};
 
 pub fn active_document(workspace: Workspace, active_view: &CellViewRef) -> ProjectDocumentId {
     match workspace {
@@ -225,67 +225,6 @@ mod tests {
             .remove(&ProjectDocumentId::ResultHistory)
             .unwrap();
         assert_ne!(baseline_digest, edited_digest);
-    }
-
-    #[test]
-    fn result_owner_preserves_existing_fingerprint_encoding() {
-        let state = ServicesHost::default();
-        let mut project = super::super::snapshot(&state).unwrap();
-        for populated in [false, true] {
-            if populated {
-                let key = serde_json::json!({
-                    "dataset_id": "b3c6b2be-c997-4f5d-a06e-714071283df5",
-                    "source": {"Legacy": 7}
-                });
-                project.file.result_presentation = serde_json::from_value(serde_json::json!({
-                    "result_markers": [{
-                        "id": 3, "analysis": key,
-                        "anchor": {"analysis": key, "trace": {
-                            "source_name": "V(out)", "kind": 0, "family_group": 0
-                        }},
-                        "trace_name": "V(out)", "x": 0.125, "kind": "Note", "note": "Test"
-                    }],
-                    "result_log_y_panes": [{"analysis": key, "unit": "V"}],
-                    "result_expression_groups": [{"analysis": key, "traces": [{"text": "V(out)*2"}]}]
-                })).unwrap();
-            }
-            // This is the pre-migration six-element encoding, including three
-            // empty arrays when annotations are absent. Changing it would also
-            // change generated-netlist authority for otherwise unchanged input.
-            let legacy = digest(&(
-                &project.file.simulation_results,
-                &project.file.workspace.report_documents,
-                &project.file.workspace.visualization_documents,
-                &project.file.result_presentation.markers,
-                &project.file.result_presentation.log_y_panes,
-                &project.file.result_presentation.expression_groups,
-            ))
-            .unwrap();
-            assert_eq!(
-                document_digests(&project.file).unwrap()[&ProjectDocumentId::ResultHistory],
-                legacy
-            );
-            let retained = project
-                .file
-                .result_presentation
-                .markers
-                .iter()
-                .map(|marker| marker.id)
-                .max()
-                .unwrap_or(0);
-            project.file.result_presentation.marker_id_high_water = Some(retained);
-            assert_eq!(
-                document_digests(&project.file).unwrap()[&ProjectDocumentId::ResultHistory],
-                legacy,
-                "an explicit, implied allocation limit preserves the legacy digest"
-            );
-            project.file.result_presentation.marker_id_high_water = Some(retained + 1);
-            assert_ne!(
-                document_digests(&project.file).unwrap()[&ProjectDocumentId::ResultHistory],
-                legacy,
-                "deleted or abandoned marker identities remain document content"
-            );
-        }
     }
 
     #[test]

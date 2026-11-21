@@ -25,7 +25,7 @@ use crate::workbench::app_state::design_checks::CheckScope;
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::framework::feature::{CodePort, DesignPort};
 use crate::workbench::lifecycle::project_lifecycle::{
-    LifecycleSource, LifecycleView, ResultPresentationSource,
+    LifecycleSource, LifecycleView, SignalSetSource,
 };
 use crate::workbench::state::{WorkbenchSession, Workspace};
 
@@ -63,7 +63,7 @@ pub struct ValidationReads<'a> {
     pub platform: &'a PlatformState,
     pub facts: SlotFacts,
     pub workspace: Workspace,
-    pub presentation: &'a dyn ResultPresentationSource,
+    pub presentation: &'a dyn SignalSetSource,
     pub design: &'a dyn DesignPort,
     pub code: &'a dyn CodePort,
 }

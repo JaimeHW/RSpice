@@ -722,14 +722,11 @@ impl AppState {
         project_workflow::install_loaded_project(&mut self.model, install);
         self.restore_active_schematic_from_workspace();
         let OpenedProject {
-            result_presentation,
+            result_signal_sets,
             accepted_baseline,
             report,
         } = project_workflow::restore_loaded_simulation(&mut self.model, restore);
-        // Markers are restored after the datasets they annotate, and only those
-        // that still find their analysis: a marker pointing at a dataset this
-        // project no longer retains would draw on nothing.
-        self.restore_result_presentation(result_presentation);
+        self.restore_result_signal_sets(result_signal_sets);
         rspice_app_results::workbench::documents::result_document::forget_replaced_project(
             &mut self.results_parts(),
         );

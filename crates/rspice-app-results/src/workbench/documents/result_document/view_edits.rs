@@ -55,7 +55,8 @@ fn is_reader_edit(edit: &DocumentEdit) -> bool {
     )
 }
 
-/// Keep `document`, a new working view, in the project.
+/// Keep `document`, a new view, in the project: a run's working view, or a
+/// document saved from one.
 pub(crate) fn create(
     state: &mut ResultsParts<'_>,
     document: VisualizationDocument,
@@ -65,6 +66,17 @@ pub(crate) fn create(
         .workspace
         .content
         .insert_visualization_document(document)
+}
+
+/// Forget the view `document_id` and its steps: a run's working view once
+/// nothing can draw it again.
+pub(crate) fn forget(state: &mut ResultsParts<'_>, document_id: ResultDocumentId) {
+    state
+        .model
+        .workspace
+        .content
+        .remove_visualization_document(document_id);
+    state.results.view_edits.views.remove(&document_id);
 }
 
 /// Apply `edits` to the view `document_id` as one transaction at `revision`.

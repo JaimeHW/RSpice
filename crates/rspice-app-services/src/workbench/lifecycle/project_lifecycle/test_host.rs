@@ -11,11 +11,10 @@ use rspice_design::drc::DrcResult;
 
 use super::{
     LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView, Model,
-    PlatformState, ResultPresentationSource,
+    PlatformState, SignalSetSource,
 };
-use crate::state::SimulationState;
 use crate::state::pdk_config::PdkConfig;
-use crate::state::result_presentation::ResultPresentation;
+use crate::state::result_presentation::SignalSet;
 use rspice_app_state::workbench::workspace::Workspace;
 
 #[derive(Clone)]
@@ -75,12 +74,9 @@ impl ServicesHost {
 /// expression groups, and a marker high-water mark of zero.
 struct NoPresentation;
 
-impl ResultPresentationSource for NoPresentation {
-    fn project_presentation(&self, _simulation: &SimulationState) -> ResultPresentation {
-        ResultPresentation {
-            marker_id_high_water: Some(0),
-            ..ResultPresentation::default()
-        }
+impl SignalSetSource for NoPresentation {
+    fn saved_signal_sets(&self) -> Vec<SignalSet> {
+        Vec::new()
     }
 }
 

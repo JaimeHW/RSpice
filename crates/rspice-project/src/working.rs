@@ -7,7 +7,7 @@ use rspice_design::{
     library::ViewType,
     schematic::owned::{CancelledOperation, Schematic},
 };
-use rspice_results::result_presentation::ResultPresentation;
+use rspice_results::result_presentation::SignalSet;
 use rspice_vocabulary::product::ContentDigest;
 
 /// Saves capture committed edits; dirty comparison and execution provenance
@@ -42,15 +42,15 @@ pub struct ProjectWorkingSet<'a> {
 
 impl ProjectWorkingSet<'_> {
     /// Freeze designs first, then lazily capture retained results, execution
-    /// inputs and presentation in order. A failed input capture stops before
-    /// presentation; only a fully validated file is returned.
+    /// inputs and signal sets in order. A failed input capture stops before
+    /// the signal sets; only a fully validated file is returned.
     pub fn capture(
         self,
         content: SnapshotContent,
         sessions: &mut impl SnapshotSessions,
         results: impl FnOnce() -> ProjectSimulationResults,
         execution_context: impl FnOnce() -> Result<ProjectExecutionContext, ProjectLifecycleError>,
-        presentation: impl FnOnce() -> ResultPresentation,
+        signal_sets: impl FnOnce() -> Vec<SignalSet>,
     ) -> Result<ProjectFile, ProjectLifecycleError> {
         #[cfg(any(test, feature = "document-fingerprint-observation"))]
         crate::registry::observe(&crate::registry::PROJECT_CAPTURES);
@@ -87,7 +87,7 @@ impl ProjectWorkingSet<'_> {
             simulation_results,
             execution_context,
         )
-        .with_result_presentation(presentation());
+        .with_result_signal_sets(signal_sets());
         project
             .validate()
             .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
@@ -110,7 +110,7 @@ impl ProjectFile {
         if let Some(context) = self.execution_context.as_mut() {
             context.model_validation_receipt = None;
         }
-        self.result_presentation = Default::default();
+        self.result_signal_sets.clear();
         self.workspace.visualization_documents.clear();
         self.workspace.decks.clear();
         crate::registry::content_digest(&self).map_err(ProjectLifecycleError::InvalidState)

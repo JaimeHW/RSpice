@@ -23,6 +23,8 @@ pub(super) fn report_figure_options(model: &Model) -> Vec<ReportFigureOption> {
         .visualization_documents
         .iter()
         .enumerate()
+        // A run's working view is the quick view, not a figure of its own.
+        .filter(|(_, document)| document.working_view().is_none())
     {
         for page in document.pages() {
             let mut panes = document
