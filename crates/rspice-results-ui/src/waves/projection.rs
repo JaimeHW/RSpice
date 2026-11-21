@@ -516,6 +516,8 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             .count();
         let mut plotted_rank = 0;
         let mut added_rank = 0;
+        // The colours given so far: no two curves of an analysis share one.
+        let mut given: Vec<egui::Color32> = Vec::new();
         let selection_key = sample_selection
             .map(SourceSampleSelection::fingerprint)
             .unwrap_or_default()
@@ -552,7 +554,14 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 added_rank += 1;
                 dataset_plotted + added_rank - 1
             };
-            let color = waveform_color(waveform, slot, tokens);
+            // A colour the run gave an earlier curve gives way to this one's
+            // place in the palette: curves sharing a strip, or an axis, are
+            // told apart by colour first.
+            let mut color = waveform_color(waveform, slot, tokens);
+            if given.contains(&color) {
+                color = tokens.color.traces[slot % tokens.color.traces.len()];
+            }
+            given.push(color);
             // Every trace has its place in the cycle, whoever chose its
             // colour, so its curve and its legend swatch agree.
             let palette_slot = Some(slot);

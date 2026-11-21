@@ -165,43 +165,66 @@ pub fn clamp_name_width(width: f32) -> f32 {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Gutter {
     pub name: f32,
-    /// The columns of the Y axes a strip reads after its first, between the
-    /// name column and the first axis' ticks: as wide on every strip of the
-    /// analysis as on the strip with the most, so every plot starts on one
-    /// rule.
+    /// What an axis standing outside the first axis' labels takes beyond
+    /// the first axis' own column: as wide on every strip of the analysis
+    /// as on the strip that needs most, so every plot starts on one rule.
     pub axes: f32,
     pub value: f32,
+    /// What the axes standing right of the plot take, on the same terms.
+    pub right: f32,
+    /// How many of a strip's added axes have room beside its plot, in the
+    /// order they take it, and how many have been measured: those between
+    /// wait in the strip's trace list for room.
+    pub kept: usize,
+    pub measured: usize,
 }
 
 impl Gutter {
+    /// A gutter of `name` and `value` columns with no added axis.
+    pub fn plain(name: f32, value: f32) -> Self {
+        Self {
+            name,
+            axes: 0.0,
+            value,
+            right: 0.0,
+            kept: 0,
+            measured: 0,
+        }
+    }
+
     pub fn width(self) -> f32 {
         self.name + self.axes + self.value
     }
-}
 
-/// The width of the column one Y axis after a strip's first takes.
-pub const SECONDARY_AXIS_WIDTH: f32 = 52.0;
-
-/// The width the most Y axes after the first on any strip of `model` take.
-fn secondary_axes_width(model: &StripModel) -> f32 {
-    let most = model
-        .unit_panes()
-        .iter()
-        .map(|pane| pane.secondary.len())
-        .max()
-        .unwrap_or(0);
-    most as f32 * SECONDARY_AXIS_WIDTH
+    /// What every plot of the strip keeps right of its area: the axes
+    /// standing there, or the breathing strip when none does.
+    pub fn right_margin(self) -> f32 {
+        navigation::WAVE_SHARED_RIGHT_MARGIN.max(self.right)
+    }
 }
 
 fn strip_gutter(ui: &Ui, host: &impl StackHost, model: &StripModel) -> Gutter {
+    let (name, value) = gutter_columns(ui, host, model);
+    let fit = super::axes::fit_axes(
+        ui.available_width(),
+        (name, value),
+        super::axes::remembered_room(ui.ctx(), model.analysis_key),
+    );
+    Gutter {
+        name,
+        axes: fit.left,
+        value,
+        right: fit.right,
+        kept: fit.kept,
+        measured: fit.measured,
+    }
+}
+
+/// The name and value columns of a strip's left gutter.
+fn gutter_columns(ui: &Ui, host: &impl StackHost, model: &StripModel) -> (f32, f32) {
     let axis = wave_left_margin(host.session());
-    let axes = secondary_axes_width(model);
     if host.event_lane_height(model) <= 0.0 {
-        return Gutter {
-            name: 0.0,
-            axes,
-            value: axis,
-        };
+        return (0.0, axis);
     }
     let specs =
         super::lanes::lane_specs(model, host.session().event_lanes.get(&model.analysis_key));
@@ -225,11 +248,10 @@ fn strip_gutter(ui: &Ui, host: &impl StackHost, model: &StripModel) -> Gutter {
             (strip * LANE_NAME_SHARE.1).max(strip * LANE_NAME_SHARE.0),
         )
     };
-    Gutter {
-        name: clamp_name_width(host.session().lane_name_width.unwrap_or_else(fit)),
-        axes,
-        value: (chars as f32).mul_add(advance, 8.0).max(LANE_VALUE_MIN),
-    }
+    (
+        clamp_name_width(host.session().lane_name_width.unwrap_or_else(fit)),
+        (chars as f32).mul_add(advance, 8.0).max(LANE_VALUE_MIN),
+    )
 }
 
 // Mockup gutter geometry: a 64 px left gutter carries the Y ticks and the
@@ -1055,6 +1077,7 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
         current,
         height,
         left_margin: gutter.width(),
+        right_margin: gutter.right_margin(),
         quantity_policy: options.quantity,
         significant_digits: usize::from(options.readout.displayed_significant_digits().get()),
         cursors: (cursor_owner || linked_cursor).then_some(host.session().cursors),
@@ -1518,6 +1541,7 @@ fn show_xy_strip(
             .then(|| abscissa_menu(host.session(), model, pane, Some(strip.abscissa.clone()))),
         window_slots: slots,
         arrange: false,
+        folded_axes: Vec::new(),
     };
     let header = ui
         .push_id(("xy-strip-pane", identity), |ui| {
@@ -1590,6 +1614,29 @@ pub(crate) fn repoint_xy_strip(
 /// more lanes than fit scroll within it.
 const EVENT_LANE_SHARE: f32 = 0.5;
 
+/// The strip's axes with no room beside its plot, each named by its unit
+/// and its curves, for its trace list.
+fn folded_axes(model: &StripModel, pane: &UnitPane, gutter: Gutter) -> Vec<String> {
+    pane.secondary
+        .iter()
+        .take(gutter.measured)
+        .skip(gutter.kept)
+        .map(|axis| {
+            let unit = if axis.unit.is_empty() {
+                pane_view::NO_UNIT
+            } else {
+                axis.unit
+            };
+            let names: Vec<&str> = axis
+                .traces
+                .iter()
+                .filter_map(|index| model.traces.get(*index).map(|trace| trace.name.as_str()))
+                .collect();
+            format!("{unit} axis: {}", names.join(", "))
+        })
+        .collect()
+}
+
 /// The time axis the strip's panes are drawn on, for the bands above them.
 fn event_frame(
     host: &impl StackHost,
@@ -1600,7 +1647,7 @@ fn event_frame(
         x_range: shared_x_view(host.session(), model.analysis_key).unwrap_or(x_domain),
         left_margin: gutter.width(),
         name_width: gutter.name,
-        right_margin: navigation::WAVE_SHARED_RIGHT_MARGIN,
+        right_margin: gutter.right_margin(),
     }
 }
 
@@ -1773,6 +1820,7 @@ fn show_unit_pane(
             .then(|| abscissa_menu(host.session(), model, pane, None)),
         window_slots,
         arrange: options.pane_chrome,
+        folded_axes: folded_axes(model, pane, gutter),
     };
     let header = host.pane_header(ui, model, pane, input);
     if let Some(strips) = header.arrange {
@@ -1917,11 +1965,23 @@ fn show_unit_pane(
         })
         .collect();
     host.note_sample_reads(0, secondary_samples);
-    let grid_axis = host
-        .session()
-        .grid_axes
-        .get(&pane_key)
-        .and_then(|slot| secondary.iter().position(|axis| axis.slot == *slot));
+    // With more than one axis, each says whose it is: the first sets its
+    // labels in its curves' colour when they share one, and otherwise
+    // carries a swatch of each beside its unit.
+    let primary_colours = if secondary.is_empty() {
+        Vec::new()
+    } else {
+        super::axes::axis_colours(
+            pane.traces
+                .iter()
+                .filter_map(|index| model.traces.get(*index).map(|trace| trace.color))
+                .chain(exprs.iter().map(|expr| expr.color)),
+        )
+    };
+    let y_ink = match primary_colours.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    };
     let input = pane_view::PanePlot {
         x_range: (x0, x1),
         auto_y: (auto_y0, auto_y1),
@@ -1944,9 +2004,11 @@ fn show_unit_pane(
             || host.session().trace_pick.is_armed()
             || (host.session().cursor_placement_enabled() && places_a),
         secondary: &secondary,
-        grid_axis,
+        right_margin: gutter.right_margin(),
+        y_ink,
     };
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
+    let y_labels_width = drawn.y_labels_width;
     let response = drawn.response;
     note_plot_stop(ui.ctx(), response.response.id);
     let plot_choice = plot_menu(
@@ -1957,26 +2019,37 @@ fn show_unit_pane(
         (&response.response, drawn.context.as_ref()),
         (options.pane_chrome, window),
     );
+    // The first axis' unit row is every axis' unit row.
+    let caption_y = response
+        .y_caption
+        .map_or(response.plot_rect.top() - 16.0, |caption| {
+            caption.center().y
+        });
+    if primary_colours.len() > 1
+        && let Some(caption) = response.y_caption
+    {
+        // As many swatches as the first axis' column has room for beside
+        // its unit.
+        let room = caption.left() - (response.plot_rect.left() - gutter.value);
+        let fit = primary_colours
+            .len()
+            .min((room / super::axes::swatches_width(1)).floor().max(0.0) as usize);
+        super::axes::paint_swatches(
+            ui.painter(),
+            &primary_colours[..fit],
+            (caption.left(), false),
+            caption.center().y,
+        );
+    }
     let axes_response = super::axes::secondary_axes(
         ui,
         model,
         &secondary,
-        (
-            response.plot_rect,
-            gutter,
-            grid_axis
-                .and_then(|index| secondary.get(index))
-                .map(|axis| axis.slot),
-        ),
+        (response.plot_rect, gutter, y_labels_width, caption_y),
         &t,
     );
-    if let Some(slot) = axes_response.clicked {
-        let grid_axes = &mut host.session_mut().grid_axes;
-        if grid_axes.get(&pane_key) == Some(&slot) {
-            grid_axes.remove(&pane_key);
-        } else {
-            grid_axes.insert(pane_key.clone(), slot);
-        }
+    if !secondary.is_empty() {
+        super::axes::note_room(ui.ctx(), model.analysis_key, axes_response.room);
     }
     let secondary_views = axes_response.ranges;
     // A pane becomes the active one when the reader acts on it: a click, a

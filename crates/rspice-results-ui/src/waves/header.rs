@@ -107,6 +107,9 @@ pub struct PaneHeader {
     /// down and its menu splits and merges strips; a legend entry drags onto
     /// another strip and its menu moves the curve.
     pub arrange: bool,
+    /// The strip's axes there is no room to draw beside its plot, each
+    /// named by its unit and its curves: the trace list names them.
+    pub folded_axes: Vec<String>,
 }
 
 /// What a unit pane's curves may be plotted against: one of the strip's
@@ -244,6 +247,7 @@ pub fn show_header(
         abscissa,
         window_slots,
         arrange,
+        folded_axes,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -435,14 +439,15 @@ pub fn show_header(
             spacing.item_spacing.x = 3.0;
             spacing.interact_size.y = ACTION_ICON_SIDE;
             spacing.button_padding.y = spacing.button_padding.y.min(2.0);
+            let folded = folded_axes.len();
             let fitted = fitted_chips(&chips, legend_rect.width(), |overflow| {
-                trace_list_label(overflow, hidden_count)
+                trace_list_label(overflow, hidden_count, folded)
                     .map_or(0.0, |label| chip_width(ui, &label) + 3.0)
             });
             for (entry, chip) in entries.iter().zip(&chips).take(fitted) {
                 entry.show(ui, chip, (model, arrange), &display_name, host, &mut output);
             }
-            let Some(label) = trace_list_label(chips.len() - fitted, hidden_count) else {
+            let Some(label) = trace_list_label(chips.len() - fitted, hidden_count, folded) else {
                 return;
             };
             // Centred on the band as the scale chip and the icon are, and
@@ -465,6 +470,16 @@ pub fn show_header(
             egui::Popup::menu(&list)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show(|ui| {
+                    // The axes the strip has no room to draw lead: their
+                    // curves are drawn, but read against nothing beside
+                    // the plot until the strip is wider.
+                    if !folded_axes.is_empty() {
+                        ui.weak("No room beside the plot for");
+                        for axis in &folded_axes {
+                            ui.label(axis);
+                        }
+                        ui.separator();
+                    }
                     // However many curves the pane has, the list finds one:
                     // typed letters narrow it, and it scrolls.
                     let filter_id = list.id.with("filter");
@@ -820,13 +835,19 @@ fn fitted_chips(chips: &[LegendEntry], width: f32, list_width: impl Fn(usize) ->
     chips.len()
 }
 
-/// The trace list's label: "+N" for drawn curves the row has no room for
-/// and "M hidden" for the ones not drawn, whichever apply; none when the row
-/// names every curve and none is hidden.
-fn trace_list_label(overflow: usize, hidden: usize) -> Option<String> {
+/// The trace list's label: "+N" for drawn curves the row has no room for,
+/// "M hidden" for the ones not drawn and "+K axes" for the strip's axes
+/// with no room beside the plot, whichever apply; none when the row names
+/// every curve, none is hidden and every axis is drawn.
+fn trace_list_label(overflow: usize, hidden: usize, folded_axes: usize) -> Option<String> {
     let parts: Vec<String> = [
         (overflow > 0).then(|| format!("+{overflow}")),
         (hidden > 0).then(|| format!("{hidden} hidden")),
+        match folded_axes {
+            0 => None,
+            1 => Some("+1 axis".to_owned()),
+            count => Some(format!("+{count} axes")),
+        },
     ]
     .into_iter()
     .flatten()

@@ -1339,6 +1339,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             current: (x0, x1),
             height: ruler_height,
             left_margin: frame.gutter.width(),
+            right_margin: super::navigation::WAVE_SHARED_RIGHT_MARGIN,
             quantity_policy: quantity,
             significant_digits,
             cursors: None,

@@ -121,6 +121,8 @@ const Y_CAPTION_CENTER: f32 = 8.0;
 const PAN_DEAD_ZONE: f32 = 6.0;
 /// The size of the tick labels' font.
 const Y_TICK_FONT_SIZE: f32 = 10.0;
+/// How far a Y tick label stands from the axis line it labels.
+pub const Y_LABEL_GAP: f32 = 7.0;
 /// The least gap between two Y tick labels that are both drawn.
 const Y_TICK_LABEL_GAP: f32 = 2.0;
 const MARGIN_BOTTOM: f32 = 26.0;
@@ -457,7 +459,15 @@ fn paint_trace_marker(
 /// it. Markers already skip non-finite points individually.
 /// A hairline `width` points wide in whole device pixels: at least one and never a fraction, as
 /// a browser draws a thin border, so a line snapped to the pixel grid stays sharp at 150 %.
-fn hairline(width: f32, pixels_per_point: f32) -> f32 {
+/// The font a plot's Y tick labels and unit are set in, so an axis drawn
+/// beside the plot reads as one of its own.
+pub fn y_tick_font() -> egui::FontId {
+    theme::mono(Y_TICK_FONT_SIZE, FontWeight::Regular)
+}
+
+/// A line `width` points wide, on whole device pixels: the plot's frame and
+/// grid, and an axis drawn beside it in their ink.
+pub fn hairline(width: f32, pixels_per_point: f32) -> f32 {
     (width * pixels_per_point).floor().max(1.0) / pixels_per_point
 }
 
@@ -1151,8 +1161,9 @@ pub fn show(
     // which carries the unit itself. Without a row of its own it owns the
     // top of the column, so tick labels give way to it; with one, the plot
     // starts below it and every label is drawn.
-    let y_chrome = y_caption_text(spec)
-        .map(|text| painter.layout_no_wrap(text, tick_font.clone(), c.canvas_text_dim));
+    let y_ink = spec.y_ink.unwrap_or(c.canvas_text_dim);
+    let y_chrome =
+        y_caption_text(spec).map(|text| painter.layout_no_wrap(text, tick_font.clone(), y_ink));
     let y_chrome_bottom = match (&y_chrome, &spec.y_caption_row) {
         (Some(galley), None) => rect.top() + Y_CAPTION_CENTER + galley.size().y * 0.5,
         _ => f32::NEG_INFINITY,
@@ -1193,28 +1204,19 @@ pub fn show(
     // rows tall carries the same tick count as a full-height one, and
     // stacked labels are less readable than none.
     let mut last_label_top = f32::INFINITY;
-    for fraction in spec.grid_rows.iter().flatten() {
-        painter.hline(
-            plot_rect.x_range(),
-            plot_rect.bottom() - fraction * plot_rect.height(),
-            grid,
-        );
-    }
     for (yv, label) in &spec.y.ticks {
         let py = my(*yv);
-        if spec.grid_rows.is_none() {
-            painter.hline(plot_rect.x_range(), py, grid);
-        }
-        let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.canvas_text_dim);
+        painter.hline(plot_rect.x_range(), py, grid);
+        let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), y_ink);
         let (height, top) = (galley.size().y, py - galley.size().y * 0.5);
         if top + height <= last_label_top - Y_TICK_LABEL_GAP
             && top >= y_chrome_bottom + Y_TICK_LABEL_GAP
         {
             last_label_top = top;
             painter.galley(
-                pos2(plot_rect.left() - 7.0 - galley.size().x, top),
+                pos2(plot_rect.left() - Y_LABEL_GAP - galley.size().x, top),
                 galley,
-                c.canvas_text_dim,
+                y_ink,
             );
         }
     }
@@ -1458,12 +1460,12 @@ pub fn show(
     if let Some(galley) = y_chrome {
         let caption = Rect::from_min_size(
             pos2(
-                plot_rect.left() - 7.0 - galley.size().x,
+                plot_rect.left() - Y_LABEL_GAP - galley.size().x,
                 rect.top() + Y_CAPTION_CENTER - galley.size().y * 0.5,
             ),
             galley.size(),
         );
-        painter.galley(caption.min, galley, c.canvas_text_dim);
+        painter.galley(caption.min, galley, y_ink);
         out.y_caption = Some(caption);
     }
     if !x_end_label.is_empty() {

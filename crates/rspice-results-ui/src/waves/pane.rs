@@ -1,6 +1,6 @@
 //! Unit-scoped waveform plot construction, retained readout and curve hit testing.
 
-use super::navigation::{WAVE_SHARED_RIGHT_MARGIN, model_x_axis};
+use super::navigation::model_x_axis;
 use super::readout::{MAX_READOUT_BRANCHES, branch_tag};
 use super::{
     ReadoutPolicy, StripModel, StripTrace, UnitPane, anchor_key, cursor_interpolation, stable_hash,
@@ -468,6 +468,14 @@ fn y_caption_row(pane: &UnitPane) -> plot::YCaptionRow {
     }
 }
 
+/// The ladder an added axis reading `range` labels over a plot `plot_height`
+/// tall, as dense as the strip's first axis would be.
+pub(crate) fn secondary_ticks(plot_height: f32, pitch: f32, range: (f64, f64)) -> Axis {
+    labelled_y_axis(plot_height, pitch, |target| {
+        Axis::linear_with(range.0, range.1, "", target)
+    })
+}
+
 /// The steps a tall pane's linear Y ladder aims for.
 const DENSEST_Y_LADDER: usize = 6;
 
@@ -475,7 +483,11 @@ const DENSEST_Y_LADDER: usize = 6;
 /// every label the pane has room to draw `pitch` apart. A pane too short even
 /// for the sparsest keeps those of its ticks that can be labelled, so it
 /// never draws a grid line it cannot say the value of.
-fn labelled_y_axis(plot_height: f32, pitch: f32, axis_with: impl Fn(usize) -> Axis) -> Axis {
+pub(crate) fn labelled_y_axis(
+    plot_height: f32,
+    pitch: f32,
+    axis_with: impl Fn(usize) -> Axis,
+) -> Axis {
     const SPARSEST: usize = 2;
     let apart = |axis: &Axis, lower: f64, upper: f64| {
         ((upper - lower).abs() / (axis.max - axis.min)) as f32 * plot_height
@@ -535,8 +547,11 @@ pub struct PanePlot<'a> {
     /// The strip's Y axes after its first, each with the curves read against
     /// it and the range it shows.
     pub secondary: &'a [SecondaryPlot<'a>],
-    /// Which of `secondary` the grid follows, when the reader selected one.
-    pub grid_axis: Option<usize>,
+    /// What the plot keeps right of its area: the axes standing there.
+    pub right_margin: f32,
+    /// The ink of the first axis' labels, when it says whose axis it is by
+    /// its curves' one colour.
+    pub y_ink: Option<egui::Color32>,
 }
 
 /// One Y axis of a strip after its first, as its plot draws it: the curves
@@ -672,6 +687,9 @@ fn paint_tolerance(painter: &egui::Painter, mapper: &plot::PlotMapper, band: &To
 
 pub struct PanePlotResponse<'a> {
     pub response: plot::PlotResponse,
+    /// The width the first axis' labels and unit take left of the plot,
+    /// outside which an axis on the left stands.
+    pub y_labels_width: f32,
     pub nearest_trace: Option<&'a StripTrace>,
     /// What a right click on the plot found this frame.
     pub context: Option<PlotContext<'a>>,
@@ -823,11 +841,29 @@ pub fn show_plot<'a>(
                 .collect()
         })
         .collect();
+    // What the first axis' labels take, so an axis on the left stands
+    // just outside them.
+    let y_labels_width = y_axis
+        .ticks
+        .iter()
+        .map(|(_, label)| label.as_str())
+        .chain(std::iter::once(pane.axis_unit()))
+        .map(|text| {
+            ui.painter()
+                .layout_no_wrap(
+                    text.to_owned(),
+                    plot::y_tick_font(),
+                    egui::Color32::PLACEHOLDER,
+                )
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
     let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
         .accessible_name("Waveform plot")
         .without_x_axis_chrome()
         .with_y_caption_row(y_caption_row(pane))
-        .with_right_margin(WAVE_SHARED_RIGHT_MARGIN)
+        .with_right_margin(input.right_margin)
         .with_significant_digits(significant_digits);
     if !detail.is_empty() {
         spec = spec.accessible_detail(&detail);
@@ -838,20 +874,7 @@ pub fn show_plot<'a>(
     }
     spec.limit_lines = input.specification_limits;
     spec.minor_grid = input.minor_grid;
-    // The grid follows the axis the reader selected.
-    if let Some(axis) = input.grid_axis.and_then(|index| input.secondary.get(index)) {
-        let (low, high) = axis.range;
-        if low.is_finite() && high.is_finite() && high > low {
-            spec.grid_rows = Some(
-                plot::Axis::linear_with(low, high, "", 5)
-                    .ticks
-                    .iter()
-                    .map(|(value, _)| ((value - low) / (high - low)) as f32)
-                    .filter(|fraction| (0.0..=1.0).contains(fraction))
-                    .collect(),
-            );
-        }
-    }
+    spec.y_ink = input.y_ink;
     spec.horizontal_cursors = input.horizontal_cursors;
     spec.horizontal_cursor_interactive = input.horizontal_cursor_interactive;
     spec.markers = input.markers;
@@ -1350,6 +1373,7 @@ pub fn show_plot<'a>(
     });
     PanePlotResponse {
         response,
+        y_labels_width,
         nearest_trace,
         context,
     }

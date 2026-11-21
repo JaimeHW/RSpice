@@ -135,6 +135,9 @@ pub struct SharedXAxis {
     pub current: (f64, f64),
     pub height: f32,
     pub left_margin: f32,
+    /// What the panes keep right of their plots, which the ruler keeps too
+    /// so its ticks stand under theirs.
+    pub right_margin: f32,
     pub quantity_policy: QuantityPresentationPolicy,
     /// The reader's significant digits, which a cursor's value box reads in.
     pub significant_digits: usize,
@@ -246,6 +249,7 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
         full_domain,
         current,
         height,
+        right_margin,
         cursors: cursor_values,
         ..
     } = input;
@@ -304,7 +308,7 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     painter.hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
 
     let plot_left = (rect.left() + input.left_margin).min(rect.right());
-    let plot_right = (rect.right() - WAVE_SHARED_RIGHT_MARGIN).max(plot_left);
+    let plot_right = (rect.right() - right_margin).max(plot_left);
     let label_top = rect.top() + SHARED_X_LABEL_TOP;
     let flag_top = rect.top() + SHARED_X_FLAG_TOP;
     let flag_bottom = flag_top + SHARED_X_FLAG_HEIGHT;

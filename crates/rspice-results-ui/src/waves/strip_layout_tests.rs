@@ -380,7 +380,8 @@ fn every_curve_a_strip_draws_reads_out_on_hover() {
                 family_envelopes: &[],
                 find_nearest: false,
                 secondary: &[],
-                grid_axis: None,
+                right_margin: 14.0,
+                y_ink: None,
             },
         );
     });
@@ -410,17 +411,15 @@ fn zooming_a_current_axis_leaves_the_volts_axis_of_its_strip_alone() {
         range: (0.0, 2.0e-3),
         slot: amps.slot,
     }];
-    let plot_rect = egui::Rect::from_min_max(egui::pos2(200.0, 50.0), egui::pos2(850.0, 450.0));
+    let plot_rect = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(800.0, 450.0));
     let gutter = super::super::stack::Gutter {
-        name: 0.0,
-        axes: super::super::stack::SECONDARY_AXIS_WIDTH,
-        value: 64.0,
+        kept: 1,
+        measured: 1,
+        right: 60.0,
+        ..super::super::stack::Gutter::plain(0.0, 64.0)
     };
-    // Over the amps column, left of the volts axis' ticks.
-    let pointer = egui::pos2(
-        plot_rect.left() - gutter.value - 0.5 * super::super::stack::SECONDARY_AXIS_WIDTH,
-        250.0,
-    );
+    // Over the amps axis, on the plot's right edge.
+    let pointer = egui::pos2(plot_rect.right() + 10.0, 250.0);
     let wheel = egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Line,
         delta: egui::vec2(0.0, 1.0),
@@ -430,14 +429,16 @@ fn zooming_a_current_axis_leaves_the_volts_axis_of_its_strip_alone() {
     let ctx = egui::Context::default();
     let mut changes = Vec::new();
     frames(&ctx, pointer, vec![wheel], 4, |ui| {
-        changes.extend(super::super::axes::secondary_axes(
-            ui,
-            &model,
-            &axes,
-            plot_rect,
-            gutter,
-            &Tokens::default(),
-        ));
+        changes.extend(
+            super::super::axes::secondary_axes(
+                ui,
+                &model,
+                &axes,
+                (plot_rect, gutter, 30.0, plot_rect.top() - 16.0),
+                &Tokens::default(),
+            )
+            .ranges,
+        );
     });
     assert!(!changes.is_empty(), "the wheel zooms the amps axis");
     assert!(
@@ -448,4 +449,168 @@ fn zooming_a_current_axis_leaves_the_volts_axis_of_its_strip_alone() {
     );
     let (low, high) = changes[0].1.expect("a pinned range");
     assert!(high - low < 2.0e-3, "zoomed in: {low}..{high}");
+}
+
+/// The second axis stands on the plot's right edge, the third outside the
+/// first axis' labels, the fourth outside the second: each column exactly
+/// as wide as asked, none over the plot or another.
+#[test]
+fn a_strips_axes_stand_on_its_plots_edges_each_as_wide_as_its_labels() {
+    use super::super::axes::{ADDED_AXES, column_rects};
+    let plot = egui::Rect::from_min_max(egui::pos2(300.0, 40.0), egui::pos2(900.0, 400.0));
+    let rects = column_rects(plot, 30.0, [42.0, 38.0, 51.0]);
+    let [Some(right), Some(left), Some(outer)] = rects else {
+        panic!("every measured axis has its column: {rects:?}");
+    };
+    assert_eq!(
+        right.left(),
+        plot.right(),
+        "the second axis is the plot's right edge"
+    );
+    assert_eq!(right.width(), 42.0);
+    assert_eq!(
+        outer.left(),
+        right.right(),
+        "the fourth stands outside the second"
+    );
+    assert_eq!(outer.width(), 51.0);
+    assert!(
+        left.right() < plot.left() - 30.0 && left.right() > plot.left() - 30.0 - 16.0,
+        "the third stands just outside the first axis' labels: {left:?}"
+    );
+    assert_eq!(left.width(), 38.0);
+    let all = [right, left, outer];
+    for (index, rect) in all.iter().enumerate() {
+        assert!(
+            !rect.intersects(plot.shrink(0.5)),
+            "{rect:?} lies over the plot"
+        );
+        assert_eq!((rect.top(), rect.bottom()), (plot.top(), plot.bottom()));
+        for other in &all[index + 1..] {
+            assert!(
+                !rect.shrink(0.5).intersects(*other),
+                "{rect:?} overlaps {other:?}"
+            );
+        }
+    }
+    assert_eq!(
+        column_rects(plot, 30.0, [0.0; ADDED_AXES]),
+        [None; ADDED_AXES],
+        "an axis with no width has no column"
+    );
+}
+
+/// An axis not yet measured is never drawn into a column with no width,
+/// and an axis that would squeeze the plot past its least width waits in
+/// the strip's trace list while the ones before it keep their columns.
+#[test]
+fn a_strip_too_narrow_for_its_axes_leaves_the_outer_ones_out_and_draws_none_collapsed() {
+    use super::super::axes::{AxisRoom, fit_axes};
+    let room = AxisRoom {
+        primary: 30.0,
+        columns: [44.0, 40.0, 48.0],
+    };
+    let wide = fit_axes(1600.0, (0.0, 64.0), room);
+    assert_eq!((wide.kept, wide.measured), (3, 3));
+    assert_eq!(
+        wide.right,
+        44.0 + 48.0,
+        "the right axes take their own widths"
+    );
+    assert!(
+        wide.left > 0.0,
+        "the left axis takes room past the first axis' gutter"
+    );
+
+    let narrow = fit_axes(330.0, (0.0, 64.0), room);
+    assert!(
+        narrow.kept < 3,
+        "a narrow strip keeps fewer axes: {narrow:?}"
+    );
+    assert_eq!(narrow.measured, 3, "the rest wait in the trace list");
+    let plot = 330.0 - 64.0 - narrow.left - narrow.right.max(14.0);
+    assert!(plot >= 165.0, "the plot keeps half the strip: {plot}");
+
+    let unmeasured = fit_axes(1600.0, (0.0, 64.0), AxisRoom::default());
+    assert_eq!(
+        unmeasured,
+        Default::default(),
+        "nothing is reserved for an axis not measured"
+    );
+}
+
+/// Drawn, an axis' labels stand in its own column right of the plot, and
+/// an axis the gutter has no room for paints nothing at all.
+#[test]
+fn an_axis_paints_its_labels_inside_its_column_and_nothing_without_room() {
+    let mut model = model(&[
+        ("V(out)", "V", [0.0, 1.0, 2.0]),
+        ("I(load)", "A", [0.0, 1.0e-3, 2.0e-3]),
+    ]);
+    let current = trace(&model, "I(load)");
+    model.arrangement = move_to_strip(&model, current, 0).expect("the volts strip takes amps");
+    let pane = model.unit_panes().remove(0);
+    let amps = &pane.secondary[0];
+    let axes = [super::super::pane::SecondaryPlot {
+        unit: amps.unit,
+        traces: &amps.traces,
+        expressions: &[],
+        range: (0.0, 2.0e-3),
+        slot: amps.slot,
+    }];
+    let plot_rect = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(700.0, 450.0));
+    let draw = |kept: usize| {
+        let gutter = super::super::stack::Gutter {
+            kept,
+            measured: 1,
+            right: 60.0,
+            ..super::super::stack::Gutter::plain(0.0, 64.0)
+        };
+        let ctx = egui::Context::default();
+        rspice_ui_kit::fonts::install(&ctx);
+        let mut room = None;
+        let output = frames(&ctx, egui::pos2(5.0, 5.0), Vec::new(), 2, |ui| {
+            room = Some(
+                super::super::axes::secondary_axes(
+                    ui,
+                    &model,
+                    &axes,
+                    (plot_rect, gutter, 30.0, plot_rect.top() - 16.0),
+                    &Tokens::default(),
+                )
+                .room,
+            );
+        });
+        (output, room.expect("a pass"))
+    };
+    let (output, room) = draw(1);
+    let width = room.columns[0];
+    assert!(width > 20.0, "the column is as wide as its labels: {width}");
+    let mut labels = 0;
+    for shape in output.shapes.iter().map(|clipped| &clipped.shape) {
+        if let egui::Shape::Text(text) = shape {
+            let rect = text.visual_bounding_rect();
+            assert!(
+                rect.left() >= plot_rect.right() && rect.right() <= plot_rect.right() + width + 0.5,
+                "{:?} stands outside its column: {rect:?}",
+                text.galley.text()
+            );
+            labels += 1;
+        }
+    }
+    assert!(
+        labels >= 3,
+        "the axis labels its ticks and its unit: {labels}"
+    );
+
+    let (output, room) = draw(0);
+    assert_eq!(
+        room.columns[0], width,
+        "an axis without room is still measured"
+    );
+    assert!(
+        painted_text(&output).is_empty(),
+        "an axis without room paints nothing: {:?}",
+        painted_text(&output)
+    );
 }

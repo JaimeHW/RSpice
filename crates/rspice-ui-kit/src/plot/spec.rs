@@ -559,10 +559,10 @@ pub struct PlotSpec<'a> {
     pub limit_lines: Vec<LimitLine>,
     /// Draw unlabeled subdivisions between major ticks.
     pub minor_grid: bool,
-    /// Where the horizontal grid lines stand when not at the Y ticks: the
-    /// ticks of another axis the reader selected, as fractions of the
-    /// plot's height from its bottom.
-    pub grid_rows: Option<Vec<f32>>,
+    /// The ink the Y tick labels and unit are set in instead of the
+    /// canvas' dim text: the colour of the only curves the axis carries,
+    /// when the plot reads several axes and each says whose it is.
+    pub y_ink: Option<Color32>,
     /// Horizontal measurement cursors H1 and H2 on the left Y axis.
     pub horizontal_cursors: [Option<f64>; 2],
     /// Whether primary click/drag places or moves a horizontal cursor.
@@ -620,7 +620,7 @@ impl<'a> PlotSpec<'a> {
             ref_lines: Vec::new(),
             limit_lines: Vec::new(),
             minor_grid: false,
-            grid_rows: None,
+            y_ink: None,
             horizontal_cursors: [None; 2],
             horizontal_cursor_interactive: false,
             bands: Vec::new(),
