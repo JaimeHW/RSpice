@@ -373,18 +373,27 @@ mod tests {
     /// bar. Before a unit the decade letters are SI's, written and read back.
     #[test]
     fn a_megahertz_range_reads_as_si_and_parses_back() {
-        assert_eq!(
-            format_axis_range((1.0, 1.0e6), "Hz"),
-            "1 Hz \u{2026} 1 MHz"
-        );
+        assert_eq!(format_axis_range((1.0, 1.0e6), "Hz"), "1 Hz \u{2026} 1 MHz");
         assert_eq!(
             format_axis_range((5.0e5, 2.0e6), "Hz"),
             "0.5 \u{2026} 2 MHz"
         );
-        assert_eq!(parse_axis_range("1 Hz \u{2026} 1 MHz", "Hz"), Some((1.0, 1.0e6)));
-        assert_eq!(parse_axis_range("0.5 \u{2026} 2 MHz", "Hz"), Some((5.0e5, 2.0e6)));
-        assert_eq!(parse_axis_range("1 mHz \u{2026} 1 Hz", "Hz"), Some((1.0e-3, 1.0)));
-        assert_eq!(parse_axis_range("1 \u{2026} 2Meg", "Hz"), Some((1.0e6, 2.0e6)));
+        assert_eq!(
+            parse_axis_range("1 Hz \u{2026} 1 MHz", "Hz"),
+            Some((1.0, 1.0e6))
+        );
+        assert_eq!(
+            parse_axis_range("0.5 \u{2026} 2 MHz", "Hz"),
+            Some((5.0e5, 2.0e6))
+        );
+        assert_eq!(
+            parse_axis_range("1 mHz \u{2026} 1 Hz", "Hz"),
+            Some((1.0e-3, 1.0))
+        );
+        assert_eq!(
+            parse_axis_range("1 \u{2026} 2Meg", "Hz"),
+            Some((1.0e6, 2.0e6))
+        );
         // A bare number keeps SPICE's spelling, where a lone M is milli.
         assert_eq!(format_axis_range((0.0, 2.0e6), ""), "0 \u{2026} 2Meg");
     }
