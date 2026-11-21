@@ -12,6 +12,7 @@ mod expression_diagnostics;
 pub(super) mod histogram_publication;
 mod inspector;
 mod keys;
+mod loop_gain;
 mod navigation;
 mod navigator_browser;
 mod op_inspector;

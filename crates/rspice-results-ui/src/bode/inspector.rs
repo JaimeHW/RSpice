@@ -1,27 +1,45 @@
 //! Inspectors for qualified frequency-response and ordinary-noise results.
 
-use crate::presentation::{angle_readout, frequency_readout};
+use crate::presentation::frequency_readout;
 use egui::Ui;
 use rspice_results::bode::AcBodeMetrics;
 use rspice_results::engine_evidence::{
     QpacAnalysisResult, QpxfAnalysisResult, QpxfGroupDelay, QpxfOutput,
 };
 use rspice_results::waveform::HeldColumn;
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::{panel_inset, section_header};
 use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::theme::{self, FontWeight};
+use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// The selected response and the evidence its inspector may display.
 pub enum BodeInspector<'a> {
-    Stability {
-        metrics: AcBodeMetrics,
-        phase_available: bool,
-    },
+    Response(BodeResponse<'a>),
     NoResponse,
     AnalysisFailed(Option<&'a str>),
     Qpac(Option<&'a QpacAnalysisResult>),
     Qpxf(Option<&'a QpxfAnalysisResult>),
     Distortion,
+}
+
+/// One measured frequency response.
+///
+/// A stability analysis's loop gain reads as the loop's margins; any other
+/// response is a response, whose phase margin is no stability margin of
+/// anything — a closed-loop node voltage crossing unity says nothing about
+/// the loop that drives it — so it reads as gain and bandwidth instead.
+pub struct BodeResponse<'a> {
+    pub metrics: AcBodeMetrics,
+    /// Whether the response retained a phase trace.
+    pub phase_available: bool,
+    /// The retained response measured, as the run names it.
+    pub signal: &'a str,
+    /// Whether the response is a loop gain, which alone has margins.
+    pub loop_gain: bool,
+    /// Every response of the analysis the card can measure, the measured one
+    /// among them. With two or more the card offers the choice.
+    pub candidates: &'a [String],
 }
 
 /// Summary facts of the selected retained ordinary-noise spectrum for the
@@ -36,14 +54,16 @@ pub struct NoiseSpectrumModel {
 }
 
 /// Render the inspector for the response qualified by the host document,
-/// its readouts at the reader's `significant_digits`.
+/// its readouts at the reader's `significant_digits`. Returns the index in
+/// [`BodeResponse::candidates`] of a response the reader chose to measure
+/// instead.
 pub fn right_panel(
     ui: &mut Ui,
     model: BodeInspector<'_>,
     quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
-) {
-    let (metrics, phase_available) = match model {
+) -> Option<usize> {
+    match model {
         BodeInspector::Qpxf(response) => {
             section_header(ui, "QPXF unit transfers", None);
             if let Some(response) = response {
@@ -91,7 +111,7 @@ pub fn right_panel(
                 }
                 crate::presentation::stat_table(ui, &rows);
             }
-            return;
+            None
         }
         BodeInspector::Qpac(response) => {
             section_header(ui, "QPAC conversion response", None);
@@ -116,21 +136,20 @@ pub fn right_panel(
                 ];
                 crate::presentation::stat_table(ui, &rows);
             }
-            return;
+            None
         }
         // The distortion sheet's whole panel was one implementation sentence.
-        BodeInspector::Distortion => return,
-        BodeInspector::Stability {
-            metrics,
-            phase_available,
-        } => (metrics, phase_available),
+        BodeInspector::Distortion => None,
+        BodeInspector::Response(response) => {
+            response_card(ui, response, quantity_policy, significant_digits)
+        }
         BodeInspector::NoResponse => {
-            section_header(ui, "Stability", None);
+            section_header(ui, "Response", None);
             crate::presentation::panel_note(ui, "No AC response in this run.");
-            return;
+            None
         }
         BodeInspector::AnalysisFailed(reason) => {
-            section_header(ui, "Stability", None);
+            section_header(ui, "Response", None);
             crate::presentation::panel_note(
                 ui,
                 &match reason {
@@ -140,12 +159,55 @@ pub fn right_panel(
                     None => "The selected frequency response did not converge, so no margins are reported.".to_owned(),
                 },
             );
-            return;
+            None
         }
+    }
+}
+
+/// The card of one measured response: the loop's margins for a loop gain,
+/// gain and bandwidth for anything else, under the response it measures.
+fn response_card(
+    ui: &mut Ui,
+    response: BodeResponse<'_>,
+    quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
+) -> Option<usize> {
+    let BodeResponse {
+        metrics,
+        phase_available,
+        signal,
+        loop_gain,
+        candidates,
+    } = response;
+    section_header(ui, if loop_gain { "Stability" } else { "Response" }, None);
+    let measured = if loop_gain { "Loop gain" } else { "Response" };
+    let picked = (candidates.len() > 1)
+        .then(|| measured_chooser(ui, measured, signal, candidates))
+        .flatten();
+    let mut rows = if loop_gain {
+        stability_rows(signal, metrics, quantity_policy, significant_digits)
+    } else {
+        response_rows(signal, metrics, quantity_policy, significant_digits)
     };
-    section_header(ui, "Stability", None);
-    let rows = margin_rows(metrics, quantity_policy, significant_digits);
+    // The chooser above names the response already.
+    if candidates.len() > 1 {
+        rows.remove(0);
+    }
     crate::presentation::stat_table(ui, &rows);
+
+    if !loop_gain {
+        crate::presentation::panel_note(
+            ui,
+            "Stability margins are read from a loop gain: run a stability (.STB) analysis.",
+        );
+        if !metrics.adc_is_dc {
+            crate::presentation::panel_note(
+                ui,
+                "Sweep starts above the dominant pole; lower fstart for DC gain.",
+            );
+        }
+        return picked;
+    }
 
     // A folded phase margin reads like a verdict and is not one. It goes above
     // the sweep-provenance notes because it is the stronger claim: the others
@@ -171,6 +233,43 @@ pub fn right_panel(
             "Sweep starts above the dominant pole; lower fstart for DC gain.",
         );
     }
+    picked
+}
+
+/// The choice of which response the card measures: a label, then a select
+/// the panel's width. Returns the index of a response the reader picked.
+fn measured_chooser(
+    ui: &mut Ui,
+    label: &str,
+    signal: &str,
+    candidates: &[String],
+) -> Option<usize> {
+    let inset = panel_inset(ui);
+    let dim = Tokens::get(ui.ctx()).color.text_dim;
+    ui.horizontal(|ui| {
+        ui.add_space(inset);
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(dim),
+        );
+    });
+    let picked = ui
+        .horizontal(|ui| {
+            ui.add_space(inset);
+            let width = (ui.available_width() - inset).max(80.0);
+            rspice_ui_kit::widgets::select(
+                ui,
+                "rspice.results.bode.measured",
+                label,
+                signal,
+                candidates,
+                width,
+            )
+        })
+        .inner;
+    ui.add_space(5.0);
+    picked.filter(|index| candidates.get(*index).is_some_and(|name| name != signal))
 }
 
 /// A signed tone tuple as the reader writes it: `(1, −1)`.
@@ -216,49 +315,98 @@ fn frequency_list(
         .join(", ")
 }
 
-/// The stability card's rows.
+/// How the lowest swept frequency's gain is labelled.
 ///
-/// Split out because the low-frequency labels are a claim about the sweep,
-/// not decoration: `gain_db.first()` is the gain at `f_min`, and calling it
-/// `A_dc` on a sweep opened above the dominant pole reports mid-rolloff gain
-/// as DC gain — and puts `f₋₃dB` 3 dB below a figure that was never the DC
-/// gain either. The label says which quantity it is, and `f₋₃dB` names the
-/// same reference.
-fn margin_rows(
+/// The label is a claim about the sweep, not decoration: `gain_db.first()`
+/// is the gain at `f_min`, and calling it `A_dc` on a sweep opened above the
+/// dominant pole reports mid-rolloff gain as DC gain — and puts the −3 dB
+/// point 3 dB below a figure that was never the DC gain either. So the
+/// label says which quantity it is, and the bandwidth names the same
+/// reference.
+fn low_frequency_labels(adc_is_dc: bool) -> (&'static str, &'static str) {
+    if adc_is_dc {
+        ("A_dc", "\u{2212}3 dB bandwidth")
+    } else {
+        ("A(f_min)", "\u{2212}3 dB re A(f_min)")
+    }
+}
+
+/// A row's value, or a dash for a figure the sweep does not reach.
+fn or_dash(value: Option<String>) -> String {
+    value.unwrap_or_else(|| "\u{2014}".to_owned())
+}
+
+/// The stability card's rows: the loop gain measured, then each margin with
+/// the frequency it was found at, as the Nyquist panel prints them, then the
+/// loop's gain at the bottom of the sweep.
+fn stability_rows(
+    signal: &str,
     m: AcBodeMetrics,
     quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
-) -> [(&'static str, String, bool); 6] {
-    let adc_is_dc = m.adc_is_dc;
-    let fmt_opt =
-        |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
-    let frequency = |v: f64| frequency_readout(quantity_policy, v, significant_digits);
-    let decibels = |v: f64| fmt_si_significant(v, "dB", significant_digits);
-    [
+) -> Vec<(&'static str, String, bool)> {
+    let (low, _) = low_frequency_labels(m.adc_is_dc);
+    vec![
+        ("Loop gain", signal.to_owned(), false),
         (
             "Phase margin",
-            fmt_opt(m.pm_deg, &|v| {
-                angle_readout(quantity_policy, v.to_radians(), significant_digits)
-            }),
+            or_dash(m.pm_deg.zip(m.ugf).map(|(degrees, frequency)| {
+                super::margins::phase_margin(
+                    degrees,
+                    frequency,
+                    quantity_policy,
+                    significant_digits,
+                )
+            })),
             true,
         ),
-        ("Gain margin", fmt_opt(m.gm_db, &decibels), true),
-        ("Unity-gain freq", fmt_opt(m.ugf, &frequency), false),
-        ("f₁₈₀", fmt_opt(m.f180, &frequency), false),
         (
-            if adc_is_dc { "A_dc" } else { "A(f_min)" },
-            fmt_opt(m.adc_db, &decibels),
-            false,
+            "Gain margin",
+            or_dash(m.gm_db.zip(m.f180).map(|(decibels, frequency)| {
+                super::margins::gain_margin(
+                    decibels,
+                    frequency,
+                    quantity_policy,
+                    significant_digits,
+                )
+            })),
+            true,
         ),
         (
-            if adc_is_dc {
-                "f₋₃dB"
-            } else {
-                "f₋₃dB re A(f_min)"
-            },
-            fmt_opt(m.f3db, &frequency),
+            low,
+            or_dash(
+                m.adc_db
+                    .map(|decibels| fmt_si_significant(decibels, "dB", significant_digits)),
+            ),
             false,
         ),
+    ]
+}
+
+/// The response card's rows: the response measured, its gain at the bottom
+/// of the sweep, its bandwidth, and where its gain crosses unity.
+fn response_rows(
+    signal: &str,
+    m: AcBodeMetrics,
+    quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
+) -> Vec<(&'static str, String, bool)> {
+    let (low, bandwidth) = low_frequency_labels(m.adc_is_dc);
+    let frequency = |value: Option<f64>| {
+        or_dash(value.map(|hertz| frequency_readout(quantity_policy, hertz, significant_digits)))
+    };
+    vec![
+        ("Response", signal.to_owned(), false),
+        (
+            low,
+            or_dash(
+                m.adc_db
+                    .map(|decibels| fmt_si_significant(decibels, "dB", significant_digits)),
+            ),
+            true,
+        ),
+        (bandwidth, frequency(m.f3db), true),
+        ("Unity-gain freq", frequency(m.ugf), false),
     ]
 }
 
@@ -322,25 +470,22 @@ mod tests {
     use super::*;
 
     /// A sweep that opens above the dominant pole has no DC gain in it. The
-    /// card must not label mid-rolloff gain `A_dc`, and `f₋₃dB` has to name
-    /// the reference it was actually measured from.
+    /// card must not label mid-rolloff gain `A_dc`, and the bandwidth has to
+    /// name the reference it was actually measured from.
     #[test]
     fn the_low_frequency_gain_is_labelled_by_what_the_sweep_proves() {
         let margins = AcBodeMetrics {
             adc_db: Some(20.0),
             adc_is_dc: false,
             ugf: Some(1.0e4),
-            pm_deg: Some(45.0),
-            pm_phase_deg: Some(-135.0),
-            f180: Some(3.0e4),
-            gm_db: Some(12.0),
             f3db: Some(1.0e2),
             ..Default::default()
         };
         let policy = QuantityPresentationPolicy::default();
 
         let labels = |adc_is_dc| {
-            margin_rows(
+            response_rows(
+                "V(out)",
                 AcBodeMetrics {
                     adc_is_dc,
                     ..margins
@@ -348,13 +493,58 @@ mod tests {
                 &policy,
                 4,
             )
+            .into_iter()
             .map(|(label, _, _)| label)
+            .collect::<Vec<_>>()
         };
 
-        assert_eq!(labels(true)[4], "A_dc");
-        assert_eq!(labels(true)[5], "f₋₃dB");
-        assert_eq!(labels(false)[4], "A(f_min)");
-        assert_eq!(labels(false)[5], "f₋₃dB re A(f_min)");
+        assert_eq!(labels(true)[1..3], ["A_dc", "\u{2212}3 dB bandwidth"]);
+        assert_eq!(
+            labels(false)[1..3],
+            ["A(f_min)", "\u{2212}3 dB re A(f_min)"]
+        );
+    }
+
+    /// Only a loop gain has stability margins: a response card states gain
+    /// and bandwidth and no margin, and each card names what it measured.
+    #[test]
+    fn only_a_loop_gain_reads_as_margins_and_each_card_names_its_response() {
+        let metrics = AcBodeMetrics {
+            adc_db: Some(12.04),
+            adc_is_dc: true,
+            ugf: Some(1_232.8),
+            pm_deg: Some(27.144_6),
+            pm_phase_deg: Some(-152.855_4),
+            f180: Some(1_732.05),
+            gm_db: Some(6.020_6),
+            f3db: Some(510.0),
+            ..Default::default()
+        };
+        let policy = QuantityPresentationPolicy::default();
+
+        let response = response_rows("V(out)", metrics, &policy, 4);
+        assert_eq!(response[0], ("Response", "V(out)".to_owned(), false));
+        assert!(
+            response
+                .iter()
+                .all(|(label, _, _)| !label.contains("margin")),
+            "{response:?}"
+        );
+
+        let stability = stability_rows("Loop Gain", metrics, &policy, 4);
+        let rows = stability
+            .iter()
+            .map(|(label, value, _)| (*label, value.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            [
+                ("Loop gain", "Loop Gain"),
+                ("Phase margin", "27.14 ° at 1.233 kHz"),
+                ("Gain margin", "6.021 dB at 1.732 kHz"),
+                ("A_dc", "12.04 dB"),
+            ]
+        );
     }
 
     /// The stability card reads at the reader's significant digits, not at a
@@ -373,19 +563,16 @@ mod tests {
             ..Default::default()
         };
         let policy = QuantityPresentationPolicy::default();
-        let values = |digits| margin_rows(margins, &policy, digits).map(|(_, value, _)| value);
+        let values = |digits| {
+            stability_rows("Loop Gain", margins, &policy, digits)
+                .into_iter()
+                .map(|(_, value, _)| value)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            values(4),
-            [
-                "61.23 °",
-                "12.35 dB",
-                "1.235 MHz",
-                "4.568 MHz",
-                "62.35 dB",
-                "123.5 Hz"
-            ]
+            values(4)[1..],
+            ["61.23 ° at 1.235 MHz", "12.35 dB at 4.568 MHz", "62.35 dB"]
         );
-        assert_eq!(values(6)[0], "61.2346 °");
-        assert_eq!(values(6)[2], "1.23457 MHz");
+        assert_eq!(values(6)[1], "61.2346 ° at 1.23457 MHz");
     }
 }

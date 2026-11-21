@@ -9,7 +9,7 @@ use egui::Ui;
 use crate::state::{AnalysisResult, AnalysisType, ac_bode_shape_for_selection};
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
-use rspice_results_ui::bode::inspector::{self, BodeInspector, NoiseSpectrumModel};
+use rspice_results_ui::bode::inspector::{self, BodeInspector, BodeResponse, NoiseSpectrumModel};
 
 use super::{BodeDerived, ResultsParts, ResultsReads};
 
@@ -21,6 +21,11 @@ struct BodeModel {
     /// lowest-frequency gain is the DC gain — the card's labels depend on it,
     /// and an unproven claim of DC gain is a wrong reading of a right number.
     margins: BodeDerived,
+    /// The response measured, as the run names it.
+    signal: String,
+    /// Whether it is a stability analysis's loop gain, which alone has
+    /// margins.
+    loop_gain: bool,
 }
 
 pub(super) use rspice_results::noise_spectrum::NoiseSpectrumShape;
@@ -159,6 +164,8 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
     Ok(BodeModel {
         phase_available,
         margins,
+        signal: shape.signal,
+        loop_gain: analysis.analysis_type == AnalysisType::Stb,
     })
 }
 
@@ -241,10 +248,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     }
     let model = build_model(state);
     let inspector = match &model {
-        Ok(model) => BodeInspector::Stability {
+        Ok(model) => BodeInspector::Response(BodeResponse {
             metrics: model.margins.metrics,
             phase_available: model.phase_available,
-        },
+            signal: &model.signal,
+            loop_gain: model.loop_gain,
+            candidates: &[],
+        }),
         Err(NoMargins::NoResponse) => BodeInspector::NoResponse,
         Err(NoMargins::AnalysisFailed(reason)) => BodeInspector::AnalysisFailed(reason.as_deref()),
     };
@@ -392,7 +402,7 @@ mod tests {
         }
         assert!(text.iter().any(|label| label == "A(f_min)"), "{text:?}");
         assert!(
-            text.iter().any(|label| label == "f₋₃dB re A(f_min)"),
+            text.iter().any(|label| label == "\u{2212}3 dB re A(f_min)"),
             "{text:?}"
         );
     }

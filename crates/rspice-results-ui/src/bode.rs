@@ -2,6 +2,7 @@
 
 pub(crate) mod data;
 pub mod inspector;
+pub mod margins;
 pub mod state;
 
 pub use data::BodeData;

@@ -18,8 +18,8 @@ use egui::Ui;
 use rspice_results::nyquist::{LOOP_GAIN_LOCUS_LABEL, loop_gain_traces};
 use rspice_results::waveform::Fetched;
 use rspice_results_ui::nyquist::NyquistData;
-use rspice_results_ui::nyquist::view::{self, NyquistPlot, NyquistStability};
-use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::nyquist::view::{self, NyquistFrame, NyquistPlot, NyquistStability};
+use rspice_results_ui::presentation::{PlotView, well_hint};
 
 /// Where the shown run keeps the loop gain the sheet draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -65,6 +65,8 @@ pub struct NyquistDerived {
     locus: Arc<NyquistData>,
     real: Arc<[f64]>,
     imaginary: Arc<[f64]>,
+    /// The negated imaginary column: the branch for negative frequencies.
+    mirror: Arc<[f64]>,
     stability: NyquistStability,
 }
 
@@ -131,6 +133,7 @@ fn locus(state: &mut ResultsParts<'_>) -> Locus {
         },
         real: locus.points.iter().map(|point| point.real).collect(),
         imaginary: locus.points.iter().map(|point| point.imag).collect(),
+        mirror: locus.points.iter().map(|point| -point.imag).collect(),
         locus: Arc::new(locus),
     };
     let nyquist = &mut state.results.nyquist;
@@ -172,6 +175,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         curve: &derived.locus,
         real: &derived.real,
         imaginary: &derived.imaginary,
+        mirror: &derived.mirror,
         stability: Some(derived.stability),
     };
     let results = &mut state.results;
@@ -202,6 +206,32 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             }
         }
     }
+}
+
+/// The sheet's bar: frame the critical point, as the sheet opens, or the
+/// whole locus.
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    let Some(frame) = view::domain_bar(ui) else {
+        return true;
+    };
+    let view = match frame {
+        NyquistFrame::CriticalPoint => PlotView::default(),
+        NyquistFrame::WholeLocus => {
+            let Locus::Ready(derived) = locus(state) else {
+                return true;
+            };
+            let (x, y) = view::locus_frame(&derived.real, &derived.imaginary);
+            PlotView {
+                x: Some(x),
+                y: Some(y),
+            }
+        }
+    };
+    *state
+        .results
+        .session
+        .plot_view_mut(super::ResultViewer::Nyquist, 0) = view;
+    true
 }
 
 /// The stability numbers of the shown run's loop gain, in the inspector.

@@ -108,7 +108,7 @@ fn root_rows(
             real_root_text(root, quantity_policy, digits)
         } else {
             format!(
-                "ζ {} · fₙ {}",
+                "ζ {} · f₀ {}",
                 fmt_si_significant(root.damping_ratio(), "", digits),
                 frequency_readout(
                     quantity_policy,
@@ -136,7 +136,7 @@ fn q_text(q: f64, digits: usize) -> String {
 }
 
 /// The hover card of one root: σ and jω in rad/s, as the s-plane measures
-/// them, beside fₙ in Hz, and the signed Q of a complex root off the axis.
+/// them, beside f₀ in Hz, and the signed Q of a complex root off the axis.
 fn root_card_rows(
     root: &ComplexRoot,
     quantity_policy: &QuantityPresentationPolicy,
@@ -153,7 +153,7 @@ fn root_card_rows(
             fmt_si_significant(root.imag, "rad/s", digits),
         ),
         (
-            "fₙ".to_owned(),
+            "f₀".to_owned(),
             frequency_readout(quantity_policy, magnitude / std::f64::consts::TAU, digits),
         ),
     ];
@@ -467,7 +467,7 @@ mod tests {
     }
 
     /// The hover card gives σ and jω in rad/s, so jω never reads as a
-    /// frequency in Hz beside fₙ, and a growing pair's Q keeps its sign.
+    /// frequency in Hz beside f₀, and a growing pair's Q keeps its sign.
     #[test]
     fn the_root_card_gives_s_plane_units_and_a_signed_q() {
         let policy = QuantityPresentationPolicy::default();
@@ -481,7 +481,7 @@ mod tests {
             [
                 "σ 628.3 rad/s",
                 "jω 6.252 krad/s",
-                "fₙ 1 kHz",
+                "f₀ 1 kHz",
                 "Q \u{2212}5 · RHP"
             ]
         );

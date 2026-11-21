@@ -20,12 +20,81 @@ pub struct NyquistStability {
 }
 
 /// One nonempty retained loop-gain contour and its cached coordinate columns.
-/// Both columns must contain the corresponding coordinate of every curve point.
+/// The columns must contain the corresponding coordinate of every curve
+/// point; `mirror` is the negated imaginary column, the branch for negative
+/// frequencies.
 pub struct NyquistPlot<'a> {
     pub curve: &'a NyquistData,
     pub real: &'a [f64],
     pub imaginary: &'a [f64],
+    pub mirror: &'a [f64],
     pub stability: Option<NyquistStability>,
+}
+
+/// Where the plot is framed, as the reader asks from the sheet's bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NyquistFrame {
+    /// The critical point and the unit circle, where the margins are read:
+    /// the frame the sheet opens on.
+    CriticalPoint,
+    /// Every sample of the locus and its mirror.
+    WholeLocus,
+}
+
+/// The frame the sheet opens on: the critical point, the unit circle the
+/// phase margin is read on, and the point the gain margin is read at, with
+/// room on the far side of −1, all on one scale.
+///
+/// A loop with 60 dB of gain at DC starts a thousand units out. Framing all
+/// of it shrinks the unit circle to a few pixels about the origin, where
+/// every question a Nyquist plot answers is asked.
+pub fn critical_frame(stability: Option<NyquistStability>) -> ((f64, f64), (f64, f64)) {
+    let (mut left, mut right) = (-2.0f64, 1.0f64);
+    if let Some(margin) = stability.and_then(|stability| stability.gain_margin) {
+        let crossing = -1.0 / margin.value;
+        if crossing.is_finite() {
+            left = left.min(crossing);
+            right = right.max(crossing);
+        }
+    }
+    let half = (right - left) * 0.5 * 1.1;
+    let center = (left + right) * 0.5;
+    ((center - half, center + half), (-half, half))
+}
+
+/// A square frame round every finite sample of the locus and its mirror,
+/// the critical point and the unit circle.
+pub fn locus_frame(real: &[f64], imaginary: &[f64]) -> ((f64, f64), (f64, f64)) {
+    let (mut left, mut right, mut reach) = (-1.0f64, 1.0f64, 1.0f64);
+    for (&r, &i) in real.iter().zip(imaginary) {
+        if r.is_finite() && i.is_finite() {
+            left = left.min(r);
+            right = right.max(r);
+            reach = reach.max(i.abs());
+        }
+    }
+    let half = ((right - left) * 0.5).max(reach) * 1.05;
+    let center = (left + right) * 0.5;
+    ((center - half, center + half), (-half, half))
+}
+
+/// The sheet's own controls in its bar: frame the critical point, as the
+/// sheet opens, or the whole locus.
+pub fn domain_bar(ui: &mut Ui) -> Option<NyquistFrame> {
+    crate::chrome::bars::bar_label(ui, "Frame");
+    let mut frame = None;
+    for (label, choice) in [
+        ("Critical point", NyquistFrame::CriticalPoint),
+        ("Whole locus", NyquistFrame::WholeLocus),
+    ] {
+        if rspice_ui_kit::widgets::Button::new(label)
+            .show(ui)
+            .clicked()
+        {
+            frame = Some(choice);
+        }
+    }
+    frame
 }
 
 /// What the tab needs, spelled the way the reader can act on it.
@@ -35,6 +104,9 @@ pub struct NyquistPlot<'a> {
 /// spectrum is not a loop gain, and drawing one here with stability numbers
 /// attached would put a verdict on a quantity that has none — so nothing but
 /// a retained loop-gain contour reaches this sheet.
+/// The legend's name for the branch drawn for negative frequencies.
+const MIRROR_LABEL: &str = "L(\u{2212}jω)";
+
 const NEEDS_LOOP_GAIN: &str =
     "No loop gain — run a stability (.STB) analysis with its Nyquist contour retained";
 
@@ -99,6 +171,7 @@ pub const REAL_SERIES: usize = 0;
 /// Imaginary-coordinate entry in the host derived-series cache.
 pub const IMAGINARY_SERIES: usize = 1;
 const LOCUS_SERIES: usize = 2;
+const MIRROR_SERIES: usize = 3;
 
 /// Render a retained locus using host-selected data and local interaction state.
 /// The host owns cache invalidation and applies the returned axes to its inspector.
@@ -121,6 +194,7 @@ pub fn show(
         curve,
         real: re,
         imaginary: im,
+        mirror,
         stability: stats,
     } = source;
     let name = &curve.name;
@@ -128,23 +202,25 @@ pub fn show(
 
     // The legend names the quantity that is actually plotted, which is the
     // retained contour's own name rather than a fixed label.
-    let legend = [LegendChip {
-        name,
-        color: c.traces[0],
-        on: true,
-    }];
+    let legend = [
+        LegendChip {
+            name,
+            color: c.traces[0],
+            on: true,
+        },
+        LegendChip {
+            name: MIRROR_LABEL,
+            color: c.traces[0],
+            on: true,
+        },
+    ];
     strip::StripHeader::new("NYQ", &format!("{point_count} pts"), &legend).show(ui);
 
-    // Equal-aspect ranges around the locus and the critical point.
-    let mut extent = 1.3f64;
-    for (&r, &i) in re.iter().zip(im.iter()) {
-        if r.is_finite() && i.is_finite() {
-            extent = extent.max(r.abs()).max(i.abs());
-        }
-    }
-    let extent = (extent * 1.1).min(50.0);
-    let (x0, x1) = view.x.unwrap_or((-extent, extent));
-    let (y0, y1) = view.y.unwrap_or((-extent, extent));
+    // Opened on the critical point; the reader's zoom, or the bar's whole
+    // locus, replaces it until a double-click brings it back.
+    let (frame_x, frame_y) = critical_frame(stats);
+    let (x0, x1) = view.x.unwrap_or(frame_x);
+    let (y0, y1) = view.y.unwrap_or(frame_y);
 
     let mut spec = PlotSpec::new(
         Axis::linear(x0, x1, "Re"),
@@ -160,6 +236,15 @@ pub fn show(
             .parametric()
             .cache_key(plot::trace_cache_key(NYQUIST_CACHE_BASE, LOCUS_SERIES)),
     );
+    // The branch for negative frequencies closes the contour the
+    // encirclements are counted round, so it is drawn, dashed.
+    spec.traces.push(
+        Trace::new(re, mirror, c.traces[0])
+            .parametric()
+            .dashed()
+            .thin()
+            .cache_key(plot::trace_cache_key(NYQUIST_CACHE_BASE, MIRROR_SERIES)),
+    );
 
     // Critical point.
     spec.markers.push(plot::Marker {
@@ -171,6 +256,42 @@ pub fn show(
         label_dy: 0.0,
         shape: plot::MarkerShape::Point,
     });
+
+    // Each margin where it is read on the locus: the gain margin where the
+    // locus crosses the negative real axis, the phase margin where it
+    // crosses the unit circle.
+    if let Some(stability) = stats {
+        if let Some(margin) = stability.gain_margin {
+            let crossing = -1.0 / margin.value;
+            if crossing.is_finite() {
+                spec.markers.push(plot::Marker::point(
+                    crossing,
+                    0.0,
+                    c.warn,
+                    format!(
+                        "GM {}",
+                        fmt_si_significant(20.0 * margin.value.log10(), "dB", significant_digits)
+                    ),
+                ));
+            }
+        }
+        if let Some(margin) = stability.phase_margin {
+            let (sin, cos) = margin.phase_deg.to_radians().sin_cos();
+            spec.markers.push(plot::Marker::point(
+                cos,
+                sin,
+                c.warn,
+                format!(
+                    "PM {}",
+                    angle_readout(
+                        quantity_policy,
+                        margin.value.to_radians(),
+                        significant_digits
+                    )
+                ),
+            ));
+        }
+    }
 
     // Unit circle + vertical axis underlay.
     let grid = c.canvas_grid;
@@ -313,17 +434,8 @@ pub fn right_panel(
         return;
     };
 
-    let margin = |margin: Option<NyquistMargin>, render: &dyn Fn(f64) -> String| -> String {
-        margin.map_or_else(
-            || "—".to_owned(),
-            |margin| {
-                format!(
-                    "{} at {}",
-                    render(margin.value),
-                    frequency_readout(quantity_policy, margin.frequency, significant_digits)
-                )
-            },
-        )
+    let margin = |margin: Option<NyquistMargin>, render: &dyn Fn(NyquistMargin) -> String| {
+        margin.map_or_else(|| "—".to_owned(), render)
     };
     let rows = [
         (
@@ -340,18 +452,28 @@ pub fn right_panel(
             false,
         ),
         (
-            "Gain margin",
-            margin(s.gain_margin, &|ratio| {
-                fmt_si_significant(20.0 * ratio.log10(), "dB", significant_digits)
+            "Phase margin",
+            margin(s.phase_margin, &|margin| {
+                crate::bode::margins::phase_margin(
+                    margin.value,
+                    margin.frequency,
+                    quantity_policy,
+                    significant_digits,
+                )
             }),
-            false,
+            true,
         ),
         (
-            "Phase margin",
-            margin(s.phase_margin, &|degrees| {
-                angle_readout(quantity_policy, degrees.to_radians(), significant_digits)
+            "Gain margin",
+            margin(s.gain_margin, &|margin| {
+                crate::bode::margins::gain_margin(
+                    20.0 * margin.value.log10(),
+                    margin.frequency,
+                    quantity_policy,
+                    significant_digits,
+                )
             }),
-            false,
+            true,
         ),
     ];
     crate::presentation::stat_table(ui, &rows);
@@ -441,12 +563,55 @@ mod tests {
     /// and the composition is the plot engine's, not a bitwise fold.
     #[test]
     fn the_cached_series_keys_stay_distinct() {
-        let keys = [REAL_SERIES, IMAGINARY_SERIES, LOCUS_SERIES]
+        let keys = [REAL_SERIES, IMAGINARY_SERIES, LOCUS_SERIES, MIRROR_SERIES]
             .map(|series| plot::trace_cache_key(NYQUIST_CACHE_BASE, series));
 
         assert_eq!(
             keys.iter().collect::<std::collections::HashSet<_>>().len(),
-            3
+            4
         );
+    }
+
+    /// The sheet opens on the critical point and the unit circle whatever
+    /// the loop's gain at DC, and widens only to keep a gain margin's
+    /// crossing beyond −1 in view.
+    #[test]
+    fn the_sheet_opens_framed_on_the_critical_point() {
+        let stability = |ratio: f64| NyquistStability {
+            encirclements: EncirclementCount::Counted(0),
+            min_distance: None,
+            gain_margin: Some(NyquistMargin {
+                value: ratio,
+                frequency: 1.0e3,
+                phase_deg: -180.0,
+            }),
+            phase_margin: None,
+        };
+        let contains = |((x0, x1), (y0, y1)): ((f64, f64), (f64, f64)), x: f64, y: f64| {
+            x0 < x && x < x1 && y0 < y && y < y1
+        };
+
+        let stable = critical_frame(Some(stability(2.0)));
+        for (x, y) in [
+            (-1.0, 0.0),
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (0.0, -1.0),
+            (-2.0, 0.0),
+        ] {
+            assert!(contains(stable, x, y), "{stable:?} holds ({x}, {y})");
+        }
+        assert!((stable.0.1 - stable.0.0 - (stable.1.1 - stable.1.0)).abs() < 1e-12);
+        assert!(stable.0.1 - stable.0.0 < 4.0, "{stable:?}");
+
+        // A loop past the critical point crosses the axis at −4: in view.
+        let unstable = critical_frame(Some(stability(0.25)));
+        assert!(contains(unstable, -4.0, 0.0), "{unstable:?}");
+        assert!(contains(unstable, 1.0, 0.0), "{unstable:?}");
+
+        // The whole locus is the bar's other frame.
+        let whole = locus_frame(&[1000.0, -0.5, 0.0], &[0.0, -40.0, 0.0]);
+        assert!(contains(whole, 1000.0, 0.0) && contains(whole, -0.5, -40.0));
+        assert!(contains(whole, -0.5, 40.0), "the mirror is in the frame");
     }
 }
