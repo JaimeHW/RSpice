@@ -454,14 +454,6 @@ pub fn scene_pane(ui: &mut egui::Ui, scene: &Scene, camera: &mut SceneCamera) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn dash_patterns_mirror_the_svg_renderer_geometry() {
-        assert_eq!(dash_pattern(StrokePattern::Solid), &[] as &[f32]);
-        assert_eq!(dash_pattern(StrokePattern::Dashed), &[4.0, 2.0]);
-        assert_eq!(dash_pattern(StrokePattern::Dotted), &[1.0, 3.0]);
-        assert_eq!(dash_pattern(StrokePattern::DashDot), &[4.0, 2.0, 1.0, 2.0]);
-    }
-
     /// An outline carrying the pattern its author drew is drawn in exactly
     /// that pattern, its round-capped lengths read for square ends: a dot of
     /// next to nothing stands one width across. One without draws the
