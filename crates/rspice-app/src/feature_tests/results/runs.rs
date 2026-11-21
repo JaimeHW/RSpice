@@ -330,11 +330,15 @@ fn the_run_selector_lists_two_hundred_runs_and_lays_out_a_page_of_them() {
         .accesskit_update
         .expect("an accessibility tree")
         .nodes;
-    let rows: Vec<&str> = nodes
+    // The update lists its nodes in no order, so the rows are read top to
+    // bottom by where they stand.
+    let mut placed: Vec<(f64, &str)> = nodes
         .iter()
-        .filter_map(|(_, node)| node.label())
-        .filter(|label| label.starts_with("Run "))
+        .filter_map(|(_, node)| Some((node.bounds()?.y0, node.label()?)))
+        .filter(|(_, label)| label.starts_with("Run "))
         .collect();
+    placed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let rows: Vec<&str> = placed.into_iter().map(|(_, label)| label).collect();
     assert_eq!(
         rows.first(),
         Some(&"Run 200"),
