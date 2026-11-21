@@ -213,8 +213,10 @@ impl ProjectDeck {
     /// Whether the deck is the file at `path`, however either is spelled.
     #[must_use]
     pub fn is_file(&self, path: &Path, project_folder: Option<&Path>) -> bool {
-        self.file_path(project_folder)
-            .is_some_and(|file| plain_path(&file) == plain_path(path))
+        self.file_path(project_folder).is_some_and(|file| {
+            plain_path(&file) == plain_path(path)
+                || resolved_path(&file).is_some_and(|file| Some(file) == resolved_path(path))
+        })
     }
 
     /// The deck the project keeps as text, when it is one.
@@ -248,27 +250,44 @@ impl ProjectDeck {
 }
 
 /// `path` as the project stores it: relative to `project_folder` with `/`
-/// separators when it is under that folder, else as given.
+/// separators when it is under that folder, else as given. The two are first
+/// compared as written; when that does not place the file under the folder,
+/// they are compared as the file system resolves them, so a folder reached
+/// through a link, a `..`, a short name (`RUNNER~1`) or `/var` for
+/// `/private/var` is still the folder the deck is under.
 #[must_use]
 pub fn stored_deck_path(path: &Path, project_folder: Option<&Path>) -> PathBuf {
     let plain = plain_path(path);
-    let Some(relative) =
-        project_folder.and_then(|folder| plain.strip_prefix(plain_path(folder)).ok())
-    else {
+    let Some(folder) = project_folder else {
         return plain;
     };
+    path_under(&plain, &plain_path(folder))
+        .or_else(|| path_under(&resolved_path(path)?, &resolved_path(folder)?))
+        .unwrap_or(plain)
+}
+
+/// `file`'s path from `folder` with `/` separators, when it is a file under
+/// that folder.
+fn path_under(file: &Path, folder: &Path) -> Option<PathBuf> {
+    let relative = file.strip_prefix(folder).ok()?;
     let mut parts = Vec::new();
     for component in relative.components() {
         match component {
             Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
             Component::CurDir => {}
-            _ => return plain,
+            _ => return None,
         }
     }
-    if parts.is_empty() {
-        return plain;
-    }
-    PathBuf::from(parts.join("/"))
+    (!parts.is_empty()).then(|| PathBuf::from(parts.join("/")))
+}
+
+/// `path` as the file system resolves it (links, `..`, short names and the
+/// letter case it keeps), without the verbatim prefix; `None` when it does
+/// not exist or there is no file system to ask, as in the browser.
+fn resolved_path(path: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(path)
+        .ok()
+        .map(|path| plain_path(&path))
 }
 
 /// `path` without the Windows verbatim prefix a canonical path carries
@@ -426,6 +445,31 @@ mod tests {
             &PathBuf::from(r"\\?\C:\work\amp\decks\amp.cir"),
             Some(&folder)
         ));
+    }
+
+    /// A deck reached through a spelling of its folder the project does not
+    /// share, here a `..`, is still stored by its path from the project
+    /// folder, and the project knows it by either spelling.
+    #[test]
+    fn a_deck_under_another_spelling_of_the_project_folder_is_stored_relative() {
+        let folder = std::env::temp_dir()
+            .join(format!("rspice-deck-spelling-{}", std::process::id()))
+            .join("amp");
+        std::fs::create_dir_all(folder.join("decks")).expect("the folders");
+        std::fs::create_dir_all(folder.join("x")).expect("the folders");
+        let file = folder.join("decks").join("amp.cir");
+        std::fs::write(&file, "* amp\n.end\n").expect("the deck");
+        let roundabout = folder.join("x").join("..").join("decks").join("amp.cir");
+
+        let deck = ProjectDeck::for_file(&roundabout, Some(&folder));
+
+        let DeckSource::File { path } = &deck.source else {
+            panic!("a deck opened from a file is a file");
+        };
+        assert_eq!(path, &PathBuf::from("decks/amp.cir"));
+        assert!(deck.is_file(&roundabout, Some(&folder)));
+        assert!(deck.is_file(&file, Some(&folder)));
+        let _ = std::fs::remove_dir_all(folder.parent().expect("the test folder"));
     }
 
     #[test]
