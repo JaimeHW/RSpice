@@ -311,6 +311,66 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
     );
 }
 
+// --------------------------------------------------------------- output rows
+
+/// An output the reader adds is plotted; its row's Plot switch keeps it for the data browser
+/// instead, and a second click plots it again. The choice is the plan's, saved with the
+/// project, so the click has to land in the plan and not only on the row.
+#[test]
+fn an_output_rows_plot_switch_decides_whether_the_plan_plots_it() {
+    use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
+    use rspice_app_state::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputDisplayIntent, SavedOutputKind,
+        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan = plan_id(&app.state.model);
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "vout",
+        "V(out)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+    )
+    .expect("valid saved output");
+    assert_eq!(output.display_intent, SavedOutputDisplayIntent::Plot);
+    app.state
+        .model
+        .workspace
+        .content
+        .add_saved_output(plan, output)
+        .expect("the plan accepts it");
+    let intent = |app: &RSpiceApp| {
+        app.state
+            .model
+            .workspace
+            .content
+            .plan_data(plan)
+            .and_then(|payload| {
+                payload
+                    .saved_outputs
+                    .first()
+                    .map(|output| output.display_intent)
+            })
+    };
+
+    let mut studio = Studio::open(app, SimulationPage::Outputs, DESKTOP);
+    studio.click(|label| label == "Plot vout");
+    assert_eq!(
+        intent(&studio.app),
+        Some(SavedOutputDisplayIntent::DataBrowserOnly)
+    );
+    assert_eq!(
+        studio.app.state.simulate.selected_saved_output, None,
+        "the switch is its own target, not a click on the row"
+    );
+    studio.click(|label| label == "Plot vout");
+    assert_eq!(intent(&studio.app), Some(SavedOutputDisplayIntent::Plot));
+}
+
 // ------------------------------------------------------------- run-set toolbar
 
 /// A run-set edit is a step of the setup's one Undo, and the toolbar's

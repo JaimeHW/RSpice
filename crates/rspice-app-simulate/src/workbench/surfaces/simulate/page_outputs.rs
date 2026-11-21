@@ -11,8 +11,8 @@ use crate::state::command_catalog::CommandKey;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroup, CaptureGroupMembership, ComplexExpressionPolicy, SavedOutput,
-    SavedOutputCompatibility, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    UNGROUPED_NAME,
+    SavedOutputCompatibility, SavedOutputDisplayIntent, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, UNGROUPED_NAME,
 };
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
@@ -27,12 +27,15 @@ use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 use rspice_simulation_contract::run_set::format_bytes;
 
 use super::page_kit::{
-    RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head,
-    field_pair, filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
+    CARD_PAD_X, RowPress, Tone, card, card_body, card_head_row, card_note, card_row,
+    card_with_head, cell_ui, column_rects, field_pair, filter_field, filter_row, ledger_head,
+    ledger_row, row_matches, rule_row, switch_cell,
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
-const REGISTRY_COLUMNS: [f32; 8] = [0.15, 0.09, 0.18, 0.12, 0.12, 0.13, 0.09, 0.12];
+const REGISTRY_COLUMNS: [f32; 9] = [0.14, 0.09, 0.17, 0.11, 0.12, 0.06, 0.12, 0.08, 0.11];
+/// The registry column holding each output's Plot switch.
+const PLOT_COLUMN: usize = 5;
 
 /// What one registry row states beyond the output's own fields.
 ///
@@ -279,6 +282,7 @@ fn registry(
         .and_then(|name| outputs.iter().find(|output| output.name == name))
         .map(|output| (output.id, output.name.clone()));
     let mut pick = None;
+    let mut plot = None;
     let mut remove = false;
     let mut duplicate = false;
     card_with_head(
@@ -317,6 +321,7 @@ fn registry(
                     "Expression",
                     "Capture group",
                     "Consumers",
+                    "Plot",
                     "Save policy",
                     "Est. size",
                     "Status",
@@ -353,7 +358,7 @@ fn registry(
                 if !row.shown {
                     continue;
                 }
-                if ledger_row(
+                let response = ledger_row(
                     ui,
                     &REGISTRY_COLUMNS,
                     &[
@@ -362,16 +367,33 @@ fn registry(
                         (output.source_expression.as_str(), Tone::Neutral),
                         (row.group.as_str(), Tone::Neutral),
                         (row.consumers.as_str(), Tone::Neutral),
+                        ("", Tone::Neutral),
                         (output.save_policy.label(), Tone::Neutral),
                         (row.size.as_str(), row.size_tone),
                         (row.status.as_str(), row.status_tone),
                     ],
                     selected.as_deref() == Some(output.name.as_str()),
                     RowPress::Taken,
-                )
-                .clicked()
-                {
+                );
+                if response.clicked() {
                     pick = Some(output.name.clone());
+                }
+                // Drawn over the row, so the switch takes its own click and the row keeps the
+                // rest.
+                if let Some(cell) = column_rects(response.rect, &REGISTRY_COLUMNS).get(PLOT_COLUMN)
+                {
+                    let mut cell = cell_ui(ui, cell.shrink2(egui::vec2(CARD_PAD_X * 0.8, 0.0)));
+                    let mut on = output.display_intent == SavedOutputDisplayIntent::Plot;
+                    if switch_cell(&mut cell, &format!("Plot {}", output.name), &mut on)
+                        .on_hover_text(if on {
+                            "Plotted when a run ends, and drawn while it runs"
+                        } else {
+                            "Kept for the data browser, not plotted"
+                        })
+                        .changed()
+                    {
+                        plot = Some((output.id, output.name.clone(), on));
+                    }
                 }
             }
             card_note(
@@ -466,6 +488,22 @@ fn registry(
         {
             cx.state.selected_saved_output = None;
         }
+    }
+    if let Some((output_id, name, on)) = plot {
+        let (intent, detail) = if on {
+            (
+                SavedOutputDisplayIntent::Plot,
+                format!("Saved output {name} is plotted."),
+            )
+        } else {
+            (
+                SavedOutputDisplayIntent::DataBrowserOnly,
+                format!("Saved output {name} is kept for the data browser, not plotted."),
+            )
+        };
+        replace_output(cx, output_id, &detail, move |output| {
+            output.display_intent = intent;
+        });
     }
     if let Some(name) = pick {
         // A draft belongs to the row it was typed into. Selecting another row
