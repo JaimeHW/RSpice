@@ -105,6 +105,43 @@ fn a_run_saved_from_memory_reopens_with_the_digest_it_had() {
     );
 }
 
+/// A run's name and note are the reader's, kept with the project as
+/// Assembler's History keeps a run's name and comment; neither is result
+/// content, so neither moves the digest.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_renamed_and_annotated_run_reopens_as_the_reader_left_it() {
+    let mut state = session_with_a_run();
+    let run = state
+        .model
+        .simulation
+        .retained
+        .runs
+        .first_mut()
+        .expect("the run");
+    let (dataset, digest) = (run.dataset_id, run.dataset_content_digest());
+    let stamp = run.start_stamp().expect("the run's start");
+    run.rename("Bias at 1.8 V");
+    run.note = "Supply ripple fixed".to_owned();
+    assert_eq!(run.label, format!("Bias at 1.8 V ({stamp})"));
+    assert_eq!(
+        run.dataset_content_digest(),
+        digest,
+        "a name is not content"
+    );
+
+    let (state, _folder) = save_and_reopen(state);
+    let run = state
+        .model
+        .simulation
+        .retained
+        .run_by_dataset_id(dataset)
+        .expect("the run reopens");
+    assert_eq!(run.name(), "Bias at 1.8 V");
+    assert_eq!(run.note, "Supply ripple fixed");
+    assert_eq!(run.dataset_content_digest(), digest);
+}
+
 /// A run the engine solved keeps its samples in the store from the start,
 /// and the save copies its segments beside the project file.
 #[cfg(not(target_arch = "wasm32"))]

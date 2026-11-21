@@ -314,6 +314,26 @@ impl SimulationRun {
     fn local_offset(timestamp: f64) -> i32 {
         crate::time_compat::local_offset_seconds(timestamp as i64)
     }
+
+    /// The date and time the run started on this host's clock:
+    /// `21 Nov 2026, 1:04:01 PM`.
+    #[must_use]
+    pub fn start_stamp(&self) -> Option<String> {
+        self.data
+            .local_start_stamp(Self::local_offset(self.timestamp))
+    }
+
+    /// The run's name, its label without the start it carries.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        self.data.name(Self::local_offset(self.timestamp))
+    }
+
+    /// Name the run `name`; its label goes on carrying its start.
+    pub fn rename(&mut self, name: &str) {
+        let offset = Self::local_offset(self.timestamp);
+        self.data.rename(name, offset);
+    }
 }
 
 #[cfg(test)]

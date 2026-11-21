@@ -343,6 +343,10 @@ pub struct ProjectSimulationRun {
     /// account of itself, not result content, so it needs no schema era.
     #[serde(default, skip_serializing_if = "RunLog::is_empty")]
     pub log: RunLog,
+    /// What the reader wrote about the run. Like the log it is outside the
+    /// dataset digest.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
 }
 
 impl ProjectSimulationRun {
@@ -476,6 +480,7 @@ impl ProjectSimulationRun {
         run.restore_lifecycle(restored_lifecycle, self.elapsed_time)?;
         run.analyses = analyses;
         run.log = self.log;
+        run.note = self.note;
         run.set_retention(self.retention);
         run.success = !was_active && self.success;
         run.restore_campaign_membership(campaign_membership)?;
@@ -789,6 +794,7 @@ impl ProjectSimulationRun {
             success,
             specification_verdicts: run.specification_verdicts().map(<[_]>::to_vec),
             log: run.log.clone(),
+            note: run.note.clone(),
         }
     }
 }

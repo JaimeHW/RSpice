@@ -238,8 +238,9 @@ pub struct SimulationRun<A = AnalysisResult> {
     /// Human-facing run sequence (monotonically increasing within a project).
     /// It is a label/order value, not persistent object identity.
     pub id: u64,
-    /// Human-readable label, with the time the run started on the clock of
-    /// the host that started it (e.g., "Run 3 (1:04:01 PM)").
+    /// Human-readable label: the run's name, with the date and time it
+    /// started on the clock of the host that started it (e.g.,
+    /// "Run 3 (21 Nov 2026, 1:04:01 PM)").
     pub label: String,
     /// Unix timestamp when run started
     pub timestamp: f64,
@@ -268,6 +269,9 @@ pub struct SimulationRun<A = AnalysisResult> {
     /// cancelled keeps its account of why. It is not result content: no
     /// digest or identity of the run reads it.
     pub log: RunLog,
+    /// What the reader wrote about the run, as Assembler's History keeps a
+    /// note per run. Not result content: no digest of the run reads it.
+    pub note: String,
 }
 
 impl<A> AsRef<SimulationRun<A>> for SimulationRun<A> {
@@ -302,6 +306,7 @@ impl<A> SimulationRun<A> {
             specification_verdicts,
             campaign_membership,
             log,
+            note,
         } = self;
         SimulationRun {
             job_id,
@@ -320,6 +325,7 @@ impl<A> SimulationRun<A> {
             specification_verdicts,
             campaign_membership,
             log,
+            note,
         }
     }
 
@@ -350,6 +356,7 @@ impl<A> SimulationRun<A> {
             specification_verdicts: None,
             campaign_membership: None,
             log: RunLog::default(),
+            note: String::new(),
         }
     }
 
@@ -391,6 +398,7 @@ impl<A> SimulationRun<A> {
             specification_verdicts: None,
             campaign_membership: None,
             log: RunLog::default(),
+            note: String::new(),
         }
     }
 
@@ -879,17 +887,31 @@ impl<A> SimulationRun<A> {
         })
     }
 
-    /// Label the run with the time it started on the host's clock,
-    /// `utc_offset_seconds` east of UTC: `Run 3 (1:04:01 PM)`.
+    /// Label the run with the date and time it started on the host's clock,
+    /// `utc_offset_seconds` east of UTC: `Run 3 (21 Nov 2026, 1:04:01 PM)`.
     ///
     /// The zone is the host's to know, so a run is labelled `Run 3` until the
     /// host says it. A start the clock cannot place leaves the label as is.
     #[must_use]
     pub fn with_local_start_label(mut self, utc_offset_seconds: i32) -> Self {
+        let name = format!("Run {}", self.id);
+        self.rename(&name, utc_offset_seconds);
+        self
+    }
+
+    /// The date and time the run started on the host's clock,
+    /// `utc_offset_seconds` east of UTC: `21 Nov 2026, 1:04:01 PM`. `None`
+    /// for a start the clock cannot place.
+    #[must_use]
+    pub fn local_start_stamp(&self, utc_offset_seconds: i32) -> Option<String> {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
         if !(self.timestamp.is_finite() && self.timestamp >= 0.0) {
-            return self;
+            return None;
         }
         let local = (self.timestamp as i64).saturating_add(i64::from(utc_offset_seconds));
+        let (year, month, day) = civil_from_unix_days(local.div_euclid(86_400));
         let of_day = local.rem_euclid(86_400);
         let (hours, minutes, seconds) = (of_day / 3_600, of_day / 60 % 60, of_day % 60);
         let hour_12 = match hours % 12 {
@@ -897,12 +919,53 @@ impl<A> SimulationRun<A> {
             hour => hour,
         };
         let meridiem = if hours < 12 { "AM" } else { "PM" };
-        self.label = format!(
-            "Run {} ({hour_12}:{minutes:02}:{seconds:02} {meridiem})",
-            self.id
-        );
-        self
+        Some(format!(
+            "{day} {} {year}, {hour_12}:{minutes:02}:{seconds:02} {meridiem}",
+            MONTHS[usize::from(month - 1)]
+        ))
     }
+
+    /// The name the run's label gives it, without the start it carries.
+    #[must_use]
+    pub fn name(&self, utc_offset_seconds: i32) -> &str {
+        self.local_start_stamp(utc_offset_seconds)
+            .and_then(|stamp| {
+                self.label
+                    .strip_suffix(&format!(" ({stamp})"))
+                    .map(str::len)
+            })
+            .map_or(self.label.as_str(), |len| &self.label[..len])
+    }
+
+    /// Name the run `name`; its label goes on carrying the start.
+    pub fn rename(&mut self, name: &str, utc_offset_seconds: i32) {
+        let name = name.trim();
+        self.label = match self.local_start_stamp(utc_offset_seconds) {
+            Some(stamp) => format!("{name} ({stamp})"),
+            None => name.to_owned(),
+        };
+    }
+}
+
+/// The proleptic Gregorian `(year, month, day)` of a day count since
+/// 1970-01-01, by Howard Hinnant's civil-from-days algorithm.
+fn civil_from_unix_days(days: i64) -> (i64, u8, u8) {
+    const ERA_DAYS: i64 = 146_097;
+    let shifted = days.rem_euclid(ERA_DAYS) + 719_468;
+    let era = days.div_euclid(ERA_DAYS) + shifted.div_euclid(ERA_DAYS);
+    let day_of_era = shifted.rem_euclid(ERA_DAYS);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_from_march = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
+    let month = if month_from_march < 10 {
+        month_from_march + 3
+    } else {
+        month_from_march - 9
+    };
+    let year = era * 400 + year_of_era + i64::from(month <= 2);
+    (year, month as u8, day as u8)
 }
 
 #[cfg(test)]
@@ -911,21 +974,36 @@ mod tests {
 
     #[test]
     fn a_run_is_labelled_with_its_start_on_the_hosts_clock() {
-        // 13:04:01 UTC.
+        // Friday 16 October 2026, 13:04:01 UTC.
         let started = 1_792_155_841.0;
         let run: SimulationRun = SimulationRun::new(3, started, ExecutionTarget::LocalDesktop);
         assert_eq!(run.label, "Run 3", "the zone is the host's to say");
         assert_eq!(
             run.clone().with_local_start_label(0).label,
-            "Run 3 (1:04:01 PM)"
+            "Run 3 (16 Oct 2026, 1:04:01 PM)"
         );
         assert_eq!(
             run.clone().with_local_start_label(-7 * 3_600).label,
-            "Run 3 (6:04:01 AM)"
+            "Run 3 (16 Oct 2026, 6:04:01 AM)"
         );
         assert_eq!(
             run.with_local_start_label(11 * 3_600).label,
-            "Run 3 (12:04:01 AM)"
+            "Run 3 (17 Oct 2026, 12:04:01 AM)",
+            "east of UTC the run started the next day"
         );
+    }
+
+    #[test]
+    fn a_renamed_run_keeps_the_start_its_label_carries() {
+        let mut run: SimulationRun =
+            SimulationRun::new(3, 1_792_155_841.0, ExecutionTarget::LocalDesktop)
+                .with_local_start_label(0);
+        assert_eq!(run.name(0), "Run 3");
+        run.rename("  Corner sweep ", 0);
+        assert_eq!(run.label, "Corner sweep (16 Oct 2026, 1:04:01 PM)");
+        assert_eq!(run.name(0), "Corner sweep");
+        run.timestamp = f64::NAN;
+        run.rename("Unplaced", 0);
+        assert_eq!(run.label, "Unplaced", "a start the clock cannot place");
     }
 }
