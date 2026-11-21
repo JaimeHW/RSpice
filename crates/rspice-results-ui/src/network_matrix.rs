@@ -15,7 +15,7 @@ use rspice_ui_kit::icons::Icon;
 use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable};
+use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable};
 use rspice_ui_kit::widgets::{Button, IconButton, SegmentedWidth, segmented, select};
 use rspice_vocabulary::quantity::AngleDisplay;
 
@@ -547,12 +547,18 @@ pub fn show(
         corner_hint.push_str("\nAdjacent physical ports form (+, −) pairs. Differential and common power waves use (a+ − a−)/√2 and (a+ + a−)/√2.");
     }
     // A matrix has no order to sort: its rows and columns are its ports.
+    // The row names keep the width they need; the port columns share the
+    // rest equally, so every coefficient cell is the same size.
     let mut columns = vec![
-        Column::name(corner, 200.0)
+        Column::words(corner, 136.0)
             .unsortable()
             .tooltip(corner_hint),
     ];
-    columns.extend((0..ports).map(|column| Column::number(channel(column), 200.0).unsortable()));
+    columns.extend((0..ports).map(|column| {
+        Column::name(channel(column), 150.0)
+            .align(Align::Right)
+            .unsortable()
+    }));
     let entry = |row: usize, column: usize| {
         let (out, input) = if controls.transpose {
             (column, row)
