@@ -464,12 +464,15 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
 #[cfg(not(any(unix, windows)))]
 pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
     let kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
-    kept.open.get(&digest.0).and_then(Weak::upgrade)
+    kept.open.get(&digest.0)?.iter().find_map(Weak::upgrade)
 }
 
-/// Every kept segment some reader has open now.
+/// Every kept segment some reader has open now, one for each digest.
 #[cfg(not(any(unix, windows)))]
 pub fn open_segments() -> Vec<Arc<Segment>> {
     let kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
-    kept.open.values().filter_map(Weak::upgrade).collect()
+    kept.open
+        .values()
+        .filter_map(|open| open.iter().find_map(Weak::upgrade))
+        .collect()
 }
