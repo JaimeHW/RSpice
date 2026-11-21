@@ -14,6 +14,11 @@ pub(super) fn binary(
     left: ComplexValue,
     right: ComplexValue,
 ) -> Result<ComplexValue, EvaluationError> {
+    if op.is_comparison() {
+        return Err(EvaluationError::TypeMismatch(
+            "a comparison reads real values; apply real(), mag() or phase() first".to_owned(),
+        ));
+    }
     for value in [&left, &right] {
         if let ComplexValue::Waveform(x, y) = value {
             validate_samples(x, y)
@@ -30,6 +35,8 @@ pub(super) fn binary(
             BinaryOp::Mul => left * right,
             BinaryOp::Div => divide(left, right),
             BinaryOp::Pow => power(left, right),
+            // A comparison of complex values is refused before it gets here.
+            _ => Complex64::new(f64::NAN, f64::NAN),
         }
     };
     Ok(match (left, right) {

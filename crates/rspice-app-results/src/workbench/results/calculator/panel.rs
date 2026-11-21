@@ -16,7 +16,9 @@ use std::borrow::Cow;
 
 use egui::Ui;
 
-use crate::analysis::calculator::catalogue::{MEASUREMENTS, MeasureSpec};
+use crate::analysis::calculator::catalogue::{
+    FUNCTIONS, FunctionGroup, FunctionSpec, MEASUREMENTS, MeasureSpec,
+};
 use crate::state::SimulationState;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
@@ -88,151 +90,63 @@ impl FunctionEntry {
             caret_back: 1,
         }
     }
+
+    /// A function's row: its signature with the optional arguments folded,
+    /// inserted with its required argument slots empty and the caret in the
+    /// first.
+    fn function(spec: &'static FunctionSpec) -> Self {
+        Self {
+            label: Cow::Owned(spec.short_signature()),
+            hint: spec.summary,
+            insert: Cow::Owned(spec.template()),
+            caret_back: 1 + 2 * spec.required.saturating_sub(1),
+        }
+    }
+
+    /// The row as the pane's x-axis reads it: `deriv` and `integ` work along
+    /// x, which is time on a transient and a frequency or a swept value
+    /// otherwise.
+    fn along_x(mut self, over_time: bool) -> Self {
+        self.hint = match (self.insert.as_ref(), over_time) {
+            ("deriv()", true) => "d/dt",
+            ("deriv()", false) => "d/dx",
+            ("integ()", true) => "∫ dt",
+            ("integ()", false) => "∫ dx",
+            _ => self.hint,
+        };
+        self
+    }
 }
 
-const MATH_FUNCTIONS: &[FunctionEntry] = &[
-    FunctionEntry {
-        label: Cow::Borrowed("complex(re, im)"),
-        hint: "rectangular complex value",
-        insert: Cow::Borrowed("complex(, )"),
-        caret_back: 3,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("abs(x)"),
-        hint: "absolute value",
-        insert: Cow::Borrowed("abs()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("sqrt(x)"),
-        hint: "square root",
-        insert: Cow::Borrowed("sqrt()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("log(x)"),
-        hint: "natural log",
-        insert: Cow::Borrowed("log()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("log10(x)"),
-        hint: "log base 10",
-        insert: Cow::Borrowed("log10()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("exp(x)"),
-        // Plex has no modifier small x: "eˣ" drew a missing-glyph box.
-        hint: "exponential",
-        insert: Cow::Borrowed("exp()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("x ^ n"),
-        hint: "power",
-        insert: Cow::Borrowed(" ^ "),
-        caret_back: 0,
-    },
-];
-
-const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
-    FunctionEntry {
-        label: Cow::Borrowed("mag(x)"),
-        hint: "complex magnitude",
-        insert: Cow::Borrowed("mag()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("real(x)"),
-        hint: "real component",
-        insert: Cow::Borrowed("real()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("imag(x)"),
-        hint: "imaginary component",
-        insert: Cow::Borrowed("imag()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("phase(x)"),
-        hint: "phase in degrees; undefined at zero",
-        insert: Cow::Borrowed("phase()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("phase_rad(x)"),
-        hint: "phase in radians",
-        insert: Cow::Borrowed("phase_rad()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("conj(x)"),
-        hint: "complex conjugate",
-        insert: Cow::Borrowed("conj()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("dB(x)"),
-        hint: "20·log₁₀|x|, an amplitude",
-        insert: Cow::Borrowed("dB()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("dB10(x)"),
-        hint: "10·log₁₀|x|, a power",
-        insert: Cow::Borrowed("dB10()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("deriv(x)"),
-        hint: "d/dt",
-        insert: Cow::Borrowed("deriv()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("integ(x)"),
-        hint: "∫ dt",
-        insert: Cow::Borrowed("integ()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("clip(x, from, to)"),
-        hint: "the part between two x points",
-        insert: Cow::Borrowed("clip(, , )"),
-        caret_back: 5,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("limit(x, lo, hi)"),
-        hint: "each value held between two bounds",
-        insert: Cow::Borrowed("limit(, , )"),
-        caret_back: 5,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("unwrap(x)"),
-        hint: "continuous phase in degrees",
-        insert: Cow::Borrowed("unwrap()"),
-        caret_back: 1,
-    },
-    FunctionEntry {
-        label: Cow::Borrowed("xval(x)"),
-        hint: "domain as a trace",
-        insert: Cow::Borrowed("xval()"),
-        caret_back: 1,
-    },
-];
+/// The operators, which name no function, listed after the math functions.
+const OPERATORS: &[FunctionEntry] = &[FunctionEntry {
+    label: Cow::Borrowed("x ^ n"),
+    hint: "power",
+    insert: Cow::Borrowed(" ^ "),
+    caret_back: 0,
+}];
 
 const FUNCTION_CONVENTIONS: &str = "phase() and unwrap() use degrees; phase_rad() uses radians";
 
+/// The rows of one group of the function table, in its order.
+fn functions(group: FunctionGroup) -> impl Iterator<Item = FunctionEntry> {
+    FUNCTIONS
+        .iter()
+        .filter(move |spec| spec.group == group)
+        .map(FunctionEntry::function)
+}
+
 impl FunctionCategory {
-    /// The rows under this category. The measurements are the shared
-    /// catalogue's, so this reference and Add measurement list the same
-    /// functions with the same arguments.
+    /// The rows under this category: the evaluator's own tables, so the
+    /// reference lists every function there is and nothing else. The
+    /// measurements are the catalogue Add measurement lists too, with the
+    /// same arguments.
     fn entries(self) -> Vec<FunctionEntry> {
         match self {
-            FunctionCategory::Math => MATH_FUNCTIONS.to_vec(),
-            FunctionCategory::Signal => SIGNAL_FUNCTIONS.to_vec(),
+            FunctionCategory::Math => functions(FunctionGroup::Math)
+                .chain(OPERATORS.iter().cloned())
+                .collect(),
+            FunctionCategory::Signal => functions(FunctionGroup::Signal).collect(),
             FunctionCategory::Measure => MEASUREMENTS
                 .iter()
                 .map(FunctionEntry::measurement)
@@ -369,7 +283,14 @@ impl CalculatorPanel {
         let mut insert: Option<(String, usize)> = None;
         two_pane(ui, RAIL_WIDTH, PANE_HEIGHT, |ui, side| match side {
             PaneSide::Rail => self.signals_pane(ui, simulation, &mut insert),
-            PaneSide::Detail => self.functions_pane(ui, &mut insert),
+            PaneSide::Detail => {
+                // No result yet reads as a transient, the calculator's usual
+                // subject.
+                let over_time = simulation
+                    .active_analysis()
+                    .is_none_or(|analysis| analysis.waveform_coordinate_unit() == Some("s"));
+                self.functions_pane(ui, over_time, &mut insert)
+            }
         });
 
         if let Some((text, caret_back)) = insert {
@@ -468,7 +389,12 @@ impl CalculatorPanel {
         pane_footer(ui, "click inserts at the caret");
     }
 
-    fn functions_pane(&mut self, ui: &mut Ui, insert: &mut Option<(String, usize)>) {
+    fn functions_pane(
+        &mut self,
+        ui: &mut Ui,
+        over_time: bool,
+        insert: &mut Option<(String, usize)>,
+    ) {
         // The categories alone: the caption that shared this strip said
         // what the rail's footer says, and was drawn under the chips.
         pane_header(ui, |ui| {
@@ -489,6 +415,7 @@ impl CalculatorPanel {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for entry in self.category.entries() {
+                    let entry = entry.along_x(over_time);
                     if function_row(ui, &entry).clicked() {
                         *insert = Some((entry.insert.to_string(), entry.caret_back));
                     }
@@ -733,6 +660,29 @@ mod tests {
             checked >= 20,
             "only {checked} function rows were checked; the reference lists more than that"
         );
+    }
+
+    /// The reference lists the evaluator's own tables: every function and
+    /// every measurement once, and nothing the evaluator does not run.
+    #[test]
+    fn the_function_list_is_the_evaluators_table() {
+        let mut listed: Vec<String> = FunctionCategory::ALL
+            .into_iter()
+            .flat_map(FunctionCategory::entries)
+            .filter_map(|entry| {
+                let open = entry.insert.find('(')?;
+                Some(entry.insert[..open].to_owned())
+            })
+            .collect();
+        let mut table: Vec<String> = FUNCTIONS
+            .iter()
+            .map(|spec| spec.name)
+            .chain(MEASUREMENTS.iter().map(|spec| spec.name))
+            .map(str::to_owned)
+            .collect();
+        listed.sort();
+        table.sort();
+        assert_eq!(listed, table);
     }
 
     /// The insert templates must land the caret where the row promises: in

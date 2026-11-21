@@ -37,6 +37,7 @@ use super::value::RealValue as CalcValue;
 use std::f64::consts::PI;
 
 mod conversion;
+mod trigonometry;
 pub use conversion::{EventWord, analog_staircase, is_logic_expression, measured_steps};
 
 /// Registry of built-in functions
@@ -54,6 +55,7 @@ impl FunctionRegistry {
             "db" | "db20" => db(args, Decibels::Amplitude),
             "db10" => db(args, Decibels::Power),
             "limit" => limit(args),
+            "if" => choose(args),
 
             // Signal processing (series in, series out)
             "deriv" | "derivative" => deriv(args),
@@ -74,6 +76,8 @@ impl FunctionRegistry {
             // Analog-to-digital and digital-to-analog conversion
             "digital" => conversion::digital(args),
             "analog" => conversion::analog(args),
+
+            name if trigonometry::NAMES.contains(&name) => trigonometry::apply(name, args),
 
             _ => match super::time_measures::lookup(&name.to_lowercase()) {
                 // Edge, pulse and step measurements take option words, so
@@ -202,6 +206,75 @@ fn limit(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
             y.iter().map(|v| v.clamp(low, high)).collect(),
         )),
     }
+}
+
+/// `if(cond, a, b)`: `a` where `cond` is true and `b` where it is not, a
+/// condition being true above 0.5 as LTspice's waveform arithmetic reads it,
+/// so a comparison's 1 and 0 choose as they read. A series condition
+/// chooses sample by sample, and a hole in it is
+/// a hole in the result; series on different x grids are read on the span
+/// and samples they share, as arithmetic reads them.
+fn choose(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
+    check_arg_count("if", &args, 3)?;
+    let mut args = args.into_iter();
+    let (condition, chosen, otherwise) = (
+        args.next().unwrap(),
+        args.next().unwrap(),
+        args.next().unwrap(),
+    );
+    let (mut x, mut holds) = match condition {
+        CalcValue::Scalar(value) if value.is_nan() => {
+            return Err(EvaluationError::MathError(
+                "if has no condition to read: it is not a number".to_owned(),
+            ));
+        }
+        CalcValue::Scalar(value) => return Ok(if value > 0.5 { chosen } else { otherwise }),
+        CalcValue::Waveform(x, y) => (x, y),
+    };
+    let mismatch = |error: crate::interpolation::InterpolationError| {
+        EvaluationError::WaveformMismatch(format!("if: {error}"))
+    };
+    for branch in [&chosen, &otherwise] {
+        if let CalcValue::Waveform(bx, by) = branch
+            && *bx != x
+        {
+            let (shared, condition, _) = crate::interpolation::align_waveforms(
+                &x,
+                &holds,
+                bx,
+                by,
+                crate::interpolation::InterpolationMethod::Linear,
+            )
+            .map_err(mismatch)?;
+            (x, holds) = (shared, condition);
+        }
+    }
+    let on_grid = |branch: CalcValue| -> Result<Vec<f64>, EvaluationError> {
+        match branch {
+            CalcValue::Scalar(value) => Ok(vec![value; x.len()]),
+            CalcValue::Waveform(bx, by) if bx == x => Ok(by),
+            CalcValue::Waveform(bx, by) => {
+                crate::interpolation::WaveformInterpolator::new(&bx, &by)
+                    .and_then(|reader| reader.resample(&x))
+                    .map_err(mismatch)
+            }
+        }
+    };
+    let (chosen, otherwise) = (on_grid(chosen)?, on_grid(otherwise)?);
+    let y = holds
+        .iter()
+        .zip(chosen.iter().zip(&otherwise))
+        .map(|(&holds, (&chosen, &otherwise))| {
+            if holds.is_nan() {
+                f64::NAN
+            } else if holds > 0.5 {
+                chosen
+            } else {
+                otherwise
+            }
+        })
+        .collect();
+    Ok(CalcValue::create_waveform(x, y))
 }
 
 // --- Aggregates over the x-window (Waveform -> Scalar) ---

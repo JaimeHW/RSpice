@@ -429,6 +429,15 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
     },
 ];
 
+mod functions;
+pub use functions::{FUNCTIONS, FunctionGroup, FunctionSpec, find_function};
+
+/// Whether the evaluator runs a function of this name, under any of its
+/// spellings: a measurement or one of [`FUNCTIONS`].
+pub fn is_known(name: &str) -> bool {
+    find(name).is_some() || find_function(name).is_some()
+}
+
 /// The catalogue entry the evaluator would run for `name`, by its own
 /// spelling or an alias, ignoring case.
 pub fn find(name: &str) -> Option<&'static MeasureSpec> {

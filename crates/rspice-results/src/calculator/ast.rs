@@ -51,6 +51,23 @@ pub enum BinaryOp {
     Mul, // *
     Div, // /
     Pow, // ^ or **
+    /// The comparisons, which read 1 where they hold and 0 where they do not.
+    Lt, // <
+    Gt,  // >
+    Le,  // <=
+    Ge,  // >=
+    Eq,  // ==
+    Ne,  // !=
+}
+
+impl BinaryOp {
+    /// Whether the operator compares its operands rather than combining them.
+    pub fn is_comparison(self) -> bool {
+        matches!(
+            self,
+            Self::Lt | Self::Gt | Self::Le | Self::Ge | Self::Eq | Self::Ne
+        )
+    }
 }
 
 /// Unary operators

@@ -247,6 +247,28 @@ fn infer(expr: &CalculatorExpr, ctx: &impl UnitContext) -> Result<Inferred, Stri
                     }
                     Inferred::Unit(left)
                 }
+                // A comparison is 1 or 0, of operands that could be added.
+                (
+                    BinaryOp::Lt
+                    | BinaryOp::Gt
+                    | BinaryOp::Le
+                    | BinaryOp::Ge
+                    | BinaryOp::Eq
+                    | BinaryOp::Ne,
+                    left,
+                    right,
+                ) => {
+                    if let (Inferred::Unit(left), Inferred::Unit(right)) = (&left, &right)
+                        && left != right
+                    {
+                        return Err(format!(
+                            "{} and {} cannot be compared",
+                            unit_phrase(left),
+                            unit_phrase(right)
+                        ));
+                    }
+                    Inferred::Unit(Unit::none())
+                }
                 (BinaryOp::Mul, left, right) => {
                     Inferred::Unit(left.into_unit().times(&right.into_unit()))
                 }
@@ -336,6 +358,29 @@ fn function_unit(
             }
         }
         "db10" | "gainmargin" => named("dB"),
+        // The value chosen, which must read in one unit whichever is chosen.
+        "if" => {
+            let (chosen, otherwise) = (
+                args.get(1).map(|arg| infer(arg, ctx)).transpose()?,
+                args.get(2).map(|arg| infer(arg, ctx)).transpose()?,
+            );
+            match (chosen, otherwise) {
+                (Some(Inferred::Literal(_)), Some(other))
+                | (Some(other), Some(Inferred::Literal(_))) => Ok(other.into_unit()),
+                (Some(Inferred::Unit(chosen)), Some(Inferred::Unit(otherwise))) => {
+                    if chosen == otherwise {
+                        Ok(chosen)
+                    } else {
+                        Err(format!(
+                            "if() chooses between {} and {}, which are not one unit",
+                            unit_phrase(&chosen),
+                            unit_phrase(&otherwise)
+                        ))
+                    }
+                }
+                _ => Err("if() is missing an argument".to_owned()),
+            }
+        }
         "phase" | "phase_deg" | "phasemargin" => named("°"),
         "phase_rad" => named("rad"),
         // A bus word's integer value and the levels 0 and 1 of a logic
@@ -346,7 +391,29 @@ fn function_unit(
             unit.powf(0.5)
                 .ok_or_else(|| format!("the square root of {} is not a unit", unit.label()))
         }
-        "exp" | "log" | "ln" | "log10" => {
+        // Radians are a plain number; degrees are the one angle that would
+        // read silently wrong.
+        "sin" | "cos" | "tan" => {
+            let unit = argument(0)?;
+            if unit.is_none() || unit == named("rad")? {
+                Ok(Unit::none())
+            } else if unit == named("°")? {
+                Err(format!(
+                    "{name}() reads radians; phase() is in degrees, phase_rad() in radians"
+                ))
+            } else {
+                Err(format!("{name}() of {} has no unit", unit.label()))
+            }
+        }
+        "asin" | "acos" | "atan" => {
+            let unit = argument(0)?;
+            if unit.is_none() {
+                named("rad")
+            } else {
+                Err(format!("{name}() of {} has no unit", unit.label()))
+            }
+        }
+        "exp" | "log" | "ln" | "log10" | "sinh" | "cosh" | "tanh" | "asinh" | "acosh" | "atanh" => {
             let unit = argument(0)?;
             if unit.is_none() {
                 Ok(unit)
@@ -377,6 +444,9 @@ fn apply_binary_op(
         (CalcValue::Real(left), CalcValue::Real(right)) => {
             apply_real_binary_op(op, left, right).map(CalcValue::Real)
         }
+        _ if op.is_comparison() => Err(EvaluationError::TypeMismatch(
+            "a comparison reads real values; apply real(), mag() or phase() first".to_owned(),
+        )),
         (left, right) => super::complex_ops::binary(op, left.into_complex(), right.into_complex())
             .map(CalcValue::Complex),
     }
@@ -453,6 +523,12 @@ fn apply_op_scalar(op: BinaryOp, l: f64, r: f64) -> f64 {
         BinaryOp::Mul => l * r,
         BinaryOp::Div => l / r, // Undefined samples remain gaps; checked scalars report an error.
         BinaryOp::Pow => l.powf(r),
+        BinaryOp::Lt => f64::from(l < r),
+        BinaryOp::Gt => f64::from(l > r),
+        BinaryOp::Le => f64::from(l <= r),
+        BinaryOp::Ge => f64::from(l >= r),
+        BinaryOp::Eq => f64::from(l == r),
+        BinaryOp::Ne => f64::from(l != r),
     }
 }
 
@@ -563,6 +639,12 @@ mod tests {
             ("dB20(V(out)/V(in))", "Hz", "dB"),
             ("clip(V(out), 0.001, 0.002)", "s", "V"),
             ("limit(I(vdd), 0, 0.001)", "s", "A"),
+            ("atan(V(out)/V(in))", "s", "rad"),
+            ("sin(phase_rad(V(out)))", "Hz", ""),
+            ("tanh(V(out)/V(in))", "s", ""),
+            ("V(out) > 2.5", "s", ""),
+            ("if(V(out) > 2.5, V(out), 0)", "s", "V"),
+            ("if(TIME < 0.001, 0, I(vdd))", "s", "A"),
         ];
         for &(text, x, expected) in table {
             assert_eq!(unit_of(text, x).as_deref(), Ok(expected), "{text} over {x}");
@@ -580,6 +662,17 @@ mod tests {
             ("V(out)^V(in)", "V raised to a signal has no unit"),
             ("V(out)^0.3", "V to the power 0.3 is not a unit"),
             ("mystery(V(out))", "the unit of mystery() is not known"),
+            (
+                "cos(phase(V(out)))",
+                "cos() reads radians; phase() is in degrees, phase_rad() in radians",
+            ),
+            ("cosh(V(out))", "cosh() of V has no unit"),
+            ("V(out) < I(r1)", "V and A cannot be compared"),
+            (
+                "if(TIME < 0.001, V(out), I(vdd))",
+                "if() chooses between V and A, which are not one unit",
+            ),
+            ("asin(I(r1))", "asin() of A has no unit"),
             ("V(out)/node", "node states no unit"),
             (
                 "db(V(out)*I(vdd))",
@@ -700,5 +793,111 @@ mod tests {
             );
             assert!(difference((&x, &[1.0, 2.0, 3.0]), (&[0.0, 1.0], &[1.0, 2.0])).is_err());
         }
+    }
+
+    /// Traces by name, for evaluating whole expressions.
+    struct Traces(Vec<(&'static str, Vec<f64>, Vec<f64>)>);
+
+    impl EvaluationContext for Traces {
+        fn get_waveform(
+            &self,
+            signal: &str,
+            _: Option<&str>,
+        ) -> Result<super::CalcValue, EvaluationError> {
+            self.0
+                .iter()
+                .find(|(name, ..)| *name == signal)
+                .map(|(_, x, y)| super::CalcValue::create_waveform(x.clone(), y.clone()))
+                .ok_or_else(|| EvaluationError::IdentifierNotFound(signal.to_owned()))
+        }
+    }
+
+    fn evaluated(traces: &Traces, text: &str) -> Result<CalcValue, String> {
+        let expr = super::super::parser::try_parse(text, |n| n.parse().map_err(|_| n.to_owned()))
+            .map_err(|error| error.to_string())?;
+        match evaluate(&expr, traces).map_err(|error| error.to_string())? {
+            super::CalcValue::Real(value) => Ok(value),
+            other => Err(format!("{text} is complex: {other:?}")),
+        }
+    }
+
+    /// A comparison reads 1 where it holds and 0 where it does not, and
+    /// `if` with a series condition chooses sample by sample: rectifying a
+    /// sine reads |sin| at every sample, a hole in the condition is a hole in
+    /// the result, and a branch on another grid is read on the shared one.
+    #[test]
+    fn if_with_a_series_condition_chooses_sample_by_sample() {
+        let x: Vec<f64> = (0..401)
+            .map(|i| 1e-3 * (f64::from(i) / 400.0).powf(1.3))
+            .collect();
+        let sine: Vec<f64> = x
+            .iter()
+            .map(|t| (2.0 * std::f64::consts::PI * 3e3 * t).sin())
+            .collect();
+        let mut holed = sine.clone();
+        holed[7] = f64::NAN;
+        // Three of the fine grid's samples, so the grid they share is the fine one.
+        let coarse = vec![x[0], x[200], x[400]];
+        let traces = Traces(vec![
+            ("V(a)", x.clone(), sine.clone()),
+            ("V(h)", x.clone(), holed),
+            // A ramp, which linear interpolation reads exactly anywhere.
+            (
+                "V(r)",
+                coarse.clone(),
+                coarse.iter().map(|t| 2e3 * t).collect(),
+            ),
+        ]);
+        let series = |text: &str| match evaluated(&traces, text) {
+            Ok(CalcValue::Waveform(x, y)) => (x, y),
+            other => panic!("{text}: {other:?}"),
+        };
+
+        let (gx, at_or_above) = series("V(a) >= 0");
+        assert_eq!(gx, x);
+        for (reading, value) in at_or_above.iter().zip(&sine) {
+            assert_eq!(*reading, f64::from(*value >= 0.0));
+        }
+        let (rx, rectified) = series("if(V(a) >= 0, V(a), -V(a))");
+        assert_eq!(rx, x);
+        for (reading, value) in rectified.iter().zip(&sine) {
+            assert_eq!(*reading, value.abs());
+        }
+        let (_, chosen) = series("if(V(h) > 0, 1, 2)");
+        assert!(chosen[7].is_nan(), "a hole in the condition is a hole");
+        assert_eq!(chosen[8], if sine[8] > 0.0 { 1.0 } else { 2.0 });
+        let (shared, ramp_where_positive) = series("if(V(a) > 0, V(r), 0 - 1)");
+        assert_eq!(
+            shared.len(),
+            x.len(),
+            "the coarse grid's samples are three of the fine one's"
+        );
+        for (t, reading) in shared.iter().zip(&ramp_where_positive) {
+            let holds = (2.0 * std::f64::consts::PI * 3e3 * t).sin() > 0.0;
+            let expected = if holds { 2e3 * t } else { -1.0 };
+            assert!(
+                (reading - expected).abs() < 1e-12,
+                "at {t}: {reading} vs {expected}"
+            );
+        }
+
+        // A scalar condition chooses the whole of one branch, and a
+        // condition is true above 0.5.
+        assert_eq!(
+            evaluated(&traces, "if(0.3, 3, 4)"),
+            Ok(CalcValue::Scalar(4.0))
+        );
+        assert_eq!(
+            evaluated(&traces, "if(0.7, 3, 4)"),
+            Ok(CalcValue::Scalar(3.0))
+        );
+        assert_eq!(
+            evaluated(&traces, "if(1 > 2, 3, 4)"),
+            Ok(CalcValue::Scalar(4.0))
+        );
+        assert_eq!(evaluated(&traces, "2 != 2"), Ok(CalcValue::Scalar(0.0)));
+        assert_eq!(evaluated(&traces, "1 + 1 == 2"), Ok(CalcValue::Scalar(1.0)));
+        let error = evaluated(&traces, "V(a) = 1").unwrap_err();
+        assert!(error.contains("compare with == or !="), "{error}");
     }
 }

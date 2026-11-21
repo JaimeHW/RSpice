@@ -29,8 +29,12 @@ impl From<RealValue> for Argument {
 /// its messages, and the arguments.
 pub(super) type Measure = fn(&str, &[Argument]) -> Result<f64, EvaluationError>;
 
-/// Run the function `name` on `args`.
+/// Run the function `name` on `args`. Only a catalogued name runs, so the
+/// reference that lists the catalogue lists every function there is.
 pub(super) fn dispatch(name: &str, args: Vec<Argument>) -> Result<CalcValue, EvaluationError> {
+    if !super::catalogue::is_known(name) {
+        return Err(EvaluationError::UnknownFunction(name.to_owned()));
+    }
     let lower = name.to_ascii_lowercase();
     if let Some(measure) =
         frequency_measures::lookup(&lower).or_else(|| time_measures::lookup(&lower))

@@ -35,6 +35,97 @@ fn every_entry_is_a_function_the_evaluator_runs_with_the_catalogued_arity() {
     }
 }
 
+/// The function table offers only what the evaluator runs, with the
+/// argument count it accepts, by every spelling.
+#[test]
+fn every_function_is_one_the_evaluator_runs_with_the_tabled_arity() {
+    let waveforms: [crate::waveform::RetainedWaveform; 0] = [];
+    for spec in FUNCTIONS {
+        for name in std::iter::once(&spec.name).chain(spec.aliases) {
+            let too_many = vec!["1"; spec.arguments.len() + 1].join(", ");
+            let parsed = try_parse(&format!("{name}({too_many})"), plain_number).unwrap();
+            match evaluate(&parsed, &WaveformsContext::new(&waveforms)) {
+                Err(EvaluationError::ArgCountMismatch {
+                    expected, actual, ..
+                }) => assert_eq!(
+                    (expected, actual),
+                    (spec.arguments.len(), spec.arguments.len() + 1),
+                    "{name} takes a different number of arguments than the table says"
+                ),
+                other => panic!("{name} with too many arguments returned {other:?}"),
+            }
+        }
+    }
+}
+
+/// The two tables are every function there is: a name in neither is
+/// unknown, and no spelling names two functions.
+#[test]
+fn a_name_in_no_table_is_unknown_and_no_spelling_names_two_functions() {
+    let waveforms: [crate::waveform::RetainedWaveform; 0] = [];
+    let parsed = try_parse("mystery(1)", plain_number).unwrap();
+    assert!(matches!(
+        evaluate(&parsed, &WaveformsContext::new(&waveforms)),
+        Err(EvaluationError::UnknownFunction(name)) if name == "mystery"
+    ));
+    let mut seen = std::collections::HashSet::new();
+    let spellings = FUNCTIONS
+        .iter()
+        .flat_map(|spec| std::iter::once(&spec.name).chain(spec.aliases))
+        .chain(
+            MEASUREMENTS
+                .iter()
+                .flat_map(|spec| std::iter::once(&spec.name).chain(spec.aliases)),
+        );
+    for name in spellings {
+        assert!(
+            seen.insert(name.to_ascii_lowercase()),
+            "{name} names two functions"
+        );
+        assert!(is_known(name), "{name} is tabled but not known");
+    }
+}
+
+/// Unit algebra knows the unit of every function there is: a call states
+/// its unit, or why it has none, but never that its unit is unknown.
+#[test]
+fn every_tabled_function_states_its_unit() {
+    use crate::calculator::evaluator::{UnitContext, infer_unit};
+    struct Volts;
+    impl UnitContext for Volts {
+        fn signal_unit(&self, _: &str, _: Option<&str>) -> Option<String> {
+            Some("V".to_owned())
+        }
+        fn x_unit(&self) -> String {
+            "s".to_owned()
+        }
+    }
+    let functions = FUNCTIONS.iter().map(|spec| {
+        let mut arguments = vec!["V(a)"; 1.min(spec.required)];
+        arguments.resize(spec.required, "1");
+        (spec.name, arguments)
+    });
+    let measurements = MEASUREMENTS.iter().map(|spec| {
+        let arguments = spec
+            .arguments
+            .iter()
+            .filter(|argument| argument.default == ArgumentDefault::Required)
+            .map(|argument| match argument.kind {
+                ArgumentKind::Signal => "V(a)",
+                _ => "1",
+            })
+            .collect::<Vec<_>>();
+        (spec.name, arguments)
+    });
+    for (name, arguments) in functions.chain(measurements) {
+        let call = format!("{name}({})", arguments.join(", "));
+        let parsed = try_parse(&call, plain_number).unwrap();
+        if let Err(reason) = infer_unit(&parsed, &Volts) {
+            assert!(!reason.contains("is not known"), "{call}: {reason}");
+        }
+    }
+}
+
 /// A level is read in the unit of the signal it is a level of, so it must
 /// name a signal argument, and the first signal's level comes before the
 /// second's.

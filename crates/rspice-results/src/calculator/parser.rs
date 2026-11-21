@@ -58,6 +58,8 @@ pub enum Token {
     Star,
     Slash,
     Caret, // ^ or **
+    /// A comparison: `<`, `>`, `<=`, `>=`, `==` or `!=`.
+    Compare(BinaryOp),
     // Delimiters
     LParen,
     RParen,
@@ -164,6 +166,30 @@ impl<'a> Lexer<'a> {
         Err(ParseError::new(start, "unterminated string literal"))
     }
 
+    /// A comparison operator. A lone `=` or `!` is refused with the spelling
+    /// meant, since neither assigns or negates here.
+    fn read_comparison(&mut self, position: usize, first: char) -> Result<Token, ParseError> {
+        self.chars.next();
+        let equals = self.chars.peek().is_some_and(|(_, c)| *c == '=');
+        if equals {
+            self.chars.next();
+        }
+        Ok(Token::Compare(match (first, equals) {
+            ('<', false) => BinaryOp::Lt,
+            ('<', true) => BinaryOp::Le,
+            ('>', false) => BinaryOp::Gt,
+            ('>', true) => BinaryOp::Ge,
+            ('=', true) => BinaryOp::Eq,
+            ('!', true) => BinaryOp::Ne,
+            _ => {
+                return Err(ParseError::new(
+                    position,
+                    format!("unexpected '{first}'; compare with == or !="),
+                ));
+            }
+        }))
+    }
+
     /// V/I arguments name signals. Read their spelling before the arithmetic
     /// lexer can interpret `-`, `+`, a SPICE suffix, or an overflowing exponent.
     /// Returns where the argument's spelling starts, quotes included.
@@ -229,6 +255,7 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     Token::Caret
                 }
+                '<' | '>' | '=' | '!' => self.read_comparison(position, c)?,
                 '(' => {
                     self.chars.next();
                     Token::LParen
@@ -342,7 +369,7 @@ impl<'a> Parser<'a> {
         if matches!(self.current.token, Token::Eof) {
             return Err(ParseError::new(0, "empty expression"));
         }
-        let expr = self.parse_additive()?;
+        let expr = self.parse_comparison()?;
         if !matches!(self.current.token, Token::Eof) {
             return Err(ParseError::new(
                 self.current.position,
@@ -356,11 +383,22 @@ impl<'a> Parser<'a> {
     }
 
     // Precedence: (low to high)
-    // 1. +, -
-    // 2. *, /
-    // 3. ^
-    // 4. unary -, unary +
-    // 5. primary (parens, numbers, idents, calls)
+    // 1. <, >, <=, >=, ==, !=
+    // 2. +, -
+    // 3. *, /
+    // 4. ^
+    // 5. unary -, unary +
+    // 6. primary (parens, numbers, idents, calls)
+
+    fn parse_comparison(&mut self) -> Result<CalculatorExpr, ParseError> {
+        let mut left = self.parse_additive()?;
+        while let Token::Compare(op) = self.current.token {
+            self.advance()?;
+            let right = self.parse_additive()?;
+            left = CalculatorExpr::binary(op, left, right);
+        }
+        Ok(left)
+    }
 
     fn parse_additive(&mut self) -> Result<CalculatorExpr, ParseError> {
         let mut left = self.parse_multiplicative()?;
@@ -437,7 +475,7 @@ impl<'a> Parser<'a> {
             Token::LParen => {
                 let start = self.current.position;
                 self.advance()?;
-                let expr = self.parse_additive()?; // Reset to lowest precedence
+                let expr = self.parse_comparison()?; // Reset to lowest precedence
                 self.expect_rparen(start)?;
                 Ok(expr)
             }
@@ -529,10 +567,10 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
 
             if !matches!(self.current.token, Token::RParen) {
-                args.push(self.parse_additive()?);
+                args.push(self.parse_comparison()?);
                 while matches!(self.current.token, Token::Comma) {
                     self.advance()?;
-                    args.push(self.parse_additive()?);
+                    args.push(self.parse_comparison()?);
                 }
             }
 
@@ -588,6 +626,17 @@ fn describe_token(token: &Token) -> String {
         Token::Star => "'*'".to_string(),
         Token::Slash => "'/'".to_string(),
         Token::Caret => "'^'".to_string(),
+        Token::Compare(op) => format!(
+            "'{}'",
+            match op {
+                BinaryOp::Lt => "<",
+                BinaryOp::Gt => ">",
+                BinaryOp::Le => "<=",
+                BinaryOp::Ge => ">=",
+                BinaryOp::Eq => "==",
+                _ => "!=",
+            }
+        ),
         Token::LParen => "'('".to_string(),
         Token::RParen => "')'".to_string(),
         Token::Comma => "','".to_string(),
