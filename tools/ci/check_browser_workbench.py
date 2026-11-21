@@ -788,6 +788,8 @@ def results_survive_reload(browser):
     reloaded and reopened, the project's run reads them, and nothing says they cannot be read."""
     before = stated_storage(browser, KEPT, "the run's results kept in this browser's storage")
     browser.capture("results-kept")
+    # The document tab that states whether the project is saved shows on the schematic.
+    browser.click("Schematic", "button")
     choose_command(browser, "Save all")
     wait_for(lambda: not unsaved(browser.snapshot()), "the project saved with its run", 60)
     files = canonical_projects(browser)
@@ -823,15 +825,26 @@ def results_survive_reload(browser):
 def exported_dataset(browser):
     """The reopened run's samples, as Export result dataset… writes them to a CSV download."""
     choose_command(browser, "Open results workspace")
-    choose_command(browser, "Export result dataset…")
-    wait_for(lambda: any(c["label"] == "Export…" for c in controls(browser.snapshot())),
-             "the export result dataset form")
-    every = [c for c in controls(browser.snapshot()) if c["label"].startswith("All (")]
-    if len(every) != 1:
-        raise AssertionError(f"Expected one choice of every signal to export; got {every}")
-    browser.click(every[0]["label"], every[0]["role"])
+    # The export writes what the waveform sheet shows, so every signal of the run is plotted.
+    plots = wait_for(lambda: [c for c in controls(browser.snapshot())
+                              if c["role"] == "checkBox" and c["label"].startswith("Plot ")],
+                     "the reopened run's signals")
+    for plot in plots:
+        if plot["toggled"] != "true":
+            browser.click(plot["label"], "checkBox")
+    browser.capture("results-plotted")
+    browser.click("Export result dataset…", "button")
+    rendered = wait_for(lambda: [c for c in controls(browser.snapshot())
+                                 if c["role"] == "dialog" and c["label"] == "Export result dataset"]
+                        and controls(browser.snapshot()), "the export result dataset form")
+    every = [c for c in rendered if c["label"].startswith("All (")]
+    if len(every) > 1:
+        raise AssertionError(f"Expected at most one choice of every signal to export; got {every}")
+    if every:
+        browser.click(every[0]["label"], every[0]["role"])
     browser.capture("results-export-form")
-    browser.click("Export…", "button")
+    # Enter is the form's Export…; the Results toolbar has an Export… of its own.
+    browser.keys("")
 
     def download():
         files = list(browser.downloads.glob("*.csv"))
