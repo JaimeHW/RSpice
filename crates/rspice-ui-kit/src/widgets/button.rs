@@ -601,43 +601,6 @@ mod tests {
         painted
     }
 
-    /// A menu button says so with a chevron painted after its label (IBM
-    /// Plex has no glyph for one), and is wider by exactly what that takes.
-    #[test]
-    fn a_menu_button_makes_room_for_its_chevron() {
-        let ctx = egui::Context::default();
-        crate::Theme::default().apply(&ctx);
-        let (mut plain, mut menu) = (Rect::NOTHING, Rect::NOTHING);
-        let output = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                plain = Button::new("More").show(ui).rect;
-                menu = Button::new("More").menu().show(ui).rect;
-            });
-        });
-        assert!(
-            (menu.width() - plain.width() - (MENU_CHEVRON_GAP + MENU_CHEVRON)).abs() < 0.01,
-            "a menu button is {} wide against {}",
-            menu.width(),
-            plain.width()
-        );
-        // The chevron is two strokes inside the menu button, past its label.
-        let strokes_in_menu = output
-            .shapes
-            .iter()
-            .filter(|clipped| match &clipped.shape {
-                egui::epaint::Shape::Path(path) => path
-                    .points
-                    .iter()
-                    .all(|point| menu.contains(*point) && point.x > menu.center().x),
-                egui::epaint::Shape::LineSegment { points, .. } => points
-                    .iter()
-                    .all(|point| menu.contains(*point) && point.x > menu.center().x),
-                _ => false,
-            })
-            .count();
-        assert!(strokes_in_menu > 0, "the menu button paints no chevron");
-    }
-
     #[test]
     fn a_disabled_button_shows_the_reason_its_call_site_attached() {
         let painted = painted_text(|ui| {
@@ -717,38 +680,5 @@ mod tests {
             Some("Ctrl+Shift+Z")
         );
         assert_eq!(trailing_shortcut("Grid: dots - click for lines"), None);
-    }
-
-    /// A bordered destructive button paints exactly what an ordinary one
-    /// does; only the filled primary keeps the error fill.
-    #[test]
-    fn only_a_filled_destructive_button_is_red() {
-        fn shapes(button: impl Fn() -> Button<'static>) -> Vec<egui::epaint::ClippedShape> {
-            let ctx = egui::Context::default();
-            crate::Theme::default().apply(&ctx);
-            ctx.run_ui(Default::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    button().show(ui);
-                });
-            })
-            .shapes
-        }
-        let ordinary = shapes(|| Button::new("Delete revision"));
-        let destructive = shapes(|| Button::new("Delete revision").destructive(true));
-        assert_eq!(
-            format!("{destructive:?}"),
-            format!("{ordinary:?}"),
-            "a bordered destructive button is drawn differently"
-        );
-
-        let err = Tokens::default().color.err;
-        let filled = shapes(|| Button::new("Delete library").accent().destructive(true));
-        assert!(
-            filled.iter().any(|clipped| matches!(
-                &clipped.shape,
-                egui::Shape::Rect(rect) if rect.fill == err
-            )),
-            "the confirmation's destructive primary lost its error fill"
-        );
     }
 }

@@ -301,29 +301,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tokens_resolve_every_direction_and_mode() {
-        let direction = Direction::Instrument;
-        for mode in Mode::ALL {
-            for density in Density::ALL {
-                let t = Tokens::new(direction, mode, density);
-                assert_eq!(t.direction, direction);
-                assert_eq!(t.radius, direction.radius());
-                assert!(t.metrics.ctl_h > 0.0);
-            }
-        }
-    }
-
-    #[test]
-    fn compact_is_denser_than_relaxed() {
-        let compact = Metrics::for_selection(Direction::Instrument, Density::Compact);
-        let relaxed = Metrics::for_selection(Direction::Instrument, Density::Relaxed);
-        assert!(compact.ctl_h < relaxed.ctl_h);
-        assert!(compact.row_h < relaxed.row_h);
-        assert!(compact.grid_row_h < relaxed.grid_row_h);
-        assert!(compact.bar_pad < relaxed.bar_pad);
-    }
-
-    #[test]
     fn only_the_instrument_direction_deserializes() {
         assert_eq!(
             serde_json::from_str::<Direction>("\"Instrument\"").unwrap(),

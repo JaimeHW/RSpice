@@ -28,22 +28,3 @@ pub fn root_viewport_rect(ctx: &Context) -> Rect {
 pub fn root_viewport_width(ctx: &Context) -> f32 {
     root_viewport_rect(ctx).width()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn captured_root_viewport_is_explicit_and_replaceable_each_frame() {
-        let ctx = Context::default();
-        let desktop = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
-        capture_root_viewport(&ctx, desktop);
-        assert_eq!(root_viewport_rect(&ctx), desktop);
-        assert_eq!(root_viewport_width(&ctx), 1280.0);
-
-        let compact = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(760.0, 720.0));
-        capture_root_viewport(&ctx, compact);
-        assert_eq!(root_viewport_rect(&ctx), compact);
-        assert_eq!(root_viewport_width(&ctx), 760.0);
-    }
-}

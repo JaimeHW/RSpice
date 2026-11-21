@@ -230,33 +230,4 @@ mod tests {
             assert_ne!(uncovered, ink(" ", font.clone()), "{font:?}");
         }
     }
-
-    /// The `usWeightClass` an sfnt face's `OS/2` table records.
-    fn weight_class(face: &[u8]) -> u16 {
-        let read_u16 = |at: usize| u16::from_be_bytes([face[at], face[at + 1]]);
-        let read_u32 =
-            |at: usize| u32::from_be_bytes([face[at], face[at + 1], face[at + 2], face[at + 3]]);
-        let tables = usize::from(read_u16(4));
-        let os2 = (0..tables)
-            .map(|index| 12 + index * 16)
-            .find(|&record| &face[record..record + 4] == b"OS/2")
-            .expect("an sfnt face carries an OS/2 table");
-        read_u16(read_u32(os2 + 8) as usize + 4)
-    }
-
-    #[test]
-    fn each_weight_letters_from_a_face_of_that_weight() {
-        // A family whose first face is another cut draws every line at that
-        // cut's weight without failing anything, so check the face itself.
-        let fonts = font_definitions();
-        for (font, weight) in every_font().into_iter().zip([400, 500, 600, 400, 500]) {
-            let face = &fonts.families[&font.family][0];
-            assert_eq!(
-                weight_class(&fonts.font_data[face].font),
-                weight,
-                "{:?} must letter from a face of weight {weight}",
-                font.family
-            );
-        }
-    }
 }

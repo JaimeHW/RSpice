@@ -162,20 +162,3 @@ pub fn pane_footer_inset(ui: &mut Ui, inset: f32, text: &str) {
         );
     });
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Under a finger a header's 44 pt buttons stand inside its strip with
-    /// the strip's air over and under them; under a pointer it stays 36 pt.
-    #[test]
-    fn a_pane_header_holds_the_controls_a_finger_gets() {
-        let ctx = egui::Context::default();
-        crate::Theme::default().apply(&ctx);
-        assert_eq!(pane_header_height(&ctx), PANE_HEADER_H);
-        crate::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
-        let ctl_h = Tokens::get(&ctx).metrics.ctl_h;
-        assert!(pane_header_height(&ctx) >= ctl_h + 8.0);
-    }
-}

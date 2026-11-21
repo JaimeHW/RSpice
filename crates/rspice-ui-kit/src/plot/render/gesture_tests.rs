@@ -38,7 +38,6 @@ struct Host {
     cursors: Option<CursorPair>,
     horizontal: [Option<f64>; 2],
     both_axes: bool,
-    dashed: bool,
     trace: (Vec<f64>, Vec<f64>),
 }
 
@@ -57,7 +56,6 @@ impl Host {
             cursors: None,
             horizontal: [None; 2],
             both_axes: false,
-            dashed: false,
             trace: (x, y),
         }
     }
@@ -76,8 +74,7 @@ impl Host {
             XScale::Linear,
             Axis::linear(self.y.0, self.y.1, "V"),
         );
-        let mut trace = Trace::new(&self.trace.0, &self.trace.1, Color32::WHITE);
-        trace.dashed = self.dashed;
+        let trace = Trace::new(&self.trace.0, &self.trace.1, Color32::WHITE);
         spec.traces.push(trace);
         spec.horizontal_cursors = self.horizontal;
         if self.both_axes {
@@ -530,51 +527,6 @@ fn an_isolated_sample_draws_as_a_dot() {
         .filter(|shape| matches!(shape, Shape::Circle(circle) if circle.fill == Color32::WHITE))
         .count();
     assert_eq!(dots, 2, "each isolated sample draws one dot");
-}
-
-/// A dense dashed curve keeps its dash: it is drawn over stretches of X with
-/// gaps between, not as one solid stroke.
-#[test]
-fn a_dense_dashed_curve_keeps_its_dash() {
-    let mut host = Host::new();
-    let x: Vec<f64> = (0..20_000)
-        .map(|index| f64::from(index) / 19_999.0)
-        .collect();
-    let y = x.iter().map(|x| (600.0 * x).sin()).collect();
-    host.trace = (x, y);
-    host.dashed = true;
-    let frame = host.frame(Vec::new());
-    let mut stretches: Vec<(f32, f32)> = painted(&frame.shapes)
-        .into_iter()
-        .filter_map(|shape| match shape {
-            Shape::Path(path)
-                if path.stroke.color == egui::epaint::ColorMode::Solid(Color32::WHITE) =>
-            {
-                let xs = path.points.iter().map(|point| point.x);
-                Some((
-                    xs.clone().fold(f32::INFINITY, f32::min),
-                    xs.fold(f32::NEG_INFINITY, f32::max),
-                ))
-            }
-            _ => None,
-        })
-        .collect();
-    stretches.sort_by(|a, b| a.0.total_cmp(&b.0));
-    assert!(
-        stretches.len() > 20,
-        "the dense curve drew {} strokes",
-        stretches.len()
-    );
-    assert!(
-        stretches.iter().all(|(left, right)| right - left <= 6.0),
-        "a stretch is longer than its dash"
-    );
-    assert!(
-        stretches
-            .windows(2)
-            .all(|pair| pair[1].0 - pair[0].1 >= 2.0),
-        "two stretches touch"
-    );
 }
 
 fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {

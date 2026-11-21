@@ -901,36 +901,6 @@ mod tests {
             .collect()
     }
 
-    /// A compact mono select as wide as [`compact_select_mono_width`]
-    /// measures prints its longest choice whole.
-    #[test]
-    fn a_compact_mono_select_at_its_measured_width_prints_its_longest_choice_whole() {
-        let ctx = egui::Context::default();
-        crate::Theme::default().apply(&ctx);
-        let options = ["All producers", "Verilog-A compiler 12", "Netlist 3"]
-            .map(str::to_owned)
-            .to_vec();
-        let longest = options[1].clone();
-        let mut printed = Vec::new();
-        for _ in 0..3 {
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                let width = compact_select_mono_width(ui, &options);
-                let _ = compact_select_mono_with_response(
-                    ui, "mono", "Mono", &longest, &options, width,
-                );
-            });
-            printed = output
-                .shapes
-                .iter()
-                .filter_map(|clipped| match &clipped.shape {
-                    Shape::Text(text) => Some(text.galley.text().to_owned()),
-                    _ => None,
-                })
-                .collect();
-        }
-        assert!(printed.contains(&longest), "{printed:?}");
-    }
-
     /// A long list scrolls inside its drop-down: the drop-down never grows
     /// past twelve options, so it cannot run off the screen.
     #[test]

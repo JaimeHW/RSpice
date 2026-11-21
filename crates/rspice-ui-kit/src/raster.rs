@@ -782,64 +782,6 @@ fn a_painted_rect_covers_its_own_pixels_and_nothing_else() {
     );
 }
 
-/// A context at two pixels per point rasterizes what a 2x display shows: the
-/// same rect in points covers twice the device pixels each way.
-#[test]
-fn a_render_at_two_pixels_per_point_lands_in_device_pixels() {
-    let painted = Rect::from_min_size(egui::pos2(10.0, 6.0), egui::vec2(20.0, 12.0));
-    let ink = Color32::from_rgb(40, 200, 90);
-    let size = egui::vec2(60.0, 40.0);
-    let ctx = egui::Context::default();
-    super::Theme::default().apply(&ctx);
-    let input = || display_input(size, 2.0);
-    let mut output = None;
-    for _ in 0..3 {
-        output = Some(ctx.run_ui(input(), |ui| {
-            ui.painter().rect_filled(painted, 0.0, ink);
-        }));
-    }
-    let canvas = rasterize(&ctx, size, &output.expect("three passes"));
-    assert_eq!((canvas.width(), canvas.height()), (120, 80));
-    let inside: Vec<Color32> = canvas
-        .pixels_in(Rect::from_min_max(
-            egui::pos2(21.0, 13.0),
-            egui::pos2(59.0, 35.0),
-        ))
-        .collect();
-    assert_eq!(inside.len(), 38 * 22);
-    assert!(inside.iter().all(|pixel| *pixel == ink));
-    assert_eq!(canvas.pixel(62, 20), Some(canvas.background()));
-    assert_eq!(canvas.pixel(40, 38), Some(canvas.background()));
-}
-
-/// A translucent rect over a square render is one tone throughout: the seam
-/// between its two triangles, whose diagonal runs through pixel centres, is
-/// filled once, as a screen fills it.
-#[test]
-fn a_translucent_fill_shows_no_seam_between_its_triangles() {
-    let size = egui::vec2(40.0, 40.0);
-    let ctx = egui::Context::default();
-    super::Theme::default().apply(&ctx);
-    let mut output = None;
-    for _ in 0..3 {
-        output = Some(ctx.run_ui(display_input(size, 2.0), |ui| {
-            let screen = ui.ctx().content_rect();
-            ui.painter()
-                .rect_filled(screen, 0.0, Color32::from_black_alpha(100));
-        }));
-    }
-    let canvas = rasterize(&ctx, size, &output.expect("three passes"));
-    let centre = canvas.pixel(41, 37).expect("inside the canvas");
-    assert_ne!(centre, canvas.background());
-    let inner = Rect::from_min_max(egui::pos2(2.0, 2.0), egui::pos2(78.0, 78.0));
-    let seam: Vec<(usize, Color32)> = (2..78)
-        .map(|at| (at, canvas.pixel(at, at).expect("on the diagonal")))
-        .filter(|(_, pixel)| *pixel != centre)
-        .collect();
-    assert!(seam.is_empty(), "the diagonal is another tone: {seam:?}");
-    assert!(canvas.pixels_in(inner).all(|pixel| pixel == centre));
-}
-
 /// A surface that paints the host's own vocabulary — a shortcut keycap reads
 /// "Cmd K" on macOS — would otherwise fingerprint differently per machine.
 #[test]

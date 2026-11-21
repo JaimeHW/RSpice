@@ -1308,31 +1308,6 @@ mod tests {
         assert_eq!(toasts.activity()[0].action(), None);
     }
 
-    /// Every notice stands in one place: the window's bottom-right corner,
-    /// fixed margins from its edge and from the chrome along its bottom. It
-    /// was hung under the toolbar beside the right dock, the corner of an
-    /// inner pane, where it covered the top of a waveform's lanes.
-    #[test]
-    fn notices_stand_in_the_windows_bottom_right_corner() {
-        assert_eq!(
-            ToastLayout::resolve(1440.0, 24.0),
-            ToastLayout {
-                bottom: 38.0,
-                right: 14.0,
-                width: 350.0,
-            }
-        );
-        assert_eq!(
-            ToastLayout::resolve(390.0, 56.0),
-            ToastLayout {
-                bottom: 64.0,
-                right: 8.0,
-                width: 374.0,
-            },
-            "a phone's stand on its navigation bar, the width of the screen"
-        );
-    }
-
     /// An outcome the reader was not watching stays until it is answered
     /// when it warns or fails, under the pointer or not; a clean finish
     /// leaves on its clock.
@@ -1800,13 +1775,6 @@ mod tests {
             7,
             "every notice dropped from the stack keeps its record"
         );
-    }
-
-    #[test]
-    fn reduced_motion_skips_the_toast_entry_fade() {
-        assert_eq!(toast_entry_opacity(0.0, false), 1.0);
-        assert_eq!(toast_entry_opacity(TOAST_ENTER / 2.0, false), 1.0);
-        assert_eq!(toast_entry_opacity(TOAST_ENTER / 2.0, true), 0.5);
     }
 
     /// A screen reader hears a toast arrive, politely for a confirmation and

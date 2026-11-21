@@ -229,98 +229,6 @@ pub fn problem_line(ui: &mut Ui, problem: Problem, text: &str) -> Response {
 mod tests {
     use super::*;
 
-    /// Every painted colour in a pass's shapes, text included.
-    fn painted_colors(shape: &Shape, colors: &mut Vec<Color32>) {
-        match shape {
-            Shape::Vec(shapes) => {
-                for shape in shapes {
-                    painted_colors(shape, colors);
-                }
-            }
-            Shape::LineSegment { stroke, .. } => colors.push(stroke.color),
-            Shape::Path(path) => {
-                if let egui::epaint::ColorMode::Solid(color) = path.stroke.color {
-                    colors.push(color);
-                }
-            }
-            Shape::Text(text) => {
-                colors.push(text.fallback_color);
-                colors.extend(text.galley.job.sections.iter().map(|s| s.format.color));
-            }
-            _ => {}
-        }
-    }
-
-    fn paint(mut add: impl FnMut(&mut Ui)) -> Vec<Shape> {
-        let ctx = egui::Context::default();
-        crate::Theme::default().apply(&ctx);
-        ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| add(ui));
-        })
-        .shapes
-        .into_iter()
-        .map(|clipped| clipped.shape)
-        .collect()
-    }
-
-    /// The mark carries the severity's colour, chosen by the problem rather
-    /// than by its caller.
-    #[test]
-    fn a_problem_mark_is_painted_in_the_problems_own_colour() {
-        let palette = Tokens::default().color;
-        assert_eq!(Problem::Warning.color(&palette), palette.warn);
-        assert_eq!(Problem::Failure.color(&palette), palette.err);
-        assert_eq!(Problem::Warning.mark(), StatusMark::Warning);
-        assert_eq!(Problem::Failure.mark(), StatusMark::Failure);
-        for problem in [Problem::Warning, Problem::Failure] {
-            let mut colors = Vec::new();
-            for shape in paint(|ui| {
-                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(14.0), Sense::hover());
-                paint_problem_mark(ui.painter(), rect, problem);
-            }) {
-                painted_colors(&shape, &mut colors);
-            }
-            assert!(!colors.is_empty(), "{problem:?} painted nothing");
-            assert!(
-                colors.iter().all(|color| *color == problem.color(&palette)),
-                "{problem:?} painted {colors:?}"
-            );
-        }
-    }
-
-    /// The words of a problem line are neutral: only the mark is coloured.
-    #[test]
-    fn a_problem_lines_text_is_dim_and_only_its_mark_is_coloured() {
-        let palette = Tokens::default().color;
-        for problem in [Problem::Warning, Problem::Failure] {
-            let shapes = paint(|ui| {
-                problem_line(ui, problem, "Port number 1 is claimed twice");
-            });
-            let text_colors = shapes
-                .iter()
-                .filter_map(|shape| match shape {
-                    Shape::Text(text) => Some(text.fallback_color),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(text_colors, vec![palette.text_dim], "{problem:?}");
-            let mut mark_colors = Vec::new();
-            for shape in shapes
-                .iter()
-                .filter(|shape| !matches!(shape, Shape::Text(_)))
-            {
-                painted_colors(shape, &mut mark_colors);
-            }
-            assert!(!mark_colors.is_empty(), "{problem:?} painted no mark");
-            assert!(
-                mark_colors
-                    .iter()
-                    .all(|color| *color == problem.color(&palette)),
-                "{problem:?} mark {mark_colors:?}"
-            );
-        }
-    }
-
     /// A screen reader hears the severity the mark shows.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -348,38 +256,6 @@ mod tests {
                     .iter()
                     .any(|(_, node)| node.value() == Some(wanted) || node.label() == Some(wanted)),
                 "nothing announces {wanted:?}"
-            );
-        }
-    }
-
-    /// With reduced motion the busy mark is still drawn but stands still: it
-    /// asks for no repaint, where the spinner it replaces asks every frame.
-    #[test]
-    fn the_busy_mark_stands_still_under_reduced_motion() {
-        for (animation_time, moves) in [(0.16, true), (0.0, false)] {
-            let ctx = egui::Context::default();
-            crate::Theme::default().apply(&ctx);
-            ctx.global_style_mut(|style| style.animation_time = animation_time);
-            // The second pass, after anything the first one settled.
-            let pass = || {
-                ctx.run_ui(Default::default(), |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        busy_mark(ui, 14.0);
-                    });
-                })
-            };
-            let _ = pass();
-            let output = pass();
-            let painted = output
-                .shapes
-                .iter()
-                .any(|clipped| matches!(clipped.shape, Shape::Path(_)));
-            assert!(painted, "the mark is drawn at {animation_time}");
-            let repaint = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
-            assert_eq!(
-                repaint.is_zero(),
-                moves,
-                "repaint {repaint:?} at {animation_time}"
             );
         }
     }

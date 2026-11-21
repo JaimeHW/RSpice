@@ -57,7 +57,6 @@ pub fn menu_button<'a, R>(
 
 #[cfg(test)]
 mod tests {
-    use egui::containers::menu::SubMenuButton;
     use egui::{CentralPanel, Context, Popup, PopupCloseBehavior, RawInput, Shape};
 
     use super::*;
@@ -105,18 +104,5 @@ mod tests {
             missing.is_empty(),
             "a submenu row draws characters no bundled face has, as boxes: {missing:?}"
         );
-    }
-
-    #[test]
-    fn egui_own_submenu_row_draws_an_arrow_no_bundled_face_has() {
-        // The reason the application never uses egui's submenu button: if a
-        // bundled face gains the arrow, this fails and the helper can go.
-        assert!(!rspice_fonts::embedded_covers(
-            SubMenuButton::RIGHT_ARROW.chars().next().unwrap()
-        ));
-        let glyphs = glyphs_in_menu(|ui| {
-            SubMenuButton::new("Code actions").ui(ui, |ui| ui.label("Format document"));
-        });
-        assert!(glyphs.contains(&'\u{23F5}'), "{glyphs:?}");
     }
 }

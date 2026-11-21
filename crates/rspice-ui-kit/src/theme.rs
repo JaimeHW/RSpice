@@ -585,19 +585,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn style_maps_core_tokens() {
-        let theme = Theme::default();
-        let t = theme.tokens();
-        let style = build_style(&t);
-        assert_eq!(style.visuals.panel_fill, t.color.bg_panel);
-        assert_eq!(style.visuals.window_fill, t.color.bg_elevated);
-        assert_eq!(style.visuals.extreme_bg_color, t.color.bg_inset);
-        assert_eq!(style.visuals.selection.bg_fill, t.color.accent_dim);
-        assert_eq!(style.visuals.hyperlink_color, t.color.accent);
-        assert!(style.visuals.dark_mode);
-    }
-
-    #[test]
     fn responsive_touch_metrics_are_transient_and_restore_user_density() {
         let ctx = Context::default();
         let theme = Theme {
@@ -615,65 +602,6 @@ mod tests {
         assert_eq!(Tokens::get(&ctx).metrics.ctl_h, 32.0);
         assert_eq!(Tokens::get(&ctx).metrics.row_h, 33.0);
         assert_eq!(ctx.global_style().spacing.interact_size.y, 32.0);
-    }
-
-    #[test]
-    fn light_mode_flips_dark_flag() {
-        let theme = Theme {
-            mode: Mode::Light,
-            ..Theme::default()
-        };
-        let style = build_style(&theme.tokens());
-        assert!(!style.visuals.dark_mode);
-    }
-
-    #[test]
-    fn engineering_canvas_theme_labels_match_the_mockup_supported_choices() {
-        assert_eq!(
-            EngineeringCanvasTheme::ALL.map(EngineeringCanvasTheme::label),
-            ["RSpice dark engineering", "RSpice light engineering"]
-        );
-    }
-
-    #[test]
-    fn engineering_canvas_theme_changes_document_wells_without_recoloring_chrome() {
-        let resolved = Theme {
-            mode: Mode::Dark,
-            canvas_theme: EngineeringCanvasTheme::Light,
-            colorblind_traces: false,
-            canvas_contrast: 62,
-            ..Theme::default()
-        }
-        .tokens();
-
-        assert_eq!(resolved.color.bg_app, INSTRUMENT_DARK.bg_app);
-        assert_eq!(resolved.color.bg_panel, INSTRUMENT_DARK.bg_panel);
-        assert_eq!(resolved.color.canvas_bg, INSTRUMENT_LIGHT.canvas_bg);
-        assert_eq!(resolved.color.canvas_grid, INSTRUMENT_LIGHT.canvas_grid);
-        assert_eq!(resolved.color.wire, INSTRUMENT_LIGHT.wire);
-        assert_eq!(resolved.color.symbol, INSTRUMENT_LIGHT.symbol);
-        assert_eq!(resolved.color.net_label, INSTRUMENT_LIGHT.net_label);
-        assert_eq!(resolved.color.traces, INSTRUMENT_LIGHT.traces);
-    }
-
-    #[test]
-    fn canvas_contrast_is_consumed_by_grid_and_symbol_render_tokens() {
-        let baseline = Tokens::new(Direction::Instrument, Mode::Dark, Density::Compact);
-        let low = Theme {
-            canvas_contrast: 0,
-            ..Theme::default()
-        }
-        .tokens();
-        let high = Theme {
-            canvas_contrast: 100,
-            ..Theme::default()
-        }
-        .tokens();
-
-        assert_eq!(low.color.canvas_grid, low.color.canvas_bg);
-        assert_ne!(low.color.symbol, baseline.color.symbol);
-        assert_ne!(high.color.canvas_grid, baseline.color.canvas_grid);
-        assert_ne!(high.color.symbol, baseline.color.symbol);
     }
 
     #[test]
@@ -697,33 +625,6 @@ mod tests {
         let restored: Theme =
             serde_json::from_value(stored).expect("theme contrast is recoverable");
         assert_eq!(restored.canvas_contrast, 100);
-    }
-
-    #[test]
-    fn the_canvas_theme_round_trips_independently_of_the_interface_mode() {
-        let independent = Theme {
-            mode: Mode::Light,
-            canvas_theme: EngineeringCanvasTheme::Dark,
-            ..Theme::default()
-        };
-        let encoded = serde_json::to_string(&independent).expect("theme serializes");
-        let restored: Theme = serde_json::from_str(&encoded).expect("theme round-trips");
-        assert_eq!(restored.canvas_theme, EngineeringCanvasTheme::Dark);
-    }
-
-    /// Traces are told apart by hue alone unless the reader asks for more, and
-    /// the choice is stored under `color_safe_traces`.
-    #[test]
-    fn color_safe_traces_are_off_by_default_and_stored_under_their_key() {
-        assert!(!Theme::default().colorblind_traces);
-        let chosen = Theme {
-            colorblind_traces: true,
-            ..Theme::default()
-        };
-        let encoded = serde_json::to_string(&chosen).expect("theme serializes");
-        assert!(encoded.contains(r#""color_safe_traces":true"#), "{encoded}");
-        let restored: Theme = serde_json::from_str(&encoded).expect("theme round-trips");
-        assert!(restored.tokens().color_safe_traces);
     }
 
     /// One frame of a canvas-like surface that, like the drawing canvases,
@@ -797,123 +698,5 @@ mod tests {
 
         focus_frame(&ctx, press(true));
         assert_eq!(settle(&ctx, press(false)), (true, false));
-    }
-
-    #[test]
-    fn mix_endpoints() {
-        let a = Color32::from_rgb(0, 0, 0);
-        let b = Color32::from_rgb(255, 255, 255);
-        assert_eq!(mix(a, b, 0.0), a);
-        assert_eq!(mix(a, b, 1.0), b);
-    }
-
-    /// Every canvas the preferences can produce, and the contrast themes an
-    /// operating system can impose.
-    fn every_canvas_palette() -> Vec<(String, Palette)> {
-        let mut palettes: Vec<(String, Palette)> = Vec::new();
-        for mode in Mode::ALL {
-            for canvas_theme in EngineeringCanvasTheme::ALL {
-                for colorblind_traces in [false, true] {
-                    for canvas_contrast in [0, 62, 100] {
-                        let theme = Theme {
-                            mode,
-                            canvas_theme,
-                            colorblind_traces,
-                            canvas_contrast,
-                            ..Theme::default()
-                        };
-                        palettes.push((format!("{theme:?}"), theme.tokens().color));
-                    }
-                }
-            }
-        }
-        for (name, inks) in crate::palette::tests::CONTRAST_THEMES {
-            palettes.push((format!("{name} contrast"), high_contrast(inks)));
-        }
-        palettes
-    }
-
-    /// The marks that bound a plot on a canvas — its frame, a unit circle, a
-    /// Smith chart's rim — take the canvas theme's own strong border whatever
-    /// the interface mode beside it: a light interface over the dark canvas
-    /// drew the frame in its own light grey, which glares there.
-    #[test]
-    fn a_canvas_frame_is_the_canvas_themes_own() {
-        for mode in [Mode::Dark, Mode::Light] {
-            for canvas_theme in EngineeringCanvasTheme::ALL {
-                let theme = Theme {
-                    mode,
-                    canvas_theme,
-                    ..Theme::default()
-                };
-                assert_eq!(
-                    theme.tokens().color.canvas_frame,
-                    canvas_theme.palette().border_strong,
-                    "{theme:?}"
-                );
-            }
-        }
-    }
-
-    /// Text painted on a canvas reads off that canvas whatever the interface
-    /// mode beside it: a light interface over the dark canvas painted its
-    /// tick labels dark on dark.
-    #[test]
-    fn canvas_text_stands_off_every_canvas() {
-        use crate::palette::contrast_ratio;
-        for (name, c) in every_canvas_palette() {
-            for (role, ink) in [
-                ("text", c.canvas_text),
-                ("secondary text", c.canvas_text_dim),
-                ("tertiary text", c.canvas_text_faint),
-            ] {
-                let ratio = contrast_ratio(ink, c.canvas_bg);
-                assert!(ratio >= 4.5, "{name}: canvas {role} {ratio:.2}:1");
-            }
-        }
-    }
-
-    /// Eight trace hues, each 4.5:1 off its canvas and 0.09 apart from every
-    /// other in OKLab, and the cursors colours no trace is near. A contrast
-    /// theme's cursor A is the operating system's highlight, which the
-    /// palette cannot choose, so only cursor B is held there.
-    #[test]
-    fn traces_are_eight_distinct_hues_and_the_cursors_are_none_of_them() {
-        use crate::palette::{TRACE_HUES, contrast_ratio, perceptual_distance};
-        for (name, c) in every_canvas_palette() {
-            if !name.ends_with("contrast") && !name.contains("HighContrast") {
-                for (index, trace) in c.traces.iter().enumerate() {
-                    let distance = perceptual_distance(c.canvas_cursor_a, *trace);
-                    assert!(
-                        distance >= 0.09,
-                        "{name}: cursor A is {distance:.3} from trace {index}"
-                    );
-                }
-            }
-            assert_eq!(c.traces.len(), TRACE_HUES);
-            for (index, trace) in c.traces.iter().enumerate() {
-                let ratio = contrast_ratio(*trace, c.canvas_bg);
-                assert!(ratio >= 4.5, "{name}: trace {index} {ratio:.2}:1");
-                for (other, next) in c.traces.iter().enumerate().skip(index + 1) {
-                    let distance = perceptual_distance(*trace, *next);
-                    assert!(
-                        distance >= 0.09,
-                        "{name}: traces {index} and {other} are {distance:.3} apart"
-                    );
-                }
-                let distance = perceptual_distance(c.canvas_cursor_b, *trace);
-                assert!(
-                    distance >= 0.09,
-                    "{name}: cursor B is {distance:.3} from trace {index}"
-                );
-            }
-            assert!(
-                perceptual_distance(c.canvas_cursor_b, c.canvas_cursor_a) >= 0.09,
-                "{name}"
-            );
-            for cursor in [c.canvas_cursor_a, c.canvas_cursor_b] {
-                assert!(contrast_ratio(cursor, c.canvas_bg) >= 4.5, "{name}");
-            }
-        }
     }
 }

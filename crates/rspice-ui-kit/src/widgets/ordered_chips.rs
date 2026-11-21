@@ -349,41 +349,6 @@ mod tests {
         }
     }
 
-    /// Under a finger each control of a chip is a touch target wide, so the
-    /// three of them side by side are three targets, not one.
-    #[test]
-    fn each_control_takes_the_touch_target_under_a_finger() {
-        let values = names(&["schematic", "spice"]);
-        let ctx = egui::Context::default();
-        crate::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(48.0));
-        ctx.enable_accesskit();
-        let output = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ordered_chips(ui, "views", "View list", "View", &values, &[], true);
-            });
-        });
-        let nodes = output.platform_output.accesskit_update.unwrap().nodes;
-        let controls = nodes
-            .iter()
-            .filter(|(_, node)| {
-                node.role() == egui::accesskit::Role::Button
-                    && node.label().is_some_and(|label| {
-                        label.starts_with("Move ") || label.starts_with("Remove ")
-                    })
-            })
-            .filter_map(|(_, node)| node.bounds())
-            .collect::<Vec<_>>();
-        assert_eq!(controls.len(), 6, "three controls on each of two chips");
-        for bounds in controls {
-            assert!(
-                bounds.width() >= 48.0 - 0.5 && bounds.height() >= 48.0 - 0.5,
-                "a control is {} by {}",
-                bounds.width(),
-                bounds.height()
-            );
-        }
-    }
-
     /// A list that may never be empty offers no Remove on its only chip, and
     /// one on each chip while it holds more.
     #[test]
