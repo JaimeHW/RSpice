@@ -63,6 +63,7 @@ pub(super) fn start_export_job(
                 job,
                 written: 0,
                 checked: 0,
+                bytes,
             };
             match write(&mut out) {
                 Ok(written) => {
@@ -120,13 +121,15 @@ struct JobWriter<'a> {
     job: &'a JobContext,
     written: u64,
     checked: u64,
+    /// About how many bytes the export writes: progress never reports more.
+    bytes: u64,
 }
 
 impl std::io::Write for JobWriter<'_> {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         if self.written - self.checked >= CHECK_BYTES {
             self.checked = self.written;
-            self.job.done(self.written);
+            self.job.done(self.written.min(self.bytes));
             if self.job.cancelled() {
                 return Err(std::io::Error::other("the export was cancelled"));
             }
