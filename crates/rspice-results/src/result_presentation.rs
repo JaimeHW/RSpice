@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::analysis_type::AnalysisType;
 #[cfg(feature = "engine-evidence")]
 use crate::{analysis_result::AnalysisResult, run::SimulationRun, waveform::RetainedWaveform};
 use rspice_vocabulary::product::{AnalysisInstanceId, DatasetId};
@@ -241,6 +242,105 @@ impl ResultViewer {
             _ => return None,
         })
     }
+
+    /// The sheets an analysis of `kind` opens on, best first. The first is
+    /// its default sheet; the rest stand in, in order, when a run's evidence
+    /// cannot fill it (a transient that kept only event nodes has no curve
+    /// for Waves, so it opens on Events).
+    ///
+    /// The one table of default sheets: a run opening, a finished run and an
+    /// imported run all choose from it, so no caller restates the mapping.
+    pub const fn default_sheets(kind: AnalysisType) -> &'static [ResultViewer] {
+        use AnalysisType as A;
+        use ResultViewer as V;
+        match kind {
+            A::DcOp => &[V::Op, V::Table],
+            A::DcSweep => &[V::DcSweep, V::Table],
+            A::Ac | A::Disto | A::Pac | A::Pxf | A::Qpac | A::Qpxf => &[V::Bode, V::Table],
+            A::Stb => &[V::Bode, V::Nyquist, V::Table],
+            // A periodic stability result is indexed by Floquet mode, not by
+            // frequency: its multipliers are listed.
+            A::Pstb => &[V::Table],
+            A::Transient | A::TransientNoise | A::Envelope | A::Pss => {
+                &[V::Waves, V::Events, V::Table]
+            }
+            A::Soa => &[V::Soa, V::Waves, V::Table],
+            A::Noise | A::Hbnoise | A::Qpnoise => &[V::NoiseContrib, V::PhaseNoise, V::Table],
+            A::Pnoise => &[V::PhaseNoise, V::NoiseContrib, V::Table],
+            A::PoleZero => &[V::PoleZero, V::Table],
+            A::Tf => &[V::TransferFunction],
+            A::Sensitivity | A::DcMismatch => &[V::Contribution, V::Table],
+            A::MonteCarlo => &[
+                V::Hist,
+                V::BoxViolin,
+                V::Scatter,
+                V::Waves,
+                V::Bode,
+                V::Table,
+            ],
+            A::Parametric | A::Corner => {
+                &[V::Waves, V::DcSweep, V::Bode, V::NoiseContrib, V::Table]
+            }
+            A::Optimization => &[V::Optimization, V::Table],
+            A::SParameter | A::Hbsp | A::Psp => {
+                &[V::Smith, V::NetworkMatrix, V::Bode, V::Polar, V::Table]
+            }
+            A::Fourier | A::HarmonicBalance | A::Qpss => &[V::HarmonicBalance, V::Waves, V::Table],
+        }
+    }
+
+    /// The sheet an analysis of `kind` opens on.
+    pub const fn default_sheet(kind: AnalysisType) -> ResultViewer {
+        Self::default_sheets(kind)[0]
+    }
+
+    /// The sheet an analysis of `kind` draws on while its run is still
+    /// writing: the waveform stack its samples stream into. An analysis whose
+    /// results arrive only when it ends has none.
+    pub const fn live_sheet(kind: AnalysisType) -> Option<ResultViewer> {
+        if kind.is_time_domain() {
+            Some(ResultViewer::Waves)
+        } else if matches!(kind, AnalysisType::DcSweep) {
+            Some(ResultViewer::DcSweep)
+        } else if kind.is_bode_response() {
+            Some(ResultViewer::Bode)
+        } else if matches!(
+            kind,
+            AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Qpnoise
+        ) {
+            Some(ResultViewer::NoiseContrib)
+        } else {
+            None
+        }
+    }
+}
+
+/// The sheet a run opens on, from the kinds of its analyses in run order and
+/// the kind of the analysis shown.
+///
+/// A run opens where its curves are: the default sheet of its first analysis
+/// whose default sheet is a waveform stack the run can fill, as ADE plots a
+/// finished run's waveforms. Failing that, the shown analysis' default sheets
+/// in order, then every other analysis' in run order. A run none of whose
+/// default sheets it can fill opens on the first sheet in tab order it can.
+pub fn opening_sheet(
+    kinds: &[AnalysisType],
+    shown: Option<AnalysisType>,
+    mut available: impl FnMut(ResultViewer) -> bool,
+) -> Option<ResultViewer> {
+    if let Some(sheet) = kinds
+        .iter()
+        .map(|kind| ResultViewer::default_sheet(*kind))
+        .find(|sheet| viewer_uses_wave_stack(*sheet) && available(*sheet))
+    {
+        return Some(sheet);
+    }
+    shown
+        .into_iter()
+        .chain(kinds.iter().copied())
+        .flat_map(|kind| ResultViewer::default_sheets(kind).iter().copied())
+        .find(|sheet| available(*sheet))
+        .or_else(|| ResultViewer::all().find(|sheet| available(*sheet)))
 }
 
 /// Stable identity of one retained analysis within one immutable dataset.
@@ -661,5 +761,106 @@ mod tests {
         let trace: ExprTrace =
             serde_json::from_value(serde_json::json!({"text": "V(out)*2"})).unwrap();
         assert!(trace.visible, "a trace written without visibility is shown");
+    }
+
+    const EVERY_KIND: [AnalysisType; 32] = [
+        AnalysisType::DcOp,
+        AnalysisType::DcSweep,
+        AnalysisType::Ac,
+        AnalysisType::Disto,
+        AnalysisType::Transient,
+        AnalysisType::Noise,
+        AnalysisType::PoleZero,
+        AnalysisType::Tf,
+        AnalysisType::Sensitivity,
+        AnalysisType::Pac,
+        AnalysisType::Pnoise,
+        AnalysisType::Pxf,
+        AnalysisType::Pstb,
+        AnalysisType::Stb,
+        AnalysisType::MonteCarlo,
+        AnalysisType::Parametric,
+        AnalysisType::Corner,
+        AnalysisType::Optimization,
+        AnalysisType::Soa,
+        AnalysisType::SParameter,
+        AnalysisType::Envelope,
+        AnalysisType::Fourier,
+        AnalysisType::HarmonicBalance,
+        AnalysisType::Pss,
+        AnalysisType::Qpss,
+        AnalysisType::Hbsp,
+        AnalysisType::Hbnoise,
+        AnalysisType::Psp,
+        AnalysisType::Qpac,
+        AnalysisType::Qpnoise,
+        AnalysisType::Qpxf,
+        AnalysisType::TransientNoise,
+    ];
+
+    /// Each kind names its sheets once, never the inventory (which is the
+    /// run's, not an analysis'), and the sheet a kind streams into while its
+    /// run writes is one of the sheets it opens on, so a run never leaves the
+    /// sheet it was drawing on for one it was never offered.
+    #[test]
+    fn every_analysis_kind_states_its_sheets_and_streams_into_one_of_them() {
+        for kind in EVERY_KIND.into_iter().chain([AnalysisType::DcMismatch]) {
+            let sheets = ResultViewer::default_sheets(kind);
+            assert!(!sheets.is_empty(), "{kind:?}");
+            assert!(!sheets.contains(&ResultViewer::Manifest), "{kind:?}");
+            for (index, sheet) in sheets.iter().enumerate() {
+                assert!(
+                    !sheets[..index].contains(sheet),
+                    "{kind:?} names {sheet:?} twice"
+                );
+            }
+            if let Some(live) = ResultViewer::live_sheet(kind) {
+                assert!(viewer_uses_wave_stack(live), "{kind:?}");
+                assert!(sheets.contains(&live), "{kind:?} streams into {live:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_run_opens_on_its_first_curves_then_the_shown_analysis_then_any_sheet() {
+        let everything = |_| true;
+        // An operating point ahead of a transient: the transient's curves.
+        assert_eq!(
+            opening_sheet(
+                &[AnalysisType::DcOp, AnalysisType::Transient],
+                Some(AnalysisType::DcOp),
+                everything
+            ),
+            Some(ResultViewer::Waves)
+        );
+        // No curves: the shown analysis' default sheet, then the others'.
+        assert_eq!(
+            opening_sheet(
+                &[AnalysisType::DcOp, AnalysisType::Sensitivity],
+                Some(AnalysisType::Sensitivity),
+                everything
+            ),
+            Some(ResultViewer::Contribution)
+        );
+        assert_eq!(
+            opening_sheet(&[AnalysisType::Soa], Some(AnalysisType::Soa), everything),
+            Some(ResultViewer::Soa)
+        );
+        // A transient that kept only its event nodes opens on Events.
+        assert_eq!(
+            opening_sheet(
+                &[AnalysisType::Transient],
+                Some(AnalysisType::Transient),
+                |sheet| sheet == ResultViewer::Events
+            ),
+            Some(ResultViewer::Events)
+        );
+        // Nothing the table names can be filled: the first sheet that can.
+        assert_eq!(
+            opening_sheet(&[AnalysisType::Tf], None, |sheet| sheet
+                == ResultViewer::Manifest),
+            Some(ResultViewer::Manifest)
+        );
+        assert_eq!(opening_sheet(&[], None, |_| false), None);
     }
 }

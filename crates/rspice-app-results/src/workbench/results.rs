@@ -24,7 +24,8 @@ use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
     cursor_jump_availability, family_available, fit_gesture_available, fit_y_to_visible_x,
     hide_selected_trace, jump_cursor, linked_cursors, open_create_document, open_dataset_browser,
-    place_marker_at_cursor, request_view_gesture, selected_trace_on_sheet, viewer_is_available,
+    opening_sheet, place_marker_at_cursor, request_view_gesture, selected_trace_on_sheet,
+    viewer_is_available,
     viewer_unavailability_reason, zoom_gesture_available, zoom_previous, zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
@@ -63,26 +64,17 @@ impl ResultsFeature {
         selected
     }
 
-    /// Open Results on the run a press of Run finished, on Waves, as LTspice
-    /// opens its waveform window and ADE plots on completion; a run with no
-    /// curve to draw opens on its operating point rather than an empty sheet.
-    /// A run that has left the history opens nothing. The shell answers the
-    /// command it raises straight after.
+    /// Open Results on the run a press of Run finished, on the sheet its
+    /// analyses open on: its curves when it has any, as ADE plots on
+    /// completion, else the default sheet of what it did produce. A run that
+    /// has left the history opens nothing. The shell answers the command it
+    /// raises straight after.
     pub fn open_finished_run(cx: &mut Cx<'_, Self>, run_sequence: u64) {
         if !cx.model.simulation.select_run_by_sequence(run_sequence) {
             return;
         }
-        let draws = cx.model.simulation.active_run().is_some_and(|run| {
-            run.analyses
-                .iter()
-                .any(|analysis| !analysis.waveforms.is_empty())
-        });
         cx.state.results.session.viewer =
-            if draws || !viewer_is_available(cx.state.reads(cx.model, cx.wb), ResultViewer::Op) {
-                ResultViewer::Waves
-            } else {
-                ResultViewer::Op
-            };
+            opening_sheet(cx.state.reads(cx.model, cx.wb)).unwrap_or(ResultViewer::Waves);
         cx.execute(ids::OPEN_RUN_IN_RESULTS);
     }
 

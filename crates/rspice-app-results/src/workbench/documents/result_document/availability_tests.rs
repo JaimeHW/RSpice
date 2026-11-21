@@ -606,6 +606,47 @@ fn incompatible_active_viewer_falls_back_to_compatible_view() {
     assert_eq!(state.results.results.session.viewer, ResultViewer::Waves);
 }
 
+/// A sheet the run cannot fill gives way to the sheet the analysis kind
+/// opens on, as the one table of default sheets names it, not to whichever
+/// sheet comes first in tab order (Table used to win for every one of these).
+#[test]
+fn each_analysis_kind_opens_on_the_sheet_the_table_names() {
+    let sensitivity = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
+        .with_result_payload(AnalysisResultPayload::Sensitivity {
+            output: "V(out)".to_owned(),
+            result_mode: SensitivityResultMode::Dc,
+            rows: vec![SensitivityResultRow {
+                parameter: "r1".to_owned(),
+                raw: (0.25).into(),
+                normalized: (0.5).into(),
+            }],
+        });
+    let dc = crate::state::DcOpResult {
+        node_voltages: vec![crate::state::OperatingPointValue {
+            name: "V(out)".to_owned(),
+            value: 1.8,
+            unit: "V".to_owned(),
+        }],
+        ..crate::state::DcOpResult::default()
+    };
+    let operating_point = AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(dc);
+    for (analysis, expected) in [
+        (sensitivity, ResultViewer::Contribution),
+        (operating_point, ResultViewer::Op),
+        (soa_analysis(), ResultViewer::Soa),
+        (optimization_analysis(), ResultViewer::Optimization),
+    ] {
+        let kind = analysis.analysis_type;
+        assert_eq!(ResultViewer::default_sheet(kind), expected, "{kind:?}");
+        let mut state = state_with_analysis(analysis);
+        state.results.results.session.viewer = ResultViewer::Bode;
+
+        reconcile_active_viewer(&mut state.results_parts());
+
+        assert_eq!(state.results.results.session.viewer, expected, "{kind:?}");
+    }
+}
+
 /// A running run that has written nothing yet keeps the reader on the sheet its results
 /// arrive on, so a transient's live plot appears where the reader is looking; a run that
 /// ended with nothing to show still falls back to its inventory.

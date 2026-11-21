@@ -784,11 +784,9 @@ fn insert_kept_import(state: &mut ResultsParts<'_>, kept: KeptResultImport) -> R
                 .to_owned(),
         );
     }
-    state.results.session.viewer = if analysis_type == AnalysisType::SParameter {
-        crate::workbench::ResultViewer::Smith
-    } else {
-        crate::workbench::ResultViewer::Waves
-    };
+    state.results.session.viewer =
+        crate::workbench::documents::result_document::opening_sheet(state.results_reads())
+            .unwrap_or(crate::workbench::ResultViewer::Waves);
     state
         .analysis
         .synchronize_specialized_viewer_cache_authority(state.model);

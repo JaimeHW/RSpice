@@ -27,7 +27,7 @@ use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
 use crate::workbench::state::Workspace;
 
-use super::{ResultsParts, ResultsReads};
+use super::{ResultViewer, ResultsParts, ResultsReads};
 
 const MAX_DOCUMENT_NAME_BYTES: usize = 120;
 
@@ -748,11 +748,18 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
 pub(super) fn view_pane_viewer(
     analysis: &AnalysisResult,
 ) -> Option<&'static ViewerDocumentDefinition> {
-    VIEWER_DOCUMENTS.iter().find(|viewer| {
+    let draws = |viewer: &&'static ViewerDocumentDefinition| {
         viewer.release == ViewerReleaseClass::ReleaseTarget
             && analysis_matches_viewer(viewer, analysis.analysis_type)
             && super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
-    })
+    };
+    // The analysis' default sheets first, as the quick view opens on them.
+    ResultViewer::default_sheets(analysis.analysis_type)
+        .iter()
+        .filter_map(|sheet| sheet.viewer_document_id())
+        .filter_map(|id| VIEWER_DOCUMENTS.iter().find(|viewer| viewer.id == id))
+        .find(draws)
+        .or_else(|| VIEWER_DOCUMENTS.iter().find(draws))
 }
 
 /// Create, with no dialog, the document a quick view's measurement is kept

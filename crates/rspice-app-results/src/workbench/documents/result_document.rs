@@ -1944,27 +1944,32 @@ struct ShownSelection {
 }
 
 /// The sheet a run that has written nothing yet draws its first results
-/// on: the one its plan's first plotted analysis is drawn on, as its
+/// on: the one its plan's first plotted analysis streams into, as its
 /// prepared tasks say, so the run opens where its plot arrives. A run with
 /// no prepared tasks (a deck run) says nothing.
 fn starting_sheet(run: &SimulationRun) -> Option<ResultViewer> {
-    use crate::state::AnalysisType;
-    run.prepared_receipt()?.tasks().iter().find_map(|task| {
-        let kind = task.result_analysis_type();
-        if kind.is_time_domain() {
-            Some(ResultViewer::Waves)
-        } else if kind == AnalysisType::DcSweep {
-            Some(ResultViewer::DcSweep)
-        } else if kind.is_bode_response() {
-            Some(ResultViewer::Bode)
-        } else if matches!(
-            kind,
-            AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Qpnoise
-        ) {
-            Some(ResultViewer::NoiseContrib)
-        } else {
-            None
-        }
+    run.prepared_receipt()?
+        .tasks()
+        .iter()
+        .find_map(|task| ResultViewer::live_sheet(task.result_analysis_type()))
+}
+
+/// The sheet the active run opens on, from the one table of default sheets
+/// and what the run can fill.
+pub(crate) fn opening_sheet(state: ResultsReads<'_>) -> Option<ResultViewer> {
+    let run = state.model.simulation.active_run()?;
+    let kinds = run
+        .analyses
+        .iter()
+        .map(|analysis| analysis.analysis_type)
+        .collect::<Vec<_>>();
+    let shown = state
+        .model
+        .simulation
+        .active_analysis()
+        .map(|analysis| analysis.analysis_type);
+    rspice_results::result_presentation::opening_sheet(&kinds, shown, |viewer| {
+        viewer_is_available(state, viewer)
     })
 }
 
@@ -2482,9 +2487,7 @@ fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
     {
         return;
     }
-    if let Some(viewer) = ResultViewer::all()
-        .find(|viewer| viewer_availability(state.results_reads(), *viewer).available)
-    {
+    if let Some(viewer) = opening_sheet(state.results_reads()) {
         state.results.session.viewer = viewer;
     }
 }
