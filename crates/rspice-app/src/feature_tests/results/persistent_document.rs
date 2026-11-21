@@ -372,139 +372,6 @@ fn undo_survives_the_view_following_a_rerun() {
     );
 }
 
-/// A re-run of a plan opens the quick view on what the reader made of the
-/// run before it: the hidden trace, the expression, the markers and the log
-/// axis all carry over, while the earlier run keeps its own. A marker put on
-/// a point keeps its X; a peak marker finds the new run's peak.
-#[test]
-fn a_rerun_keeps_the_quick_view_the_reader_made() {
-    use rspice_app_results::workbench::documents::result_document::prepare_viewer_state;
-    use rspice_app_workbench::workbench::state::{Workspace, WorkspaceDocumentId};
-    use rspice_results::feature_search::{Anchor, nearest};
-    use rspice_results::result_presentation::{
-        ExprTrace, MarkerKind, SourceWaveformPresentationKey, WavePanePresentationKey,
-    };
-
-    let LatestFixture {
-        mut app,
-        plan_id,
-        authored_analysis_id,
-        source_digest,
-        ..
-    } = latest_tracking_fixture();
-    app.state.workbench.activate(Workspace::Results);
-    let first = app.state.model.simulation.retained.runs[0].dataset_id;
-    app.state
-        .workbench
-        .documents
-        .activate(WorkspaceDocumentId::ResultDataset(first));
-    prepare_viewer_state(&mut app.state.results_parts());
-    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
-    let session = &mut app.state.results.results.session;
-    session.waveform_visibility.insert(
-        SourceWaveformPresentationKey::new(analysis, "V(out)"),
-        false,
-    );
-    session.analysis_exprs.insert(
-        analysis,
-        vec![ExprTrace {
-            text: "V(out)*2".to_owned(),
-            complex_policy: Default::default(),
-            visible: true,
-        }],
-    );
-    session.log_y_panes.insert(WavePanePresentationKey {
-        analysis,
-        unit: "V".to_owned(),
-    });
-    session
-        .add_marker(analysis, anchor.clone(), "V(out)".to_owned(), 0.25)
-        .expect("a note marker");
-    let peak = session
-        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.5)
-        .expect("a peak marker");
-    session.marker_mut(peak).expect("the peak marker").kind = MarkerKind::Peak;
-
-    let rerun_x = [0.0, 0.25, 0.5, 0.75, 1.0];
-    let rerun_y = [0.0, 0.2, 0.4, 1.0, 0.1];
-    let project_revision = app.state.model.workspace.content.project.revision();
-    app.state
-        .model
-        .simulation
-        .retained
-        .runs
-        .push(authored_run_with(
-            2,
-            plan_id,
-            project_revision,
-            source_digest,
-            authored_analysis_id,
-            "V(out)",
-            (rerun_x.to_vec(), rerun_y.to_vec()),
-        ));
-    let rerun = app.state.model.simulation.retained.runs[1].dataset_id;
-    assert!(app.state.model.simulation.select_run(1));
-    app.state
-        .workbench
-        .documents
-        .activate(WorkspaceDocumentId::ResultDataset(rerun));
-    prepare_viewer_state(&mut app.state.results_parts());
-    let (rerun_analysis, _) = active_analysis_anchor(&mut app.state);
-    assert_ne!(rerun_analysis, analysis, "the re-run is another dataset");
-
-    let session = &app.state.results.results.session;
-    assert_eq!(
-        session
-            .waveform_visibility
-            .get(&SourceWaveformPresentationKey::new(
-                rerun_analysis,
-                "V(out)"
-            )),
-        Some(&false),
-        "the hidden trace stays hidden"
-    );
-    assert_eq!(
-        session
-            .analysis_exprs
-            .get(&rerun_analysis)
-            .map(|expressions| expressions[0].text.as_str()),
-        Some("V(out)*2")
-    );
-    assert!(session.log_y_panes.contains(&WavePanePresentationKey {
-        analysis: rerun_analysis,
-        unit: "V".to_owned(),
-    }));
-    let carried = session
-        .markers
-        .iter()
-        .filter(|marker| marker.analysis == rerun_analysis)
-        .collect::<Vec<_>>();
-    assert_eq!(carried.len(), 2);
-    let note = carried
-        .iter()
-        .find(|marker| marker.kind == MarkerKind::Note)
-        .expect("the note marker");
-    assert_eq!(note.x, 0.25, "a marker on a point keeps its X");
-    let peak = carried
-        .iter()
-        .find(|marker| marker.kind == MarkerKind::Peak)
-        .expect("the peak marker");
-    assert_eq!(
-        nearest(&rerun_x, &rerun_y, peak.x, Anchor::Peak).map(|found| found.x),
-        Some(0.75),
-        "a peak marker finds the new run's peak"
-    );
-    assert_eq!(
-        session
-            .markers
-            .iter()
-            .filter(|marker| marker.analysis == analysis)
-            .count(),
-        2,
-        "the earlier run keeps its own markers"
-    );
-}
-
 /// A refused retarget rebuilds the retained source dataset. Re-trying it
 /// every frame would pay for that rebuild every frame, so the refusal is
 /// held against the candidate that produced it.
@@ -817,15 +684,10 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
     }
 }
 
-/// (h.2) Projecting a pane that already holds a retained marker must not
-/// adopt it into the project's quick-view list.
-///
-/// The projection used to write the document's markers straight into
-/// `ResultsState::markers` — the list the project file saves — so a
-/// document's own annotation was saved a second time as a dataset marker,
-/// under an id truncated out of the document's entity serial.
+/// Projecting a pane that already holds a retained marker draws it in the
+/// overlay, under the pane that keeps it.
 #[test]
-fn projecting_a_retained_marker_never_adopts_it_into_the_quick_list() {
+fn projecting_a_pane_draws_its_retained_marker() {
     let (mut app, document_id) = persistent_transient_fixture();
     let pane = projected_pane(&mut app.state, document_id);
     let (trace_id, revision) = {
@@ -859,18 +721,6 @@ fn projecting_a_retained_marker_never_adopts_it_into_the_quick_list() {
 
     let pane = projected_pane(&mut app.state, document_id);
 
-    assert!(
-        app.state.results.results.session.markers.is_empty(),
-        "a retained document marker leaked into the project's quick-view list: {:?}",
-        app.state
-            .results
-            .results
-            .session
-            .markers
-            .iter()
-            .map(|marker| (marker.id, marker.note.clone()))
-            .collect::<Vec<_>>()
-    );
     assert_eq!(app.state.results.results.session.document_markers.len(), 1);
     assert_eq!(
         app.state.results.results.session.document_markers[0].note,
@@ -882,8 +732,7 @@ fn projecting_a_retained_marker_never_adopts_it_into_the_quick_list() {
     );
 }
 
-/// (h.7) A click inside a persistent pane is retained by the document,
-/// not copied into the project's quick-view marker list.
+/// A click inside a persistent pane is retained by the document.
 #[test]
 fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
     let (mut app, document_id) = persistent_transient_fixture();
@@ -904,14 +753,11 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
     )
     .expect("the placement resolves a store");
 
-    let rspice_results_ui::session::MarkerSelector::Document {
+    let rspice_results_ui::session::MarkerSelector {
         document_id: routed_document,
         pane_id,
         marker_id,
-    } = selector
-    else {
-        panic!("a persistent pane must retain its own markers");
-    };
+    } = selector;
     assert_eq!(routed_document, document_id);
     assert_eq!(pane_id, pane.id);
     let retained = retained_markers(&app, document_id);
@@ -929,10 +775,6 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
         revision_before,
         "retaining a marker advances the document revision"
     );
-    assert!(
-        app.state.results.results.session.markers.is_empty(),
-        "a document marker must never enter the project's quick-view list"
-    );
     // It is addressable in the frame it was placed in, not one frame later.
     assert!(
         app.state
@@ -944,50 +786,80 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
     );
 }
 
-/// (h.7) A document cannot retain a marker on a trace it does not own, so
-/// the click still lands — on the dataset — and says so.
+/// A saved document places no marker on a trace it does not keep, and
+/// says so, rather than keeping the marker somewhere it does not.
 #[test]
-fn a_trace_the_document_does_not_retain_falls_back_to_a_quick_marker() {
+fn a_trace_the_document_does_not_keep_places_no_marker_and_says_so() {
     let (mut app, document_id) = persistent_transient_fixture();
     let _pane = projected_pane(&mut app.state, document_id);
-    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
+    let (analysis, _) = active_analysis_anchor(&mut app.state);
+    let anchor = rspice_app_results::workbench::documents::result_document::marker_anchor_for(
+        analysis,
+        "V(a)+V(b)",
+    );
 
     let selector = rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(a)+V(b)", 0.25),
-    )
-    .expect("the placement resolves a store");
+    );
 
-    assert!(matches!(
-        selector,
-        rspice_results_ui::session::MarkerSelector::Quick(_)
-    ));
-    assert_eq!(app.state.results.results.session.markers.len(), 1);
+    assert_eq!(selector, None);
     assert!(retained_markers(&app, document_id).is_empty());
     assert!(
         app.state
             .prompt_text()
-            .is_some_and(|text| text.contains("not a retained trace")),
-        "the fallback has to be stated, not silent"
+            .is_some_and(|text| text.contains("not a trace this view keeps")),
+        "the refusal has to be stated, not silent"
     );
 }
 
-/// (h.1) Quick markers are a fact about the dataset. Opening, drawing and
-/// leaving a project-owned document must not adopt, rewrite or drop them.
+/// The quick view's frame around nothing: the shown run's working view is
+/// made or followed, drawn, and kept.
+fn quick_frame(state: &mut AppState) {
+    state.results.results.session.leave_persistent_document();
+    let mut parts = state.results_parts();
+    rspice_app_results::workbench::documents::result_document::working_view::sync(&mut parts);
+    rspice_app_results::workbench::documents::result_document::working_view::capture(&mut parts);
+}
+
+/// The markers the shown run's working view keeps.
+fn working_view_markers(app: &RSpiceApp) -> Vec<Marker> {
+    let run = app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .expect("a shown run")
+        .dataset_id;
+    let view =
+        rspice_app_results::workbench::documents::result_document::working_view::view_of_run(
+            app.state.results_reads(),
+            run,
+        )
+        .expect("the shown run's working view");
+    retained_markers(app, view)
+}
+
+/// A working view's markers are what the reader made of the run. Opening,
+/// drawing and leaving a saved document draws the document's own and
+/// leaves the working view's as they were.
 #[test]
-fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
+fn a_working_views_markers_are_untouched_by_opening_and_leaving_a_saved_document() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
-    let quick = app
-        .state
-        .results
-        .results
-        .session
-        .add_marker(analysis, anchor.clone(), "V(out)".to_owned(), 0.75)
-        .unwrap();
-    if let Some(marker) = app.state.results.results.session.marker_mut(quick) {
-        marker.note = "dataset note".to_owned();
-    }
+    quick_frame(&mut app.state);
+    let quick = rspice_app_results::workbench::documents::result_document::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.75),
+    )
+    .expect("the working view keeps the marker");
+    rspice_app_results::workbench::documents::result_document::commit_marker_edit(
+        &mut app.state.results_parts(),
+        quick,
+        "dataset note",
+        rspice_app_results::workbench::documents::result_document::MarkerKind::Note,
+    )
+    .expect("the working view takes the note");
     let pane = projected_pane(&mut app.state, document_id);
     rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
@@ -1003,24 +875,19 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
         });
     }
 
-    assert_eq!(app.state.results.results.session.markers.len(), 1);
-    assert_eq!(app.state.results.results.session.markers[0].id, quick);
+    let kept = working_view_markers(&app);
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].id, quick.marker_id);
+    assert_eq!(kept[0].label, "dataset note");
+    let overlay = &app.state.results.results.session.document_markers;
     assert_eq!(
-        app.state.results.results.session.markers[0].note,
-        "dataset note"
-    );
-    assert_eq!(
-        app.state.results.results.session.document_markers.len(),
+        overlay.len(),
         1,
         "the drawn pane's retained markers project into the overlay"
     );
-    assert_eq!(
-        app.state.results.results.session.document_markers[0].pane_id,
-        pane.id
-    );
+    assert_eq!(overlay[0].pane_id, pane.id);
 
-    // Back on a quick surface the overlay is gone and the quick marker is
-    // exactly what it was.
+    // Back on a quick surface the overlay is the working view's again.
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
             rspice_app_results::workbench::documents::result_document::show_compact_split(
@@ -1035,148 +902,83 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
             .results
             .results
             .session
-            .document_markers
-            .is_empty()
-    );
-    assert!(
-        app.state
-            .results
-            .results
-            .session
             .persistent_pane_context
             .is_none()
     );
-    assert_eq!(app.state.results.results.session.markers.len(), 1);
-    assert_eq!(
-        app.state.results.results.session.markers[0].note,
-        "dataset note"
-    );
+    let overlay = &app.state.results.results.session.document_markers;
+    assert_eq!(overlay.len(), 1);
+    assert_eq!(overlay[0].retained_id, quick.marker_id);
+    assert_eq!(overlay[0].note, "dataset note");
 }
 
-/// (h.2, h.3) The two stores never contend: a document serial cannot
-/// advance the quick allocator, and the project save carries exactly the
-/// quick markers.
+/// Apply routes to the view the dialog opened on: an edit of the saved
+/// document's marker leaves the working view's, and the other way round.
 #[test]
-fn document_marker_serials_never_reach_the_project_save_or_the_quick_allocator() {
+fn the_marker_dialog_applies_to_the_view_it_opened_on() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
+    quick_frame(&mut app.state);
+    let quick = rspice_app_results::workbench::documents::result_document::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.75),
+    )
+    .expect("the working view keeps the marker");
     let _pane = projected_pane(&mut app.state, document_id);
-    let selector = rspice_app_results::workbench::documents::result_document::place_marker(
+    let retained = rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(out)", 0.5),
     )
     .expect("the document retains its own marker");
-    let rspice_results_ui::session::MarkerSelector::Document { marker_id, .. } = selector else {
-        panic!("a persistent pane retains its own markers");
-    };
-
-    let quick = app
-        .state
-        .results
-        .results
-        .session
-        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.9)
-        .unwrap();
-
-    assert_eq!(
-        quick,
-        1,
-        "the quick allocator counts quick markers alone, whatever serial \
-         the document handed its own marker ({})",
-        marker_id.get()
-    );
-    assert_eq!(
-        app.state.results.results.session.markers.len(),
-        1,
-        "the project's saved marker list is exactly the quick markers"
-    );
-    assert_eq!(app.state.results.results.session.markers[0].id, quick);
-}
-
-/// (h.5) Apply routes by the store the dialog opened on, even when a quick
-/// id and a document serial are the same number — the case the old shared
-/// `u32` space could not tell apart.
-#[test]
-fn the_marker_dialog_applies_to_the_store_it_opened_on() {
-    let (mut app, document_id) = persistent_transient_fixture();
-    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
-    let _pane = projected_pane(&mut app.state, document_id);
-    let selector = rspice_app_results::workbench::documents::result_document::place_marker(
-        &mut app.state.results_parts(),
-        placement(analysis, &anchor, "V(out)", 0.5),
-    )
-    .expect("the document retains its own marker");
-    let rspice_results_ui::session::MarkerSelector::Document { marker_id, .. } = selector else {
-        panic!("a persistent pane retains its own markers");
-    };
-    // Give the quick store a marker whose id is the document serial, so
-    // the two identities collide as integers and can only be told apart
-    // by the store they name.
-    let colliding = u32::try_from(marker_id.get()).expect("a small test serial");
-    app.state.results.results.session.adopt_markers(
-        vec![
-            rspice_app_results::workbench::documents::result_document::ResultMarker {
-                id: colliding,
-                analysis,
-                anchor,
-                trace_name: "V(out)".to_owned(),
-                x: 0.9,
-                kind: rspice_app_results::workbench::documents::result_document::MarkerKind::Note,
-                note: "quick".to_owned(),
-            },
-        ],
-        0,
-    );
 
     rspice_app_results::workbench::documents::result_document::commit_marker_edit(
         &mut app.state.results_parts(),
-        selector,
+        retained,
         "retained",
         rspice_app_results::workbench::documents::result_document::MarkerKind::Peak,
     )
     .expect("the document edit commits");
 
-    let retained = retained_markers(&app, document_id);
-    assert_eq!(retained.len(), 1);
-    assert_eq!(retained[0].label, "retained");
+    let in_document = retained_markers(&app, document_id);
+    assert_eq!(in_document.len(), 1);
+    assert_eq!(in_document[0].label, "retained");
     assert_eq!(
-        retained[0].kind,
+        in_document[0].kind,
         rspice_app_state::results::visualization_document::PlotMarkerKind::Peak
     );
     assert_eq!(
-        app.state.results.results.session.markers[0].note, "quick",
-        "the quick marker that shares the number must be untouched"
-    );
-    assert_eq!(
-        app.state.results.results.session.markers[0].kind,
-        rspice_app_results::workbench::documents::result_document::MarkerKind::Note
+        working_view_markers(&app)[0].label,
+        "V(out)",
+        "the working view's marker is untouched"
     );
 
     rspice_app_results::workbench::documents::result_document::commit_marker_edit(
         &mut app.state.results_parts(),
-        rspice_results_ui::session::MarkerSelector::Quick(colliding),
+        quick,
         "edited quick",
         rspice_app_results::workbench::documents::result_document::MarkerKind::Spec,
     )
-    .expect("the quick edit commits");
+    .expect("the working view edit commits");
 
-    assert_eq!(
-        app.state.results.results.session.markers[0].note,
-        "edited quick"
-    );
+    assert_eq!(working_view_markers(&app)[0].label, "edited quick");
     assert_eq!(
         retained_markers(&app, document_id)[0].label,
         "retained",
-        "editing the quick marker must not reach the document"
+        "editing the working view's marker must not reach the document"
     );
 }
 
-/// (h.6) Removing a row removes it from the store that owns it, and only
-/// a document row advances the document.
+/// Removing a row removes it from the view that keeps it, and only that
+/// view changes.
 #[test]
-fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
+fn removing_a_marker_row_reaches_only_the_view_that_keeps_it() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
+    quick_frame(&mut app.state);
+    let quick = rspice_app_results::workbench::documents::result_document::place_marker(
+        &mut app.state.results_parts(),
+        placement(analysis, &anchor, "V(out)", 0.9),
+    )
+    .expect("the working view keeps the marker");
     let _pane = projected_pane(&mut app.state, document_id);
     let document_selector =
         rspice_app_results::workbench::documents::result_document::place_marker(
@@ -1184,13 +986,6 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
             placement(analysis, &anchor, "V(out)", 0.5),
         )
         .expect("the document retains its own marker");
-    let quick = app
-        .state
-        .results
-        .results
-        .session
-        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.9)
-        .unwrap();
     let revision_before = app
         .state
         .model
@@ -1202,10 +997,10 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
 
     rspice_app_results::workbench::documents::result_document::remove_marker(
         &mut app.state.results_parts(),
-        rspice_results_ui::session::MarkerSelector::Quick(quick),
+        quick,
     );
 
-    assert!(app.state.results.results.session.markers.is_empty());
+    assert!(working_view_markers(&app).is_empty());
     assert_eq!(retained_markers(&app, document_id).len(), 1);
     assert_eq!(
         app.state
@@ -1216,7 +1011,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
             .expect("retained document")
             .revision(),
         revision_before,
-        "removing a quick marker is not a change to the document"
+        "removing the working view's marker is not a change to the document"
     );
 
     rspice_app_results::workbench::documents::result_document::remove_marker(
@@ -1242,124 +1037,6 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
             .expect("retained document")
             .revision(),
         revision_before
-    );
-}
-
-/// (h.4) A project saved before markers had one owner captured the
-/// document's markers into the quick list as well. Reopening must keep the
-/// genuine quick marker and drop the duplicate rather than draw both.
-#[test]
-fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
-    let (mut app, document_id) = persistent_transient_fixture();
-    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
-    let _pane = projected_pane(&mut app.state, document_id);
-    rspice_app_results::workbench::documents::result_document::place_marker(
-        &mut app.state.results_parts(),
-        placement(analysis, &anchor, "V(out)", 0.5),
-    )
-    .expect("the document retains its own marker");
-    let marker_id = retained_markers(&app, document_id)[0].id;
-    rspice_app_results::workbench::documents::result_document::commit_marker_edit(
-        &mut app.state.results_parts(),
-        rspice_results_ui::session::MarkerSelector::Document {
-            document_id,
-            pane_id: _pane.id,
-            marker_id,
-        },
-        "overshoot",
-        rspice_app_results::workbench::documents::result_document::MarkerKind::Peak,
-    )
-    .expect("the document edit commits");
-
-    let duplicate = rspice_app_results::workbench::documents::result_document::ResultMarker {
-        id: 4,
-        analysis,
-        anchor: anchor.clone(),
-        trace_name: "V(out)".to_owned(),
-        x: 0.5,
-        kind: rspice_app_results::workbench::documents::result_document::MarkerKind::Peak,
-        note: "overshoot".to_owned(),
-    };
-    let genuine = rspice_app_results::workbench::documents::result_document::ResultMarker {
-        id: 5,
-        analysis,
-        anchor,
-        trace_name: "V(out)".to_owned(),
-        x: 0.9,
-        kind: rspice_app_results::workbench::documents::result_document::MarkerKind::Note,
-        note: "settling".to_owned(),
-    };
-
-    rspice_app_results::workbench::documents::result_document::restore_markers(
-        &mut app.state.results_parts(),
-        vec![duplicate.clone(), genuine.clone()],
-        None,
-    );
-
-    assert_eq!(app.state.results.results.session.markers.len(), 1);
-    assert_eq!(
-        app.state.results.results.session.markers[0].note,
-        "settling"
-    );
-
-    // Current files explicitly own quick markers. Identical annotation text
-    // and coordinates no longer identify a legacy document projection.
-    rspice_app_results::workbench::documents::result_document::restore_presentation(
-        &mut app.state.results_parts(),
-        rspice_app_state::state::result_presentation::ResultPresentation {
-            markers: vec![duplicate, genuine],
-            marker_id_high_water: Some(5),
-            ..Default::default()
-        },
-    );
-    assert_eq!(app.state.results.results.session.markers.len(), 2);
-    assert_eq!(
-        app.state.results.results.session.markers[0].note,
-        "overshoot"
-    );
-}
-
-#[test]
-fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
-    let (mut app, document_id) = persistent_transient_fixture();
-    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
-    projected_pane(&mut app.state, document_id);
-    rspice_app_results::workbench::documents::result_document::place_marker(
-        &mut app.state.results_parts(),
-        placement(analysis, &anchor, "V(out)", 0.5),
-    )
-    .expect("document marker");
-    let retained = retained_markers(&app, document_id).remove(0);
-    let mut another_run = SimulationRun::new(2);
-    another_run.add_analysis(app.state.model.simulation.retained.runs[0].analyses[0].clone());
-    let another_analysis =
-        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
-            another_run.dataset_id,
-            &another_run.analyses[0],
-        );
-    app.state.model.simulation.retained.runs.push(another_run);
-    let mut another_anchor = anchor;
-    another_anchor.analysis = another_analysis;
-    let marker = rspice_app_results::workbench::documents::result_document::ResultMarker {
-        id: 5,
-        analysis: another_analysis,
-        anchor: another_anchor,
-        trace_name: "V(out)".to_owned(),
-        x: 0.5,
-        kind: rspice_app_results::workbench::documents::result_document::marker_kind_of_retained(
-            retained.kind,
-        ),
-        note: retained.label,
-    };
-    rspice_app_results::workbench::documents::result_document::restore_markers(
-        &mut app.state.results_parts(),
-        vec![marker],
-        None,
-    );
-    assert_eq!(app.state.results.results.session.markers.len(), 1);
-    assert_eq!(
-        app.state.results.results.session.markers[0].analysis,
-        another_analysis
     );
 }
 

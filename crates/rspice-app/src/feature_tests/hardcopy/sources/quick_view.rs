@@ -475,7 +475,7 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
 #[test]
 fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
     use rspice_app_results::workbench::documents::result_document::{
-        AnalysisPresentationKey, marker_anchor_for,
+        MarkerPlacement, place_marker, remove_marker, waves::source_waveform_anchor, working_view,
     };
 
     let analysis =
@@ -483,21 +483,24 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
             RetainedTrace::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 4.0, 8.0], "#0af"),
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Waves);
-    let analysis_key = {
-        let run = state.model.simulation.active_run().expect("active run");
-        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
-    };
-    let marker_id = state
-        .results
-        .results
-        .session
-        .add_marker(
-            analysis_key,
-            marker_anchor_for(analysis_key, "V(out)"),
-            "V(out)".to_owned(),
-            1.0,
-        )
-        .unwrap();
+    {
+        let mut parts = state.results_parts();
+        working_view::sync(&mut parts);
+        working_view::capture(&mut parts);
+    }
+    let (analysis_key, anchor) =
+        source_waveform_anchor(&mut state.results_parts(), "V(out)").expect("V(out) is drawn");
+    let marker = place_marker(
+        &mut state.results_parts(),
+        MarkerPlacement {
+            analysis: analysis_key,
+            anchor,
+            trace_name: "V(out)".to_owned(),
+            x: 1.0,
+            samples: &vec![0.0, 1.0, 2.0].into(),
+        },
+    )
+    .expect("the working view keeps the marker");
     state.results.results.session.cursors.a = Some(0.0);
     state.results.results.session.cursors.b = Some(2.0);
 
@@ -509,8 +512,9 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
     // The marker rides its trace: the exact source coordinates travel, and
     // the resampled Y is the trace's own value at the anchor.
     assert_eq!(plot.markers.len(), 1, "{:?}", plot.markers);
+    let marker_id = marker;
     let marker = &plot.markers[0];
-    assert_eq!(marker.label, format!("M{marker_id}"));
+    assert_eq!(marker.label, format!("M{}", marker_id.marker_id.get()));
     assert_eq!(marker.source_x_bits, Some(1.0f64.to_bits()));
     assert_eq!(marker.source_y_bits, Some(4.0f64.to_bits()));
     assert_eq!(marker.trace_id, Some(plot.traces[0].trace_id));
@@ -538,7 +542,7 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
     assert_ne!(a.start.y_um, a.end.y_um);
 
     // A page with nothing placed on it carries neither.
-    state.results.results.session.markers.clear();
+    remove_marker(&mut state.results_parts(), marker_id);
     state.results.results.session.cursors.a = None;
     state.results.results.session.cursors.b = None;
     let bare = resolve_quick_view(&state).expect("quick view resolves");

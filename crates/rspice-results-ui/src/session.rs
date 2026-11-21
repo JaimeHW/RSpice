@@ -14,7 +14,7 @@ use rspice_results::{
     family_projection::SourceSampleSelection,
     result_presentation::{
         AnalysisPresentationKey, AnalysisPresentationSource, ExprTrace, MarkerKind,
-        ResultArtifactPresentationKey, ResultMarker, ResultViewer, SourceWaveformPresentationKey,
+        ResultArtifactPresentationKey, ResultViewer, SourceWaveformPresentationKey,
         WavePanePresentationKey, WaveformPresentationKey, viewer_uses_wave_stack,
     },
     visualization_document::{MarkerId, PaneId},
@@ -82,24 +82,13 @@ impl CursorTool {
     }
 }
 
-/// Which store owns one marker, and where in it.
-///
-/// The two stores are genuinely different objects: a quick marker is a
-/// project-scoped annotation on a dataset, and a document marker is a retained
-/// entity of one project-owned visualization document. Naming the store in the
-/// identity means every edit routes by construction — there is no shared
-/// integer space to collide in, and no truncation of the document's full-width
-/// entity serial into a session id.
+/// Where one marker lives: the view that keeps it, the pane, and the view's
+/// own serial for it at full width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarkerSelector {
-    /// Project-persisted quick-view marker in [`ResultViewerState::markers`].
-    Quick(u32),
-    /// Retained marker of one project-owned visualization document pane.
-    Document {
-        document_id: ResultDocumentId,
-        pane_id: PaneId,
-        marker_id: MarkerId,
-    },
+pub struct MarkerSelector {
+    pub document_id: ResultDocumentId,
+    pub pane_id: PaneId,
+    pub marker_id: MarkerId,
 }
 
 /// An uncommitted edit of one marker's purpose.
@@ -110,13 +99,12 @@ pub struct MarkerEditDraft {
     pub kind: MarkerKind,
 }
 
-/// Per-frame projection of one persistent pane's retained markers.
+/// Per-frame projection of the markers the view being drawn keeps.
 ///
-/// The project-owned visualization document is the only owner of these: the
-/// overlay is rebuilt by projection every frame, never serialized, and never
-/// saved into the project's quick-view marker list. It exists so the renderer
-/// and the readout can draw a retained marker without the document having to
-/// impersonate a quick one.
+/// The view, a saved document or a working view, is the only owner of
+/// these: the overlay is rebuilt by projection every frame and never
+/// serialized. It lets the renderer and the readout draw a marker without
+/// reading the view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DocumentMarker {
     pub document_id: ResultDocumentId,
@@ -133,82 +121,46 @@ pub struct DocumentMarker {
     pub note: String,
 }
 
-/// One marker to draw or list, whichever store owns it.
-///
-/// Both stores can be live at once — a document pane can carry a quick marker
-/// when the retained document does not own the clicked trace — so every
-/// consumer reads one union rather than picking a store and being wrong half
-/// the time.
+/// One marker to draw or list.
 #[derive(Debug, Clone, Copy)]
-pub enum MarkerView<'a> {
-    Quick(&'a ResultMarker),
-    Document(&'a DocumentMarker),
-}
+pub struct MarkerView<'a>(pub &'a DocumentMarker);
 
 impl<'a> MarkerView<'a> {
     pub fn selector(self) -> MarkerSelector {
-        match self {
-            MarkerView::Quick(marker) => MarkerSelector::Quick(marker.id),
-            MarkerView::Document(marker) => MarkerSelector::Document {
-                document_id: marker.document_id,
-                pane_id: marker.pane_id,
-                marker_id: marker.retained_id,
-            },
+        MarkerSelector {
+            document_id: self.0.document_id,
+            pane_id: self.0.pane_id,
+            marker_id: self.0.retained_id,
         }
     }
 
     pub fn analysis(self) -> AnalysisPresentationKey {
-        match self {
-            MarkerView::Quick(marker) => marker.analysis,
-            MarkerView::Document(marker) => marker.analysis,
-        }
+        self.0.analysis
     }
 
     pub fn anchor(self) -> &'a WaveformPresentationKey {
-        match self {
-            MarkerView::Quick(marker) => &marker.anchor,
-            MarkerView::Document(marker) => &marker.anchor,
-        }
+        &self.0.anchor
     }
 
     pub fn trace_name(self) -> &'a str {
-        match self {
-            MarkerView::Quick(marker) => &marker.trace_name,
-            MarkerView::Document(marker) => &marker.trace_name,
-        }
+        &self.0.trace_name
     }
 
     pub fn x(self) -> f64 {
-        match self {
-            MarkerView::Quick(marker) => marker.x,
-            MarkerView::Document(marker) => marker.x,
-        }
+        self.0.x
     }
 
     pub fn kind(self) -> MarkerKind {
-        match self {
-            MarkerView::Quick(marker) => marker.kind,
-            MarkerView::Document(marker) => marker.kind,
-        }
+        self.0.kind
     }
 
     pub fn note(self) -> &'a str {
-        match self {
-            MarkerView::Quick(marker) => &marker.note,
-            MarkerView::Document(marker) => &marker.note,
-        }
+        &self.0.note
     }
 
     /// What the tag reads on the plot and in the readout.
-    ///
-    /// The two stores allocate independently, so they are given distinct
-    /// prefixes: an `M7` quick marker and a `D7` retained one can share a
-    /// strip without either label claiming to name the other.
     pub fn display_id(self) -> String {
-        match self {
-            MarkerView::Quick(marker) => format!("M{}", marker.id),
-            MarkerView::Document(marker) => format!("D{}", marker.retained_id.get()),
-        }
+        format!("M{}", self.0.retained_id.get())
     }
 }
 
@@ -338,19 +290,6 @@ pub struct DocumentXyPlot {
     pub follow_view: bool,
     /// Whether the abscissa is read over decades.
     pub log_x: bool,
-}
-
-/// The quick view's own expressions and X scales, set aside while a result
-/// document's pane shows the ones it keeps in their place.
-#[derive(Debug, Clone, Default)]
-pub struct QuickViewPresentation {
-    pub analysis_exprs: std::collections::HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
-    pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
-    pub expr_projection_keys: std::collections::HashMap<usize, AnalysisPresentationKey>,
-    pub expression_units: Box<std::collections::HashMap<(AnalysisPresentationKey, String), String>>,
-    pub x_scales:
-        Box<std::collections::HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>>,
-    pub xy_strips: Box<XyStrips>,
 }
 
 /// State of the inline expression editor under a strip header.
@@ -587,6 +526,10 @@ pub struct ResultViewerState {
     /// This scopes otherwise session-only plot state and routes edits back to
     /// the project-owned visualization document.
     pub persistent_pane_context: Option<PersistentPaneContext>,
+    /// The panes of the working view the quick view draws, one per analysis
+    /// of the shown run it has a pane for. Like the persistent context, it
+    /// routes what the reader does on a strip to the view that keeps it.
+    pub working_view_panes: Vec<PersistentPaneContext>,
     /// Markers of the persistent pane currently being projected.
     ///
     /// Single-pane and wholesale-replaced: panes project, render and capture
@@ -649,8 +592,6 @@ pub struct ResultViewerState {
     /// it; `None` until they do. One width for every strip, so stacked strips
     /// keep their lanes and panes on one edge.
     pub lane_name_width: Option<f32>,
-    /// User-placed markers across every waveform strip.
-    pub markers: Vec<ResultMarker>,
     /// Most-recent-first stable waveform identities the user selected or
     /// revealed, deduplicated and bounded: the browser's Recent scope is this
     /// order.
@@ -667,12 +608,6 @@ pub struct ResultViewerState {
     /// current deterministic row order, so filtering never leaves an ordinal
     /// pointing at a different quantity.
     pub browser_range_anchor: Option<ResultBrowserSelectionKey>,
-    /// Highest allocated or restored quick-marker ID in this live project.
-    /// Restoring markers can raise it; deleting markers never lowers it.
-    next_marker_id: u32,
-    /// Allocation history owned by the current Results draft. Revert restores
-    /// this value while the live allocator above retains its monotonic floor.
-    marker_allocation_high_water: u32,
     /// The open marker-purpose dialog's uncommitted edit, if any.
     ///
     /// Editing is transactional: nothing reaches the marker until Apply, so
@@ -794,11 +729,6 @@ pub struct ResultViewerState {
     /// The strips that draw a unit pane against a signal or an expression,
     /// each after its analysis' strip. Boxed, as the X scales are.
     pub xy_strips: Box<XyStrips>,
-    /// The quick view's expressions and X scales while a document pane
-    /// shows its own, boxed: the results state is built by value before it
-    /// is boxed, and a stash held only while a document is open need not
-    /// grow it.
-    pub quick_view_presentation: Option<Box<QuickViewPresentation>>,
     /// Bit period the reader has pinned the eye to, per result.
     ///
     /// Absent means the eye recovers the period from the waveform. Project
@@ -957,93 +887,11 @@ impl ResultViewerState {
         self.marker_tool = MarkerTool(!self.marker_tool.is_armed());
     }
 
-    /// Place a valid marker without reusing an identity in this live project.
-    pub fn add_marker(
-        &mut self,
-        analysis: AnalysisPresentationKey,
-        anchor: WaveformPresentationKey,
-        trace_name: String,
-        x: f64,
-    ) -> Result<u32, String> {
-        ResultMarker::validate_placement(analysis, &anchor, x)?;
-        let id = self.marker_id_high_water().max(self.next_marker_id).checked_add(1)
-            .ok_or("result marker identity space is exhausted; existing markers can still be edited or removed")?;
-        self.next_marker_id = id;
-        self.marker_allocation_high_water = id;
-        self.markers.push(ResultMarker {
-            id,
-            analysis,
-            anchor,
-            trace_name,
-            x,
-            kind: MarkerKind::default(),
-            note: String::new(),
-        });
-        Ok(id)
-    }
-
-    pub fn marker_mut(&mut self, id: u32) -> Option<&mut ResultMarker> {
-        self.markers.iter_mut().find(|marker| marker.id == id)
-    }
-
-    /// Remove one quick marker, and with it any open edit of it.
-    pub fn remove_marker(&mut self, id: u32) {
-        self.remember_marker_ids();
-        self.markers.retain(|marker| marker.id != id);
-        if self.reference_marker == Some(MarkerSelector::Quick(id)) {
-            self.reference_marker = None;
-        }
-        if self
-            .marker_edit
-            .as_ref()
-            .is_some_and(|draft| draft.selector == MarkerSelector::Quick(id))
-        {
-            self.marker_edit = None;
-        }
-    }
-
-    /// Adopt markers restored from a project, keeping the id allocator ahead
-    /// of every label already in use.
-    pub fn adopt_markers(&mut self, markers: Vec<ResultMarker>, high_water: u32) {
-        let live_high_water = self.next_marker_id.max(self.marker_id_high_water());
-        self.marker_allocation_high_water = markers
-            .iter()
-            .map(|marker| marker.id)
-            .max()
-            .unwrap_or(0)
-            .max(high_water);
-        self.next_marker_id = live_high_water.max(self.marker_allocation_high_water);
-        self.markers = markers;
-        self.marker_edit = None;
-    }
-
-    pub fn marker_id_high_water(&self) -> u32 {
-        self.marker_allocation_high_water.max(
-            self.markers
-                .iter()
-                .map(|marker| marker.id)
-                .max()
-                .unwrap_or(0),
-        )
-    }
-
-    /// Retain even IDs inserted through the legacy mutable marker collection
-    /// before removing the last evidence of them.
-    pub fn remember_marker_ids(&mut self) {
-        self.marker_allocation_high_water = self.marker_id_high_water();
-        self.next_marker_id = self.next_marker_id.max(self.marker_allocation_high_water);
-    }
-
-    /// Replace the overlay with one persistent pane's retained markers.
-    ///
-    /// This writes nothing into the quick-view store and never touches the
-    /// quick id allocator: a retained marker's serial belongs to its document,
-    /// and letting it advance `next_marker_id` made the two stores contend for
-    /// one integer space.
+    /// Replace the overlay with the markers of the view being drawn.
     pub fn project_document_markers(&mut self, markers: Vec<DocumentMarker>) {
         self.document_markers = markers;
         if let Some(draft) = &self.marker_edit
-            && let MarkerSelector::Document { marker_id, .. } = draft.selector
+            && let MarkerSelector { marker_id, .. } = draft.selector
             && !self
                 .document_markers
                 .iter()
@@ -1062,33 +910,25 @@ impl ResultViewerState {
             .find(|marker| marker.retained_id == marker_id)
     }
 
-    /// Markers on one strip, in placement order, from both stores.
-    ///
-    /// Retained document markers come last so they paint over the quick ones:
-    /// on a persistent pane the document's own annotation is the authority.
-    /// The overlay is additionally verified against the live pane context, so
-    /// a stale projection cannot leak a document's markers onto a quick strip.
+    /// Markers on one strip, in placement order: those of the view that keeps
+    /// the strip. The overlay is verified against the pane that keeps the
+    /// strip, so a stale projection cannot leak one view's markers onto
+    /// another's strip.
     pub fn strip_markers(
         &self,
         analysis: AnalysisPresentationKey,
     ) -> impl Iterator<Item = MarkerView<'_>> {
-        let context = self.persistent_pane_context;
-        self.markers
+        let pane = self.pane_for(analysis);
+        self.document_markers
             .iter()
-            .filter(move |marker| marker.analysis == analysis)
-            .map(MarkerView::Quick)
-            .chain(
-                self.document_markers
-                    .iter()
-                    .filter(move |marker| {
-                        marker.analysis == analysis
-                            && context.is_some_and(|context| {
-                                context.document_id == marker.document_id
-                                    && context.pane_id == marker.pane_id
-                            })
+            .filter(move |marker| {
+                marker.analysis == analysis
+                    && pane.is_some_and(|context| {
+                        context.document_id == marker.document_id
+                            && context.pane_id == marker.pane_id
                     })
-                    .map(MarkerView::Document),
-            )
+            })
+            .map(MarkerView)
     }
 
     pub fn waveform_visibility(
@@ -1102,103 +942,8 @@ impl ResultViewerState {
             .unwrap_or(dataset_default)
     }
 
-    /// Carry the reader's view of the analysis `from` onto `to`, the same
-    /// authored analysis solved again by a newer run: which traces are
-    /// hidden or shown, the expressions and their units, the markers, the
-    /// log axes, the X scale, the XY strips and a hidden strip. A choice
-    /// `to` already holds is kept. A carried marker takes an identity of its
-    /// own and the X it was put at, so a marker on a point keeps its X and
-    /// one that finds a feature finds it again on the new curve.
-    pub fn carry_view(&mut self, from: AnalysisPresentationKey, to: AnalysisPresentationKey) {
-        if from == to {
-            return;
-        }
-        let visibility = self
-            .waveform_visibility
-            .iter()
-            .filter(|(key, _)| key.analysis() == from)
-            .map(|(key, visible)| {
-                (
-                    SourceWaveformPresentationKey::new(to, key.source_name()),
-                    *visible,
-                )
-            })
-            .collect::<Vec<_>>();
-        for (key, visible) in visibility {
-            self.waveform_visibility.entry(key).or_insert(visible);
-        }
-        let log_y = self
-            .log_y_panes
-            .iter()
-            .filter(|pane| pane.analysis == from)
-            .map(|pane| WavePanePresentationKey {
-                analysis: to,
-                unit: pane.unit.clone(),
-            })
-            .collect::<Vec<_>>();
-        self.log_y_panes.extend(log_y);
-        if self.hidden_strips.contains(&from) {
-            self.hidden_strips.insert(to);
-        }
-        match self.quick_view_presentation.as_deref_mut() {
-            Some(aside) => carry_expressions(
-                &mut aside.analysis_exprs,
-                &mut aside.expression_units,
-                &mut aside.x_scales,
-                &mut aside.xy_strips,
-                from,
-                to,
-            ),
-            None => carry_expressions(
-                &mut self.analysis_exprs,
-                &mut self.expression_units,
-                &mut self.x_scales,
-                &mut self.xy_strips,
-                from,
-                to,
-            ),
-        }
-        if self.markers.iter().any(|marker| marker.analysis == to) {
-            return;
-        }
-        let carried = self
-            .markers
-            .iter()
-            .filter(|marker| marker.analysis == from)
-            .cloned()
-            .collect::<Vec<_>>();
-        for marker in carried {
-            let anchor = WaveformPresentationKey {
-                analysis: to,
-                trace: marker.anchor.trace.clone(),
-            };
-            if let Ok(id) = self.add_marker(to, anchor, marker.trace_name, marker.x)
-                && let Some(placed) = self.marker_mut(id)
-            {
-                placed.kind = marker.kind;
-                placed.note = marker.note;
-            }
-        }
-    }
-
-    /// Set the quick view's expressions and X scales aside, the first time a
-    /// document pane shows its own in their place.
-    fn set_quick_view_aside(&mut self) {
-        if self.quick_view_presentation.is_none() {
-            self.quick_view_presentation = Some(Box::new(QuickViewPresentation {
-                analysis_exprs: self.analysis_exprs.clone(),
-                exprs: self.exprs.clone(),
-                expr_projection_keys: self.expr_projection_keys.clone(),
-                expression_units: self.expression_units.clone(),
-                x_scales: self.x_scales.clone(),
-                xy_strips: self.xy_strips.clone(),
-            }));
-        }
-    }
-
     /// Show a document pane's expressions, with the units declared for
-    /// them, on its analysis' strip. The quick view's own are set aside the
-    /// first time and come back when the document is left.
+    /// them, on its analysis' strip.
     pub fn project_document_expressions(
         &mut self,
         analysis: AnalysisPresentationKey,
@@ -1206,7 +951,6 @@ impl ResultViewerState {
         traces: Vec<ExprTrace>,
         units: Vec<(String, String)>,
     ) {
-        self.set_quick_view_aside();
         let held = self
             .analysis_exprs
             .get(&analysis)
@@ -1227,32 +971,23 @@ impl ResultViewerState {
     }
 
     /// Draw a document pane's analysis strip on the X scale the pane keeps.
-    /// The quick view's own choice is set aside the first time and comes
-    /// back when the document is left, as its expressions do.
     pub fn project_document_x_scale(
         &mut self,
         analysis: AnalysisPresentationKey,
         scale: rspice_ui_kit::plot::XScale,
     ) {
-        // Set aside even when the two agree: a toggle inside the pane is the
-        // document's, never the quick view's.
-        self.set_quick_view_aside();
         if self.x_scales.get(&analysis) != Some(&scale) {
             self.x_scales.insert(analysis, scale);
         }
     }
 
     /// Show the strips a document pane keeps drawn against a signal or an
-    /// expression. The quick view's own
-    /// strips are set aside the first time and come back when the document
-    /// is left, as its expressions do. A strip the pane keeps keeps the
-    /// zoom the reader gave it.
+    /// expression. A strip the pane keeps keeps the zoom the reader gave it.
     pub fn project_document_xy_strips(
         &mut self,
         analysis: AnalysisPresentationKey,
         plots: Vec<DocumentXyPlot>,
     ) {
-        self.set_quick_view_aside();
         let held: Vec<_> = self
             .xy_strips
             .iter()
@@ -1307,14 +1042,9 @@ impl ResultViewerState {
         self.expr_projection_keys.insert(analysis_index, analysis);
     }
 
-    /// Clear design results within the same project, retaining its marker IDs.
+    /// Clear design results within the same project.
     pub fn clear_design_scoped_state(&mut self) {
-        self.remember_marker_ids();
-        let next_marker_id = self.next_marker_id;
-        let marker_allocation_high_water = self.marker_allocation_high_water;
         self.clear_project_scoped_state();
-        self.next_marker_id = next_marker_id;
-        self.marker_allocation_high_water = marker_allocation_high_water;
     }
 
     /// Reset result UI state and identities when replacing the whole project.
@@ -1366,6 +1096,7 @@ impl ResultViewerState {
         pane_id: PaneId,
         analysis: AnalysisPresentationKey,
     ) {
+        self.working_view_panes.clear();
         self.persistent_pane_context = Some(PersistentPaneContext {
             document_id,
             pane_id,
@@ -1373,18 +1104,22 @@ impl ResultViewerState {
         });
     }
 
+    /// The pane that keeps what the reader does on `analysis`' strip: the
+    /// persistent pane being drawn, or the working view's pane for it.
+    pub fn pane_for(&self, analysis: AnalysisPresentationKey) -> Option<PersistentPaneContext> {
+        self.persistent_pane_context
+            .filter(|context| context.analysis == analysis)
+            .or_else(|| {
+                self.working_view_panes
+                    .iter()
+                    .copied()
+                    .find(|context| context.analysis == analysis)
+            })
+    }
+
     /// Leave the persistent projection: the pane context and the retained
     /// marker overlay it scopes both belong to the document that was open.
     pub fn leave_persistent_document(&mut self) {
-        if let Some(quick) = self.quick_view_presentation.take() {
-            let quick = *quick;
-            self.analysis_exprs = quick.analysis_exprs;
-            self.exprs = quick.exprs;
-            self.expr_projection_keys = quick.expr_projection_keys;
-            self.expression_units = quick.expression_units;
-            self.x_scales = quick.x_scales;
-            self.xy_strips = quick.xy_strips;
-        }
         self.persistent_pane_context = None;
         self.document_markers.clear();
         self.document_presentation = None;
@@ -1749,9 +1484,7 @@ impl ResultViewerState {
     /// and only its dataset-named legacy keys are pruned.
     ///
     pub fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
-        self.remember_marker_ids();
         let live = |analysis: AnalysisPresentationKey| retained.contains(&analysis.dataset_id());
-        self.markers.retain(|marker| live(marker.analysis));
         self.log_y_panes.retain(|pane| live(pane.analysis));
         self.analysis_exprs.retain(|analysis, _| live(*analysis));
         self.expression_units
@@ -1786,44 +1519,6 @@ impl ResultViewerState {
             .selected_result_artifact
             .take()
             .filter(|key| live(key.analysis()));
-    }
-}
-
-/// Carry one analysis' expressions, their units, its X scale and its XY
-/// strips onto another, keeping any `to` already holds.
-fn carry_expressions(
-    analysis_exprs: &mut HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
-    expression_units: &mut HashMap<(AnalysisPresentationKey, String), String>,
-    x_scales: &mut HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>,
-    xy_strips: &mut XyStrips,
-    from: AnalysisPresentationKey,
-    to: AnalysisPresentationKey,
-) {
-    if let Some(expressions) = analysis_exprs.get(&from).cloned() {
-        analysis_exprs.entry(to).or_insert(expressions);
-    }
-    let units = expression_units
-        .iter()
-        .filter(|((analysis, _), _)| *analysis == from)
-        .map(|((_, text), unit)| ((to, text.clone()), unit.clone()))
-        .collect::<Vec<_>>();
-    for (key, unit) in units {
-        expression_units.entry(key).or_insert(unit);
-    }
-    if let Some(scale) = x_scales.get(&from).copied() {
-        x_scales.entry(to).or_insert(scale);
-    }
-    if !xy_strips.iter().any(|strip| strip.analysis == to) {
-        let strips = xy_strips
-            .iter()
-            .filter(|strip| strip.analysis == from)
-            .cloned()
-            .map(|mut strip| {
-                strip.analysis = to;
-                strip
-            })
-            .collect::<Vec<_>>();
-        xy_strips.extend(strips);
     }
 }
 

@@ -211,23 +211,23 @@ fn table_and_marker_waveform_identity_survive_waveform_reorder() {
     };
     state.results.results.session.table.analysis = Some(analysis_key);
     state.results.results.session.table.columns = vec![trace];
-    state
-        .results
-        .results
-        .session
-        .add_marker(analysis_key, waveform.clone(), "V(a)".to_owned(), 0.5)
-        .unwrap();
+    state.quick_frame();
+    state.place_marker("V(a)", 0.5).expect("a marker");
 
     state.model.simulation.retained.runs[0].analyses[0]
         .waveforms
         .swap(0, 1);
+    state.quick_frame();
     assert_eq!(
         state.results.results.session.table.columns[0].source_name, "V(a)",
         "the selected table column must not become the new waveform at slot zero"
     );
-    assert_eq!(state.results.results.session.markers[0].anchor, waveform);
     assert_eq!(
-        state.results.results.session.markers[0]
+        state.results.results.session.document_markers[0].anchor,
+        waveform
+    );
+    assert_eq!(
+        state.results.results.session.document_markers[0]
             .anchor
             .trace
             .source_name,
@@ -1002,17 +1002,6 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
             .results
             .results
             .session
-            .add_marker(
-                analysis,
-                marker_anchor_for(analysis, name),
-                name.to_owned(),
-                0.5,
-            )
-            .unwrap();
-        state
-            .results
-            .results
-            .session
             .log_y_panes
             .insert(WavePanePresentationKey {
                 analysis,
@@ -1044,8 +1033,6 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
         .results
         .reconcile_retained_datasets(&state.model.simulation);
 
-    assert_eq!(state.results.results.session.markers.len(), 1);
-    assert_eq!(state.results.results.session.markers[0].analysis, kept);
     assert_eq!(state.results.results.session.log_y_panes.len(), 1);
     assert_eq!(state.results.results.session.hidden_strips.len(), 1);
     assert_eq!(state.results.results.session.recent_signals.len(), 1);
@@ -1058,15 +1045,6 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
             .analysis_exprs
             .contains_key(&kept)
     );
-    assert!(
-        state
-            .results
-            .results
-            .project_expression_groups(&state.model.simulation)
-            .iter()
-            .all(|group| group.analysis == kept),
-        "a save must not carry a group about a dataset the project dropped"
-    );
 }
 
 #[test]
@@ -1075,17 +1053,7 @@ fn retained_history_reconciliation_skips_reads_and_tracks_edits_and_replacement(
 
     let mut state = transient_state();
     let analysis = active_analysis_key(&state);
-    state
-        .results
-        .results
-        .session
-        .add_marker(
-            analysis,
-            marker_anchor_for(analysis, "V(out)"),
-            "V(out)".to_owned(),
-            0.5,
-        )
-        .unwrap();
+    state.results.results.session.hidden_strips.insert(analysis);
 
     let baseline = WorkCounts::reset();
     state
@@ -1121,7 +1089,7 @@ fn retained_history_reconciliation_skips_reads_and_tracks_edits_and_replacement(
         .results
         .reconcile_retained_datasets(&state.model.simulation);
     assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
-    assert_eq!(state.results.results.session.markers.len(), 1);
+    assert_eq!(state.results.results.session.hidden_strips.len(), 1);
 
     // Same run count and sequence, different dataset: no old annotation survives.
     state.model.simulation.retained.runs = transient_state().model.simulation.retained.runs;
@@ -1131,7 +1099,7 @@ fn retained_history_reconciliation_skips_reads_and_tracks_edits_and_replacement(
         .results
         .reconcile_retained_datasets(&state.model.simulation);
     assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
-    assert!(state.results.results.session.markers.is_empty());
+    assert!(state.results.results.session.hidden_strips.is_empty());
 }
 
 /// The defect this pins: the waveform sheets key their viewports by
@@ -1240,92 +1208,6 @@ fn an_unqualified_signal_reads_in_its_analysis_quantity() {
         "A",
         "an explicit accessor still wins over the analysis default"
     );
-}
-
-#[test]
-fn restored_markers_keep_their_labels_and_advance_the_id_allocator() {
-    let mut state = transient_state();
-    let key = active_analysis_key(&state);
-    let anchor = WaveformPresentationKey {
-        analysis: key,
-        trace: TracePresentationKey {
-            source_name: "V(out)".to_owned(),
-            kind: 0,
-            family_group: 0,
-        },
-    };
-    let marker = ResultMarker {
-        id: 7,
-        analysis: key,
-        anchor,
-        trace_name: "V(out)".to_owned(),
-        x: 0.5,
-        kind: MarkerKind::Peak,
-        note: "settling".to_owned(),
-    };
-
-    restore_markers(&mut state.results_parts(), vec![marker], None);
-
-    assert_eq!(state.results.results.session.markers.len(), 1);
-    assert_eq!(state.results.results.session.markers[0].note, "settling");
-    let next = state
-        .results
-        .results
-        .session
-        .add_marker(
-            key,
-            state.results.results.session.markers[0].anchor.clone(),
-            "V(out)".to_owned(),
-            0.75,
-        )
-        .unwrap();
-    assert!(
-        next > 7,
-        "a restored label must not be handed out a second time"
-    );
-}
-
-/// A marker naming a dataset the reopened project no longer retains has
-/// nothing to draw on, and must not be adopted as if it did.
-#[test]
-fn markers_for_absent_datasets_are_dropped_on_restore() {
-    let mut state = transient_state();
-    let key = active_analysis_key(&state);
-    let foreign = AnalysisPresentationKey::new(
-        crate::product::DatasetId::new(),
-        &AnalysisResult::new(9, AnalysisType::Transient, "TRAN"),
-    );
-    let anchor = WaveformPresentationKey {
-        analysis: foreign,
-        trace: TracePresentationKey {
-            source_name: "V(gone)".to_owned(),
-            kind: 0,
-            family_group: 0,
-        },
-    };
-    let kept = ResultMarker {
-        id: 1,
-        analysis: key,
-        anchor: anchor.clone(),
-        trace_name: "V(out)".to_owned(),
-        x: 0.1,
-        kind: MarkerKind::Note,
-        note: String::new(),
-    };
-    let dropped = ResultMarker {
-        id: 2,
-        analysis: foreign,
-        anchor,
-        trace_name: "V(gone)".to_owned(),
-        x: 0.1,
-        kind: MarkerKind::Note,
-        note: String::new(),
-    };
-
-    restore_markers(&mut state.results_parts(), vec![kept, dropped], None);
-
-    assert_eq!(state.results.results.session.markers.len(), 1);
-    assert_eq!(state.results.results.session.markers[0].id, 1);
 }
 
 /// The offering gate has to fail closed on both of its branches.

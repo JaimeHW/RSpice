@@ -74,6 +74,90 @@ impl ResultsTestHost {
         self.results.reads(&self.model, &self.workbench)
     }
 
+    /// What a quick-view frame does around drawing: leave any saved
+    /// document, draw the shown run from its working view, and keep what the
+    /// reader changed since the last frame. The app draws a frame before the
+    /// reader can change anything, so a test calls it first too.
+    pub(crate) fn quick_frame(&mut self) {
+        let mut parts = self.results_parts();
+        parts.results.session.leave_persistent_document();
+        super::prepare_viewer_state(&mut parts);
+        super::working_view::sync(&mut parts);
+        super::working_view::capture(&mut parts);
+    }
+
+    /// The working view the shown run is drawn through.
+    pub(crate) fn working_view(
+        &self,
+    ) -> Option<&crate::results::visualization_document::VisualizationDocument> {
+        let run = self.model.simulation.active_run()?;
+        let view = super::working_view::view_of_run(self.results_reads(), run.dataset_id)?;
+        self.model.workspace.content.visualization_document(view)
+    }
+
+    /// Put a marker at `x` on `signal`'s trace of the shown analysis, as a
+    /// click on the drawn trace does: on the view that keeps the strip.
+    pub(crate) fn place_marker(&mut self, signal: &str, x: f64) -> Option<super::MarkerSelector> {
+        let (index, samples) = {
+            let run = self.model.simulation.active_run()?;
+            let shown = self.model.simulation.view.active_analysis_idx.unwrap_or(0);
+            let (index, waveform) = std::iter::once(shown)
+                .chain(0..run.analyses.len())
+                .find_map(|index| {
+                    let waveform = run
+                        .analyses
+                        .get(index)?
+                        .waveforms
+                        .iter()
+                        .find(|waveform| waveform.name == signal)?;
+                    Some((index, waveform))
+                })?;
+            (index, waveform.x.clone())
+        };
+        let (analysis, anchor) =
+            super::waves::source_waveform_anchor_in(&mut self.results_parts(), index, signal)?;
+        super::place_marker(
+            &mut self.results_parts(),
+            super::MarkerPlacement {
+                analysis,
+                anchor,
+                trace_name: signal.to_owned(),
+                x,
+                samples: &samples,
+            },
+        )
+    }
+
+    /// Give a placed marker a label and a kind, as the marker dialog's
+    /// Apply does, and draw the quick view again.
+    pub(crate) fn mark(
+        &mut self,
+        marker: super::MarkerSelector,
+        note: &str,
+        kind: crate::state::result_presentation::MarkerKind,
+    ) {
+        super::commit_marker_edit(&mut self.results_parts(), marker, note, kind)
+            .expect("the view takes the marker's purpose");
+        self.quick_frame();
+    }
+
+    /// The project reopened: its runs, and its visualization documents
+    /// written out and read back, with none of this session's Results.
+    pub(crate) fn reopened(&self) -> Self {
+        let mut reopened = Self::default();
+        reopened.model.simulation = self.model.simulation.clone();
+        for document in &self.model.workspace.content.visualization_documents {
+            let json = serde_json::to_string(document).expect("a view writes out");
+            reopened
+                .model
+                .workspace
+                .content
+                .insert_visualization_document(serde_json::from_str(&json).expect("and reads back"))
+                .expect("the project takes the view back");
+        }
+        reopened
+    }
+
     /// The parts the results workspace's commands write.
     pub(crate) fn results_parts(&mut self) -> ResultsParts<'_> {
         self.results.parts(

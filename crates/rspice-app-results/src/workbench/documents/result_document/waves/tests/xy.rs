@@ -641,40 +641,21 @@ fn a_cursor_on_the_figure_reads_the_instant_and_both_coordinates() {
     );
 }
 
-/// The quick view's strips are the project's: saved with the result
-/// presentation, span and all, and drawn again when the project is
-/// reopened.
+/// The quick view's strips are the project's: kept by the run's working
+/// view, span and all, and drawn again when the project is reopened.
 #[test]
 fn the_project_keeps_a_strip_against_a_signal_and_its_span() {
     let mut state = lissajous_host();
+    state.quick_frame();
     open_strip(&mut state, "V", signal("V(a)"));
     state.results.results.session.xy_strips[0].sweep_range = Some((0.25e-3, 0.75e-3));
     let analysis = super::lanes::strip(&mut state)[0].analysis_key;
-    let saved = state
-        .results
-        .results
-        .project_presentation(&state.model.simulation);
-    assert_eq!(
-        saved.xy_plots,
-        [rspice_results::result_presentation::StripXyPlot {
-            analysis,
-            unit: "V".to_owned(),
-            abscissa: signal("V(a)"),
-            sweep_range: Some(
-                rspice_results::visualization_document::AxisRange::new(0.25e-3, 0.75e-3).unwrap()
-            ),
-            follow_sweep_view: false,
-            log_abscissa: false,
-        }]
-    );
-    state.results.results.session.xy_strips.clear();
-    crate::workbench::documents::result_document::restore_presentation(
-        &mut state.results_parts(),
-        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap(),
-    );
+    state.quick_frame();
+    let mut reopened = state.reopened();
+    reopened.quick_frame();
     let mut expected = XyStrip::new(analysis, "V", signal("V(a)"));
     expected.sweep_range = Some((0.25e-3, 0.75e-3));
-    assert_eq!(strips(&state), [expected]);
+    assert_eq!(strips(&reopened), [expected]);
 }
 
 /// A saved view keeps its strip against a signal, the strip's span and
@@ -688,8 +669,10 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
     };
     use super::expression_units::{document_frame, save_single_pane_view};
     let mut state = lissajous_host();
+    state.quick_frame();
     open_strip(&mut state, "V", signal("V(a)"));
     state.results.results.session.xy_strips[0].sweep_range = Some((0.0, 0.5e-3));
+    state.quick_frame();
     let document_id = save_single_pane_view(&mut state);
     let kept = |state: &ResultsTestHost| {
         state
@@ -770,7 +753,7 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
     assert!(reloaded.xy_plots()[0].follow_sweep_view);
     assert!(reloaded.xy_plots()[0].log_abscissa);
 
-    state.results.results.session.leave_persistent_document();
+    state.quick_frame();
     let held = |state: &ResultsTestHost| {
         strips(state)
             .iter()

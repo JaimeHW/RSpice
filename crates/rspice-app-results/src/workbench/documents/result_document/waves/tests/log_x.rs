@@ -76,6 +76,7 @@ fn a_startup_transient_reads_over_decades_of_time_from_its_first_positive_sample
     assert_eq!(log_x_refusal(&model(&mut state)[0]), None);
 
     let analysis = key(&state);
+    state.quick_frame();
     state
         .results
         .results
@@ -109,24 +110,11 @@ fn a_startup_transient_reads_over_decades_of_time_from_its_first_positive_sample
         Some((true, true)),
         "lit while logarithmic"
     );
-    // The choice is the project's.
-    let saved = state
-        .results
-        .results
-        .project_presentation(&state.model.simulation);
-    assert_eq!(
-        saved.x_scales,
-        [rspice_results::result_presentation::StripXScale {
-            analysis,
-            logarithmic: true
-        }]
-    );
-    state.results.results.session.x_scales.clear();
-    crate::workbench::documents::result_document::restore_presentation(
-        &mut state.results_parts(),
-        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap(),
-    );
-    assert_eq!(model(&mut state)[0].x_scale, XScale::Log10);
+    // The choice is the project's: its working view keeps it.
+    state.quick_frame();
+    let mut reopened = state.reopened();
+    reopened.quick_frame();
+    assert_eq!(model(&mut reopened)[0].x_scale, XScale::Log10);
 }
 
 #[test]
@@ -170,8 +158,8 @@ fn a_signed_sweep_refuses_a_logarithmic_axis_and_says_why() {
 }
 
 /// A saved view keeps the X scale its strip drew when it was saved and draws
-/// its own while it is shown. The quick view's choice is set aside meanwhile:
-/// the project keeps it, and the strip has it back when the view is left.
+/// its own while it is shown. The quick view's choice stays in its working
+/// view, and the strip has it back when the view is left.
 #[test]
 fn a_saved_view_draws_its_own_x_scale_and_hands_the_quick_view_its_choice_back() {
     use super::super::super::persistent_document::{
@@ -182,12 +170,14 @@ fn a_saved_view_draws_its_own_x_scale_and_hands_the_quick_view_its_choice_back()
     let x = vec![0.0, 1.0e-9, 1.0e-8, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3];
     let mut state = strip_host(AnalysisType::Transient, x);
     let analysis = key(&state);
+    state.quick_frame();
     state
         .results
         .results
         .session
         .x_scales
         .insert(analysis, XScale::Log10);
+    state.quick_frame();
     let document_id = save_single_pane_view(&mut state);
     let kept = |state: &ResultsTestHost| {
         state
@@ -235,18 +225,17 @@ fn a_saved_view_draws_its_own_x_scale_and_hands_the_quick_view_its_choice_back()
     );
     assert_eq!(
         state
-            .results
-            .results
-            .project_presentation(&state.model.simulation)
-            .x_scales,
-        [rspice_results::result_presentation::StripXScale {
-            analysis,
-            logarithmic: true
-        }],
-        "the project keeps the quick view's choice"
+            .working_view()
+            .expect("the run's working view")
+            .axes()
+            .iter()
+            .find(|axis| axis.orientation == AxisOrientation::Horizontal)
+            .map(|axis| axis.scale),
+        Some(AxisScale::Logarithmic),
+        "the working view keeps the quick view's choice"
     );
 
-    state.results.results.session.leave_persistent_document();
+    state.quick_frame();
     assert_eq!(
         state.results.results.session.x_scales.get(&analysis),
         Some(&XScale::Log10),
@@ -260,7 +249,7 @@ fn a_saved_view_draws_its_own_x_scale_and_hands_the_quick_view_its_choice_back()
         state.results.results.session.x_scales.get(&analysis),
         Some(&XScale::Linear)
     );
-    state.results.results.session.leave_persistent_document();
+    state.quick_frame();
     assert_eq!(
         state.results.results.session.x_scales.get(&analysis),
         Some(&XScale::Log10)

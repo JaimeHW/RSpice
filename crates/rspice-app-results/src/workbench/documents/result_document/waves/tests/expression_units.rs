@@ -180,6 +180,7 @@ fn an_expression_that_fails_to_evaluate_opens_no_pane() {
 #[test]
 fn a_declared_unit_survives_a_save_and_reload() {
     let mut state = power_fixture();
+    state.quick_frame();
     add(&mut state, "V(out)*I(vdd)");
     let analysis = AnalysisPresentationKey::new(
         state.model.simulation.retained.runs[0].dataset_id,
@@ -191,19 +192,11 @@ fn a_declared_unit_survives_a_save_and_reload() {
         .session
         .expression_units
         .insert((analysis, "V(out)*I(vdd)".to_owned()), "mW".to_owned());
-    let saved = state
-        .results
-        .results
-        .project_presentation(&state.model.simulation);
-    assert_eq!(saved.expression_groups[0].units.len(), 1);
-    let wire = serde_json::to_string(&saved).unwrap();
-    state.results.results.session.expression_units.clear();
-    crate::workbench::documents::result_document::restore_presentation(
-        &mut state.results_parts(),
-        serde_json::from_str(&wire).unwrap(),
-    );
+    state.quick_frame();
+    let mut reopened = state.reopened();
+    reopened.quick_frame();
     assert_eq!(
-        state
+        reopened
             .results
             .results
             .session
@@ -259,6 +252,7 @@ pub(super) fn save_single_pane_view(
 #[test]
 fn a_saved_view_keeps_its_expressions_and_their_declared_units() {
     let mut state = power_fixture();
+    state.quick_frame();
     add(&mut state, "V(out)*I(vdd)");
     add(&mut state, "V(out)/V(in)");
     let analysis = AnalysisPresentationKey::new(
@@ -271,6 +265,7 @@ fn a_saved_view_keeps_its_expressions_and_their_declared_units() {
         .session
         .expression_units
         .insert((analysis, "V(out)*I(vdd)".to_owned()), "mW".to_owned());
+    state.quick_frame();
     let document_id = save_single_pane_view(&mut state);
     for _ in 0..2 {
         document_frame(&mut state, document_id);
@@ -310,8 +305,8 @@ fn a_saved_view_keeps_its_expressions_and_their_declared_units() {
         settled,
         "an idle frame writes nothing"
     );
-    // The quick view keeps its own expressions while the view shows the
-    // document's, and has them back when the view is left.
+    // A change to the document's expressions outside its frame is nobody's;
+    // the quick view draws its working view's when the view is left.
     state
         .results
         .results
@@ -320,7 +315,7 @@ fn a_saved_view_keeps_its_expressions_and_their_declared_units() {
         .get_mut(&analysis)
         .unwrap()
         .pop();
-    state.results.results.session.leave_persistent_document();
+    state.quick_frame();
     assert_eq!(
         state.results.results.session.analysis_exprs[&analysis].len(),
         2,
@@ -369,7 +364,9 @@ fn an_expression_added_while_a_document_pane_is_open_is_written_to_the_document(
         capture_pane_presentation, project_pane_presentation, projection,
     };
     let mut state = power_fixture();
+    state.quick_frame();
     add(&mut state, "V(out)*I(vdd)");
+    state.quick_frame();
     let analysis = AnalysisPresentationKey::new(
         state.model.simulation.retained.runs[0].dataset_id,
         &state.model.simulation.retained.runs[0].analyses[0],
@@ -438,7 +435,7 @@ fn an_expression_added_while_a_document_pane_is_open_is_written_to_the_document(
         settled
     );
     // The quick view never had it.
-    state.results.results.session.leave_persistent_document();
+    state.quick_frame();
     assert_eq!(
         state.results.results.session.analysis_exprs[&analysis]
             .iter()

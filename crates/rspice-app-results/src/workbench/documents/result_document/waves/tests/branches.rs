@@ -356,13 +356,9 @@ fn loop_readings(
 #[test]
 fn a_marker_row_states_a_value_the_marked_branch_takes() {
     let mut state = hysteresis_run();
-    let (analysis, anchor, forward, artifact) = loop_readings(&mut state);
-    state
-        .results
-        .results
-        .session
-        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.25)
-        .unwrap();
+    let (_, _, forward, artifact) = loop_readings(&mut state);
+    state.quick_frame();
+    state.place_marker("V(out)", 0.25).expect("a marker");
 
     let painted = super::interaction::painted_texts(&mut state, marker_section);
 

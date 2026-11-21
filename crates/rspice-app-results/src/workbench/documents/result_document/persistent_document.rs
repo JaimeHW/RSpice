@@ -930,6 +930,9 @@ pub fn project_pane_presentation(
     pane: &PaneProjection,
     viewer: ResultViewer,
 ) -> Result<(), String> {
+    // The pane draws over the quick view's drawing state: what the reader
+    // did in the quick view is kept in its view first.
+    super::working_view::release(state);
     let run = state
         .model
         .simulation
@@ -1138,7 +1141,7 @@ pub fn project_pane_presentation(
             trace_name: trace.label.clone(),
             x: *x,
             kind: super::marker_kind_of_retained(marker.kind),
-            note: marker.label.clone(),
+            note: super::marker_note(&marker.label, &trace.label),
         });
     }
     state.results.session.project_document_markers(markers);
@@ -1293,11 +1296,22 @@ fn x_scale_edit(
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    x_scale_edit_for(state, document, pane.id, analysis_key)
+}
+
+/// The edit that makes `pane_id` keep the X scale the reader chose for the
+/// strip of `analysis_key`.
+pub(super) fn x_scale_edit_for(
+    state: &ResultsParts<'_>,
+    document: &VisualizationDocument,
+    pane_id: PaneId,
+    analysis_key: super::AnalysisPresentationKey,
+) -> Option<DocumentEdit> {
     let chosen = state.results.session.x_scales.get(&analysis_key)?;
     let axis = document
         .axes()
         .iter()
-        .find(|axis| axis.pane_id == pane.id && axis.orientation == AxisOrientation::Horizontal)?;
+        .find(|axis| axis.pane_id == pane_id && axis.orientation == AxisOrientation::Horizontal)?;
     let scale = if *chosen == crate::ui::plot::XScale::Log10 {
         AxisScale::Logarithmic
     } else {
@@ -1341,6 +1355,17 @@ fn xy_plot_edit(
         return None;
     };
     let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    xy_plot_edit_for(state, document, pane.id, analysis_key)
+}
+
+/// The edit that makes `pane_id` keep the strips drawn against a signal of
+/// the analysis `analysis_key`, in their order.
+pub(super) fn xy_plot_edit_for(
+    state: &ResultsParts<'_>,
+    document: &VisualizationDocument,
+    pane_id: PaneId,
+    analysis_key: super::AnalysisPresentationKey,
+) -> Option<DocumentEdit> {
     let strips: Vec<XyStrip> = state
         .results
         .session
@@ -1349,18 +1374,14 @@ fn xy_plot_edit(
         .filter(|strip| strip.analysis == analysis_key)
         .cloned()
         .collect();
-    let plots = xy_plots_of(pane.id, &strips);
+    let plots = xy_plots_of(pane_id, &strips);
     let held: Vec<&XyPlot> = document
         .xy_plots()
         .iter()
-        .filter(|plot| plot.pane_id == pane.id)
+        .filter(|plot| plot.pane_id == pane_id)
         .collect();
-    (held.len() != plots.len() || held.iter().zip(&plots).any(|(held, plot)| *held != plot)).then(
-        || DocumentEdit::SetXyPlots {
-            pane_id: pane.id,
-            plots,
-        },
-    )
+    (held.len() != plots.len() || held.iter().zip(&plots).any(|(held, plot)| *held != plot))
+        .then(|| DocumentEdit::SetXyPlots { pane_id, plots })
 }
 
 /// The edits that make the pane keep the expressions its strip draws: each
@@ -1378,6 +1399,19 @@ fn expression_edits(
         return Vec::new();
     };
     let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    expression_edits_for(state, document, pane.id, binding.dataset, run, analysis_key)
+}
+
+/// The edits that make `pane_id`, reading `dataset`, keep the expressions
+/// the strip of `analysis_key` over `run` draws.
+pub(super) fn expression_edits_for(
+    state: &ResultsParts<'_>,
+    document: &VisualizationDocument,
+    pane_id: PaneId,
+    dataset: crate::product::DatasetBinding,
+    run: &SimulationRun,
+    analysis_key: super::AnalysisPresentationKey,
+) -> Vec<DocumentEdit> {
     let session = &state.results.session;
     let drawn = session
         .analysis_exprs
@@ -1386,25 +1420,25 @@ fn expression_edits(
     let held: Vec<_> = document
         .expression_traces()
         .iter()
-        .filter(|trace| trace.pane_id == pane.id)
+        .filter(|trace| trace.pane_id == pane_id)
         .collect();
     let mut edits: Vec<DocumentEdit> = held
         .iter()
         .filter(|trace| !drawn.iter().any(|expr| expr.text == trace.text))
         .map(|trace| DocumentEdit::RemoveExpressionTrace {
-            pane_id: pane.id,
+            pane_id,
             text: trace.text.clone(),
         })
         .collect();
     for expr in drawn {
-        let mut datasets = vec![binding.dataset];
+        let mut datasets = vec![dataset];
         for read in named_datasets(state.results_reads(), document, run, &expr.text) {
             if !datasets.contains(&read) {
                 datasets.push(read);
             }
         }
         let wanted = ExpressionTrace {
-            pane_id: pane.id,
+            pane_id,
             text: expr.text.clone(),
             datasets,
             unit: session
@@ -1585,7 +1619,7 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
     }
 }
 
-mod lanes;
+pub(super) mod lanes;
 pub(crate) mod sources;
 
 #[cfg(test)]

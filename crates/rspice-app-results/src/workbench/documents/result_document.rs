@@ -47,6 +47,7 @@ pub(crate) mod view_edits;
 mod view_history;
 mod view_plans;
 mod viewer_state;
+pub mod working_view;
 
 /// Lossless CSV projection of the exact evidence rendered by a Results sheet.
 pub(crate) struct ResultSheetCsv {
@@ -165,13 +166,13 @@ use std::collections::{HashMap, HashSet};
 
 use egui::{Ui, WidgetInfo, WidgetType};
 
+use crate::state::result_presentation::ResultPresentation;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use crate::state::result_presentation::TracePresentationKey;
 pub use crate::state::result_presentation::{AnalysisPresentationKey, WaveformPresentationKey};
 pub use crate::state::result_presentation::{
     ExprTrace, MarkerKind, ResultMarker, WavePanePresentationKey,
 };
-use crate::state::result_presentation::{ResultExpressionGroup, ResultPresentation};
 
 use crate::product::{AnalysisInstanceId, DatasetId};
 
@@ -741,22 +742,23 @@ pub const fn marker_kind_of_retained(
     match kind {
         PlotMarkerKind::PointNote | PlotMarkerKind::MeasurementAnchor => MarkerKind::Note,
         PlotMarkerKind::Peak => MarkerKind::Peak,
+        PlotMarkerKind::Valley => MarkerKind::Valley,
+        PlotMarkerKind::Crossing { level } => MarkerKind::Crossing(level),
         PlotMarkerKind::SpecificationLine => MarkerKind::Spec,
     }
 }
 
-/// How a Results marker kind is retained in a visualization document, or
-/// `None` for a kind a result document does not keep: a valley or a crossing
-/// is a search of the project's quick markers.
+/// How a Results marker kind is retained in a visualization document.
 pub(crate) const fn retained_kind_of_marker(
     kind: MarkerKind,
-) -> Option<crate::results::visualization_document::PlotMarkerKind> {
+) -> crate::results::visualization_document::PlotMarkerKind {
     use crate::results::visualization_document::PlotMarkerKind;
     match kind {
-        MarkerKind::Note => Some(PlotMarkerKind::PointNote),
-        MarkerKind::Peak => Some(PlotMarkerKind::Peak),
-        MarkerKind::Spec => Some(PlotMarkerKind::SpecificationLine),
-        MarkerKind::Valley | MarkerKind::Crossing(_) => None,
+        MarkerKind::Note => PlotMarkerKind::PointNote,
+        MarkerKind::Peak => PlotMarkerKind::Peak,
+        MarkerKind::Valley => PlotMarkerKind::Valley,
+        MarkerKind::Crossing(level) => PlotMarkerKind::Crossing { level },
+        MarkerKind::Spec => PlotMarkerKind::SpecificationLine,
     }
 }
 
@@ -770,9 +772,9 @@ pub struct MarkerPlacement<'a> {
     /// The anchoring trace's X samples, as drawn.
     ///
     /// A retained document marker names an exact retained sample — the
-    /// document declines to interpolate one into existence — so a document
-    /// placement is snapped onto the nearest of these. A quick marker keeps
-    /// the requested position, which is what the quick view has always meant.
+    /// document declines to interpolate one into existence — so a placement
+    /// on a saved document is snapped onto the nearest of these. A working
+    /// view keeps the requested position.
     pub samples: &'a rspice_results::waveform::SharedWaveformValues,
 }
 
@@ -818,14 +820,24 @@ fn retained_marker_label<'a>(note: &'a str, trace_name: &'a str) -> &'a str {
     }
 }
 
-/// Place a marker on whichever store owns the pane being drawn.
+/// The note a retained marker label reads as: none while it is only the
+/// name of the signal it rides, which its row states already.
+pub(crate) fn marker_note(label: &str, trace_name: &str) -> String {
+    if label == trace_name {
+        String::new()
+    } else {
+        label.to_owned()
+    }
+}
+
+/// Place a marker on the view that keeps the strip being drawn: the saved
+/// document's pane, or the working view's pane for the strip's analysis.
 ///
-/// On a persistent pane the retained document is the owner, so the marker is
-/// committed to it immediately — one interaction, one transaction, no frame
-/// diff to reconcile. A document that cannot hold the marker — it does not
-/// retain the clicked trace (an expression trace, or one family member of a
-/// swept trace), or it declines the placement outright — falls back to a quick
-/// marker and says why, rather than dropping the reader's click.
+/// The marker is committed to it immediately: one interaction, one
+/// transaction, no frame diff to reconcile. It rides the view's trace of the
+/// clicked signal; a click on something the view does not plot as a trace of
+/// its own (an expression, or a trace another document draws) places nothing
+/// and says why, rather than keeping the marker somewhere the view does not.
 pub fn place_marker(
     state: &mut ResultsParts<'_>,
     placement: MarkerPlacement<'_>,
@@ -844,46 +856,38 @@ pub fn place_marker(
         x,
         ..
     } = placement;
-    let retained = state
-        .results
-        .session
-        .persistent_pane_context
-        .and_then(|context| {
-            let document = state
-                .model
-                .workspace
-                .content
-                .visualization_document(context.document_id)?;
-            let trace = document
-                .traces()
-                .iter()
-                .find(|trace| trace.pane_id == context.pane_id && trace.label == trace_name)?;
-            Some((context, document.revision(), trace.id))
-        });
-    let quick_fallback = |state: &mut ResultsParts<'_>, reason: Option<String>| match state
-        .results
-        .session
-        .add_marker(analysis, anchor.clone(), trace_name.clone(), x)
-    {
-        Ok(id) => {
-            if let Some(reason) = reason {
-                state.prompt(reason);
-            }
-            Some(MarkerSelector::Quick(id))
-        }
-        Err(error) => {
-            state.prompt(format!("Could not place marker: {error}"));
-            None
-        }
+    let Some(context) = state.results.session.pane_for(analysis) else {
+        state.prompt(format!(
+            "No view keeps this strip, so the marker on '{trace_name}' was not placed."
+        ));
+        return None;
     };
-
-    let Some((context, revision, trace_id)) = retained else {
-        let reason = state.results.session.persistent_pane_context.is_some().then(|| {
-            format!(
-                "'{trace_name}' is not a retained trace of this result document, so the marker was placed on the dataset instead of the document."
-            )
+    let retained = state
+        .model
+        .workspace
+        .content
+        .visualization_document(context.document_id)
+        .and_then(|document| {
+            let trace = document.traces().iter().find(|trace| {
+                trace.pane_id == context.pane_id
+                    && (trace.label == trace_name
+                        || trace.source_signal() == Some(anchor.trace.source_name.as_str()))
+            })?;
+            // A working view reads the run itself, so its marker stays where
+            // it was put, as the quick view's always has; a saved document
+            // names a retained sample.
+            let at = if document.working_view().is_some() {
+                x
+            } else {
+                retained_x
+            };
+            Some((document.revision(), trace.id, at))
         });
-        return quick_fallback(state, reason);
+    let Some((revision, trace_id, at)) = retained else {
+        state.prompt(format!(
+            "'{trace_name}' is not a trace this view keeps, so the marker was not placed."
+        ));
+        return None;
     };
 
     let receipt = match view_edits::apply(
@@ -894,7 +898,7 @@ pub fn place_marker(
             crate::results::visualization_document::DocumentEdit::AddTypedMarker {
                 pane_id: context.pane_id,
                 trace_id,
-                coordinate: crate::results::visualization_document::TypedValue::Real(retained_x),
+                coordinate: crate::results::visualization_document::TypedValue::Real(at),
                 label: trace_name.clone(),
                 kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
                 scope: crate::results::visualization_document::PlotMarkerScope::Pane,
@@ -904,12 +908,8 @@ pub fn place_marker(
     ) {
         Ok(receipt) => receipt,
         Err(error) => {
-            return quick_fallback(
-                state,
-                Some(format!(
-                    "This result document declined to retain the marker ({error}), so it was placed on the dataset instead."
-                )),
-            );
+            state.prompt(format!("Could not place marker: {error}"));
+            return None;
         }
     };
     let marker_id = receipt
@@ -927,68 +927,67 @@ pub fn place_marker(
         retained_id: marker_id,
         analysis,
         anchor,
-        trace_name: trace_name.clone(),
-        x: retained_x,
+        trace_name,
+        x: at,
         kind: MarkerKind::default(),
-        note: trace_name,
+        note: String::new(),
     });
-    Some(MarkerSelector::Document {
+    Some(MarkerSelector {
         document_id: context.document_id,
         pane_id: context.pane_id,
         marker_id,
     })
 }
 
-/// Remove one marker from whichever store owns it.
+/// Remove one marker from the view that keeps it.
 pub fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelector) {
-    match selector {
-        MarkerSelector::Quick(id) => state.results.session.remove_marker(id),
-        MarkerSelector::Document {
-            document_id,
-            marker_id,
-            ..
-        } => {
-            let Some(revision) = state
-                .model
-                .workspace
-                .content
-                .visualization_document(document_id)
-                .map(|document| document.revision())
-            else {
-                return;
-            };
-            if let Err(error) = view_edits::apply(
-                state,
-                document_id,
-                revision,
-                vec![
-                    crate::results::visualization_document::DocumentEdit::Remove(
-                        crate::results::visualization_document::EntityRef::Marker(marker_id),
-                    ),
-                ],
-            ) {
-                state.prompt(format!("Could not remove the marker: {error}"));
-                return;
-            }
-            state
-                .results
-                .session
-                .document_markers
-                .retain(|marker| marker.retained_id != marker_id);
-            if state
-                .results
-                .session
-                .marker_edit
-                .as_ref()
-                .is_some_and(|draft| draft.selector == selector)
-            {
-                state.results.session.marker_edit = None;
-            }
-        }
+    let MarkerSelector {
+        document_id,
+        marker_id,
+        ..
+    } = selector;
+    let Some(revision) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .map(|document| document.revision())
+    else {
+        return;
+    };
+    if let Err(error) = view_edits::apply(
+        state,
+        document_id,
+        revision,
+        vec![
+            crate::results::visualization_document::DocumentEdit::Remove(
+                crate::results::visualization_document::EntityRef::Marker(marker_id),
+            ),
+        ],
+    ) {
+        state.prompt(format!("Could not remove the marker: {error}"));
+        return;
+    }
+    state
+        .results
+        .session
+        .document_markers
+        .retain(|marker| marker.retained_id != marker_id);
+    if state
+        .results
+        .session
+        .marker_edit
+        .as_ref()
+        .is_some_and(|draft| draft.selector == selector)
+    {
+        state.results.session.marker_edit = None;
+    }
+    if state.results.session.reference_marker == Some(selector) {
+        state.results.session.reference_marker = None;
     }
 }
 
-/// Commit one marker-purpose edit to whichever store owns the marker.
+/// Commit one marker-purpose edit to the view that keeps the marker.
 ///
 /// The retained coordinate, scope and source specification are read back from
 /// the live document rather than from the projection, so an edit of the label
@@ -999,89 +998,69 @@ pub fn commit_marker_edit(
     note: &str,
     kind: MarkerKind,
 ) -> Result<(), String> {
-    match selector {
-        MarkerSelector::Quick(id) => {
-            let marker =
-                state.results.session.marker_mut(id).ok_or_else(|| {
-                    "The quick marker is no longer part of this project.".to_owned()
-                })?;
-            marker.note = note.to_owned();
-            marker.kind = kind;
-            Ok(())
-        }
-        MarkerSelector::Document {
-            document_id,
-            marker_id,
-            ..
-        } => {
-            let Some(retained_kind) = retained_kind_of_marker(kind) else {
-                return Err(format!(
-                    "A result document keeps note, peak and spec markers; a {} marker is kept \
-                     with the project's own markers.",
-                    kind.label()
-                ));
-            };
-            let trace_name = state
-                .results
-                .session
-                .document_marker(marker_id)
-                .map(|marker| marker.trace_name.clone())
-                .unwrap_or_default();
-            let label = retained_marker_label(note, &trace_name).to_owned();
-            let retained = state
-                .model
-                .workspace
-                .content
-                .visualization_document(document_id)
-                .and_then(|document| {
-                    let marker = document
-                        .markers()
-                        .iter()
-                        .find(|marker| marker.id == marker_id)?;
-                    Some((
-                        document.revision(),
-                        marker.coordinate.clone(),
-                        marker.scope,
-                        marker.source_specification.clone(),
-                    ))
-                });
-            let Some((revision, coordinate, scope, source_specification)) = retained else {
-                return Err(
-                    "The retained marker is no longer part of this result document.".to_owned(),
-                );
-            };
-            view_edits::apply(
-                state,
-                document_id,
-                revision,
-                vec![
-                    crate::results::visualization_document::DocumentEdit::SetMarker {
-                        marker_id,
-                        coordinate,
-                        label: label.clone(),
-                        kind: retained_kind,
-                        scope,
-                        source_specification,
-                    },
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-            // The overlay states what the document now holds, not what was
-            // typed: those are the same thing only when the typed label was
-            // one the document would accept.
-            if let Some(marker) = state
-                .results
-                .session
-                .document_markers
-                .iter_mut()
-                .find(|marker| marker.retained_id == marker_id)
-            {
-                marker.note = label;
-                marker.kind = kind;
-            }
-            Ok(())
-        }
+    let MarkerSelector {
+        document_id,
+        marker_id,
+        ..
+    } = selector;
+    let retained_kind = retained_kind_of_marker(kind);
+    let trace_name = state
+        .results
+        .session
+        .document_marker(marker_id)
+        .map(|marker| marker.trace_name.clone())
+        .unwrap_or_default();
+    let label = retained_marker_label(note, &trace_name).to_owned();
+    let retained = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .and_then(|document| {
+            let marker = document
+                .markers()
+                .iter()
+                .find(|marker| marker.id == marker_id)?;
+            Some((
+                document.revision(),
+                marker.coordinate.clone(),
+                marker.scope,
+                marker.source_specification.clone(),
+            ))
+        });
+    let Some((revision, coordinate, scope, source_specification)) = retained else {
+        return Err("The retained marker is no longer part of this result document.".to_owned());
+    };
+    view_edits::apply(
+        state,
+        document_id,
+        revision,
+        vec![
+            crate::results::visualization_document::DocumentEdit::SetMarker {
+                marker_id,
+                coordinate,
+                label: label.clone(),
+                kind: retained_kind,
+                scope,
+                source_specification,
+            },
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    // The overlay states what the document now holds, not what was
+    // typed: those are the same thing only when the typed label was
+    // one the document would accept.
+    if let Some(marker) = state
+        .results
+        .session
+        .document_markers
+        .iter_mut()
+        .find(|marker| marker.retained_id == marker_id)
+    {
+        marker.note = label;
+        marker.kind = kind;
     }
+    Ok(())
 }
 
 /// A marker anchor naming one retained signal's plain value projection.
@@ -1104,8 +1083,6 @@ pub fn marker_anchor_for(
     }
 }
 
-/// Restore authored presentation only after its datasets and visualization
-/// documents have been loaded. Exhaustive ownership covers every durable field.
 /// Forget what Results showed of a project another project replaced: the
 /// view or run it had open, and every view's undo steps. The opened
 /// project then opens on its own Results, not on the view of the project
@@ -1118,197 +1095,13 @@ pub fn forget_replaced_project(state: &mut ResultsParts<'_>) {
     state.results.view_edits = view_edits::ViewHistories::default();
 }
 
+/// Restore what a project keeps of Results beside its visualization
+/// documents, once its datasets have loaded.
 pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPresentation) {
-    let ResultPresentation {
-        markers,
-        marker_id_high_water,
-        log_y_panes,
-        expression_groups,
-        signal_sets,
-        x_scales,
-        xy_plots,
-    } = presentation;
-    restore_markers(state, markers, marker_id_high_water);
-    restore_log_y_panes(state, log_y_panes);
-    restore_expression_groups(state, expression_groups);
+    // What the reader made of a run is its view's, restored with the
+    // project's visualization documents; only the signal sets are kept here.
+    let ResultPresentation { signal_sets, .. } = presentation;
     state.results.signal_sets = signal_sets::sanitize_signal_sets(signal_sets);
-    *state.results.session.x_scales = x_scales
-        .into_iter()
-        .map(|scale| {
-            let x_scale = if scale.logarithmic {
-                crate::ui::plot::XScale::Log10
-            } else {
-                crate::ui::plot::XScale::Linear
-            };
-            (scale.analysis, x_scale)
-        })
-        .collect();
-    // A strip drawn against a signal keeps its span only while it is an
-    // interval; a span a file cannot hold draws the whole record.
-    *state.results.session.xy_strips = xy_plots
-        .into_iter()
-        .map(|plot| {
-            let mut strip =
-                rspice_results_ui::session::XyStrip::new(plot.analysis, plot.unit, plot.abscissa);
-            strip.sweep_range = plot
-                .sweep_range
-                .filter(|range| {
-                    range.minimum.is_finite()
-                        && range.maximum.is_finite()
-                        && range.minimum < range.maximum
-                })
-                .map(|range| (range.minimum, range.maximum));
-            strip.follow_view = plot.follow_sweep_view;
-            strip.log_x = plot.log_abscissa;
-            strip
-        })
-        .collect();
-}
-
-/// Restore the markers a project retained, dropping any whose analysis is not
-/// in the reopened datasets, and any that is only a saved projection of a
-/// marker the workspace's own visualization documents already own.
-///
-/// Projects saved before markers had one owner captured every retained
-/// document marker into the quick-view list as well. Reopening such a project
-/// would draw both copies and offer two rows for one annotation, so an
-/// incoming quick marker that matches a retained one in content — same trace,
-/// position, label and kind — is dropped in favour of the document's. The
-/// match is content-shaped, not id-shaped: the two stores never shared an id
-/// space that could be compared.
-pub fn restore_markers(
-    state: &mut ResultsParts<'_>,
-    markers: Vec<ResultMarker>,
-    high_water: Option<u32>,
-) {
-    let legacy = high_water.is_none();
-    let mut highest = high_water.unwrap_or(0);
-    let retained: Vec<ResultMarker> = markers
-        .into_iter()
-        .filter(|marker| {
-            // Current writers explicitly own quick markers. A genuine quick
-            // annotation can match a document marker without being its old
-            // projection; migrate this ambiguity only in legacy files.
-            if legacy && is_document_marker_projection(state.results_reads(), marker) {
-                return false;
-            }
-            // A discarded dataset does not make its allocated labels reusable.
-            highest = highest.max(marker.id);
-            state
-                .model
-                .simulation
-                .retained
-                .runs
-                .iter()
-                .any(|run| marker.analysis.resolve(run).is_some())
-        })
-        .collect();
-    state.results.session.adopt_markers(retained, highest);
-}
-
-/// Whether one loaded quick marker restates a marker a project-owned
-/// visualization document already retains.
-fn is_document_marker_projection(state: ResultsReads<'_>, marker: &ResultMarker) -> bool {
-    use crate::results::visualization_document::TypedValue;
-    if marker.anchor.analysis != marker.analysis {
-        return false;
-    }
-    state
-        .model
-        .workspace
-        .content
-        .visualization_documents
-        .iter()
-        .any(|document| {
-            document.markers().iter().any(|retained| {
-                let Some(trace) = document
-                    .traces()
-                    .iter()
-                    .find(|trace| trace.id == retained.trace_id)
-                else {
-                    return false;
-                };
-                let Some(binding) = document
-                    .panes()
-                    .iter()
-                    .find(|pane| pane.id == trace.pane_id)
-                    .and_then(|pane| pane.binding)
-                else {
-                    return false;
-                };
-                // Equal display text is not evidence of equal ownership.
-                // Preserve annotations on another dataset, analysis, or signal.
-                binding.dataset == trace.binding
-                    && binding.dataset.dataset_id == marker.analysis.dataset_id()
-                    && binding.analysis_id == marker.analysis.retained_instance_id()
-                    && trace.source_signal() == Some(marker.anchor.trace.source_name.as_str())
-                    && trace.label == marker.trace_name
-                    && retained.coordinate == TypedValue::Real(marker.x)
-                    && retained.label == marker.note
-                    && marker_kind_of_retained(retained.kind) == marker.kind
-            })
-        })
-}
-
-/// Restore the reader's logarithmic-axis pane choices, dropping any whose
-/// analysis this project no longer retains.
-///
-/// Same rule as the markers above: a presentation decision that cannot find
-/// the dataset it was made about is not a decision about anything.
-pub fn restore_log_y_panes(state: &mut ResultsParts<'_>, panes: Vec<WavePanePresentationKey>) {
-    state.results.session.log_y_panes = panes
-        .into_iter()
-        .filter(|pane| {
-            state
-                .model
-                .simulation
-                .retained
-                .runs
-                .iter()
-                .any(|run| pane.analysis.resolve(run).is_some())
-        })
-        .collect();
-}
-
-/// Restore project-owned expression definitions after their immutable result
-/// datasets have been loaded. Stale groups fail closed instead of attaching
-/// their text to whichever analysis happens to occupy an old ordinal.
-pub fn restore_expression_groups(state: &mut ResultsParts<'_>, groups: Vec<ResultExpressionGroup>) {
-    state.results.session.analysis_exprs.clear();
-    state.results.session.expression_units.clear();
-    state.results.session.exprs.clear();
-    state.results.session.expr_projection_keys.clear();
-    state.results.analysis_expr_cache.clear();
-    for group in groups {
-        let retained = state
-            .model
-            .simulation
-            .retained
-            .runs
-            .iter()
-            .any(|run| group.analysis.resolve(run).is_some());
-        if retained && !group.traces.is_empty() {
-            for declared in group.units {
-                if group.traces.iter().any(|trace| trace.text == declared.text)
-                    && !declared.unit.trim().is_empty()
-                {
-                    state
-                        .results
-                        .session
-                        .expression_units
-                        .insert((group.analysis, declared.text), declared.unit);
-                }
-            }
-            state
-                .results
-                .session
-                .analysis_exprs
-                .insert(group.analysis, group.traces);
-        }
-    }
-    state
-        .results
-        .reconcile_expression_projection(&state.model.simulation);
 }
 
 /// Whether one analysis' retained evidence passes its own validator.
@@ -1619,6 +1412,10 @@ pub struct ResultsState {
     /// The quick view's viewer while a saved document's pane shows its own,
     /// put back when the quick view is shown again.
     pub(crate) quick_view_viewer: Option<ResultViewer>,
+    /// The working view the quick view last drew and the drawing state it
+    /// left, so what the reader changed is written back to it. Boxed to keep
+    /// the results state inside its stack budget. Transient.
+    pub(crate) working_view: Option<Box<working_view::QuickViewBinding>>,
     /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
     pub analysis_expr_cache:
@@ -1968,6 +1765,7 @@ fn show_with_chrome(
     let family = document_edit::family::quick_view_selection(state.results_reads());
     state.results.set_sample_selection(family);
     prepare_viewer_state(state);
+    working_view::sync(state);
     let plan_before_docbar = state
         .model
         .sim_setup
@@ -2014,6 +1812,7 @@ fn show_with_chrome(
     if strip_height > 0.0 {
         waves::readout_strip(ui, state, strip_height);
     }
+    working_view::capture(state);
 }
 
 /// Whether the active viewer owns a stage-local bar below the viewer tabs.

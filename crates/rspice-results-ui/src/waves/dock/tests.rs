@@ -5,7 +5,7 @@ use crate::waves::TraceKind;
 use rspice_results::{
     analysis_result::AnalysisResult,
     analysis_type::AnalysisType,
-    result_presentation::{ResultMarker, TracePresentationKey, WaveformPresentationKey},
+    result_presentation::{TracePresentationKey, WaveformPresentationKey},
     waveform::RetainedWaveform,
 };
 use rspice_vocabulary::product::{DatasetId, ResultDocumentId};
@@ -19,8 +19,10 @@ fn a_marker_tag_names_the_note_only_when_there_is_one() {
     let analysis_result =
         AnalysisResult::<RetainedWaveform>::new(1, AnalysisType::Transient, "marker analysis", 0.0);
     let analysis = AnalysisPresentationKey::new(DatasetId::new(), &analysis_result);
-    let mut marker = ResultMarker {
-        id: 3,
+    let mut marker = DocumentMarker {
+        document_id: ResultDocumentId::new(),
+        pane_id: retained_entity_id(1),
+        retained_id: retained_entity_id(3),
         analysis,
         anchor: WaveformPresentationKey {
             analysis,
@@ -35,26 +37,8 @@ fn a_marker_tag_names_the_note_only_when_there_is_one() {
         kind: MarkerKind::Note,
         note: String::new(),
     };
-    assert_eq!(marker_label(MarkerView::Quick(&marker)), "M3");
+    assert_eq!(marker_label(MarkerView(&marker)), "M3");
 
     marker.note = "  settling  ".to_owned();
-    assert_eq!(marker_label(MarkerView::Quick(&marker)), "M3 · settling");
-
-    // The two stores allocate independently, so a retained marker's tag can
-    // never be mistaken for the quick marker that happens to share its number.
-    let retained = DocumentMarker {
-        document_id: ResultDocumentId::new(),
-        pane_id: retained_entity_id(1),
-        retained_id: retained_entity_id(3),
-        analysis,
-        anchor: marker.anchor.clone(),
-        trace_name: "V(out)".to_owned(),
-        x: 0.0,
-        kind: MarkerKind::Note,
-        note: "  ringing  ".to_owned(),
-    };
-    assert_eq!(
-        marker_label(MarkerView::Document(&retained)),
-        "D3 · ringing"
-    );
+    assert_eq!(marker_label(MarkerView(&marker)), "M3 · settling");
 }

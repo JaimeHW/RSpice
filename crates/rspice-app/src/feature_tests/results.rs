@@ -21,6 +21,7 @@ mod retained_memo;
 mod two_windows;
 mod viewer_capabilities;
 mod waveform_export;
+mod working_view;
 
 use crate::workbench::RSpiceApp;
 use rspice_app_results::workbench::documents::result_document::ResultsParts;

@@ -743,6 +743,18 @@ pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateRe
     Ok(document_id)
 }
 
+/// The viewer a working view's pane for `analysis` names: the first sheet
+/// released for its kind that draws it.
+pub(super) fn view_pane_viewer(
+    analysis: &AnalysisResult,
+) -> Option<&'static ViewerDocumentDefinition> {
+    VIEWER_DOCUMENTS.iter().find(|viewer| {
+        viewer.release == ViewerReleaseClass::ReleaseTarget
+            && analysis_matches_viewer(viewer, analysis.analysis_type)
+            && super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
+    })
+}
+
 /// Create, with no dialog, the document a quick view's measurement is kept
 /// in: one pane reading the analysis at `analysis_index` of the run
 /// `dataset_id`, as the quick view shows it, in the first viewer that draws

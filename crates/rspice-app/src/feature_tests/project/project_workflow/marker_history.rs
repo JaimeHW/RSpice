@@ -1,24 +1,17 @@
-//! Published marker identities must survive deletion, scoped save, and reload.
+//! A marker's number is never handed out again, through a save and a
+//! reopen: the view that keeps the marker keeps the numbers it gave out.
 
 use super::*;
-use crate::workbench::app_state::services_access::confirm_revert_active_document;
 use rspice_app_results::workbench::documents::result_document::{
-    AnalysisPresentationKey, marker_anchor_for,
+    MarkerPlacement, place_marker, remove_marker, waves::source_waveform_anchor, working_view,
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
-    DestinationAuthority, SaveScope, active_document, active_document_is_dirty,
-    generated_netlist_input_digest, has_unsaved_changes, prepare_revert_active_document,
-    save_native, saved_snapshot_authorizes_continuation,
+    DestinationAuthority, SaveScope, has_unsaved_changes, save_native,
 };
-use rspice_app_state::state::{ComponentType, Point};
+use rspice_results_ui::session::MarkerSelector;
 
-fn retained_results() -> (AppState, AnalysisPresentationKey) {
+fn retained_results() -> AppState {
     let mut state = AppState::default();
-    let key = install_retained_results(&mut state);
-    (state, key)
-}
-
-fn install_retained_results(state: &mut AppState) -> AnalysisPresentationKey {
     let mut run = rspice_app_state::state::SimulationRun::new(1);
     run.add_analysis(
         rspice_app_state::state::AnalysisResult::new(
@@ -37,341 +30,76 @@ fn install_retained_results(state: &mut AppState) -> AnalysisPresentationKey {
     run.mark_running().unwrap();
     run.finish_lifecycle(rspice_app_state::state::SimulationRunLifecycle::Completed)
         .unwrap();
-    let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     state.model.simulation.retained.runs.push(run);
     assert!(state.model.simulation.select_run(0));
     state
         .workbench
         .activate(rspice_app_state::workbench::workspace::Workspace::Results);
-    key
+    state
 }
 
-fn unique_path(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "rspice-{label}-{}.rspiceproj",
+/// Draw the quick view's frame around nothing: its run's working view is
+/// made or followed, drawn, and kept.
+fn quick_frame(state: &mut AppState) {
+    let mut parts = state.results_parts();
+    working_view::sync(&mut parts);
+    working_view::capture(&mut parts);
+}
+
+fn mark(state: &mut AppState, x: f64) -> MarkerSelector {
+    quick_frame(state);
+    let (analysis, anchor) =
+        source_waveform_anchor(&mut state.results_parts(), "V(out)").expect("V(out) is drawn");
+    place_marker(
+        &mut state.results_parts(),
+        MarkerPlacement {
+            analysis,
+            anchor,
+            trace_name: "V(out)".to_owned(),
+            x,
+            samples: &vec![0.0, 1.0].into(),
+        },
+    )
+    .expect("the working view keeps the marker")
+}
+
+#[test]
+fn a_removed_markers_number_is_not_handed_out_again_after_save_and_reopen() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-marker-numbers-{}.rspiceproj",
         uuid::Uuid::new_v4()
-    ))
-}
+    ));
+    let mut state = retained_results();
+    mark(&mut state, 0.25);
+    let highest = mark(&mut state, 0.5);
+    remove_marker(&mut state.results_parts(), highest);
+    save_native(
+        &mut state,
+        SaveScope::AllDocuments,
+        &path,
+        DestinationAuthority::UserSelected,
+    )
+    .unwrap();
+    assert!(!has_unsaved_changes(&state));
+    drop(state);
 
-fn remove_project_artifacts(path: &std::path::Path) {
-    let _ = std::fs::remove_file(path);
+    let mut reopened = AppState::default();
+    assert!(reopened.load_project_from_path(&path));
+    assert!(reopened.model.simulation.select_run(0));
+    quick_frame(&mut reopened);
+    assert!(
+        !has_unsaved_changes(&reopened),
+        "drawing the reopened run's view changes nothing"
+    );
+    let next = mark(&mut reopened, 0.75);
+    assert!(
+        next.marker_id.get() > highest.marker_id.get(),
+        "a removed marker's number was handed out again after a reopen"
+    );
+    assert_eq!(reopened.results.results.session.document_markers.len(), 2);
+    let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(path.with_extension("rspiceproj.bak"));
-    let mut lock = path.as_os_str().to_os_string();
+    let mut lock = path.into_os_string();
     lock.push(".rspice.lock");
     let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
-}
-
-fn add_marker(state: &mut AppState, analysis: AnalysisPresentationKey) -> u32 {
-    state
-        .results
-        .results
-        .session
-        .add_marker(
-            analysis,
-            marker_anchor_for(analysis, "V(out)"),
-            "V(out)".to_owned(),
-            0.5,
-        )
-        .unwrap()
-}
-
-#[test]
-fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
-    for scope in [SaveScope::ActiveDocument, SaveScope::AllDocuments] {
-        for remove_all in [false, true] {
-            let path = unique_path("marker-allocation-history");
-            let (mut state, analysis) = retained_results();
-            let first = add_marker(&mut state, analysis);
-            let highest = add_marker(&mut state, analysis);
-            save_native(
-                &mut state,
-                SaveScope::AllDocuments,
-                &path,
-                DestinationAuthority::UserSelected,
-            )
-            .unwrap();
-            state.results.results.session.remove_marker(highest);
-            if remove_all {
-                state.results.results.session.remove_marker(first);
-            }
-            state
-                .model
-                .schematic
-                .with_undo("Unrelated drawing edit", |schematic| {
-                    schematic.add_component(ComponentType::Resistor, Point::new(2, 3));
-                });
-            assert!(active_document_is_dirty(&state));
-            save_native(&mut state, scope, &path, DestinationAuthority::Canonical).unwrap();
-            assert!(!active_document_is_dirty(&state));
-            assert_eq!(
-                has_unsaved_changes(&state),
-                scope == SaveScope::ActiveDocument
-            );
-
-            let written = rspice_app_services::io::load_project_file(&path).unwrap();
-            let expected_components = usize::from(scope == SaveScope::AllDocuments);
-            assert_eq!(
-                written.file.workspace.schematic_buffers
-                    [&state.model.workspace.content.active_key()]
-                    .document()
-                    .components
-                    .len(),
-                expected_components
-            );
-            drop(state);
-            let mut reopened = AppState::default();
-            assert!(reopened.load_project_from_path(&path));
-            assert!(!has_unsaved_changes(&reopened));
-            let next = add_marker(&mut reopened, analysis);
-            assert!(
-                next > highest,
-                "a published marker label was reused after deletion and reopen"
-            );
-            assert_eq!(
-                reopened.results.results.session.markers.len(),
-                if remove_all { 1 } else { 2 }
-            );
-            remove_project_artifacts(&path);
-        }
-    }
-}
-
-#[test]
-fn allocator_only_edits_are_dirty_and_revert_does_not_reuse_live_ids() {
-    let path = unique_path("marker-allocation-revert");
-    let (mut state, analysis) = retained_results();
-    let published = add_marker(&mut state, analysis);
-    save_native(
-        &mut state,
-        SaveScope::AllDocuments,
-        &path,
-        DestinationAuthority::UserSelected,
-    )
-    .unwrap();
-    let saved_document = active_document(&state);
-    let solver_input = generated_netlist_input_digest(&state).unwrap();
-    let abandoned = add_marker(&mut state, analysis);
-    state.results.results.session.remove_marker(abandoned);
-    assert!(
-        active_document_is_dirty(&state),
-        "allocation history needs a durable Results owner"
-    );
-    assert!(has_unsaved_changes(&state));
-    assert_eq!(
-        generated_netlist_input_digest(&state).unwrap(),
-        solver_input
-    );
-    assert!(!saved_snapshot_authorizes_continuation(
-        &state,
-        SaveScope::ActiveDocument,
-        &saved_document
-    ));
-    assert!(!saved_snapshot_authorizes_continuation(
-        &state,
-        SaveScope::AllDocuments,
-        &saved_document
-    ));
-    let review = prepare_revert_active_document(&state).unwrap();
-    confirm_revert_active_document(&mut state, &review).unwrap();
-    assert!(
-        !has_unsaved_changes(&state),
-        "revert restores the accepted allocation history"
-    );
-    assert_eq!(state.results.results.session.markers[0].id, published);
-    assert!(
-        add_marker(&mut state, analysis) > abandoned,
-        "an abandoned live ID cannot retarget an open editor"
-    );
-    remove_project_artifacts(&path);
-}
-
-#[test]
-fn saving_another_document_does_not_publish_results_allocation_history() {
-    let path = unique_path("marker-history-save-scope");
-    let (mut state, analysis) = retained_results();
-    let published = add_marker(&mut state, analysis);
-    save_native(
-        &mut state,
-        SaveScope::AllDocuments,
-        &path,
-        DestinationAuthority::UserSelected,
-    )
-    .unwrap();
-    let pending = add_marker(&mut state, analysis);
-    state.results.results.session.remove_marker(pending);
-    state
-        .workbench
-        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
-    state
-        .model
-        .schematic
-        .with_undo("Drawing edit", |schematic| {
-            schematic.add_component(ComponentType::Resistor, Point::new(2, 3));
-        });
-    save_native(
-        &mut state,
-        SaveScope::ActiveDocument,
-        &path,
-        DestinationAuthority::Canonical,
-    )
-    .unwrap();
-    assert!(!active_document_is_dirty(&state));
-    assert!(has_unsaved_changes(&state));
-    let written = rspice_app_services::io::load_project_file(&path).unwrap();
-    assert_eq!(
-        written.file.result_presentation.marker_id_high_water,
-        Some(published)
-    );
-    state
-        .workbench
-        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
-    assert!(active_document_is_dirty(&state));
-    save_native(
-        &mut state,
-        SaveScope::ActiveDocument,
-        &path,
-        DestinationAuthority::Canonical,
-    )
-    .unwrap();
-    let written = rspice_app_services::io::load_project_file(&path).unwrap();
-    assert_eq!(
-        written.file.result_presentation.marker_id_high_water,
-        Some(pending)
-    );
-    assert_eq!(written.file.result_presentation.markers.len(), 1);
-    assert!(!has_unsaved_changes(&state));
-    remove_project_artifacts(&path);
-}
-
-#[test]
-fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
-    for replace_drawing in [false, true] {
-        let path = unique_path("marker-history-design-reset");
-        let (mut state, analysis) = retained_results();
-        let published = add_marker(&mut state, analysis);
-        let project_id = state.model.workspace.content.project.id();
-        save_native(
-            &mut state,
-            SaveScope::AllDocuments,
-            &path,
-            DestinationAuthority::UserSelected,
-        )
-        .unwrap();
-        state
-            .results
-            .results
-            .reconcile_retained_datasets(&state.model.simulation);
-        // Opening a schematic file inside a project imports it beside the
-        // drawing rather than replacing it, so the drawing is replaced here
-        // by a new document in place.
-        if replace_drawing {
-            state.create_new_schematic();
-        } else {
-            state.results_parts().clear_simulation_results(true);
-        }
-        state
-            .results
-            .results
-            .reconcile_retained_datasets(&state.model.simulation);
-        assert_eq!(state.model.workspace.content.project.id(), project_id);
-        assert!(state.results.results.session.markers.is_empty());
-        save_native(
-            &mut state,
-            SaveScope::AllDocuments,
-            &path,
-            DestinationAuthority::Canonical,
-        )
-        .unwrap();
-        drop(state);
-        let mut reopened = AppState::default();
-        assert!(reopened.load_project_from_path(&path));
-        assert!(!has_unsaved_changes(&reopened));
-        let analysis = install_retained_results(&mut reopened);
-        assert!(add_marker(&mut reopened, analysis) > published);
-
-        reopened.create_new_project();
-        assert_ne!(reopened.model.workspace.content.project.id(), project_id);
-        let analysis = install_retained_results(&mut reopened);
-        assert_eq!(add_marker(&mut reopened, analysis), 1);
-        remove_project_artifacts(&path);
-    }
-}
-
-#[test]
-fn legacy_marker_history_is_adopted_without_dirtying_an_unchanged_project() {
-    let path = unique_path("marker-history-legacy");
-    let (mut state, analysis) = retained_results();
-    let highest = add_marker(&mut state, analysis);
-    save_native(
-        &mut state,
-        SaveScope::AllDocuments,
-        &path,
-        DestinationAuthority::UserSelected,
-    )
-    .unwrap();
-    let mut legacy: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert!(
-        legacy
-            .as_object_mut()
-            .unwrap()
-            .remove("result_marker_id_high_water")
-            .is_some()
-    );
-    std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
-    let written = rspice_app_services::io::load_project_file(&path).unwrap();
-    assert_eq!(written.file.result_presentation.marker_id_high_water, None);
-    drop(state);
-    let mut reopened = AppState::default();
-    assert!(reopened.load_project_from_path(&path));
-    assert!(!has_unsaved_changes(&reopened));
-    assert!(add_marker(&mut reopened, analysis) > highest);
-    assert!(has_unsaved_changes(&reopened));
-    remove_project_artifacts(&path);
-}
-
-#[test]
-fn removing_the_last_possible_marker_does_not_reset_exhaustion_after_reopen() {
-    let path = unique_path("marker-history-exhausted");
-    let (mut state, analysis) = retained_results();
-    add_marker(&mut state, analysis);
-    state.results.results.session.markers[0].id = u32::MAX;
-    save_native(
-        &mut state,
-        SaveScope::AllDocuments,
-        &path,
-        DestinationAuthority::UserSelected,
-    )
-    .unwrap();
-    // Install the published maximum through the real restoration path.
-    assert!(state.load_project_from_path(&path));
-    state.results.results.session.remove_marker(u32::MAX);
-    save_native(
-        &mut state,
-        SaveScope::AllDocuments,
-        &path,
-        DestinationAuthority::Canonical,
-    )
-    .unwrap();
-    drop(state);
-    let mut reopened = AppState::default();
-    assert!(reopened.load_project_from_path(&path));
-    assert!(!has_unsaved_changes(&reopened));
-    assert!(
-        reopened
-            .results
-            .results
-            .session
-            .add_marker(
-                analysis,
-                marker_anchor_for(analysis, "V(out)"),
-                "V(out)".to_owned(),
-                0.5,
-            )
-            .unwrap_err()
-            .contains("exhausted")
-    );
-    assert!(reopened.results.results.session.markers.is_empty());
-    assert!(!has_unsaved_changes(&reopened));
-    remove_project_artifacts(&path);
 }

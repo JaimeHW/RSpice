@@ -12,7 +12,6 @@ use rspice_results::calculator::value::RealValue;
 use rspice_results::feature_search::Direction;
 use rspice_results::result_presentation::{MarkerKind, WavePanePresentationKey};
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
-use rspice_results_ui::session::MarkerSelector;
 use rspice_results_ui::waves::cursor_values::{marker_position, x_separation};
 use rspice_results_ui::waves::navigation::CursorJump;
 use std::f64::consts::PI;
@@ -287,24 +286,22 @@ fn a_reference_marker_reads_the_analytic_differences() {
     let models = strip(&mut state);
     let model = &models[0];
     let trace = &model.traces[0];
-    let anchor = rspice_results_ui::waves::anchor_key(model, trace);
-    let session = &mut state.results.results.session;
+    state.quick_frame();
     let mut ids = Vec::new();
     for (k, offset) in [(0, 9.0), (2, -6.0), (4, 4.0)] {
-        let id = session
-            .add_marker(
-                model.analysis_key,
-                anchor.clone(),
-                trace.name.clone(),
-                extremum(k) + offset * DT,
-            )
-            .unwrap();
-        session.marker_mut(id).unwrap().kind = MarkerKind::Peak;
-        ids.push(id);
+        let marker = state
+            .place_marker(&trace.source_waveform_name, extremum(k) + offset * DT)
+            .expect("a marker");
+        state.mark(marker, "", MarkerKind::Peak);
+        ids.push(marker);
     }
-    session.toggle_reference_marker(MarkerSelector::Quick(ids[0]));
+    state
+        .results
+        .results
+        .session
+        .toggle_reference_marker(ids[0]);
 
-    let found: Vec<f64> = state.results.results.session.markers[..3]
+    let found: Vec<f64> = state.results.results.session.document_markers[..3]
         .iter()
         .map(|marker| marker_position(model, &marker.anchor, marker.x, marker.kind).unwrap())
         .collect();
@@ -344,7 +341,7 @@ fn a_reference_marker_reads_the_analytic_differences() {
         assert!(
             painted.contains(&expected),
             "M{} reads {expected}: {painted:?}",
-            ids[index]
+            ids[index].marker_id.get()
         );
     }
     assert!(painted.iter().any(|text| text == "Reference"));

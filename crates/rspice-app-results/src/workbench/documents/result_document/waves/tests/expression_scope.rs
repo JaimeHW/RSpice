@@ -22,11 +22,13 @@ fn fixture(indices: Vec<usize>, text: &str) -> (ResultsTestHost, Vec<StripModel>
         .with_family_presentation(&manifest, &family_policy())
         .unwrap();
     state.results.results.set_sample_selection(Some(selection));
+    state.quick_frame();
     state
         .results
         .results
         .add_expression_trace(&state.model.simulation, key, text.to_owned())
         .unwrap();
+    state.quick_frame();
     let models = build_models(
         &state.model.simulation,
         &mut DerivedSeries::default(),
@@ -156,21 +158,10 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
             value: TypedValue::Text("TT".to_owned()),
         },
     });
-    let bytes = serde_json::to_vec(&(
-        state
-            .results
-            .results
-            .project_presentation(&state.model.simulation),
-        policy,
-    ))
-    .unwrap();
-    let (presentation, policy): (
-        crate::state::result_presentation::ResultPresentation,
-        FamilyPresentationPolicy,
-    ) = serde_json::from_slice(&bytes).unwrap();
-    let mut reopened = ResultsTestHost::default();
-    reopened.model.simulation = state.model.simulation.clone();
-    super::super::super::restore_presentation(&mut reopened.results_parts(), presentation);
+    let policy: FamilyPresentationPolicy =
+        serde_json::from_slice(&serde_json::to_vec(&policy).unwrap()).unwrap();
+    let mut reopened = state.reopened();
+    reopened.quick_frame();
     let run = reopened.model.simulation.active_run().unwrap();
     let manifest = FamilyManifest::from_metadata(
         run.analyses[0].analysis_type,

@@ -20,16 +20,9 @@ use super::{ReadoutPolicy, StripModel, anchor_key, cursor_interpolation};
 
 /// Open the dialog for one marker, seeding the draft from its current state.
 pub fn open(state: &mut ResultViewerState, selector: MarkerSelector) {
-    let seed = match selector {
-        MarkerSelector::Quick(id) => state
-            .markers
-            .iter()
-            .find(|marker| marker.id == id)
-            .map(|marker| (marker.note.clone(), marker.kind)),
-        MarkerSelector::Document { marker_id, .. } => state
-            .document_marker(marker_id)
-            .map(|marker| (marker.note.clone(), marker.kind)),
-    };
+    let seed = state
+        .document_marker(selector.marker_id)
+        .map(|marker| (marker.note.clone(), marker.kind));
     let Some((note, kind)) = seed else {
         return;
     };
@@ -46,40 +39,20 @@ struct MarkerFacts {
     analysis: AnalysisPresentationKey,
     anchor: WaveformPresentationKey,
     trace_name: String,
-    /// A result document keeps notes, peaks and specs; a valley or crossing
-    /// is a search only the project's quick markers carry.
-    document: bool,
     x: f64,
     persistence: &'static str,
 }
 
 fn marker_facts(state: &ResultViewerState, selector: MarkerSelector) -> Option<MarkerFacts> {
-    match selector {
-        MarkerSelector::Quick(id) => {
-            let marker = state.markers.iter().find(|m| m.id == id)?;
-            Some(MarkerFacts {
-                display_id: format!("M{id}"),
-                analysis: marker.analysis,
-                anchor: marker.anchor.clone(),
-                trace_name: marker.trace_name.clone(),
-                document: false,
-                x: marker.x,
-                persistence: "Saved with the project · survives zoom, pan and reload",
-            })
-        }
-        MarkerSelector::Document { marker_id, .. } => {
-            let marker = state.document_marker(marker_id)?;
-            Some(MarkerFacts {
-                display_id: format!("D{}", marker_id.get()),
-                analysis: marker.analysis,
-                anchor: marker.anchor.clone(),
-                trace_name: marker.trace_name.clone(),
-                document: true,
-                x: marker.x,
-                persistence: "Retained by this result document · travels with the document",
-            })
-        }
-    }
+    let marker = state.document_marker(selector.marker_id)?;
+    Some(MarkerFacts {
+        display_id: format!("M{}", selector.marker_id.get()),
+        analysis: marker.analysis,
+        anchor: marker.anchor.clone(),
+        trace_name: marker.trace_name.clone(),
+        x: marker.x,
+        persistence: "Kept by this view · saved with the project",
+    })
 }
 
 /// A draft and its anchoring facts captured before the host refreshes projections.
@@ -172,9 +145,6 @@ pub fn show(
 
             ui.label(RichText::new("Kind").strong());
             for kind in MarkerKind::ALL {
-                if marker.document && kind.search().is_some() && kind != MarkerKind::Peak {
-                    continue;
-                }
                 if ui
                     .radio(draft.kind.same_choice(kind), kind.dialog_label())
                     .clicked()

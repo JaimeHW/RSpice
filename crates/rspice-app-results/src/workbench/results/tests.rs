@@ -236,8 +236,12 @@ fn the_cursor_commands_move_the_stepping_cursor_to_each_feature() {
 
     harness.execute(ResultsCommand::MarkerAtCursor.key());
     let session = &harness.state.results.session;
-    assert_eq!(session.markers.len(), 1, "a marker is placed at A");
-    assert_eq!(session.markers[0].x, a);
+    assert_eq!(
+        session.document_markers.len(),
+        1,
+        "a marker is placed at A, on the run's working view"
+    );
+    assert_eq!(session.document_markers[0].x, a);
     assert!(session.marker_edit.is_some(), "and its dialog opens on it");
 }
 

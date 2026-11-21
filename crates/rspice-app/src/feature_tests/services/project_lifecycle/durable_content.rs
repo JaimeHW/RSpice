@@ -2,7 +2,8 @@
 
 use super::*;
 use rspice_app_results::workbench::documents::result_document::{
-    AnalysisPresentationKey, ResultsState, WavePanePresentationKey, marker_anchor_for,
+    AnalysisPresentationKey, MarkerPlacement, WavePanePresentationKey, place_marker,
+    waves::source_waveform_anchor, working_view,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -93,131 +94,76 @@ enum Annotation {
 impl Annotation {
     const ALL: [Self; 3] = [Self::Marker, Self::LogAxis, Self::Expression];
 
-    fn add(
-        self,
-        results: &mut ResultsState,
-        simulation: &rspice_app_state::state::SimulationState,
-        key: AnalysisPresentationKey,
-    ) {
+    /// What the reader does in the quick view, kept by the run's working
+    /// view once the quick view has drawn.
+    fn add(self, state: &mut AppState, key: AnalysisPresentationKey) {
+        quick_frame(state);
         match self {
-            Self::Marker => {
-                results
-                    .session
-                    .add_marker(
-                        key,
-                        marker_anchor_for(key, "V(out)"),
-                        "V(out)".to_owned(),
-                        0.5,
-                    )
-                    .unwrap();
-            }
+            Self::Marker => mark(state, 0.5),
             Self::LogAxis => {
-                results.session.log_y_panes.insert(WavePanePresentationKey {
-                    analysis: key,
-                    unit: "V".to_owned(),
-                });
+                state
+                    .results
+                    .results
+                    .session
+                    .log_y_panes
+                    .insert(WavePanePresentationKey {
+                        analysis: key,
+                        unit: "V".to_owned(),
+                    });
             }
             Self::Expression => {
-                results
-                    .add_expression_trace(simulation, key, "V(out)*2".to_owned())
+                state
+                    .results
+                    .results
+                    .add_expression_trace(&state.model.simulation, key, "V(out)*2".to_owned())
                     .unwrap();
             }
         }
+        quick_frame(state);
     }
 }
 
-fn annotations(project: &ProjectSnapshot) -> serde_json::Value {
-    serde_json::to_value((
-        &project.file.result_presentation.markers,
-        &project.file.result_presentation.log_y_panes,
-        &project.file.result_presentation.expression_groups,
-    ))
-    .unwrap()
+/// The quick view's frame around nothing: the shown run's working view is
+/// made or followed, drawn, and kept.
+fn quick_frame(state: &mut AppState) {
+    let mut parts = state.results_parts();
+    working_view::sync(&mut parts);
+    working_view::capture(&mut parts);
 }
 
-#[test]
-fn result_presentation_retains_flat_project_wire_format_and_legacy_defaults() {
-    let (mut state, key) = retained_results();
-    for annotation in Annotation::ALL {
-        annotation.add(&mut state.results.results, &state.model.simulation, key);
-    }
-    let project = snapshot(&state).unwrap();
-    let wire = serde_json::to_value(&project).unwrap();
-    assert!(wire.get("result_presentation").is_none());
-    for name in [
-        "result_markers",
-        "result_log_y_panes",
-        "result_expression_groups",
-    ] {
-        assert_eq!(wire[name].as_array().unwrap().len(), 1, "{name}");
-        // Versions predating each field restore the other fields unchanged.
-        let mut legacy = wire.clone();
-        legacy.as_object_mut().unwrap().remove(name);
-        let restored: ProjectSnapshot = serde_json::from_value(legacy.clone()).unwrap();
-        restored.file.validate().unwrap();
-        assert_eq!(serde_json::to_value(restored).unwrap(), legacy);
-    }
-    let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
-    let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
-    assert_eq!(annotations(&restored), annotations(&project));
-    assert_eq!(serde_json::to_value(restored).unwrap(), wire);
-}
-
-#[test]
-fn result_log_axis_presentation_has_canonical_order_after_restore() {
-    let (mut state, key) = retained_results();
-    let units: Vec<_> = (0..16).map(|index| format!("unit-{index:02}")).collect();
-    for unit in units.iter().rev() {
-        state
-            .results
-            .results
-            .session
-            .log_y_panes
-            .insert(WavePanePresentationKey {
-                analysis: key,
-                unit: unit.clone(),
-            });
-    }
-    let presentation = state
-        .results
-        .results
-        .project_presentation(&state.model.simulation);
-    assert_eq!(
-        presentation
-            .log_y_panes
-            .iter()
-            .map(|pane| &pane.unit)
-            .collect::<Vec<_>>(),
-        units.iter().collect::<Vec<_>>()
-    );
-    let expected = serde_json::to_value(&presentation).unwrap();
-    rspice_app_results::workbench::documents::result_document::restore_presentation(
+fn mark(state: &mut AppState, x: f64) {
+    let (analysis, anchor) =
+        source_waveform_anchor(&mut state.results_parts(), "V(out)").expect("V(out) is drawn");
+    place_marker(
         &mut state.results_parts(),
-        presentation,
-    );
-    assert_eq!(
-        serde_json::to_value(
-            state
-                .results
-                .results
-                .project_presentation(&state.model.simulation)
-        )
-        .unwrap(),
-        expected
-    );
+        MarkerPlacement {
+            analysis,
+            anchor,
+            trace_name: "V(out)".to_owned(),
+            x,
+            samples: &vec![0.0, 1.0].into(),
+        },
+    )
+    .expect("the working view keeps the marker");
+}
+
+/// What the project keeps of what the reader made of its runs: its views.
+fn annotations(project: &ProjectSnapshot) -> serde_json::Value {
+    serde_json::to_value(&project.file.workspace.visualization_documents).unwrap()
 }
 
 #[test]
 fn every_result_annotation_is_dirty_revertible_and_independent_of_solver_inputs() {
     for annotation in Annotation::ALL {
         let (mut state, key) = retained_results();
+        quick_frame(&mut state);
         let baseline = snapshot(&state).unwrap();
         let solver_input = generated_netlist_input_digest(&state).unwrap();
         state
             .platform
             .project_lifecycle
             .accept_project(baseline.clone(), None);
-        annotation.add(&mut state.results.results, &state.model.simulation, key);
+        annotation.add(&mut state, key);
         assert!(has_unsaved_changes(&state), "{annotation:?}");
         assert!(active_document_is_dirty(&state), "{annotation:?}");
         assert_eq!(dirty_document_count(&state), 1);
@@ -263,6 +209,7 @@ fn every_result_annotation_is_dirty_revertible_and_independent_of_solver_inputs(
 fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
     for annotation in Annotation::ALL {
         let (mut state, key) = retained_results();
+        quick_frame(&mut state);
         let path = unique_path("result-annotations");
         save_native(
             &mut state,
@@ -271,7 +218,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             DestinationAuthority::UserSelected,
         )
         .unwrap();
-        annotation.add(&mut state.results.results, &state.model.simulation, key);
+        annotation.add(&mut state, key);
         state
             .model
             .schematic
@@ -301,19 +248,10 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
 
         // Save acceptance compares against the actual published snapshot.
         // A later annotation must remain dirty even if an earlier write finishes.
-        annotation.add(&mut state.results.results, &state.model.simulation, key);
+        annotation.add(&mut state, key);
         state.results.results.session.log_y_panes.clear();
-        state
-            .results
-            .results
-            .session
-            .add_marker(
-                key,
-                marker_anchor_for(key, "V(out)"),
-                "V(out)".to_owned(),
-                0.75,
-            )
-            .unwrap();
+        quick_frame(&mut state);
+        mark(&mut state, 0.75);
         let post_save = prepare_post_save_registry(
             &state,
             &saved.file,

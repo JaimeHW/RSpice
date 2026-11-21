@@ -116,6 +116,17 @@ pub fn source_waveform_anchor(
     state: &mut ResultsParts<'_>,
     source_name: &str,
 ) -> Option<(AnalysisPresentationKey, WaveformPresentationKey)> {
+    let active_analysis_index = state.model.simulation.view.active_analysis_idx?;
+    source_waveform_anchor_in(state, active_analysis_index, source_name)
+}
+
+/// The drawn trace of `source_name` in the strip of the shown run's analysis
+/// at `analysis_index`, as a marker anchors to it.
+pub(super) fn source_waveform_anchor_in(
+    state: &mut ResultsParts<'_>,
+    analysis_index: usize,
+    source_name: &str,
+) -> Option<(AnalysisPresentationKey, WaveformPresentationKey)> {
     let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
@@ -123,10 +134,9 @@ pub fn source_waveform_anchor(
         presentation.complex_number_display(),
         &Tokens::default(),
     );
-    let active_analysis_index = state.model.simulation.view.active_analysis_idx?;
     let model = models
         .iter()
-        .find(|model| model.analysis_index == active_analysis_index)?;
+        .find(|model| model.analysis_index == analysis_index)?;
     let trace = model
         .traces
         .iter()

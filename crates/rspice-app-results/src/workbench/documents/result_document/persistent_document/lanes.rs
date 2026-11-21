@@ -24,7 +24,7 @@ use rspice_results_ui::waves::lanes::{BusView, EventLaneLayout, LaneKey, UserLan
 /// What a run's event history names: its digital and real nets, each
 /// declared bus's label with its members' `D()` columns, and the `D()` and
 /// `E()` names of the nets the analysis has no column for.
-pub(super) struct EventNames {
+pub(in crate::workbench::documents::result_document) struct EventNames {
     digital: HashSet<String>,
     real: HashSet<String>,
     buses: Vec<(String, Vec<String>)>,
@@ -32,7 +32,9 @@ pub(super) struct EventNames {
 }
 
 impl EventNames {
-    pub(super) fn of(analysis: &AnalysisResult) -> Option<Self> {
+    pub(in crate::workbench::documents::result_document) fn of(
+        analysis: &AnalysisResult,
+    ) -> Option<Self> {
         let Some(AnalysisResultPayload::TransientEvents {
             digital_traces,
             real_traces,
@@ -96,7 +98,7 @@ impl EventNames {
     }
 
     /// The `D()` and `E()` names of the nets the analysis has no column for.
-    pub(super) fn history_only(&self) -> &[String] {
+    pub(in crate::workbench::documents::result_document) fn history_only(&self) -> &[String] {
         &self.history_only
     }
 
@@ -116,7 +118,7 @@ fn column(trace: &Trace) -> &str {
 /// selection, which is the reader's and not the document's. A pane that
 /// records no lanes yet takes the session's whole: a view saved from the
 /// strip keeps the lanes the reader was looking at.
-pub(super) fn projected_layout(
+pub(in crate::workbench::documents::result_document) fn projected_layout(
     document: &VisualizationDocument,
     pane: PaneId,
     names: &EventNames,
@@ -193,7 +195,7 @@ pub(super) fn projected_layout(
 /// The history-only nets the document has on `pane`: those its order lists
 /// and the members of the buses it groups or orders. `None` while the pane
 /// records no lanes at all, when the reader's own choice stands.
-pub(super) fn plotted_history_nets(
+pub(in crate::workbench::documents::result_document) fn plotted_history_nets(
     document: &VisualizationDocument,
     pane: PaneId,
     names: &EventNames,
@@ -235,7 +237,7 @@ pub(super) fn plotted_history_nets(
 /// plot: each plotted event column's lane kind, the buses, then the order,
 /// which lists a plotted history-only net by name. Nothing when they already
 /// agree.
-pub(super) fn lane_edits(
+pub(in crate::workbench::documents::result_document) fn lane_edits(
     document: &VisualizationDocument,
     pane: PaneId,
     names: &EventNames,

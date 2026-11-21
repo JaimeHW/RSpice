@@ -49,7 +49,22 @@ fn is_reader_edit(edit: &DocumentEdit) -> bool {
             | DocumentEdit::MoveCursor { .. }
             | DocumentEdit::AddCursor { .. }
             | DocumentEdit::RetargetTrackedDataset { .. }
+            | DocumentEdit::FollowRun { .. }
+            | DocumentEdit::AddViewPane(_)
+            | DocumentEdit::SetTracking(_)
     )
+}
+
+/// Keep `document`, a new working view, in the project.
+pub(crate) fn create(
+    state: &mut ResultsParts<'_>,
+    document: VisualizationDocument,
+) -> Result<ResultDocumentId, VisualizationDocumentPersistenceError> {
+    state
+        .model
+        .workspace
+        .content
+        .insert_visualization_document(document)
 }
 
 /// Apply `edits` to the view `document_id` as one transaction at `revision`.

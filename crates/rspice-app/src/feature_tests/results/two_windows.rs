@@ -33,7 +33,7 @@ fn run(id: u64) -> SimulationRun {
 }
 
 #[derive(Default)]
-struct MemoryStorage(std::collections::HashMap<String, String>);
+pub(super) struct MemoryStorage(std::collections::HashMap<String, String>);
 
 impl eframe::Storage for MemoryStorage {
     fn get_string(&self, key: &str) -> Option<String> {

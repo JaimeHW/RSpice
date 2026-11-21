@@ -380,158 +380,17 @@ impl ResultsState {
         Ok(())
     }
 
-    pub(super) fn dataset_is_retained(
-        simulation: &crate::state::SimulationState,
-        analysis: AnalysisPresentationKey,
-    ) -> bool {
-        simulation
-            .retained
-            .runs
-            .iter()
-            .any(|run| run.dataset_id == analysis.dataset_id())
-    }
-
-    /// Capture every authored quick-view field about retained datasets.
+    /// Capture what the project keeps of Results beside its visualization
+    /// documents: the reader's signal sets. What the reader made of a run is
+    /// its view's.
     pub(crate) fn project_presentation(
         &self,
-        simulation: &crate::state::SimulationState,
+        _simulation: &crate::state::SimulationState,
     ) -> ResultPresentation {
         ResultPresentation {
-            markers: self.project_markers(simulation),
-            marker_id_high_water: Some(self.session.marker_id_high_water()),
-            log_y_panes: self.project_log_y_panes(simulation),
-            expression_groups: self.project_expression_groups(simulation),
             signal_sets: self.signal_sets.clone(),
-            x_scales: {
-                // While a document pane shows its own X scale, the project
-                // keeps the quick view's, set aside until it is left.
-                let mut scales: Vec<_> = self
-                    .session
-                    .quick_view_presentation
-                    .as_ref()
-                    .map_or(&self.session.x_scales, |quick| &quick.x_scales)
-                    .iter()
-                    .filter(|(analysis, _)| Self::dataset_is_retained(simulation, **analysis))
-                    .map(
-                        |(analysis, scale)| rspice_results::result_presentation::StripXScale {
-                            analysis: *analysis,
-                            logarithmic: *scale == crate::ui::plot::XScale::Log10,
-                        },
-                    )
-                    .collect();
-                scales.sort_by_key(|scale| scale.analysis.order_key());
-                scales
-            },
-            xy_plots: {
-                // Likewise the quick view's strips, not a document's, in the
-                // order the reader made them.
-                self.session
-                    .quick_view_presentation
-                    .as_ref()
-                    .map_or(&self.session.xy_strips, |quick| &quick.xy_strips)
-                    .iter()
-                    .filter(|strip| Self::dataset_is_retained(simulation, strip.analysis))
-                    .map(|strip| rspice_results::result_presentation::StripXyPlot {
-                        analysis: strip.analysis,
-                        unit: strip.unit.clone(),
-                        abscissa: strip.abscissa.clone(),
-                        sweep_range: strip.sweep_range.and_then(|(minimum, maximum)| {
-                            rspice_results::visualization_document::AxisRange::new(minimum, maximum)
-                                .ok()
-                        }),
-                        follow_sweep_view: strip.follow_view,
-                        log_abscissa: strip.log_x,
-                    })
-                    .collect()
-            },
+            ..ResultPresentation::default()
         }
-    }
-
-    /// The markers this project saves: the reader's own, about datasets the
-    /// project still holds.
-    pub(crate) fn project_markers(
-        &self,
-        simulation: &crate::state::SimulationState,
-    ) -> Vec<ResultMarker> {
-        self.session
-            .markers
-            .iter()
-            .filter(|marker| Self::dataset_is_retained(simulation, marker.analysis))
-            .cloned()
-            .collect()
-    }
-
-    /// The logarithmic-axis choices this project saves.
-    pub(crate) fn project_log_y_panes(
-        &self,
-        simulation: &crate::state::SimulationState,
-    ) -> Vec<WavePanePresentationKey> {
-        let mut panes = self
-            .session
-            .log_y_panes
-            .iter()
-            .filter(|pane| Self::dataset_is_retained(simulation, pane.analysis))
-            .cloned()
-            .collect();
-        crate::state::result_presentation::canonicalize_log_y_panes(&mut panes);
-        panes
-    }
-
-    /// Deterministic project projection of every stable expression trace.
-    pub fn project_expression_groups(
-        &self,
-        simulation: &crate::state::SimulationState,
-    ) -> Vec<ResultExpressionGroup> {
-        // While a document pane shows its own expressions, the project
-        // keeps the quick view's, which are set aside until it is left.
-        let quick = self.session.quick_view_presentation.as_ref();
-        let units = quick.map_or(&self.session.expression_units, |quick| {
-            &quick.expression_units
-        });
-        let mut stable = quick.map_or_else(
-            || self.session.analysis_exprs.clone(),
-            |quick| quick.analysis_exprs.clone(),
-        );
-        if let Some(run) = simulation.active_run().filter(|_| quick.is_none()) {
-            for (analysis_index, analysis) in run.analyses.iter().enumerate() {
-                let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-                let may_import = self
-                    .session
-                    .expr_projection_keys
-                    .get(&analysis_index)
-                    .is_none_or(|projected| *projected == key);
-                if may_import && let Some(projected) = self.session.exprs.get(&analysis_index) {
-                    stable.insert(key, projected.clone());
-                }
-            }
-        }
-        // Retention discards datasets; a group naming one the project no
-        // longer holds would be written out only to fail its own resolvability
-        // check on the next load.
-        let mut groups = stable
-            .iter()
-            .filter(|(analysis, traces)| {
-                !traces.is_empty() && Self::dataset_is_retained(simulation, **analysis)
-            })
-            .map(|(analysis, traces)| ResultExpressionGroup {
-                analysis: *analysis,
-                traces: traces.clone(),
-                units: traces
-                    .iter()
-                    .filter_map(|trace| {
-                        let unit = units.get(&(*analysis, trace.text.clone()))?;
-                        Some(
-                            rspice_results::result_presentation::DeclaredExpressionUnit {
-                                text: trace.text.clone(),
-                                unit: unit.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
-            })
-            .collect::<Vec<_>>();
-        groups.sort_by(|left, right| left.analysis.order_key().cmp(&right.analysis.order_key()));
-        groups
     }
 
     /// Release discarded local state and source-derived caches together.
@@ -583,69 +442,9 @@ impl ResultsState {
             self.retained_history_revision = Some(revision);
             return;
         }
-        if !self.retained_datasets.is_empty() {
-            self.carry_views_onto_new_runs(simulation, &retained);
-        }
         self.retain_datasets(&retained);
         self.retained_datasets = retained;
         self.retained_history_revision = Some(revision);
-    }
-
-    /// Carry the reader's view onto each run that joined the history since
-    /// the last look: a re-run of a plan opens on what the reader made of
-    /// the run before it, analysis by authored analysis and signal by name,
-    /// not on every signal shown and nothing else.
-    fn carry_views_onto_new_runs(
-        &mut self,
-        simulation: &crate::state::SimulationState,
-        retained: &HashSet<DatasetId>,
-    ) {
-        let runs = &simulation.retained.runs;
-        let plan = |run: &crate::state::SimulationRun| {
-            run.prepared_receipt()
-                .and_then(|receipt| receipt.simulation_plan_id())
-        };
-        for run in runs.iter().filter(|run| {
-            retained.contains(&run.dataset_id) && !self.retained_datasets.contains(&run.dataset_id)
-        }) {
-            let Some(previous) = runs
-                .iter()
-                .filter(|other| {
-                    self.retained_datasets.contains(&other.dataset_id)
-                        && other.id < run.id
-                        && plan(other) == plan(run)
-                })
-                .max_by_key(|other| other.id)
-            else {
-                continue;
-            };
-            for (index, analysis) in run.analyses.iter().enumerate() {
-                let authored = analysis
-                    .provenance()
-                    .map(|provenance| provenance.authored_source_instance_id());
-                let before = previous
-                    .analyses
-                    .iter()
-                    .find(|candidate| {
-                        authored.is_some()
-                            && candidate
-                                .provenance()
-                                .map(|provenance| provenance.authored_source_instance_id())
-                                == authored
-                    })
-                    .or_else(|| {
-                        previous.analyses.get(index).filter(|candidate| {
-                            authored.is_none() && candidate.analysis_type == analysis.analysis_type
-                        })
-                    });
-                if let Some(before) = before {
-                    self.session.carry_view(
-                        AnalysisPresentationKey::new(previous.dataset_id, before),
-                        AnalysisPresentationKey::new(run.dataset_id, analysis),
-                    );
-                }
-            }
-        }
     }
 
     /// The standing reason one document's Latest retarget onto this exact

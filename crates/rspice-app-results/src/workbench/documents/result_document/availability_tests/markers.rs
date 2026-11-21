@@ -1,336 +1,67 @@
-//! Marker identity and payload failures must never corrupt saved annotations.
+//! A marker the view cannot hold puts nothing on it, and an edit of a marker
+//! the view no longer holds fails.
 
 use super::*;
-use crate::io::ProjectSnapshot;
 
-fn marker_project(state: &ResultsTestHost) -> ProjectSnapshot {
-    ProjectSnapshot::new_with_execution_context(
-        state.model.workspace.clone(),
-        state.model.library_manager.clone(),
-        crate::io::capture_simulation_results(&state.model.simulation),
-        crate::io::capture_execution_context(
-            &state.model.sim_setup,
-            &state.model.model_library_manager,
-        )
-        .unwrap(),
-    )
-    .with_result_presentation(
-        state
-            .results
-            .results
-            .project_presentation(&state.model.simulation),
-    )
+fn view_markers(state: &ResultsTestHost) -> usize {
+    state
+        .working_view()
+        .expect("the shown run's working view")
+        .markers()
+        .len()
 }
 
-fn marker_state(id: u32) -> (ResultsTestHost, AnalysisPresentationKey) {
+#[test]
+fn an_invalid_placement_puts_nothing_on_the_view() {
     let mut state = transient_state();
-    let run = &mut state.model.simulation.retained.runs[0];
-    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
-        .unwrap();
-    run.mark_running().unwrap();
-    run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
-        .unwrap();
-    assert!(state.model.simulation.select_run(0));
+    state.quick_frame();
     let analysis = active_analysis_key(&state);
-    state.results.results.session.adopt_markers(
-        vec![ResultMarker {
-            id,
-            analysis,
-            anchor: marker_anchor_for(analysis, "V(out)"),
-            trace_name: "V(out)".to_owned(),
-            x: 0.5,
-            kind: MarkerKind::Peak,
-            note: "Retained annotation".to_owned(),
-        }],
-        0,
-    );
-    (state, analysis)
-}
-
-fn place_quick(
-    state: &mut ResultsTestHost,
-    analysis: AnalysisPresentationKey,
-    x: f64,
-) -> Option<MarkerSelector> {
-    place_marker(
-        &mut state.results_parts(),
-        MarkerPlacement {
-            analysis,
-            anchor: marker_anchor_for(analysis, "V(out)"),
-            trace_name: "V(out)".to_owned(),
-            x,
-            samples: &vec![0.0, 1.0].into(),
-        },
-    )
-}
-
-#[test]
-fn restored_maximum_marker_id_cannot_wrap_or_retarget_existing_annotations() {
-    let (mut state, analysis) = marker_state(u32::MAX);
-    let project = marker_project(&state);
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-    restore_presentation(
-        &mut state.results_parts(),
-        restored.file.result_presentation,
-    );
-    assert_eq!(place_quick(&mut state, analysis, 0.75), None);
-    assert_eq!(state.results.results.session.markers.len(), 1);
-    assert_eq!(state.results.results.session.markers[0].id, u32::MAX);
-    assert_eq!(
-        state.results.results.session.markers[0].note,
-        "Retained annotation"
-    );
-    assert!(
-        state
-            .prompt_text()
-            .is_some_and(|text| text.contains("marker") && text.contains("exhausted"))
-    );
-    commit_marker_edit(
-        &mut state.results_parts(),
-        MarkerSelector::Quick(u32::MAX),
-        "Edited",
-        MarkerKind::Spec,
-    )
-    .unwrap();
-    assert_eq!(state.results.results.session.markers[0].note, "Edited");
-    state.results.results.session.remove_marker(u32::MAX);
-    assert!(state.results.results.session.markers.is_empty());
-    assert_eq!(
-        place_quick(&mut state, analysis, 0.75),
-        None,
-        "deleted identities must not be reused"
-    );
-}
-
-#[test]
-fn nonfinite_marker_coordinates_are_refused_before_project_publication() {
-    let (state, _) = marker_state(7);
-    let mut project = marker_project(&state);
-    for coordinate in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        project.file.result_presentation.markers[0].x = coordinate;
-        assert!(
-            crate::io::project_io::serialize_project_file(&project).is_err(),
-            "a nonfinite marker would serialize as null and make the project unreadable"
-        );
-    }
-}
-
-#[test]
-fn marker_anchor_must_name_the_same_analysis_as_the_marker() {
-    let (state, _) = marker_state(7);
-    let mut project = marker_project(&state);
-    project.file.result_presentation.markers[0].anchor.analysis = AnalysisPresentationKey::new(
-        crate::product::DatasetId::new(),
-        &state.model.simulation.retained.runs[0].analyses[0],
-    );
-    assert!(
-        project.file.validate().is_err(),
-        "one marker cannot identify two different datasets"
-    );
-}
-
-#[test]
-fn duplicate_marker_ids_are_refused_before_project_publication() {
-    let (state, _) = marker_state(7);
-    let mut project = marker_project(&state);
-    let mut duplicate = project.file.result_presentation.markers[0].clone();
-    duplicate.note = "Another annotation".to_owned();
-    duplicate.x = 0.75;
-    project.file.result_presentation.markers.push(duplicate);
-    assert!(
-        crate::io::project_io::serialize_project_file(&project).is_err(),
-        "duplicate IDs alias edit and delete operations"
-    );
-}
-
-#[test]
-fn an_edit_cannot_succeed_after_its_quick_marker_has_been_removed() {
-    let (mut state, _) = marker_state(7);
-    state.results.results.session.remove_marker(7);
-    assert!(
-        commit_marker_edit(
+    let samples = vec![0.0, 1.0].into();
+    let place = |state: &mut ResultsTestHost, anchor: AnalysisPresentationKey, x: f64| {
+        place_marker(
             &mut state.results_parts(),
-            MarkerSelector::Quick(7),
-            "Later edit",
-            MarkerKind::Peak
+            MarkerPlacement {
+                analysis,
+                anchor: marker_anchor_for(anchor, "V(out)"),
+                trace_name: "V(out)".to_owned(),
+                x,
+                samples: &samples,
+            },
         )
-        .is_err()
-    );
-    assert!(state.results.results.session.markers.is_empty());
-}
-
-#[test]
-fn last_marker_identity_can_be_allocated_once_and_remains_serializable() {
-    let (mut state, analysis) = marker_state(u32::MAX - 1);
-    assert_eq!(
-        place_quick(&mut state, analysis, 0.75),
-        Some(MarkerSelector::Quick(u32::MAX))
-    );
-    let before = serde_json::to_value(&state.results.results.session.markers).unwrap();
-    assert_eq!(place_quick(&mut state, analysis, 0.9), None);
-    assert_eq!(
-        serde_json::to_value(&state.results.results.session.markers).unwrap(),
-        before
-    );
-    let project = marker_project(&state);
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-    assert_eq!(
-        serde_json::to_value(restored.file.result_presentation.markers).unwrap(),
-        before
-    );
-}
-
-#[test]
-fn invalid_marker_placement_does_not_consume_an_identity_or_mutate_annotations() {
-    let (mut state, analysis) = marker_state(7);
-    let before = serde_json::to_value(&state.results.results.session.markers).unwrap();
+    };
     for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert_eq!(place_quick(&mut state, analysis, x), None);
-        assert!(
-            state
-                .results
-                .results
-                .session
-                .add_marker(
-                    analysis,
-                    marker_anchor_for(analysis, "V(out)"),
-                    "V(out)".to_owned(),
-                    x
-                )
-                .is_err()
-        );
+        assert_eq!(place(&mut state, analysis, x), None);
     }
     let foreign = AnalysisPresentationKey::new(
         crate::product::DatasetId::new(),
         &state.model.simulation.retained.runs[0].analyses[0],
     );
-    assert!(
-        state
-            .results
-            .results
-            .session
-            .add_marker(
-                analysis,
-                marker_anchor_for(foreign, "V(out)"),
-                "V(out)".to_owned(),
-                0.75
-            )
-            .is_err()
-    );
     assert_eq!(
-        serde_json::to_value(&state.results.results.session.markers).unwrap(),
-        before
+        place(&mut state, foreign, 0.75),
+        None,
+        "one marker cannot name two datasets"
     );
-    assert_eq!(
-        place_quick(&mut state, analysis, 0.75),
-        Some(MarkerSelector::Quick(8))
-    );
+    assert_eq!(view_markers(&state), 0);
+    assert!(state.results.results.session.document_markers.is_empty());
 
-    // Until every legacy caller uses the marker owner, a directly inserted
-    // identity must also be respected by the allocator.
-    let mut inserted = state.results.results.session.markers[0].clone();
-    inserted.id = 100;
-    state.results.results.session.markers.push(inserted);
-    assert_eq!(
-        place_quick(&mut state, analysis, 0.9),
-        Some(MarkerSelector::Quick(101))
-    );
+    assert!(place(&mut state, analysis, 0.75).is_some());
+    assert_eq!(view_markers(&state), 1);
 }
 
 #[test]
-fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
-    let (mut state, _) = marker_state(7);
-    let mut project = marker_project(&state);
-    let template = project.file.result_presentation.markers[0].clone();
-    project.file.result_presentation.marker_id_high_water = None;
-    project.file.result_presentation.markers = [0, 1, 2, 7, u32::MAX, 7, 0, u32::MAX]
-        .into_iter()
-        .enumerate()
-        .map(|(index, id)| {
-            let mut marker = template.clone();
-            marker.id = id;
-            marker.note = format!("Annotation {index}");
-            marker.x = index as f64 * 0.125;
-            marker
-        })
-        .collect();
-    // Simulate bytes from older writers, before publication enforced unique IDs.
-    let text = serde_json::to_string(&project).unwrap();
-    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-    assert_eq!(
-        restored
-            .file
-            .result_presentation
-            .markers
-            .iter()
-            .map(|marker| marker.id)
-            .collect::<Vec<_>>(),
-        [0, 1, 2, 7, u32::MAX, 3, 4, 5]
-    );
+fn an_edit_cannot_succeed_after_its_marker_has_been_removed() {
+    let mut state = transient_state();
+    state.quick_frame();
+    let marker = state.place_marker("V(out)", 0.5).expect("a marker");
+    remove_marker(&mut state.results_parts(), marker);
     assert!(
-        restored
-            .file
-            .workspace_migration_warning
-            .as_deref()
-            .unwrap()
-            .contains("duplicate IDs")
+        commit_marker_edit(
+            &mut state.results_parts(),
+            marker,
+            "Later edit",
+            MarkerKind::Peak
+        )
+        .is_err()
     );
-    for (original, repaired) in project
-        .file
-        .result_presentation
-        .markers
-        .iter()
-        .zip(&restored.file.result_presentation.markers)
-    {
-        let mut expected = original.clone();
-        expected.id = repaired.id;
-        assert_eq!(
-            serde_json::to_value(repaired).unwrap(),
-            serde_json::to_value(expected).unwrap()
-        );
-    }
-    let repeated = crate::io::project_io::load_project_text(&text, None).unwrap();
-    assert_eq!(
-        serde_json::to_value(&restored.file.result_presentation.markers).unwrap(),
-        serde_json::to_value(repeated.file.result_presentation.markers).unwrap()
-    );
-    let normalized_text = crate::io::project_io::serialize_project_file(&restored).unwrap();
-    let normalized = crate::io::project_io::load_project_text(&normalized_text, None).unwrap();
-    assert_eq!(
-        serde_json::to_value(&restored.file.result_presentation.markers).unwrap(),
-        serde_json::to_value(normalized.file.result_presentation.markers).unwrap()
-    );
-
-    restore_presentation(
-        &mut state.results_parts(),
-        restored.file.result_presentation,
-    );
-    commit_marker_edit(
-        &mut state.results_parts(),
-        MarkerSelector::Quick(3),
-        "Only this annotation",
-        MarkerKind::Spec,
-    )
-    .unwrap();
-    assert_eq!(
-        state.results.results.session.markers[5].note,
-        "Only this annotation"
-    );
-    assert_eq!(
-        state.results.results.session.markers[3].note,
-        "Annotation 3"
-    );
-    state.results.results.session.remove_marker(3);
-    assert_eq!(state.results.results.session.markers.len(), 7);
-    assert!(
-        state
-            .results
-            .results
-            .session
-            .markers
-            .iter()
-            .any(|marker| marker.id == 7)
-    );
+    assert_eq!(view_markers(&state), 0);
 }

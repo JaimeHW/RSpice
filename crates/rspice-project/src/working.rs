@@ -101,8 +101,8 @@ impl ProjectWorkingSet<'_> {
 
 impl ProjectFile {
     /// Identity of authoritative schematic generator inputs. Retained results,
-    /// plot annotations, validation receipts and decks are excluded; project
-    /// sources, model bindings and plans remain.
+    /// result views and their plot annotations, validation receipts and decks
+    /// are excluded; project sources, model bindings and plans remain.
     pub fn generated_netlist_input_digest(
         mut self,
     ) -> Result<ContentDigest, ProjectLifecycleError> {
@@ -111,6 +111,7 @@ impl ProjectFile {
             context.model_validation_receipt = None;
         }
         self.result_presentation = Default::default();
+        self.workspace.visualization_documents.clear();
         self.workspace.decks.clear();
         crate::registry::content_digest(&self).map_err(ProjectLifecycleError::InvalidState)
     }

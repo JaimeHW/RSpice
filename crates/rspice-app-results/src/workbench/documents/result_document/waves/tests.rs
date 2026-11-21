@@ -621,15 +621,11 @@ fn a_marker_never_migrates_to_a_different_dataset_after_a_re_run() {
 #[test]
 fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     let mut state = marker_fixture();
-    let (analysis, waveform) = marker_identity(&state);
+    let (analysis, _) = marker_identity(&state);
+    state.quick_frame();
     assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
 
-    state
-        .results
-        .results
-        .session
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
-        .unwrap();
+    state.place_marker("V(out)", 0.5).expect("a marker");
     assert_eq!(
         readout_strip_height(&mut state.results_parts()),
         READOUT_HEADER_H + MARKER_ROW_H,
@@ -644,13 +640,9 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
 #[test]
 fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
     let mut state = marker_fixture();
-    let (analysis, waveform) = marker_identity(&state);
-    state
-        .results
-        .results
-        .session
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
-        .unwrap();
+    let (analysis, _) = marker_identity(&state);
+    state.quick_frame();
+    state.place_marker("V(out)", 0.5).expect("a marker");
     state.results.results.session.readout_collapsed = true;
 
     assert_eq!(
@@ -665,57 +657,44 @@ fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
 #[test]
 fn markers_outlive_the_tool_that_placed_them() {
     let mut state = marker_fixture();
-    let (analysis, waveform) = marker_identity(&state);
     assert!(
         !state.results.results.session.marker_tool.is_armed(),
         "annotating is deliberate — the tool is off until asked for"
     );
+    state.quick_frame();
     state.results.results.session.toggle_marker_tool();
-    let id = state
-        .results
-        .results
-        .session
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
-        .unwrap();
+    let marker = state.place_marker("V(out)", 0.5).expect("a marker");
     state.results.results.session.toggle_marker_tool();
 
     assert!(!state.results.results.session.marker_tool.is_armed());
-    assert_eq!(state.results.results.session.markers.len(), 1);
+    assert_eq!(state.results.results.session.document_markers.len(), 1);
 
     // Cursors are a readout and clear; markers are content and do not.
     state.results.results.session.clear_cursors();
-    assert_eq!(state.results.results.session.markers.len(), 1);
-    assert_eq!(state.results.results.session.markers[0].id, id);
+    state.quick_frame();
+    let markers = &state.results.results.session.document_markers;
+    assert_eq!(markers.len(), 1);
+    assert_eq!(markers[0].retained_id, marker.marker_id);
 }
 
 #[test]
 fn removing_a_marker_takes_its_open_edit_with_it() {
     let mut state = marker_fixture();
-    let (analysis, waveform) = marker_identity(&state);
-    let first = state
-        .results
-        .results
-        .session
-        .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5)
-        .unwrap();
-    marker_dialog::open(&mut state.results_parts(), MarkerSelector::Quick(first));
+    state.quick_frame();
+    let first = state.place_marker("V(out)", 0.5).expect("a marker");
+    marker_dialog::open(&mut state.results_parts(), first);
     assert!(state.results.results.session.marker_edit.is_some());
 
-    state.results.results.session.remove_marker(first);
+    super::super::remove_marker(&mut state.results_parts(), first);
 
-    assert!(state.results.results.session.markers.is_empty());
+    assert!(state.results.results.session.document_markers.is_empty());
     assert!(
         state.results.results.session.marker_edit.is_none(),
         "an edit of a marker that no longer exists has nothing to apply to"
     );
 
     // Ids are not recycled: M1 must not come back meaning something else.
-    let second = state
-        .results
-        .results
-        .session
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.9)
-        .unwrap();
+    let second = state.place_marker("V(out)", 0.9).expect("another marker");
     assert_ne!(first, second);
 }
 
@@ -724,19 +703,11 @@ fn removing_a_marker_takes_its_open_edit_with_it() {
 #[test]
 fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
     let mut state = marker_fixture();
-    let (analysis, waveform) = marker_identity(&state);
-    let id = state
-        .results
-        .results
-        .session
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
-        .unwrap();
-    if let Some(marker) = state.results.results.session.marker_mut(id) {
-        marker.note = "overshoot".to_owned();
-        marker.kind = MarkerKind::Peak;
-    }
+    state.quick_frame();
+    let marker = state.place_marker("V(out)", 0.5).expect("a marker");
+    state.mark(marker, "overshoot", MarkerKind::Peak);
 
-    marker_dialog::open(&mut state.results_parts(), MarkerSelector::Quick(id));
+    marker_dialog::open(&mut state.results_parts(), marker);
 
     let draft = state
         .results
@@ -745,7 +716,7 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
         .marker_edit
         .clone()
         .expect("draft opened");
-    assert_eq!(draft.selector, MarkerSelector::Quick(id));
+    assert_eq!(draft.selector, marker);
     assert_eq!(draft.note, "overshoot");
     assert_eq!(draft.kind, MarkerKind::Peak);
 }

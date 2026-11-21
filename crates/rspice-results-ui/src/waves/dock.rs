@@ -549,7 +549,6 @@ pub fn marker_section(
         analysis: AnalysisPresentationKey,
         trace_name: String,
         note: String,
-        retained: bool,
         /// Where the marker is now, or where it was put when its search
         /// finds nothing there.
         position: Result<f64, f64>,
@@ -588,7 +587,6 @@ pub fn marker_section(
             analysis: marker.analysis(),
             trace_name: marker.trace_name().to_owned(),
             note: marker.note().to_owned(),
-            retained: matches!(marker, MarkerView::Document(_)),
             position,
             value,
         }
@@ -697,11 +695,7 @@ pub fn marker_section(
                     .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                     .color(color),
             )
-            .on_hover_text(if entry.retained {
-                "Saved in this result document"
-            } else {
-                "Saved in the project"
-            });
+            .on_hover_text("Kept by this view");
         // The kind is stated, not cycled: a click that silently reclassifies
         // what a marker asserts is a decision made by accident. The id
         // already carries the marker's colour, so the kind is plain words,
@@ -764,11 +758,7 @@ pub fn marker_section(
                 )
                 .frame(false),
             )
-            .on_hover_text(if entry.retained {
-                "Remove this marker from the result document"
-            } else {
-                "Remove this marker"
-            })
+            .on_hover_text("Remove this marker")
             .clicked()
         {
             remove = Some(selector);
