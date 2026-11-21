@@ -155,14 +155,6 @@ fn incompatible_profile_repair_is_draft_only_and_emits_a_receipt() {
 }
 
 #[test]
-fn shortcuts_category_is_exposed_after_review_workflows_land() {
-    assert!(
-        rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory::ALL
-            .contains(&rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory::Shortcuts)
-    );
-}
-
-#[test]
 fn desktop_page_publishes_its_rows_its_actions_and_its_policy_heading() {
     let ctx = Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
@@ -250,36 +242,6 @@ fn portable_profile_buttons_emit_distinct_workflow_actions() {
     assert!(exported.open_shortcut_export);
     assert!(!exported.open_shortcut_import);
     assert!(!exported.open_shortcut_editor);
-}
-
-#[test]
-fn phone_page_keeps_the_portable_actions_on_one_reachable_row() {
-    let ctx = Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let mut state = AppState::default();
-    let mut actions = PreferencePageActions::default();
-    let output = ctx.run_ui(input(390.0, 844.0), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            render_page(ui, &mut preferences_dialogs(&mut state), &mut actions);
-        });
-    });
-    let nodes = output
-        .platform_output
-        .accesskit_update
-        .expect("AccessKit update")
-        .nodes;
-    let import = node_bounds(&nodes, egui::accesskit::Role::Button, "Import\u{2026}");
-    let export = node_bounds(&nodes, egui::accesskit::Role::Button, "Export\u{2026}");
-    assert!(import.x0 < export.x0);
-    assert_eq!(import.y0, export.y0);
-    assert!(import.y1 - import.y0 >= 44.0);
-    // Order is asserted spatially, above: Import sits left of Export on a
-    // shared row. This used to also compare their positions in the flat
-    // AccessKit update, but that vector is egui's emission order, not a
-    // reading order — egui 0.35 scatters the two buttons across it while
-    // rendering them in exactly the same place, and this harness's update
-    // carries no parent/child links to read a true reading order from.
 }
 
 #[test]

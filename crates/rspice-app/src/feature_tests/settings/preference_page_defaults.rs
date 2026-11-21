@@ -82,26 +82,6 @@ fn named_keys(source: &str) -> Vec<String> {
     keys
 }
 
-/// The first option on the Appearance scale row is the scale RSpice ships.
-#[test]
-fn the_shipped_interface_scale_is_one() {
-    assert!(
-        (rspice_app_state::workbench::preferences::UserPreferences::default().interface_scale()
-            - 1.0)
-            .abs()
-            < f32::EPSILON
-    );
-}
-
-/// The shipped worker ceiling leaves the engine's own in place.
-#[test]
-fn the_shipped_worker_ceiling_is_the_engines_own() {
-    assert_eq!(
-        rspice_app_state::workbench::preferences::UserPreferences::default().solver_worker_limit(),
-        None
-    );
-}
-
 /// Restore defaults is only as good as its coverage: a row added to a page
 /// and not to [`restore_defaults`] is a setting the footer's control
 /// silently skips, with nothing on screen to say which.

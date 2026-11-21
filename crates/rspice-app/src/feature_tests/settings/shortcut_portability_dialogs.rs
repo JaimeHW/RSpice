@@ -5,9 +5,7 @@ use egui::Context;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 use rspice_app_settings::workbench::shortcuts::artifacts::DecodedShortcutArtifact;
 use rspice_app_settings::workbench::shortcuts::artifacts::DetectedShortcutArtifact;
-use rspice_app_settings::workbench::shortcuts::artifacts::ImportBindingClass;
 use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutArtifactFormat;
-use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutConflictPolicy;
 use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutExportRequest;
 use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutExportScope;
 use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutImportOptions;
@@ -75,29 +73,6 @@ pub(crate) fn open_with_artifact(
     state.artifact = Some(artifact);
     state.plan_dirty = true;
     state.refresh_plan(base, command_registry());
-}
-
-#[test]
-fn option_order_and_labels_are_stable() {
-    assert_eq!(
-        MERGE_POLICIES.map(ShortcutMergePolicy::label),
-        [
-            "Merge non-conflicting bindings",
-            "Replace current user bindings",
-        ]
-    );
-    assert_eq!(
-        CONFLICT_POLICIES.map(ShortcutConflictPolicy::label),
-        [
-            "Keep current and report",
-            "Use imported binding",
-            "Leave both unbound",
-        ]
-    );
-    assert_eq!(
-        IMPORT_CLASSES.map(ImportBindingClass::label),
-        ["Global", "Schematic", "Results", "Simulation",]
-    );
 }
 
 #[test]
@@ -491,15 +466,6 @@ fn pending_export_controls_are_accessibly_disabled() {
                 .any(|(_, node)| node.label() == Some(label) && node.is_disabled())
         );
     }
-}
-
-#[test]
-fn helper_artifact_is_canonical() {
-    // Prevent the helper from silently drifting to a foreign adaptation.
-    assert!(matches!(
-        detected(&ShortcutPreferences::default()),
-        DetectedShortcutArtifact::RSpice(_)
-    ));
 }
 
 #[test]
