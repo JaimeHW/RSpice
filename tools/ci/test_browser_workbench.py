@@ -274,7 +274,8 @@ class BrowserWorkbenchTests(unittest.TestCase):
             self.assertFalse(stored_window_pair(x, y))
 
     def test_exported_samples_must_hold_the_authored_output_to_the_end_of_the_run(self):
-        exported = "time,V(out),I(V1)\n0,5,0\n0.0005,5,0\n0.001,5.0000001,0\n"
+        exported = ("time,V(out),I(V1)\n0,5,0\n0.0005,5,0\n0.001,5.0000001,0\n"
+                    '# RSpiceTableLayoutV2,"{""columns"":[]}"\n')
         self.assertEqual(verify_exported_samples(exported),
                          {"signals": ["V(out)", "I(V1)"], "rows": 3})
         for wrong in ("time,V(out)\n0,5\n", "time,V(out)\n0,5\n0.0005,5\n0.0009,5\n",

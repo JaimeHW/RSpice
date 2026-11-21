@@ -881,8 +881,8 @@ def click_control(browser, control):
 
 def verify_exported_samples(text):
     """The exported transient runs to 1 ms on a rising time axis and holds the authored 5 V
-    output at every sample."""
-    rows = [row for row in csv.reader(io.StringIO(text)) if row]
+    output at every sample. A row whose first cell starts with # describes the table's layout."""
+    rows = [row for row in csv.reader(io.StringIO(text)) if row and not row[0].startswith("#")]
     if len(rows) < 3:
         raise AssertionError(f"The exported dataset holds fewer than two samples: {rows[:3]}")
     header, samples = rows[0], [[float(value) for value in row] for row in rows[1:]]
