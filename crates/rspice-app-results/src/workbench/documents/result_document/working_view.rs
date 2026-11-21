@@ -24,8 +24,8 @@ use rspice_results_ui::waves::lanes::EventLaneLayout;
 use crate::product::{DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{
     AxisOrientation, AxisScale, DocumentEdit, NewAxis, PaneId, ResultDocumentTracking,
-    ResultDocumentTrackingMode, SourceDataset, TypedValue, VisualizationDocument, WorkingPane,
-    WorkingViewSource,
+    ResultDocumentTrackingMode, SourceDataset, Strip, TypedValue, VisualizationDocument,
+    WorkingPane, WorkingViewSource,
 };
 use crate::state::SimulationRun;
 use crate::ui::plot::XScale;
@@ -50,6 +50,7 @@ struct ViewScratch {
     hidden: HashSet<AnalysisPresentationKey>,
     lanes: HashMap<AnalysisPresentationKey, EventLaneLayout>,
     pins: readout_pins::Pins,
+    strips: HashMap<AnalysisPresentationKey, Vec<Strip>>,
 }
 
 /// The view the quick view last drew, the run it drew it over, and the
@@ -765,6 +766,11 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
             session.hidden_strips.remove(&key);
         }
         readout_pins::project(&mut session.readout_pins, &document, key, pane_id);
+        if pane.strips.is_empty() {
+            session.strip_layouts.remove(&key);
+        } else if session.strip_layouts.get(&key) != Some(&pane.strips) {
+            session.strip_layouts.insert(key, pane.strips.clone());
+        }
 
         for marker in document
             .markers()
@@ -870,6 +876,12 @@ fn scratch_of(state: ResultsReads<'_>, keys: &[(AnalysisPresentationKey, PaneId)
             .map(|(key, layout)| (*key, layout.clone()))
             .collect(),
         pins: readout_pins::scratch(&session.readout_pins, keys),
+        strips: session
+            .strip_layouts
+            .iter()
+            .filter(|(key, _)| shown(key))
+            .map(|(key, strips)| (*key, strips.clone()))
+            .collect(),
     }
 }
 
@@ -972,6 +984,16 @@ fn capture_edits(state: &ResultsParts<'_>, binding: &QuickViewBinding) -> Vec<Do
             key,
             pane_id,
         ));
+        let strips = session
+            .strip_layouts
+            .get(&key)
+            .map_or(&[][..], Vec::as_slice);
+        if strips != pane.strips.as_slice() {
+            edits.push(DocumentEdit::SetPaneStrips {
+                pane_id,
+                strips: strips.to_vec(),
+            });
+        }
     }
     edits
 }

@@ -368,12 +368,7 @@ fn field_ticks(ctx: &egui::Context, state: &mut ResultsTestHost) -> Vec<f64> {
 
 fn zoom_in_time(state: &mut ResultsTestHost, window: (f64, f64)) {
     let analysis = analysis(state);
-    set_shared_x_view(
-        &mut state.results.results.session,
-        analysis,
-        2,
-        Some(window),
-    );
+    set_shared_x_view(&mut state.results.results.session, analysis, Some(window));
 }
 
 /// Zoomed in time to where H runs from 0 to 400, the H pane's axis fits that
@@ -465,7 +460,6 @@ fn a_logarithmic_pane_fits_the_positive_values_in_view() {
     set_shared_x_view(
         &mut state.results.results.session,
         analysis,
-        1,
         Some((5.0e-4, 1.0e-3)),
     );
     let output = settled(&ctx, &mut state, FRAME);

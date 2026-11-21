@@ -915,6 +915,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 .and_then(|axis| super::logic::RunMarkers::of(&analysis.checks, axis))
                 .map(Arc::new),
             expression_panes: Vec::new(),
+            arrangement: Vec::new(),
         };
         model.grid_ascending = super::grid_is_ascending(&model);
         models.push(model);

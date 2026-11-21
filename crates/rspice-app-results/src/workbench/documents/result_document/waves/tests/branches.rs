@@ -304,7 +304,6 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
     set_shared_x_view(
         &mut state.results.results.session,
         analysis,
-        2,
         Some((0.400_000, 0.600_000)),
     );
 

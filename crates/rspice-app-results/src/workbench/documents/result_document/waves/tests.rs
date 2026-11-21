@@ -27,6 +27,7 @@ mod run_difference;
 mod source_cache;
 mod stored_run;
 mod strip_chrome;
+mod strips;
 mod xy;
 
 #[test]
@@ -485,7 +486,6 @@ fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
     set_shared_x_view(
         &mut state.results.results.session,
         model.analysis_key,
-        1,
         Some((0.25, 0.75)),
     );
     let ctx = egui::Context::default();

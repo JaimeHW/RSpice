@@ -697,7 +697,7 @@ fn dragging_a_full_view_handle_inward_zooms_in() {
     }
     let analysis = strip(&mut state)[0].analysis_key;
     let (from, until) =
-        rspice_results_ui::waves::stack::shared_x_view(&state.results.results.session, analysis, 1)
+        rspice_results_ui::waves::stack::shared_x_view(&state.results.results.session, analysis)
             .expect("the drag zoomed the panes in");
     assert!(
         (from - 0.2 * STOP).abs() < 0.01 * STOP,

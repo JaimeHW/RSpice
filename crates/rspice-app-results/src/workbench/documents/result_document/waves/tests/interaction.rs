@@ -59,6 +59,22 @@ fn pane_units(state: &mut ResultsTestHost) -> Vec<String> {
         .collect()
 }
 
+/// The viewport slot each pane of the first strip keeps its Y range on.
+fn pane_slots(state: &mut ResultsTestHost) -> Vec<usize> {
+    let presentation = state.model.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.model.simulation,
+        &mut state.results.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    models[0]
+        .unit_panes()
+        .iter()
+        .map(|pane| pane.slot)
+        .collect()
+}
+
 fn pane_x(
     state: &ResultsTestHost,
     analysis: AnalysisPresentationKey,
@@ -94,15 +110,17 @@ fn zoom_from_a_companion_pane_moves_the_strips_shared_abscissa() {
     });
     zoom_active_pane(&mut state.results_parts(), &Tokens::default(), 0.5);
 
-    let magnitude = pane_x(&state, analysis, 0).expect("the magnitude pane took the zoom");
-    let phase = pane_x(&state, analysis, phase_ordinal).expect("the phase pane took the zoom");
+    let shared = pane_x(&state, analysis, rspice_results_ui::waves::SHARED_X_SLOT)
+        .expect("the strip's shared window took the zoom");
+    let phase_slot = pane_slots(&mut state)[phase_ordinal];
     assert_eq!(
-        magnitude, phase,
-        "a zoom from one pane left the strip's panes on different windows"
+        pane_x(&state, analysis, phase_slot),
+        None,
+        "a zoom from one pane gave that pane a window of its own"
     );
     assert!(
-        magnitude.0 > 1.0 && magnitude.1 < 1000.0,
-        "the zoom did not narrow the retained span: {magnitude:?}"
+        shared.0 > 1.0 && shared.1 < 1000.0,
+        "the zoom did not narrow the retained span: {shared:?}"
     );
 }
 
@@ -178,6 +196,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
     let mut state = bode_strip();
     let analysis = strip_key(&mut state);
     let units = pane_units(&mut state);
+    let sibling = pane_slots(&mut state)[1];
     let viewer = super::super::super::ResultViewer::Waves;
     for ordinal in [0usize, 1, 5] {
         state
@@ -191,7 +210,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
         .results
         .results
         .session
-        .analysis_plot_view_pane_mut(viewer, analysis, 1)
+        .analysis_plot_view_pane_mut(viewer, analysis, sibling)
         .y = Some((-90.0, 0.0));
     state.results.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
@@ -213,7 +232,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
             .results
             .results
             .session
-            .analysis_plot_view_pane(viewer, analysis, 1)
+            .analysis_plot_view_pane(viewer, analysis, sibling)
             .y,
         Some((-90.0, 0.0)),
         "fitting one pane took a sibling pane's own Y with it"
@@ -228,12 +247,17 @@ fn fitting_y_to_the_window_keeps_the_window() {
     let mut state = bode_strip();
     let analysis = strip_key(&mut state);
     let units = pane_units(&mut state);
+    let slots = pane_slots(&mut state);
     let viewer = super::super::super::ResultViewer::Waves;
     let pin = |state: &mut ResultsTestHost| {
         let session = &mut state.results.results.session;
-        set_shared_x_view(session, analysis, 2, Some((10.0, 100.0)));
-        session.analysis_plot_view_pane_mut(viewer, analysis, 0).y = Some((0.2, 0.4));
-        session.analysis_plot_view_pane_mut(viewer, analysis, 1).y = Some((-90.0, 0.0));
+        set_shared_x_view(session, analysis, Some((10.0, 100.0)));
+        session
+            .analysis_plot_view_pane_mut(viewer, analysis, slots[0])
+            .y = Some((0.2, 0.4));
+        session
+            .analysis_plot_view_pane_mut(viewer, analysis, slots[1])
+            .y = Some((-90.0, 0.0));
     };
     let view = |state: &ResultsTestHost, ordinal: usize| {
         state
@@ -249,20 +273,26 @@ fn fitting_y_to_the_window_keeps_the_window() {
         unit: units[1].clone(),
     });
     fit_y_to_visible_x(&mut state.results_parts());
-    for ordinal in [0, 1] {
-        assert_eq!(view(&state, ordinal).y, None, "pane {ordinal} kept its Y");
-        assert_eq!(
-            view(&state, ordinal).x,
-            Some((10.0, 100.0)),
-            "fitting Y moved the window"
-        );
+    for (ordinal, slot) in slots.iter().enumerate() {
+        assert_eq!(view(&state, *slot).y, None, "pane {ordinal} kept its Y");
     }
+    assert_eq!(
+        shared_x_view(&state.results.results.session, analysis),
+        Some((10.0, 100.0)),
+        "fitting Y moved the window"
+    );
 
     pin(&mut state);
     state.results.results.session.active_wave_pane = None;
     fit_y_to_visible_x(&mut state.results_parts());
-    assert_eq!((view(&state, 0).y, view(&state, 1).y), (None, None));
-    assert_eq!(view(&state, 0).x, Some((10.0, 100.0)));
+    assert_eq!(
+        (view(&state, slots[0]).y, view(&state, slots[1]).y),
+        (None, None)
+    );
+    assert_eq!(
+        shared_x_view(&state.results.results.session, analysis),
+        Some((10.0, 100.0))
+    );
 }
 
 /// Draw the result document once at 1200 x 760 with `modifiers` held.
@@ -401,7 +431,7 @@ fn ctrl_wheel_over_a_pane_zooms_its_y_and_nothing_else() {
         "Ctrl+wheel moved the strip's window: {views:?}"
     );
     assert_eq!(
-        shared_x_view(&state.results.results.session, analysis, 2),
+        shared_x_view(&state.results.results.session, analysis),
         None,
         "Ctrl+wheel moved the strip's window"
     );

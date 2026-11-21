@@ -582,8 +582,7 @@ pub fn active_shared_x_status(
         None => models.first(),
     }?;
     let full = model.x_range?;
-    let panes = model.unit_panes().len();
-    let view = shared_x_view(&state.results.session, model.analysis_key, panes).unwrap_or(full);
+    let view = shared_x_view(&state.results.session, model.analysis_key).unwrap_or(full);
     let (start, end) = shared_axis_viewport_fraction(model.x_scale, full, view);
     let width = end - start;
     Some(SharedXStatus {
@@ -667,13 +666,13 @@ fn active_pane_extents(
     else {
         return (None, None);
     };
-    let x = model.x_range.map(|full| {
-        shared_x_view(&state.results.session, key.analysis, panes.len()).unwrap_or(full)
-    });
+    let x = model
+        .x_range
+        .map(|full| shared_x_view(&state.results.session, key.analysis).unwrap_or(full));
     let pinned = state
         .results
         .session
-        .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
+        .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, pane.slot)
         .y;
     let y = match pinned {
         Some(range) => Some(range),
@@ -725,18 +724,22 @@ pub(crate) fn set_active_pane_axis_range(
         return false;
     };
     let panes = model.unit_panes();
-    let Some(ordinal) = panes.iter().position(|pane| pane.unit == key.unit) else {
+    let Some(slot) = panes
+        .iter()
+        .find(|pane| pane.unit == key.unit)
+        .map(|pane| pane.slot)
+    else {
         return false;
     };
     match axis {
         super::PaneAxis::X => {
-            set_shared_x_view(&mut state.results.session, key.analysis, panes.len(), range);
+            set_shared_x_view(&mut state.results.session, key.analysis, range);
         }
         super::PaneAxis::Y => {
             state
                 .results
                 .session
-                .analysis_plot_view_pane_mut(super::ResultViewer::Waves, key.analysis, ordinal)
+                .analysis_plot_view_pane_mut(super::ResultViewer::Waves, key.analysis, slot)
                 .y = range;
         }
     }
@@ -778,14 +781,9 @@ pub(super) fn displayed_pane_auto_y(
     ordinal: usize,
     t: &Tokens,
 ) -> Option<(f64, f64)> {
-    let window = model.x_range.map(|full| {
-        shared_x_view(
-            &state.results.session,
-            model.analysis_key,
-            model.unit_panes().len(),
-        )
-        .unwrap_or(full)
-    })?;
+    let window = model
+        .x_range
+        .map(|full| shared_x_view(&state.results.session, model.analysis_key).unwrap_or(full))?;
     let log = pane_log_y(&state.results.session, model, pane);
     let limits = if state.results.session.show_spec_limits {
         matching_spec_limits(state.results_reads(), model, pane, t)

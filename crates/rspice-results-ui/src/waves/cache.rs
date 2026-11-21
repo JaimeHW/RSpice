@@ -32,6 +32,11 @@ pub struct ModelCacheInput<'a> {
         rspice_results::result_presentation::AnalysisPresentationKey,
         rspice_ui_kit::plot::XScale,
     >,
+    /// The strips the reader arranged each analysis into.
+    pub strips: &'a HashMap<
+        rspice_results::result_presentation::AnalysisPresentationKey,
+        Vec<rspice_results::visualization_document::Strip>,
+    >,
 }
 
 /// Frame cache for the strip models. Building them clones every trace name
@@ -99,6 +104,13 @@ fn models_fingerprint(input: &ModelCacheInput<'_>, t: &Tokens) -> u64 {
         .collect::<Vec<_>>();
     x_scales.sort_unstable();
     x_scales.hash(&mut h);
+    let mut strips = input
+        .strips
+        .iter()
+        .map(|(analysis, strips)| (analysis.order_key(), format!("{strips:?}")))
+        .collect::<Vec<_>>();
+    strips.sort_unstable();
+    strips.hash(&mut h);
     input.projection.complex_display.hash(&mut h);
     input.projection.ac.hash(&mut h);
     input
@@ -164,6 +176,9 @@ impl ModelsCache {
                     || super::stack::log_x_refusal(model).is_none())
             {
                 model.x_scale = *scale;
+            }
+            if let Some(strips) = input.strips.get(&model.analysis_key) {
+                model.arrangement.clone_from(strips);
             }
         }
         // Only now is it settled which traces the strip draws, so only now can

@@ -734,6 +734,11 @@ pub struct ResultViewerState {
     /// The strips that draw a unit pane against a signal or an expression,
     /// each after its analysis' strip. Boxed, as the X scales are.
     pub xy_strips: Box<XyStrips>,
+    /// The strips the reader arranged each analysis' waveform stack into, as
+    /// the view being drawn keeps them; an analysis it has none for gives
+    /// each unit a strip of its own.
+    pub strip_layouts:
+        HashMap<AnalysisPresentationKey, Vec<rspice_results::visualization_document::Strip>>,
     /// Bit period the reader has pinned the eye to, per result.
     ///
     /// Absent means the eye recovers the period from the waveform. Project
@@ -1500,6 +1505,7 @@ impl ResultViewerState {
             .retain(|(analysis, _), _| live(*analysis));
         self.x_scales.retain(|analysis, _| live(*analysis));
         self.xy_strips.retain(|strip| live(strip.analysis));
+        self.strip_layouts.retain(|analysis, _| live(*analysis));
         self.expr_projection_keys
             .retain(|_, analysis| live(*analysis));
         self.hidden_strips.retain(|analysis| live(*analysis));

@@ -72,6 +72,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
             waveform_colors: &session.waveform_colors,
             expressions,
             x_scales: &session.x_scales,
+            strips: &session.strip_layouts,
         },
         &simulation.retained.executed_decks,
         t,

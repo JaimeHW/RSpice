@@ -331,7 +331,9 @@ pub fn show_header(
         .traces
         .iter()
         .take(model.signal_trace_count)
-        .filter(|trace| !trace.visible && !pane.unlabeled && model.trace_unit(trace) == pane.unit)
+        .filter(|trace| {
+            !trace.visible && !pane.unlabeled && model.trace_unit(trace) == pane.quantity_unit()
+        })
         .filter(curve)
         .collect();
     sweep_members_in_value_order(&mut plotted_traces, |trace| &trace.source_waveform_name);
@@ -434,7 +436,7 @@ pub fn show_header(
             .id()
             .with(("abscissa-menu-draft", model.analysis_key, pane.unit));
         if let Some(chosen) = crate::context_menu::context_menu(&band, |ui| {
-            abscissa_choices(ui, pane.unit, menu, &display, draft_id)
+            abscissa_choices(ui, pane.quantity_unit(), menu, &display, draft_id)
         })
         .and_then(|inner| inner.inner)
         {

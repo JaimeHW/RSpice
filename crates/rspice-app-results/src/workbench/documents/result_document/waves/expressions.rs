@@ -597,6 +597,7 @@ pub(super) fn route_expressions(
                         unit,
                         unknown: None,
                         visible: expr.visible,
+                        text: expr.text.clone(),
                     },
                     Err(reason) => rspice_results_ui::waves::ExpressionPane {
                         visible: expr.visible,

@@ -233,7 +233,6 @@ fn a_running_transients_strip_frames_its_run_and_keeps_a_zoom_past_its_end() {
     let running = models(&mut state);
     assert_eq!(running[0].x_range, Some((0.0, 10.0)));
     let key = running[0].analysis_key;
-    let panes = running[0].unit_panes().len();
 
     for last in [4.0, 7.5] {
         state.model.simulation.retained.runs[0].analyses[0] =
@@ -247,12 +246,7 @@ fn a_running_transients_strip_frames_its_run_and_keeps_a_zoom_past_its_end() {
         );
     }
 
-    set_shared_x_view(
-        &mut state.results.results.session,
-        key,
-        panes,
-        Some((2.0, 4.0)),
-    );
+    set_shared_x_view(&mut state.results.results.session, key, Some((2.0, 4.0)));
     state.model.simulation.retained.runs[0].analyses[0] =
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![trace(10.0)]);
     state.model.simulation.execution.live_window = None;
@@ -261,7 +255,7 @@ fn a_running_transients_strip_frames_its_run_and_keeps_a_zoom_past_its_end() {
     assert_eq!(ended[0].analysis_key, key);
     assert_eq!(ended[0].x_range, Some((0.0, 10.0)));
     assert_eq!(
-        shared_x_view(&state.results.results.session, key, panes),
+        shared_x_view(&state.results.results.session, key),
         Some((2.0, 4.0)),
         "the reader's zoom outlives the run's end"
     );
@@ -298,11 +292,10 @@ fn following_a_running_transient_keeps_its_newest_rows_in_view_until_a_zoom() {
     };
     let running = models(&mut state);
     let key = running[0].analysis_key;
-    let panes = running[0].unit_panes().len();
     let session = &mut state.results.results.session;
-    set_shared_x_view(session, key, panes, Some((0.0, 1.0)));
-    start_following(session, &running[0], panes);
-    assert_eq!(shared_x_view(session, key, panes), Some((2.0, 3.0)));
+    set_shared_x_view(session, key, Some((0.0, 1.0)));
+    start_following(session, &running[0]);
+    assert_eq!(shared_x_view(session, key), Some((2.0, 3.0)));
 
     state.model.simulation.retained.runs[0].analyses[0] =
         AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "Tran")
@@ -310,13 +303,13 @@ fn following_a_running_transient_keeps_its_newest_rows_in_view_until_a_zoom() {
     state.model.simulation.view.data_version += 1;
     let grown = models(&mut state);
     let session = &mut state.results.results.session;
-    follow_leading_edge(session, &grown[0], panes);
-    assert_eq!(shared_x_view(session, key, panes), Some((5.0, 6.0)));
+    follow_leading_edge(session, &grown[0]);
+    assert_eq!(shared_x_view(session, key), Some((5.0, 6.0)));
 
-    set_shared_x_view(session, key, panes, Some((1.0, 2.0)));
-    follow_leading_edge(session, &grown[0], panes);
+    set_shared_x_view(session, key, Some((1.0, 2.0)));
+    follow_leading_edge(session, &grown[0]);
     assert_eq!(
-        shared_x_view(session, key, panes),
+        shared_x_view(session, key),
         Some((1.0, 2.0)),
         "a zoom of the reader's ends following"
     );

@@ -601,10 +601,9 @@ pub(crate) fn drawn_span(
     results: &crate::session::ResultViewerState,
     strip: &crate::session::XyStrip,
     domain: (f64, f64),
-    pane_count: usize,
 ) -> (f64, f64) {
     let span = if strip.follow_view {
-        super::stack::shared_x_view(results, strip.analysis, pane_count)
+        super::stack::shared_x_view(results, strip.analysis)
     } else {
         strip.sweep_range
     };
@@ -779,7 +778,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     // The strip draws the span of the sweep its header names: the whole
     // record unless the reader narrowed it, or while it follows, the window
     // its analysis' strip shows.
-    let window_range = drawn_span(host.session(), &strip, frame.x_domain, frame.pane_count);
+    let window_range = drawn_span(host.session(), &strip, frame.x_domain);
     let mut refusals: Vec<String> = Vec::new();
     let mut curves: Vec<Curve> = Vec::new();
     let trace_width = frame.options.trace_width;
@@ -1356,7 +1355,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(format!(
                 "Choose what the {} curves are plotted against. {pairing}.",
-                pane.unit
+                pane.quantity_unit()
             ));
         if label.hovered()
             || egui::Popup::is_id_open(strip_ui.ctx(), egui::Popup::default_response_id(&label))
@@ -1371,7 +1370,13 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         let draft_id = label.id.with("draft");
         chosen = egui::Popup::menu(&label)
             .show(|ui| {
-                super::header::abscissa_choices(ui, pane.unit, &menu, &str::to_owned, draft_id)
+                super::header::abscissa_choices(
+                    ui,
+                    pane.quantity_unit(),
+                    &menu,
+                    &str::to_owned,
+                    draft_id,
+                )
             })
             .and_then(|inner| inner.inner);
     }

@@ -437,7 +437,9 @@ pub fn real_step_traces(
         .lane_traces
         .iter()
         .filter(|lane| {
-            lane.visible && lane.kind == LaneTraceKind::Real && model.lane_unit(lane) == pane.unit
+            lane.visible
+                && lane.kind == LaneTraceKind::Real
+                && model.lane_unit(lane) == pane.quantity_unit()
         })
         .filter_map(|lane| {
             let real = lanes.real(&lane.net)?;

@@ -1,6 +1,6 @@
 //! Waveform stack layout and local viewer interaction over host-qualified sources.
 use super::{
-    CursorDomain, ReadoutPolicy, StripModel, StripTrace, UnitPane, anchor_key,
+    CursorDomain, ReadoutPolicy, SHARED_X_SLOT, StripModel, StripTrace, UnitPane, anchor_key,
     cursor_interpolation,
     cursor_values::marker_position,
     dock::{marker_color, marker_label},
@@ -393,7 +393,7 @@ pub fn active_pane<'a>(
 fn pane_log_y_key(model: &StripModel, pane: &UnitPane) -> WavePanePresentationKey {
     WavePanePresentationKey {
         analysis: model.analysis_key,
-        unit: pane.unit.to_owned(),
+        unit: pane.quantity_unit().to_owned(),
     }
 }
 
@@ -415,16 +415,15 @@ pub fn set_pane_log_y(
     }
 }
 
+/// The X window the reader put the analysis' strips in: one for all of
+/// them, kept on [`SHARED_X_SLOT`].
 pub fn shared_x_view(
     results: &ResultViewerState,
     analysis: AnalysisPresentationKey,
-    pane_count: usize,
 ) -> Option<(f64, f64)> {
-    (0..pane_count).find_map(|ordinal| {
-        results
-            .analysis_plot_view_pane(ResultViewer::Waves, analysis, ordinal)
-            .x
-    })
+    results
+        .analysis_plot_view_pane(ResultViewer::Waves, analysis, SHARED_X_SLOT)
+        .x
 }
 
 /// Set the strip's X window, as the reader zoomed, panned or fitted it: which ends following
@@ -432,15 +431,12 @@ pub fn shared_x_view(
 pub fn set_shared_x_view(
     results: &mut ResultViewerState,
     analysis: AnalysisPresentationKey,
-    pane_count: usize,
     range: Option<(f64, f64)>,
 ) {
     results.live_extent.follow.remove(&analysis);
-    for ordinal in 0..pane_count {
-        results
-            .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, ordinal)
-            .x = range;
-    }
+    results
+        .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, SHARED_X_SLOT)
+        .x = range;
 }
 
 /// How a strip's height is shared out.
@@ -710,12 +706,11 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                                 XScale::Log10 => XScale::Linear,
                                 XScale::Linear => XScale::Log10,
                             };
-                            let pane_count = model.unit_panes().len();
                             let session = host.session_mut();
                             session.x_scales.insert(model.analysis_key, scale);
                             // A range read on one scale is no viewport on the
                             // other.
-                            set_shared_x_view(session, model.analysis_key, pane_count, None);
+                            set_shared_x_view(session, model.analysis_key, None);
                         }
                         if let Some(chip_index) = header.legend_clicked {
                             toggle_expr = Some((model.analysis_key, chip_index));
@@ -881,7 +876,6 @@ fn expression_conversions(
 pub(crate) struct StripFrame<'a> {
     pub(crate) model: &'a StripModel,
     pub(crate) x_domain: (f64, f64),
-    pub(crate) pane_count: usize,
     pub(crate) linked_cursor_domain: Option<&'a CursorDomain>,
     pub(crate) options: StackOptions,
     pub(crate) gutter: Gutter,
@@ -954,16 +948,16 @@ pub(crate) fn visible_x_bounds(model: &StripModel) -> Option<(f64, f64)> {
 
 /// Follow a running transient's newest rows: its window keeps the width it has and ends at the
 /// newest time. A strip of anything else has nothing to follow.
-pub fn start_following(results: &mut ResultViewerState, model: &StripModel, pane_count: usize) {
+pub fn start_following(results: &mut ResultViewerState, model: &StripModel) {
     if model.live_frame.is_some() {
         results.live_extent.follow.insert(model.analysis_key);
-        follow_leading_edge(results, model, pane_count);
+        follow_leading_edge(results, model);
     }
 }
 
 /// Keep a following strip's window on its run's newest rows. Once the run ended its strip has
 /// no live frame, and following ends with the window where it was.
-pub fn follow_leading_edge(results: &mut ResultViewerState, model: &StripModel, pane_count: usize) {
+pub fn follow_leading_edge(results: &mut ResultViewerState, model: &StripModel) {
     if !results.live_extent.follow.contains(&model.analysis_key) {
         return;
     }
@@ -971,14 +965,12 @@ pub fn follow_leading_edge(results: &mut ResultViewerState, model: &StripModel, 
         results.live_extent.follow.remove(&model.analysis_key);
         return;
     };
-    let view = shared_x_view(results, model.analysis_key, pane_count).unwrap_or(frame);
+    let view = shared_x_view(results, model.analysis_key).unwrap_or(frame);
     let followed = super::extent::LiveExtent::followed(view, leading);
     if followed != view {
-        for ordinal in 0..pane_count {
-            results
-                .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, ordinal)
-                .x = Some(followed);
-        }
+        results
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, SHARED_X_SLOT)
+            .x = Some(followed);
     }
 }
 
@@ -987,7 +979,6 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
     let StripFrame {
         model,
         x_domain: full_domain,
-        pane_count,
         linked_cursor_domain,
         options,
         gutter,
@@ -996,9 +987,8 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
     if height <= 1.0 {
         return;
     }
-    follow_leading_edge(host.session_mut(), model, pane_count);
-    let current =
-        shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(full_domain);
+    follow_leading_edge(host.session_mut(), model);
+    let current = shared_x_view(host.session(), model.analysis_key).unwrap_or(full_domain);
     let cursor_owner = host.session().cursor_strip == Some(model.analysis_index);
     let linked_cursor =
         host.session().linked_cursors && linked_cursor_domain == Some(&model.cursor_domain());
@@ -1016,18 +1006,13 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
     if let Some(viewport) = output.viewport {
         match viewport {
             navigation::SharedXViewChange::Fit => {
-                set_shared_x_view(host.session_mut(), model.analysis_key, pane_count, None);
+                set_shared_x_view(host.session_mut(), model.analysis_key, None);
             }
             navigation::SharedXViewChange::Range(range) => {
-                set_shared_x_view(
-                    host.session_mut(),
-                    model.analysis_key,
-                    pane_count,
-                    Some(range),
-                );
+                set_shared_x_view(host.session_mut(), model.analysis_key, Some(range));
             }
             navigation::SharedXViewChange::Follow => {
-                start_following(host.session_mut(), model, pane_count);
+                start_following(host.session_mut(), model);
             }
         }
     }
@@ -1099,7 +1084,7 @@ fn show_strip_plot(
     // A real event lane is placed in a pane, and joins that pane's traces on
     // its unit axis.
     let mut pane_exprs = route_expressions(host, model, &panes, &t);
-    let view = shared_x_view(host.session(), model.analysis_key, panes.len()).unwrap_or(x_domain);
+    let view = shared_x_view(host.session(), model.analysis_key).unwrap_or(x_domain);
     for (pane, exprs) in panes.iter().zip(&mut pane_exprs) {
         exprs.extend(host.real_step_traces(model, pane, &t, view));
     }
@@ -1126,7 +1111,7 @@ fn show_strip_plot(
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
     let gutter = strip_gutter(ui, host, model);
-    let marker_height = event_marker_band(ui, host, model, (x_domain, gutter), count);
+    let marker_height = event_marker_band(ui, host, model, (x_domain, gutter));
     let lane_height = marker_height
         + event_lane_band(ui, host, model, (x_domain, gutter), count, wanted_lanes, &t);
     let expanded_count = count - collapsed_count;
@@ -1137,7 +1122,6 @@ fn show_strip_plot(
     let frame = StripFrame {
         model,
         x_domain,
-        pane_count: count,
         linked_cursor_domain,
         options,
         gutter,
@@ -1166,7 +1150,7 @@ fn show_strip_plot(
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.set_height(pane_height);
-                show_unit_pane(ui, host, pane, ordinal, &pane_exprs, frame, edits);
+                show_unit_pane(ui, host, pane, &pane_exprs, frame, edits);
             },
         );
     }
@@ -1343,7 +1327,7 @@ fn show_xy_strip(
     let panes = model.unit_panes();
     let span = model
         .x_range
-        .map(|domain| super::xy::drawn_span(host.session(), &strip, domain, panes.len()));
+        .map(|domain| super::xy::drawn_span(host.session(), &strip, domain));
     if let (Some(rect), Some(span)) = (header.field_rect, span)
         && let Some(edit) = super::xy::sweep_range_field(
             ui,
@@ -1386,7 +1370,7 @@ fn show_xy_strip(
         well_hint(ui, NO_SAMPLES);
         return false;
     };
-    let Some(ordinal) = panes.iter().position(|pane| pane.unit == strip.unit) else {
+    let Some(ordinal) = panes.iter().position(|pane| pane.axis == strip.unit) else {
         well_hint(
             ui,
             &format!("This analysis has no {} curves to plot", strip.unit),
@@ -1400,7 +1384,6 @@ fn show_xy_strip(
     let frame = StripFrame {
         model,
         x_domain,
-        pane_count: panes.len(),
         linked_cursor_domain,
         options,
         gutter,
@@ -1511,10 +1494,9 @@ fn event_frame(
     host: &impl StackHost,
     model: &StripModel,
     (x_domain, gutter): ((f64, f64), Gutter),
-    pane_count: usize,
 ) -> EventLaneFrame {
     EventLaneFrame {
-        x_range: shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(x_domain),
+        x_range: shared_x_view(host.session(), model.analysis_key).unwrap_or(x_domain),
         left_margin: gutter.width(),
         name_width: gutter.name,
         right_margin: navigation::WAVE_SHARED_RIGHT_MARGIN,
@@ -1528,14 +1510,13 @@ fn event_marker_band(
     host: &mut impl StackHost,
     model: &StripModel,
     domain: ((f64, f64), Gutter),
-    pane_count: usize,
 ) -> f32 {
     let available = ui.available_rect_before_wrap().height().max(0.0);
     let height = host.event_marker_height(model).max(0.0).min(available);
     if height <= 0.0 {
         return 0.0;
     }
-    let frame = event_frame(host, model, domain, pane_count);
+    let frame = event_frame(host, model, domain);
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), height),
         egui::Layout::top_down(egui::Align::Min),
@@ -1571,7 +1552,7 @@ fn event_lane_band(
     if height <= 0.0 {
         return 0.0;
     }
-    let frame = event_frame(host, model, domain, pane_count);
+    let frame = event_frame(host, model, domain);
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), height),
         egui::Layout::top_down(egui::Align::Min),
@@ -1600,7 +1581,6 @@ fn show_unit_pane(
     ui: &mut Ui,
     host: &mut impl StackHost,
     pane: &UnitPane,
-    ordinal: usize,
     exprs: &[ResolvedExpr],
     frame: StripFrame<'_>,
     edits: &mut ExpressionEdits,
@@ -1608,7 +1588,6 @@ fn show_unit_pane(
     let StripFrame {
         model,
         x_domain,
-        pane_count,
         linked_cursor_domain,
         options,
         gutter,
@@ -1684,13 +1663,13 @@ fn show_unit_pane(
     edits.toggle = edits.toggle.or(header.toggle_expression);
     edits.remove = edits.remove.or(header.remove_expression);
     if let Some(abscissa) = header.abscissa {
-        open_xy_strip(ui.ctx(), host.session_mut(), model, pane.unit, abscissa);
+        open_xy_strip(ui.ctx(), host.session_mut(), model, pane.axis, abscissa);
     }
     if header.autoscale_y || header.toggle_log_y {
         let view = host.session_mut().analysis_plot_view_pane_mut(
             ResultViewer::Waves,
             model.analysis_key,
-            ordinal,
+            pane.slot,
         );
         view.y = None;
     }
@@ -1701,7 +1680,7 @@ fn show_unit_pane(
 
     // The automatic fit follows the X window: a zoom in time refits Y to
     // what the window shows, until the reader pins a Y range of their own.
-    let window = shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(x_domain);
+    let window = shared_x_view(host.session(), model.analysis_key).unwrap_or(x_domain);
     let auto_y = pane_fit(
         &mut host.session_mut().derived,
         model,
@@ -1739,7 +1718,7 @@ fn show_unit_pane(
     // User zoom/pan overrides the automatic fit per axis, per pane.
     let pane_view =
         host.session()
-            .analysis_plot_view_pane(ResultViewer::Waves, model.analysis_key, ordinal);
+            .analysis_plot_view_pane(ResultViewer::Waves, model.analysis_key, pane.slot);
     let (x0, x1) = window;
     let family_envelopes = host
         .session()
@@ -1866,21 +1845,21 @@ fn show_unit_pane(
     }
 
     if response.view.reset {
-        set_shared_x_view(host.session_mut(), model.analysis_key, pane_count, None);
+        set_shared_x_view(host.session_mut(), model.analysis_key, None);
         let view = host.session_mut().analysis_plot_view_pane_mut(
             ResultViewer::Waves,
             model.analysis_key,
-            ordinal,
+            pane.slot,
         );
         view.y = None;
     } else if response.view.any() {
         if let Some(x) = response.view.x {
-            set_shared_x_view(host.session_mut(), model.analysis_key, pane_count, Some(x));
+            set_shared_x_view(host.session_mut(), model.analysis_key, Some(x));
         }
         let view = host.session_mut().analysis_plot_view_pane_mut(
             ResultViewer::Waves,
             model.analysis_key,
-            ordinal,
+            pane.slot,
         );
         if let Some(y) = response.view.y {
             view.y = Some(y);
@@ -1944,7 +1923,7 @@ pub(crate) fn abscissa_menu(
         {
             continue;
         }
-        if model.trace_unit(trace) == pane.unit {
+        if model.trace_unit(trace) == pane.quantity_unit() {
             own.push(trace.source_waveform_name.clone());
         } else {
             others.push(trace.source_waveform_name.clone());

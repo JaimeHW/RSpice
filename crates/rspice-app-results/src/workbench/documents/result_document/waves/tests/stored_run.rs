@@ -284,7 +284,7 @@ fn exercise(name: &str, rows: u64, reserve: u64, beyond_budget: bool) -> RunCost
     let (x0, x1) = model.x_range.expect("the strip has an X extent");
     let span = x1 - x0;
     let view = |state: &mut ResultsTestHost, range: (f64, f64)| {
-        set_shared_x_view(&mut state.results.results.session, analysis, 1, Some(range));
+        set_shared_x_view(&mut state.results.results.session, analysis, Some(range));
         timed_frame(&ctx, state)
     };
     let pans = (0..20)

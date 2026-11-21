@@ -8,6 +8,7 @@ use rspice_results::family_projection::FamilyTraceStyle;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, TracePresentationKey, WaveformPresentationKey,
 };
+use rspice_results::visualization_document::{MAX_STRIP_AXES, SignalForm, Strip, StripMember};
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::plot::sample::SweepShape;
 use rspice_ui_kit::plot::{XScale, fmt_si_significant};
@@ -28,6 +29,7 @@ mod policy;
 mod projection;
 pub mod readout;
 pub mod stack;
+pub mod strip_layout;
 pub mod xy;
 pub use policy::{ReadoutPolicy, cursor_interpolation};
 mod units;
@@ -285,6 +287,10 @@ pub struct StripModel {
     /// states for each, hidden ones with where they would be. Left empty by [`build_models`] and filled in
     /// by the host, which owns the expressions.
     pub expression_panes: Vec<ExpressionPane>,
+    /// The strips the reader arranged the analysis into, top to bottom;
+    /// empty, each unit has a strip of its own. Filled in by the host from
+    /// the view it draws.
+    pub arrangement: Vec<Strip>,
 }
 
 /// Where one expression trace is drawn.
@@ -310,6 +316,8 @@ pub struct ExpressionPane {
     /// run, whose Y axis fits the difference rather than the signals it is
     /// taken from. `None` for one that joins the pane of its unit.
     pub apart: Option<String>,
+    /// The expression as typed, which a strip lists it by.
+    pub text: String,
 }
 
 impl ExpressionPane {
@@ -322,6 +330,7 @@ impl ExpressionPane {
             unknown: Some(reason),
             visible: true,
             apart: None,
+            text: text.to_owned(),
         }
     }
 }
@@ -495,6 +504,243 @@ impl StripModel {
     /// domain, not a second axis on the magnitude pane. Phase panes order
     /// after the quantity panes so magnitude keeps the primary slot.
     pub fn unit_panes(&self) -> Vec<UnitPane<'_>> {
+        let (panes, drawn) = self.default_panes();
+        let first_unit = self
+            .traces
+            .first()
+            .map_or("", |trace| self.trace_unit(trace));
+        if !self.arrangement.is_empty() {
+            return self.arranged_panes(panes, &drawn, first_unit);
+        }
+        let (quantity, phase): (Vec<_>, Vec<_>) = panes
+            .into_iter()
+            .zip(drawn)
+            .filter_map(|(pane, drawn)| drawn.then_some(pane))
+            .partition(|pane| !is_phase_unit(pane.axis));
+        let mut panes: Vec<_> = quantity.into_iter().chain(phase).collect();
+        for pane in &mut panes {
+            let identity = pane.unit;
+            pane.assign_slots(identity, first_unit);
+        }
+        panes
+    }
+
+    /// The strips as the reader arranged them. Each strip's axes draw the
+    /// curves they list, a curve of another unit going to the strip's axis
+    /// of its unit, or a new one while the strip has fewer than four. A
+    /// curve no strip lists, or one no listing strip has room for, joins the
+    /// first strip with an axis of its unit, or has a strip of its own after
+    /// the arranged ones, as an unarranged unit does. A strip, or an axis,
+    /// that draws nothing takes no room.
+    fn arranged_panes<'s>(
+        &'s self,
+        defaults: Vec<UnitPane<'s>>,
+        drawn: &[bool],
+        first_unit: &str,
+    ) -> Vec<UnitPane<'s>> {
+        struct Row<'s> {
+            identity: &'s str,
+            slot_identity: &'s str,
+            weight: f32,
+            locked: bool,
+            arranged: bool,
+            unlabeled: bool,
+            axes: Vec<(SecondaryAxis<'s>, bool)>,
+            hidden_expressions: Vec<usize>,
+        }
+        fn axis<'s>(unit: &'s str) -> (SecondaryAxis<'s>, bool) {
+            (
+                SecondaryAxis {
+                    unit,
+                    traces: Vec::new(),
+                    expressions: Vec::new(),
+                    slot: SHARED_X_SLOT,
+                },
+                false,
+            )
+        }
+        enum Curve {
+            Trace(usize),
+            Expression(usize),
+        }
+        struct Item<'s> {
+            curve: Curve,
+            unit: &'s str,
+            identity: &'s str,
+            unlabeled: bool,
+        }
+        let mut items: Vec<Item<'s>> = Vec::new();
+        let mut lane_units: Vec<&'s str> = Vec::new();
+        let mut hidden: Vec<(&'s str, Vec<usize>)> = Vec::new();
+        for (pane, drawn) in defaults.iter().zip(drawn) {
+            let unit = if pane.unlabeled { pane.unit } else { pane.axis };
+            if !pane.hidden_expressions.is_empty() {
+                hidden.push((unit, pane.hidden_expressions.clone()));
+            }
+            if *drawn && pane.traces.is_empty() && pane.expressions.is_empty() {
+                lane_units.push(unit);
+            }
+            let item = |curve| Item {
+                curve,
+                unit,
+                identity: pane.unit,
+                unlabeled: pane.unlabeled,
+            };
+            items.extend(pane.traces.iter().map(|&index| item(Curve::Trace(index))));
+            items.extend(
+                pane.expressions
+                    .iter()
+                    .map(|&slot| item(Curve::Expression(slot))),
+            );
+        }
+        let mut rows: Vec<Row<'s>> = self
+            .arrangement
+            .iter()
+            .enumerate()
+            .map(|(position, strip)| {
+                let first = strip.axes.first().map_or("", |axis| axis.unit.as_str());
+                let earlier = self.arrangement[..position]
+                    .iter()
+                    .any(|strip| strip.axes.first().is_some_and(|axis| axis.unit == first));
+                Row {
+                    identity: strip.key.as_str(),
+                    slot_identity: if earlier { strip.key.as_str() } else { first },
+                    weight: strip.weight.unwrap_or(1.0),
+                    locked: strip.locked,
+                    arranged: true,
+                    unlabeled: false,
+                    axes: strip.axes.iter().map(|held| axis(&held.unit)).collect(),
+                    hidden_expressions: Vec::new(),
+                }
+            })
+            .collect();
+        let listed = |curve: &Curve, member: &StripMember| match (curve, member) {
+            (Curve::Trace(index), StripMember::Signal { name, form }) => {
+                self.traces.get(*index).is_some_and(|trace| {
+                    trace.source_waveform_name == *name && signal_form(trace.kind) == *form
+                })
+            }
+            (Curve::Expression(slot), StripMember::Expression { text }) => self
+                .expression_panes
+                .iter()
+                .any(|expression| expression.slot == *slot && expression.text == *text),
+            _ => false,
+        };
+        let push = |axis: &mut SecondaryAxis<'s>, curve: &Curve| match curve {
+            Curve::Trace(index) => axis.traces.push(*index),
+            Curve::Expression(slot) => axis.expressions.push(*slot),
+        };
+        let mut unplaced: Vec<&Item<'s>> = Vec::new();
+        for item in &items {
+            let mut placed = false;
+            for (strip, row) in self.arrangement.iter().zip(rows.iter_mut()) {
+                let Some(listing) = strip.axes.iter().position(|held| {
+                    held.members
+                        .iter()
+                        .any(|member| listed(&item.curve, member))
+                }) else {
+                    continue;
+                };
+                let target = if row.axes[listing].0.unit == item.unit {
+                    Some(listing)
+                } else if let Some(other) =
+                    row.axes.iter().position(|(held, _)| held.unit == item.unit)
+                {
+                    Some(other)
+                } else if row.axes.len() < MAX_STRIP_AXES {
+                    row.axes.push(axis(item.unit));
+                    Some(row.axes.len() - 1)
+                } else {
+                    None
+                };
+                if let Some(target) = target {
+                    push(&mut row.axes[target].0, &item.curve);
+                    placed = true;
+                }
+            }
+            if !placed {
+                unplaced.push(item);
+            }
+        }
+        for item in unplaced {
+            if let Some(row) = rows
+                .iter_mut()
+                .find(|row| row.axes.iter().any(|(held, _)| held.unit == item.unit))
+            {
+                let held = row
+                    .axes
+                    .iter_mut()
+                    .find(|(held, _)| held.unit == item.unit)
+                    .expect("the row has an axis of the unit");
+                push(&mut held.0, &item.curve);
+                continue;
+            }
+            let mut held = axis(item.unit);
+            push(&mut held.0, &item.curve);
+            rows.push(Row {
+                identity: item.identity,
+                slot_identity: item.identity,
+                weight: 1.0,
+                locked: false,
+                arranged: false,
+                unlabeled: item.unlabeled,
+                axes: vec![held],
+                hidden_expressions: Vec::new(),
+            });
+        }
+        for unit in lane_units {
+            match rows
+                .iter_mut()
+                .find_map(|row| row.axes.iter_mut().find(|(held, _)| held.unit == unit))
+            {
+                Some(held) => held.1 = true,
+                None => rows.push(Row {
+                    identity: unit,
+                    slot_identity: unit,
+                    weight: 1.0,
+                    locked: false,
+                    arranged: false,
+                    unlabeled: false,
+                    axes: vec![(axis(unit).0, true)],
+                    hidden_expressions: Vec::new(),
+                }),
+            }
+        }
+        for (unit, slots) in hidden {
+            if let Some(row) = rows
+                .iter_mut()
+                .find(|row| row.axes.first().is_some_and(|(held, _)| held.unit == unit))
+            {
+                row.hidden_expressions.extend(slots);
+            }
+        }
+        rows.into_iter()
+            .filter_map(|row| {
+                let mut axes = row.axes.into_iter().filter_map(|(held, lanes)| {
+                    (lanes || !held.traces.is_empty() || !held.expressions.is_empty())
+                        .then_some(held)
+                });
+                let first = axes.next()?;
+                let mut pane = UnitPane {
+                    traces: first.traces,
+                    expressions: first.expressions,
+                    hidden_expressions: row.hidden_expressions,
+                    unlabeled: row.unlabeled,
+                    secondary: axes.collect(),
+                    weight: row.weight,
+                    locked: row.locked,
+                    arranged: row.arranged,
+                    ..UnitPane::of(row.identity, first.unit)
+                };
+                pane.assign_slots(row.slot_identity, first_unit);
+                Some(pane)
+            })
+            .collect()
+    }
+
+    /// Every unit's pane, in the order the units first appear, and whether
+    /// each draws anything.
+    fn default_panes(&self) -> (Vec<UnitPane<'_>>, Vec<bool>) {
         let mut panes: Vec<UnitPane<'_>> = Vec::new();
         // Whether each pane draws anything: one that draws nothing is
         // dropped at the end, once its hidden expressions have found it.
@@ -510,12 +756,8 @@ impl StripModel {
                 }
                 None => {
                     panes.push(UnitPane {
-                        unit,
-                        axis: unit,
                         traces: trace.visible.then_some(index).into_iter().collect(),
-                        expressions: Vec::new(),
-                        hidden_expressions: Vec::new(),
-                        unlabeled: false,
+                        ..UnitPane::of(unit, unit)
                     });
                     drawn.push(trace.visible);
                 }
@@ -532,14 +774,7 @@ impl StripModel {
             match panes.iter().position(|pane| pane.unit == unit) {
                 Some(ordinal) => drawn[ordinal] = true,
                 None => {
-                    panes.push(UnitPane {
-                        unit,
-                        axis: unit,
-                        traces: Vec::new(),
-                        expressions: Vec::new(),
-                        hidden_expressions: Vec::new(),
-                        unlabeled: false,
-                    });
+                    panes.push(UnitPane::of(unit, unit));
                     drawn.push(true);
                 }
             }
@@ -576,12 +811,8 @@ impl StripModel {
                 panes.insert(
                     at,
                     UnitPane {
-                        unit: identity.as_str(),
-                        axis: expression.unit.as_str(),
-                        traces: Vec::new(),
                         expressions: vec![expression.slot],
-                        hidden_expressions: Vec::new(),
-                        unlabeled: false,
+                        ..UnitPane::of(identity.as_str(), expression.unit.as_str())
                     },
                 );
                 drawn.insert(at, true);
@@ -594,12 +825,9 @@ impl StripModel {
                 }
                 None => {
                     panes.push(UnitPane {
-                        unit: expression.unit.as_str(),
-                        axis: expression.unit.as_str(),
-                        traces: Vec::new(),
                         expressions: vec![expression.slot],
-                        hidden_expressions: Vec::new(),
                         unlabeled: expression.unknown.is_some(),
+                        ..UnitPane::of(expression.unit.as_str(), expression.unit.as_str())
                     });
                     drawn.push(true);
                 }
@@ -610,12 +838,25 @@ impl StripModel {
                 panes[owner].hidden_expressions.push(expression.slot);
             }
         }
-        let (quantity, phase): (Vec<_>, Vec<_>) = panes
-            .into_iter()
-            .zip(drawn)
-            .filter_map(|(pane, drawn)| drawn.then_some(pane))
-            .partition(|pane| !matches!(pane.axis, "°" | "rad"));
-        quantity.into_iter().chain(phase).collect()
+        (panes, drawn)
+    }
+
+    /// What a strip lists `index` by: its signal's name and the form drawn.
+    pub fn trace_member(&self, index: usize) -> Option<StripMember> {
+        self.traces.get(index).map(|trace| StripMember::Signal {
+            name: trace.source_waveform_name.clone(),
+            form: signal_form(trace.kind),
+        })
+    }
+
+    /// What a strip lists the expression in `slot` by: its text.
+    pub fn expression_member(&self, slot: usize) -> Option<StripMember> {
+        self.expression_panes
+            .iter()
+            .find(|expression| expression.slot == slot)
+            .map(|expression| StripMember::Expression {
+                text: expression.text.clone(),
+            })
     }
 
     /// Indices of the visible active-run signal traces, in legend order.
@@ -747,7 +988,7 @@ pub fn anchor_key(model: &StripModel, trace: &StripTrace) -> WaveformPresentatio
 ///
 /// Panes of a strip always share the strip's X domain — they are one
 /// measurement read against several scales, not several plots.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnitPane<'a> {
     /// The unit every trace on this pane's axis is measured in. Borrowed from
     /// the strip model, because a retained unit is data rather than one of a
@@ -767,12 +1008,137 @@ pub struct UnitPane<'a> {
     /// Whether this is the pane of an expression whose unit cannot be
     /// stated: its axis carries no unit, and `unit` is only its identity.
     pub unlabeled: bool,
+    /// The Y axes after the first, each with a gutter of its own, when the
+    /// reader put curves of other units on this strip: three at most.
+    pub secondary: Vec<SecondaryAxis<'a>>,
+    /// The key its pinned Y range is kept by in the session's viewports:
+    /// the same for the same strip and axis however many strips around it
+    /// are shown or hidden. The X window of the whole analysis is kept on
+    /// [`SHARED_X_SLOT`].
+    pub slot: usize,
+    /// Its share of the analysis' height against the other strips'.
+    pub weight: f32,
+    /// The reader locked its height.
+    pub locked: bool,
+    /// Whether the strip is one the reader arranged, rather than the strip
+    /// a unit has of its own.
+    pub arranged: bool,
 }
 
-impl UnitPane<'_> {
+/// One Y axis of a strip after its first: the curves of one unit, read
+/// against a gutter of their own beside the strip's first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecondaryAxis<'a> {
+    pub unit: &'a str,
+    pub traces: Vec<usize>,
+    pub expressions: Vec<usize>,
+    /// The key its pinned Y range is kept by, as [`UnitPane::slot`].
+    pub slot: usize,
+}
+
+/// The viewport slot an analysis keeps its shared X window on, which is also
+/// the slot of the first unit's strip: a result document states that strip's
+/// Y range and the X window in its own axes.
+pub const SHARED_X_SLOT: usize = 0;
+
+/// The form of a signal a trace of `kind` draws.
+pub const fn signal_form(kind: TraceKind) -> SignalForm {
+    match kind {
+        TraceKind::Value => SignalForm::Value,
+        TraceKind::MagnitudeDb => SignalForm::Magnitude,
+        TraceKind::PhaseDeg => SignalForm::Phase,
+        TraceKind::Real => SignalForm::Real,
+        TraceKind::Imaginary => SignalForm::Imaginary,
+        TraceKind::NoiseDensity => SignalForm::NoiseDensity,
+    }
+}
+
+/// Whether a pane of `unit` reads a phase, which a unit's own strips stack
+/// after every other unit's.
+fn is_phase_unit(unit: &str) -> bool {
+    matches!(unit, "\u{b0}" | "rad")
+}
+
+impl<'a> UnitPane<'a> {
+    /// An empty pane of identity `unit` whose axis reads in `axis`.
+    fn of(unit: &'a str, axis: &'a str) -> Self {
+        Self {
+            unit,
+            axis,
+            traces: Vec::new(),
+            expressions: Vec::new(),
+            hidden_expressions: Vec::new(),
+            unlabeled: false,
+            secondary: Vec::new(),
+            slot: SHARED_X_SLOT,
+            weight: 1.0,
+            locked: false,
+            arranged: false,
+        }
+    }
+
+    /// The unit the strip's own curves are measured in: on a pane apart,
+    /// or one the reader did not arrange, `unit`; on an arranged strip, its
+    /// first axis' unit, as `unit` is then the strip's key.
+    pub fn quantity_unit(&self) -> &'a str {
+        if self.arranged { self.axis } else { self.unit }
+    }
+
+    /// Key this strip's axes by what they are rather than where they stand:
+    /// by `identity`, the unit of a unit's first strip or a later strip's
+    /// own key, and each axis' unit; the first unit's own axis on its first
+    /// strip by [`SHARED_X_SLOT`].
+    fn assign_slots(&mut self, identity: &str, first_unit: &str) {
+        // A strip may read two curves of one unit against two axes, a
+        // ripple beside its rail: the later axis is keyed by its turn too.
+        let mut seen: Vec<&str> = Vec::new();
+        let mut slot = |axis: &'a str| {
+            let turn = seen.iter().filter(|held| **held == axis).count();
+            seen.push(axis);
+            if turn == 0 && identity == first_unit && axis == first_unit {
+                SHARED_X_SLOT
+            } else if turn == 0 {
+                // Odd, so never the shared slot.
+                (stable_hash(&(identity, axis)) as usize) | 1
+            } else {
+                (stable_hash(&(identity, axis, turn)) as usize) | 1
+            }
+        };
+        self.slot = slot(self.axis);
+        for secondary in &mut self.secondary {
+            secondary.slot = slot(secondary.unit);
+        }
+    }
+
     /// The unit this pane's axis reads in: none on an unlabeled pane.
     pub fn axis_unit(&self) -> &str {
         if self.unlabeled { "" } else { self.axis }
+    }
+
+    /// Every trace the strip draws, whichever of its axes it reads against.
+    pub fn all_traces(&self) -> impl Iterator<Item = usize> + '_ {
+        self.traces
+            .iter()
+            .chain(self.secondary.iter().flat_map(|axis| axis.traces.iter()))
+            .copied()
+    }
+
+    /// Every expression the strip draws, whichever of its axes it reads
+    /// against.
+    pub fn all_expressions(&self) -> impl Iterator<Item = usize> + '_ {
+        self.expressions
+            .iter()
+            .chain(
+                self.secondary
+                    .iter()
+                    .flat_map(|axis| axis.expressions.iter()),
+            )
+            .copied()
+    }
+
+    /// The units of the strip's axes, first to last.
+    pub fn axis_units(&self) -> impl Iterator<Item = &'a str> + '_ {
+        std::iter::once(self.axis).chain(self.secondary.iter().map(|axis| axis.unit))
     }
 }
 

@@ -66,14 +66,13 @@ pub(crate) fn zoom_active_pane(state: &mut ResultsParts<'_>, t: &Tokens, factor:
     let Some((model, ordinal, pane)) = active_pane(&models, &state.results.session) else {
         return;
     };
-    let pane_count = model.unit_panes().len();
     let logarithmic_y = pane_log_y(&state.results.session, model, &pane);
     let current = state.results.session.analysis_plot_view_pane(
         super::super::ResultViewer::Waves,
         model.analysis_key,
-        ordinal,
+        pane.slot,
     );
-    let x = shared_x_view(&state.results.session, model.analysis_key, pane_count)
+    let x = shared_x_view(&state.results.session, model.analysis_key)
         .or(model.x_range)
         .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10))
         .and_then(|range| floored_span(range, model.x_scale));
@@ -93,12 +92,7 @@ pub(crate) fn zoom_active_pane(state: &mut ResultsParts<'_>, t: &Tokens, factor:
         )
     });
     if let Some(x) = x {
-        set_shared_x_view(
-            &mut state.results.session,
-            model.analysis_key,
-            pane_count,
-            Some(x),
-        );
+        set_shared_x_view(&mut state.results.session, model.analysis_key, Some(x));
     }
     if let Some(y) = y {
         state
@@ -107,7 +101,7 @@ pub(crate) fn zoom_active_pane(state: &mut ResultsParts<'_>, t: &Tokens, factor:
             .analysis_plot_view_pane_mut(
                 super::super::ResultViewer::Waves,
                 model.analysis_key,
-                ordinal,
+                pane.slot,
             )
             .y = Some(y);
     }
@@ -128,7 +122,7 @@ pub(crate) fn fit_active_pane(state: &mut ResultsParts<'_>, t: &Tokens) {
         presentation.complex_number_display(),
         t,
     );
-    let Some((model, ordinal, _)) = active_pane(&models, &state.results.session) else {
+    let Some((model, _, pane)) = active_pane(&models, &state.results.session) else {
         return;
     };
     state.results.session.clear_analysis_plot_view_axis(
@@ -142,7 +136,7 @@ pub(crate) fn fit_active_pane(state: &mut ResultsParts<'_>, t: &Tokens) {
         .analysis_plot_view_pane_mut(
             super::super::ResultViewer::Waves,
             model.analysis_key,
-            ordinal,
+            pane.slot,
         )
         .y = None;
 }

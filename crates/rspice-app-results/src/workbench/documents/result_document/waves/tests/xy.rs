@@ -484,14 +484,10 @@ fn a_following_strip_draws_the_window_the_time_strip_shows() {
     click(&ctx, &mut state, follow, egui::PointerButton::Primary);
     assert!(strips(&state)[0].follow_view);
 
-    let (analysis, pane_count) = {
-        let models = super::lanes::strip(&mut state);
-        (models[0].analysis_key, models[0].unit_panes().len())
-    };
+    let analysis = super::lanes::strip(&mut state)[0].analysis_key;
     rspice_results_ui::waves::stack::set_shared_x_view(
         &mut state.results.results.session,
         analysis,
-        pane_count,
         Some((0.0, 250.0e-6)),
     );
     let painted = painted_texts(&ctx, &mut state);

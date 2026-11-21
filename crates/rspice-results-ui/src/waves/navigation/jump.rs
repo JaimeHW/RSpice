@@ -1,7 +1,7 @@
 //! Moving the stepping cursor to a feature of the trace it reads: the
 //! maximum, the minimum, the next or previous peak, crossing or sample.
 
-use super::super::{StripModel, StripTrace, anchor_key};
+use super::super::{StripModel, StripTrace, UnitPane, anchor_key};
 use super::{recentered_shared_x_view, shared_axis_viewport_fraction};
 use crate::session::ResultViewerState;
 use crate::waves::stack::{set_shared_x_view, shared_x_view};
@@ -64,7 +64,14 @@ pub fn jump_trace<'a>(
             .active_wave_pane
             .as_ref()
             .filter(|pane| pane.analysis == model.analysis_key)
-            .and_then(|pane| candidates().find(|trace| model.trace_unit(trace) == pane.unit))
+            .and_then(|active| {
+                let panes = model.unit_panes();
+                let unit = panes
+                    .iter()
+                    .find(|pane| pane.unit == active.unit)
+                    .map_or(active.unit.as_str(), UnitPane::quantity_unit);
+                candidates().find(|trace| model.trace_unit(trace) == unit)
+            })
     };
     selected
         .or_else(anchored)
@@ -328,8 +335,7 @@ fn follow(session: &mut ResultViewerState, model: &StripModel, x: f64) {
     let Some(full) = model.x_range else {
         return;
     };
-    let panes = model.unit_panes().len();
-    let Some(view) = shared_x_view(session, model.analysis_key, panes) else {
+    let Some(view) = shared_x_view(session, model.analysis_key) else {
         return;
     };
     if x >= view.0.min(view.1) && x <= view.0.max(view.1) {
@@ -337,6 +343,6 @@ fn follow(session: &mut ResultViewerState, model: &StripModel, x: f64) {
     }
     let (centre, _) = shared_axis_viewport_fraction(model.x_scale, full, (x, x));
     if let Some(range) = recentered_shared_x_view(model.x_scale, full, view, centre) {
-        set_shared_x_view(session, model.analysis_key, panes, Some(range));
+        set_shared_x_view(session, model.analysis_key, Some(range));
     }
 }
