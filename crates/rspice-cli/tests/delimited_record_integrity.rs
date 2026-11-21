@@ -4,8 +4,12 @@ mod common;
 use common::{quiet as cli, read_json, test_dir};
 use std::process::Output;
 
+/// A delimiter-only header is the header, two columns named '', not a blank
+/// line that hands the header's place to the first data row (whose names "0"
+/// and "1" would convert). Two columns of one name are refused, as the app's
+/// importer refuses them, and nothing is written.
 #[test]
-fn delimiter_only_headers_do_not_consume_the_first_data_row() {
+fn a_delimiter_only_header_is_the_header_and_its_unnamed_columns_are_refused() {
     let directory = test_dir("delimiter_only_header");
     for (format, separator) in [("csv", ','), ("tsv", '\t')] {
         let input = directory.join(format!("source.{format}"));
@@ -22,15 +26,13 @@ fn delimiter_only_headers_do_not_consume_the_first_data_row() {
             "--to",
             "json",
         ]);
-        assert!(result.status.success(), "{result:?}");
-        let actual = read_json(&output);
-        assert_eq!(actual["scale"]["name"], "");
-        assert_eq!(actual["scale"]["values"], serde_json::json!([0.0, 1.0]));
-        assert_eq!(actual["signals"][0]["name"], "");
-        assert_eq!(
-            actual["signals"][0]["values"],
-            serde_json::json!([1.0, 2.0])
+        assert_eq!(result.status.code(), Some(1), "{result:?}");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            stderr.contains("two columns are named '', and a reader cannot tell them apart"),
+            "{format}: {stderr}"
         );
+        assert!(!output.exists(), "{format}: a refused table was written");
     }
 }
 
