@@ -467,10 +467,11 @@ fn a_seeded_run_of_64_mib_saves_closes_and_reopens_with_every_sample() {
 }
 
 /// Run every check this thread left for one, as the frames after an open or a save do, until
-/// none runs.
+/// none runs. Started before the frame polls them: a quick check can end before the poll that
+/// started it looks at it.
 fn run_segment_checks(simulation: &mut SimulationState) {
     let mut checks = Vec::new();
-    crate::io::result_segments::poll_segment_checks(simulation, &mut checks);
+    crate::io::result_segments::start_segment_checks(&mut checks);
     assert!(!checks.is_empty(), "a check was left to run");
     for check in &checks {
         assert!(check.wait(std::time::Duration::from_secs(60)));
