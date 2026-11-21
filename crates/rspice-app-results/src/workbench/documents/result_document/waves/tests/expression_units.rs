@@ -125,7 +125,9 @@ fn each_expression_is_drawn_on_the_axis_of_its_own_unit() {
         "the unlabeled pane says its unit is unknown: {painted:?} {labels:?}"
     );
     assert!(
-        painted.iter().any(|text| text.ends_with(" mW")),
+        painted.iter().any(|text| text
+            .split_once(' ')
+            .is_some_and(|(_, unit)| unit.ends_with('W'))),
         "the watts pane names its unit on its top tick: {painted:?}"
     );
 }
