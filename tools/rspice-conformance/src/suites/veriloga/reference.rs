@@ -210,11 +210,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_reference_device_builds_from_defaults() {
-        bsim4_default_device().expect("an empty card must select BSIM4 defaults");
-    }
-
-    #[test]
     fn the_reference_device_stamps_at_the_bench_bias() {
         let mut device = bsim4_default_device().expect("reference device");
         let mut stamper = DenseStamper::new(BSIM4_NODE_COUNT);

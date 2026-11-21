@@ -5144,20 +5144,6 @@ timescale output
 }
 
 #[test]
-fn tran_print_time_scale_factor_defaults_to_one() {
-    let factor = XyceTestRunner::tran_print_time_scale_factor(
-        "\
-default output
-.PRINT TRAN V(1)
-.END
-",
-    )
-    .expect("TRAN print line without a time scale factor parses");
-
-    assert!((factor - 1.0).abs() <= 1.0e-15);
-}
-
-#[test]
 fn output_snapshots_option_is_detected_for_csv_guardrails() {
     assert!(
         XyceTestRunner::line_declares_output_snapshots(

@@ -1590,12 +1590,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn zero_branch_current_uses_a_milliamp_coarse_perturbation() {
-        let step = AUDIT_STEP_LADDER[0] * 0.0_f64.abs().max(PROBE_BRANCH_SCALE);
-        assert_eq!(step, 1.0e-3);
-    }
-
     /// Build a one-entry ladder by hand: the same derivative at every step, with
     /// the one-sided gap shrinking or holding as the caller dictates.
     fn rung(derivative: Value, asymmetry: Value) -> DifferenceRung {

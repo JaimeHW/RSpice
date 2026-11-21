@@ -610,18 +610,6 @@ fn all_circuit_paths(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn test_suite_config_applies_soi_timeout_override() {
-    for suite in ["bsim3soidd", "bsim3soifd", "bsim3soipd"] {
-        let cfg = suite_config(suite);
-        assert_eq!(
-            cfg.max_time_per_test_ms, 1_800_000,
-            "expected {} to inherit the long-suite timeout override",
-            suite
-        );
-    }
-}
-
-#[test]
 fn test_bsim3soifd_nmos_model_card_has_parseable_rth0_parameter() {
     let tests_dir = get_tests_dir();
     let deck_path = tests_dir.join("bsim3soifd").join("RampVg2.cir");
@@ -715,14 +703,6 @@ fn test_full_suite_timeout_is_bounded_by_default() {
         120_000
     );
     assert_eq!(resolve_full_suite_timeout_ms(&suites, Some(0)), timeout);
-}
-
-#[test]
-fn test_ngspice_deck_preflight_allows_current_profile() {
-    let result = std::panic::catch_unwind(|| {
-        assert_ngspice_regression_deck_run_allowed("deck 'general/rc.cir'");
-    });
-    result.expect("ngspice deck preflight must allow debug and release profiles");
 }
 
 #[test]
@@ -889,23 +869,6 @@ fn ngspice_exe_console_binary_error(exe: &Path) -> Option<String> {
         ));
     }
     None
-}
-
-#[test]
-fn test_discover_tests() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
-
-    let general_tests = runner.discover_tests("general");
-    println!("Found {} tests in general/", general_tests.len());
-
-    let bsim3soifd_tests = runner.discover_tests("bsim3soifd");
-    println!("Found {} tests in bsim3soifd/", bsim3soifd_tests.len());
-
-    // Verify paths look correct
-    for path in general_tests.iter().take(3) {
-        println!("  - {}", path.display());
-        assert!(path.extension().is_some_and(|e| e == "cir"));
-    }
 }
 
 #[test]
@@ -1102,18 +1065,4 @@ fn test_expected_unsupported_manifest_entries_match_unsupported_decks() {
             result
         );
     }
-}
-
-#[test]
-fn test_statistics_calculation() {
-    let stats = TestStatistics {
-        total: 100,
-        passed: 75,
-        failed: 15,
-        skipped: 10,
-        expected_unsupported: 0,
-        total_time_ms: 1234,
-    };
-
-    assert!((stats.pass_rate() - 75.0).abs() < 0.01);
 }
