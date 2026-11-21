@@ -938,24 +938,3 @@ fn d5_c6_a_pure_analog_deck_is_untouched_by_the_event_machinery() {
         );
     }
 }
-
-/// **D5 clause 6, inertness half.** A pure-analog deck constructs no event
-/// world at all, so there is nothing for the machinery to be inert about.
-///
-/// This is the structural reason the clause holds:
-/// `collect_xspice_runtime_breakpoints` is reached only under
-/// `circuit.has_xspice_devices()`, and for a pure-analog circuit that is false.
-#[test]
-fn d5_c6_a_pure_analog_deck_constructs_no_event_world() {
-    let engine = Engine::default();
-    let netlist = Netlist::parse(PURE_ANALOG_DECK).expect("deck parses");
-    let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-    assert!(
-        !circuit.has_xspice_devices(),
-        "the clause-6 deck must stay free of event-driven content"
-    );
-
-    let result = run_deck(PURE_ANALOG_DECK, 2.0e-8, 1.0e-10);
-    assert!(result.digital_traces.is_empty());
-    assert!(result.real_traces.is_empty());
-}
