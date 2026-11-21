@@ -72,7 +72,7 @@ pub fn show(
     }];
     let header = strip::StripHeader::new(
         "PHASE NOISE",
-        &format!("{} · {} · retained L(f)", model.label, model.source),
+        &format!("{} · {}", model.label, model.source),
         &legend,
     )
     .zoomed(view.is_zoomed())

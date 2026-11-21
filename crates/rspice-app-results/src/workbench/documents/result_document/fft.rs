@@ -27,9 +27,6 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if out.fit_requested {
         state.results.session.reset_plot_view(ResultViewer::Fft, 0);
     }
-    if out.rebuild_failed {
-        state.analysis.clear_fft_viewer_cache_authority();
-    }
     frame_work::note_samples(
         frame_work::FrameSampleRead::TraceExtremes,
         out.range_samples_read,
@@ -44,6 +41,15 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 .apply(&response.view);
         }
     }
+}
+
+/// The transform settings in the sheet bar. A setting that fails to rebuild
+/// the spectrum revokes the viewer's source authorization, as it always has.
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    if view::domain_bar(ui, &mut state.analysis.fft_state) {
+        state.analysis.clear_fft_viewer_cache_authority();
+    }
+    true
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {

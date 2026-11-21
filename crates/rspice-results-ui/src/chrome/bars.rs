@@ -46,7 +46,6 @@ const PAGE_PICKER_GUTTER: f32 = 8.0;
 pub trait SheetBarHost {
     fn viewer(&self) -> ResultViewer;
     fn export(&mut self, requests: ExportRequests);
-    fn fft_summary(&self) -> Option<String>;
     fn operating_point_filter(&mut self) -> &mut String;
     fn instrument(&mut self, ui: &mut Ui);
     fn eye_actions(&mut self, ui: &mut Ui);
@@ -54,6 +53,17 @@ pub trait SheetBarHost {
     fn domain_controls(&mut self, ui: &mut Ui) -> bool;
     fn purpose(&self) -> String;
 }
+
+/// A word naming the control after it in a sheet bar: sans, sentence case,
+/// in the dim ink, so the controls carry the weight.
+pub fn bar_label(ui: &mut Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(Tokens::get(ui.ctx()).color.text_dim),
+    );
+}
+
 pub const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
     matches!(viewer, ResultViewer::Op | ResultViewer::Table)
 }
@@ -325,16 +335,6 @@ fn operating_point_filter(ui: &mut Ui, filter: &mut String) {
 
 fn result_viewer_actions(ui: &mut Ui, host: &mut impl SheetBarHost) {
     match host.viewer() {
-        ResultViewer::Fft => {
-            let label = host.fft_summary();
-            if let Some(label) = label {
-                ui.label(
-                    egui::RichText::new(label)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(Tokens::get(ui.ctx()).color.text_faint),
-                );
-            }
-        }
         ResultViewer::Eye => host.eye_actions(ui),
         ResultViewer::Op => operating_point_filter(ui, host.operating_point_filter()),
         ResultViewer::Table => host.table_actions(ui),

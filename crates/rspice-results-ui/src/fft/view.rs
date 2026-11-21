@@ -37,8 +37,6 @@ pub struct FftViewResponse {
     pub plot: Option<plot::PlotResponse>,
     /// Fit clears all pinned panes for this FFT plot in the host document.
     pub fit_requested: bool,
-    /// A transform-setting failure invalidates the host source authorization.
-    pub rebuild_failed: bool,
     /// Retained samples scanned for axis bounds this frame; zero on a cache hit.
     pub range_samples_read: usize,
 }
@@ -47,8 +45,9 @@ pub struct FftViewResponse {
 /// FFT state's spectrum revision.
 struct FftModel {
     revision: u64,
-    subtitle: String,
     source: String,
+    /// The transform length: how many samples of the record it read.
+    fft_size: usize,
     resolution_bandwidth: Option<f64>,
     normalization: crate::fft::data::SpectrumNormalization,
     frequency: Arc<[f64]>,
@@ -96,13 +95,7 @@ fn build_model(fft: &FftState, series: &mut Option<FftSeries>) -> Option<FftMode
 
     Some(FftModel {
         revision,
-        subtitle: spectrum_subtitle(
-            fft.source_cache
-                .as_ref()
-                .map_or(data.name.as_str(), |source| source.name.as_str()),
-            data.window,
-            data.fft_size,
-        ),
+        fft_size: data.fft_size,
         source: fft
             .source_cache
             .as_ref()
@@ -164,16 +157,13 @@ const NO_FINITE_LEVEL: &str = "No level to plot — the spectrum in this band is
 /// Every bin in view is exactly zero: the record itself is a flat zero.
 const ZERO_SIGNAL: &str = "The signal is zero — its spectrum has no level to plot";
 
-/// The strip subtitle: what was transformed, how, and at what length.
+/// The record the transform read, as the Spectrum table states it.
 ///
 /// `fft_size` is the length of the transform, not the count of points on
-/// screen: a 1024-point transform plots 513 bins. Calling it "points" beside
+/// screen: a 1024-sample transform plots 513 bins. Calling it "points" beside
 /// a plotted spectrum invited exactly the reading it is not.
-fn spectrum_subtitle(source: &str, window: crate::fft::WindowFunction, fft_size: usize) -> String {
-    format!(
-        "{source} · {} · {fft_size}-point transform",
-        window.display_name().to_lowercase()
-    )
+fn record_length(fft_size: usize) -> String {
+    format!("{fft_size} samples")
 }
 
 fn trace_cache_key(revision: u64) -> u64 {
@@ -183,6 +173,68 @@ fn trace_cache_key(revision: u64) -> u64 {
 fn resolution_bandwidth(data: &crate::fft::data::FftData) -> Option<f64> {
     let bandwidth = data.resolution_bandwidth();
     (bandwidth.is_finite() && bandwidth > 0.0).then_some(bandwidth)
+}
+
+// ---------------------------------------------------------------------------
+// sheet bar
+// ---------------------------------------------------------------------------
+
+/// Width of the window and normalization selects: the longest choice of
+/// either, so the two stand at one width.
+const TRANSFORM_SELECT_WIDTH: f32 = 140.0;
+/// Why the transform settings wait.
+const NO_SOURCE: &str = "The spectrum has no source to transform yet";
+
+/// The transform's settings, the sheet's own controls in its bar: the window
+/// and the amplitude normalization. Both recompute from the cached uniformly
+/// sampled source, so they wait for one. Returns whether a setting failed to
+/// rebuild the spectrum, which revokes the host's source authorization.
+pub fn domain_bar(ui: &mut Ui, fft: &mut FftState) -> bool {
+    let mut failed = false;
+    ui.add_enabled_ui(fft.source_cache.is_some(), |ui| {
+        crate::chrome::bars::bar_label(ui, "Window");
+        let windows = crate::fft::WindowFunction::all();
+        let names = windows
+            .iter()
+            .map(|window| window.display_name().to_owned())
+            .collect::<Vec<_>>();
+        let window = rspice_ui_kit::widgets::select_with_response(
+            ui,
+            "rspice.fft.window",
+            "Window",
+            fft.window.display_name(),
+            &names,
+            TRANSFORM_SELECT_WIDTH,
+        );
+        window.response.on_disabled_hover_text(NO_SOURCE);
+        if let Some(picked) = window.picked
+            && fft.set_window(windows[picked]).is_err()
+        {
+            failed = true;
+        }
+        ui.add_space(8.0);
+        crate::chrome::bars::bar_label(ui, "Normalization");
+        let normalizations = crate::fft::data::SpectrumNormalization::all();
+        let names = normalizations
+            .iter()
+            .map(|normalization| normalization.display_name().to_owned())
+            .collect::<Vec<_>>();
+        let normalization = rspice_ui_kit::widgets::select_with_response(
+            ui,
+            "rspice.fft.normalization",
+            "Normalization",
+            fft.normalization.display_name(),
+            &names,
+            TRANSFORM_SELECT_WIDTH,
+        );
+        normalization.response.on_disabled_hover_text(NO_SOURCE);
+        if let Some(picked) = normalization.picked
+            && fft.set_normalization(normalizations[picked]).is_err()
+        {
+            failed = true;
+        }
+    });
+    failed
 }
 
 // ---------------------------------------------------------------------------
@@ -217,75 +269,20 @@ pub fn show(
     let level_unit = spectrum_level_unit(&model.source, model.normalization);
 
     // The legend names the quantity that is plotted, which is the signal the
-    // transform read. It carried the level unit, which the ordinate axis
-    // already states — so the chip repeated the axis and the sheet never
-    // named its own source.
+    // transform read. Nothing follows the kind: the window is the bar's
+    // select and the transform length is the Spectrum table's first row.
     let legend = [LegendChip {
         name: &model.source,
         color: c.traces[0],
         on: true,
     }];
-    let header = strip::StripHeader::new("FFT", &model.subtitle, &legend)
+    let header = strip::StripHeader::new("FFT", "", &legend)
         .zoomed(view.is_zoomed())
+        .maximizable(false)
         .show(ui);
     if header.fit_clicked {
         out.fit_requested = true;
     }
-
-    // Window and amplitude normalization are transform decisions. Both
-    // recompute from the cached uniformly sampled source and therefore stay
-    // coupled to the provenance shown by the inspector.
-    ui.horizontal(|ui| {
-        ui.add_space(10.0);
-        ui.label(
-            egui::RichText::new("window")
-                .font(rspice_ui_kit::theme::mono(
-                    rspice_ui_kit::tokens::FS_0,
-                    rspice_ui_kit::theme::FontWeight::Medium,
-                ))
-                .color(c.text_dim),
-        );
-        ui.add_enabled_ui(fft.source_cache.is_some(), |ui| {
-            let current = fft.window;
-            rspice_ui_kit::widgets::Combo::from_id_salt("rspice.fft.window")
-                .selected_text(current.display_name())
-                .show_ui(ui, |ui| {
-                    for &window in crate::fft::WindowFunction::all() {
-                        if ui
-                            .selectable_label(window == current, window.display_name())
-                            .clicked()
-                            && fft.set_window(window).is_err()
-                        {
-                            out.rebuild_failed = true;
-                        }
-                    }
-                });
-        });
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new("normalization")
-                .font(rspice_ui_kit::theme::mono(
-                    rspice_ui_kit::tokens::FS_0,
-                    rspice_ui_kit::theme::FontWeight::Medium,
-                ))
-                .color(c.text_dim),
-        );
-        let current = fft.normalization;
-        rspice_ui_kit::widgets::Combo::from_id_salt("rspice.fft.normalization")
-            .selected_text(current.display_name())
-            .show_ui(ui, |ui| {
-                for &normalization in crate::fft::data::SpectrumNormalization::all() {
-                    if ui
-                        .selectable_label(normalization == current, normalization.display_name())
-                        .clicked()
-                        && fft.set_normalization(normalization).is_err()
-                    {
-                        out.rebuild_failed = true;
-                    }
-                }
-            });
-    });
-    ui.add_space(2.0);
 
     // X: linear; zoom to ~11 harmonics when a fundamental is known.
     let data_max = *model.frequency.last().unwrap_or(&1.0);
@@ -454,10 +451,11 @@ pub fn right_panel(
         _ => "—".to_owned(),
     };
 
-    // The strip subtitle reads "V(out) · blackman-harris · 1024-point
-    // transform" and the window and normalization are combos above the plot,
-    // so the panel states only what is derived from them.
+    // The legend names the source and the window and normalization are
+    // selects in the sheet bar, so the panel states the record the transform
+    // read and what is derived from it.
     let rows = [
+        ("Record", record_length(model.fft_size), false),
         ("Resolution BW", resolution_bandwidth, false),
         ("Fundamental", f(analysis.fundamental_frequency), false),
         ("Amplitude", amplitude, false),
@@ -578,16 +576,16 @@ mod tests {
         assert_ne!(trace_cache_key(41), trace_cache_key(42));
     }
 
-    /// The number beside a spectrum is the transform length, not the count
-    /// of points drawn — a 1024-point transform plots 513 bins. The strip
-    /// called it "points", which is the one reading the number does not have.
+    /// The record's length is the transform length, not the count of points
+    /// drawn — a 1024-sample transform plots 513 bins. The sheet once called
+    /// it "points", which is the one reading the number does not have.
     #[test]
     fn the_transform_length_is_never_called_a_count_of_plotted_points() {
-        let subtitle = spectrum_subtitle("V(out)", WindowFunction::BlackmanHarris, 1024);
-        assert!(subtitle.contains("1024"), "{subtitle}");
+        let record = record_length(1024);
+        assert_eq!(record, "1024 samples");
         assert!(
-            !subtitle.contains("points"),
-            "the strip calls the transform length a count of plotted points: {subtitle}"
+            !record.contains("point"),
+            "the record calls the transform length a count of plotted points: {record}"
         );
     }
 

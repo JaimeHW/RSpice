@@ -10,9 +10,6 @@ impl SheetBarHost for FilterHost {
         ResultViewer::Op
     }
     fn export(&mut self, _: ExportRequests) {}
-    fn fft_summary(&self) -> Option<String> {
-        None
-    }
     fn operating_point_filter(&mut self) -> &mut String {
         &mut self.filter
     }

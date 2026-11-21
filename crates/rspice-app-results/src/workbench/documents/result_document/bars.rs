@@ -46,14 +46,6 @@ impl SheetBarHost for Host<'_, '_> {
     fn export(&mut self, requests: ExportRequests) {
         raise_exports(&self.1, self.0, requests);
     }
-    fn fft_summary(&self) -> Option<String> {
-        self.0
-            .analysis
-            .fft_state
-            .data
-            .as_ref()
-            .map(|d| format!("{} · {}", d.window.display_name(), d.fft_size))
-    }
     fn operating_point_filter(&mut self) -> &mut String {
         &mut self.0.results.session.op_filter
     }
