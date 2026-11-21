@@ -3,7 +3,7 @@
 //! Executes the `CalculatorExpr` AST against an `EvaluationContext`.
 //! Handles vector arithmetic logic.
 
-use super::ast::{BinaryOp, CalculatorConstant, CalculatorExpr, UnaryOp};
+use super::ast::{BinaryOp, CalculatorConstant, CalculatorExpr, Cursor, UnaryOp};
 use super::measures::Argument;
 pub use super::value::{CalcValue, RealValue};
 use crate::waveform::WaveformValues;
@@ -35,6 +35,12 @@ pub trait EvaluationContext {
         _signal: &str,
         _dataset: Option<&str>,
     ) -> Option<(&WaveformValues, &WaveformValues)> {
+        None
+    }
+
+    /// Where `cursor` stands on the x-axis, for `xA` and `xB`; `None` while
+    /// it is not placed. A context with no cursors places none.
+    fn cursor(&self, _cursor: Cursor) -> Option<f64> {
         None
     }
 
@@ -105,6 +111,16 @@ pub fn evaluate(
             // But if we treat them as abstract signals:
             CalculatorConstant::Time => ctx.get_waveform("TIME", None),
             CalculatorConstant::Frequency => ctx.get_waveform("FREQ", None),
+            CalculatorConstant::Cursor(cursor) => ctx
+                .cursor(*cursor)
+                .map(|x| CalcValue::Real(RealValue::Scalar(x)))
+                .ok_or_else(|| {
+                    EvaluationError::IdentifierNotFound(format!(
+                        "{}: cursor {} is not placed",
+                        cursor.name(),
+                        cursor.letter()
+                    ))
+                }),
         },
 
         CalculatorExpr::WaveformRef { signal, dataset } => {
@@ -242,6 +258,10 @@ fn infer(expr: &CalculatorExpr, ctx: &impl UnitContext) -> Result<Inferred, Stri
         CalculatorExpr::Constant(CalculatorConstant::Time) => Inferred::Unit(read_unit("s", "")?),
         CalculatorExpr::Constant(CalculatorConstant::Frequency) => {
             Inferred::Unit(read_unit("Hz", "")?)
+        }
+        // A cursor stands on the x-axis, so it reads in the x-axis' unit.
+        CalculatorExpr::Constant(CalculatorConstant::Cursor(_)) => {
+            Inferred::Unit(read_unit(&ctx.x_unit(), "The x-axis")?)
         }
         CalculatorExpr::WaveformRef { signal, dataset } => {
             let text = ctx
@@ -720,6 +740,9 @@ mod tests {
             ("V(out) > 2.5", "s", ""),
             ("stddev(V(out))", "s", "V"),
             ("sfdr(V(out))", "s", "dB"),
+            ("xB - xA", "s", "s"),
+            ("1 / (xB - xA)", "s", "Hz"),
+            ("yval(V(out), xA)", "Hz", "V"),
             ("period_jitter(V(out), \"sd\")", "s", "s"),
             ("abs_jitter(V(out))", "s", "s"),
             ("enob(V(out))", "s", ""),
@@ -903,6 +926,64 @@ mod tests {
             super::CalcValue::Real(value) => Ok(value),
             other => Err(format!("{text} is complex: {other:?}")),
         }
+    }
+
+    /// Traces and a placed cursor pair.
+    struct Placed(Traces, Option<f64>, Option<f64>);
+
+    impl EvaluationContext for Placed {
+        fn get_waveform(
+            &self,
+            signal: &str,
+            dataset: Option<&str>,
+        ) -> Result<super::CalcValue, EvaluationError> {
+            self.0.get_waveform(signal, dataset)
+        }
+
+        fn cursor(&self, cursor: Cursor) -> Option<f64> {
+            match cursor {
+                Cursor::A => self.1,
+                Cursor::B => self.2,
+            }
+        }
+    }
+
+    /// `xA` and `xB` are where the cursors stand, in any expression: the
+    /// span between them, a window between them, a reading at one. An
+    /// unplaced cursor is refused by name, and `xa` still names a signal.
+    #[test]
+    fn the_cursor_names_read_where_the_cursors_stand() {
+        let x: Vec<f64> = (0..=100).map(|i| f64::from(i) * 1e-5).collect();
+        let ramp: Vec<f64> = x.iter().map(|t| 1e3 * t).collect();
+        let placed = Placed(
+            Traces(vec![("V(r)", x.clone(), ramp)]),
+            Some(2e-4),
+            Some(6e-4),
+        );
+        let scalar = |text: &str| -> f64 {
+            let expr =
+                super::super::parser::try_parse(text, |n| n.parse().map_err(|_| n.to_owned()))
+                    .unwrap();
+            match evaluate(&expr, &placed) {
+                Ok(super::CalcValue::Real(CalcValue::Scalar(value))) => value,
+                other => panic!("{text}: {other:?}"),
+            }
+        };
+        assert_eq!(scalar("xB - xA"), 6e-4 - 2e-4);
+        let error = evaluated(&placed.0, "xa").unwrap_err();
+        assert!(error.contains("not found: xa"), "{error}");
+        // The ramp's mean between the cursors is its value midway.
+        let mean = scalar("avg(clip(V(r), xA, xB))");
+        assert!((mean - 0.4).abs() <= 1e-12, "{mean}");
+        let at = scalar("yval(V(r), xB)");
+        assert!((at - 0.6).abs() <= 1e-12, "{at}");
+        let unplaced = Placed(Traces(Vec::new()), Some(1.0), None);
+        let expr =
+            super::super::parser::try_parse("xB", |n| n.parse().map_err(|_| n.to_owned())).unwrap();
+        let error = evaluate(&expr, &unplaced).unwrap_err().to_string();
+        assert!(error.contains("cursor B is not placed"), "{error}");
+        // Without a cursor pair, as in a saved expression, neither is placed.
+        assert!(evaluated(&placed.0, "xA").is_err());
     }
 
     /// A comparison reads 1 where it holds and 0 where it does not, and

@@ -10,7 +10,7 @@ use crate::analysis::calculator::{
     CalcValue, ComplexValue, RealValue, SimulationContext, evaluator, parser,
 };
 use crate::state::SimulationState;
-use crate::ui::plot::fmt_si_significant;
+use crate::ui::plot::{CursorPair, fmt_si_significant};
 
 /// How many significant digits the readout shows.
 ///
@@ -123,7 +123,7 @@ impl CalculatorPanel {
     /// recover a malformed expression to the literal `0`, so a typo evaluated
     /// cleanly, printed `= 0.0000` in the success colour, and joined the
     /// recall history — a wrong answer indistinguishable from a right one.
-    pub fn evaluate(&mut self, simulation: &SimulationState) {
+    pub fn evaluate(&mut self, simulation: &SimulationState, cursors: CursorPair) {
         let text = self.expression.trim();
         if text.is_empty() {
             self.outcome = None;
@@ -136,7 +136,7 @@ impl CalculatorPanel {
                 return;
             }
         };
-        let ctx = SimulationContext::new(simulation);
+        let ctx = SimulationContext::new(simulation).with_cursors(cursors.a, cursors.b);
         self.outcome = Some(match evaluator::evaluate(&expr, &ctx) {
             Ok(CalcValue::Real(RealValue::Scalar(value))) => Ok(CalcResult {
                 readout: format!("= {}", fmt_si_significant(value, "", READOUT_DIGITS)),
@@ -199,16 +199,16 @@ mod tests {
         let simulation = simulation_with_a_ramp();
         let mut panel = CalculatorPanel::new();
         panel.expression = "complex(1/3,-1/7)".to_owned();
-        panel.evaluate(&simulation);
+        panel.evaluate(&simulation, CursorPair::default());
         let original = panel.outcome.as_ref().unwrap().as_ref().unwrap().clone();
         panel.expression = original.exact_text().unwrap();
-        panel.evaluate(&simulation);
+        panel.evaluate(&simulation, CursorPair::default());
         let copied = panel.outcome.as_ref().unwrap().as_ref().unwrap();
         assert_eq!(copied.exact, original.exact);
         assert_eq!(copied.exact_imaginary, original.exact_imaginary);
         for text in ["1/(V(out)-2)", "complex(1,1)/(V(out)-2)"] {
             panel.expression = text.to_owned();
-            panel.evaluate(&simulation);
+            panel.evaluate(&simulation, CursorPair::default());
             let result = panel.outcome.as_ref().unwrap().as_ref().unwrap();
             assert!(result.readout.ends_with("unavailable"));
             assert!(result.exact_text().is_none());
@@ -226,13 +226,32 @@ mod tests {
         simulation
     }
 
+    /// The calculator reads the cursors where the reader placed them:
+    /// `xA` and `xB` in an expression are their positions on the x-axis.
+    #[test]
+    fn the_cursor_names_read_the_placed_cursors() {
+        let simulation = simulation_with_a_ramp();
+        let mut panel = CalculatorPanel::new();
+        panel.expression = "yval(V(out), xB) - yval(V(out), xA)".to_owned();
+        let cursors = CursorPair {
+            a: Some(0.5),
+            b: Some(1.75),
+        };
+        panel.evaluate(&simulation, cursors);
+        let result = panel.outcome.clone().expect("evaluated").expect("read");
+        assert_eq!(result.exact, 1.25);
+        panel.evaluate(&simulation, CursorPair::default());
+        let error = panel.outcome.clone().expect("evaluated").unwrap_err();
+        assert!(error.contains("cursor B is not placed"), "{error}");
+    }
+
     #[test]
     fn a_syntax_error_never_reports_a_numeric_result() {
         let simulation = simulation_with_a_ramp();
         for text in ["V(out) +", "avg(V(out)", "1 2", "V()", "*3"] {
             let mut panel = CalculatorPanel::new();
             panel.expression = text.to_owned();
-            panel.evaluate(&simulation);
+            panel.evaluate(&simulation, CursorPair::default());
 
             let outcome = panel
                 .outcome
@@ -261,7 +280,7 @@ mod tests {
         let simulation = simulation_with_a_ramp();
         let mut panel = CalculatorPanel::new();
         panel.expression = "1/3".to_owned();
-        panel.evaluate(&simulation);
+        panel.evaluate(&simulation, CursorPair::default());
 
         let result = match panel.outcome.as_ref().expect("evaluated") {
             Ok(value) => value.clone(),
@@ -277,7 +296,7 @@ mod tests {
         // A scalar result copies the result itself.
         let mut panel = CalculatorPanel::new();
         panel.expression = "1/3".to_owned();
-        panel.evaluate(&simulation);
+        panel.evaluate(&simulation, CursorPair::default());
         let result = panel
             .outcome
             .as_ref()
@@ -304,7 +323,7 @@ mod tests {
         // A series result copies its last sample, and says so.
         let mut panel = CalculatorPanel::new();
         panel.expression = "V(out) / 3".to_owned();
-        panel.evaluate(&simulation);
+        panel.evaluate(&simulation, CursorPair::default());
         let result = panel
             .outcome
             .as_ref()

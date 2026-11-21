@@ -118,13 +118,28 @@ impl FunctionEntry {
     }
 }
 
-/// The operators, which name no function, listed after the math functions.
-const OPERATORS: &[FunctionEntry] = &[FunctionEntry {
-    label: Cow::Borrowed("x ^ n"),
-    hint: "power",
-    insert: Cow::Borrowed(" ^ "),
-    caret_back: 0,
-}];
+/// The operators and the cursor names, which name no function, listed
+/// after the math functions.
+const OPERATORS: &[FunctionEntry] = &[
+    FunctionEntry {
+        label: Cow::Borrowed("x ^ n"),
+        hint: "power",
+        insert: Cow::Borrowed(" ^ "),
+        caret_back: 0,
+    },
+    FunctionEntry {
+        label: Cow::Borrowed("xA"),
+        hint: "cursor A's x",
+        insert: Cow::Borrowed("xA"),
+        caret_back: 0,
+    },
+    FunctionEntry {
+        label: Cow::Borrowed("xB"),
+        hint: "cursor B's x",
+        insert: Cow::Borrowed("xB"),
+        caret_back: 0,
+    },
+];
 
 const FUNCTION_CONVENTIONS: &str = "phase() and unwrap() use degrees; phase_rad() uses radians";
 

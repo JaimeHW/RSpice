@@ -196,9 +196,10 @@ fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>, body_width: f32) {
                         .show(ui)
                         .clicked()
                     {
+                        let cursors = cx.state.results.session.cursors;
                         let (panel, simulation) =
                             (&mut cx.state.calculator_panel, &cx.model.simulation);
-                        panel.evaluate(simulation);
+                        panel.evaluate(simulation, cursors);
                     }
                     if Button::new("Clear").ghost().show(ui).clicked() {
                         cx.state.calculator_panel.clear();
@@ -234,7 +235,8 @@ pub fn plot_expression(panel: &mut CalculatorPanel, state: &mut ResultsParts<'_>
         run.dataset_id,
         analysis,
     );
-    panel.evaluate(&state.model.simulation);
+    let cursors = state.results.session.cursors;
+    panel.evaluate(&state.model.simulation, cursors);
     if let Some(Err(error)) = panel.outcome.as_ref() {
         let error = format!("Expression was not plotted: {error}");
         state.workbench.prompt(error);

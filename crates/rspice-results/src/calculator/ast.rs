@@ -81,6 +81,33 @@ pub enum UnaryOp {
 pub enum CalculatorConstant {
     Time,
     Frequency,
+    /// Where a cursor of the A/B pair stands on the x-axis: `xA` or `xB`.
+    Cursor(Cursor),
+}
+
+/// One cursor of the A/B pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Cursor {
+    A,
+    B,
+}
+
+impl Cursor {
+    /// The name an expression reads its position by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::A => "xA",
+            Self::B => "xB",
+        }
+    }
+
+    /// The letter the cursor is known by.
+    pub fn letter(self) -> &'static str {
+        match self {
+            Self::A => "A",
+            Self::B => "B",
+        }
+    }
 }
 
 impl CalculatorExpr {

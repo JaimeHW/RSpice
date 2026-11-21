@@ -9,7 +9,7 @@
 //! `/` anywhere else opens a name. So `V(a)/V(b)` and `a/b` still divide while
 //! `V(/X1/out)` reads one signal.
 
-use super::ast::{BinaryOp, CalculatorConstant, CalculatorExpr, UnaryOp};
+use super::ast::{BinaryOp, CalculatorConstant, CalculatorExpr, Cursor, UnaryOp};
 use std::iter::Peekable;
 use std::str::CharIndices;
 
@@ -568,6 +568,18 @@ impl<'a> Parser<'a> {
             }
             if upper_name == "FREQ" {
                 return Ok(CalculatorExpr::Constant(CalculatorConstant::Frequency));
+            }
+            // The cursor pair's positions on the x-axis, spelled exactly, so
+            // a node named `xa` keeps its bare name.
+            if name == "xA" {
+                return Ok(CalculatorExpr::Constant(CalculatorConstant::Cursor(
+                    Cursor::A,
+                )));
+            }
+            if name == "xB" {
+                return Ok(CalculatorExpr::Constant(CalculatorConstant::Cursor(
+                    Cursor::B,
+                )));
             }
         }
 

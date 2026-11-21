@@ -59,6 +59,8 @@ pub struct SimulationContext<'a> {
     /// Reference to simulation state containing waveforms
     simulation: &'a SimulationState,
     complex_policy: ComplexExpressionPolicy,
+    /// Where cursors A and B stand, for `xA` and `xB`.
+    cursors: [Option<f64>; 2],
 }
 
 impl<'a> SimulationContext<'a> {
@@ -67,7 +69,15 @@ impl<'a> SimulationContext<'a> {
         Self {
             simulation,
             complex_policy: ComplexExpressionPolicy::Rectangular,
+            cursors: [None, None],
         }
+    }
+
+    /// The context with cursors A and B where the reader placed them, so an
+    /// expression can name them `xA` and `xB`.
+    pub fn with_cursors(mut self, a: Option<f64>, b: Option<f64>) -> Self {
+        self.cursors = [a, b];
+        self
     }
 
     /// Find a waveform by signal name with flexible matching
@@ -132,6 +142,14 @@ impl<'a> SimulationContext<'a> {
 }
 
 impl<'a> EvaluationContext for SimulationContext<'a> {
+    fn cursor(&self, cursor: rspice_results::calculator::ast::Cursor) -> Option<f64> {
+        use rspice_results::calculator::ast::Cursor;
+        match cursor {
+            Cursor::A => self.cursors[0],
+            Cursor::B => self.cursors[1],
+        }
+    }
+
     fn get_magnitude(
         &self,
         signal: &str,
