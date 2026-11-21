@@ -796,7 +796,11 @@ mod tests {
                 last_s: 16.0,
             })
         );
-        assert!(drained[1..].iter().all(|point| point.dropped_before.is_none()));
+        assert!(
+            drained[1..]
+                .iter()
+                .all(|point| point.dropped_before.is_none())
+        );
         // The next drain starts clean.
         push_live_transient_sample(&samples, point(1e6));
         let drained = samples.lock().expect("live queue").drain();
