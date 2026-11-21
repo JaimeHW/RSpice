@@ -143,6 +143,11 @@ pub struct SimulationRunner {
     #[cfg(not(target_arch = "wasm32"))]
     storage_budget: Option<Arc<crate::results_store::StorageBudget>>,
 
+    /// The segment the running transient writes, while it writes it, so the controller draws the
+    /// rows written so far from it.
+    #[cfg(not(target_arch = "wasm32"))]
+    live_segment: crate::results_store::LiveSegmentSlot,
+
     /// The files the run's analyses opened for writing, which every engine
     /// its tasks build shares, so a later analysis appends where an earlier
     /// one wrote (LRM 2.4 section 9.5.1.1). A browser task runs on a copy in
@@ -186,6 +191,8 @@ impl SimulationRunner {
             transient_states: Arc::default(),
             #[cfg(not(target_arch = "wasm32"))]
             storage_budget: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            live_segment: Arc::default(),
             hdl_run_files: Default::default(),
             thread_handle: None,
             pending_result: None,
@@ -300,6 +307,16 @@ impl SimulationRunner {
         samples.drain()
     }
 
+    /// The segment the running transient writes its rows to, while it writes them: the rows
+    /// written so far are read from there, and no accepted point is copied to this side.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn live_segment(&self) -> Option<PathBuf> {
+        self.live_segment
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
     /// Drain everything the engine logged since the previous UI update.
     ///
     /// The controller writes these into the Console as `ENG` rows. The run's
@@ -377,6 +394,10 @@ impl SimulationRunner {
         self.abort_flag = Arc::new(AtomicBool::new(false));
         self.progress = Arc::new(Mutex::new(SimulationProgress::default()));
         self.transient_samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.live_segment = Arc::default();
+        }
         self.engine_log = Arc::new(Mutex::new(EngineLogQueue::default()));
         self.monte_carlo_checkpoint = Arc::new(Mutex::new(None));
         self.transient_checkpoint = Arc::new(Mutex::new(None));
@@ -561,6 +582,13 @@ impl SimulationRunner {
         let transient_samples = input
             .stream_transient_samples
             .then(|| Arc::clone(&self.transient_samples));
+        #[cfg(not(target_arch = "wasm32"))]
+        let live_segment = {
+            *self.live_segment.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            input
+                .stream_transient_samples
+                .then(|| Arc::clone(&self.live_segment))
+        };
 
         // Spawn simulation thread with real engine. Browser builds route
         // through the module worker so the egui UI thread stays responsive.
@@ -582,6 +610,7 @@ impl SimulationRunner {
                 )),
                 backends: Some(self.backends.clone()),
                 storage_budget: self.storage_budget.clone(),
+                live_segment,
                 hdl_run_files: Some(self.hdl_run_files.clone()),
                 ..RunStreams::default()
             };
@@ -727,6 +756,9 @@ pub(in crate::runner) struct RunStreams {
     /// The storage budget the run's transients write their results stores against.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::runner) storage_budget: Option<Arc<crate::results_store::StorageBudget>>,
+    /// Where the run's transients name the segment they write while they write it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::runner) live_segment: Option<crate::results_store::LiveSegmentSlot>,
     /// The record of the files the run's analyses wrote, shared by every
     /// engine the task builds; `None` gives the task one of its own.
     pub(in crate::runner) hdl_run_files: Option<rspice_core::config::HdlRunFiles>,
@@ -1094,6 +1126,8 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         backends,
         #[cfg(not(target_arch = "wasm32"))]
         storage_budget,
+        #[cfg(not(target_arch = "wasm32"))]
+        live_segment,
         hdl_run_files,
     } = streams;
 
@@ -1112,6 +1146,9 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     // Every results store the run writes counts against its plan's storage budget.
     #[cfg(not(target_arch = "wasm32"))]
     let _storage_budget = storage_budget.map(crate::results_store::install_storage_budget);
+    // The run's transients name the segment they write, for the host to draw from while they run.
+    #[cfg(not(target_arch = "wasm32"))]
+    let _live_segment = live_segment.map(crate::results_store::install_live_segment);
 
     // Update status: parsing
     {

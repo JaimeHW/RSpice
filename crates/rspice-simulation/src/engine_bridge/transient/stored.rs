@@ -108,6 +108,9 @@ impl EngineBridge {
                 );
             }
         }));
+        // The host draws the rows from the segment while the run writes them, until the run
+        // returns.
+        let live = crate::results_store::publish_live_segment(&path);
         let ran = if capture_times.is_empty() {
             engine
                 .run_tran_into_sink_with_abort(netlist, span.tstop, span.max_step, abort, &mut sink)
@@ -133,6 +136,7 @@ impl EngineBridge {
             )) => Ok((Some(result), receipt.digest, stopped, states)),
             Err(source) => Err(source),
         };
+        drop(live);
         let refused = sink.refused();
         let rows_needed = sink.rows_needed();
         let (inner, free) = sink.into_parts();

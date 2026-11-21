@@ -13,6 +13,8 @@ use rspice_core::netlist::AnalysisCommand;
 use rspice_simulation_contract::config::TransientAnalysisConfig;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod live;
+#[cfg(not(target_arch = "wasm32"))]
 mod stored;
 #[cfg(not(target_arch = "wasm32"))]
 use stored::StoredTransient;

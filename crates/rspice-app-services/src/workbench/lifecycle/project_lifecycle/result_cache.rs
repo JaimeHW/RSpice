@@ -81,6 +81,9 @@ impl CachedResults {
                     run_intent: _,
                     progress: _,
                     status: _,
+                    reported_progress: _,
+                    live_window: _,
+                    live_preview_note: _,
                 },
             source:
                 crate::state::SimulationSourceState {

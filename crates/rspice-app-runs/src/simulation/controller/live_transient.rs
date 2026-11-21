@@ -17,6 +17,58 @@ pub(super) struct LiveTransientAccumulator {
     /// The preview could not be shown and is not tried again for this task.
     /// The samples are still kept, for a partial result.
     preview_stopped: bool,
+    /// Analog points the live queue let go of while the host was busy, and the stretches of
+    /// time they covered, each drawn as a gap in the live traces.
+    dropped: u64,
+    gaps: Vec<(f64, f64)>,
+    /// The pixel columns the history was last thinned to, once it was.
+    thinned_to: Option<usize>,
+    /// The span of time the run fills, which the thinning columns divide: fixed for the run, so
+    /// a column thinned again keeps the same least and greatest values.
+    span: Option<(f64, f64)>,
+}
+
+/// What the live preview of a transient left out, for the status card to say.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LivePreviewGaps {
+    /// Analog points the host was too busy to take, and the stretches of time they covered.
+    pub dropped: u64,
+    pub gaps: usize,
+    /// The pixel columns the earlier part of the trace keeps every least and greatest value of,
+    /// once the history was thinned to them.
+    pub thinned_to: Option<usize>,
+}
+
+impl LivePreviewGaps {
+    /// What the live plot leaves out, in words, when it leaves anything out.
+    pub fn note(&self) -> Option<String> {
+        let mut words = Vec::new();
+        if self.dropped > 0 {
+            words.push(format!(
+                "The live plot could not keep up and left out {} point{}; the trace breaks \
+                 where {} ({} gap{}).",
+                self.dropped,
+                if self.dropped == 1 { "" } else { "s" },
+                if self.dropped == 1 {
+                    "it was"
+                } else {
+                    "they were"
+                },
+                self.gaps,
+                if self.gaps == 1 { "" } else { "s" },
+            ));
+        }
+        if let Some(columns) = self.thinned_to {
+            words.push(format!(
+                "Its earlier part is thinned to {columns} columns, each keeping its least \
+                 and greatest value."
+            ));
+        }
+        (!words.is_empty()).then(|| {
+            words.push("The finished result has every point.".to_owned());
+            words.join(" ")
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -27,9 +79,15 @@ pub(super) struct LiveTransientWaveform {
 }
 
 impl LiveTransientAccumulator {
-    pub(super) const MAX_SOURCE_SAMPLES: usize = 8_192;
-    pub(super) const COMPACTED_SOURCE_SAMPLES: usize =
-        crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES;
+    /// The values the provisional history holds across its signals before it is thinned: what
+    /// a frame may copy into the live preview.
+    pub(super) const HISTORY_VALUES: usize = 1 << 18;
+    /// The columns the history is thinned to: more than the widest plot has pixels across its
+    /// data. Every signal keeps its least and greatest value in each column.
+    pub(super) const THIN_COLUMNS: usize = 4_096;
+    /// The fewest columns thinning goes down to when the signals' extremes fall on so many
+    /// different points that the history would not fit at more.
+    const FEWEST_COLUMNS: usize = 64;
     /// Live event points retained across all nodes while a run is in flight.
     ///
     /// An event history is exact — every point is a committed transition, so
@@ -50,6 +108,64 @@ impl LiveTransientAccumulator {
         self.events_lost = false;
         self.event_loss_notice = false;
         self.preview_stopped = false;
+        self.dropped = 0;
+        self.gaps.clear();
+        self.thinned_to = None;
+        self.span = None;
+    }
+
+    /// The span of time the running transient fills, from where its result starts to its stop
+    /// time.
+    pub(super) fn set_span(&mut self, span: (f64, f64)) {
+        if span.0.is_finite() && span.1 > span.0 {
+            self.span = Some(span);
+        }
+    }
+
+    /// Take in the rows a run's segment held, a block at a time, as the history the live
+    /// preview had drawn from it: thinned as it grows, so it stays as small as one taken from the
+    /// live queue.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn ingest_rows(
+        &mut self,
+        waveforms: &[rspice_results::waveform::RetainedWaveform],
+    ) -> Result<(), String> {
+        const BLOCK_ROWS: usize = 1 << 16;
+        let Some(first) = waveforms.first() else {
+            return Ok(());
+        };
+        let rows = first.x.len();
+        let failed = |error: rspice_results::waveform::ColumnReadFailure| error.to_string();
+        self.waveforms = waveforms
+            .iter()
+            .map(|waveform| LiveTransientWaveform {
+                name: waveform.name.clone(),
+                x: Vec::new(),
+                y: Vec::new(),
+            })
+            .collect();
+        let mut start = 0;
+        while start < rows {
+            let end = (start + BLOCK_ROWS).min(rows);
+            let x = first.x.read_range(start..end).map_err(failed)?;
+            for (history, waveform) in self.waveforms.iter_mut().zip(waveforms) {
+                let y = waveform.y.read_range(start..end).map_err(failed)?;
+                history.x.extend_from_slice(&x);
+                history.y.extend_from_slice(&y);
+            }
+            self.thin_if_needed();
+            start = end;
+        }
+        Ok(())
+    }
+
+    /// What the live preview left out so far.
+    pub(super) fn gaps(&self) -> LivePreviewGaps {
+        LivePreviewGaps {
+            dropped: self.dropped,
+            gaps: self.gaps.len(),
+            thinned_to: self.thinned_to,
+        }
     }
 
     pub(super) fn stop_preview(&mut self) {
@@ -160,12 +276,29 @@ impl LiveTransientAccumulator {
                 // provisional point. The terminal result remains authoritative.
                 continue;
             }
+            // Points the queue let go of leave a gap: an unavailable sample where the first of
+            // them was, so the trace breaks there instead of joining across them.
+            if let Some(dropped) = delta.dropped_before {
+                self.dropped += dropped.count;
+                self.gaps.push((dropped.first_s, dropped.last_s));
+                let after_last = self
+                    .waveforms
+                    .first()
+                    .and_then(|waveform| waveform.x.last())
+                    .is_none_or(|last| *last < dropped.first_s);
+                if after_last && dropped.first_s < delta.time {
+                    for waveform in &mut self.waveforms {
+                        waveform.x.push(dropped.first_s);
+                        waveform.y.push(f64::NAN);
+                    }
+                }
+            }
             for waveform in &mut self.waveforms {
                 waveform.x.push(delta.time);
                 waveform.y.push(samples[&waveform.name]);
             }
         }
-        self.compact_if_needed();
+        self.thin_if_needed();
     }
 
     /// Fold one accepted point's changed event values into the provisional
@@ -340,62 +473,88 @@ impl LiveTransientAccumulator {
             .then_some(payload)
     }
 
-    /// Bound the source arrays used to build the provisional live document.
+    /// Bound the history the live preview is built from.
     ///
-    /// All traces retain one common time selection, so differential and
-    /// derived expressions remain aligned. Each displayed trace contributes
-    /// bucket extrema to that shared selection; deterministic evenly spaced
-    /// points fill any spare capacity. The terminal solver result is untouched
-    /// and replaces this provisional cache at completion.
-    fn compact_if_needed(&mut self) {
+    /// All traces keep one common time selection, so differential and derived outputs combine
+    /// samples of the same instant. Once the history holds more values than a frame should copy,
+    /// it is thinned to pixel columns over its span: every signal keeps its least and greatest
+    /// value in every column, with the first and last points and every gap. When the signals'
+    /// extremes fall on so many different points that the selection would not fit, the columns
+    /// are halved until it does, and the preview says how many it kept. The terminal result
+    /// replaces this history whole at completion.
+    fn thin_if_needed(&mut self) {
         let Some(point_count) = self.waveforms.iter().map(|waveform| waveform.x.len()).min() else {
             return;
         };
-        if point_count <= Self::MAX_SOURCE_SAMPLES || point_count <= 2 {
+        let signals = self.waveforms.len().max(1);
+        let budget = (Self::HISTORY_VALUES / signals).max(4 * Self::THIN_COLUMNS);
+        if point_count <= budget {
             return;
         }
-
-        let target = Self::COMPACTED_SOURCE_SAMPLES.min(point_count).max(2);
-        let maximum_extrema_series = ((target - 2) / 2).max(1);
-        let extrema_series = self.waveforms.len().min(maximum_extrema_series).max(1);
-        let bucket_count = ((target - 2) / (2 * extrema_series)).max(1);
-        let interior = point_count - 2;
-        let mut selected = std::collections::BTreeSet::new();
-        selected.insert(0usize);
-        selected.insert(point_count - 1);
-
-        for bucket in 0..bucket_count {
-            let start = 1 + bucket * interior / bucket_count;
-            let end = 1 + (bucket + 1) * interior / bucket_count;
-            if start >= end {
-                continue;
+        let mut columns = Self::THIN_COLUMNS;
+        let selected = loop {
+            let selected = self.column_extrema(point_count, columns);
+            if selected.len() <= budget / 2 || columns <= Self::FEWEST_COLUMNS {
+                break selected;
             }
-            for waveform in self.waveforms.iter().take(extrema_series) {
-                let mut minimum = start;
-                let mut maximum = start;
-                for index in start + 1..end {
-                    if waveform.y[index].total_cmp(&waveform.y[minimum]).is_lt() {
-                        minimum = index;
-                    }
-                    if waveform.y[index].total_cmp(&waveform.y[maximum]).is_gt() {
-                        maximum = index;
-                    }
-                }
-                selected.insert(minimum);
-                selected.insert(maximum);
-            }
-        }
-        for slot in 1..target - 1 {
-            if selected.len() >= target {
-                break;
-            }
-            selected.insert(slot * (point_count - 1) / (target - 1));
-        }
-        let selected = selected.into_iter().take(target).collect::<Vec<_>>();
+            columns /= 2;
+        };
+        self.thinned_to = Some(
+            self.thinned_to
+                .map_or(columns, |before| before.min(columns)),
+        );
         for waveform in &mut self.waveforms {
             waveform.x = selected.iter().map(|index| waveform.x[*index]).collect();
             waveform.y = selected.iter().map(|index| waveform.y[*index]).collect();
         }
+    }
+
+    /// The points that keep every signal's least and greatest value in each of `columns` equal
+    /// spans of time, with the first and last points and every gap, in time order.
+    fn column_extrema(&self, point_count: usize, columns: usize) -> Vec<usize> {
+        let Some(axis) = self.waveforms.first().map(|waveform| &waveform.x) else {
+            return Vec::new();
+        };
+        let (first, last) = self.span.unwrap_or((axis[0], axis[point_count - 1]));
+        let span = last - first;
+        let column_of = |x: f64| {
+            if span > 0.0 {
+                (((x - first) / span * columns as f64).max(0.0) as usize).min(columns - 1)
+            } else {
+                0
+            }
+        };
+        let mut selected = vec![0, point_count - 1];
+        let mut start = 0;
+        while start < point_count {
+            let column = column_of(axis[start]);
+            let mut end = start + 1;
+            while end < point_count && column_of(axis[end]) == column {
+                end += 1;
+            }
+            for waveform in &self.waveforms {
+                let (mut minimum, mut maximum) = (None::<usize>, None::<usize>);
+                for index in start..end {
+                    let value = waveform.y[index];
+                    if value.is_nan() {
+                        selected.push(index);
+                        continue;
+                    }
+                    if minimum.is_none_or(|at| value < waveform.y[at]) {
+                        minimum = Some(index);
+                    }
+                    if maximum.is_none_or(|at| value > waveform.y[at]) {
+                        maximum = Some(index);
+                    }
+                }
+                selected.extend(minimum);
+                selected.extend(maximum);
+            }
+            start = end;
+        }
+        selected.sort_unstable();
+        selected.dedup();
+        selected
     }
 
     pub(super) fn source_analysis(

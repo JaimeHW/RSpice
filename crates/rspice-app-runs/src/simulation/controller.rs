@@ -70,6 +70,8 @@ pub use engine_check::{PreflightOutcome, PreflightStage, PreflightVerdict};
 pub(crate) mod dc_history_tests;
 #[cfg(test)]
 mod directive_parse_ratchet;
+#[cfg(not(target_arch = "wasm32"))]
+mod live_segment;
 mod live_transient;
 mod machine_memory;
 #[cfg(test)]
@@ -196,6 +198,12 @@ pub struct SimulationController {
     /// back both adaptive live presentation and a truthful partial result if
     /// the task terminates before returning a full engine result.
     live_transient: LiveTransientAccumulator,
+    /// The rows the running transient's segment holds, which the desktop's live plot draws.
+    #[cfg(not(target_arch = "wasm32"))]
+    live_segment: live_segment::LiveSegmentFollower,
+    /// When the live plot was last drawn again, and whether newer samples wait for it.
+    last_live_publish: Option<crate::time_compat::Instant>,
+    live_publish_due: bool,
     /// The results store each kept transient wrote, by its segment's path: the run and the
     /// analysis a stored column that cannot be read is said in.
     stored_segments: HashMap<String, (u64, String)>,
@@ -275,6 +283,10 @@ impl SimulationController {
             current_advisories: Vec::new(),
             current_engine_lines: HashMap::new(),
             live_transient: LiveTransientAccumulator::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            live_segment: live_segment::LiveSegmentFollower::default(),
+            last_live_publish: None,
+            live_publish_due: false,
             stored_segments: HashMap::new(),
             pending_analyses: VecDeque::new(),
             successful_analysis_instances: HashSet::new(),
@@ -382,9 +394,19 @@ impl SimulationController {
 
         // Update running state
         let is_running = self.runner.is_running();
+        let live_window = self.live_window().filter(|_| is_running);
         let execution = &mut state.model_mut().simulation.execution;
         execution.progress =
             Self::ui_progress_fraction(self.runner.progress_fraction(), is_running);
+        execution.reported_progress = self
+            .runner
+            .progress_fraction()
+            .filter(|_| is_running)
+            .map(|fraction| f64::from(fraction).clamp(0.0, 1.0));
+        execution.live_window = live_window;
+        if !is_running {
+            execution.live_preview_note = None;
+        }
         execution.is_running = is_running;
     }
 
@@ -774,7 +796,7 @@ impl SimulationController {
         self.current_saved_output_contracts.clear();
         self.current_save_policy =
             crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
-        self.live_transient.clear();
+        self.clear_live_preview();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
@@ -813,7 +835,7 @@ impl SimulationController {
         self.current_config_digest = None;
         self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
-        self.live_transient.clear();
+        self.clear_live_preview();
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
 
         let mut skipped_blocked_task = false;
@@ -1475,12 +1497,30 @@ impl SimulationController {
         }
     }
 
+    /// The live plot is drawn again at most this often: each drawing builds the preview's
+    /// waveforms again, and more often than this the eye cannot follow.
+    const LIVE_PUBLISH_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
     fn publish_live_transient_samples(&mut self, model: &mut Model) {
         let deltas = self.runner.drain_transient_samples();
-        if deltas.is_empty() {
+        #[cfg(not(target_arch = "wasm32"))]
+        let grew = self.live_segment.poll(self.runner.live_segment());
+        #[cfg(target_arch = "wasm32")]
+        let grew = false;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(error) = self.live_segment.take_failure() {
+            self.stop_live_preview(model, &error);
+        }
+        if !deltas.is_empty() || grew {
+            if let Some(window) = self.live_window() {
+                self.live_transient.set_span(window);
+            }
+            self.live_transient.ingest(deltas);
+            self.live_publish_due = true;
+        }
+        if !self.live_publish_due {
             return;
         }
-        self.live_transient.ingest(deltas);
         if !self.current_saved_output_contracts.iter().any(|contract| {
             contract.streaming()
                 == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
@@ -1490,7 +1530,69 @@ impl SimulationController {
         if !self.current_save_policy.live_streaming_enabled() {
             return;
         }
-        self.publish_live_preview(model);
+        if self
+            .last_live_publish
+            .is_some_and(|at| at.elapsed() < Self::LIVE_PUBLISH_EVERY)
+        {
+            return;
+        }
+        self.last_live_publish = Some(crate::time_compat::Instant::now());
+        self.live_publish_due = false;
+        let held_back = self.publish_live_preview(model);
+        let mut note = self.live_transient.gaps().note();
+        if held_back {
+            let words = "Differences and expressions are drawn when the run ends.";
+            note = Some(note.map_or_else(|| words.to_owned(), |note| format!("{note} {words}")));
+        }
+        model.simulation.execution.live_preview_note = note;
+    }
+
+    /// Forget the running task's live samples and the rows followed for it.
+    fn clear_live_preview(&mut self) {
+        self.live_transient.clear();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.live_segment.clear();
+        self.last_live_publish = None;
+        self.live_publish_due = false;
+    }
+
+    /// The span of time the running transient fills, from where its result starts to its stop
+    /// time; `None` for any other task.
+    fn live_window(&self) -> Option<(f64, f64)> {
+        match (&self.current_spec, &self.current_config) {
+            (
+                Some(AnalysisSpec::Transient {
+                    start_time,
+                    stop_time,
+                    ..
+                }),
+                _,
+            ) => Some((*start_time, *stop_time)),
+            (_, Some(AnalysisConfig::Transient(config))) => {
+                Some((config.start_time, config.stop_time))
+            }
+            _ => None,
+        }
+        .filter(|(start, stop)| start.is_finite() && stop > start)
+    }
+
+    /// The samples the live plot draws from. On the desktop, a run that writes its segment as
+    /// it goes is drawn from the rows the segment holds, read through the store as a finished
+    /// run's are; any other run from the history taken from the live queue.
+    fn live_source(&self, analysis_type: AnalysisType, label: &str) -> AnalysisResult {
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+        let mut source = self.live_transient.source_analysis(analysis_type, label);
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(rows) = self.live_segment.rows() {
+            use rspice_results::waveform::OutputWaveform as _;
+            source.waveforms = rows
+                .waveforms
+                .iter()
+                .cloned()
+                .map(RetainedTrace::from_retained)
+                .collect();
+        }
+        source
     }
 
     /// Show the samples accepted so far as the running analysis's live
@@ -1499,9 +1601,12 @@ impl SimulationController {
     /// A preview that cannot be shown stops for the rest of the task, and its
     /// reason is written once: this runs every frame, and the solve goes on
     /// regardless, its result replacing the preview when it completes.
-    fn publish_live_preview(&mut self, model: &mut Model) {
+    /// Whether outputs the plan streams were held back to the run's end: on the desktop, a
+    /// difference or an expression reads its columns whole, so it is not drawn from a segment
+    /// that is still being written.
+    fn publish_live_preview(&mut self, model: &mut Model) -> bool {
         if self.live_transient.preview_stopped() {
-            return;
+            return false;
         }
         if self.live_transient.take_event_loss_notice() {
             self.run_line(
@@ -1512,7 +1617,7 @@ impl SimulationController {
         }
         let Some(provenance) = self.current_provenance.clone() else {
             self.stop_live_preview(model, "the running analysis could not be identified");
-            return;
+            return false;
         };
         let analysis_type = self
             .current_spec
@@ -1534,12 +1639,34 @@ impl SimulationController {
                     .map(|config| self.analysis_name(config))
             })
             .unwrap_or("Transient");
-        let source = self.live_transient.source_analysis(analysis_type, label);
-        let waveforms =
-            materialize_live_saved_outputs(&source, &self.current_saved_output_contracts);
+        let source = self.live_source(analysis_type, label);
+        #[cfg(not(target_arch = "wasm32"))]
+        let from_segment = self.live_segment.rows().is_some();
+        #[cfg(target_arch = "wasm32")]
+        let from_segment = false;
+        let (contracts, held_back) = if from_segment {
+            let drawn = self
+                .current_saved_output_contracts
+                .iter()
+                .filter(|contract| reads_one_column(contract))
+                .cloned()
+                .collect::<Vec<_>>();
+            let held_back = self.current_saved_output_contracts.iter().any(|contract| {
+                contract.streaming()
+                    == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+                    && !reads_one_column(contract)
+            });
+            (std::borrow::Cow::Owned(drawn), held_back)
+        } else {
+            (
+                std::borrow::Cow::Borrowed(self.current_saved_output_contracts.as_slice()),
+                false,
+            )
+        };
+        let waveforms = materialize_live_saved_outputs(&source, &contracts);
         let events = self.live_transient.event_payload(analysis_type);
         if waveforms.is_empty() && events.is_none() {
-            return;
+            return held_back;
         }
         let partial = AnalysisResult::live_transient_partial(1, analysis_type, label)
             .with_waveforms(waveforms)
@@ -1550,11 +1677,12 @@ impl SimulationController {
         };
         let Some(run_id) = self.target_run_id() else {
             self.stop_live_preview(model, "the running analysis belongs to no run");
-            return;
+            return held_back;
         };
         if let Err(error) = self.retain_live_transient_analysis(model, run_id, partial) {
             self.stop_live_preview(model, &error);
         }
+        held_back
     }
 
     /// Stop the live preview for the rest of the task, saying why in the
@@ -1622,12 +1750,33 @@ impl SimulationController {
         error: impl Into<String>,
         provenance: AnalysisResultProvenance,
     ) -> AnalysisResult {
-        let mut analysis = if self.live_transient.is_empty()
+        #[cfg(not(target_arch = "wasm32"))]
+        let rows = self.live_segment.rows();
+        #[cfg(target_arch = "wasm32")]
+        let rows = None::<&rspice_results::waveform::RetainedWaveform>;
+        let mut analysis = if (self.live_transient.is_empty() && rows.is_none())
             || !self.current_save_policy.retain_failure_diagnostics()
         {
             AnalysisResult::failed(1, analysis_type, label, error.into())
         } else {
+            #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
             let mut analysis = self.live_transient.source_analysis(analysis_type, label);
+            // The rows a run that wrote its segment had written when it stopped, thinned as
+            // the live history of any other run is: the segment of a run that failed is not kept.
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(rows) = rows
+                && analysis.waveforms.is_empty()
+            {
+                let mut history = LiveTransientAccumulator::default();
+                if let Some(window) = self.live_window() {
+                    history.set_span(window);
+                }
+                if history.ingest_rows(&rows.waveforms).is_ok() {
+                    analysis.waveforms = std::mem::take(
+                        &mut history.source_analysis(analysis_type, label).waveforms,
+                    );
+                }
+            }
             analysis.error_message = Some(error.into());
             analysis
         };
@@ -1647,7 +1796,7 @@ impl SimulationController {
         let storage_stop = completed_run
             .and_then(|run| run.results_storage_stop())
             .map(|stop| stop.budget.is_some());
-        self.live_transient.clear();
+        self.clear_live_preview();
 
         if let Some(run_id) = completed_run_id
             && let Some(run) = model.simulation.retained.run_by_sequence_mut(run_id)
@@ -1996,3 +2145,27 @@ impl SimulationController {
 // fixtures.
 #[cfg(test)]
 pub(crate) mod tests;
+
+/// Whether a saved output draws one column of the run as it is: a node's voltage to ground, or
+/// one branch's or device's current. Only such an output is drawn from a segment the run is still
+/// writing; a difference or an expression reads its columns whole.
+fn reads_one_column(contract: &PreparedSavedOutput) -> bool {
+    if contract.kind() != crate::state::SavedOutputKind::RawVoltageOrCurrent {
+        return false;
+    }
+    let expression = contract.source_expression().trim();
+    if rspice_results::saved_output::device_current_probe(expression).is_some() {
+        return true;
+    }
+    let Some((function, rest)) = expression.split_once('(') else {
+        return false;
+    };
+    let Some(argument) = rest.trim_end().strip_suffix(')') else {
+        return false;
+    };
+    let argument = argument.trim();
+    (function.trim().eq_ignore_ascii_case("V") || function.trim().eq_ignore_ascii_case("I"))
+        && !argument.is_empty()
+        && !argument.contains(',')
+        && argument != "0"
+}

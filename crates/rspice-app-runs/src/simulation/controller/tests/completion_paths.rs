@@ -1164,6 +1164,7 @@ fn live_current_impulses_reach_a_charge_only_preview_and_survive_bad_analog_colu
 #[test]
 fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
     let sample = |time, waveforms: &[(&str, f64)]| TransientSampleDelta {
+        dropped_before: None,
         event_delivery_complete: true,
         voltage_impulses: None,
         current_impulses: None,
@@ -1206,6 +1207,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
 
     let delta =
         |time: f64, events: &[(&str, u8)], real_events: &[(&str, f64)]| TransientSampleDelta {
+            dropped_before: None,
             event_delivery_complete: true,
             voltage_impulses: None,
             current_impulses: None,
@@ -1309,6 +1311,7 @@ fn live_transient_accumulator_keeps_event_times_and_stops_at_delivery_gaps() {
         TransientDigitalEventSample, TransientRealEventSample,
     };
     let message = TransientSampleDelta {
+        dropped_before: None,
         time: 1.0,
         event_delivery_complete: true,
         waveforms: vec![rspice_simulation::live_transient::TransientWaveformSample {
@@ -1394,6 +1397,7 @@ fn live_transient_accumulator_bounds_the_provisional_event_history() {
 
     let deltas = (0..LiveTransientAccumulator::MAX_LIVE_EVENT_POINTS + 64)
         .map(|index| TransientSampleDelta {
+            dropped_before: None,
             event_delivery_complete: true,
             voltage_impulses: None,
             current_impulses: None,
@@ -1433,45 +1437,102 @@ fn live_transient_accumulator_bounds_the_provisional_event_history() {
     );
 }
 
-#[test]
-fn live_transient_accumulator_compacts_aligned_source_traces() {
-    let mut accumulator = LiveTransientAccumulator::default();
-    let deltas = (0..LiveTransientAccumulator::MAX_SOURCE_SAMPLES + 1)
-        .map(|index| TransientSampleDelta {
-            event_delivery_complete: true,
-            voltage_impulses: None,
-            current_impulses: None,
-            time: index as f64,
-            waveforms: vec![
-                rspice_simulation::live_transient::TransientWaveformSample {
-                    name: "out".to_owned(),
-                    value: (index as f64 / 10.0).sin(),
-                    y_unit: "V".to_owned(),
-                },
-                rspice_simulation::live_transient::TransientWaveformSample {
-                    name: "ref".to_owned(),
-                    value: (index as f64 / 17.0).cos(),
-                    y_unit: "V".to_owned(),
-                },
-            ],
-            events: Vec::new(),
-            real_events: Vec::new(),
-            buses: Vec::new(),
-        })
-        .collect();
+fn two_signal_point(index: usize) -> TransientSampleDelta {
+    TransientSampleDelta {
+        dropped_before: None,
+        event_delivery_complete: true,
+        voltage_impulses: None,
+        current_impulses: None,
+        time: index as f64,
+        waveforms: vec![
+            rspice_simulation::live_transient::TransientWaveformSample {
+                name: "out".to_owned(),
+                value: (index as f64 / 10.0).sin(),
+                y_unit: "V".to_owned(),
+            },
+            rspice_simulation::live_transient::TransientWaveformSample {
+                name: "ref".to_owned(),
+                value: (index as f64 / 17.0).cos(),
+                y_unit: "V".to_owned(),
+            },
+        ],
+        events: Vec::new(),
+        real_events: Vec::new(),
+        buses: Vec::new(),
+    }
+}
 
-    accumulator.ingest(deltas);
+#[test]
+fn a_thinned_live_history_keeps_every_signals_extremes_in_every_pixel_column() {
+    let mut accumulator = LiveTransientAccumulator::default();
+    let count = LiveTransientAccumulator::HISTORY_VALUES / 2 + 1;
+    accumulator.ingest((0..count).map(two_signal_point).collect());
 
     assert_eq!(accumulator.waveforms.len(), 2);
-    assert!(accumulator.waveforms[0].x.len() <= LiveTransientAccumulator::COMPACTED_SOURCE_SAMPLES);
+    let columns = accumulator
+        .gaps()
+        .thinned_to
+        .expect("a history past its budget is thinned, and says so");
+    assert_eq!(columns, LiveTransientAccumulator::THIN_COLUMNS);
+    let kept = &accumulator.waveforms[0].x;
+    assert!(kept.len() < count);
     assert_eq!(
         accumulator.waveforms[0].x, accumulator.waveforms[1].x,
         "derived expressions require one aligned provisional axis"
     );
-    assert_eq!(accumulator.waveforms[0].x.first(), Some(&0.0));
+    assert_eq!(kept.first(), Some(&0.0));
+    assert_eq!(kept.last(), Some(&((count - 1) as f64)));
+    // Each column of the original record: both signals' least and greatest values are kept,
+    // at their own instants.
+    let span = (count - 1) as f64;
+    let column_of = |x: f64| ((x / span * columns as f64) as usize).min(columns - 1);
+    for (signal, value) in [
+        (0, (|t: f64| (t / 10.0).sin()) as fn(f64) -> f64),
+        (1, |t: f64| (t / 17.0).cos()),
+    ] {
+        let mut extremes = vec![(f64::INFINITY, f64::NEG_INFINITY); columns];
+        for index in 0..count {
+            let t = index as f64;
+            let entry = &mut extremes[column_of(t)];
+            entry.0 = entry.0.min(value(t));
+            entry.1 = entry.1.max(value(t));
+        }
+        let mut kept_extremes = vec![(f64::INFINITY, f64::NEG_INFINITY); columns];
+        for (&t, &y) in kept.iter().zip(&accumulator.waveforms[signal].y) {
+            let entry = &mut kept_extremes[column_of(t)];
+            entry.0 = entry.0.min(y);
+            entry.1 = entry.1.max(y);
+        }
+        assert_eq!(kept_extremes, extremes, "signal {signal}");
+    }
+}
+
+#[test]
+fn points_the_live_queue_let_go_of_leave_a_gap_in_the_trace_and_are_counted() {
+    let mut accumulator = LiveTransientAccumulator::default();
+    accumulator.ingest((0..3).map(two_signal_point).collect());
+    let mut after = two_signal_point(10);
+    after.dropped_before = Some(rspice_simulation::live_transient::DroppedSamples {
+        count: 6,
+        first_s: 3.0,
+        last_s: 9.0,
+    });
+    accumulator.ingest(vec![after]);
+
+    let out = &accumulator.waveforms[0];
+    assert_eq!(out.x, vec![0.0, 1.0, 2.0, 3.0, 10.0]);
+    assert!(
+        out.y[3].is_nan(),
+        "the trace breaks where the dropped points were"
+    );
+    assert!(out.y[4].is_finite());
     assert_eq!(
-        accumulator.waveforms[0].x.last(),
-        Some(&(LiveTransientAccumulator::MAX_SOURCE_SAMPLES as f64))
+        accumulator.gaps(),
+        super::super::live_transient::LivePreviewGaps {
+            dropped: 6,
+            gaps: 1,
+            thinned_to: None,
+        }
     );
 }
 

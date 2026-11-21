@@ -500,6 +500,8 @@ pub struct LiveTransientQueue {
     voltage_impulses: VoltageImpulseBuffer,
     event_points: usize,
     events_lost: bool,
+    /// Analog points let go of since the last drain to make room for newer ones.
+    dropped: Option<super::DroppedSamples>,
 }
 
 impl LiveTransientQueue {
@@ -547,6 +549,15 @@ impl LiveTransientQueue {
             let Some(discarded) = self.samples.pop_front() else {
                 break;
             };
+            if !discarded.waveforms.is_empty() {
+                let dropped = self.dropped.get_or_insert(super::DroppedSamples {
+                    count: 0,
+                    first_s: discarded.time,
+                    last_s: discarded.time,
+                });
+                dropped.count += 1;
+                dropped.last_s = discarded.time;
+            }
             let removed = discarded.events.len() + discarded.real_events.len();
             self.event_points = self.event_points.saturating_sub(removed);
             self.events_lost |= removed != 0 || !discarded.buses.is_empty();
@@ -559,6 +570,16 @@ impl LiveTransientQueue {
     pub fn drain(&mut self) -> Vec<TransientSampleDelta> {
         let mut samples: Vec<_> = self.samples.drain(..).collect();
         self.event_points = 0;
+        // The gap lies just before the first analog point the queue kept.
+        if let Some(dropped) = self.dropped.take() {
+            match samples
+                .iter_mut()
+                .find(|sample| !sample.waveforms.is_empty())
+            {
+                Some(after) => after.dropped_before = Some(dropped),
+                None => self.dropped = Some(dropped),
+            }
+        }
         if self.events_lost {
             for sample in &mut samples {
                 sample.event_delivery_complete = false;
@@ -568,6 +589,7 @@ impl LiveTransientQueue {
             // A separate event-only message preserves the interval even if
             // a later analog sample has no recorded current section.
             samples.push(TransientSampleDelta {
+                dropped_before: None,
                 event_delivery_complete: true,
                 time: impulses.stop_time_s,
                 waveforms: vec![],
@@ -580,6 +602,7 @@ impl LiveTransientQueue {
         }
         if let Some(impulses) = self.voltage_impulses.take_delta() {
             samples.push(TransientSampleDelta {
+                dropped_before: None,
                 event_delivery_complete: true,
                 time: impulses.stop_time_s,
                 waveforms: vec![],
@@ -713,6 +736,7 @@ mod tests {
                 impulse.traces.clear();
             }
             queue.push(TransientSampleDelta {
+                dropped_before: None,
                 event_delivery_complete: true,
                 time: index as f64,
                 waveforms: vec![],

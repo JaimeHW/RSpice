@@ -42,6 +42,16 @@ pub struct SimulationExecutionState {
 
     /// Status message
     pub status: String,
+
+    /// The fraction of the running task the engine reports done, while it reports one.
+    pub reported_progress: Option<f64>,
+
+    /// The span of time the running transient fills, from where its result starts to its stop
+    /// time: the X frame an unzoomed strip of it shows while it runs.
+    pub live_window: Option<(f64, f64)>,
+
+    /// What the running transient's live plot leaves out, when it leaves something out.
+    pub live_preview_note: Option<String>,
 }
 
 /// Retained run evidence, imported checkpoints and retention policy.

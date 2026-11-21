@@ -6,6 +6,8 @@
 use std::sync::{Arc, Mutex};
 
 mod impulses;
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::engine_bridge::live::{LiveRows, open_live_rows};
 pub use impulses::{
     CurrentImpulseBuffer, CurrentImpulseDelta, CurrentImpulseUpdate, LiveTransientQueue,
     VoltageImpulseBuffer, VoltageImpulseDelta, VoltageImpulseUpdate,
@@ -62,6 +64,44 @@ pub struct TransientSampleDelta {
     /// Newly accepted voltage actions, with independent delivery coverage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voltage_impulses: Option<VoltageImpulseDelta>,
+    /// The analog points the live queue let go of just before this one, while its host was too
+    /// busy to take them: a gap in the live trace. The finished run keeps every point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dropped_before: Option<DroppedSamples>,
+}
+
+/// Accepted points a live queue let go of: how many, and the times of the first and the last.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DroppedSamples {
+    pub count: u64,
+    pub first_s: f64,
+    pub last_s: f64,
+}
+
+impl TransientSampleDelta {
+    /// Whether the point carries no value, event, bus or charge: a point whose analog values the
+    /// host reads from the run's segment and which changed nothing else.
+    fn carries_nothing(&self) -> bool {
+        self.event_delivery_complete
+            && self.waveforms.is_empty()
+            && self.events.is_empty()
+            && self.real_events.is_empty()
+            && self.buses.is_empty()
+            && self.current_impulses.is_none()
+            && self.voltage_impulses.is_none()
+    }
+}
+
+/// Whether the transient solving on this thread writes a segment its host reads live.
+#[cfg(not(target_arch = "wasm32"))]
+fn analog_rows_in_segment() -> bool {
+    crate::results_store::live_segment_written()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn analog_rows_in_segment() -> bool {
+    false
 }
 
 /// One digital bus a run declared, as it crosses to the live viewer.
@@ -135,8 +175,11 @@ impl LiveTransientPublisher {
             return;
         }
         let time = sample.time;
-        let mut waveforms = Vec::with_capacity(sample.row.values.len());
-        for (index, value) in sample.row.node_voltages() {
+        // A transient writing a segment its host reads live sends no analog values: the host
+        // draws them from the segment, and only events and charge travel here.
+        let analog = !analog_rows_in_segment();
+        let mut waveforms = Vec::with_capacity(if analog { sample.row.values.len() } else { 0 });
+        for (index, value) in sample.row.node_voltages().filter(|_| analog) {
             let name = sample
                 .node_names
                 .get(index)
@@ -148,7 +191,7 @@ impl LiveTransientPublisher {
                 y_unit: "V".to_owned(),
             });
         }
-        for (index, value) in sample.row.branch_currents() {
+        for (index, value) in sample.row.branch_currents().filter(|_| analog) {
             let branch = sample
                 .branch_names
                 .get(index)
@@ -179,6 +222,7 @@ impl LiveTransientPublisher {
             Err(poisoned) => poisoned.into_inner().voltages.publish(&sample),
         };
         let delta = TransientSampleDelta {
+            dropped_before: None,
             event_delivery_complete,
             time,
             waveforms,
@@ -188,6 +232,9 @@ impl LiveTransientPublisher {
             current_impulses,
             voltage_impulses,
         };
+        if !analog && delta.carries_nothing() {
+            return;
+        }
         if let Some(samples) = &self.transient_samples {
             push_live_transient_sample(samples, delta.clone());
         }
@@ -697,6 +744,7 @@ mod tests {
             push_live_transient_sample(
                 &samples,
                 TransientSampleDelta {
+                    dropped_before: None,
                     event_delivery_complete: true,
                     voltage_impulses: None,
                     current_impulses: None,
@@ -716,5 +764,42 @@ mod tests {
             samples.samples.back().expect("latest retained").time,
             (MAX_PENDING_LIVE_TRANSIENT_SAMPLES + 16) as f64
         );
+    }
+
+    #[test]
+    fn an_overflowing_queue_names_the_points_it_let_go_of_on_the_first_point_it_kept() {
+        let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
+        let point = |time: f64| TransientSampleDelta {
+            dropped_before: None,
+            event_delivery_complete: true,
+            voltage_impulses: None,
+            current_impulses: None,
+            time,
+            waveforms: vec![TransientWaveformSample {
+                name: "out".to_owned(),
+                value: time,
+                y_unit: "V".to_owned(),
+            }],
+            events: Vec::new(),
+            real_events: Vec::new(),
+            buses: Vec::new(),
+        };
+        for index in 0..MAX_PENDING_LIVE_TRANSIENT_SAMPLES + 17 {
+            push_live_transient_sample(&samples, point(index as f64));
+        }
+        let drained = samples.lock().expect("live queue").drain();
+        assert_eq!(
+            drained[0].dropped_before,
+            Some(DroppedSamples {
+                count: 17,
+                first_s: 0.0,
+                last_s: 16.0,
+            })
+        );
+        assert!(drained[1..].iter().all(|point| point.dropped_before.is_none()));
+        // The next drain starts clean.
+        push_live_transient_sample(&samples, point(1e6));
+        let drained = samples.lock().expect("live queue").drain();
+        assert_eq!(drained[0].dropped_before, None);
     }
 }

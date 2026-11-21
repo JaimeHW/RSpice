@@ -32,6 +32,8 @@ mod recorded_fft;
 mod sensitivity;
 mod small_signal_state;
 mod transient;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use transient::live;
 
 /// Bridge between UI and rspice-core engine
 ///

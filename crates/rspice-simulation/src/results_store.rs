@@ -205,6 +205,74 @@ pub(crate) fn storage_budget() -> Option<Arc<StorageBudget>> {
     STORAGE_BUDGET.with(|slot| slot.borrow().clone())
 }
 
+/// Where the segment a running transient writes is, while it writes it: the host draws the rows
+/// written so far from there, so they reach it without a copy of each accepted point.
+pub type LiveSegmentSlot = Arc<std::sync::Mutex<Option<PathBuf>>>;
+
+thread_local! {
+    /// The live segment slot of the run solving on this thread, and whether a transient on it is
+    /// writing a segment its host reads now.
+    static LIVE_SEGMENT: std::cell::RefCell<Option<(LiveSegmentSlot, bool)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Name every segment a transient on this thread writes in `slot` until the guard drops.
+#[must_use]
+pub(crate) fn install_live_segment(slot: LiveSegmentSlot) -> LiveSegmentGuard {
+    let previous = LIVE_SEGMENT.with(|live| live.replace(Some((slot, false))));
+    LiveSegmentGuard { previous }
+}
+
+/// What removes a run's live segment slot from its thread, on every exit path.
+pub(crate) struct LiveSegmentGuard {
+    previous: Option<(LiveSegmentSlot, bool)>,
+}
+
+impl Drop for LiveSegmentGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        LIVE_SEGMENT.with(|live| {
+            live.replace(previous);
+        });
+    }
+}
+
+/// Name `path` as the segment the transient on this thread writes, until the returned value
+/// drops; nothing when the run installed no slot.
+pub(crate) fn publish_live_segment(path: &Path) -> Option<LiveSegmentPublication> {
+    LIVE_SEGMENT.with(|live| {
+        let mut live = live.borrow_mut();
+        let (slot, writing) = live.as_mut()?;
+        *slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(path.to_path_buf());
+        *writing = true;
+        Some(LiveSegmentPublication {
+            slot: Arc::clone(slot),
+        })
+    })
+}
+
+/// A segment named in its run's live slot; dropping it says the transient is done writing it.
+pub(crate) struct LiveSegmentPublication {
+    slot: LiveSegmentSlot,
+}
+
+impl Drop for LiveSegmentPublication {
+    fn drop(&mut self) {
+        *self.slot.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        LIVE_SEGMENT.with(|live| {
+            if let Some((_, writing)) = live.borrow_mut().as_mut() {
+                *writing = false;
+            }
+        });
+    }
+}
+
+/// Whether a transient on this thread is writing its rows to a segment its host reads live, so
+/// its accepted points need not be sent to the host one by one.
+pub(crate) fn live_segment_written() -> bool {
+    LIVE_SEGMENT.with(|live| live.borrow().as_ref().is_some_and(|(_, writing)| *writing))
+}
+
 /// A new segment file in this process's store folder.
 pub(crate) fn create_segment() -> Result<(PathBuf, TemporaryIo), String> {
     let stores = process_stores()?;

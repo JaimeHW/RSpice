@@ -1,6 +1,6 @@
 //! Application presentation and adoption of exact runtime saved outputs.
 
-use crate::state::{AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
+use crate::state::{AnalysisResult, RetainedTrace};
 use rspice_simulation::output_contract::{PreparedSavedOutput, materialization};
 
 #[cfg(test)]
@@ -38,15 +38,14 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
     materialization::retain_plan_saved_outputs(&mut analysis.data, contracts);
 }
 
+/// The live preview's outputs, drawn from `analysis` as it is: a segment's rows through the
+/// store, or a live history that is already thinned to the plot's columns. Thinning it again by
+/// sample count would lose the least and greatest values its columns keep.
 pub fn materialize_live_saved_outputs(
     analysis: &AnalysisResult,
     contracts: &[PreparedSavedOutput],
 ) -> Vec<RetainedTrace> {
-    materialization::materialize_live_saved_outputs(
-        &analysis.data,
-        contracts,
-        DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-    )
+    materialization::materialize_live_saved_outputs(&analysis.data, contracts, usize::MAX)
 }
 
 #[cfg(test)]
@@ -289,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn live_output_projection_is_bounded_and_does_not_mutate_source_precision() {
+    fn live_output_projection_draws_the_history_as_given_and_does_not_mutate_source_precision() {
         let live_output = SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
             "output_voltage",
@@ -320,7 +319,8 @@ mod tests {
         assert_eq!(source.waveforms[0].x.len(), 10_000);
         assert_eq!(projected.len(), 1);
         assert_eq!(projected[0].name, "output_voltage");
-        assert!(projected[0].x.len() <= DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+        // The history is bounded where it is kept, by pixel columns; the projection takes it whole.
+        assert_eq!(projected[0].x.len(), 10_000);
         assert!(source.saved_output_receipts.is_empty());
     }
 
