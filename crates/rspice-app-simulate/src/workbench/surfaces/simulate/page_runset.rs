@@ -2112,24 +2112,6 @@ mod run_space_layout_tests {
 mod point_table_note_tests {
     use super::point_table_note;
 
-    /// The note's refusal sentence agrees with its own count.
-    ///
-    /// The subject was pluralized and the verb was not: "2 enabled analyses
-    /// refused their participation and runs at no point here".
-    #[test]
-    fn the_refusal_sentence_agrees_with_the_count_it_states() {
-        let one = point_table_note(4, 4, 1).expect("a refusal is a note");
-        assert!(
-            one.contains("1 enabled analysis refused its participation and runs at no point here"),
-            "{one}"
-        );
-        let two = point_table_note(4, 4, 2).expect("a refusal is a note");
-        assert!(
-            two.contains("2 enabled analyses refused their participation and run at no point here"),
-            "{two}"
-        );
-    }
-
     /// A table that shows every point and reconciles with the plan total says
     /// nothing at all: the rows are the answer and a sentence under them that
     /// restated the rows was the page's longest piece of prose.

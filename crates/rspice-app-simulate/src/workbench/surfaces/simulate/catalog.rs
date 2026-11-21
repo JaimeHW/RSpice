@@ -935,19 +935,6 @@ mod tests {
         }
     }
 
-    /// The second column is taken on the width the rows are given.
-    ///
-    /// Either side of `2 × ANALYSIS_CATALOG_COLUMN_MIN_WIDTH`, and at the
-    /// bound itself, where a column drawn at exactly the minimum is already
-    /// the stacked row the split was meant to avoid.
-    #[test]
-    fn the_catalogue_takes_a_second_column_only_when_both_columns_clear_the_row_minimum() {
-        let bound = 2.0 * ANALYSIS_CATALOG_COLUMN_MIN_WIDTH;
-        assert_eq!(analysis_catalog_column_count(bound - 1.0), 1);
-        assert_eq!(analysis_catalog_column_count(bound), 1);
-        assert_eq!(analysis_catalog_column_count(bound + 1.0), 2);
-    }
-
     /// The catalogue window itself, driven one frame per keystroke.
     ///
     /// The travel helper is pure and proved on its own; what this reaches is

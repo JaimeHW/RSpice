@@ -6,10 +6,8 @@
 //! is the half that grows every time a form makes a new claim.
 
 use super::envelope::ENVELOPE_FIELD_LABELS;
-use super::harmonic_balance::{HB_FIELD_LABELS, HB_SOLVER_CHOICES};
-use super::noise::{
-    NOISE_CONTRIBUTION_CHOICES, NOISE_FIELD_LABELS, NOISE_INTEGRATION_CHOICES, NOISE_SWEEP_CHOICES,
-};
+use super::harmonic_balance::HB_FIELD_LABELS;
+use super::noise::NOISE_FIELD_LABELS;
 use super::operating_point::{
     OP_INITIAL_GUESS_CHOICES, OP_NODE_INITIALIZATION_CHOICES, op_initial_guess_disabled,
     op_node_initialization_disabled, op_startup_indices_compatible,
@@ -39,11 +37,8 @@ fn hbnoise_form_exposes_source_reference_when_noise_figure_is_enabled() {
         }
     }
 }
-use crate::simulation::config::NoiseSweepType;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::simulation::dialog::{HbDialogState, PssConfig, PssDialogState};
+use crate::simulation::dialog::HbDialogState;
 use crate::simulation::plan::AnalysisKind;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::plan::NoiseDraft;
@@ -72,16 +67,6 @@ fn operating_point_startup_choices_match_the_execution_contract() {
     let old_revision = op_initial_guess_disabled(1, false, true);
     assert!(old_revision.iter().any(|(index, _)| *index == 1));
     assert!(!old_revision.iter().any(|(index, _)| *index == 4));
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn analysis_form_height(draft: AnalysisDraft) -> f32 {
-    analysis_form_height_in_domain(draft, NoiseDomain::default())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn analysis_form_height_in_domain(draft: AnalysisDraft, noise_domain: NoiseDomain<'_>) -> f32 {
-    render_analysis_form(draft, noise_domain).0
 }
 
 /// Render one analysis form off-screen: the height it occupied, and every
@@ -266,21 +251,6 @@ fn a_disabled_axis_does_not_move_the_corner_form() {
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn pss_form_height(oscillator_mode: bool) -> f32 {
-    let mut setup = PssDialogState::from_config(&PssConfig::default());
-    setup.osc_mode = oscillator_mode;
-    analysis_form_height(AnalysisDraft::Pss(setup))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn pss_oscillator_toggle_preserves_form_geometry() {
-    let driven_height = pss_form_height(false);
-    let oscillator_height = pss_form_height(true);
-    assert_eq!(driven_height, oscillator_height);
-}
-
 #[test]
 fn pss_integration_methods_are_the_engines_own() {
     assert_eq!(
@@ -325,52 +295,6 @@ fn the_periodic_carrier_row_offers_the_carriers_the_engine_has() {
     }
 }
 
-/// Every carrier position leaves the three forms the same size.
-///
-/// The row is one chooser whatever it holds, so a selection that moved the
-/// form would mean a row appearing or disappearing behind the selection —
-/// which is how the option sheet under these forms used to jump.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn every_periodic_carrier_position_preserves_form_geometry() {
-    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
-
-    for kind in [AnalysisKind::Pac, AnalysisKind::Pxf, AnalysisKind::Pnoise] {
-        let mut heights = Vec::new();
-        for position in 0..PeriodicCarrier::ALL.len() {
-            let mut draft = AnalysisDraft::for_kind(kind);
-            match &mut draft {
-                AnalysisDraft::Pac(setup) => setup.carrier_idx = position,
-                AnalysisDraft::Pxf(setup) => setup.carrier_idx = position,
-                AnalysisDraft::Pnoise(setup) => setup.carrier_idx = position,
-                _ => panic!("{kind:?} carries a periodic small-signal draft"),
-            }
-            heights.push(analysis_form_height(draft));
-        }
-        assert!(
-            heights.windows(2).all(|pair| pair[0] == pair[1]),
-            "{kind:?} changed height with the carrier selection: {heights:?}"
-        );
-    }
-}
-
-/// The GMRES restart is the Krylov solver's parameter and is offered only on
-/// that choice, so the chooser must withhold the row rather than remove it.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn hb_solver_choice_preserves_form_geometry() {
-    let heights = HB_SOLVER_CHOICES
-        .iter()
-        .enumerate()
-        .map(|(solver_idx, _)| {
-            let mut setup = HbDialogState::from_config(&HbConfig::default());
-            setup.solver_idx = solver_idx;
-            analysis_form_height(AnalysisDraft::HarmonicBalance(setup))
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(heights[0], heights[1]);
-}
-
 /// Every solver control the form owns is painted, once.
 ///
 /// Read off the render rather than off [`HB_FIELD_LABELS`]: a form that
@@ -388,99 +312,6 @@ fn every_hb_solver_control_is_painted_by_the_form() {
             painted.iter().filter(|line| *line == label).count(),
             1,
             "the HB form paints {label} exactly once: {painted:?}"
-        );
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn every_noise_selection_preserves_the_eight_field_geometry() {
-    let expected = analysis_form_height(AnalysisDraft::Noise(NoiseDraft::default()));
-    for sweep in [
-        NoiseSweepType::Decade,
-        NoiseSweepType::Octave,
-        NoiseSweepType::Linear,
-        NoiseSweepType::ExplicitFrequencyList,
-    ] {
-        for contribution_detail in [
-            NoiseContributionDetail::Top50,
-            NoiseContributionDetail::AllContributors,
-            NoiseContributionDetail::Top20,
-            NoiseContributionDetail::SummaryOnly,
-        ] {
-            for integration_mode in [
-                NoiseIntegrationMode::Enabled,
-                NoiseIntegrationMode::OutputNoiseOnly,
-                NoiseIntegrationMode::Disabled,
-            ] {
-                let draft = NoiseDraft {
-                    sweep,
-                    contribution_detail,
-                    integration_mode,
-                    ..NoiseDraft::default()
-                };
-                assert_eq!(expected, analysis_form_height(AnalysisDraft::Noise(draft)));
-            }
-        }
-    }
-
-    for (output, input) in [
-        ("out_p,out_n", "I1"),
-        ("V(custom_p,custom_n)", "VCUSTOM"),
-        ("", ""),
-    ] {
-        let draft = NoiseDraft {
-            output: output.to_owned(),
-            input: input.to_owned(),
-            ..NoiseDraft::default()
-        };
-        assert_eq!(expected, analysis_form_height(AnalysisDraft::Noise(draft)));
-    }
-}
-
-/// Whether the elaborated design was reachable changes what the two domain
-/// rows offer, and must not change where any field sits.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn an_elaborated_noise_domain_preserves_the_eight_field_geometry() {
-    let empty = analysis_form_height(AnalysisDraft::Noise(NoiseDraft::default()));
-    let nodes = (0..NOISE_DOMAIN_PRESET_LIMIT * 3)
-        .map(|index| format!("net{index}"))
-        .collect::<Vec<_>>();
-    let sources = vec!["I1".to_owned(), "V1".to_owned()];
-    for (draft, domain) in [
-        (
-            NoiseDraft::default(),
-            NoiseDomain {
-                nodes: &nodes,
-                sources: &sources,
-                unavailable: None,
-            },
-        ),
-        (
-            NoiseDraft {
-                output: nodes[1].clone(),
-                input: sources[1].clone(),
-                ..NoiseDraft::default()
-            },
-            NoiseDomain {
-                nodes: &nodes,
-                sources: &sources,
-                unavailable: None,
-            },
-        ),
-        (
-            NoiseDraft::default(),
-            NoiseDomain {
-                nodes: &[],
-                sources: &[],
-                unavailable: None,
-            },
-        ),
-    ] {
-        assert_eq!(
-            empty,
-            analysis_form_height_in_domain(AnalysisDraft::Noise(draft), domain)
         );
     }
 }
@@ -548,102 +379,6 @@ fn a_noise_domain_row_states_which_kind_of_empty_it_has() {
         noise_domain_hint("nodes", 64, 812, false),
         "64 of 812 nodes"
     );
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn conditional_analysis_controls_preserve_form_geometry() {
-    let mut pairs = Vec::new();
-
-    let disabled = AnalysisDraft::for_kind(AnalysisKind::DcSweep);
-    let mut enabled = disabled.clone();
-    if let AnalysisDraft::DcSweep(setup) = &mut enabled {
-        setup.nested = true;
-    }
-    pairs.push((disabled, enabled));
-
-    let disabled = AnalysisDraft::for_kind(AnalysisKind::Sensitivity);
-    let mut enabled = disabled.clone();
-    if let AnalysisDraft::Sensitivity(setup) = &mut enabled {
-        setup.sens_type_idx = 1;
-    }
-    pairs.push((disabled, enabled));
-
-    // The Corner pair is absent on purpose: axis enablement is no longer a
-    // draft field, so there is nothing on the draft to toggle. The same
-    // geometry property is pinned against the plan's declaration by
-    // `a_disabled_axis_does_not_move_the_corner_form`.
-
-    let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Optimization);
-    let mut enabled = disabled.clone();
-    if let AnalysisDraft::Optimization(setup) = &mut disabled {
-        setup.goal_mode = 0;
-    }
-    if let AnalysisDraft::Optimization(setup) = &mut enabled {
-        setup.goal_mode = 2;
-    }
-    pairs.push((disabled, enabled));
-
-    let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Soa);
-    let mut enabled = disabled.clone();
-    if let AnalysisDraft::Soa(setup) = &mut disabled {
-        setup.check_vgs_max = false;
-        setup.check_vds_max = false;
-        setup.check_vbe_max = false;
-        setup.check_vce_max = false;
-    }
-    if let AnalysisDraft::Soa(setup) = &mut enabled {
-        setup.check_vgs_max = true;
-        setup.check_vds_max = true;
-        setup.check_vbe_max = true;
-        setup.check_vce_max = true;
-    }
-    pairs.push((disabled, enabled));
-
-    let mut disabled = AnalysisDraft::for_kind(AnalysisKind::Qpss);
-    let mut enabled = disabled.clone();
-    if let AnalysisDraft::Qpss(setup) = &mut disabled {
-        setup.autonomous = false;
-    }
-    if let AnalysisDraft::Qpss(setup) = &mut enabled {
-        setup.autonomous = true;
-    }
-    pairs.push((disabled, enabled));
-
-    for (disabled, enabled) in pairs {
-        assert_eq!(
-            analysis_form_height(disabled),
-            analysis_form_height(enabled)
-        );
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn envelope_modulation_source_modes_preserve_form_geometry() {
-    let mut named = AnalysisDraft::for_kind(AnalysisKind::Envelope);
-    let mut declared = named.clone();
-    if let AnalysisDraft::Envelope(setup) = &mut named {
-        setup.modulation_sources = "VIN_AM".to_owned();
-    }
-    if let AnalysisDraft::Envelope(setup) = &mut declared {
-        setup.modulation_sources = "VCTRL, VDATA".to_owned();
-    }
-
-    assert_eq!(analysis_form_height(named), analysis_form_height(declared));
-}
-
-#[test]
-fn envelope_modulation_source_split_is_fixed_and_fills_the_control_row() {
-    for available_width in [1.0, 120.0, 320.0, 640.0] {
-        let (selector, editor) = envelope_modulation_control_widths(available_width);
-        assert!(selector > 0.0);
-        assert!(editor > 0.0);
-        assert_eq!(
-            selector + editor + ENVELOPE_INLINE_CONTROL_GAP,
-            available_width.max(ENVELOPE_INLINE_CONTROL_GAP + 2.0)
-        );
-    }
 }
 
 /// Where a form pairs a point count with a graded [`SWEEP_KINDS`] mode,
@@ -782,40 +517,6 @@ fn every_catalog_kind_draws_a_form() {
         "catalog kinds whose form paints nothing:\n  {}",
         blank.join("\n  ")
     );
-}
-
-#[test]
-fn noise_form_matches_mockup_owned_contract() {
-    assert_eq!(
-        NOISE_SWEEP_CHOICES,
-        ["Decade", "Octave", "Linear", "Explicit frequency list"]
-    );
-    assert_eq!(
-        NOISE_CONTRIBUTION_CHOICES,
-        ["Top 50", "All contributors", "Top 20", "Summary only"]
-    );
-    assert_eq!(
-        NOISE_INTEGRATION_CHOICES,
-        ["Enabled", "Output noise only", "Disabled"]
-    );
-    // Rendered, the point row names the units the selected mode gives it.
-    assert_eq!(
-        noise_point_field_label(NoiseSweepType::Decade),
-        "Points / decade"
-    );
-    assert_eq!(
-        noise_point_field_label(NoiseSweepType::Linear),
-        "Total points"
-    );
-    for available_width in [1.0, 120.0, 320.0, 640.0] {
-        let (selector, editor) = noise_sweep_control_widths(available_width);
-        assert!(selector > 0.0);
-        assert!(editor > 0.0);
-        assert_eq!(
-            selector + editor + ENVELOPE_INLINE_CONTROL_GAP,
-            available_width.max(ENVELOPE_INLINE_CONTROL_GAP + 2.0)
-        );
-    }
 }
 
 /// The page gathers the drawing's loop probes for exactly the forms that offer

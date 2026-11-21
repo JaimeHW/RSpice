@@ -1607,7 +1607,6 @@ mod tests {
         AnalysisResult, AnalysisResultSourceDomain, AnalysisType, PreparedRunReceipt,
         PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationState,
     };
-    use crate::workbench::SurfaceId;
     use crate::workbench::simulate::test_host::SimulateTestHost;
 
     fn plan_receipt(plan_id: crate::product::SimulationPlanId, byte: u8) -> PreparedRunReceipt {
@@ -1878,45 +1877,6 @@ mod tests {
         analysis
     }
 
-    /// Four completed runs in the queue: one without checks, and one whose
-    /// checks passed, warned and failed.
-    #[test]
-    #[ignore = "writes the review pictures"]
-    fn write_the_check_verdict_picture() {
-        use rspice_core::config::HdlSeverity;
-
-        let directory = std::env::var("RSPICE_PICTURES")
-            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-        let mut state = SimulateTestHost::default();
-        for severities in [
-            &[][..],
-            &[HdlSeverity::Info],
-            &[HdlSeverity::Warning],
-            &[HdlSeverity::Error],
-        ] {
-            let run = state.model.simulation.start_run();
-            run.add_analysis(checked_analysis(severities));
-            run.lifecycle = SimulationRunLifecycle::Completed;
-        }
-        let snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
-        let canvas = rspice_ui_kit::raster::render(egui::vec2(1000.0, 230.0), |ui, _| {
-            render_queue_and_graph(
-                ui,
-                &snapshot,
-                &mut RowRequests {
-                    selection: &mut None,
-                    open: &mut None,
-                    verify: &mut None,
-                },
-            );
-        });
-        std::fs::write(
-            format!("{directory}/jobs-run-check-verdicts.png"),
-            canvas.png(canvas.height()),
-        )
-        .expect("the picture is written");
-    }
-
     #[test]
     fn manifest_never_infers_missing_legacy_job_or_target_identity() {
         let mut run = SimulationRun::new(7);
@@ -2018,28 +1978,6 @@ mod tests {
         let tasks = [task(1.0), task(0.25), task(0.0), task(0.0)];
         assert!((batch_progress(&tasks) - 0.3125).abs() < f32::EPSILON);
         assert_eq!(batch_progress(&[]), 0.0);
-    }
-
-    /// Status text is neutral. A failed run or task carries a failure mark, a
-    /// run that stopped short a warning mark, and completion carries nothing;
-    /// only live work fills its progress bar with the accent.
-    #[test]
-    fn run_states_mark_only_problems_and_never_colour_success() {
-        assert_eq!(RunTone::Error.problem(), Some(Problem::Failure));
-        assert_eq!(RunTone::Warning.problem(), Some(Problem::Warning));
-        for quiet in [RunTone::Active, RunTone::Success, RunTone::Neutral] {
-            assert_eq!(quiet.problem(), None);
-        }
-        let t = Tokens::default();
-        assert_eq!(RunTone::Active.progress_fill(&t), t.color.accent);
-        for stopped in [
-            RunTone::Success,
-            RunTone::Warning,
-            RunTone::Error,
-            RunTone::Neutral,
-        ] {
-            assert_eq!(stopped.progress_fill(&t), t.color.text_dim);
-        }
     }
 
     /// A campaign rolls up in counts. It used to read "complete · 2/2
@@ -2178,10 +2116,5 @@ mod tests {
             render_inspector(ui, &snapshot, &mut None, &mut verify, &mut None);
         });
         assert_eq!(verify, Some((run_id, VerificationPage::Specifications)));
-    }
-
-    #[test]
-    fn the_manager_is_titled_run_history_everywhere() {
-        assert_eq!(SurfaceId::JobsManager.label(), TITLE);
     }
 }

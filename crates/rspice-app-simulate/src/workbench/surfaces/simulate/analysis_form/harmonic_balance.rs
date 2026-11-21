@@ -106,8 +106,7 @@ pub(super) fn fields(
     );
     // Withheld rather than hidden on the Newton choice: the restart is the
     // Krylov solver's own parameter, and a row that disappeared would move
-    // every field under it when the chooser moved
-    // (`hb_solver_choice_preserves_form_geometry`).
+    // every field under it when the chooser moved.
     input_row_enabled(
         ui,
         HB_FIELD_LABELS[12],

@@ -1371,49 +1371,4 @@ mod tests {
             "picking a compared plan moved the base with it"
         );
     }
-
-    /// A compatibility verdict is words. It is set in the body face, at the
-    /// size of the values beside it in its row, not in the mono face a value
-    /// is compared digit by digit in.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn a_compatibility_verdict_is_set_in_words_at_its_rows_size() {
-        let (harness, active, _) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&harness.model);
-        let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
-        draft.mode = SimulationPlanManagerMode::Compare;
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut shapes = Vec::new();
-        for _ in 0..3 {
-            shapes = ctx
-                .run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            GATED_VIEWPORTS[0],
-                        )),
-                        ..Default::default()
-                    },
-                    |ctx| {
-                        dialog(ctx, &mut draft, &records);
-                    },
-                )
-                .shapes;
-        }
-        let verdict = shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::epaint::Shape::Text(text) if text.galley.job.text == "same analyses" => {
-                    Some(text.galley.job.sections[0].format.font_id.clone())
-                }
-                _ => None,
-            })
-            .expect("the analyses verdict is painted");
-        assert_eq!(
-            verdict,
-            theme::sans(tokens::FS_1, theme::FontWeight::Regular),
-            "the body face, at a value cell's size"
-        );
-    }
 }

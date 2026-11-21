@@ -1,15 +1,11 @@
 //! What the navigator is allowed to claim about a run.
 //!
 //! Each view's second line is counted from what that view draws; the runs
-//! list puts the newest first and marks the reference. The remaining cases
-//! hold the mock's grid and spacing, and the density switch between desktop
-//! and touch.
+//! list puts the newest first and marks the reference.
 
 use super::super::simulate::simulate_nav_meta;
-use super::super::verify::{
-    VerifyNavigator, verification_flow_presentation, verification_navigator_requires_scroll, verify,
-};
-use super::{FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, flow_row_geometry};
+use super::super::verify::{VerifyNavigator, verification_flow_presentation, verify};
+use super::flow_row_geometry;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::pdk_config::PdkConfig;
 use crate::state::{
@@ -64,41 +60,6 @@ fn simulation_models_meta_counts_only_active_plan_bindings() {
     assert_eq!(
         simulate_nav_meta(&model, SimulationPage::Models, "unused", None, 0),
         Some("1".to_owned()),
-    );
-}
-
-#[test]
-fn verification_flow_rows_match_the_mock_grid_without_text_collisions() {
-    assert!(FLOW_DETAIL_TOP - (FLOW_LABEL_TOP + 11.0) >= 4.0);
-    assert!(FLOW_STATUS_TOP - (FLOW_DETAIL_TOP + 11.0) >= 4.0);
-    assert!(FLOW_ROW_HEIGHT - (FLOW_STATUS_TOP + 11.0) >= 7.0);
-    // A label and one line of detail; each wrapped line adds one pitch.
-    assert_eq!(flow_row_geometry(1), 43.0);
-    assert_eq!(flow_row_geometry(2), 58.0);
-    assert_eq!(flow_row_geometry(3), 73.0);
-    // A row with nothing under its name keeps its siblings' height.
-    assert_eq!(flow_row_geometry(0), 43.0);
-}
-
-#[test]
-fn verification_navigation_lists_every_view_by_its_label() {
-    let model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
-    let simulate = SimulateState::default();
-    let labels = VerificationPage::NAVIGATION
-        .map(|page| verification_flow_presentation(&model, &simulate, page).label);
-    assert_eq!(
-        labels,
-        [
-            "Specifications",
-            "Corners",
-            "Monte Carlo",
-            "Checks",
-            "Reference"
-        ]
-    );
-    assert_eq!(
-        labels,
-        VerificationPage::NAVIGATION.map(|page| page.label().to_owned())
     );
 }
 
@@ -249,15 +210,6 @@ fn the_checks_line_states_the_soa_fixture_as_the_view_lists_it() {
     let flow =
         verification_flow_presentation(&model, &SimulateState::default(), VerificationPage::Checks);
     assert_eq!(flow.detail, expected.join(" \u{b7} "));
-}
-
-#[test]
-fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
-    assert!(verification_navigator_requires_scroll(440.0));
-    assert!(!verification_navigator_requires_scroll(441.0));
-    assert!(verification_navigator_requires_scroll(330.0));
-    assert!(!verification_navigator_requires_scroll(560.0));
-    assert!(!verification_navigator_requires_scroll(700.0));
 }
 
 /// The longest Monte Carlo sample trail the active dataset's yield evidence

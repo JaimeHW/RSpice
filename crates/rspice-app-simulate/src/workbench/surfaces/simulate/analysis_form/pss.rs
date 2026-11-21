@@ -8,9 +8,8 @@
 //! anything, so the same fields mean two different things.
 //!
 //! Those two things are said on the two fields they are about, as hints rather
-//! than prose, because the form's height must not move when the switch does
-//! (`pss_oscillator_toggle_preserves_form_geometry`). They are said at all
-//! because the engine has no opinion here to enforce. The core's
+//! than prose, because the form's height must not move when the switch does.
+//! They are said at all because the engine has no opinion here to enforce. The core's
 //! `PssConfig` carries no tone list (`rspice-core/src/analysis/pss/config.rs`);
 //! the list exists so a *driven* run can close over the elaborated periodic
 //! source set before dispatch, which is what

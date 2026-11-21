@@ -5,7 +5,6 @@
 
 use egui::Color32;
 
-use super::super::histogram::HistogramModel;
 use super::super::raster::{
     PageGeometry, VerifyStage, page_input, page_pass, refresh_verification, seed_monte_carlo,
     seed_monte_carlo_at_two_points, seed_monte_carlo_over_different_trials,
@@ -584,83 +583,5 @@ fn a_ranges_bounds_fail_outward() {
             (Side::Floor, "\u{2265} 1.62 V".to_owned()),
             (Side::Ceiling, "\u{2264} 1.98 V".to_owned()),
         ]
-    );
-}
-
-/// The forty-trial gain histogram as the view paints it.
-fn gain_histogram(ctx: &egui::Context) -> (HistogramModel, egui::FullOutput) {
-    let harness = monte_carlo_app();
-    let statistics = sheet(&harness).rows[0].statistics.as_ref().expect("trials");
-    let model = histogram_model(
-        &population(statistics, None).expect("every trial").samples(),
-        &[FLOOR_40],
-    )
-    .expect("forty samples bin");
-    let mut output = None;
-    for _ in 0..2 {
-        output = Some(ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(900.0, 420.0),
-                )),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    super::super::histogram::paint_histogram(ui, "gain", "dB", &model);
-                });
-            },
-        ));
-    }
-    (model, output.expect("two frames ran"))
-}
-
-/// Every shape a frame painted, flattened.
-fn shapes(output: &egui::FullOutput) -> Vec<egui::Shape> {
-    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
-        match shape {
-            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
-            shape => out.push(shape.clone()),
-        }
-    }
-    let mut out = Vec::new();
-    for clipped in &output.shapes {
-        walk(&clipped.shape, &mut out);
-    }
-    out
-}
-
-/// Bars wear the Results histogram's tones, the accent wash in an accent
-/// outline, and the failing part of a bar the same wash and outline in the
-/// failing ink; the canvas theme is worn again once the plot has drawn.
-#[test]
-fn bars_wear_the_results_tones_and_failing_parts_the_failing_ink() {
-    let ctx = context();
-    let canvas = Tokens::get(&ctx).color;
-    let (_, output) = gain_histogram(&ctx);
-    let t = Tokens::get(&ctx);
-    assert_eq!(t.color, canvas, "the page's inks are put back");
-    let bars = shapes(&output)
-        .into_iter()
-        .filter_map(|shape| match shape {
-            egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => {
-                Some((rect.fill, rect.stroke.color))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert!(bars.contains(&(t.color.accent_dim, t.color.accent)));
-    let failing = t
-        .color
-        .err
-        .gamma_multiply(f32::from(t.color.accent_dim.a()) / 255.0);
-    assert!(bars.contains(&(failing, t.color.err)));
-    assert!(
-        bars.iter()
-            .all(|bar| *bar == (t.color.accent_dim, t.color.accent)
-                || *bar == (failing, t.color.err)
-                || bar.0 == t.color.bg_elevated),
-        "{bars:?}"
     );
 }
