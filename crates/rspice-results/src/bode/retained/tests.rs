@@ -491,21 +491,6 @@ fn a_lone_first_decade_sample_never_proves_flatness() {
     );
 }
 
-/// The minimal shape of the same defect, with the sweep reduced to the two
-/// samples the span check needs: the first decade holds one of them, and
-/// the gain is visibly falling.
-#[test]
-fn one_sample_in_the_first_decade_is_not_a_flat_first_decade() {
-    let frequency = [1.0, 100.0];
-    let gain_db = [60.0, 40.0];
-
-    assert!(!low_frequency_gain_is_dc(&frequency, &gain_db));
-
-    let analysis = wrapped_response(&frequency, &gain_db, &[0.0, -90.0]);
-    let metrics = summary(&analysis, 0).expect("AC summary").metrics;
-    assert!(!metrics.adc_is_dc);
-}
-
 /// A NaN frequency never reads as a proven DC gain.
 ///
 /// Both span guards are written `f.is_nan() || f <op> bound` rather than

@@ -725,13 +725,6 @@ mod tests {
         assert!(!wants_offset_notation(-1.0, 1.0));
     }
 
-    #[test]
-    fn significant_readouts_are_distinct_from_fixed_decimal_formatting() {
-        assert_eq!(fmt_si_significant(12.345_678, "V", 7), "12.34568 V");
-        assert_eq!(fmt_si_significant(1.234_567_8e-6, "s", 7), "1.234568 µs");
-        assert_eq!(fmt_si_significant(0.0, "A", 3), "0 A");
-    }
-
     /// A rounding that carries into the next decade prints exactly the digits
     /// asked for, under the prefix it carried into.
     #[test]

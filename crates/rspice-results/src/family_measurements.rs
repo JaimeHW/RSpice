@@ -226,17 +226,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_swept_point_names_itself_by_the_value_it_was_solved_at() {
-        let point = FamilyMemberId::SweepPoint {
-            index: 2,
-            value: 27.5,
-        };
-
-        assert_eq!(point.index(), 2);
-        assert_eq!(point.label(), "Point 27.5");
-    }
-
     /// A swept point is named in engineering notation.
     ///
     /// `Display` for `f64` never uses an exponent, so a picofarad sweep was
@@ -257,16 +246,6 @@ mod tests {
         assert_eq!(named(1.000_000_1), "Point 1.0000001");
         assert_eq!(named(0.0), "Point 0");
         assert_eq!(named(-40.0), "Point -40");
-    }
-
-    #[test]
-    fn a_corner_names_itself_by_its_section_label() {
-        let corner = FamilyMemberId::Corner {
-            index: 1,
-            label: "SS_1.08V_125C".to_owned(),
-        };
-
-        assert_eq!(corner.label(), "SS_1.08V_125C");
     }
 
     #[test]

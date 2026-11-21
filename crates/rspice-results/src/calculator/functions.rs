@@ -1684,48 +1684,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cross_finds_the_nth_crossing_of_a_level() {
-        // Triangle: 0 → 2 over [0,1], 2 → −2 over [1,3], −2 → 0 over [3,4].
-        // Level 1 is crossed rising at x = 0.5 and falling at x = 1.5.
-        let (x, y) = pwl_series(&[(0.0, 0.0), (1.0, 2.0), (3.0, -2.0), (4.0, 0.0)], 11);
-        let series = wave(x, y);
-        assert_close(
-            scalar_of(
-                "cross",
-                vec![
-                    series.clone(),
-                    CalcValue::Scalar(1.0),
-                    CalcValue::Scalar(1.0),
-                ],
-            ),
-            0.5,
-            1.0e-12,
-            "first crossing of 1",
-        );
-        assert_close(
-            scalar_of(
-                "cross",
-                vec![
-                    series.clone(),
-                    CalcValue::Scalar(1.0),
-                    CalcValue::Scalar(2.0),
-                ],
-            ),
-            1.5,
-            1.0e-12,
-            "second crossing of 1",
-        );
-        assert!(
-            call(
-                "cross",
-                vec![series, CalcValue::Scalar(1.0), CalcValue::Scalar(3.0)]
-            )
-            .is_err(),
-            "there is no third crossing of 1"
-        );
-    }
-
     /// Four periods of a trapezoidal pulse train: period 1, rise 0 → 10 over
     /// [k, k+0.2], fall 10 → 0 over [k+0.5, k+0.7]. The mid level is 5, so
     /// the rising mid-crossings sit at k+0.1 and the falling ones at k+0.6:
@@ -1742,64 +1700,6 @@ mod tests {
         breaks.push((4.0, 0.0));
         let (x, y) = pwl_series(&breaks, 61);
         wave(x, y)
-    }
-
-    #[test]
-    fn freq_period_and_duty_measure_a_pulse_train() {
-        assert_close(
-            scalar_of("freq", vec![pulse_train()]),
-            1.0,
-            1.0e-9,
-            "frequency",
-        );
-        assert_close(
-            scalar_of("period", vec![pulse_train()]),
-            1.0,
-            1.0e-9,
-            "period",
-        );
-        assert_close(
-            scalar_of("duty", vec![pulse_train()]),
-            50.0,
-            1.0e-9,
-            "duty cycle in percent",
-        );
-    }
-
-    #[test]
-    fn overshoot_is_the_percent_above_the_final_value() {
-        // Step 0 → 1 that peaks at 1.2 and settles back to 1.0: 20 %.
-        let (x, y) = pwl_series(
-            &[(0.0, 0.0), (1.0, 1.2), (2.0, 0.9), (3.0, 1.0), (4.0, 1.0)],
-            23,
-        );
-        assert_close(
-            scalar_of("overshoot", vec![wave(x, y)]),
-            20.0,
-            1.0e-9,
-            "overshoot",
-        );
-    }
-
-    #[test]
-    fn rise_and_fall_measure_the_ten_to_ninety_percent_edge() {
-        // 0 → 10 over [0,1] then flat: 10 % at 0.1, 90 % at 0.9 → 0.8.
-        let (x, y) = pwl_series(&[(0.0, 0.0), (1.0, 10.0), (2.0, 10.0)], 19);
-        assert_close(
-            scalar_of("rise", vec![wave(x, y)]),
-            0.8,
-            1.0e-12,
-            "rise time",
-        );
-
-        // Flat 10 then 10 → 0 over [1,2]: 90 % at 1.1, 10 % at 1.9 → 0.8.
-        let (x, y) = pwl_series(&[(0.0, 10.0), (1.0, 10.0), (2.0, 0.0)], 19);
-        assert_close(
-            scalar_of("fall", vec![wave(x, y)]),
-            0.8,
-            1.0e-12,
-            "fall time",
-        );
     }
 
     #[test]

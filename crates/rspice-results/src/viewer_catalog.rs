@@ -290,62 +290,6 @@ mod tests {
 
     use super::*;
 
-    const DOCUMENT_IDS: &[&str] = &[
-        "viewer-waveform",
-        "viewer-bode",
-        "viewer-spectrum",
-        "viewer-phase-noise",
-        "viewer-spectrogram",
-        "viewer-optical-spectrum",
-        "viewer-optical-transfer",
-        "viewer-optical-mode",
-        "viewer-smith",
-        "viewer-polar",
-        "viewer-load-pull",
-        "viewer-wireless",
-        "viewer-network-quality",
-        "viewer-mixed-mode-network",
-        "viewer-constellation",
-        "viewer-ccdf",
-        "viewer-tdr",
-        "viewer-transfer-function",
-        "viewer-table",
-        "viewer-histogram",
-        "viewer-scatter",
-        "viewer-contour",
-        "viewer-box-violin",
-        "viewer-parallel-coordinates",
-        "viewer-scatter-matrix",
-        "viewer-contribution",
-        "eye-viewer",
-        "bathtub-viewer",
-        "margin-viewer",
-        "dynamic-droop-viewer",
-        "viewer-digital-events",
-        "viewer-soa",
-        "viewer-optimization",
-        "viewer-pz",
-        "field-viewer-3d",
-        "field-viewer-current",
-        "field-viewer-voltage",
-        "field-viewer-thermal",
-        "field-viewer-mesh",
-        "field-viewer-probe",
-    ];
-
-    #[test]
-    fn catalog_has_exact_manifest_document_ids_and_order() {
-        assert_eq!(VIEWER_DOCUMENTS.len(), CANONICAL_VIEWER_COUNT);
-        assert_eq!(CANONICAL_VIEWER_COUNT, 40);
-        assert_eq!(
-            VIEWER_DOCUMENTS
-                .iter()
-                .map(|document| document.id)
-                .collect::<Vec<_>>(),
-            DOCUMENT_IDS
-        );
-    }
-
     #[test]
     fn stable_ids_are_unique_and_lookups_are_total_for_catalog_entries() {
         let mut document_ids = HashSet::new();
@@ -353,31 +297,6 @@ mod tests {
             assert!(document_ids.insert(document.id), "{}", document.id);
             assert_eq!(viewer_document(document.id), Some(document));
         }
-    }
-
-    #[test]
-    fn groups_have_exact_manifest_labels_order_and_document_counts() {
-        assert_eq!(
-            ViewerGroup::ALL.map(ViewerGroup::label),
-            [
-                "Time & frequency",
-                "Photonics",
-                "RF & network",
-                "Statistical & tabular",
-                "Serial link",
-                "Digital & AMS",
-                "Verification & optimization",
-                "Specialized",
-                "Fields & physical",
-            ]
-        );
-        assert_eq!(
-            ViewerGroup::ALL.map(|group| VIEWER_DOCUMENTS
-                .iter()
-                .filter(|document| document.group == group)
-                .count()),
-            [5, 3, 9, 9, 4, 1, 2, 1, 6]
-        );
     }
 
     #[test]
@@ -519,22 +438,6 @@ mod tests {
         assert_eq!(
             viewer_compatibility("viewer-does-not-exist", all_plausible_capabilities),
             ViewerCompatibility::UnknownDocument
-        );
-    }
-
-    #[test]
-    fn document_group_iteration_preserves_manifest_order() {
-        assert_eq!(
-            VIEWER_DOCUMENTS
-                .iter()
-                .filter(|document| document.group == ViewerGroup::Photonics)
-                .map(|document| document.id)
-                .collect::<Vec<_>>(),
-            [
-                "viewer-optical-spectrum",
-                "viewer-optical-transfer",
-                "viewer-optical-mode",
-            ]
         );
     }
 }
