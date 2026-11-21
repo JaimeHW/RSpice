@@ -1,20 +1,20 @@
 //! Transient viewer data.
 //!
 //! Prepares and caches what the transient viewers draw, so switching between
-//! viewers after a run does not re-derive the same traces.
+//! viewers after a run does not re-derive the same traces. The spectrum's
+//! input and the folded eye are prepared on Results jobs beside the window.
 
 use super::*;
 use crate::simulation::ViewerHost;
 use crate::state::{
     ActiveViewer, AnalysisType, RunEvent, SharedWaveformValues, SpecializedViewerCacheProvenance,
 };
+use rspice_app_services::workbench::results_job::{JobOutcome, JobStop, ResultsJob};
 use rspice_results_ui::eye_diagram::{
     EyeData, EyeDataBuilder, EyeTimebase, EyeTimebaseProvenance, crossing_phase_at,
     estimate_unit_interval, fold_anchor,
 };
 use rspice_results_ui::fft::{FftInputError, FftInputOptions, PreparedFftInput};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DerivedViewerLoadState {
@@ -41,11 +41,12 @@ pub struct LoadedDerivedView {
     pub availability: DerivedViewAvailability,
 }
 
+/// A derived view being prepared for the analysis it was asked for.
 #[derive(Debug)]
 pub struct PendingDerivedViewTask {
     pub analysis: SpecializedViewerCacheProvenance,
-    pub receiver: mpsc::Receiver<DerivedViewTaskResult>,
-    pub cancel_flag: Arc<AtomicBool>,
+    /// The preparation. A job that fails is a preparation that stopped unexpectedly.
+    pub job: ResultsJob<DerivedViewTaskResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -293,17 +294,23 @@ impl SimulationController {
         let Some(task) = task_slot.as_mut() else {
             return;
         };
+        if !task.job.is_finished() {
+            return;
+        }
 
-        let message = match task.receiver.try_recv() {
-            Ok(message) => message,
-            Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => {
+        let message = match task.job.take_outcome() {
+            Some(JobOutcome::Done(message)) => message,
+            Some(JobOutcome::Cancelled) | None => {
+                *task_slot = None;
+                return;
+            }
+            Some(JobOutcome::Failed(_)) => {
                 let disconnected_analysis = task.analysis;
                 *task_slot = None;
-                // Cancellation removes the task slot before setting its flag,
-                // so a disconnected receiver that is still installed is an
-                // unexpected worker termination, not cancellation. Attribute
-                // it only to the still-active FFT provenance.
+                // Cancellation removes the task slot before it cancels the
+                // job, so a job that failed while still installed is an
+                // unexpected stop of the preparation, not cancellation.
+                // Attribute it only to the still-active FFT provenance.
                 if view == DerivedViewKind::Fft && Some(disconnected_analysis) == active_analysis {
                     state.apply_run_event(RunEvent::FftWorkerLost);
                     self.transient_post.fft_loaded = Some(LoadedDerivedView {
@@ -360,41 +367,32 @@ impl SimulationController {
     fn spawn_derived_view_task(&mut self, view: DerivedViewKind, source: DerivedWaveformSource) {
         self.cancel_task_slot(view);
 
-        let (sender, receiver) = mpsc::channel();
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-        let task_cancel_flag = Arc::clone(&cancel_flag);
-        let task_source = source.clone();
-
-        spawn_or_inline(move || {
-            let payload = match view {
+        let analysis = source.analysis;
+        let (name, step) = match view {
+            DerivedViewKind::EyeDiagram => ("eye-fold", "Folding the eye"),
+            DerivedViewKind::Fft => ("fft-preparation", "Preparing the spectrum"),
+        };
+        let job = ResultsJob::start(name, move |job| {
+            job.step(step, 0);
+            // A preparation that panics ends as a failed job, which the
+            // poll reports as a preparation that stopped unexpectedly.
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match view {
                 DerivedViewKind::EyeDiagram => {
-                    if task_cancel_flag.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    DerivedViewResultPayload::Eye(build_eye_diagram_data(&task_source))
+                    DerivedViewResultPayload::Eye(build_eye_diagram_data(&source))
                 }
                 DerivedViewKind::Fft => {
-                    if task_cancel_flag.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    let prepared = build_fft_prepared_input(&task_source);
-                    DerivedViewResultPayload::Fft(prepared)
+                    DerivedViewResultPayload::Fft(build_fft_prepared_input(&source))
                 }
-            };
-            if task_cancel_flag.load(Ordering::Relaxed) {
-                return;
-            }
-            let _ = sender.send(DerivedViewTaskResult {
-                analysis: task_source.analysis,
+            }))
+            .map_err(|_| JobStop::Failed(format!("{step} stopped unexpectedly")))?;
+            job.check()?;
+            Ok(DerivedViewTaskResult {
+                analysis: source.analysis,
                 payload,
-            });
+            })
         });
 
-        *self.task_slot_mut(view) = Some(PendingDerivedViewTask {
-            analysis: source.analysis,
-            receiver,
-            cancel_flag,
-        });
+        *self.task_slot_mut(view) = Some(PendingDerivedViewTask { analysis, job });
     }
 
     fn cancel_stale_transient_task(
@@ -413,7 +411,7 @@ impl SimulationController {
 
     pub fn cancel_task_slot(&mut self, view: DerivedViewKind) {
         if let Some(task) = self.task_slot_mut(view).take() {
-            task.cancel_flag.store(true, Ordering::Relaxed);
+            task.job.cancel();
         }
     }
 
@@ -571,8 +569,8 @@ pub fn build_eye_from_waveform(
 /// A source's time and value columns, each borrowed or read.
 type SourceColumns<'a> = (std::borrow::Cow<'a, [f64]>, std::borrow::Cow<'a, [f64]>);
 
-/// Both columns of a derivation's source. A spectrum and an eye fold every sample of the record,
-/// so the task reads them whole, off the frame; a record past the whole-read budget is refused.
+/// Both columns of an eye's source. An eye folds every sample of the record, so the job reads
+/// them whole, off the frame; a record past the whole-read budget is refused.
 fn whole_source(source: &DerivedWaveformSource) -> Result<SourceColumns<'_>, String> {
     let time = source
         .time
@@ -593,14 +591,15 @@ fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {
     EyeBuild { data, provenance }
 }
 
+/// The spectrum's input: the record validated a block at a time as it is read, and only the rows
+/// of its time window held, so a record kept in a results store is prepared whatever its length.
 fn build_fft_prepared_input(
     source: &DerivedWaveformSource,
 ) -> Result<PreparedFftInput, FftInputError> {
-    let (time, values) = whole_source(source).map_err(FftInputError::Unreadable)?;
-    rspice_results_ui::fft::prepare_fft_input_with_options(
+    rspice_results_ui::fft::pipeline::prepare_fft_input_from_columns(
         &source.source_name,
-        &time,
-        &values,
+        &source.time,
+        &source.values,
         source.fft_options,
     )
 }

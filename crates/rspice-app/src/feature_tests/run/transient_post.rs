@@ -1,8 +1,8 @@
 //! The transient coordinator's derived views, observed through the results
 //! viewer they load.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
+use std::time::Duration;
 
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseProvenance};
 use rspice_results_ui::fft::{
@@ -18,6 +18,7 @@ use rspice_app_runs::simulation::controller::transient_post::{
     DerivedViewerLoadState, LoadedDerivedView, PendingDerivedViewTask, build_eye_from_waveform,
     eye_matches_timebase,
 };
+use rspice_app_services::workbench::results_job::{JobStop, ResultsJob};
 use rspice_app_state::product::{AnalysisInstanceId, DatasetId};
 use rspice_app_state::state::{
     ActiveViewer, AnalysisResult, AnalysisType, SimulationRun, SpecializedViewerCacheProvenance,
@@ -50,18 +51,32 @@ fn seed_fft(state: &mut AppState, analysis: SpecializedViewerCacheProvenance) {
         .bind_specialized_viewer_cache(ActiveViewer::Fft, analysis);
 }
 
+/// An FFT preparation for `analysis` that ends with what the returned sender sends, or stops
+/// unexpectedly when the sender is dropped.
 fn install_fft_task(
     controller: &mut SimulationController,
     analysis: SpecializedViewerCacheProvenance,
-) -> (mpsc::Sender<DerivedViewTaskResult>, Arc<AtomicBool>) {
+) -> (
+    mpsc::Sender<DerivedViewTaskResult>,
+    ResultsJob<DerivedViewTaskResult>,
+) {
     let (sender, receiver) = mpsc::channel();
-    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let job = ResultsJob::start("fft-test", move |job| {
+        loop {
+            match receiver.recv_timeout(Duration::from_millis(5)) {
+                Ok(message) => return Ok(message),
+                Err(mpsc::RecvTimeoutError::Timeout) => job.check()?,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(JobStop::Failed("the preparation stopped".to_owned()));
+                }
+            }
+        }
+    });
     controller.transient_post.fft_task = Some(PendingDerivedViewTask {
         analysis,
-        receiver,
-        cancel_flag: Arc::clone(&cancel_flag),
+        job: job.clone(),
     });
-    (sender, cancel_flag)
+    (sender, job)
 }
 
 #[test]
@@ -70,7 +85,7 @@ fn matching_fft_input_failure_owns_and_clears_only_its_active_cache() {
     let mut state = AppState::default();
     seed_fft(&mut state, analysis);
     let mut controller = SimulationController::new();
-    let (sender, _) = install_fft_task(&mut controller, analysis);
+    let (sender, job) = install_fft_task(&mut controller, analysis);
     sender
         .send(DerivedViewTaskResult {
             analysis,
@@ -80,6 +95,7 @@ fn matching_fft_input_failure_owns_and_clears_only_its_active_cache() {
             })),
         })
         .expect("installed local receiver");
+    assert!(job.wait(Duration::from_secs(10)));
 
     controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(analysis));
 
@@ -109,7 +125,7 @@ fn stale_fft_input_failure_cannot_mutate_the_active_cache() {
     let mut state = AppState::default();
     seed_fft(&mut state, active);
     let mut controller = SimulationController::new();
-    let (sender, _) = install_fft_task(&mut controller, stale);
+    let (sender, job) = install_fft_task(&mut controller, stale);
     sender
         .send(DerivedViewTaskResult {
             analysis: stale,
@@ -119,6 +135,7 @@ fn stale_fft_input_failure_cannot_mutate_the_active_cache() {
             })),
         })
         .expect("installed local receiver");
+    assert!(job.wait(Duration::from_secs(10)));
 
     controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(active));
 
@@ -141,7 +158,7 @@ fn design_replacement_rejects_a_late_successful_fft_completion() {
         .active_specialized_viewer_cache_provenance()
         .unwrap();
     let mut controller = SimulationController::new();
-    let (sender, cancelled) = install_fft_task(&mut controller, stale);
+    let (sender, job) = install_fft_task(&mut controller, stale);
 
     state.clear_design_execution_context();
     // Reuse the display indices and sequence numbers in the replacement design.
@@ -177,7 +194,7 @@ fn design_replacement_rejects_a_late_successful_fft_completion() {
         .expect("completion arrives before the next application poll");
     controller.sync_transient_post_views(&mut state);
 
-    assert!(cancelled.load(Ordering::Relaxed));
+    assert!(job.is_cancelled());
     assert!(controller.transient_post.fft_task.is_none());
     assert!(controller.transient_post.fft_loaded.is_none());
     assert_eq!(state.results.analysis.cache_authority.fft, Some(active));
@@ -201,12 +218,13 @@ fn cancelling_an_fft_task_is_silent_and_drops_its_result_channel() {
     let mut state = AppState::default();
     seed_fft(&mut state, analysis);
     let mut controller = SimulationController::new();
-    let (sender, cancel_flag) = install_fft_task(&mut controller, analysis);
+    let (sender, job) = install_fft_task(&mut controller, analysis);
 
     controller.cancel_task_slot(DerivedViewKind::Fft);
 
-    assert!(cancel_flag.load(Ordering::Relaxed));
+    assert!(job.is_cancelled());
     assert!(controller.transient_post.fft_task.is_none());
+    assert!(job.wait(Duration::from_secs(10)));
     assert!(
         sender
             .send(DerivedViewTaskResult {
@@ -230,8 +248,9 @@ fn active_fft_worker_disconnect_fails_closed_with_typed_ownership() {
     let mut state = AppState::default();
     seed_fft(&mut state, analysis);
     let mut controller = SimulationController::new();
-    let (sender, _) = install_fft_task(&mut controller, analysis);
+    let (sender, job) = install_fft_task(&mut controller, analysis);
     drop(sender);
+    assert!(job.wait(Duration::from_secs(10)));
 
     controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(analysis));
 

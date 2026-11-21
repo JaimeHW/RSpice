@@ -294,6 +294,33 @@ pub fn prepare_fft_input_with_options(
     values: &[f64],
     options: FftInputOptions,
 ) -> Result<PreparedFftInput, FftInputError> {
+    let (point_cap, target_samples) = validate_options(options)?;
+    validate_source(time, values)?;
+    let windowed = select_time_window(time, values, options.time_window)?;
+    prepare_windowed(name, windowed, point_cap, target_samples)
+}
+
+/// Prepare a waveform for FFT analysis as [`prepare_fft_input_with_options`] prepares the same
+/// samples, reading its columns rather than slices: the complete record is validated a block at a
+/// time as it is read, and only the rows of the time window are held. A record kept in a results
+/// store is prepared whatever its length; a block that cannot be read is
+/// [`FftInputError::Unreadable`].
+pub fn prepare_fft_input_from_columns(
+    name: &str,
+    time: &crate::waveform::WaveformValues,
+    values: &crate::waveform::WaveformValues,
+    options: FftInputOptions,
+) -> Result<PreparedFftInput, FftInputError> {
+    let (point_cap, target_samples) = validate_options(options)?;
+    validate_source_columns(time, values)?;
+    let windowed = select_time_window_columns(time, values, options.time_window)?;
+    prepare_windowed(name, windowed, point_cap, target_samples)
+}
+
+/// The point cap and target count `options` ask for, once they agree.
+fn validate_options(
+    options: FftInputOptions,
+) -> Result<(Option<usize>, Option<usize>), FftInputError> {
     let point_cap = options.policy.point_cap()?;
     let target_samples = validate_target_count(options.target_samples)?;
     if let (Some(point_cap), Some(target)) = (point_cap, target_samples)
@@ -301,8 +328,16 @@ pub fn prepare_fft_input_with_options(
     {
         return Err(FftInputError::TargetExceedsPointCap { target, point_cap });
     }
-    validate_source(time, values)?;
-    let windowed = select_time_window(time, values, options.time_window)?;
+    Ok((point_cap, target_samples))
+}
+
+/// The pipeline from the validated rows of the time window on.
+fn prepare_windowed(
+    name: &str,
+    windowed: Vec<(f64, f64)>,
+    point_cap: Option<usize>,
+    target_samples: Option<usize>,
+) -> Result<PreparedFftInput, FftInputError> {
     let original_count = windowed.len();
 
     let explicit_decimation = match target_samples {
@@ -404,32 +439,107 @@ fn validate_target_count(target: Option<usize>) -> Result<Option<usize>, FftInpu
 }
 
 fn validate_source(time: &[f64], values: &[f64]) -> Result<(), FftInputError> {
-    if time.len() != values.len() {
+    validate_source_counts(time.len(), values.len())?;
+    let mut previous = None;
+    for (index, (&t, &value)) in time.iter().zip(values).enumerate() {
+        validate_source_sample(index, t, value, previous)?;
+        previous = Some(t);
+    }
+    Ok(())
+}
+
+/// [`validate_source`] over columns, a block of each at a time.
+fn validate_source_columns(
+    time: &crate::waveform::WaveformValues,
+    values: &crate::waveform::WaveformValues,
+) -> Result<(), FftInputError> {
+    validate_source_counts(time.len(), values.len())?;
+    let mut previous = None;
+    let mut index = 0;
+    column_pairs(time, values, 0..time.len(), |t, value| {
+        validate_source_sample(index, t, value, previous)?;
+        previous = Some(t);
+        index += 1;
+        Ok(())
+    })
+}
+
+/// Each pair of samples of `time` and `values` over `rows`, in order, read a block of each column
+/// at a time; the columns' blocks need not line up.
+fn column_pairs(
+    time: &crate::waveform::WaveformValues,
+    values: &crate::waveform::WaveformValues,
+    rows: std::ops::Range<usize>,
+    mut each: impl FnMut(f64, f64) -> Result<(), FftInputError>,
+) -> Result<(), FftInputError> {
+    let unreadable = |failure: crate::waveform::ColumnReadFailure| {
+        FftInputError::Unreadable(failure.to_string())
+    };
+    let (mut times, mut samples) = (time.blocks(rows.clone()), values.blocks(rows));
+    let (mut time_block, mut time_at) = (std::borrow::Cow::Borrowed(&[][..]), 0);
+    let (mut value_block, mut value_at) = (std::borrow::Cow::Borrowed(&[][..]), 0);
+    loop {
+        if time_at == time_block.len() {
+            let Some(block) = times.next() else {
+                return Ok(());
+            };
+            (time_block, time_at) = (block.map_err(unreadable)?, 0);
+        }
+        if value_at == value_block.len() {
+            let Some(block) = samples.next() else {
+                return Ok(());
+            };
+            (value_block, value_at) = (block.map_err(unreadable)?, 0);
+        }
+        let run = (time_block.len() - time_at).min(value_block.len() - value_at);
+        for (&t, &value) in time_block[time_at..time_at + run]
+            .iter()
+            .zip(&value_block[value_at..value_at + run])
+        {
+            each(t, value)?;
+        }
+        time_at += run;
+        value_at += run;
+    }
+}
+
+fn validate_source_counts(time_count: usize, value_count: usize) -> Result<(), FftInputError> {
+    if time_count != value_count {
         return Err(FftInputError::LengthMismatch {
-            time_count: time.len(),
-            value_count: values.len(),
+            time_count,
+            value_count,
         });
     }
-    if time.len() < MIN_FFT_SAMPLES {
+    if time_count < MIN_FFT_SAMPLES {
         return Err(FftInputError::InsufficientSamples {
-            length: time.len(),
+            length: time_count,
             minimum: MIN_FFT_SAMPLES,
         });
     }
-    for (index, (&t, &value)) in time.iter().zip(values).enumerate() {
-        if !t.is_finite() {
-            return Err(FftInputError::NonFiniteTime { index, value: t });
-        }
-        if !value.is_finite() {
-            return Err(FftInputError::NonFiniteValue { index, value });
-        }
-        if index > 0 && t <= time[index - 1] {
-            return Err(FftInputError::NonIncreasingTime {
-                index,
-                previous: time[index - 1],
-                current: t,
-            });
-        }
+    Ok(())
+}
+
+/// Sample `index` of the record, `t` and `value`, after the time `previous`.
+fn validate_source_sample(
+    index: usize,
+    t: f64,
+    value: f64,
+    previous: Option<f64>,
+) -> Result<(), FftInputError> {
+    if !t.is_finite() {
+        return Err(FftInputError::NonFiniteTime { index, value: t });
+    }
+    if !value.is_finite() {
+        return Err(FftInputError::NonFiniteValue { index, value });
+    }
+    if let Some(previous) = previous
+        && t <= previous
+    {
+        return Err(FftInputError::NonIncreasingTime {
+            index,
+            previous,
+            current: t,
+        });
     }
     Ok(())
 }
@@ -459,18 +569,10 @@ fn select_time_window(
         None => (0, time.len(), None),
     };
     let retained = end_index.saturating_sub(start_index);
-    if retained < MIN_FFT_SAMPLES {
-        let window = diagnostic_bounds.unwrap_or(FftTimeWindow {
-            start: time[0],
-            end: time[time.len() - 1],
-        });
-        return Err(FftInputError::InsufficientWindowSamples {
-            start: window.start,
-            end: window.end,
-            retained,
-        });
-    }
-    validate_retained_count(retained)?;
+    validate_window_rows(retained, diagnostic_bounds, || FftTimeWindow {
+        start: time[0],
+        end: time[time.len() - 1],
+    })?;
 
     let mut selected = Vec::new();
     try_reserve_exact(
@@ -485,6 +587,59 @@ fn select_time_window(
             .zip(values[start_index..end_index].iter().copied()),
     );
     Ok(selected)
+}
+
+/// [`select_time_window`] over columns: the window's bounds found by search, and only its rows
+/// read, a block of each column at a time.
+fn select_time_window_columns(
+    time: &crate::waveform::WaveformValues,
+    values: &crate::waveform::WaveformValues,
+    time_window: Option<FftTimeWindow>,
+) -> Result<Vec<(f64, f64)>, FftInputError> {
+    let (start_index, end_index, diagnostic_bounds) = match time_window {
+        Some(window) => {
+            let window = window.validated()?;
+            let start = time.partition_point(|value| value < window.start);
+            let end = time.partition_point(|value| value <= window.end);
+            (start, end, Some(window))
+        }
+        None => (0, time.len(), None),
+    };
+    let retained = end_index.saturating_sub(start_index);
+    validate_window_rows(retained, diagnostic_bounds, || FftTimeWindow {
+        start: time.sample(0).unwrap_or(f64::NAN),
+        end: time.sample(time.len() - 1).unwrap_or(f64::NAN),
+    })?;
+
+    let mut selected = Vec::new();
+    try_reserve_exact(
+        &mut selected,
+        retained,
+        FftInputAllocationStage::SelectedSamples,
+    )?;
+    column_pairs(time, values, start_index..end_index, |t, value| {
+        selected.push((t, value));
+        Ok(())
+    })?;
+    Ok(selected)
+}
+
+/// Whether a window of `retained` rows can be prepared: `window`, or the whole record's span,
+/// names it when it holds too few.
+fn validate_window_rows(
+    retained: usize,
+    window: Option<FftTimeWindow>,
+    record: impl FnOnce() -> FftTimeWindow,
+) -> Result<(), FftInputError> {
+    if retained < MIN_FFT_SAMPLES {
+        let window = window.unwrap_or_else(record);
+        return Err(FftInputError::InsufficientWindowSamples {
+            start: window.start,
+            end: window.end,
+            retained,
+        });
+    }
+    validate_retained_count(retained)
 }
 
 fn is_uniform_timeline(data: &[(f64, f64)]) -> Result<bool, FftInputError> {
@@ -1789,6 +1944,97 @@ mod tests {
         assert!(
             alias_amplitude < 1.0e-3,
             "stopband alias amplitude {alias_amplitude:?} exceeds the qualified limit"
+        );
+    }
+
+    /// A column kept in a store, read a block at a time.
+    struct Stored(Vec<f64>);
+
+    impl crate::waveform::ColumnSource for Stored {
+        fn name(&self) -> &str {
+            "column"
+        }
+
+        fn store(&self) -> String {
+            "run.rsr".to_owned()
+        }
+
+        fn rows(&self) -> u64 {
+            self.0.len() as u64
+        }
+
+        fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+            let first = first as usize;
+            out.copy_from_slice(&self.0[first..first + out.len()]);
+            Ok(())
+        }
+    }
+
+    fn stored(values: &[f64]) -> crate::waveform::WaveformValues {
+        crate::waveform::WaveformValues::stored(
+            std::sync::Arc::new(Stored(values.to_vec())),
+            crate::waveform::StoredWindow {
+                first: 0,
+                rows: values.len() as u64,
+                lead: crate::waveform::WindowLead::None,
+            },
+        )
+        .expect("the window fits the column")
+    }
+
+    /// Columns prepare what slices of the same samples prepare: a record of several blocks cut by
+    /// a time window, in memory, in a store and one of each, and each refusal at the same row.
+    #[test]
+    fn columns_prepare_what_slices_of_the_same_samples_prepare() {
+        use crate::waveform::{BLOCK_SAMPLES, WaveformValues};
+        let rows = 3 * BLOCK_SAMPLES + 17;
+        let (time, values) = uniform_record(rows, 0.0, 1.0e-9);
+        let options = FftInputOptions::with_policy(FftInputPolicy::interactive_default())
+            .with_time_window(Some(FftTimeWindow {
+                start: 1.0e-6,
+                end: (rows - 500) as f64 * 1.0e-9,
+            }));
+        let prepared = prepare_fft_input_with_options("v", &time, &values, options);
+        assert!(prepared.is_ok(), "{prepared:?}");
+        let columns = [
+            (
+                WaveformValues::from(time.clone()),
+                WaveformValues::from(values.clone()),
+            ),
+            (stored(&time), stored(&values)),
+            (WaveformValues::from(time.clone()), stored(&values)),
+        ];
+        for (time, values) in &columns {
+            assert_eq!(
+                prepare_fft_input_from_columns("v", time, values, options),
+                prepared
+            );
+        }
+
+        let mut repeated = time.clone();
+        repeated[2 * BLOCK_SAMPLES + 5] = repeated[2 * BLOCK_SAMPLES + 4];
+        let refused = prepare_fft_input_with_options("v", &repeated, &values, options);
+        assert!(
+            matches!(refused, Err(FftInputError::NonIncreasingTime { index, .. }) if index == 2 * BLOCK_SAMPLES + 5),
+            "{refused:?}"
+        );
+        assert_eq!(
+            prepare_fft_input_from_columns("v", &stored(&repeated), &stored(&values), options),
+            refused
+        );
+        let mut gap = values.clone();
+        gap[BLOCK_SAMPLES + 3] = f64::NAN;
+        assert!(matches!(
+            prepare_fft_input_from_columns("v", &stored(&time), &stored(&gap), options),
+            Err(FftInputError::NonFiniteValue { index, .. }) if index == BLOCK_SAMPLES + 3
+        ));
+        let narrow = options.with_time_window(Some(FftTimeWindow {
+            start: 1.0e-6,
+            end: 1.0e-6 + 2.0e-9,
+        }));
+        assert_eq!(
+            prepare_fft_input_from_columns("v", &stored(&time), &stored(&values), narrow),
+            prepare_fft_input_with_options("v", &time, &values, narrow)
         );
     }
 }
