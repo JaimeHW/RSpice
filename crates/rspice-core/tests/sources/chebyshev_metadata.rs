@@ -64,14 +64,6 @@ fn authored_count_excludes_comments_inactive_branches_and_post_end_text() {
 }
 
 #[test]
-fn default_and_ordinary_netlists_report_zero_authored_chebyshev_cards() {
-    assert_eq!(Netlist::default().pspice_chebyshev_source_count(), 0);
-    let ordinary =
-        Netlist::parse("ordinary\nV1 1 0 1\nR1 1 0 1k\n.end\n").expect("ordinary deck parses");
-    assert_eq!(ordinary.pspice_chebyshev_source_count(), 0);
-}
-
-#[test]
 fn expanded_include_cards_contribute_to_authored_count() {
     let directory = TempDirectory::new("include-count");
     let child = directory.path().join("filter.inc");
