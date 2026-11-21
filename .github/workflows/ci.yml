@@ -952,6 +952,11 @@ jobs:
         run: |
           node --version
           cargo test --locked -p rspice-worker --target wasm32-unknown-unknown --test browser_worker_transport
+      - name: Test the browser results store against origin-private storage in a dedicated worker
+        if: ${{ !cancelled() && steps.bindgen.outcome == 'success' }}
+        env:
+          WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
+        run: cargo test --locked -p rspice-worker --target wasm32-unknown-unknown --test browser_results_store
 
   wasm-ui-size:
     name: Browser build & qualification
