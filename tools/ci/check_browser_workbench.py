@@ -764,13 +764,23 @@ def results_store_files(browser, store):
 
 
 def stated_storage(browser, wanted, description, timeout=120):
-    choose_command(browser, SAVE_PAGE)
+    """The Save page's statement once it says `wanted`. A page just loaded may still be reading
+    its project's segments, and the project opening closes a palette or page opened before it,
+    so the page is opened again until it states the storage."""
+    deadline = time.monotonic() + timeout
 
     def statement():
         text = results_storage(controls(browser.snapshot()))
         return text if text and wanted in text else None
 
-    return wait_for(statement, description, timeout)
+    while True:
+        try:
+            choose_command(browser, SAVE_PAGE)
+            return wait_for(statement, description, min(20, max(1, deadline - time.monotonic())))
+        except AssertionError as error:
+            if not str(error).startswith("Timed out waiting for") or time.monotonic() >= deadline:
+                raise
+            browser.capture("results-storage-retry")
 
 
 def results_survive_reload(browser):
