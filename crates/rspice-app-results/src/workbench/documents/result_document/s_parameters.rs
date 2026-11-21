@@ -14,9 +14,47 @@ use rspice_results_ui::s_parameters::{self as view, NetworkOffer, PlotGroup};
 use rspice_results_ui::selection::ResultExpressionPresentationKey;
 
 use super::{
-    AnalysisPresentationKey, ResultViewer, ResultsParts, ResultsReads, ViewerAvailability,
+    AnalysisPresentationKey, ResultViewer, ResultsParts, ResultsReads,
+    SourceWaveformPresentationKey, ViewerAvailability,
 };
 use crate::state::{AnalysisResult, AnalysisResultFamilyMetadata};
+
+/// The sheet: the run's strips, with each network's noise columns (the
+/// correlation matrix, F, Fmin, Rn, Sopt) unticked until the reader ticks
+/// them. They are other quantities in other units, and the correlation
+/// matrix in decibels would crush the coefficients' pane; NF, NFmin and Rn
+/// are in the Plot menu.
+pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    untick_noise_columns(state);
+    super::waves::show_bode(ui, state);
+}
+
+/// Gives every non-coefficient column of the run's networks a hidden
+/// visibility, unless the reader has already chosen one, so the browser
+/// and the strip agree on what is drawn.
+fn untick_noise_columns(state: &mut ResultsParts<'_>) {
+    let Some(run) = state.model.simulation.active_run() else {
+        return;
+    };
+    let visibility = &mut state.results.session.waveform_visibility;
+    for analysis in run
+        .analyses
+        .iter()
+        .filter(|analysis| analysis.analysis_type.is_network_response())
+    {
+        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+        for waveform in &analysis.waveforms {
+            if !view::is_coefficient(&waveform.name) {
+                visibility
+                    .entry(SourceWaveformPresentationKey::new(
+                        key,
+                        waveform.name.clone(),
+                    ))
+                    .or_insert(false);
+            }
+        }
+    }
+}
 
 /// Whether the active run holds a network the sheet can draw.
 pub(super) fn availability(state: ResultsReads<'_>) -> ViewerAvailability {

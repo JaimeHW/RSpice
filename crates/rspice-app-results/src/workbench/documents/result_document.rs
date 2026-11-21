@@ -2218,7 +2218,8 @@ fn show_viewer_well(
             ResultChrome::Full => waves::show(ui, state),
             ResultChrome::CompactSplit => waves::show_compact(ui, state),
         },
-        ResultViewer::Bode | ResultViewer::SParameters => waves::show_bode(ui, state),
+        ResultViewer::Bode => waves::show_bode(ui, state),
+        ResultViewer::SParameters => s_parameters::show(ui, state),
         ResultViewer::Fft => {
             if ensure_derived(ui, state, run_controller, ActiveViewer::Fft) {
                 fft::show(ui, state);

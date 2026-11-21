@@ -1,6 +1,6 @@
 //! The S-parameter sheet's share of the strip stack: which of a network
-//! run's retained columns it draws, and the Plot menu of the functions ADS
-//! and ViVA's Direct Plot read from them.
+//! run's retained columns it draws at first, and the Plot menu of the
+//! functions ADS and ViVA's Direct Plot read from them.
 //!
 //! Every function in the menu is a calculator expression over the run's
 //! own coefficients (`kf(S11,S12,S21,S22)`), added to the analysis' strip
@@ -9,10 +9,7 @@
 
 use egui::Ui;
 use rspice_results::network_matrix::trace_identity;
-use rspice_results::result_presentation::ResultViewer;
 use rspice_ui_kit::widgets::Button;
-
-use crate::waves::StripModel;
 
 /// Whether a retained column is one of a network's scattering coefficients
 /// (`|S21|`, `phase(S21)`), rather than a noise column of the same run.
@@ -23,31 +20,6 @@ pub fn is_coefficient(name: &str) -> bool {
         .and_then(|rest| rest.strip_suffix(')'))
         .unwrap_or(name);
     trace_identity(name).is_some()
-}
-
-/// On the S-parameter sheet a network run's strips draw its coefficients
-/// only. Its noise columns (the correlation matrix, F, Fmin, Rn, Sopt) are
-/// other quantities in other units, which would share the decibel pane and
-/// crush its scale; the Plot menu adds the noise figures as curves of their
-/// own.
-pub fn keep_coefficients(viewer: ResultViewer, models: &mut [StripModel]) {
-    if viewer != ResultViewer::SParameters {
-        return;
-    }
-    for model in models
-        .iter_mut()
-        .filter(|model| model.analysis_type.is_network_response())
-    {
-        let signals = model.signal_trace_count;
-        let (mut index, mut kept) = (0, 0);
-        model.traces.retain(|trace| {
-            let keep = is_coefficient(&trace.source_waveform_name);
-            kept += usize::from(keep && index < signals);
-            index += 1;
-            keep
-        });
-        model.signal_trace_count = kept;
-    }
 }
 
 /// What the run offers the Plot menu, read from its column names and

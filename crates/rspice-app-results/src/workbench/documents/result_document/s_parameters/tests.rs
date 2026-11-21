@@ -127,14 +127,16 @@ fn analysis_key(state: &ResultsTestHost) -> AnalysisPresentationKey {
 }
 
 /// A two-port amplifier's run opens on the S-parameter sheet, as ADS opens
-/// an S-parameter dataset, with S21 drawn in decibels against frequency and
-/// none of the run's noise columns sharing the decibel pane.
+/// an S-parameter dataset, with S21 drawn in decibels against frequency;
+/// the run's noise columns start unticked in the browser and undrawn, and
+/// ticking one draws it.
 #[test]
 fn a_two_port_amplifier_opens_on_the_s_parameter_sheet_with_s21_in_decibels() {
     let mut state = finished_run(amplifier());
     state.results.results.session.viewer = ResultViewer::Bode;
 
     super::super::reconcile_active_viewer(&mut state.results_parts());
+    untick_noise_columns(&mut state.results_parts());
 
     assert_eq!(
         state.results.results.session.viewer,
@@ -168,14 +170,50 @@ fn a_two_port_amplifier_opens_on_the_s_parameter_sheet_with_s21_in_decibels() {
             drawn[sample]
         );
     }
-    for trace in &model.traces {
-        assert!(
+    for trace in model.traces.iter().filter(|trace| !trace.overlay) {
+        assert_eq!(
+            trace.visible,
             view::is_coefficient(&trace.source_waveform_name),
-            "{} is not a coefficient",
-            trace.source_waveform_name
+            "{} drawn: {}",
+            trace.source_waveform_name,
+            trace.visible
         );
     }
-    assert!(model.signal_trace_count <= model.traces.len());
+    let key = analysis_key(&state);
+    let noise_figure = SourceWaveformPresentationKey::new(key, "F".to_owned());
+    let ticked = |state: &ResultsTestHost| {
+        super::super::waveform_plotted(
+            &state.model,
+            &state.results.results,
+            &noise_figure,
+            "F",
+            true,
+        )
+    };
+    assert!(!ticked(&state), "F starts unticked");
+
+    // The reader ticks F: it stays ticked and is drawn.
+    state
+        .results
+        .results
+        .session
+        .waveform_visibility
+        .insert(noise_figure.clone(), true);
+    untick_noise_columns(&mut state.results_parts());
+    assert!(ticked(&state), "the reader's tick stands");
+    let models = super::super::waves::cached_models(
+        &state.model.simulation,
+        &mut state.results.results,
+        display,
+        &Tokens::default(),
+    );
+    assert!(
+        models[0]
+            .traces
+            .iter()
+            .any(|trace| trace.source_waveform_name == "F" && trace.visible),
+        "a ticked noise column is drawn"
+    );
 }
 
 /// The K and μ curves the Plot menu adds read, at each of three

@@ -176,7 +176,6 @@ impl ModelsCache {
             return Arc::clone(&cached.models);
         }
         let mut built = build(input.projection, input.waveform_visibility);
-        crate::s_parameters::keep_coefficients(input.viewer, &mut built);
         // The reader's X scale replaces the analysis' own, unless a
         // logarithmic axis cannot show the strip's domain.
         for model in &mut built {
