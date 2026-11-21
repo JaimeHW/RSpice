@@ -1529,6 +1529,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/documents/result_document.rs", "test_fixtures"),
             ("workbench/documents/result_document.rs", "view_context"),
             ("workbench/documents/result_document.rs", "waves"),
+            ("workbench/documents/result_document.rs", "working_view"),
             (
                 "workbench/documents/result_document/document_edit.rs",
                 "compare",
