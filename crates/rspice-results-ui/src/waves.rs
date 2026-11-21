@@ -1125,9 +1125,14 @@ impl<'a> UnitPane<'a> {
         }
     }
 
-    /// The unit this pane's axis reads in: none on an unlabeled pane.
+    /// The unit this pane's axis reads in: none on an unlabeled pane, and
+    /// none for a dimensionless one, whose `1` would read as a tick value.
     pub fn axis_unit(&self) -> &str {
-        if self.unlabeled { "" } else { self.axis }
+        if self.unlabeled || self.axis == "1" {
+            ""
+        } else {
+            self.axis
+        }
     }
 
     /// Every trace the strip draws, whichever of its axes it reads against.
