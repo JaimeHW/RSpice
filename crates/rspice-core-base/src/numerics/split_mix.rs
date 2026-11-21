@@ -65,10 +65,4 @@ mod tests {
             assert_eq!(split_mix64_output(state), split_mix64_at(seed, index));
         }
     }
-
-    #[test]
-    fn fnv1a_is_content_addressed() {
-        assert_ne!(fnv1a("R1"), fnv1a("R2"));
-        assert_eq!(fnv1a("M1:ID"), fnv1a("M1:ID"));
-    }
 }

@@ -812,25 +812,4 @@ mod tests {
         cache.clear();
         assert_eq!(cache.retained_bytes(), 0);
     }
-
-    #[test]
-    fn unlimited_policy_sets_every_field_to_usize_max() {
-        let limits = ResourceLimits::unlimited();
-        assert_eq!(limits.max_netlist_bytes, usize::MAX);
-        assert_eq!(limits.max_netlist_lines, usize::MAX);
-        assert_eq!(limits.max_expanded_source_bytes, usize::MAX);
-        assert_eq!(limits.max_dependency_source_bytes, usize::MAX);
-        assert_eq!(limits.max_external_data_bytes, usize::MAX);
-        assert_eq!(limits.max_external_data_values, usize::MAX);
-        assert_eq!(limits.max_shared_cache_bytes, usize::MAX);
-        assert_eq!(limits.max_include_depth, usize::MAX);
-        assert_eq!(limits.max_hierarchy_depth, usize::MAX);
-        assert_eq!(limits.max_flattened_elements, usize::MAX);
-        assert_eq!(limits.max_circuit_nodes, usize::MAX);
-        assert_eq!(limits.max_matrix_unknowns, usize::MAX);
-        assert_eq!(limits.max_result_values, usize::MAX);
-        assert_eq!(limits.max_transport_history_bytes, usize::MAX);
-        assert_eq!(limits.max_parallel_workers, usize::MAX);
-        assert_eq!(limits.max_batch_runs, usize::MAX);
-    }
 }

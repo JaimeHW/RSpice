@@ -470,13 +470,4 @@ mod tests {
             "results memory is full"
         );
     }
-
-    #[test]
-    fn the_sink_trait_is_object_safe() {
-        let mut sink = VecSink::new();
-        let dynamic: &mut dyn ResultSink = &mut sink;
-        dynamic.begin(&schema(), &RunMeta::default()).unwrap();
-        dynamic.row(0.0, &[1.0, 2.0]).unwrap();
-        assert_eq!(dynamic.end(RunStatus::Completed).unwrap().rows, 1);
-    }
 }

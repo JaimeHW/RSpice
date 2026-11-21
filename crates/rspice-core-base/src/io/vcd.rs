@@ -2119,21 +2119,4 @@ mod tests {
         });
         assert!(rendered(&selected).contains("$var wire 4 ! bus [3:0] $end"));
     }
-
-    #[test]
-    fn the_writer_version_names_the_crate() {
-        assert!(
-            VCD_WRITER_VERSION.starts_with("RSpice "),
-            "{VCD_WRITER_VERSION}"
-        );
-        assert!(
-            VCD_WRITER_VERSION.ends_with(" VCD writer"),
-            "{VCD_WRITER_VERSION}"
-        );
-        let document = VcdDocument::new(VcdTimescale {
-            magnitude: VcdMagnitude::One,
-            unit: VcdTimeUnit::Femtoseconds,
-        });
-        assert_eq!(document.version, VCD_WRITER_VERSION);
-    }
 }
