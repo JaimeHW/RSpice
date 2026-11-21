@@ -921,7 +921,7 @@ def exported_dataset(browser):
     """The reopened run's samples, as Export result dataset… writes them to a CSV download."""
     # A dataset exported before was read already; the one this export writes is the only one.
     for earlier in browser.downloads.glob("*.csv"):
-        earlier.rename(earlier.with_name(earlier.name + ".read"))
+        earlier.replace(earlier.with_name(earlier.name + ".read"))
     choose_command(browser, "Open results workspace")
     # The export writes what the waveform sheet shows, so every signal of the run is plotted.
     plots = wait_for(lambda: [c for c in controls(browser.snapshot())
