@@ -2414,7 +2414,14 @@ fn tag_collides(
     spec.traces.iter().any(|trace| {
         let (x, y) = (trace.x, trace.y);
         let n = x.len().min(y.len());
-        if n < 2 || !(x[0] <= x[n - 1]) {
+        // A trace that does not rise in x, or whose ends are not numbers,
+        // has no span to search.
+        if n < 2
+            || !matches!(
+                x[0].partial_cmp(&x[n - 1]),
+                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            )
+        {
             return false;
         }
         let first = x[..n].partition_point(|v| *v < from).saturating_sub(1);
