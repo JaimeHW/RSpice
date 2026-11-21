@@ -1,22 +1,24 @@
-//! Transfer-function cards and inspector over host-qualified scalar evidence.
+//! The transfer-function sheet: a DC transfer function's outputs in one dense
+//! table, each with its unit, and how they were measured in the inspector.
+//!
+//! The rows are the outputs a `.TF` reports, in the order it reports them —
+//! the gain from the input source to the output, the resistance seen at the
+//! input source, the resistance seen at the output — and, for a gain made
+//! relative to the operating point, the nominal values it was made relative
+//! to. Each reads at the reader's significant digits.
 
-use crate::presentation::well_hint;
-use crate::strip::StripHeader;
+use crate::presentation::{stat_table, well_hint, with_table_state};
 use egui::Ui;
 use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
-use rspice_ui_kit::{
-    theme::{self, FontWeight},
-    tokens::{self, Tokens},
-    widgets::measurement_table,
-};
-use rspice_vocabulary::product::DatasetId;
+use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable};
 
-/// Borrowed retained values and provenance labels selected and validated by the host.
+/// Borrowed retained values selected and validated by the host.
 pub struct TransferFunctionView<'a> {
-    pub analysis_label: &'a str,
     pub input_source: &'a str,
     pub output_expression: &'a str,
     pub input_quantity: TransferFunctionQuantityEvidence,
@@ -30,11 +32,13 @@ pub struct TransferFunctionView<'a> {
     pub output_resistance: Option<TransferFunctionScalarEvidence>,
     pub nominal_input: Option<f64>,
     pub nominal_output: Option<f64>,
-    pub dataset_id: DatasetId,
-    pub dataset_authority: &'static str,
 }
 
-pub fn show(ui: &mut Ui, view: Option<TransferFunctionView<'_>>) {
+/// What an output the run was not asked for says when the pointer rests on
+/// its dash.
+const NOT_REQUESTED: &str = "Not requested by this run";
+
+pub fn show(ui: &mut Ui, view: Option<TransferFunctionView<'_>>, significant_digits: usize) {
     let Some(view) = view else {
         well_hint(
             ui,
@@ -42,269 +46,128 @@ pub fn show(ui: &mut Ui, view: Option<TransferFunctionView<'_>>) {
         );
         return;
     };
-
-    StripHeader::new(
-        "XF",
-        &format!(
-            "{} → {} · DC operating point",
-            view.input_source, view.output_expression
-        ),
-        &[],
-    )
-    .show(ui);
-
-    let width = ui.available_width();
-    egui::ScrollArea::vertical()
-        .id_salt("rspice.results.transfer-function")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.set_min_width(width);
-            ui.add_space(14.0);
-            metric_cards(ui, &view);
-
-            ui.add_space(14.0);
-            contract_cards(ui, &view);
-        });
+    let rows = output_rows(&view, significant_digits);
+    // The value stands beside what it is, and the signal it is read at takes
+    // what the two leave, so a wide sheet does not part a name from its
+    // number. The rows keep the order a transfer function reports them in.
+    let columns = [
+        Column::words("Output", 168.0).unsortable(),
+        Column::number("Value", 168.0).unsortable(),
+        Column::name("Signal", 168.0).unsortable(),
+    ];
+    with_table_state(ui, "transfer-function", |ui, state| {
+        DataTable::new("rspice.results.transfer-function", &columns, rows.len())
+            .state(state)
+            .show(ui, |index| rows[index].clone())
+    });
 }
 
-fn metric_cards(ui: &mut Ui, view: &TransferFunctionView<'_>) {
-    let available = ui.available_width().max(1.0);
-    if available >= 590.0 {
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            let card_width = (available - 20.0) / 3.0;
-            metric_card(
-                ui,
-                card_width,
-                "TRANSFER GAIN",
-                view.gain,
-                gain_unit(view),
-                "exact retained scalar",
-            );
-            metric_card(
-                ui,
-                card_width,
-                "INPUT RESISTANCE",
-                view.input_resistance,
-                "ohm",
-                "small-signal input resistance",
-            );
-            metric_card(
-                ui,
-                card_width,
-                "OUTPUT RESISTANCE",
-                view.output_resistance,
-                "ohm",
-                "small-signal output resistance",
-            );
-        });
-    } else {
-        metric_card(
-            ui,
-            available,
-            "TRANSFER GAIN",
-            view.gain,
-            gain_unit(view),
-            "exact retained scalar",
-        );
-        ui.add_space(8.0);
-        metric_card(
-            ui,
-            available,
-            "INPUT RESISTANCE",
-            view.input_resistance,
-            "ohm",
-            "small-signal input resistance",
-        );
-        ui.add_space(8.0);
-        metric_card(
-            ui,
-            available,
-            "OUTPUT RESISTANCE",
-            view.output_resistance,
-            "ohm",
-            "small-signal output resistance",
-        );
+/// The sheet's rows: each output, its value with its unit, and the signal it
+/// is read at.
+fn output_rows(view: &TransferFunctionView<'_>, significant_digits: usize) -> Vec<Vec<Cell>> {
+    let relative = view.normalization == TransferFunctionNormalizationEvidence::RelativeToNominal;
+    let mut rows = vec![
+        vec![
+            Cell::text(if relative {
+                "Relative gain"
+            } else {
+                "Transfer gain"
+            }),
+            scalar_cell(view.gain, gain_unit(view), significant_digits),
+            Cell::text(format!(
+                "{} / {}",
+                view.output_expression, view.input_source
+            )),
+        ],
+        vec![
+            Cell::text("Input resistance"),
+            scalar_cell(view.input_resistance, "Ω", significant_digits),
+            Cell::text(view.input_source),
+        ],
+        vec![
+            Cell::text("Output resistance"),
+            scalar_cell(view.output_resistance, "Ω", significant_digits),
+            Cell::text(view.output_expression),
+        ],
+    ];
+    if relative {
+        rows.push(vec![
+            Cell::text("Nominal input"),
+            nominal_cell(view.nominal_input, view.input_unit, significant_digits),
+            Cell::text(view.input_source),
+        ]);
+        rows.push(vec![
+            Cell::text("Nominal output"),
+            nominal_cell(view.nominal_output, view.output_unit, significant_digits),
+            Cell::text(view.output_expression),
+        ]);
     }
+    rows
 }
 
-fn metric_card(
-    ui: &mut Ui,
-    width: f32,
-    title: &str,
+fn scalar_cell(
     value: Option<TransferFunctionScalarEvidence>,
     unit: &str,
-    detail: &str,
-) {
-    let t = Tokens::get(ui.ctx());
-    ui.allocate_ui_with_layout(
-        egui::vec2(width.max(1.0), 104.0),
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            egui::Frame::new()
-                .fill(t.color.bg_panel)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .inner_margin(egui::Margin::symmetric(12, 11))
-                .show(ui, |ui| {
-                    ui.set_min_size(egui::vec2((width - 26.0).max(1.0), 80.0));
-                    ui.label(
-                        egui::RichText::new(title)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint),
-                    );
-                    ui.add_space(7.0);
-                    ui.label(
-                        egui::RichText::new(display_scalar(value, unit))
-                            .font(theme::mono(tokens::FS_3, FontWeight::Medium))
-                            .color(if value.is_some() {
-                                t.color.text
-                            } else {
-                                t.color.text_faint
-                            }),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(if value.is_some() {
-                            detail
-                        } else {
-                            "scalar not retained"
-                        })
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                    );
-                });
-        },
-    );
-}
-
-fn contract_cards(ui: &mut Ui, view: &TransferFunctionView<'_>) {
-    let available = ui.available_width().max(1.0);
-    if available >= 610.0 {
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            let width = (available - 10.0) / 2.0;
-            transfer_definition_card(ui, width, view);
-            nominal_evidence_card(ui, width, view);
-        });
-    } else {
-        transfer_definition_card(ui, available, view);
-        ui.add_space(10.0);
-        nominal_evidence_card(ui, available, view);
-    }
-}
-
-fn transfer_definition_card(ui: &mut Ui, width: f32, view: &TransferFunctionView<'_>) {
-    contract_card(ui, width, "Transfer definition", None, |ui| {
-        measurement_table(
-            ui,
-            &[
-                ("Input source", view.input_source),
-                ("Output expression", view.output_expression),
-                ("Solve point", "DC operating point"),
-                ("Normalization", normalization_label(view.normalization)),
-                ("Accuracy", accuracy_label(view.accuracy)),
-            ],
-        );
-    });
-}
-
-fn nominal_evidence_card(ui: &mut Ui, width: f32, view: &TransferFunctionView<'_>) {
-    let nominal_input = nominal_value_label(view.nominal_input, view.input_unit);
-    let nominal_output = nominal_value_label(view.nominal_output, view.output_unit);
-    let input_quantity = quantity_label(view.input_quantity);
-    let output_quantity = quantity_label(view.output_quantity);
-    let dataset = view.dataset_id.to_string();
-    // The values say they were kept; only their absence is worth a word.
-    let status =
-        (view.nominal_input.is_none() || view.nominal_output.is_none()).then_some("unavailable");
-    contract_card(ui, width, "Nominal evidence", status, |ui| {
-        measurement_table(
-            ui,
-            &[
-                ("Nominal input", nominal_input.as_str()),
-                ("Nominal output", nominal_output.as_str()),
-                ("Input quantity", input_quantity),
-                ("Output quantity", output_quantity),
-                ("Dataset", dataset.as_str()),
-                ("Authority", view.dataset_authority),
-            ],
-        );
-    });
-}
-
-fn contract_card(
-    ui: &mut Ui,
-    width: f32,
-    title: &str,
-    status: Option<&str>,
-    add_contents: impl FnOnce(&mut Ui),
-) {
-    let t = Tokens::get(ui.ctx());
-    ui.allocate_ui_with_layout(
-        egui::vec2(width.max(1.0), 232.0),
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            egui::Frame::new()
-                .fill(t.color.bg_panel)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .inner_margin(egui::Margin::symmetric(10, 9))
-                .show(ui, |ui| {
-                    ui.set_min_size(egui::vec2((width - 22.0).max(1.0), 212.0));
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(title)
-                                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                                .color(t.color.text),
-                        );
-                        if let Some(status) = status {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(status)
-                                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                            .color(t.color.text_faint),
-                                    );
-                                },
-                            );
-                        }
-                    });
-                    ui.separator();
-                    add_contents(ui);
-                });
-        },
-    );
-}
-
-fn nominal_value_label(value: Option<f64>, unit: &str) -> String {
-    value.map_or_else(
-        || "Not retained".to_owned(),
-        |value| exact_value(value, unit),
-    )
-}
-
-fn display_scalar(value: Option<TransferFunctionScalarEvidence>, unit: &str) -> String {
+    significant_digits: usize,
+) -> Cell {
     match value {
-        Some(TransferFunctionScalarEvidence::Finite(value)) => exact_value(value, unit),
-        Some(TransferFunctionScalarEvidence::PositiveInfinity) => format!("+infinity {unit}"),
-        Some(TransferFunctionScalarEvidence::NegativeInfinity) => format!("-infinity {unit}"),
-        None => "Not retained".to_owned(),
+        Some(value) => Cell::number(scalar_text(value, unit, significant_digits)),
+        None => Cell::absent().hint(NOT_REQUESTED),
     }
 }
 
-fn exact_value(value: f64, unit: &str) -> String {
-    if unit == "1" {
-        format!("{value:.9e}")
-    } else {
-        format!("{value:.9e} {unit}")
+fn nominal_cell(value: Option<f64>, unit: &str, significant_digits: usize) -> Cell {
+    match value {
+        Some(value) => Cell::number(fmt_si_significant(value, unit, significant_digits)),
+        None => Cell::absent(),
     }
 }
 
-fn quantity_label(quantity: TransferFunctionQuantityEvidence) -> &'static str {
-    match quantity {
-        TransferFunctionQuantityEvidence::Voltage => "Voltage",
-        TransferFunctionQuantityEvidence::Current => "Current",
+/// A retained scalar at `significant_digits` with its unit. A ratio of like
+/// quantities takes no SI prefix — a gain of a half reads "0.5 V/V", not
+/// "500 mV/V" — and a relative gain is a bare number.
+fn scalar_text(
+    value: TransferFunctionScalarEvidence,
+    unit: &str,
+    significant_digits: usize,
+) -> String {
+    let with_unit = |number: String| {
+        if unit == "1" {
+            number
+        } else {
+            format!("{number} {unit}")
+        }
+    };
+    match value {
+        TransferFunctionScalarEvidence::Finite(value) => match unit {
+            "1" | "V/V" | "A/A" => with_unit(fmt_si_significant(value, "", significant_digits)),
+            _ => fmt_si_significant(value, unit, significant_digits),
+        },
+        TransferFunctionScalarEvidence::PositiveInfinity => with_unit("+∞".to_owned()),
+        TransferFunctionScalarEvidence::NegativeInfinity => with_unit("−∞".to_owned()),
     }
+}
+
+/// How the transfer function was measured: where it was solved, how its gain
+/// is normalized and how hard the solves worked. The sheet lists what came of
+/// it.
+pub fn right_panel(ui: &mut Ui, view: Option<TransferFunctionView<'_>>) {
+    let Some(view) = view else {
+        return;
+    };
+    section_header(ui, "Measurement", None);
+    stat_table(
+        ui,
+        &[
+            ("Solve point", "DC operating point".to_owned(), false),
+            (
+                "Normalization",
+                normalization_label(view.normalization).to_owned(),
+                false,
+            ),
+            ("Accuracy", accuracy_label(view.accuracy).to_owned(), false),
+        ],
+    );
 }
 
 fn normalization_label(value: TransferFunctionNormalizationEvidence) -> &'static str {
@@ -347,30 +210,78 @@ pub fn gain_unit(view: &TransferFunctionView<'_>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use TransferFunctionScalarEvidence::{Finite, NegativeInfinity, PositiveInfinity};
 
-    #[test]
-    fn scalar_display_keeps_infinity_and_units_explicit() {
-        assert_eq!(
-            display_scalar(
-                Some(TransferFunctionScalarEvidence::PositiveInfinity),
-                "ohm"
-            ),
-            "+infinity ohm"
-        );
-        assert_eq!(
-            display_scalar(
-                Some(TransferFunctionScalarEvidence::NegativeInfinity),
-                "V/A"
-            ),
-            "-infinity V/A"
-        );
-        assert_eq!(display_scalar(None, "A/V"), "Not retained");
-        assert_eq!(exact_value(0.5, "1"), "5.000000000e-1");
+    fn view(normalization: TransferFunctionNormalizationEvidence) -> TransferFunctionView<'static> {
+        let relative = normalization == TransferFunctionNormalizationEvidence::RelativeToNominal;
+        TransferFunctionView {
+            input_source: "VIN",
+            output_expression: "V(out)",
+            input_quantity: TransferFunctionQuantityEvidence::Voltage,
+            output_quantity: TransferFunctionQuantityEvidence::Voltage,
+            input_unit: "V",
+            output_unit: "V",
+            normalization,
+            accuracy: TransferFunctionAccuracyEvidence::Balanced,
+            gain: Some(Finite(-9.999_000_1)),
+            input_resistance: Some(Finite(1_000.0)),
+            output_resistance: Some(PositiveInfinity),
+            nominal_input: relative.then_some(2.0),
+            nominal_output: relative.then_some(0.5),
+        }
     }
 
+    fn texts(rows: &[Vec<Cell>]) -> Vec<Vec<&str>> {
+        rows.iter()
+            .map(|row| row.iter().map(|cell| cell.text.as_str()).collect())
+            .collect()
+    }
+
+    /// Every output reads at the reader's digits with its unit and the
+    /// signal it is read at: resistances in ohms with their prefix, a
+    /// voltage gain as a plain ratio, an open input as infinite ohms.
     #[test]
-    fn missing_nominal_evidence_remains_explicit() {
-        assert_eq!(nominal_value_label(None, "V"), "Not retained");
-        assert_eq!(nominal_value_label(Some(1.25), "V"), "1.250000000e0 V");
+    fn each_output_reads_with_its_unit_and_its_signal() {
+        let rows = output_rows(&view(TransferFunctionNormalizationEvidence::None), 4);
+        assert_eq!(
+            texts(&rows),
+            [
+                ["Transfer gain", "−9.999 V/V", "V(out) / VIN"],
+                ["Input resistance", "1 kΩ", "VIN"],
+                ["Output resistance", "+∞ Ω", "V(out)"],
+            ]
+        );
+    }
+
+    /// A gain made relative to the operating point is a bare number, and the
+    /// nominal values it was made relative to read beneath it.
+    #[test]
+    fn a_relative_gain_reads_with_the_nominal_values_it_divides_by() {
+        let rows = output_rows(
+            &view(TransferFunctionNormalizationEvidence::RelativeToNominal),
+            4,
+        );
+        assert_eq!(texts(&rows)[0], ["Relative gain", "−9.999", "V(out) / VIN"]);
+        assert_eq!(texts(&rows)[3], ["Nominal input", "2 V", "VIN"]);
+        assert_eq!(texts(&rows)[4], ["Nominal output", "500 mV", "V(out)"]);
+    }
+
+    /// An output the run was not asked for reads as a dash, not as zero.
+    #[test]
+    fn an_output_the_run_did_not_request_reads_as_a_dash() {
+        let mut view = view(TransferFunctionNormalizationEvidence::None);
+        view.input_resistance = None;
+        assert_eq!(output_rows(&view, 4)[1][1].text, "\u{2014}");
+    }
+
+    /// A ratio of unlike quantities keeps its prefix, a ratio of like ones
+    /// does not, and an infinity keeps its sign and unit.
+    #[test]
+    fn a_scalar_takes_a_prefix_only_where_its_unit_does() {
+        assert_eq!(scalar_text(Finite(0.5), "V/V", 4), "0.5 V/V");
+        assert_eq!(scalar_text(Finite(0.002), "A/V", 4), "2 mA/V");
+        assert_eq!(scalar_text(Finite(1.25e4), "V/A", 4), "12.5 kV/A");
+        assert_eq!(scalar_text(NegativeInfinity, "V/A", 4), "−∞ V/A");
+        assert_eq!(scalar_text(PositiveInfinity, "1", 4), "+∞");
     }
 }

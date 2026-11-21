@@ -1,7 +1,7 @@
-//! XF source selection, validation and retained dataset authority.
+//! XF source selection and validation.
 
 use super::ResultsReads;
-use crate::state::{AnalysisResultPayload, SimulationRun};
+use crate::state::AnalysisResultPayload;
 #[cfg(test)]
 use crate::state::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
@@ -16,7 +16,6 @@ use rspice_results_ui::transfer_function::gain_unit;
 use rspice_results_ui::transfer_function::{self as view, TransferFunctionView};
 
 fn active_transfer_function(state: ResultsReads<'_>) -> Option<TransferFunctionView<'_>> {
-    let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     let payload = analysis.result_payload.as_ref()?;
     let AnalysisResultPayload::TransferFunction {
@@ -41,7 +40,6 @@ fn active_transfer_function(state: ResultsReads<'_>) -> Option<TransferFunctionV
         return None;
     }
     Some(TransferFunctionView {
-        analysis_label: &analysis.label,
         input_source,
         output_expression,
         input_quantity: *input_quantity,
@@ -55,17 +53,7 @@ fn active_transfer_function(state: ResultsReads<'_>) -> Option<TransferFunctionV
         output_resistance: *output_resistance,
         nominal_input: *nominal_input,
         nominal_output: *nominal_output,
-        dataset_id: run.dataset_id,
-        dataset_authority: dataset_authority_label(run),
     })
-}
-
-fn dataset_authority_label(run: &SimulationRun) -> &'static str {
-    match (run.prepared_receipt(), run.validate_provenance()) {
-        (Some(_), Ok(())) => "prepared receipt matched",
-        (Some(_), Err(_)) => "prepared receipt mismatch",
-        (None, _) => "prepared receipt unavailable",
-    }
 }
 
 pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
@@ -73,7 +61,19 @@ pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
 }
 
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    view::show(ui, active_transfer_function(state.results_reads()));
+    let state = state.results_reads();
+    let digits = usize::from(
+        state
+            .presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    );
+    view::show(ui, active_transfer_function(state), digits);
+}
+
+/// How the active transfer function was measured.
+pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    view::right_panel(ui, active_transfer_function(state.results_reads()));
 }
 
 #[cfg(test)]
@@ -163,7 +163,6 @@ mod tests {
 
         let view =
             active_transfer_function(state.results_reads()).expect("selected TF payload is active");
-        assert_eq!(view.analysis_label, "XF active");
         assert_eq!(view.input_source, "VIN");
         assert_eq!(view.output_expression, "I(VMEAS)");
         assert_eq!(
@@ -203,17 +202,14 @@ mod tests {
         ]);
 
         let first = active_transfer_function(state.results_reads()).expect("first TF");
-        assert_eq!(first.analysis_label, "A per V");
         assert_eq!(gain_unit(&first), "A/V");
 
         assert!(state.model.simulation.select_analysis(1));
         let second = active_transfer_function(state.results_reads()).expect("second TF");
-        assert_eq!(second.analysis_label, "V per A");
         assert_eq!(gain_unit(&second), "V/A");
 
         assert!(state.model.simulation.select_analysis(2));
         let relative = active_transfer_function(state.results_reads()).expect("relative TF");
-        assert_eq!(relative.analysis_label, "Relative");
         assert_eq!(gain_unit(&relative), "1");
     }
 
@@ -247,26 +243,6 @@ mod tests {
         assert!(
             active_transfer_function(state_with_analyses(vec![mismatched]).results_reads())
                 .is_none()
-        );
-    }
-
-    #[test]
-    fn unsealed_dataset_does_not_claim_authenticated_authority() {
-        let state = state_with_analyses(vec![tf_result(
-            1,
-            "XF",
-            TransferFunctionQuantityEvidence::Voltage,
-            TransferFunctionQuantityEvidence::Voltage,
-            TransferFunctionNormalizationEvidence::None,
-            1.0,
-        )]);
-
-        let view = active_transfer_function(state.results_reads()).expect("active XF view");
-
-        assert_eq!(view.dataset_authority, "prepared receipt unavailable");
-        assert_eq!(
-            view.dataset_id,
-            state.model.simulation.active_run().unwrap().dataset_id
         );
     }
 }
