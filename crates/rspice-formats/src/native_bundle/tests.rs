@@ -55,6 +55,7 @@ fn native_bundles_refuse_repeated_exact_member_names_before_selecting_a_payload(
 fn native_publication_checks_json_and_archive_growth_before_allocating_past_the_limit() {
     let mut dataset = NativeBundleDataset {
         analysis: crate::WaveformDomain::Transient,
+        member: None,
         coordinate_name: "time",
         coordinate_unit: None,
         coordinate: (&[0.0, 1.0][..]).into(),
@@ -109,6 +110,7 @@ fn native_coordinates_reject_both_orders_of_duplicate_signed_zero() {
             let values = vec![-0.0; coordinate.len()];
             let dataset = NativeBundleDataset {
                 analysis,
+                member: None,
                 coordinate_name: "axis",
                 coordinate_unit: None,
                 coordinate: (&coordinate[..]).into(),
@@ -146,6 +148,7 @@ fn native_export_counts_the_magnitude_retained_by_complex_imports() {
     let component = vec![0.0; coordinate.len()];
     let dataset = NativeBundleDataset {
         analysis: crate::WaveformDomain::Transient,
+        member: None,
         coordinate_name: "time",
         coordinate_unit: None,
         coordinate: (&coordinate[..]).into(),
@@ -208,6 +211,7 @@ fn native_nullable_samples_use_version_three_and_reject_ambiguous_availability()
     let imag = [2.0, f64::NAN, 0.0];
     let dataset = NativeBundleDataset {
         analysis: crate::WaveformDomain::Transient,
+        member: None,
         coordinate_name: "time",
         coordinate_unit: Some("s"),
         coordinate: (&[0.0, 1.0, 2.0][..]).into(),
@@ -279,6 +283,7 @@ fn native_nullable_samples_use_version_three_and_reject_ambiguous_availability()
                 values,
             }],
             coordinate: dataset.coordinate.clone(),
+            member: None,
             ..dataset
         };
         assert!(encode_native_bundle(kind, &invalid, MAX_RESULT_DATASET_BYTES).is_err());
@@ -289,6 +294,7 @@ fn native_nullable_samples_use_version_three_and_reject_ambiguous_availability()
 fn coordinate_units_round_trip_through_version_two_without_relabeling_samples() {
     let dataset = NativeBundleDataset {
         analysis: crate::WaveformDomain::DcSweep,
+        member: None,
         coordinate_name: "bias",
         coordinate_unit: Some("mA"),
         coordinate: (&[0.0, 2.0][..]).into(),
@@ -335,6 +341,7 @@ fn native_export_rejects_coordinates_its_reader_cannot_interpret() {
     ] {
         let dataset = NativeBundleDataset {
             analysis: domain,
+            member: None,
             coordinate_name: "x",
             coordinate_unit: Some(unit),
             coordinate: (&coordinate[..]).into(),
@@ -362,6 +369,7 @@ fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
     let complex_imag = [0.125, 0.25, -0.75];
     let dataset = NativeBundleDataset {
         analysis: crate::WaveformDomain::Ac,
+        member: None,
         coordinate_name: "frequency",
         coordinate_unit: None,
         coordinate: (&coordinate[..]).into(),
@@ -503,6 +511,75 @@ fn native_decode_preserves_record_names_in_json_errors() {
             "{error}"
         );
     }
+}
+
+/// A member of a `.step` sweep is read only from the schema that names one, and only with every
+/// swept parameter named and finite; the writer refuses what the reader would.
+#[test]
+fn a_family_member_needs_version_four_and_named_finite_values() {
+    let mut document = serde_json::json!({
+        "schema": "rspice-waveform-dataset/3", "analysis": "transient",
+        "coordinate": { "name": "time", "values": [0.0, 1.0] },
+        "signals": [{ "name": "out", "values": [1.0, 2.0] }],
+        "member": { "member": "step_point", "index": 1, "coordinate": [{ "name": "r", "value": 2000.0 }] },
+    });
+    let error = decode_native_bundle(&pack_dataset(&document), NativeBundleKind::Result, limits())
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "a .step or Monte Carlo member requires rspice-waveform-dataset/4"
+    );
+    document["schema"] = serde_json::json!("rspice-waveform-dataset/4");
+    let (_, member) = decode_native_bundle_with_member(
+        &pack_dataset(&document),
+        NativeBundleKind::Result,
+        limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        member,
+        Some(NativeBundleMember::StepPoint {
+            index: 1,
+            coordinate: vec![NativeBundleStepValue {
+                name: "r".to_owned(),
+                value: 2000.0,
+            }],
+        })
+    );
+    document["member"]["coordinate"][0]["name"] = serde_json::json!(" ");
+    let error = decode_native_bundle(&pack_dataset(&document), NativeBundleKind::Result, limits())
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("not a named finite value"),
+        "{error}"
+    );
+
+    let unnamed = NativeBundleDataset {
+        analysis: crate::WaveformDomain::Transient,
+        coordinate_name: "time",
+        coordinate_unit: None,
+        coordinate: vec![0.0, 1.0].into(),
+        signals: vec![NativeBundleSignal {
+            name: "out",
+            unit: None,
+            values: NativeBundleSignalValues::Real(vec![1.0, 2.0].into()),
+        }],
+        member: Some(NativeBundleMember::StepPoint {
+            index: 0,
+            coordinate: vec![NativeBundleStepValue {
+                name: String::new(),
+                value: 1.0,
+            }],
+        }),
+    };
+    assert!(
+        encode_native_bundle(
+            NativeBundleKind::Dataset,
+            &unnamed,
+            MAX_RESULT_DATASET_BYTES
+        )
+        .is_err()
+    );
 }
 
 fn pack_dataset(document: &serde_json::Value) -> Vec<u8> {

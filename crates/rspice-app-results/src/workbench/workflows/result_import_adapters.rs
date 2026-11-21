@@ -80,7 +80,7 @@ pub(super) fn parse_native_bundle(
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
     use rspice_formats::native_bundle::{
-        NativeBundleKind, NativeBundleReadLimits, decode_native_bundle,
+        NativeBundleKind, NativeBundleReadLimits, decode_native_bundle_with_member,
     };
 
     let kind = match format {
@@ -88,7 +88,7 @@ pub(super) fn parse_native_bundle(
         ResultImportFormat::RSpiceDatasetBundle => NativeBundleKind::Dataset,
         _ => unreachable!(),
     };
-    let dataset = decode_native_bundle(
+    let (dataset, member) = decode_native_bundle_with_member(
         bytes,
         kind,
         NativeBundleReadLimits {
@@ -101,7 +101,22 @@ pub(super) fn parse_native_bundle(
         },
     )
     .map_err(|error| adapter_error(format, error))?;
-    finish_numeric_dataset(format, dataset)
+    let mut parsed = finish_numeric_dataset(format, dataset)?;
+    // A bundle of one member of a `.step` sweep or Monte Carlo study reads back as that member,
+    // titled the way every route titles one: `Transient · r = 2000`.
+    if let Some(member) = member.map(|member| member.into_family_member()) {
+        let analysis = match parsed.analysis_type {
+            AnalysisType::Ac => "AC",
+            AnalysisType::DcSweep => "DC sweep",
+            _ => "Transient",
+        };
+        parsed.plots = Some(Arc::new(ResultImportPlots {
+            reviewed: member.titled(analysis),
+            reviewed_member: Some(member),
+            further: Vec::new(),
+        }));
+    }
+    Ok(parsed)
 }
 
 // -------------------------------------------------------------------------

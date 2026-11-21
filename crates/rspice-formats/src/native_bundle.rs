@@ -11,7 +11,7 @@ mod writer;
 
 use std::borrow::Cow;
 
-pub use reader::{NativeBundleReadLimits, decode_native_bundle};
+pub use reader::{NativeBundleReadLimits, decode_native_bundle, decode_native_bundle_with_member};
 pub use writer::encode_native_bundle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +57,52 @@ pub struct NativeBundleDataset<'a> {
     pub coordinate_unit: Option<&'a str>,
     pub coordinate: Cow<'a, [f64]>,
     pub signals: Vec<NativeBundleSignal<'a>>,
+    /// The member of a `.step` sweep or Monte Carlo study the dataset is, when it is one.
+    pub member: Option<NativeBundleMember>,
+}
+
+/// The member of a `.step` sweep or Monte Carlo study a bundle's dataset is: a member read back
+/// from its own file is still that member, with the value each swept parameter takes there.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "member", rename_all = "snake_case", deny_unknown_fields)]
+pub enum NativeBundleMember {
+    /// Trial `index` of a Monte Carlo study, in the study's own numbering.
+    MonteCarloTrial { index: usize },
+    /// Point `index` of a `.step` sweep, in sweep order from 0, with the value each swept
+    /// parameter takes there.
+    StepPoint {
+        index: usize,
+        coordinate: Vec<NativeBundleStepValue>,
+    },
+}
+
+/// The value one swept parameter takes at a `.step` point: `r = 2000`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeBundleStepValue {
+    pub name: String,
+    pub value: f64,
+}
+
+impl NativeBundleMember {
+    /// Refuse a swept parameter without a name, or with a value that is not a finite number.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if let Self::StepPoint { index, coordinate } = self {
+            for axis in coordinate {
+                if axis.name.trim().is_empty()
+                    || axis.name.chars().any(char::is_control)
+                    || !axis.value.is_finite()
+                {
+                    return Err(format!(
+                        "point {index} of the .step sweep names parameter '{}' with value {}, \
+                         which is not a named finite value",
+                        axis.name, axis.value
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]

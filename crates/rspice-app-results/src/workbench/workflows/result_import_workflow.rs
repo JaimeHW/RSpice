@@ -1192,7 +1192,11 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
 
 fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState) {
     ui.heading("Map engineering data");
-    if let Some(plots) = draft.plots.as_deref() {
+    if let Some(plots) = draft
+        .plots
+        .as_deref()
+        .filter(|plots| !plots.further.is_empty())
+    {
         ui.label(
             egui::RichText::new(format!(
                 "Mapping {}. The source's other analyses import as written.",
@@ -1315,7 +1319,7 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
     }
     match parsed_result_from_draft(draft) {
         Ok(_) => {
-            let message = match draft.plots.as_deref() {
+            let message = match draft.plots.as_deref().filter(|plots| !plots.further.is_empty()) {
                 Some(plots) => format!(
                     "Validation passed. Import will add one completed retained run of {} analyses and open it in Results.",
                     plots.further.len() + 1

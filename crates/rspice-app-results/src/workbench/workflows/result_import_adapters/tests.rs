@@ -47,6 +47,63 @@ fn native_bundle(format: ResultImportFormat) -> Vec<u8> {
     ])
 }
 
+/// A bundle of one member of a `.step` sweep imports as that member, titled the way every route
+/// titles one, so a member exported and read back is still that member of its family.
+#[test]
+fn a_member_bundle_imports_as_that_member() {
+    use rspice_formats::native_bundle::{
+        NativeBundleDataset, NativeBundleKind, NativeBundleMember, NativeBundleSignal,
+        NativeBundleSignalValues, NativeBundleStepValue, encode_native_bundle,
+    };
+    let member = NativeBundleMember::StepPoint {
+        index: 1,
+        coordinate: vec![NativeBundleStepValue {
+            name: "r".to_owned(),
+            value: 2000.0,
+        }],
+    };
+    for (kind, format) in [
+        (
+            NativeBundleKind::Result,
+            ResultImportFormat::RSpiceResultBundle,
+        ),
+        (
+            NativeBundleKind::Dataset,
+            ResultImportFormat::RSpiceDatasetBundle,
+        ),
+    ] {
+        let bytes = encode_native_bundle(
+            kind,
+            &NativeBundleDataset {
+                analysis: rspice_formats::WaveformDomain::Transient,
+                coordinate_name: "time",
+                coordinate_unit: None,
+                coordinate: vec![0.0, 1.0e-6].into(),
+                signals: vec![NativeBundleSignal {
+                    name: "V(out)",
+                    unit: None,
+                    values: NativeBundleSignalValues::Real(vec![0.5, 1.5].into()),
+                }],
+                member: Some(member.clone()),
+            },
+            1_000_000,
+        )
+        .expect("a member bundle");
+        let parsed = parse_native_bundle(&bytes, format).expect("a member bundle reads");
+        let kept = keep_reviewed_draft("member.bundle", parsed).expect("a member bundle imports");
+        let analysis = &kept.analyses[0];
+        assert_eq!(
+            analysis.family_member(),
+            Some(&member.clone().into_family_member()),
+            "{format:?}"
+        );
+        assert_eq!(
+            analysis.label,
+            "Imported \u{00b7} Transient \u{00b7} r = 2000"
+        );
+    }
+}
+
 /// A size no small test source can hold: a declaration of it is damage, as a bomb's is.
 const DECLARED_PAST_THE_SOURCE: u64 = 64 * 1024 * 1024;
 

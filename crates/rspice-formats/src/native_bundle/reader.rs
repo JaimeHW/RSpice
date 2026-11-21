@@ -1,6 +1,6 @@
 //! Bounded native bundle container, digest, and versioned JSON decoding.
 
-use super::{NativeBundleError, NativeBundleKind};
+use super::{NativeBundleError, NativeBundleKind, NativeBundleMember};
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal};
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -39,6 +39,8 @@ struct NativeDataset {
     analysis: String,
     coordinate: NativeCoordinate,
     signals: Vec<NativeSignal>,
+    #[serde(default)]
+    member: Option<NativeBundleMember>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +76,16 @@ pub fn decode_native_bundle(
     kind: NativeBundleKind,
     limits: NativeBundleReadLimits,
 ) -> Result<DecodedNumericDataset, NativeBundleError> {
+    decode_native_bundle_with_member(bytes, kind, limits).map(|(dataset, _)| dataset)
+}
+
+/// [`decode_native_bundle`], with the member of a `.step` sweep or Monte Carlo study the dataset
+/// is, when the bundle names one.
+pub fn decode_native_bundle_with_member(
+    bytes: &[u8],
+    kind: NativeBundleKind,
+    limits: NativeBundleReadLimits,
+) -> Result<(DecodedNumericDataset, Option<NativeBundleMember>), NativeBundleError> {
     let max_members = limits.max_members;
     let max_expanded_bytes = limits.max_expanded_bytes;
     let mut archive =
@@ -165,7 +177,10 @@ pub fn decode_native_bundle(
         })?;
     if !matches!(
         dataset.schema.as_str(),
-        "rspice-waveform-dataset/1" | "rspice-waveform-dataset/2" | "rspice-waveform-dataset/3"
+        "rspice-waveform-dataset/1"
+            | "rspice-waveform-dataset/2"
+            | "rspice-waveform-dataset/3"
+            | "rspice-waveform-dataset/4"
     ) {
         return Err(NativeBundleError::InvalidData(format!(
             "unsupported dataset schema '{}'",
@@ -176,6 +191,14 @@ pub fn decode_native_bundle(
         return Err(NativeBundleError::InvalidData(
             "coordinate units require rspice-waveform-dataset/2".into(),
         ));
+    }
+    if let Some(member) = &dataset.member {
+        if dataset.schema != "rspice-waveform-dataset/4" {
+            return Err(NativeBundleError::InvalidData(
+                "a .step or Monte Carlo member requires rspice-waveform-dataset/4".into(),
+            ));
+        }
+        member.validate().map_err(NativeBundleError::InvalidData)?;
     }
     let domain = dataset
         .analysis
@@ -213,7 +236,10 @@ pub fn decode_native_bundle(
                 signal.name
             )));
         }
-        if dataset.schema != "rspice-waveform-dataset/3" && real.iter().any(|value| value.is_nan())
+        if matches!(
+            dataset.schema.as_str(),
+            "rspice-waveform-dataset/1" | "rspice-waveform-dataset/2"
+        ) && real.iter().any(|value| value.is_nan())
         {
             return Err(NativeBundleError::InvalidData(
                 "unavailable samples require rspice-waveform-dataset/3".into(),
@@ -236,7 +262,7 @@ pub fn decode_native_bundle(
     decoded
         .normalize_coordinate_unit()
         .map_err(NativeBundleError::InvalidData)?;
-    Ok(decoded)
+    Ok((decoded, dataset.member))
 }
 
 pub(super) fn read_zip_member(

@@ -750,4 +750,32 @@ fn a_stepped_member_names_its_step_in_every_export() {
     }
     let (_, prompt) = export(7);
     assert!(prompt.contains(&point), "{prompt}");
+    // The bundles keep the member itself, with its parameter values, and read it back.
+    use rspice_formats::native_bundle::{
+        NativeBundleKind, NativeBundleReadLimits, decode_native_bundle_with_member,
+    };
+    for (choice, kind) in [
+        (3, NativeBundleKind::Result),
+        (4, NativeBundleKind::Dataset),
+    ] {
+        let (io, _) = export(choice);
+        let (_, read) = decode_native_bundle_with_member(
+            &io.byte_files.borrow()[0].1,
+            kind,
+            NativeBundleReadLimits {
+                max_members: 10,
+                max_member_bytes: 1_000_000,
+                max_expanded_bytes: 1_000_000,
+                max_rows: 1_000,
+                max_columns: 10,
+                max_numeric_values: 10_000,
+            },
+        )
+        .expect("the bundle reads back");
+        assert_eq!(
+            read.map(|member| member.into_family_member()).as_ref(),
+            analysis.family_member(),
+            "{kind:?}"
+        );
+    }
 }

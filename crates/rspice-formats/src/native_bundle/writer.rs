@@ -30,6 +30,8 @@ struct DatasetDocument<'a> {
     analysis: &'static str,
     coordinate: CoordinateDocument<'a>,
     signals: Vec<SignalDocument<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    member: Option<&'a super::NativeBundleMember>,
 }
 
 #[derive(Serialize)]
@@ -88,7 +90,11 @@ pub fn encode_native_bundle(
         })
         .collect();
     let document = DatasetDocument {
-        schema: if dataset.signals.iter().any(|signal| match &signal.values {
+        // Each schema adds one thing a reader of the one before refuses: a member, unavailable
+        // samples, a coordinate unit.
+        schema: if dataset.member.is_some() {
+            "rspice-waveform-dataset/4"
+        } else if dataset.signals.iter().any(|signal| match &signal.values {
             NativeBundleSignalValues::Real(values) => values.iter().any(|value| value.is_nan()),
             NativeBundleSignalValues::Complex { real, .. } => {
                 real.iter().any(|value| value.is_nan())
@@ -107,6 +113,7 @@ pub fn encode_native_bundle(
             values: &dataset.coordinate,
         },
         signals,
+        member: dataset.member.as_ref(),
     };
     let mut dataset_output = BoundedBuffer::new(max_bytes);
     serde_json::to_writer(&mut dataset_output, &document).map_err(|source| {
@@ -213,6 +220,9 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Res
         ));
     }
     validate_coordinate(dataset.analysis, &dataset.coordinate)?;
+    if let Some(member) = &dataset.member {
+        member.validate()?;
+    }
     if dataset.coordinate_unit.is_some() {
         // Publication must satisfy the reader's physical-coordinate contract.
         // Validate conversion without changing the borrowed source samples.

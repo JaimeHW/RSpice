@@ -1,13 +1,59 @@
 //! Borrowed native-bundle projections from selected retained waveforms.
 
-use super::{NativeBundleDataset, NativeBundleSignal, NativeBundleSignalValues};
+use super::{
+    NativeBundleDataset, NativeBundleMember, NativeBundleSignal, NativeBundleSignalValues,
+    NativeBundleStepValue,
+};
 use crate::WaveformDomain;
 use crate::waveform_io::result::{
     WaveformExportError, WaveformProjectionError, axis_signal_for_analysis, export_samples,
     validate_shared_x_axis,
 };
 use rspice_results::analysis_result::AnalysisResult;
+use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
 use rspice_results::waveform::RetainedWaveform;
+
+impl NativeBundleMember {
+    /// The bundle's record of a result's family member.
+    #[must_use]
+    pub fn of(member: &AnalysisResultFamilyMember) -> Self {
+        match member {
+            AnalysisResultFamilyMember::MonteCarloTrial { index } => {
+                Self::MonteCarloTrial { index: *index }
+            }
+            AnalysisResultFamilyMember::StepPoint { index, coordinate } => Self::StepPoint {
+                index: *index,
+                coordinate: coordinate
+                    .iter()
+                    .map(|axis| NativeBundleStepValue {
+                        name: axis.name.clone(),
+                        value: axis.value,
+                    })
+                    .collect(),
+            },
+        }
+    }
+
+    /// The family member a result read from the bundle is.
+    #[must_use]
+    pub fn into_family_member(self) -> AnalysisResultFamilyMember {
+        match self {
+            Self::MonteCarloTrial { index } => {
+                AnalysisResultFamilyMember::MonteCarloTrial { index }
+            }
+            Self::StepPoint { index, coordinate } => AnalysisResultFamilyMember::StepPoint {
+                index,
+                coordinate: coordinate
+                    .into_iter()
+                    .map(|axis| AnalysisResultStepCoordinate {
+                        name: axis.name,
+                        value: axis.value,
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
 
 /// Project selected traces for a domain already admitted by the caller.
 pub fn project_native_bundle<'a, W: AsRef<RetainedWaveform>>(
@@ -60,6 +106,7 @@ pub fn project_native_bundle<'a, W: AsRef<RetainedWaveform>>(
         coordinate_unit: analysis.waveform_coordinate_unit(),
         coordinate,
         signals,
+        member: analysis.family_member().map(NativeBundleMember::of),
     })
 }
 
@@ -106,6 +153,66 @@ mod tests {
                     decoded.signals[1].imag.as_deref(),
                     Some([1.0, -1.0].as_slice())
                 );
+            }
+        }
+    }
+
+    /// One member of a `.step` sweep or Monte Carlo study keeps which member it is, with its
+    /// parameter values, through either bundle; a result that is no member writes none.
+    #[test]
+    fn a_family_member_round_trips_through_both_bundles() {
+        use crate::native_bundle::decode_native_bundle_with_member;
+        let limits = NativeBundleReadLimits {
+            max_members: 10,
+            max_member_bytes: 1_000_000,
+            max_expanded_bytes: 1_000_000,
+            max_rows: 1_000_000,
+            max_columns: 1_024,
+            max_numeric_values: 1_000_000 / size_of::<f64>(),
+        };
+        let step = AnalysisResultFamilyMember::StepPoint {
+            index: 2,
+            coordinate: vec![
+                AnalysisResultStepCoordinate {
+                    name: "r".to_owned(),
+                    value: 2000.0,
+                },
+                AnalysisResultStepCoordinate {
+                    name: "temp".to_owned(),
+                    value: -40.0,
+                },
+            ],
+        };
+        let trial = AnalysisResultFamilyMember::MonteCarloTrial { index: 7 };
+        for member in [Some(step), Some(trial), None] {
+            let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "Transient", 0.0)
+                .with_waveforms(vec![RetainedWaveform::new(
+                    "V(out)",
+                    vec![0.0, 1.0],
+                    vec![0.5, 1.5],
+                )]);
+            if let Some(member) = &member {
+                analysis.import_source = Some(rspice_results::result_import::ResultImportSource {
+                    source_name: "family.raw".to_owned(),
+                    format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
+                    coordinate: None,
+                    family_member: Some(member.clone()),
+                    event_dump: None,
+                });
+            }
+            let waveforms = analysis.waveforms.iter().collect::<Vec<_>>();
+            let projected =
+                project_native_bundle(&analysis, &waveforms, WaveformDomain::Transient).unwrap();
+            for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
+                let bytes = encode_native_bundle(kind, &projected, 1_000_000).unwrap();
+                let (decoded, read) =
+                    decode_native_bundle_with_member(&bytes, kind, limits).unwrap();
+                assert_eq!(
+                    read.map(NativeBundleMember::into_family_member),
+                    member,
+                    "{kind:?}"
+                );
+                assert_eq!(decoded.signals[0].real, vec![0.5, 1.5]);
             }
         }
     }
