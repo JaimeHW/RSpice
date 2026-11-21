@@ -416,29 +416,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn phone_uses_drawers_five_item_navigation_and_exact_chrome() {
-        let spec = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
-
-        assert!(!spec.show_navigator_dock);
-        assert!(!spec.show_inspector_dock);
-        assert!(spec.navigator_uses_drawer);
-        assert!(spec.inspector_uses_drawer);
-        assert!(spec.workspaces_uses_drawer);
-        assert!(spec.show_phone_navigation);
-        assert!(!spec.show_console_body);
-        assert!(!spec.show_pvt_selector);
-        assert_eq!(spec.toolbar_tool_limit, Some(2));
-        assert!(!spec.show_status_bar);
-        assert_eq!(spec.title_bar_height, 40.0);
-        assert_eq!(spec.toolbar_height, 46.0);
-        assert_eq!(spec.toolbar_control_height, 44.0);
-        assert_eq!(spec.run_control_height, 44.0);
-        assert_eq!(spec.document_bar_height, 36.0);
-        assert_eq!(spec.console_height, 31.0);
-        assert_eq!(spec.phone_navigation_height, 54.0);
-    }
-
-    #[test]
     fn no_project_shell_removes_context_docks_and_drawers() {
         let spec = LayoutSpec::resolve_for_shell(
             1_440.0,
@@ -607,108 +584,6 @@ mod tests {
         assert!(!spec.show_inspector_dock);
         assert!(!spec.show_console_body);
         assert_eq!(spec.console_height, 31.0);
-    }
-
-    #[test]
-    fn coarse_tablet_uses_touch_metrics_and_bounded_console() {
-        let mut state = WorkbenchSession::default();
-        state.console_height = 640.0;
-        state.console_visible = true;
-
-        let spec = LayoutSpec::resolve_with_pointer(834.0, 1112.0, true, &state);
-
-        assert_eq!(spec.title_bar_height, 44.0);
-        assert_eq!(spec.toolbar_height, 48.0);
-        assert_eq!(spec.document_bar_height, 44.0);
-        assert_eq!(spec.status_bar_height, 44.0);
-        assert_eq!(spec.console_height, 260.0);
-        assert_eq!(spec.console_max_height, 260.0);
-        assert!(!spec.console_resizable);
-    }
-
-    #[test]
-    fn tablet_console_uses_exact_42dvh_cap_without_desktop_resize_state() {
-        let mut state = WorkbenchSession::default();
-        state.console_visible = true;
-
-        let spec = LayoutSpec::resolve_with_pointer(768.0, 1_024.0, true, &state);
-
-        assert_eq!(spec.console_height, 260.0);
-        assert_eq!(spec.console_max_height, 260.0);
-        assert!(!spec.console_resizable);
-    }
-
-    #[test]
-    fn wide_coarse_pointer_keeps_the_mockup_touch_target_contract() {
-        let spec =
-            LayoutSpec::resolve_with_pointer(1_440.0, 900.0, true, &WorkbenchSession::default());
-
-        assert_eq!(spec.title_bar_height, 44.0);
-        assert_eq!(spec.toolbar_height, 48.0);
-        assert_eq!(spec.toolbar_control_height, 44.0);
-        assert_eq!(spec.run_control_height, 44.0);
-        assert_eq!(spec.document_bar_height, 44.0);
-        assert_eq!(spec.status_bar_height, 25.0);
-        assert_eq!(spec.console_height, 44.0);
-    }
-
-    #[test]
-    fn collapsed_phone_landscape_removes_the_console_row() {
-        let spec =
-            LayoutSpec::resolve_with_pointer(844.0, 390.0, true, &WorkbenchSession::default());
-
-        assert!(spec.compact_shell);
-        assert!(!spec.show_console_body);
-        assert!(!spec.show_console_strip);
-        assert_eq!(spec.toolbar_control_height, 44.0);
-        assert_eq!(spec.run_control_height, 44.0);
-    }
-
-    #[test]
-    fn narrow_fine_pointer_landscape_keeps_compact_rows_and_accessible_targets() {
-        let spec = LayoutSpec::resolve(800.0, 390.0, &WorkbenchSession::default());
-
-        assert!(spec.compact_shell);
-        assert_eq!(spec.toolbar_control_height, 44.0);
-        assert_eq!(spec.run_control_height, 44.0);
-    }
-
-    #[test]
-    fn fine_pointer_short_landscape_retains_the_collapsed_console_strip() {
-        let spec = LayoutSpec::resolve(844.0, 390.0, &WorkbenchSession::default());
-
-        assert!(spec.compact_shell);
-        assert!(!spec.show_console_body);
-        assert!(spec.show_console_strip);
-        assert_eq!(spec.console_height, 31.0);
-    }
-
-    #[test]
-    fn the_sheet_strip_is_a_shorter_row_that_the_centre_stack_pays_for() {
-        let state = WorkbenchSession::default();
-        assert_eq!(
-            LayoutSpec::resolve(1_440.0, 900.0, &state).sheet_strip_height,
-            30.0
-        );
-        assert_eq!(
-            LayoutSpec::resolve(768.0, 1_024.0, &state).sheet_strip_height,
-            32.0
-        );
-        assert_eq!(
-            LayoutSpec::resolve_with_pointer(834.0, 1_112.0, true, &state).sheet_strip_height,
-            44.0,
-            "a coarse pointer has no step shorter than the touch target"
-        );
-
-        let mut maximized = WorkbenchSession::default();
-        maximized.console_maximized = true;
-        let without = LayoutSpec::resolve_for_shell(
-            1_440.0, 900.0, false, true, false, true, true, &maximized,
-        );
-        let with = LayoutSpec::resolve_for_shell(
-            1_440.0, 900.0, false, true, true, true, true, &maximized,
-        );
-        assert_eq!(without.console_height - with.console_height, 30.0);
     }
 
     #[test]

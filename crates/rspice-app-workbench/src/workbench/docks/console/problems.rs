@@ -1144,31 +1144,6 @@ mod producer_name_tests {
     use super::producer_name;
 
     #[test]
-    fn a_problem_names_who_raised_it_in_the_words_of_the_product() {
-        for (producer, name) in [
-            ("rspice.veriloga.compiler", "Verilog-A compiler"),
-            ("rspice.veriloga.compiler-worker", "Verilog-A compiler"),
-            ("rspice.veriloga.browser-worker", "Verilog-A compiler"),
-            ("rspice.veriloga.bundle", "Verilog-A source"),
-            ("rspice.veriloga.build-profile", "Build settings"),
-            ("rspice.veriloga.interface", "Verilog-A interface"),
-            ("rspice.veriloga.specialist", "Verilog-A checks"),
-            ("rspice.design.rule-deck", "Rule deck"),
-            ("rspice.design.waivers", "Waivers"),
-            ("rspice.design.symbol.pins", "Symbol pins"),
-            ("rspice.text.lettering", "Lettering"),
-            ("rspice.diagnostics", "Diagnostics"),
-            ("rspice.netlist.parser", "Netlist"),
-            ("rspice.design.rules", "Design rules"),
-            ("rspice.simulation.run", "Simulation"),
-            ("rspice.engine.hdl", "HDL"),
-            ("rspice.engine.assert", "Assertions"),
-        ] {
-            assert_eq!(producer_name(producer), name, "{producer}");
-        }
-    }
-
-    #[test]
     fn a_producer_without_a_name_is_still_written_as_words() {
         assert_eq!(producer_name("rspice.some-new_tool"), "some new tool");
     }

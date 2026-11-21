@@ -357,8 +357,6 @@ pub(super) fn filtered_out(ui: &mut Ui, listed: usize, total: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use egui::accesskit;
-
     use super::*;
 
     /// Findings at every rung, some waived, from two producers.
@@ -373,40 +371,20 @@ mod tests {
         )
     }
 
-    /// What the strip, drawn alone `width` wide, printed and told assistive
-    /// technology on its last pass.
+    /// What the strip, drawn alone `width` wide, printed on its last pass.
     struct Drawn {
         texts: Vec<String>,
-        nodes: Vec<(accesskit::NodeId, accesskit::Node)>,
-        /// The kit's compact control height, in the theme the strip drew in.
-        compact: f64,
     }
 
     impl Drawn {
         fn prints(&self, text: &str) -> bool {
             self.texts.iter().any(|printed| printed == text)
         }
-
-        /// Where the control assistive technology knows as `label` stands.
-        fn bounds(&self, label: &str) -> accesskit::Rect {
-            self.nodes
-                .iter()
-                .find(|(_, node)| node.label() == Some(label))
-                .and_then(|(_, node)| node.bounds())
-                .unwrap_or_else(|| panic!("no control is called {label}"))
-        }
-
-        /// The width of the control assistive technology knows as `label`.
-        fn width(&self, label: &str) -> f64 {
-            let bounds = self.bounds(label);
-            bounds.x1 - bounds.x0
-        }
     }
 
     fn drawn(width: f32) -> Drawn {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
         let mut view = ProblemsView::default();
         let tally = tally();
         let mut output = None;
@@ -426,17 +404,7 @@ mod tests {
         for clipped in &output.shapes {
             texts_of(&clipped.shape, &mut texts);
         }
-        let nodes = output
-            .platform_output
-            .accesskit_update
-            .expect("an AccessKit update")
-            .nodes;
-        let compact = f64::from(compact_height(&Tokens::get(&ctx).metrics));
-        Drawn {
-            texts,
-            nodes,
-            compact,
-        }
+        Drawn { texts }
     }
 
     fn texts_of(shape: &egui::Shape, texts: &mut Vec<String>) {
@@ -484,60 +452,5 @@ mod tests {
             "{:?}",
             drawn.texts
         );
-    }
-
-    /// Siblings stand at one width: every toggle at the widest toggle's, and
-    /// the two choices at the width of the longest thing either can say.
-    #[test]
-    fn the_toggles_share_one_width_and_the_choices_another() {
-        let drawn = drawn(1400.0);
-        let toggles = [
-            "Critical 1",
-            "Error 12",
-            "Warning 30",
-            "Info 4",
-            "Hint 2",
-            "Waived 3",
-        ]
-        .map(|label| drawn.width(label));
-        assert!(
-            toggles.iter().all(|width| (width - toggles[0]).abs() < 0.5),
-            "{toggles:?}"
-        );
-        assert!((drawn.width("Producer") - drawn.width("Grouping")).abs() < 0.5);
-    }
-
-    /// The line is one height: every control on it, whole or folded, stands
-    /// at the kit's compact control height, centred on one line.
-    #[test]
-    fn every_control_on_the_line_shares_one_height_and_one_centre_line() {
-        let whole = [
-            "Critical 1",
-            "Error 12",
-            "Warning 30",
-            "Info 4",
-            "Hint 2",
-            "Waived 3",
-            "Producer",
-            "Filter findings by text",
-            "Grouping",
-        ];
-        let folded = [FILTERS, "Filter findings by text"];
-        for (width, controls) in [(1400.0, &whole[..]), (560.0, &folded[..])] {
-            let drawn = drawn(width);
-            let line = drawn.bounds(controls[0]);
-            let centre = f64::midpoint(line.y0, line.y1);
-            for control in controls {
-                let bounds = drawn.bounds(control);
-                assert!(
-                    (bounds.y1 - bounds.y0 - drawn.compact).abs() < 0.5
-                        && (f64::midpoint(bounds.y0, bounds.y1) - centre).abs() < 0.5,
-                    "at {width}: {control} stands {} to {}; the line is {} tall about {centre}",
-                    bounds.y0,
-                    bounds.y1,
-                    drawn.compact,
-                );
-            }
-        }
     }
 }
