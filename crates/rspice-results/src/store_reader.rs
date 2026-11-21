@@ -35,6 +35,8 @@ pub use references::parse_digest;
 pub(crate) use references::references_written;
 pub use references::{ColumnReference, EventsReference, LeadReference, writing_references};
 mod segments;
+#[cfg(not(any(unix, windows)))]
+pub use segments::open_segments;
 #[cfg(any(unix, windows))]
 pub use segments::pin_segment;
 pub use segments::{

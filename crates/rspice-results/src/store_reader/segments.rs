@@ -459,8 +459,17 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
     Some(segment)
 }
 
-/// No folder holds a segment in a build without files.
+/// A build without files has no folder to look in: the kept segment of that digest is the one a
+/// reader has open, which the browser loads from its own storage before reading a result again.
 #[cfg(not(any(unix, windows)))]
-pub fn kept_segment(_digest: Digest) -> Option<Arc<Segment>> {
-    None
+pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
+    let kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
+    kept.open.get(&digest.0).and_then(Weak::upgrade)
+}
+
+/// Every kept segment some reader has open now.
+#[cfg(not(any(unix, windows)))]
+pub fn open_segments() -> Vec<Arc<Segment>> {
+    let kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
+    kept.open.values().filter_map(Weak::upgrade).collect()
 }

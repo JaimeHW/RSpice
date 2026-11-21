@@ -566,6 +566,9 @@ impl RSpiceApp {
         rspice_app_services::workbench::lifecycle::project_lifecycle::follow_browser_open_lock(
             &mut self.state,
         );
+        // So does its results store.
+        #[cfg(target_arch = "wasm32")]
+        follow_browser_results_store(&mut self.state, ctx);
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(event) = self.state.poll_results_save(ctx) {
             self.handle_save_continuation_event(event);
@@ -700,8 +703,11 @@ impl RSpiceApp {
             authoring_has_unsaved_changes,
             self.state.model.live_write_locks.mirror,
         );
+        // Leaving while results are still being written to the browser's storage asks too.
         #[cfg(target_arch = "wasm32")]
-        update_browser_before_unload_guard(should_warn_before_unload);
+        update_browser_before_unload_guard(
+            should_warn_before_unload || !rspice_app_state::state::run_store::browser::settled(),
+        );
         #[cfg(not(target_arch = "wasm32"))]
         let _ = should_warn_before_unload;
 
@@ -1197,6 +1203,28 @@ fn should_warn_before_browser_unload(
 
 fn should_persist_application_state(state: &AppState) -> bool {
     !state.model.live_write_locks.mirror
+}
+
+/// Keep the open project's results store with it, and say each run a full store stopped: one
+/// line in the log and one finding, as a run whose volume filled says.
+#[cfg(target_arch = "wasm32")]
+fn follow_browser_results_store(state: &mut AppState, ctx: &Context) {
+    use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+    use rspice_app_state::state::run_store::browser;
+    use rspice_app_state::workbench::app_state::diagnostic_store::run_notices::storage_stop_message;
+    let project = state
+        .platform
+        .project_lifecycle
+        .is_open()
+        .then(|| state.model.workspace.content.project.id().to_string());
+    for (run_sequence, stop) in browser::follow(&mut state.model.simulation, project, ctx) {
+        let line = format!("{}: {}", stop.analysis, storage_stop_message(&stop));
+        state.record(LogSeverity::Error, LogSource::Run, line);
+        let facts = state.slot_facts();
+        state
+            .model
+            .publish_results_storage_stop(&stop, run_sequence, facts);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

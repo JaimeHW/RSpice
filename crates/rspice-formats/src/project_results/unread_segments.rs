@@ -1,7 +1,8 @@
 //! A kept segment a saved result names but cannot read: gone from every folder, or there and
 //! damaged. A damaged one says what is wrong with it instead of reading as deleted, and only its
-//! own run goes without samples: the rest of the history opens. The browser keeps its segments
-//! in the page's memory, so a result read after the page was left says that is where they were.
+//! own run goes without samples: the rest of the history opens. The browser reads a segment only
+//! from the page's memory, which loads it from the browser's own storage, so a result whose
+//! segment neither holds says so.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -49,11 +50,12 @@ pub(super) fn values(reference: &ColumnReference) -> Result<WaveformValues, Stri
     }
 }
 
-/// Why the browser cannot read a result a session or project names: it kept the samples in the
-/// page's memory, which leaving or reloading the page empties.
+/// Why the browser cannot read a result a session or project names: neither the page's memory
+/// nor the project's store in the browser's own storage holds the samples. A page that kept them
+/// only in memory loses them on a reload, and another tab may hold the store.
 #[cfg(not(any(unix, windows)))]
-const LEFT_WITH_THE_PAGE: &str = "this browser kept these results in the page's memory, and reloading or leaving the page \
-     emptied it";
+const NOT_HELD_HERE: &str =
+    "neither this page's memory nor this browser's storage for RSpice holds these results";
 
 /// The kept segment file `name` that a folder holds, and what is wrong with it; `None` when no
 /// folder holds one, or the one it holds is still waiting for its first check.
@@ -77,11 +79,11 @@ fn damage(name: &str) -> Option<(PathBuf, String)> {
     Some((path, reason))
 }
 
-/// A build without files has no folder to hold a segment: every segment it names was in the
-/// memory of a page since left.
+/// A build without files has no folder to hold a segment: every segment it names and no reader
+/// has open is one the page cannot read.
 #[cfg(not(any(unix, windows)))]
 fn damage(name: &str) -> Option<(PathBuf, String)> {
-    Some((PathBuf::from(name), LEFT_WITH_THE_PAGE.to_owned()))
+    Some((PathBuf::from(name), NOT_HELD_HERE.to_owned()))
 }
 
 fn damaged(

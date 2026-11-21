@@ -11,8 +11,9 @@
 //! from the segment's summaries. Any other axis (a DC sweep that runs down, a nested sweep that
 //! repeats) is a column of its own beside an axis of row numbers, and is read as values.
 //!
-//! The browser build has no store folder: its segments live in memory, read the same way, and
-//! do not outlive the page.
+//! The browser build has no store folder: its segments live in the page's memory, read the same
+//! way, and each is kept in the open project's store in the browser's own storage, from which a
+//! reload loads it again ([`browser`]).
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -398,14 +399,17 @@ fn process_segment(
     .map_err(kept_failure)
 }
 
-/// The browser has no store folder: its segments are held in memory.
+/// The browser has no store folder: its segments are held in memory, and each is kept in the open
+/// project's store in the browser's own storage.
 #[cfg(target_arch = "wasm32")]
 fn process_segment(
     schema: &Schema,
     meta: &RunMeta,
     fill: &mut FillSegment<'_>,
 ) -> Result<Arc<Segment>, String> {
-    memory_segment(schema, meta, fill)
+    let segment = memory_segment(schema, meta, fill)?;
+    browser::keep(&segment);
+    Ok(segment)
 }
 
 /// A finished segment held in memory.
@@ -424,5 +428,7 @@ fn memory_segment(
     Ok(Segment::kept(StoreReader::new(reader), std::path::PathBuf::new()).shared())
 }
 
+#[cfg(target_arch = "wasm32")]
+pub mod browser;
 #[cfg(test)]
 mod tests;

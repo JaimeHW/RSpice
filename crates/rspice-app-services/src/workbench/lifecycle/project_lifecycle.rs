@@ -1693,7 +1693,28 @@ pub fn complete_browser_save(
             handle_id,
             binding: completion.binding,
         };
+        // The segments the file reads: its runs', and those its result documents archived.
+        let archived = candidate
+            .file
+            .workspace
+            .visualization_documents
+            .iter()
+            .flat_map(
+                rspice_results::visualization_document::VisualizationDocument::archived_segments,
+            )
+            .filter_map(|hex| rspice_results::store_reader::parse_digest(hex).ok());
+        let read: Vec<_> = candidate
+            .file
+            .simulation_results
+            .stored_segments()
+            .into_iter()
+            .map(|segment| segment.digest)
+            .chain(archived)
+            .collect();
         finish_successful_save(state, candidate, binding, completion.scope);
+        // The project's results store lets go of what neither this file, nor the version it
+        // replaced, nor the page reads.
+        rspice_app_state::state::run_store::browser::saved(read);
         state
             .lifecycle_parts()
             .platform

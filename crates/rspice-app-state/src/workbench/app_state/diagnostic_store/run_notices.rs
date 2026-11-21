@@ -888,9 +888,14 @@ pub fn storage_stop_message(stop: &ResultsStorageStop) -> String {
         .free
         .map(|free| format!(", {} free", format_bytes(free)))
         .unwrap_or_default();
+    // A browser keeps a project's results in the storage it gives the page, not on a volume.
+    let filled = if cfg!(target_arch = "wasm32") {
+        format!("{} is full", stop.folder)
+    } else {
+        format!("the volume holding {} filled", stop.folder)
+    };
     format!(
-        "Stopped{at}: the volume holding {} filled; {} points kept ({}){free}",
-        stop.folder,
+        "Stopped{at}: {filled}; {} points kept ({}){free}",
         stop.rows,
         format_bytes(stop.bytes)
     )

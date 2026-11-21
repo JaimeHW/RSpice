@@ -540,13 +540,34 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         format_bytes(storage.loaded_bytes),
         format_bytes(storage.budget)
     );
-    // The browser keeps every result in the page's memory, and says what that costs.
+    // The browser reads every result from the page's memory, and says what that costs and
+    // whether the project's results store in the browser's own storage keeps them past a reload.
     #[cfg(target_arch = "wasm32")]
-    let results_storage = format!(
-        "{} of {} in this page's memory \u{b7} results do not survive a reload",
-        format_bytes(storage.loaded_bytes),
-        format_bytes(storage.budget)
-    );
+    let results_storage = {
+        use crate::state::run_store::browser::{Standing, kept_bytes, settled, standing};
+        let kept = match standing() {
+            Standing::Held if settled() => format!(
+                "{} kept in this browser's storage",
+                format_bytes(kept_bytes())
+            ),
+            Standing::Held => "writing results to this browser's storage".to_owned(),
+            Standing::Opening => "opening this project's results store".to_owned(),
+            Standing::HeldElsewhere => "another tab holds this project's results store, \
+                 so results do not survive a reload"
+                .to_owned(),
+            Standing::Unavailable(reason) => format!(
+                "this browser keeps no results store ({reason}), so results do not survive a reload"
+            ),
+            Standing::Unasked => {
+                "results do not survive a reload until a project is open".to_owned()
+            }
+        };
+        format!(
+            "{} of {} in this page's memory \u{b7} {kept}",
+            format_bytes(storage.loaded_bytes),
+            format_bytes(storage.budget)
+        )
+    };
     let note = if rows.is_empty() {
         RETENTION_NOTE.to_owned()
     } else {
