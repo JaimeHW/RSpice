@@ -25,8 +25,7 @@ use crate::workbench::documents::result_document::{
     cursor_jump_availability, family_available, fit_gesture_available, fit_y_to_visible_x,
     hide_selected_trace, jump_cursor, linked_cursors, open_create_document, open_dataset_browser,
     place_marker_at_cursor, request_view_gesture, selected_trace_on_sheet, viewer_is_available,
-    viewer_unavailability_reason, viewer_uses_wave_stack, zoom_gesture_available, zoom_previous,
-    zoom_previous_available,
+    viewer_unavailability_reason, zoom_gesture_available, zoom_previous, zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -367,10 +366,9 @@ fn keep_axis_drafts(_: &mut Cx<'_, ResultsFeature>, _: &egui::Context) {}
 /// takes the cursor readout, the zooms and Fit move the active sheet's
 /// viewport, Zoom previous steps the waveform sheet back through the views it
 /// showed, Undo and Redo step the shown view's edits, Delete takes the
-/// selected trace off the sheet, the grid key shows or hides the minor grid,
-/// Properties (Q, as ViVA binds it) opens the plot's properties, and Cancel
-/// lets go of the placed cursors. Each is the workspace's wherever Results
-/// is in front, Cancel only while a cursor is placed.
+/// selected trace off the sheet, and Cancel lets go of the placed cursors.
+/// Each is the workspace's wherever Results is in front, Cancel only while a
+/// cursor is placed.
 const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
     RoutedCommand {
         key: ids::COPY,
@@ -429,28 +427,6 @@ const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
         takes: in_results,
         enabled: |reads| selected_trace_on_sheet(results_reads(reads)).is_some(),
         execute: |cx| hide_selected_trace(&mut results_parts(cx)),
-    },
-    RoutedCommand {
-        key: ids::CYCLE_GRID,
-        takes: in_results,
-        enabled: |reads| {
-            reads.model.simulation.retained.has_results()
-                && viewer_uses_wave_stack(reads.state.results.session.viewer)
-        },
-        execute: |cx| {
-            let session = &mut cx.state.results.session;
-            session.show_minor_grid = !session.show_minor_grid;
-        },
-    },
-    RoutedCommand {
-        key: ids::OBJECT_PROPERTIES,
-        takes: in_results,
-        enabled: |reads| {
-            ResultsCommand::VisualizationDocumentProperties
-                .availability(reads)
-                .is_available()
-        },
-        execute: |cx| ResultsCommand::VisualizationDocumentProperties.execute(cx),
     },
     RoutedCommand {
         key: ids::CANCEL,
@@ -555,13 +531,20 @@ impl CommandSet for ResultsCommand {
                     "no result dataset is available"
                 },
             ),
+            // Its dialog also offers back the runs deleted or cleared, so it
+            // stays open to them once every run is gone.
             Self::ClearResults => {
-                if retained.has_results() && !executing {
-                    CommandAvailability::Available
-                } else if executing {
+                if executing {
                     CommandAvailability::Disabled(
                         "an active simulation execution still owns result history",
                     )
+                } else if retained.has_results()
+                    || crate::workbench::docks::navigator::results_runs::restore_refusal(
+                        &model.simulation,
+                    )
+                    .is_none()
+                {
+                    CommandAvailability::Available
                 } else {
                     CommandAvailability::Disabled("no result dataset is available")
                 }
@@ -728,6 +711,23 @@ impl CommandSet for ResultsCommand {
                         )
                 }
             }
+            Self::OverlayPrevious(_) => {
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else {
+                    available_or(retained.has_results(), "no result dataset is available")
+                }
+            }
+            Self::RenameDocument | Self::DuplicateDocument | Self::DeleteDocument => {
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else {
+                    crate::workbench::chrome::document_bar::results::document_refusal(state).map_or(
+                        CommandAvailability::Available,
+                        CommandAvailability::Disabled,
+                    )
+                }
+            }
             Self::RestoreDeletedRuns => {
                 crate::workbench::docks::navigator::results_runs::restore_refusal(&model.simulation)
                     .map_or(
@@ -846,6 +846,33 @@ impl CommandSet for ResultsCommand {
                         .unwrap_or_else(|error| format!("Could not save the view: {error}"));
                 parts.prompt(said);
             }
+            Self::OverlayPrevious(depth) => {
+                let view = &mut cx.model.simulation.view;
+                view.overlay_previous = usize::from(depth);
+                view.data_version = view.data_version.wrapping_add(1);
+            }
+            Self::RenameDocument => {
+                crate::workbench::chrome::document_bar::results::open_rename(&mut results_parts(
+                    cx,
+                ));
+            }
+            Self::DuplicateDocument => {
+                let mut parts = results_parts(cx);
+                let said =
+                    crate::workbench::chrome::document_bar::results::duplicate_shown_document(
+                        &mut parts,
+                    )
+                    .unwrap_or_else(|error| format!("Could not duplicate the document: {error}"));
+                parts.prompt(said);
+            }
+            Self::DeleteDocument => {
+                let mut parts = results_parts(cx);
+                let said = crate::workbench::chrome::document_bar::results::delete_shown_document(
+                    &mut parts,
+                )
+                .unwrap_or_else(|error| format!("Could not delete the document: {error}"));
+                parts.prompt(said);
+            }
             Self::RestoreDeletedRuns => {
                 let mut parts = results_parts(cx);
                 let said = crate::workbench::docks::navigator::results_runs::restore_deleted_runs(
@@ -907,6 +934,9 @@ impl CommandSet for ResultsCommand {
             Self::ToggleResultsSplit => Some(reads.wb.split_with_results),
             Self::ToggleLinkedCursors => Some(linked_cursors(results_reads(reads))),
             Self::ToggleCursorTool => Some(reads.state.results.session.cursor_tool.is_armed()),
+            Self::OverlayPrevious(depth) => {
+                Some(reads.model.simulation.view.overlay_previous == usize::from(depth))
+            }
             _ => None,
         }
     }

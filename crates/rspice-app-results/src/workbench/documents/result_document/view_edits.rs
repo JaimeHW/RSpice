@@ -10,6 +10,10 @@
 //! at least one edit the reader made; moving the viewport or a cursor is
 //! navigation, which zoom's own back and forward covers, and following a new
 //! run is not the reader's edit, so neither is a step.
+//!
+//! Renaming, duplicating and deleting a saved document are steps too, kept
+//! beside the views' own. Undo and Redo take whichever is latest: the shown
+//! view's step or the documents' step.
 
 use std::collections::HashMap;
 
@@ -21,16 +25,94 @@ use crate::state::workspace::VisualizationDocumentPersistenceError;
 
 use super::{ResultsParts, ResultsReads};
 
-/// The undo and redo steps of every view the session has edited.
+/// The undo and redo steps of every view the session has edited, and of
+/// the saved documents renamed, duplicated or deleted.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ViewHistories {
     views: HashMap<ResultDocumentId, ViewHistory>,
+    documents: History<DocumentStep>,
+    /// Counts the steps recorded and taken, so Undo and Redo take the
+    /// latest of the shown view's steps and the documents' steps.
+    clock: u64,
 }
 
-#[derive(Debug, Clone, Default)]
-struct ViewHistory {
-    undo: Vec<ViewSnapshot>,
-    redo: Vec<ViewSnapshot>,
+impl ViewHistories {
+    /// The stamp of a step recorded or taken now, later than every other.
+    fn tick(&mut self) -> u64 {
+        self.clock += 1;
+        self.clock
+    }
+}
+
+/// Undo and redo stacks, each step stamped with when it was recorded or
+/// last taken.
+#[derive(Debug, Clone)]
+struct History<T> {
+    undo: Vec<(u64, T)>,
+    redo: Vec<(u64, T)>,
+}
+
+impl<T> Default for History<T> {
+    fn default() -> Self {
+        Self {
+            undo: Vec::new(),
+            redo: Vec::new(),
+        }
+    }
+}
+
+impl<T> History<T> {
+    fn stack_mut(&mut self, direction: Step) -> &mut Vec<(u64, T)> {
+        match direction {
+            Step::Undo => &mut self.undo,
+            Step::Redo => &mut self.redo,
+        }
+    }
+
+    /// When the step `direction` takes next was recorded or last taken.
+    fn latest(&self, direction: Step) -> Option<u64> {
+        let stack = match direction {
+            Step::Undo => &self.undo,
+            Step::Redo => &self.redo,
+        };
+        stack.last().map(|(stamp, _)| *stamp)
+    }
+}
+
+type ViewHistory = History<ViewSnapshot>;
+
+/// What taking a document step does: each step taken leaves the step that
+/// reverses it on the other stack.
+#[derive(Debug, Clone)]
+enum DocumentStep {
+    /// Give the document `document` the title `to`.
+    Rename {
+        document: ResultDocumentId,
+        to: String,
+    },
+    /// Take the document `document` out of the project, then show `show`:
+    /// the document a duplicate was made of.
+    Remove {
+        document: ResultDocumentId,
+        show: Option<ResultDocumentId>,
+    },
+    /// Put `document` back at place `at` with its view's own steps; taking
+    /// it out again shows `then`.
+    Insert {
+        document: Box<VisualizationDocument>,
+        at: usize,
+        history: Option<ViewHistory>,
+        then: Option<ResultDocumentId>,
+    },
+}
+
+impl Step {
+    const fn other(self) -> Self {
+        match self {
+            Self::Undo => Self::Redo,
+            Self::Redo => Self::Undo,
+        }
+    }
 }
 
 /// Which way a history step goes.
@@ -104,13 +186,14 @@ pub(crate) fn apply(
         .content
         .transact_visualization_document(document_id, revision, edits)?;
     if let Some(before) = before {
+        let stamp = state.results.view_edits.tick();
         let history = state
             .results
             .view_edits
             .views
             .entry(document_id)
             .or_default();
-        history.undo.push(before);
+        history.undo.push((stamp, before));
         history.redo.clear();
     }
     Ok(receipt)
@@ -129,23 +212,6 @@ pub(crate) fn apply_following(
         .workspace
         .content
         .transact_visualization_document(document_id, revision, edits)
-}
-
-/// Whether the view `document_id` has a step to take in `direction`.
-pub(crate) fn can_step(
-    state: ResultsReads<'_>,
-    document_id: ResultDocumentId,
-    direction: Step,
-) -> bool {
-    state
-        .results
-        .view_edits
-        .views
-        .get(&document_id)
-        .is_some_and(|history| match direction {
-            Step::Undo => !history.undo.is_empty(),
-            Step::Redo => !history.redo.is_empty(),
-        })
 }
 
 /// Take one undo or redo step of the view `document_id`. A step addresses
@@ -170,11 +236,7 @@ pub(crate) fn step(
     let Some(history) = state.results.view_edits.views.get_mut(&document_id) else {
         return Ok(());
     };
-    let popped = match direction {
-        Step::Undo => history.undo.pop(),
-        Step::Redo => history.redo.pop(),
-    };
-    let Some(target) = popped else {
+    let Some((_, target)) = history.stack_mut(direction).pop() else {
         return Ok(());
     };
     let (revision, snapshot) = current;
@@ -189,16 +251,15 @@ pub(crate) fn step(
             Step::Redo => format!("This step can no longer be redone: {error}"),
         });
     }
-    let history = state
+    let stamp = state.results.view_edits.tick();
+    state
         .results
         .view_edits
         .views
         .entry(document_id)
-        .or_default();
-    match direction {
-        Step::Undo => history.redo.push(snapshot),
-        Step::Redo => history.undo.push(snapshot),
-    }
+        .or_default()
+        .stack_mut(direction.other())
+        .push((stamp, snapshot));
     Ok(())
 }
 
@@ -207,18 +268,225 @@ pub(crate) fn shown_view(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
     super::document_edit::active_document_id(state)
 }
 
-/// Whether Undo or Redo in Results would take a step.
-pub(crate) fn shown_view_can_step(state: ResultsReads<'_>, direction: Step) -> bool {
-    shown_view(state).is_some_and(|document_id| can_step(state, document_id, direction))
+/// Whose step Undo or Redo takes next in Results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NextStep {
+    /// The shown view's own.
+    View(ResultDocumentId),
+    /// A saved document's rename, duplicate or delete.
+    Document,
 }
 
-/// Take one undo or redo step of the view Results shows, saying on the
-/// status bar why when it cannot.
+/// The step Undo or Redo takes next in Results: the latest of the shown
+/// view's and the documents'.
+fn next_step(state: ResultsReads<'_>, direction: Step) -> Option<NextStep> {
+    let histories = &state.results.view_edits;
+    let view = shown_view(state).and_then(|document_id| {
+        histories
+            .views
+            .get(&document_id)
+            .and_then(|history| history.latest(direction))
+            .map(|stamp| (stamp, NextStep::View(document_id)))
+    });
+    let document = histories
+        .documents
+        .latest(direction)
+        .map(|stamp| (stamp, NextStep::Document));
+    view.into_iter()
+        .chain(document)
+        .max_by_key(|(stamp, _)| *stamp)
+        .map(|(_, next)| next)
+}
+
+/// Whether Undo or Redo in Results would take a step.
+pub(crate) fn shown_view_can_step(state: ResultsReads<'_>, direction: Step) -> bool {
+    next_step(state, direction).is_some()
+}
+
+/// Take one undo or redo step in Results, the shown view's or a saved
+/// document's, saying on the status bar why when it cannot.
 pub(crate) fn step_shown_view(state: &mut ResultsParts<'_>, direction: Step) {
-    let Some(document_id) = shown_view(state.results_reads()) else {
-        return;
+    let outcome = match next_step(state.results_reads(), direction) {
+        Some(NextStep::View(document_id)) => step(state, document_id, direction),
+        Some(NextStep::Document) => step_document(state, direction),
+        None => return,
     };
-    if let Err(reason) = step(state, document_id, direction) {
+    if let Err(reason) = outcome {
         state.prompt(reason);
+    }
+}
+
+/// Note a document step the reader took, as one Undo takes back.
+fn record(state: &mut ResultsParts<'_>, reverse: DocumentStep) {
+    let stamp = state.results.view_edits.tick();
+    let documents = &mut state.results.view_edits.documents;
+    documents.undo.push((stamp, reverse));
+    documents.redo.clear();
+}
+
+/// Give the saved document `document_id` the title `title`, a step Undo
+/// takes back.
+pub(crate) fn rename_document(
+    state: &mut ResultsParts<'_>,
+    document_id: ResultDocumentId,
+    title: &str,
+) -> Result<(), String> {
+    let from = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .ok_or_else(|| GONE.to_owned())?
+        .title()
+        .to_owned();
+    state
+        .model
+        .workspace
+        .content
+        .rename_visualization_document(document_id, title)
+        .map_err(|error| error.to_string())?;
+    record(
+        state,
+        DocumentStep::Rename {
+            document: document_id,
+            to: from,
+        },
+    );
+    Ok(())
+}
+
+/// Keep `copy`, a duplicate of the saved document `of`, in the project, a
+/// step Undo takes back.
+pub(crate) fn add_duplicate(
+    state: &mut ResultsParts<'_>,
+    copy: VisualizationDocument,
+    of: ResultDocumentId,
+) -> Result<ResultDocumentId, String> {
+    let document = create(state, copy).map_err(|error| error.to_string())?;
+    record(
+        state,
+        DocumentStep::Remove {
+            document,
+            show: Some(of),
+        },
+    );
+    Ok(document)
+}
+
+/// Delete the saved document `document_id` and its view's steps, a step
+/// Undo takes back: the document returns where it stood, with its steps.
+pub(crate) fn delete_document(
+    state: &mut ResultsParts<'_>,
+    document_id: ResultDocumentId,
+) -> Result<(), String> {
+    let reverse = take_out(state, document_id, None)?;
+    record(state, reverse);
+    Ok(())
+}
+
+const GONE: &str = "The document is no longer in the project.";
+
+/// Take the document `document_id` out of the project with its view's
+/// steps, and return the step that puts both back; taking it out again
+/// then shows `then`.
+fn take_out(
+    state: &mut ResultsParts<'_>,
+    document_id: ResultDocumentId,
+    then: Option<ResultDocumentId>,
+) -> Result<DocumentStep, String> {
+    let content = &mut state.model.workspace.content;
+    let at = content
+        .visualization_documents
+        .iter()
+        .position(|document| document.id() == document_id)
+        .ok_or_else(|| GONE.to_owned())?;
+    let document = Box::new(content.visualization_documents[at].clone());
+    content.remove_visualization_document(document_id);
+    let history = state.results.view_edits.views.remove(&document_id);
+    Ok(DocumentStep::Insert {
+        document,
+        at,
+        history,
+        then,
+    })
+}
+
+/// Take the documents' next step in `direction`, leave the step that
+/// reverses it on the other stack, and show the document it leaves in
+/// front. A step that can no longer be taken is dropped and the reason
+/// returned.
+fn step_document(state: &mut ResultsParts<'_>, direction: Step) -> Result<(), String> {
+    let Some((_, next)) = state
+        .results
+        .view_edits
+        .documents
+        .stack_mut(direction)
+        .pop()
+    else {
+        return Ok(());
+    };
+    let (reverse, show) = take_document_step(state, next).map_err(|error| match direction {
+        Step::Undo => format!("This step can no longer be undone: {error}"),
+        Step::Redo => format!("This step can no longer be redone: {error}"),
+    })?;
+    let stamp = state.results.view_edits.tick();
+    state
+        .results
+        .view_edits
+        .documents
+        .stack_mut(direction.other())
+        .push((stamp, reverse));
+    if let Some(document_id) = show {
+        crate::workbench::chrome::document_bar::results::show_visualization_document(
+            state,
+            &document_id,
+        );
+    }
+    Ok(())
+}
+
+/// Do what `step` says, and return the step that reverses it with the
+/// document to show after it.
+fn take_document_step(
+    state: &mut ResultsParts<'_>,
+    step: DocumentStep,
+) -> Result<(DocumentStep, Option<ResultDocumentId>), String> {
+    match step {
+        DocumentStep::Rename { document, to } => {
+            let content = &mut state.model.workspace.content;
+            let from = content
+                .visualization_document(document)
+                .ok_or_else(|| GONE.to_owned())?
+                .title()
+                .to_owned();
+            content
+                .rename_visualization_document(document, &to)
+                .map_err(|error| error.to_string())?;
+            Ok((DocumentStep::Rename { document, to: from }, Some(document)))
+        }
+        DocumentStep::Remove { document, show } => Ok((take_out(state, document, show)?, show)),
+        DocumentStep::Insert {
+            document,
+            at,
+            history,
+            then,
+        } => {
+            let document_id = state
+                .model
+                .workspace
+                .content
+                .insert_visualization_document_at(*document, at)
+                .map_err(|error| error.to_string())?;
+            if let Some(history) = history {
+                state.results.view_edits.views.insert(document_id, history);
+            }
+            Ok((
+                DocumentStep::Remove {
+                    document: document_id,
+                    show: then,
+                },
+                Some(document_id),
+            ))
+        }
     }
 }

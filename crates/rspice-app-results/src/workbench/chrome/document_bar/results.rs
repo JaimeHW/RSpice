@@ -11,7 +11,7 @@ use crate::state::SimulationRun;
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::documents::result_document::working_view::{self, source_of};
-use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads, view_edits};
 use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
@@ -245,4 +245,127 @@ pub(in crate::workbench) fn save_shown_view(
     let saved = working_view::save_as_document(state, view, &title)?;
     show_visualization_document(state, &saved);
     Ok(format!("Saved the view as {title}."))
+}
+
+/// The saved result document Results shows, if it shows one.
+fn shown_saved_document(state: ResultsReads<'_>) -> Option<crate::product::ResultDocumentId> {
+    match active_result_document(state.model, state.workbench) {
+        Some(WorkspaceDocumentId::VisualizationDocument(document)) => Some(document),
+        _ => None,
+    }
+}
+
+/// Why the saved document shown cannot be renamed, duplicated or deleted,
+/// if it cannot.
+pub(in crate::workbench) fn document_refusal(state: ResultsReads<'_>) -> Option<&'static str> {
+    if state.model.safe_mode.project_read_only() {
+        Some("the project is open read-only")
+    } else if shown_saved_document(state).is_none() {
+        Some("show a saved result document")
+    } else {
+        None
+    }
+}
+
+/// Open the form that renames the saved document shown.
+pub(in crate::workbench) fn open_rename(state: &mut ResultsParts<'_>) {
+    let reads = state.results_reads();
+    let Some(title) = shown_saved_document(reads)
+        .and_then(|document| {
+            reads
+                .model
+                .workspace
+                .content
+                .visualization_document(document)
+        })
+        .map(|document| document.title().to_owned())
+    else {
+        return;
+    };
+    *state.result_document_dialog = Some(
+        rspice_results_ui::document_dialogs::ResultDocumentDialog::Rename(
+            rspice_results_ui::document_dialogs::rename::RenameDraft::new(&title),
+        ),
+    );
+}
+
+/// Give the saved document shown the name `draft` holds, a step Undo takes
+/// back. The form closes once the name lands; refused, it stays open and
+/// the status bar says why.
+pub(in crate::workbench) fn commit_rename(
+    state: &mut ResultsParts<'_>,
+    draft: &rspice_results_ui::document_dialogs::rename::RenameDraft,
+) -> Result<Option<rspice_results_ui::document_dialogs::ResultDocumentDialog>, String> {
+    let document = shown_saved_document(state.results_reads())
+        .ok_or("Results no longer shows the document")?;
+    let title = draft.title.trim();
+    if title.is_empty() {
+        return Err("Type a name for the document.".to_owned());
+    }
+    if title != draft.from {
+        view_edits::rename_document(state, document, title)?;
+        state.prompt(format!("Renamed {} to {title}.", draft.from));
+    }
+    Ok(None)
+}
+
+/// Copy the saved document shown as a document of its own, titled after it,
+/// and show the copy: a step Undo takes back. Returns what the status bar
+/// says.
+pub(in crate::workbench) fn duplicate_shown_document(
+    state: &mut ResultsParts<'_>,
+) -> Result<String, String> {
+    let reads = state.results_reads();
+    let of = shown_saved_document(reads).ok_or("show a saved result document")?;
+    let document = reads
+        .model
+        .workspace
+        .content
+        .visualization_document(of)
+        .ok_or("the document is no longer in the project")?;
+    let title = free_title(reads.model, &format!("{} copy", document.title()));
+    let copy = document
+        .duplicate(title.as_str())
+        .map_err(|error| error.to_string())?;
+    let from = document.title().to_owned();
+    let shown = view_edits::add_duplicate(state, copy, of)?;
+    show_visualization_document(state, &shown);
+    Ok(format!("Duplicated {from} as {title}."))
+}
+
+/// Delete the saved document shown and show the tab beside it, as closing
+/// it would: a step Undo takes back. Returns what the status bar says.
+pub(in crate::workbench) fn delete_shown_document(
+    state: &mut ResultsParts<'_>,
+) -> Result<String, String> {
+    let reads = state.results_reads();
+    let document = shown_saved_document(reads).ok_or("show a saved result document")?;
+    let title = reads
+        .model
+        .workspace
+        .content
+        .visualization_document(document)
+        .map(|document| document.title().to_owned())
+        .ok_or("the document is no longer in the project")?;
+    let tabs = result_documents(reads.model);
+    let at = tabs
+        .iter()
+        .position(|tab| tab.id == WorkspaceDocumentId::VisualizationDocument(document));
+    let beside = at
+        .and_then(|at| {
+            tabs.get(at + 1)
+                .or_else(|| at.checked_sub(1).and_then(|at| tabs.get(at)))
+        })
+        .map(|tab| tab.id.clone());
+    view_edits::delete_document(state, document)?;
+    match beside {
+        Some(WorkspaceDocumentId::VisualizationDocument(next)) => {
+            show_visualization_document(state, &next);
+        }
+        Some(WorkspaceDocumentId::ResultDataset(dataset)) => {
+            show_result_dataset(state, &dataset);
+        }
+        _ => {}
+    }
+    Ok(format!("Deleted {title}. Undo puts it back."))
 }

@@ -11,6 +11,7 @@ pub mod compare;
 pub mod family;
 pub mod measurement;
 pub mod properties;
+pub mod rename;
 
 /// The one result-document form open at a time.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +29,8 @@ pub enum ResultDocumentDialog {
     /// Plot properties set the document's digits and phase over a document,
     /// and the reader's own over a quick view.
     Properties(properties::PropertiesDraft),
+    /// Rename a saved result document.
+    Rename(rename::RenameDraft),
 }
 
 /// Option labels for a select row, and the label of the selected entry.

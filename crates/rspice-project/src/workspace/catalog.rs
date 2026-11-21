@@ -330,6 +330,18 @@ impl ProjectWorkspace {
         &mut self,
         document: rspice_results::visualization_document::VisualizationDocument,
     ) -> Result<ResultDocumentId, VisualizationDocumentPersistenceError> {
+        let at = self.visualization_documents.len();
+        self.insert_visualization_document_at(document, at)
+    }
+
+    /// [`Self::insert_visualization_document`] at place `at` among the
+    /// project's documents, or last when `at` is past them: a deleted
+    /// document put back where it stood.
+    pub fn insert_visualization_document_at(
+        &mut self,
+        document: rspice_results::visualization_document::VisualizationDocument,
+        at: usize,
+    ) -> Result<ResultDocumentId, VisualizationDocumentPersistenceError> {
         if self.visualization_documents.len() >= MAX_PROJECT_VISUALIZATION_DOCUMENTS {
             return Err(VisualizationDocumentPersistenceError::CatalogFull);
         }
@@ -357,10 +369,40 @@ impl ProjectWorkspace {
             });
         }
         let document_id = document.id();
-        self.visualization_documents.push(document);
+        let at = at.min(self.visualization_documents.len());
+        self.visualization_documents.insert(at, document);
         self.visualization_documents_dirty = true;
         self.visualization_documents_modified.insert(document_id);
         Ok(document_id)
+    }
+
+    /// Give the result document `document_id` the title `title`, which no
+    /// other document of the project holds, case aside.
+    pub fn rename_visualization_document(
+        &mut self,
+        document_id: ResultDocumentId,
+        title: &str,
+    ) -> Result<(), VisualizationDocumentPersistenceError> {
+        if self.visualization_documents.iter().any(|candidate| {
+            candidate.id() != document_id && candidate.title().eq_ignore_ascii_case(title)
+        }) {
+            return Err(VisualizationDocumentPersistenceError::DuplicateTitle {
+                title: title.to_owned(),
+            });
+        }
+        let document = self
+            .visualization_documents
+            .iter_mut()
+            .find(|document| document.id() == document_id)
+            .ok_or(VisualizationDocumentPersistenceError::NotFound { document_id })?;
+        document.retitle(title).map_err(|error| {
+            VisualizationDocumentPersistenceError::Invalid {
+                message: error.to_string(),
+            }
+        })?;
+        self.visualization_documents_dirty = true;
+        self.visualization_documents_modified.insert(document_id);
+        Ok(())
     }
 
     #[must_use]

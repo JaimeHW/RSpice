@@ -65,6 +65,8 @@ impl CachedResults {
                     active_run_idx,
                     active_analysis_idx,
                     overlay_dataset_ids,
+                    // Runtime: the reader's overlay setting for the session.
+                    overlay_previous: _,
                     // Runtime: the analysis each run was last left on.
                     remembered_analyses: _,
                     waveforms: _,

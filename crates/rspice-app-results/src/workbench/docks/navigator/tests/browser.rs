@@ -485,3 +485,35 @@ fn the_row_model_is_kept_until_what_it_lists_changes() {
         labels(&nodes)
     );
 }
+
+/// A measurement of a run that kept no curves is not offered the table, and
+/// its menu says why: Open in active result pane and Open as table did
+/// nothing and said nothing.
+#[test]
+fn a_measurement_of_a_run_without_curves_is_not_offered_the_table() {
+    use super::super::results_actions::viewer_refusal;
+    use super::super::results_rows::retained_result_artifacts;
+    use rspice_results::result_presentation::ResultViewer;
+
+    let mut host = ResultsTestHost::default();
+    let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    analysis.measurements = vec![rspice_core::MeasureResult::success("TDELAY", 1.6e-3)];
+    host.model.simulation.start_run().add_analysis(analysis);
+    let measurement = {
+        let run = host.model.simulation.active_run().expect("a run");
+        let analysis = &run.analyses[0];
+        retained_result_artifacts(
+            analysis,
+            AnalysisPresentationKey::new(run.dataset_id, analysis),
+        )
+        .into_iter()
+        .find(|artifact| artifact.name == ".MEAS TDELAY")
+        .expect("the measurement has a row")
+    };
+    assert_eq!(measurement.viewer, ResultViewer::Table);
+    let parts = host.results_parts();
+    assert_eq!(
+        viewer_refusal(&parts, &measurement, ResultViewer::Table),
+        Some("Requires an analysis with retained samples")
+    );
+}

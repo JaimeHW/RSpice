@@ -1721,3 +1721,68 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
         &[-80.0, -60.0]
     );
 }
+
+/// With the overlay set to two, the third run of a plan draws the two runs
+/// before it behind it, at an overlay's weight, and a run of another plan
+/// is not among them; set to none, it draws itself alone.
+#[test]
+fn overlaying_two_previous_runs_draws_the_two_before_the_shown_one() {
+    use crate::workbench::documents::result_document::ResultsTestHost;
+    use crate::workbench::documents::result_document::test_fixtures::{
+        completed_prepared_run, digest,
+    };
+    use crate::workbench::results::commands::ResultsCommand;
+
+    let plan = crate::product::SimulationPlanId::new();
+    let other = crate::product::SimulationPlanId::new();
+    let run = |id: u64, plan| {
+        let mut run =
+            completed_prepared_run(plan, crate::product::ObjectRevision::INITIAL, digest(0x40));
+        run.id = id;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, id as f64], "#ffffff"),
+            ]),
+        );
+        run
+    };
+    let mut host = ResultsTestHost::default();
+    // Newest first, as the history lists them.
+    host.model.simulation.retained.runs = vec![
+        run(4, plan),
+        run(3, other),
+        run(2, plan),
+        run(1, plan),
+        run(0, plan),
+    ]
+    .into();
+    assert!(host.model.simulation.select_run(0));
+    let overlaid = |host: &ResultsTestHost| {
+        let models = build_models(
+            &host.model.simulation,
+            &mut DerivedSeries::default(),
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            Default::default(),
+            None,
+            &HashSet::new(),
+        );
+        let mut ends: Vec<(f64, bool)> = models[0]
+            .traces
+            .iter()
+            .map(|trace| (trace.y.read_whole().unwrap()[1], trace.overlay))
+            .collect();
+        ends.sort_by(|a, b| b.0.total_cmp(&a.0));
+        ends
+    };
+
+    host.run_command(ResultsCommand::OverlayPrevious(2));
+    assert_eq!(
+        overlaid(&host),
+        [(4.0, false), (2.0, true), (1.0, true)],
+        "the shown run at full weight, the two before it of its plan thinner"
+    );
+    host.run_command(ResultsCommand::OverlayPrevious(0));
+    assert_eq!(overlaid(&host), [(4.0, false)]);
+}

@@ -2740,6 +2740,49 @@ impl VisualizationDocument {
         &self.title
     }
 
+    /// Give this document `title`, as renaming it does: a new revision of
+    /// the same document. The project catalog checks the title is free.
+    pub fn retitle(
+        &mut self,
+        title: impl Into<String>,
+    ) -> Result<VisualizationTransactionReceipt, VisualizationError> {
+        let title = title.into();
+        validate_label("visualization-document.title", &title)?;
+        let previous_revision = self.revision;
+        let committed_revision = previous_revision.next()?;
+        self.title = title;
+        self.revision = committed_revision;
+        Ok(VisualizationTransactionReceipt {
+            document_id: self.id,
+            previous_revision,
+            committed_revision,
+            created: Vec::new(),
+            tombstoned: Vec::new(),
+            edit_count: 0,
+        })
+    }
+
+    /// A saved document of its own copied whole from this one under
+    /// `title`: a new identity at the first revision, with every page, pane,
+    /// trace, marker, axis and binding this one holds. A working view is
+    /// saved as a document rather than duplicated.
+    pub fn duplicate(&self, title: impl Into<String>) -> Result<Self, VisualizationError> {
+        if self.working_view.is_some() {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.working-view",
+                message: "a working view is saved as a document, not duplicated".to_owned(),
+            });
+        }
+        let title = title.into();
+        validate_label("visualization-document.title", &title)?;
+        let mut document = self.clone();
+        document.id = ResultDocumentId::new();
+        document.revision = ObjectRevision::INITIAL;
+        document.title = title;
+        document.validate()?;
+        Ok(document)
+    }
+
     #[must_use]
     pub const fn tracking(&self) -> ResultDocumentTracking {
         self.tracking
@@ -2972,6 +3015,9 @@ impl VisualizationDocument {
         let committed_revision = previous_revision.next()?;
         let mut candidate = (*snapshot.0).clone();
         candidate.datasets = self.datasets.clone();
+        // The title is the project's name for the document, not its view:
+        // stepping the view back keeps the name it has now.
+        candidate.title = self.title.clone();
         candidate.next_serial = candidate.next_serial.max(self.next_serial);
         candidate.revision = committed_revision;
         self.follow_into(&mut candidate)?;

@@ -55,10 +55,11 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
         .map(|(key, _)| key.clone())
         .collect();
     let session = &mut results.session;
+    let overlaid = simulation.overlaid_dataset_ids();
     results.models.get_or_build(
         ModelCacheInput {
             active_run_idx: simulation.view.active_run_idx,
-            overlay_dataset_ids: &simulation.view.overlay_dataset_ids,
+            overlay_dataset_ids: &overlaid,
             viewer: session.viewer,
             projection: ProjectionOptions {
                 phase_continuous: session.presented_phase_continuous(),

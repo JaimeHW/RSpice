@@ -667,12 +667,14 @@ const RESULTS_MENU: &[MenuEntry] = &[
     Separator,
     results(ResultsCommand::CreateResultDocument).access('N'),
     results(ResultsCommand::SaveViewAsDocument).access('S'),
+    MenuEntry::submenu("Document", DOCUMENT_MENU).access('T'),
     results(ResultsCommand::AddVisualizationPane).access('A'),
     results(ResultsCommand::CompareResultDatasets).access('D'),
     results(ResultsCommand::MeasurementLibrary).access('M'),
     results(ResultsCommand::FamilySlicing).access('F'),
     Separator,
     MenuEntry::submenu("Cursors", CURSORS_MENU).access('U'),
+    MenuEntry::submenu("Overlay previous runs", OVERLAY_MENU).access('O'),
     results(ResultsCommand::FitYToVisibleX).access('Y'),
     results(ResultsCommand::VisualizationDocumentProperties).access('P'),
     results(ResultsCommand::WaveformCalculator).access('C'),
@@ -680,6 +682,31 @@ const RESULTS_MENU: &[MenuEntry] = &[
     hardcopy(HardcopyCommand::ReportAuthoring).access('R'),
     Separator,
     MenuEntry::submenu("History", HISTORY_MENU).access('H'),
+];
+
+/// The saved result document shown: its name, a copy of it, and deleting
+/// it, each a step Undo takes back.
+const DOCUMENT_MENU: &[MenuEntry] = &[
+    results(ResultsCommand::RenameDocument).access('R'),
+    results(ResultsCommand::DuplicateDocument).access('D'),
+    results(ResultsCommand::DeleteDocument).access('L'),
+];
+
+/// How many runs of the shown run's plan just before it are drawn behind
+/// it, thinner: one of them is on.
+const OVERLAY_MENU: &[MenuEntry] = &[
+    MenuEntry::radio(ResultsCommand::OverlayPrevious(0).key(), "None").access('N'),
+    MenuEntry::radio(ResultsCommand::OverlayPrevious(1).key(), "The previous run").access('P'),
+    MenuEntry::radio(
+        ResultsCommand::OverlayPrevious(2).key(),
+        "The previous 2 runs",
+    )
+    .access('2'),
+    MenuEntry::radio(
+        ResultsCommand::OverlayPrevious(3).key(),
+        "The previous 3 runs",
+    )
+    .access('3'),
 ];
 
 /// The A and B cursors: arming them, which one the keys move, where they

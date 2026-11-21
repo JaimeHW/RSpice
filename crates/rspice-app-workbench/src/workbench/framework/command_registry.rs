@@ -78,6 +78,10 @@ impl CommandFlags {
     /// Repeat last command runs it again: dispatching it while it can run
     /// records it as the last repeatable command.
     pub const REPEATABLE: Self = Self(1 << 6);
+    /// Answers for itself where it cannot run: raised there anyway, from the
+    /// palette, which stays open while what it reaches can go, it runs and
+    /// states why. Any other command is not run where it cannot run.
+    pub const STATES_ITS_REFUSAL: Self = Self(1 << 7);
 
     /// These flags, with `flag` set when `set` holds.
     #[must_use]
@@ -675,7 +679,6 @@ pub mod ids {
         NEW_CELL = "new-cell";
         NEW_PROJECT = "new-project";
         NEW_VERILOGA_DEVICE = "new-veriloga-device";
-        OBJECT_PROPERTIES = "object-properties";
         OPEN_CONSOLE = "open-console";
         OPEN_NETLIST = "open-netlist";
         OPEN_NOTIFICATIONS = "open-notifications";

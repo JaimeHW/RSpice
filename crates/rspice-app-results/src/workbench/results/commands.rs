@@ -84,8 +84,17 @@ pub enum ResultsCommand {
     FitYToVisibleX,
     /// Keep the view in front as a result document of the project.
     SaveViewAsDocument,
+    /// Give the saved result document shown another name.
+    RenameDocument,
+    /// Copy the saved result document shown as a document of its own.
+    DuplicateDocument,
+    /// Delete the saved result document shown.
+    DeleteDocument,
     /// Put back every run deleted since the project opened.
     RestoreDeletedRuns,
+    /// Draw this many runs of the shown run's plan just before it behind
+    /// it, thinner; none for zero.
+    OverlayPrevious(u8),
 }
 
 const NONE: &[ShortcutBinding] = &[];
@@ -122,7 +131,7 @@ const PREVIOUS_CROSSING: &[ShortcutBinding] =
     &[primary(Key::ArrowLeft, false, true, false, "Alt+Left")];
 const MAXIMUM: &[ShortcutBinding] = &[primary(Key::ArrowUp, false, false, true, "Shift+Up")];
 const MINIMUM: &[ShortcutBinding] = &[primary(Key::ArrowDown, false, false, true, "Shift+Down")];
-const SWITCH_CURSOR: &[ShortcutBinding] = &[primary(Key::S, false, false, false, "S")];
+const SWITCH_CURSOR: &[ShortcutBinding] = &[primary(Key::S, false, false, true, "Shift+S")];
 const MARKER_AT_CURSOR: &[ShortcutBinding] = &[primary(Key::M, false, false, true, "Shift+M")];
 const CALCULATOR: &[ShortcutBinding] = &[primary(Key::E, false, false, false, "E")];
 const ADD_MEASUREMENT: &[ShortcutBinding] = &[primary(Key::E, false, false, true, "Shift+E")];
@@ -136,10 +145,12 @@ const PROJECT: CommandFlags = ANYWHERE.with(CommandFlags::REQUIRES_OPEN_PROJECT,
 /// A command that needs an open project and waits for its operation to end.
 const PROJECT_TRANSACTION: CommandFlags =
     PROJECT.with(CommandFlags::BLOCKED_BY_PROJECT_OPERATION, true);
+/// A hop to where a run came from, which states why when it cannot go.
+const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL, true);
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 58] = [
+    pub const ALL: [Self; 65] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -197,7 +208,14 @@ impl ResultsCommand {
         Self::MarkerAtCursor,
         Self::FitYToVisibleX,
         Self::SaveViewAsDocument,
+        Self::RenameDocument,
+        Self::DuplicateDocument,
+        Self::DeleteDocument,
         Self::RestoreDeletedRuns,
+        Self::OverlayPrevious(0),
+        Self::OverlayPrevious(1),
+        Self::OverlayPrevious(2),
+        Self::OverlayPrevious(3),
     ];
 
     /// The command `key` names, if the feature declares one.
@@ -242,7 +260,14 @@ impl ResultsCommand {
             Self::MarkerAtCursor => CommandKey::new("marker-at-cursor"),
             Self::FitYToVisibleX => CommandKey::new("fit-y-to-visible-x"),
             Self::SaveViewAsDocument => CommandKey::new("save-view-as-document"),
+            Self::RenameDocument => CommandKey::new("rename-result-document"),
+            Self::DuplicateDocument => CommandKey::new("duplicate-result-document"),
+            Self::DeleteDocument => CommandKey::new("delete-result-document"),
             Self::RestoreDeletedRuns => CommandKey::new("restore-deleted-runs"),
+            Self::OverlayPrevious(0) => CommandKey::new("overlay-previous-runs-off"),
+            Self::OverlayPrevious(1) => CommandKey::new("overlay-previous-run"),
+            Self::OverlayPrevious(2) => CommandKey::new("overlay-previous-2-runs"),
+            Self::OverlayPrevious(_) => CommandKey::new("overlay-previous-3-runs"),
         }
     }
 
@@ -302,21 +327,21 @@ impl ResultsCommand {
             Self::OpenProducingPlan => (
                 "Open producing simulation plan",
                 "Results",
-                PROJECT,
+                PROJECT_HOP,
                 ShortcutContext::ResultsWorkspace,
                 NONE,
             ),
             Self::OpenTaskDeck => (
                 OPEN_TASK_DECK,
                 "Results",
-                PROJECT,
+                PROJECT_HOP,
                 ShortcutContext::ResultsWorkspace,
                 NONE,
             ),
             Self::RevealProducerLog => (
                 "Open producing run log",
                 "Results",
-                PROJECT,
+                PROJECT_HOP,
                 ShortcutContext::ResultsWorkspace,
                 NONE,
             ),
@@ -419,8 +444,41 @@ impl ResultsCommand {
                 ShortcutContext::ResultsWorkspace,
                 SAVE_VIEW,
             ),
+            Self::RenameDocument => (
+                "Rename document…",
+                "Results",
+                PROJECT_TRANSACTION,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::DuplicateDocument => (
+                "Duplicate document",
+                "Results",
+                PROJECT_TRANSACTION,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::DeleteDocument => (
+                "Delete document",
+                "Results",
+                PROJECT_TRANSACTION,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
             Self::RestoreDeletedRuns => (
                 "Restore deleted runs",
+                "Results",
+                ANYWHERE,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::OverlayPrevious(depth) => (
+                match depth {
+                    0 => "Overlay no previous run",
+                    1 => "Overlay the previous run",
+                    2 => "Overlay the previous 2 runs",
+                    _ => "Overlay the previous 3 runs",
+                },
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,

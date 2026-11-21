@@ -351,12 +351,13 @@ pub(super) fn result_artifact_context_menu(
             )
             .err();
         let exact_available = exact_error.is_none();
+        let open_refusal = viewer_refusal(state, artifact, artifact.viewer);
         let open = ui.add_enabled(
-            exact_available,
+            exact_available && open_refusal.is_none(),
             egui::Button::new("Open in active result pane"),
         );
-        if let Some(error) = exact_error.as_deref() {
-            open.clone().on_disabled_hover_text(error);
+        if let Some(reason) = exact_error.as_deref().or(open_refusal) {
+            open.clone().on_disabled_hover_text(reason);
         }
         if open.clicked() {
             open_result_artifact(state, artifact, false);
@@ -373,9 +374,13 @@ pub(super) fn result_artifact_context_menu(
             }
             ui.close();
         }
-        let table = ui.add_enabled(exact_available, egui::Button::new("Open as table"));
-        if let Some(error) = exact_error.as_deref() {
-            table.clone().on_disabled_hover_text(error);
+        let table_refusal = viewer_refusal(state, artifact, ResultViewer::Table);
+        let table = ui.add_enabled(
+            exact_available && table_refusal.is_none(),
+            egui::Button::new("Open as table"),
+        );
+        if let Some(reason) = exact_error.as_deref().or(table_refusal) {
+            table.clone().on_disabled_hover_text(reason);
         }
         if table.clicked() {
             if select_result_artifact(state, &artifact.identity) {
@@ -448,6 +453,27 @@ pub(super) fn result_artifact_context_menu(
             ui.close();
         }
     });
+}
+
+/// Why `viewer` would not open on `artifact`'s analysis, as the viewer's
+/// command answers it, when the artifact belongs to the run shown; `None`
+/// when it would. For another run the command answers once the row has
+/// shown its run, and says why on the status line if it cannot open.
+pub(super) fn viewer_refusal(
+    state: &ResultsParts<'_>,
+    artifact: &ResultArtifact,
+    viewer: ResultViewer,
+) -> Option<&'static str> {
+    let (run, _, _) = artifact
+        .identity
+        .resolve(&state.model.simulation.retained.runs)?;
+    if state.model.simulation.view.active_run_idx != Some(run) {
+        return None;
+    }
+    crate::workbench::documents::result_document::viewer_unavailability_reason(
+        state.results_reads(),
+        viewer,
+    )
 }
 
 fn open_result_artifact(

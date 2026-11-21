@@ -430,6 +430,25 @@ mod shortcut_ownership_tests {
     #[test]
     fn linked_cursor_command_toggles_real_results_state() {
         let mut app = RSpiceApp::test_instance();
+        let mut run = rspice_app_state::state::SimulationRun::new(1);
+        run.add_analysis(
+            rspice_app_state::state::AnalysisResult::new(
+                1,
+                rspice_app_state::state::AnalysisType::Transient,
+                "TRAN",
+            )
+            .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                "#fff",
+            )]),
+        );
+        app.state.model.simulation.retained.runs = vec![run].into();
+        assert!(app.state.model.simulation.select_run(0));
+        app.state
+            .workbench
+            .activate(rspice_app_state::workbench::workspace::Workspace::Results);
         assert!(!app.state.results.results.session.linked_cursors);
         app.execute_command_key(
             rspice_app_results::workbench::results::commands::ResultsCommand::ToggleLinkedCursors

@@ -695,6 +695,36 @@ impl SimulationState {
         }
     }
 
+    /// The datasets drawn behind the active one: those overlaid one by one,
+    /// then the [`overlay_previous`](SimulationViewState::overlay_previous)
+    /// runs of the active run's plan just before it in the history.
+    pub fn overlaid_dataset_ids(&self) -> Vec<DatasetId> {
+        let mut ids = self.view.overlay_dataset_ids.clone();
+        let plan_of = |run: &SimulationRun| {
+            run.prepared_receipt()
+                .and_then(|receipt| receipt.simulation_plan_id())
+        };
+        if let Some(active) = self.view.active_run_idx
+            && let Some(plan) = self.retained.runs.get(active).and_then(plan_of)
+        {
+            // The history lists the newest run first: the runs before the
+            // active one come after it.
+            let previous = self
+                .retained
+                .runs
+                .iter()
+                .skip(active + 1)
+                .filter(|run| plan_of(run) == Some(plan))
+                .take(self.view.overlay_previous);
+            for run in previous {
+                if !ids.contains(&run.dataset_id) {
+                    ids.push(run.dataset_id);
+                }
+            }
+        }
+        ids
+    }
+
     /// The runs to draw: the active run first (full weight), then every
     /// overlaid run in history order (reduced weight). The active run never
     /// repeats even when its ID is also in the overlay set.
@@ -704,10 +734,9 @@ impl SimulationState {
         if let Some(run) = self.active_run() {
             out.push(run);
         }
+        let overlaid = self.overlaid_dataset_ids();
         for run in &self.retained.runs {
-            if Some(run.dataset_id) != active_id
-                && self.view.overlay_dataset_ids.contains(&run.dataset_id)
-            {
+            if Some(run.dataset_id) != active_id && overlaid.contains(&run.dataset_id) {
                 out.push(run);
             }
         }

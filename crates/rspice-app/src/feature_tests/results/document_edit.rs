@@ -1098,7 +1098,7 @@ fn quick_view_properties_are_the_reader_s_own() {
     app.state.model.simulation.retained.runs = vec![transient_run(1)].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
-    app.state.workbench.workspace = Workspace::Results;
+    app.state.workbench.activate(Workspace::Results);
 
     apply_properties(&mut app, 5, true);
     assert_eq!(shown_digits(&app), 5);

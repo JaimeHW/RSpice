@@ -1,6 +1,7 @@
-//! The Results keys: every Results command on a menu row with its key, no
-//! key of Results shared with another command that acts there, and the keys
-//! acting through the shortcut resolver with a plot focused by Tab.
+//! The Results keys and commands: every Results command on a menu row with
+//! its key, no key of Results shared with another command that acts there,
+//! the keys acting through the shortcut resolver with a plot focused by Tab,
+//! and a command raised where it cannot run refused with its reason.
 
 use egui::{Context, Event, Key, Modifiers, RawInput, Rect};
 
@@ -15,7 +16,9 @@ use rspice_app_state::state::{
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ALL_MENUS;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{self, MenuRow, menu_keys};
-use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
+use rspice_app_workbench::workbench::framework::command_registry::{
+    CommandAvailability, WorkbenchCommand,
+};
 use rspice_app_workbench::workbench::framework::host::Host;
 
 /// Every command row the menus show, submenus included.
@@ -276,4 +279,44 @@ fn with_a_plot_focused_by_tab_the_cursor_keys_and_delete_still_act() {
         .flat_map(|document| document.traces())
         .any(|trace| trace.label == "V(out)" && !trace.visible);
     assert!(hidden, "the view hides V(out)");
+}
+
+/// A command raised where it cannot run is not run, and its menu row is off
+/// and says why. With no result retained, arming the cursors from a
+/// feature's menu or another command armed them regardless.
+#[test]
+fn an_unavailable_command_is_not_run_and_its_row_says_why() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.model.simulation.retained.runs = Vec::new().into();
+    app.state.workbench.activate(Workspace::Results);
+    let key = ResultsCommand::ToggleCursorTool.key();
+    let CommandAvailability::Disabled(reason) = app.command_availability(key) else {
+        panic!("the cursors cannot be armed with no result retained");
+    };
+    let armed = app.state.results.results.session.cursor_tool.is_armed();
+
+    app.execute_command_key(key);
+
+    assert_eq!(
+        app.state.results.results.session.cursor_tool.is_armed(),
+        armed,
+        "the refused command ran"
+    );
+    let mut rows = Vec::new();
+    for menu in ALL_MENUS {
+        command_rows(
+            &menu_entries::resolve_menu_rows(
+                app.menu_entries(menu),
+                &app,
+                CommandPlatform::Desktop,
+                egui::os::OperatingSystem::Windows,
+            ),
+            &mut rows,
+        );
+    }
+    let row = rows
+        .iter()
+        .find(|row| row.command == key)
+        .expect("the cursors have a menu row");
+    assert_eq!(row.availability, CommandAvailability::Disabled(reason));
 }

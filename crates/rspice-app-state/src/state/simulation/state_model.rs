@@ -161,6 +161,12 @@ pub struct SimulationViewState {
     /// the history are pruned automatically.
     pub overlay_dataset_ids: Vec<DatasetId>,
 
+    /// How many runs of the shown run's plan just before it are drawn
+    /// behind it, at an overlay's weight, as ADS's History and EZwave's
+    /// keep-previous setting draw them. Zero draws none. Runtime: the
+    /// reader's setting for the session.
+    pub overlay_previous: usize,
+
     /// The analysis each run showed when another run was selected, so that
     /// going back to a run goes back to its analysis rather than its first.
     /// Runtime only: two windows on two runs select each in turn every frame.

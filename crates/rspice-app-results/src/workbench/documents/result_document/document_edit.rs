@@ -151,6 +151,10 @@ pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) -> Option<DialogRequest
                 rspice_results_ui::document_dialogs::properties::show(ctx, &mut draft, &scope);
             (ResultDocumentDialog::Properties(draft), choice)
         }
+        ResultDocumentDialog::Rename(mut draft) => {
+            let choice = rspice_results_ui::document_dialogs::rename::show(ctx, &mut draft);
+            (ResultDocumentDialog::Rename(draft), choice)
+        }
     };
     trace_pick::arm(
         state,
@@ -192,6 +196,9 @@ pub fn commit_open_dialog(state: &mut ResultsParts<'_>) {
         Some(ResultDocumentDialog::Measurement(draft)) => measurement::commit(state, &draft),
         Some(ResultDocumentDialog::Family(draft)) => family::commit(state, &draft),
         Some(ResultDocumentDialog::Properties(draft)) => properties::commit(state, draft),
+        Some(ResultDocumentDialog::Rename(draft)) => {
+            crate::workbench::chrome::document_bar::results::commit_rename(state, &draft)
+        }
         None => return,
     };
     match result {

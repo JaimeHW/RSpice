@@ -4,13 +4,15 @@
 //! A command runs behind one prologue, always in the same order: a project
 //! operation in flight holds it back, a command that needs a project needs
 //! one open, an active source editor takes the editing commands it handles,
-//! a read-only schematic refuses an edit, a pending inspector edit commits
-//! first, and a repeatable command is recorded for Repeat. Only then does the
-//! command's owner carry it out: the feature that declares it, in its
-//! context; for one of the workbench's routed commands, the part the shell's
-//! edit target sends it to; or for one of the shell's own commands, the
-//! shell ([`ShellCommand::carry_out`]). A command a feature's command
-//! raised runs as soon as that one returns, behind the same prologue.
+//! a read-only schematic refuses an edit, a feature's command that cannot
+//! run here is not run (its menu row is off and says why), a pending
+//! inspector edit commits first, and a repeatable command is recorded for
+//! Repeat. Only then does the command's owner carry it out: the feature that
+//! declares it, in its context; for one of the workbench's routed commands,
+//! the part the shell's edit target sends it to; or for one of the shell's
+//! own commands, the shell ([`ShellCommand::carry_out`]). A command a
+//! feature's command raised runs as soon as that one returns, behind the
+//! same prologue.
 //!
 //! A command acts on a source editor's text as typed before it. The focused
 //! editor applies a frame's keys as the page draws, after the keys' own
@@ -257,6 +259,16 @@ impl RSpiceApp {
                 &self.state.model,
                 &mut self.state.workbench,
             );
+            return;
+        }
+        // A feature's command runs only where it will act. Raised where it
+        // cannot, by a row of a feature's own menu or by another command, it
+        // is not run; the row that offers it is off and says why. One that
+        // states its own refusal runs to say it.
+        if let Owner::Feature = owner
+            && !flags.contains(CommandFlags::STATES_ITS_REFUSAL)
+            && !self.command_availability(spec.key).is_available()
+        {
             return;
         }
         if flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT)
