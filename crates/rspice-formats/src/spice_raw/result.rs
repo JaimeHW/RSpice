@@ -42,7 +42,7 @@ use rspice_results::waveform::RetainedWaveform;
 
 use crate::SignalType;
 use crate::waveform_io::result::{
-    WaveformExportError, axis_signal_for_analysis, export_samples, shared_coordinate,
+    RowReader, WaveformExportError, axis_signal_for_analysis, checked_coordinate,
     signal_type_from_waveform_name,
 };
 
@@ -89,6 +89,12 @@ impl std::error::Error for RawProjectionError {
 #[derive(Debug)]
 pub struct RawExport {
     pub bytes: Vec<u8>,
+    pub facts: RawPlotFacts,
+}
+
+/// What a written rawfile holds, in the terms a rawfile reader lists it by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawPlotFacts {
     /// The analysis plot's `Plotname:`.
     pub plot_name: &'static str,
     /// The analysis plot's scale variable.
@@ -119,8 +125,8 @@ struct Column<'a> {
     name: &'a str,
     var_type: &'static str,
     unit: Option<&'a str>,
-    real: std::borrow::Cow<'a, [f64]>,
-    imag: Option<std::borrow::Cow<'a, [f64]>>,
+    real: &'a rspice_results::waveform::WaveformValues,
+    imag: Option<&'a rspice_results::waveform::WaveformValues>,
 }
 
 /// The rawfile type a signal is declared with: its unit's quantity when it
@@ -166,13 +172,53 @@ pub fn encode_result_raw<W: AsRef<RetainedWaveform>>(
     format: RawFormat,
     limits: WaveformImportLimits,
 ) -> Result<RawExport, RawProjectionError> {
+    let mut bytes = Vec::new();
+    let facts = write_result_raw(
+        analysis,
+        waveforms,
+        carries_event_node,
+        format,
+        limits,
+        &mut bytes,
+    )?;
+    Ok(RawExport { bytes, facts })
+}
+
+/// Whether `waveforms` of `analysis` can be written as a rawfile, checked without reading a
+/// sample, so a writer can refuse before it asks where the file goes.
+pub fn check_result_raw<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
+    waveforms: &[&W],
+    limits: WaveformImportLimits,
+) -> Result<(), RawProjectionError> {
+    plot_name(analysis.analysis_type).ok_or_else(|| RawProjectionError::UnsupportedAnalysis {
+        analysis: analysis.analysis_type,
+        label: analysis.label.clone(),
+    })?;
+    checked_coordinate(waveforms, limits).map_err(RawProjectionError::Waveforms)?;
+    Ok(())
+}
+
+/// Write `analysis` as [`encode_result_raw`] encodes it, to `out` as its samples are read: each
+/// column a block at a time, so an analysis kept in a results store of any length is written
+/// holding one block of each column. A column that cannot be read stops the write with its
+/// failure; what reached `out` is then a partial file its caller discards.
+pub fn write_result_raw<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
+    waveforms: &[&W],
+    carries_event_node: &dyn Fn(&str) -> bool,
+    format: RawFormat,
+    limits: WaveformImportLimits,
+    out: &mut dyn std::io::Write,
+) -> Result<RawPlotFacts, RawProjectionError> {
     let Some(plot_name) = plot_name(analysis.analysis_type) else {
         return Err(RawProjectionError::UnsupportedAnalysis {
             analysis: analysis.analysis_type,
             label: analysis.label.clone(),
         });
     };
-    let coordinate = shared_coordinate(waveforms, limits).map_err(RawProjectionError::Waveforms)?;
+    let reference = checked_coordinate(waveforms, limits).map_err(RawProjectionError::Waveforms)?;
+    let points = reference.x.len();
     let (scale_name, scale_type, scale_unit) = scale(analysis);
 
     let mut columns: Vec<Column<'_>> = Vec::with_capacity(waveforms.len());
@@ -183,19 +229,14 @@ pub fn encode_result_raw<W: AsRef<RetainedWaveform>>(
                 name: &complex.source_name,
                 var_type: variable_type(&complex.source_name, waveform.unit.as_deref()),
                 unit: waveform.unit.as_deref(),
-                real: export_samples(&complex.source_name, &complex.real)
-                    .map_err(RawProjectionError::Waveforms)?,
-                imag: Some(
-                    export_samples(&complex.source_name, &complex.imag)
-                        .map_err(RawProjectionError::Waveforms)?,
-                ),
+                real: &complex.real,
+                imag: Some(&complex.imag),
             },
             None => Column {
                 name: &waveform.name,
                 var_type: variable_type(&waveform.name, waveform.unit.as_deref()),
                 unit: waveform.unit.as_deref(),
-                real: export_samples(&waveform.name, &waveform.y)
-                    .map_err(RawProjectionError::Waveforms)?,
+                real: &waveform.y,
                 imag: None,
             },
         };
@@ -260,40 +301,91 @@ pub fn encode_result_raw<W: AsRef<RetainedWaveform>>(
         // `log` is never inferred from the samples.
         logarithmic: false,
         variables: &variables,
-        points: coordinate.len(),
+        points,
     };
 
     let (events, buses) = event_plots(analysis, carries_event_node)?;
-    let mut bytes = Vec::new();
-    write_raw_plot(
-        &mut bytes,
+    let mut scale = RowReader::new(&reference.name, &reference.x);
+    let mut readers = columns
+        .iter()
+        .map(|column| {
+            (
+                RowReader::new(column.name, column.real),
+                column.imag.map(|imag| RowReader::new(column.name, imag)),
+            )
+        })
+        .collect::<Vec<_>>();
+    // A row that cannot be read stops the write at the next bytes it would write, rather than
+    // writing the rest of the file as gaps.
+    let unreadable = std::cell::Cell::new(false);
+    let read = |reader: &mut RowReader<'_>, row: usize| {
+        let value = reader.at(row);
+        if value.is_nan() && reader.failed() {
+            unreadable.set(true);
+        }
+        value
+    };
+    let mut writer = StopWhen {
+        out,
+        stop: &unreadable,
+    };
+    let written = write_raw_plot(
+        &mut writer,
         &layout,
         format,
         write_raw_exponent,
         |row, variable| match variable.checked_sub(1) {
-            None => (coordinate[row], 0.0),
+            None => (read(&mut scale, row), 0.0),
             Some(column) => {
-                let column = &columns[column];
+                let (real, imag) = &mut readers[column];
                 (
-                    column.real[row],
-                    column.imag.as_ref().map_or(0.0, |imag| imag[row]),
+                    read(real, row),
+                    imag.as_mut().map_or(0.0, |imag| read(imag, row)),
                 )
             }
         },
     )
-    .and_then(|()| write_event_plots(&mut bytes, &events, &buses, format))
-    .map_err(RawProjectionError::Write)?;
+    .and_then(|()| write_event_plots(&mut writer, &events, &buses, format));
+    if let Some(failure) = std::iter::once(&mut scale)
+        .chain(
+            readers
+                .iter_mut()
+                .flat_map(|(real, imag)| std::iter::once(real).chain(imag.as_mut())),
+        )
+        .find_map(RowReader::failure)
+    {
+        return Err(RawProjectionError::Waveforms(failure));
+    }
+    written.map_err(RawProjectionError::Write)?;
     let variables = variables.len();
-    Ok(RawExport {
-        bytes,
+    Ok(RawPlotFacts {
         plot_name,
         scale_name,
-        points: coordinate.len(),
+        points,
         variables,
         complex,
         event_plots: events.len(),
         bus_plots: buses.len(),
     })
+}
+
+/// A writer that refuses further bytes once `stop` is set.
+struct StopWhen<'a> {
+    out: &'a mut dyn std::io::Write,
+    stop: &'a std::cell::Cell<bool>,
+}
+
+impl std::io::Write for StopWhen<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.stop.get() {
+            return Err(std::io::Error::other("a column could not be read"));
+        }
+        self.out.write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
+    }
 }
 
 /// The event plots and bus plots of the nodes the export carries.

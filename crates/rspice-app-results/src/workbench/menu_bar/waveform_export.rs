@@ -2,6 +2,7 @@
 
 mod format_picker;
 mod hdf5;
+mod job;
 mod matlab;
 mod noise_stack;
 mod numpy;
@@ -25,6 +26,7 @@ pub use format_picker::{
     DatasetExportChoice, DatasetExportForm, DatasetExportPicker, ExportedSignals,
     dataset_export_form, dataset_export_picker, show_dataset_export_picker,
 };
+pub use job::{ResultExportJob, finish_export_job};
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
@@ -232,17 +234,19 @@ pub fn action_export_result_selection_with_io(
 
 /// Export the displayed result in the stored format, narrowed to what the
 /// export form chose: one of the displayed analyses, and the plotted signals
-/// or every one the analysis retains.
+/// or every one the analysis retains. An export written as it is read
+/// returns its job, which the caller keeps until [`finish_export_job`] says
+/// how it ended.
 pub fn action_export_dataset_with_io(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     choice: &DatasetExportChoice,
-) {
+) -> Option<ResultExportJob> {
     let mut displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state.results_reads()) {
         Ok(displayed) => displayed,
         Err(message) => {
             state.prompt(message);
-            return;
+            return None;
         }
     };
     // The analysis the form chose stands in for the view's own, so every
@@ -250,7 +254,7 @@ pub fn action_export_dataset_with_io(
     if let Some(index) = choice.analysis {
         if !displayed.analysis_indices.contains(&index) {
             state.prompt("The analysis chosen for export is no longer displayed. Export again.");
-            return;
+            return None;
         }
         displayed.analysis_indices = vec![index];
         displayed.primary_analysis_index = Some(index);
@@ -268,7 +272,7 @@ pub fn action_export_dataset_with_io(
             "Result export failed",
             format!("the stored result did not verify: {error}"),
         );
-        return;
+        return None;
     }
     let export_format = state
         .model
@@ -292,7 +296,7 @@ pub fn action_export_dataset_with_io(
     };
     if let Err(error) = result_export_format_availability_by_id(contract_format.canonical_id()) {
         state.prompt(error);
-        return;
+        return None;
     }
     // These encoders currently publish one retained analysis. Enforce that
     // before any route selects the primary analysis and discards other strips.
@@ -316,7 +320,7 @@ pub fn action_export_dataset_with_io(
             "This export supports one analysis, and this view shows several. Choose the \
              analysis in Export result dataset\u{2026}, or choose CSV/TSV to export the displayed stack.",
         );
-        return;
+        return None;
     }
     if let Some(kind) = match export_format {
         EngineeringExportFormat::RSpiceResultBundle => {
@@ -337,10 +341,10 @@ pub fn action_export_dataset_with_io(
                 "RSpice bundles export one waveform analysis with a shared x-axis. Select a \
                  waveform sheet, or choose CSV/TSV for this derived or tabular view.",
             );
-            return;
+            return None;
         }
         export_native_result_bundle(state, io, &displayed, kind, signals);
-        return;
+        return None;
     }
     // Binary payloads of the retained analysis, each publishing its own bytes
     // and returning here. A dump is the transient's event schedule, which no
@@ -353,47 +357,45 @@ pub fn action_export_dataset_with_io(
     match export_format {
         EngineeringExportFormat::ValueChangeDump => {
             vcd::export_vcd(state, io, &displayed);
-            return;
+            return None;
         }
         EngineeringExportFormat::NumpyArray => {
             numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Array, signals);
-            return;
+            return None;
         }
         EngineeringExportFormat::NumpyArchive => {
             numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Archive, signals);
-            return;
+            return None;
         }
         EngineeringExportFormat::Hdf5EngineeringDataset => {
             hdf5::export_hdf5(state, io, &displayed, signals);
-            return;
+            return None;
         }
         EngineeringExportFormat::MatlabV5File => {
             matlab::export_matlab(state, io, &displayed, signals);
-            return;
+            return None;
         }
         EngineeringExportFormat::SpiceRawBinary => {
-            raw::export_raw(
+            return raw::export_raw(
                 state,
                 io,
                 &displayed,
                 rspice_core::io::RawFormat::Binary,
                 signals,
             );
-            return;
         }
         EngineeringExportFormat::SpicePwl => {
             pwl::export_pwl(state, io, &displayed, choice.trace.as_deref());
-            return;
+            return None;
         }
         EngineeringExportFormat::SpiceRawAscii => {
-            raw::export_raw(
+            return raw::export_raw(
                 state,
                 io,
                 &displayed,
                 rspice_core::io::RawFormat::Ascii,
                 signals,
             );
-            return;
         }
         _ => {}
     }
@@ -435,7 +437,7 @@ pub fn action_export_dataset_with_io(
             // came back holding a transient's event history.
             Err(reason) => state.prompt(reason),
         }
-        return;
+        return None;
     }
 
     let prepared = match prepare_waveform_dataset(
@@ -450,7 +452,7 @@ pub fn action_export_dataset_with_io(
         Ok(prepared) => prepared,
         Err(message) => {
             state.prompt(message);
-            return;
+            return None;
         }
     };
 
@@ -459,6 +461,7 @@ pub fn action_export_dataset_with_io(
         TabularExportFormat::Tsv => export_tsv(state, io, &prepared),
         TabularExportFormat::TouchstoneWhereCompatible => export_touchstone(state, io, &prepared),
     }
+    None
 }
 
 struct PreparedTypedResultCsv {

@@ -15,6 +15,7 @@ mod periodic_noise;
 mod pwl;
 mod soa;
 mod spice_raw;
+mod streamed;
 mod typed_csv;
 
 use std::path::PathBuf;

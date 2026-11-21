@@ -18,6 +18,8 @@ pub struct ResultsState {
     /// holds it only while the form is open.
     pub dataset_export_form:
         Option<Box<crate::workbench::menu_bar::waveform_export::DatasetExportForm>>,
+    /// The export being written as it is read, while it is written.
+    pub dataset_export_job: Option<crate::workbench::menu_bar::waveform_export::ResultExportJob>,
     /// Run details…: the provenance of one retained run. Boxed: the
     /// manifest it carries would otherwise outgrow the slot's stack budget.
     pub run_details: Option<Box<crate::workbench::docks::RunDetailsDialogState>>,

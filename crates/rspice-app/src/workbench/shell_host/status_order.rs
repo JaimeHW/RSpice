@@ -222,7 +222,7 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         order: 4,
         workspace: None,
         content: results_work_cell,
-        activate: Some(|app, _| cancel_project_pack(app)),
+        activate: Some(|app, _| cancel_results_work(app)),
     },
 ];
 
@@ -704,8 +704,9 @@ fn results_save_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<Statu
     }
 }
 
-/// Results work run beside the window, while it runs: a pack being written or opened, how far
-/// it got, and pressing it cancels the pack; else how far the checks of kept results got.
+/// Results work run beside the window, while it runs: a pack being written or opened, or else an
+/// export being written, how far it got, and pressing it cancels it; else how far the checks of
+/// kept results got.
 fn results_work_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -718,6 +719,18 @@ fn results_work_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<Statu
                 mark: StatusMark::None,
                 control: StatusControl::Button,
                 hover: Some(Cow::Borrowed("Cancel leaves nothing of the pack.")),
+            });
+        }
+        if let Some(export) = &app.state.results.dataset_export_job
+            && let JobState::Running { done, total, .. } = export.state()
+        {
+            return Some(StatusText {
+                text: Cow::Owned(format!("Exporting {} · Cancel", saved_of(done, total))),
+                mark: StatusMark::None,
+                control: StatusControl::Button,
+                hover: Some(Cow::Borrowed(
+                    "Cancel leaves the file the export was writing as it was.",
+                )),
             });
         }
         let checks = &app.state.platform.segment_checks;
@@ -754,9 +767,23 @@ fn results_work_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<Statu
     }
 }
 
-fn cancel_project_pack(app: &mut RSpiceApp) {
+/// Cancel the Results work the status bar shows: the pack, or else the export.
+fn cancel_results_work(app: &mut RSpiceApp) {
     #[cfg(not(target_arch = "wasm32"))]
-    app.state.cancel_project_pack();
+    {
+        use rspice_app_services::workbench::results_job::JobState;
+        let packing = app
+            .state
+            .platform
+            .project_pack
+            .as_ref()
+            .is_some_and(|pack| matches!(pack.state(), JobState::Running { .. }));
+        if packing {
+            app.state.cancel_project_pack();
+        } else if let Some(export) = &app.state.results.dataset_export_job {
+            export.cancel();
+        }
+    }
     #[cfg(target_arch = "wasm32")]
     let _ = app;
 }

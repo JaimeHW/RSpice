@@ -276,8 +276,19 @@ fn render_result_import(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
 
 /// "Export dataset…" asks for a format, the analysis and the signals, then
 /// writes the displayed result as chosen. What the form offers is read from
-/// the view once, on the frame it opens.
+/// the view once, on the frame it opens. An export written as it is read runs
+/// beside the window, one at a time, and is said here when it ends.
 fn render_dataset_export(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
+    if let Some(export) = cx.state.dataset_export_job.take() {
+        let running = crate::workbench::menu_bar::waveform_export::finish_export_job(
+            &mut results_parts(cx),
+            export,
+        );
+        if running.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        cx.state.dataset_export_job = running;
+    }
     if cx.state.dataset_export_form.is_none() {
         let form = crate::workbench::menu_bar::waveform_export::dataset_export_form(
             cx.state.reads(cx.model, cx.wb),
@@ -290,12 +301,20 @@ fn render_dataset_export(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
         &mut cx.state.dataset_export_form,
         &mut cx.model.preferences,
     ) {
+        if cx.state.dataset_export_job.is_some() {
+            results_parts(cx).prompt(
+                "An export is being written. Wait for it to finish, or cancel it in the status \
+                 bar, then export again.",
+            );
+            return;
+        }
         let io = cx.handles.export_io;
-        crate::workbench::menu_bar::waveform_export::action_export_dataset_with_io(
-            &mut results_parts(cx),
-            io,
-            &choice,
-        );
+        cx.state.dataset_export_job =
+            crate::workbench::menu_bar::waveform_export::action_export_dataset_with_io(
+                &mut results_parts(cx),
+                io,
+                &choice,
+            );
     }
 }
 

@@ -109,6 +109,12 @@ pub trait ExportWorkflowIo {
         Err("this export backend does not support binary publication".to_owned())
     }
 
+    /// Whether an export is written to its destination as it is read, on a Results job, through
+    /// [`publish_streamed`], rather than handed to this backend as complete bytes.
+    fn writes_as_it_reads(&self) -> bool {
+        false
+    }
+
     fn write_waveform_csv(
         &self,
         dataset: &crate::io::WaveformDataset,
@@ -290,6 +296,38 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
     fn saved_paths_are_reopenable(&self) -> bool {
         !cfg!(target_arch = "wasm32")
     }
+
+    fn writes_as_it_reads(&self) -> bool {
+        !cfg!(target_arch = "wasm32")
+    }
+}
+
+/// Publish what `write` makes at `destination` as it is made: staged beside the destination and
+/// put in its place, against the destination state accepted after the picker returned, only once
+/// `write` finishes. A `write` that fails or is stopped leaves the destination as it was and
+/// nothing beside it, so an export of any size costs no more memory than its writer holds.
+pub fn publish_streamed(
+    destination: &ObservedExportDestination,
+    write: impl FnOnce(&mut dyn std::io::Write) -> std::io::Result<()>,
+) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::io::durable_file::compare_exchange_with(
+            &destination.path,
+            expected_content(destination)?,
+            write,
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = write;
+        Err(format!(
+            "'{}' is a browser download, which takes complete bytes",
+            destination.path.display()
+        ))
+    }
 }
 
 /// Publish a derived, read-only project manifest through the same observed
@@ -371,20 +409,31 @@ fn publish_observed_bytes(
     destination: &ObservedExportDestination,
     contents: &[u8],
 ) -> Result<(), String> {
-    let expected = match destination.expectation {
-        ExportDestinationExpectation::Missing => crate::io::durable_file::ExpectedContent::Missing,
+    crate::io::durable_file::compare_exchange_bytes(
+        &destination.path,
+        expected_content(destination)?,
+        contents,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// What the destination must still hold when a native export is put in its place.
+#[cfg(not(target_arch = "wasm32"))]
+fn expected_content(
+    destination: &ObservedExportDestination,
+) -> Result<crate::io::durable_file::ExpectedContent, String> {
+    match destination.expectation {
+        ExportDestinationExpectation::Missing => {
+            Ok(crate::io::durable_file::ExpectedContent::Missing)
+        }
         ExportDestinationExpectation::Digest(digest) => {
-            crate::io::durable_file::ExpectedContent::Digest(digest)
+            Ok(crate::io::durable_file::ExpectedContent::Digest(digest))
         }
-        ExportDestinationExpectation::BackendManaged => {
-            return Err(format!(
-                "export destination '{}' has no native publication authorization",
-                destination.path.display()
-            ));
-        }
-    };
-    crate::io::durable_file::compare_exchange_bytes(&destination.path, expected, contents)
-        .map_err(|error| error.to_string())
+        ExportDestinationExpectation::BackendManaged => Err(format!(
+            "export destination '{}' has no native publication authorization",
+            destination.path.display()
+        )),
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

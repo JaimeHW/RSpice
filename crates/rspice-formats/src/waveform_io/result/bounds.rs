@@ -125,6 +125,17 @@ pub(crate) fn shared_coordinate<'a, W: AsRef<RetainedWaveform>>(
     waveforms: &[&'a W],
     limits: WaveformImportLimits,
 ) -> Result<Cow<'a, [f64]>, WaveformExportError> {
+    let reference = checked_coordinate(waveforms, limits)?;
+    export_samples(&reference.name, &reference.x)
+}
+
+/// The waveform whose coordinate every exported signal shares, once the receiving host's sample
+/// limits and the table's shape are checked: no sample is read, so a writer can refuse a table
+/// before it writes a byte and then read the coordinate a block at a time.
+pub(crate) fn checked_coordinate<'a, W: AsRef<RetainedWaveform>>(
+    waveforms: &[&'a W],
+    limits: WaveformImportLimits,
+) -> Result<&'a RetainedWaveform, WaveformExportError> {
     let reference = waveforms
         .iter()
         .map(|waveform| (*waveform).as_ref())
@@ -168,7 +179,71 @@ pub(crate) fn shared_coordinate<'a, W: AsRef<RetainedWaveform>>(
             check("imaginary", complex.imag.len())?;
         }
     }
-    export_samples(&reference.name, &reference.x)
+    Ok(reference)
+}
+
+/// A column read in row order a block at a time, for a writer that writes a table row by row: a
+/// column of any length costs one block of memory. A column held in memory is read in place.
+pub(crate) struct RowReader<'a> {
+    signal: &'a str,
+    values: &'a WaveformValues,
+    first: usize,
+    block: Cow<'a, [f64]>,
+    failure: Option<WaveformExportError>,
+}
+
+impl<'a> RowReader<'a> {
+    pub(crate) fn new(signal: &'a str, values: &'a WaveformValues) -> Self {
+        Self {
+            signal,
+            values,
+            first: 0,
+            block: values.in_memory().map_or(Cow::Borrowed(&[]), Cow::Borrowed),
+            failure: None,
+        }
+    }
+
+    /// Sample `row`. A row whose block cannot be read is unavailable (NaN), and the failure is
+    /// kept for [`Self::failure`]; no block is read after it.
+    pub(crate) fn at(&mut self, row: usize) -> f64 {
+        if let Some(value) = row
+            .checked_sub(self.first)
+            .and_then(|at| self.block.get(at))
+        {
+            return *value;
+        }
+        if self.failure.is_some() || row >= self.values.len() {
+            return f64::NAN;
+        }
+        let end = row
+            .saturating_add(rspice_results::waveform::BLOCK_SAMPLES)
+            .min(self.values.len());
+        match self.values.blocks(row..end).next() {
+            Some(Ok(block)) => {
+                self.first = row;
+                self.block = block;
+                self.block[0]
+            }
+            Some(Err(failure)) => {
+                self.failure = Some(WaveformExportError::Unreadable {
+                    signal: self.signal.to_owned(),
+                    reason: failure.to_string(),
+                });
+                f64::NAN
+            }
+            None => f64::NAN,
+        }
+    }
+
+    /// Whether a row could not be read.
+    pub(crate) fn failed(&self) -> bool {
+        self.failure.is_some()
+    }
+
+    /// Why a row could not be read, if one could not.
+    pub(crate) fn failure(&mut self) -> Option<WaveformExportError> {
+        self.failure.take()
+    }
 }
 
 /// The samples of `values`, the signal `signal`, for a writer that takes them as one array:

@@ -13,10 +13,18 @@
 //! every one when the export writes all signals — follow the analysis plot as
 //! the engine's own per-node event plots, so a mixed run's logic travels
 //! exactly, strength and all, where a VCD keeps four bit states.
+//!
+//! # Written as it is read
+//!
+//! Where the file is one this process writes, the rawfile is written on a
+//! Results job as its samples are read, a block of each column at a time, so
+//! a run kept in a results store exports whatever its length. A browser
+//! download takes the encoded bytes.
 
+use super::job::{ResultExportJob, start_export_job};
 use super::{
     ALL_TRACES_HIDDEN_MESSAGE, ExportedSignals, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE,
-    exported_waveforms, note_result_export_failure, note_result_export_success,
+    event_nodes, exported_waveforms, note_result_export_failure, note_result_export_success,
 };
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
@@ -24,7 +32,9 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 use crate::workbench::workflows::result_import_workflow::exported_waveform_limits;
 
 use rspice_core::io::RawFormat;
-use rspice_formats::spice_raw::result::{RawExport, encode_result_raw};
+use rspice_formats::spice_raw::result::{
+    RawPlotFacts, check_result_raw, encode_result_raw, write_result_raw,
+};
 
 const EXTENSION: &str = "raw";
 
@@ -78,7 +88,10 @@ pub(super) fn export_raw(
     displayed: &ResolvedResultView,
     format: RawFormat,
     signals: ExportedSignals,
-) {
+) -> Option<ResultExportJob> {
+    if io.writes_as_it_reads() {
+        return export_raw_as_read(state, io, displayed, format, signals);
+    }
     let reads = state.results_reads();
     let prepared = match displayed.primary_analysis(reads) {
         Some(analysis) => {
@@ -110,7 +123,7 @@ pub(super) fn export_raw(
         Ok(prepared) => prepared,
         Err(message) => {
             state.prompt(message);
-            return;
+            return None;
         }
     };
 
@@ -129,7 +142,7 @@ pub(super) fn export_raw(
             });
             (path, export)
         }
-        Ok(None) => return,
+        Ok(None) => return None,
         Err(error) => (std::path::PathBuf::from(default_name), Err(error)),
     };
     match export {
@@ -139,7 +152,7 @@ pub(super) fn export_raw(
             crate::workbench::workflows::export_workflow::export_completion_message(
                 label,
                 &published_path,
-                Some(completion_detail(&prepared)),
+                Some(completion_detail(&prepared.facts)),
                 io,
             ),
         ),
@@ -148,10 +161,122 @@ pub(super) fn export_raw(
             state.report_failure(format!("{label} export failed"), error.to_string());
         }
     }
+    None
+}
+
+/// The rawfile written on a job as its samples are read: refused before the
+/// picker opens when it cannot be written, and started once the reader picks
+/// where it goes.
+fn export_raw_as_read(
+    state: &mut ResultsParts<'_>,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    displayed: &ResolvedResultView,
+    format: RawFormat,
+    signals: ExportedSignals,
+) -> Option<ResultExportJob> {
+    let reads = state.results_reads();
+    let Some(analysis) = displayed.primary_analysis(reads) else {
+        state.prompt(NO_ACTIVE_ANALYSIS_MESSAGE);
+        return None;
+    };
+    let waveforms = exported_waveforms(reads, displayed.dataset_id, analysis, signals);
+    let refusal = if waveforms.is_empty() {
+        Some(if analysis.waveforms.is_empty() {
+            NO_SAMPLES_MESSAGE.to_owned()
+        } else {
+            ALL_TRACES_HIDDEN_MESSAGE.to_owned()
+        })
+    } else {
+        check_result_raw(analysis, &waveforms, exported_waveform_limits())
+            .err()
+            .map(|error| error.to_string())
+    };
+    if let Some(refusal) = refusal {
+        state.prompt(refusal);
+        return None;
+    }
+    // What the job writes is fixed now: the analysis, the signals by their
+    // place in it, and the event lanes that ride along.
+    let chosen = analysis
+        .waveforms
+        .iter()
+        .enumerate()
+        .filter(|(_, waveform)| {
+            waveforms
+                .iter()
+                .any(|chosen| std::ptr::eq(*chosen, *waveform))
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let lanes = event_nodes(analysis)
+        .into_iter()
+        .filter(|node| {
+            signals == ExportedSignals::All
+                || plotted_event_lane(reads, displayed.dataset_id, analysis, node)
+        })
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>();
+    let bytes = estimated_bytes(&waveforms, format);
+    let analysis = analysis.clone();
+
+    let label = label(format);
+    let default_name = format!("waveforms.{EXTENSION}");
+    let destination = match io.show_save_dialog(SaveDialogConfig {
+        title: "Export SPICE Rawfile",
+        default_name: &default_name,
+        filter_name: "SPICE Rawfile",
+        filter_extensions: &[EXTENSION],
+    }) {
+        Ok(Some(mut path)) => {
+            crate::io::file_exchange::ensure_file_extension(&mut path, EXTENSION);
+            io.observe_destination(&path)
+        }
+        Ok(None) => return None,
+        Err(error) => Err(error),
+    };
+    let destination = match destination {
+        Ok(destination) => destination,
+        Err(error) => {
+            note_result_export_failure(state, format!("{label} export failed: {error}"));
+            state.report_failure(format!("{label} export failed"), error);
+            return None;
+        }
+    };
+    Some(start_export_job(label, destination, bytes, move |out| {
+        let waveforms = chosen
+            .iter()
+            .map(|&index| &analysis.waveforms[index])
+            .collect::<Vec<_>>();
+        write_result_raw(
+            &analysis,
+            &waveforms,
+            &|node| lanes.contains(node),
+            format,
+            exported_waveform_limits(),
+            out,
+        )
+        .map(|facts| completion_detail(&facts))
+        .map_err(|error| error.to_string())
+    }))
+}
+
+/// About how many bytes the analysis plot of `waveforms` takes, for the
+/// progress of its export: a binary value is eight bytes, an ASCII one about
+/// twenty-five characters.
+fn estimated_bytes(waveforms: &[&crate::state::RetainedTrace], format: RawFormat) -> u64 {
+    let rows = waveforms.first().map_or(0, |waveform| waveform.x.len()) as u64;
+    let values = waveforms.iter().fold(1_u64, |values, waveform| {
+        values + if waveform.complex.is_some() { 2 } else { 1 }
+    });
+    let value_bytes = match format {
+        RawFormat::Binary => 8,
+        RawFormat::Ascii => 25,
+    };
+    rows.saturating_mul(values).saturating_mul(value_bytes)
 }
 
 /// What the file holds, in the terms a rawfile reader lists it by.
-fn completion_detail(export: &RawExport) -> String {
+fn completion_detail(export: &RawPlotFacts) -> String {
     let mut detail = format!(
         "plot '{}': {} points x {} variables on '{}'{}",
         export.plot_name,

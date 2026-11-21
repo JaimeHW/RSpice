@@ -43,9 +43,9 @@ fn a_transient_reads_back_bit_for_bit_in_both_encodings() {
         ]);
     for format in [RawFormat::Binary, RawFormat::Ascii] {
         let export = encode(&analysis, format, NO_EVENTS);
-        assert_eq!(export.plot_name, "Transient Analysis");
-        assert_eq!((export.points, export.variables), (3, 3));
-        assert!(!export.complex);
+        assert_eq!(export.facts.plot_name, "Transient Analysis");
+        assert_eq!((export.facts.points, export.facts.variables), (3, 3));
+        assert!(!export.facts.complex);
         let decoded = decode_spice_raw(&export.bytes, Default::default()).unwrap();
         assert_eq!(decoded.domain, WaveformDomain::Transient);
         assert_eq!(decoded.coordinate_name, "time");
@@ -83,8 +83,8 @@ fn an_ac_sweep_is_a_complex_plot_and_keeps_a_real_trace_real() {
     ]);
     for format in [RawFormat::Binary, RawFormat::Ascii] {
         let export = encode(&analysis, format, NO_EVENTS);
-        assert_eq!(export.plot_name, "AC Analysis");
-        assert!(export.complex);
+        assert_eq!(export.facts.plot_name, "AC Analysis");
+        assert!(export.facts.complex);
         let text = String::from_utf8_lossy(&export.bytes);
         assert!(text.contains("Flags: complex"), "{text}");
         assert!(text.contains("\t1\tV(out)\tvoltage\n"), "{text}");
@@ -198,7 +198,7 @@ fn event_histories_ride_along_as_the_engines_own_plots() {
     let analysis = mixed_transient();
     for format in [RawFormat::Binary, RawFormat::Ascii] {
         let export = encode(&analysis, format, EVERY_EVENT);
-        assert_eq!((export.event_plots, export.bus_plots), (3, 1));
+        assert_eq!((export.facts.event_plots, export.facts.bus_plots), (3, 1));
         let file =
             rspice_core::io::parse_raw_plots_bytes_with_limits(&export.bytes, Default::default())
                 .unwrap();
@@ -224,9 +224,9 @@ fn event_histories_ride_along_as_the_engines_own_plots() {
 fn only_the_named_event_nodes_are_written() {
     let analysis = mixed_transient();
     let export = encode(&analysis, RawFormat::Binary, &|name| name == "q1");
-    assert_eq!((export.event_plots, export.bus_plots), (1, 0));
+    assert_eq!((export.facts.event_plots, export.facts.bus_plots), (1, 0));
     let without = encode(&analysis, RawFormat::Binary, NO_EVENTS);
-    assert_eq!((without.event_plots, without.bus_plots), (0, 0));
+    assert_eq!((without.facts.event_plots, without.facts.bus_plots), (0, 0));
     let decoded = decode_spice_raw(&without.bytes, Default::default()).unwrap();
     assert_eq!(decoded.signals[0].real, [0.0, 1.8]);
 }
