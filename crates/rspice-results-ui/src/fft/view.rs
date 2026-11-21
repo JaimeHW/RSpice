@@ -191,6 +191,7 @@ fn resolution_bandwidth(data: &crate::fft::data::FftData) -> Option<f64> {
 
 /// Render the spectrum; its cursor reads at the reader's significant digits
 /// and by the reader's cursor interpolation.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     fft: &mut FftState,

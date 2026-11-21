@@ -52,6 +52,7 @@ pub fn show_absent(ui: &mut Ui, selected_periodic_noise_without_phase_trace: boo
 /// Draw the retained spectrum and request navigation without mutating host
 /// state; its cursor reads at the reader's significant digits and by the
 /// reader's cursor interpolation.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     model: &PhaseNoiseTrace<'_>,

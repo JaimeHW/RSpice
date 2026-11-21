@@ -1196,10 +1196,10 @@ impl<'a> DataTable<'a> {
             }
             if let Some(step_by) = keys.step {
                 let page = ((memory.height.max(row_h) / row_h).floor() as usize).max(1);
-                if let Some(row) = step(&shown, state.selected_row(), step_by, page) {
+                if let Some(row) = step(shown, state.selected_row(), step_by, page) {
                     let lead = self.selection_at(row, state.selected_column());
                     response.selection_changed |= if keys.extend {
-                        let range = self.range(state, &shown, row);
+                        let range = self.range(state, shown, row);
                         state.extend(lead, range, false)
                     } else {
                         state.select_only(lead)
@@ -1230,7 +1230,7 @@ impl<'a> DataTable<'a> {
                 memory.typed.push_str(&keys.typed.to_lowercase());
                 let column = self.text_column();
                 let found = type_ahead(
-                    &shown,
+                    shown,
                     state.selected_row(),
                     memory.typed.trim_start(),
                     |row| {
@@ -1248,7 +1248,7 @@ impl<'a> DataTable<'a> {
             if let (Some(by), false) = (keys.across, self.cell_selection)
                 && let Some(lead) = state.selected_row()
             {
-                match tree_step(&shown, lead, by, |row| {
+                match tree_step(shown, lead, by, |row| {
                     rows.get(row).first().map_or((0, None), Cell::branch)
                 }) {
                     TreeStep::Expand(open) => response.expand = Some((lead, open)),
@@ -1452,7 +1452,7 @@ impl<'a> DataTable<'a> {
                                 Pressed {
                                     index,
                                     modifiers,
-                                    shown: &shown,
+                                    shown: shown,
                                 },
                                 row,
                             );
