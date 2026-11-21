@@ -47,7 +47,7 @@ pub(super) fn dispatch(name: &str, args: Vec<CalcValue>) -> Result<CalcValue, Ev
             .collect::<Result<_, _>>()?;
         return FunctionRegistry::dispatch(&name, args).map(CalcValue::Real);
     }
-    if matches!(name.as_str(), "abs" | "db") {
+    if matches!(name.as_str(), "abs" | "db" | "db20" | "db10") {
         count(&name, &args, 1)?;
         return project(args.into_iter().next().unwrap().into_complex(), &name)
             .map(CalcValue::Real);
@@ -140,7 +140,8 @@ pub(super) fn project(value: ComplexValue, name: &str) -> Result<RealValue, Eval
             return f64::NAN;
         }
         match name {
-            "db" => (20.0 / std::f64::consts::LN_10) * complex_ops::logarithm(value).re,
+            "db" | "db20" => (20.0 / std::f64::consts::LN_10) * complex_ops::logarithm(value).re,
+            "db10" => (10.0 / std::f64::consts::LN_10) * complex_ops::logarithm(value).re,
             "re" | "real" => value.re,
             "im" | "imag" => value.im,
             "phase" | "phase_deg" | "phase_rad" if value == Complex64::new(0.0, 0.0) => f64::NAN,

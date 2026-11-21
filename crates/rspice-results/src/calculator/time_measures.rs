@@ -11,8 +11,9 @@
 //!   them: `rise(w, 10, 90)` runs from 10 % to 90 % of the way from the
 //!   initial level to the final one, and so does `fall(w, 10, 90)` — on a
 //!   falling edge that is the 90 % level down to the 10 % level. The initial
-//!   and final levels default to the waveform's own excursion; give them to
-//!   fix the 0 % and 100 % levels absolutely, as a logic swing does.
+//!   and final levels default to the first and last samples, as ViVA's
+//!   `riseTime` takes them; give them to fix the 0 % and 100 % levels
+//!   absolutely, as a clock's logic swing needs.
 //! - An edge is a complete transition: the most recent crossing of its first
 //!   threshold, then the next crossing of its second. A runt that turns back
 //!   before the second threshold is not an edge, and a second edge needs the
@@ -277,35 +278,42 @@ fn measured_edge(
         )));
     }
     let wanted = ordinal(name, "edge number", args, 3)?;
-    let (initial, last) = match (
+    let given = match (
         number(name, "initial level", args, 4)?,
         number(name, "final level", args, 5)?,
     ) {
-        (Some(initial), Some(last)) => (initial, last),
-        _ => {
-            let (low, high) = extremes(name, y)?;
-            if sense == Sense::Fall {
-                (high, low)
-            } else {
-                (low, high)
-            }
-        }
+        (Some(initial), Some(last)) => Some((initial, last)),
+        _ => None,
+    };
+    // Unless given, the 0 % and 100 % levels are where the trace starts and
+    // where it ends, as ViVA's riseTime takes them, so an overshoot does not
+    // move the 90 % point.
+    let (initial, last) = match given {
+        Some(levels) => levels,
+        None => step_levels(name, y)?,
+    };
+    let unstated = if given.is_none() {
+        "; its first and last samples set them unless the 0 % and 100 % levels are given"
+    } else {
+        ""
     };
     if initial == last {
         return Err(math(format!(
-            "{name} needs an edge; its initial and final levels are both {initial}"
+            "{name} needs an edge; its initial and final levels are both {initial}{unstated}"
         )));
     }
     let rising = last > initial;
     match (sense, rising) {
         (Sense::Rise, false) => {
             return Err(math(format!(
-                "{name} measures a rising edge, so its final level must be above its initial level"
+                "{name} measures a rising edge, so its final level must be above its initial level\
+                 {unstated}"
             )));
         }
         (Sense::Fall, true) => {
             return Err(math(format!(
-                "{name} measures a falling edge, so its final level must be below its initial level"
+                "{name} measures a falling edge, so its final level must be below its initial level\
+                 {unstated}"
             )));
         }
         _ => {}
@@ -353,14 +361,14 @@ fn measured_edge(
 
 /// `rise(w[, theta1, theta2[, n[, initial, final]]])` — the time the nth
 /// rising edge takes from `theta1` to `theta2` percent of its transition
-/// (default 10 % to 90 % of the waveform's own excursion).
+/// (default 10 % to 90 % of the way from the first sample to the last).
 fn rise(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
     let edge = measured_edge(name, args, Sense::Rise)?;
     Ok(edge.end - edge.start)
 }
 
 /// `fall(w[, theta1, theta2[, n[, initial, final]]])` — as `rise`, on the
-/// nth falling edge; the initial level defaults to the maximum.
+/// nth falling edge.
 fn fall(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
     let edge = measured_edge(name, args, Sense::Fall)?;
     Ok(edge.end - edge.start)

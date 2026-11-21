@@ -144,8 +144,9 @@ const LEVEL_ARGUMENTS: [ArgumentSpec; 3] = [
     arg("Window to", "to", Number, Derived("the end of the trace")),
 ];
 
-const RISE_ARGUMENTS: [ArgumentSpec; 6] = edge_arguments("signal minimum", "signal maximum");
-const FALL_ARGUMENTS: [ArgumentSpec; 6] = edge_arguments("signal maximum", "signal minimum");
+/// `rise`, `fall` and `slewRate` read the 0 % and 100 % levels from where
+/// the trace starts and ends, as ViVA's riseTime does.
+const EDGE_ARGUMENTS: [ArgumentSpec; 6] = edge_arguments("first sample", "last sample");
 
 pub const MEASUREMENTS: &[MeasureSpec] = &[
     MeasureSpec {
@@ -217,8 +218,8 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         summary: "rise time of an edge",
         description: "How long the nth rising edge takes from one percentage of its transition \
                       to another, 10 % to 90 % unless stated. The 0 % and 100 % levels are the \
-                      signal's own excursion unless given.",
-        arguments: &RISE_ARGUMENTS,
+                      first and last samples unless given.",
+        arguments: &EDGE_ARGUMENTS,
     },
     MeasureSpec {
         name: "fall",
@@ -227,7 +228,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         summary: "fall time of an edge",
         description: "How long the nth falling edge takes from one percentage of its transition \
                       to another, 10 % to 90 % of the way down unless stated.",
-        arguments: &FALL_ARGUMENTS,
+        arguments: &EDGE_ARGUMENTS,
     },
     MeasureSpec {
         name: "slewRate",
@@ -235,9 +236,10 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Timing,
         summary: "slope of an edge",
         description: "The average slope of the nth edge between two percentages of its \
-                      transition. The edge runs from the 0 % level to the 100 % level, so give \
-                      them high to low for a falling edge, whose slope is negative.",
-        arguments: &RISE_ARGUMENTS,
+                      transition. The edge runs from the 0 % level to the 100 % level, the \
+                      first and last samples unless given, so a falling edge's slope is \
+                      negative.",
+        arguments: &EDGE_ARGUMENTS,
     },
     MeasureSpec {
         name: "delay",

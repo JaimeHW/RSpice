@@ -175,8 +175,14 @@ const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
     },
     FunctionEntry {
         label: Cow::Borrowed("dB(x)"),
-        hint: "20·log₁₀|x|",
+        hint: "20·log₁₀|x|, an amplitude",
         insert: Cow::Borrowed("dB()"),
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: Cow::Borrowed("dB10(x)"),
+        hint: "10·log₁₀|x|, a power",
+        insert: Cow::Borrowed("dB10()"),
         caret_back: 1,
     },
     FunctionEntry {
@@ -192,9 +198,15 @@ const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
         caret_back: 1,
     },
     FunctionEntry {
-        label: Cow::Borrowed("clip(x, lo, hi)"),
-        hint: "limit range",
+        label: Cow::Borrowed("clip(x, from, to)"),
+        hint: "the part between two x points",
         insert: Cow::Borrowed("clip(, , )"),
+        caret_back: 5,
+    },
+    FunctionEntry {
+        label: Cow::Borrowed("limit(x, lo, hi)"),
+        hint: "each value held between two bounds",
+        insert: Cow::Borrowed("limit(, , )"),
         caret_back: 5,
     },
     FunctionEntry {

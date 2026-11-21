@@ -184,6 +184,19 @@ impl Unit {
         self.factors.is_empty()
     }
 
+    /// Whether the unit measures a power: watts, a squared voltage or current
+    /// (the power either delivers into a resistance), or a density of one of
+    /// them over frequency. Its decibel is `10·log₁₀`, not `20·log₁₀`.
+    pub fn is_power(&self) -> bool {
+        let mut base = self.clone();
+        if base.factors.get("Hz").is_some_and(|halves| *halves < 0) {
+            base.factors.remove("Hz");
+        }
+        ["W", "V^2", "A^2"]
+            .iter()
+            .any(|text| Self::parse(text).as_ref() == Some(&base))
+    }
+
     fn multiply_symbol(&mut self, symbol: &str, halves: i8) {
         let reduced = DERIVED_UNITS
             .iter()

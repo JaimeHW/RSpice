@@ -51,7 +51,9 @@ impl FunctionRegistry {
             "exp" => exp(args),
             "log" | "ln" => ln(args),
             "log10" => log10(args),
-            "db" => db(args),
+            "db" | "db20" => db(args, Decibels::Amplitude),
+            "db10" => db(args, Decibels::Power),
+            "limit" => limit(args),
 
             // Signal processing (series in, series out)
             "deriv" | "derivative" => deriv(args),
@@ -139,21 +141,66 @@ fn log10(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     }
 }
 
-/// Voltage decibels: `20·log₁₀|x|`.
+/// Which decibel a quantity is read in, as ViVA's `dB20` and `dB10` define
+/// them: `20·log₁₀(mag(x))` for an amplitude (a voltage, a current, a ratio
+/// of them), `10·log₁₀(mag(x))` for a power.
+#[derive(Clone, Copy)]
+pub(super) enum Decibels {
+    Amplitude,
+    Power,
+}
+
+impl Decibels {
+    pub(super) fn factor(self) -> f64 {
+        match self {
+            Decibels::Amplitude => 20.0,
+            Decibels::Power => 10.0,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Decibels::Amplitude => "dB20",
+            Decibels::Power => "dB10",
+        }
+    }
+}
+
+/// `dB(x)` and `dB20(x)` are `20·log₁₀|x|`; `dB10(x)` is `10·log₁₀|x|`.
 ///
 /// The magnitude is what is measured, so a negative sample reads as its
 /// absolute value — the sign of a ratio is a phase statement, and phase is
 /// not what a dB axis carries.
-fn decibels(value: f64) -> f64 {
-    20.0 * value.abs().log10()
+fn db(args: Vec<CalcValue>, decibels: Decibels) -> Result<CalcValue, EvaluationError> {
+    let name = decibels.name();
+    check_arg_count(name, &args, 1)?;
+    let factor = decibels.factor();
+    let level = |value: f64| factor * value.abs().log10();
+    match &args[0] {
+        CalcValue::Scalar(s) if *s == 0.0 => Err(domain_error(name, "zero")),
+        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(level(*s))),
+        CalcValue::Waveform(x, y) => Ok(map_domain(x, y, level)),
+    }
 }
 
-fn db(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_count("dB", &args, 1)?;
+/// `limit(x, lo, hi)` — the middle value of the three, sample by sample: `x`
+/// held between the two bounds, whichever order they are given in.
+fn limit(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
+    check_arg_count("limit", &args, 3)?;
+    let first = scalar_arg("limit", "first bound", &args[1])?;
+    let second = scalar_arg("limit", "second bound", &args[2])?;
+    if !first.is_finite() || !second.is_finite() {
+        return Err(EvaluationError::MathError(
+            "limit bounds must be finite numbers".to_owned(),
+        ));
+    }
+    let (low, high) = (first.min(second), first.max(second));
     match &args[0] {
-        CalcValue::Scalar(s) if *s == 0.0 => Err(domain_error("dB", "zero")),
-        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(decibels(*s))),
-        CalcValue::Waveform(x, y) => Ok(map_domain(x, y, decibels)),
+        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(s.clamp(low, high))),
+        CalcValue::Waveform(x, y) => Ok(CalcValue::create_waveform(
+            x.clone(),
+            y.iter().map(|v| v.clamp(low, high)).collect(),
+        )),
     }
 }
 
@@ -244,16 +291,27 @@ fn one_sided(x: &[f64], y: &[f64], at: usize, forward: bool) -> f64 {
     }
 }
 
-/// Central difference across `at`, or a hole where the stencil has no width.
-fn central(x: &[f64], y: &[f64], at: usize) -> f64 {
-    let dx = x[at + 1] - x[at - 1];
-    if dx == 0.0 {
-        f64::NAN
-    } else {
-        (y[at + 1] - y[at - 1]) / dx
+/// The slope at `at` of the parabola through samples `a`, `at` and `b`, the
+/// three-point formula for uneven steps: exact for a quadratic, and second
+/// order on a transient's grid where the centred secant is only first order.
+/// `None` when two of the three share an x, so they span no parabola.
+fn parabola_slope(x: &[f64], y: &[f64], [a, b, c]: [usize; 3], at: usize) -> Option<f64> {
+    let (xa, xb, xc) = (x[a], x[b], x[c]);
+    if xa == xb || xb == xc || xa == xc {
+        return None;
     }
+    // The derivative of the Lagrange interpolant through the three points.
+    let t = x[at];
+    let slope = y[a] * ((t - xb) + (t - xc)) / ((xa - xb) * (xa - xc))
+        + y[b] * ((t - xa) + (t - xc)) / ((xb - xa) * (xb - xc))
+        + y[c] * ((t - xa) + (t - xb)) / ((xc - xa) * (xc - xb));
+    Some(slope)
 }
 
+/// `deriv(x)` — the slope at every sample, from the parabola through it and
+/// its two neighbours (at an end, its two nearest). Each side of a vertical
+/// edge, where SPICE writes the same timepoint twice, keeps the one-sided
+/// slope of its own side.
 fn deriv(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("deriv", &args, 1)?;
     match &args[0] {
@@ -268,13 +326,28 @@ fn deriv(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
             let last = x.len() - 1;
             let slopes = (0..=last)
                 .map(|i| {
-                    if i == 0 {
-                        one_sided(x, y, 0, true)
-                    } else if i == last {
-                        one_sided(x, y, last, false)
-                    } else {
-                        central(x, y, i)
-                    }
+                    let stencil = match i {
+                        _ if last < 2 => None,
+                        0 => Some([0, 1, 2]),
+                        _ if i == last => Some([last - 2, last - 1, last]),
+                        _ => Some([i - 1, i, i + 1]),
+                    };
+                    stencil
+                        .and_then(|stencil| parabola_slope(x, y, stencil, i))
+                        .unwrap_or_else(|| {
+                            if i == 0 || i == last {
+                                return one_sided(x, y, i, i == 0);
+                            }
+                            // The right side of a repeated timepoint reads
+                            // forward, its left side backward; a sample with
+                            // a repeat on both sides is inside the edge and
+                            // has no slope.
+                            match (x[i - 1] == x[i], x[i + 1] == x[i]) {
+                                (true, false) => one_sided(x, y, i, true),
+                                (false, true) => one_sided(x, y, i, false),
+                                _ => f64::NAN,
+                            }
+                        })
                 })
                 .collect();
             Ok(CalcValue::create_waveform(x.clone(), slopes))
@@ -308,23 +381,84 @@ fn integ(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     }
 }
 
-/// `clip(x, lo, hi)` — every sample limited to `[lo, hi]`, domain unchanged.
+/// `clip(x, from, to)` — the part of the trace between two points of its
+/// x-axis, as ViVA's `clip` returns it: every sample inside, and the trace's
+/// value interpolated at each end that falls between samples. It restricts
+/// what a measurement around it reads: `avg(clip(V(out), 1m, 2m))` is the
+/// mean from 1 ms to 2 ms. A DC value is the same everywhere, so it clips to
+/// itself.
 fn clip(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("clip", &args, 3)?;
-    let low = scalar_arg("clip", "lower bound", &args[1])?;
-    let high = scalar_arg("clip", "upper bound", &args[2])?;
-    if low > high {
+    let from = scalar_arg("clip", "start", &args[1])?;
+    let to = scalar_arg("clip", "end", &args[2])?;
+    match &args[0] {
+        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)),
+        CalcValue::Waveform(x, y) => {
+            let (x, y) = clip_x(x, y, from, to)?;
+            Ok(CalcValue::create_waveform(x, y))
+        }
+    }
+}
+
+/// The samples of `(x, y)` between `from` and `to` on the x-axis, either
+/// order, with interpolated ends: the trace as drawn over that interval, in
+/// the order it was swept. Refused on an axis that turns back, where one x
+/// has several values, and for an interval that misses the trace.
+pub(super) fn clip_x(
+    x: &[f64],
+    y: &[f64],
+    from: f64,
+    to: f64,
+) -> Result<(Vec<f64>, Vec<f64>), EvaluationError> {
+    if !from.is_finite() || !to.is_finite() {
         return Err(EvaluationError::MathError(
-            "clip lower bound is above its upper bound".to_owned(),
+            "clip start and end must be finite numbers".to_owned(),
         ));
     }
-    match &args[0] {
-        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(s.clamp(low, high))),
-        CalcValue::Waveform(x, y) => Ok(CalcValue::create_waveform(
-            x.clone(),
-            y.iter().map(|v| v.clamp(low, high)).collect(),
-        )),
+    if x.is_empty() || x.len() != y.len() {
+        return Err(EvaluationError::MathError(
+            "clip needs a waveform with samples".to_owned(),
+        ));
     }
+    let rises = x.windows(2).any(|pair| pair[1] > pair[0]);
+    let falls = x.windows(2).any(|pair| pair[1] < pair[0]);
+    if rises && falls {
+        return Err(EvaluationError::MathError(
+            "clip needs an x-axis that runs one way; this sweep turns back".to_owned(),
+        ));
+    }
+    let (low, high) = (from.min(to), from.max(to));
+    let (first, last) = (x[0], x[x.len() - 1]);
+    if high < first.min(last) || low > first.max(last) {
+        return Err(EvaluationError::MathError(format!(
+            "clip from {from} to {to} lies outside the trace, which runs from {first} to {last}"
+        )));
+    }
+    let inside = |at: f64| at >= low && at <= high;
+    let (mut out_x, mut out_y) = (Vec::new(), Vec::new());
+    for i in 0..x.len() {
+        if i > 0 {
+            // An interval end strictly between this sample and the one
+            // before it becomes a sample of its own.
+            let (x0, x1) = (x[i - 1], x[i]);
+            let mut ends = [low, high];
+            if x1 < x0 {
+                ends.reverse();
+            }
+            let ends = if low == high { &ends[..1] } else { &ends[..] };
+            for &end in ends {
+                if (x0 < end && end < x1) || (x1 < end && end < x0) {
+                    out_x.push(end);
+                    out_y.push(y[i - 1] + (y[i] - y[i - 1]) * (end - x0) / (x1 - x0));
+                }
+            }
+        }
+        if inside(x[i]) {
+            out_x.push(x[i]);
+            out_y.push(y[i]);
+        }
+    }
+    Ok((out_x, out_y))
 }
 
 /// `xval(w)` — the domain plotted against itself, so an expression can do
@@ -1545,19 +1679,175 @@ mod tests {
     }
 
     #[test]
-    fn clip_limits_a_series_to_its_scalar_bounds() {
-        let (_, y) = series_of(
+    fn deriv_of_a_quadratic_is_exact_on_a_random_grid() {
+        // A reproducible uneven grid: steps from a linear congruential
+        // sequence, between 0.1 and 2.1 units.
+        let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut t = 0.0;
+        let mut x = Vec::new();
+        for _ in 0..202 {
+            x.push(t);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            t += 0.1 + 2.0 * (state >> 11) as f64 / (1u64 << 53) as f64;
+        }
+        let y = x.iter().map(|t| t * t).collect();
+        let (_, slope) = series_of("deriv", vec![wave(x.clone(), y)]);
+        for (at, value) in x.iter().zip(slope) {
+            let expected = 2.0 * at;
+            // Exact up to rounding: the centred secant is off by the
+            // difference of the two steps, up to two units here.
+            assert_close(value, expected, 1.0e-9 * expected.max(1.0), "d(t²)/dt = 2t");
+        }
+    }
+
+    #[test]
+    fn deriv_of_an_rc_step_follows_its_closed_form_on_a_transient_grid() {
+        // v = 1 − e^(−t/τ), sampled with steps that grow and shrink by up
+        // to a factor of three, as a transient's do.
+        let tau = 1.0e-3;
+        let x = nonuniform(1_049, 0.0, 5.0e-3);
+        let y = x.iter().map(|t| 1.0 - (-t / tau).exp()).collect();
+        let (_, slope) = series_of("deriv", vec![wave(x.clone(), y)]);
+        for (at, value) in x.iter().zip(slope) {
+            let expected = (-at / tau).exp() / tau;
+            assert_close(value, expected, 2.0e-5 * expected, "dv/dt = e^(−t/τ)/τ");
+        }
+    }
+
+    #[test]
+    fn clip_keeps_the_part_of_the_trace_between_two_x_points() {
+        let trace = wave(vec![0.0, 1.0, 2.0, 3.0], vec![0.0, 10.0, 20.0, 30.0]);
+        let clip = |from: f64, to: f64| {
+            series_of(
+                "clip",
+                vec![
+                    trace.clone(),
+                    CalcValue::Scalar(from),
+                    CalcValue::Scalar(to),
+                ],
+            )
+        };
+        // Ends between samples are interpolated on the trace.
+        assert_eq!(
+            clip(0.5, 2.25),
+            (vec![0.5, 1.0, 2.0, 2.25], vec![5.0, 10.0, 20.0, 22.5])
+        );
+        // An end on a sample keeps that sample once; the order of the ends
+        // does not matter.
+        assert_eq!(clip(2.0, 1.0), (vec![1.0, 2.0], vec![10.0, 20.0]));
+        // A backwards sweep keeps its direction.
+        let (x, y) = series_of(
             "clip",
             vec![
-                wave(vec![0.0, 1.0, 2.0], vec![-5.0, 0.5, 9.0]),
-                CalcValue::Scalar(-1.0),
-                CalcValue::Scalar(1.0),
+                reversed(&trace),
+                CalcValue::Scalar(0.5),
+                CalcValue::Scalar(1.5),
             ],
         );
-        assert_eq!(
-            y,
-            vec![-1.0, 0.5, 1.0],
-            "clip(x, lo, hi) takes three arguments"
+        assert_eq!((x, y), (vec![1.5, 1.0, 0.5], vec![15.0, 10.0, 5.0]));
+        // A window beside the trace has nothing to keep.
+        assert!(
+            call(
+                "clip",
+                vec![
+                    trace.clone(),
+                    CalcValue::Scalar(4.0),
+                    CalcValue::Scalar(5.0)
+                ]
+            )
+            .is_err()
+        );
+        // A sweep that turns back has no single x range to keep.
+        assert!(
+            call(
+                "clip",
+                vec![
+                    wave(vec![0.0, 1.0, 0.5], vec![0.0, 1.0, 2.0]),
+                    CalcValue::Scalar(0.0),
+                    CalcValue::Scalar(1.0)
+                ]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_mean_of_a_clipped_rc_step_is_the_closed_form_mean_over_that_interval() {
+        // RC step, τ = 1 ms: v = 1 − e^(−t/τ). Its mean from 1 ms to 2 ms is
+        // 1 − τ (e^(−1) − e^(−2)) / 1 ms.
+        let tau = 1.0e-3;
+        let x = nonuniform(50_001, 0.0, 5.0e-3);
+        let y = x.iter().map(|t| 1.0 - (-t / tau).exp()).collect();
+        let clipped = call(
+            "clip",
+            vec![
+                wave(x, y),
+                CalcValue::Scalar(1.0e-3),
+                CalcValue::Scalar(2.0e-3),
+            ],
+        )
+        .unwrap();
+        let expected = 1.0 - tau * ((-1.0f64).exp() - (-2.0f64).exp()) / 1.0e-3;
+        assert!((expected - 0.767).abs() < 1.0e-3, "closed form {expected}");
+        assert_close(
+            scalar_of("avg", vec![clipped]),
+            expected,
+            1.0e-9,
+            "avg(clip(v, 1m, 2m))",
+        );
+    }
+
+    #[test]
+    fn limit_holds_each_sample_between_two_bounds_in_either_order() {
+        for (low, high) in [(-1.0, 1.0), (1.0, -1.0)] {
+            let (_, y) = series_of(
+                "limit",
+                vec![
+                    wave(vec![0.0, 1.0, 2.0], vec![-5.0, 0.5, 9.0]),
+                    CalcValue::Scalar(low),
+                    CalcValue::Scalar(high),
+                ],
+            );
+            assert_eq!(y, vec![-1.0, 0.5, 1.0], "limit(x, {low}, {high})");
+        }
+    }
+
+    #[test]
+    fn db10_reads_a_power_and_db20_an_amplitude() {
+        // ViVA's own example: 371.875 mV reads −4.296 dB10 and −8.5921 dB20.
+        let sample = 0.371_875;
+        assert_close(
+            scalar_of("dB10", vec![CalcValue::Scalar(sample)]),
+            10.0 * sample.log10(),
+            1.0e-12,
+            "dB10",
+        );
+        assert_close(
+            scalar_of("dB10", vec![CalcValue::Scalar(sample)]),
+            -4.296,
+            5.0e-4,
+            "dB10 of ViVA's sample",
+        );
+        assert_close(
+            scalar_of("dB20", vec![CalcValue::Scalar(-sample)]),
+            -8.5921,
+            5.0e-5,
+            "dB20 of ViVA's sample",
+        );
+        // A 1 mW power is −30 dB10 (dBW); dB() stays the amplitude form.
+        assert_close(
+            scalar_of("dB10", vec![CalcValue::Scalar(1.0e-3)]),
+            -30.0,
+            1.0e-12,
+            "dBW",
+        );
+        assert_close(
+            scalar_of("dB", vec![CalcValue::Scalar(1.0e-3)]),
+            -60.0,
+            1.0e-12,
+            "dB",
         );
     }
 

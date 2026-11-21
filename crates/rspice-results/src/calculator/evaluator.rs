@@ -127,19 +127,19 @@ pub fn evaluate(
                     Err(error) => return Err(error),
                 }
             }
-            if matches!(
-                name.to_ascii_lowercase().as_str(),
-                "mag" | "magnitude" | "abs" | "db"
-            ) && let [CalculatorExpr::WaveformRef { signal, dataset }] = args.as_slice()
+            let lower = name.to_ascii_lowercase();
+            let decibels = matches!(lower.as_str(), "db" | "db20" | "db10");
+            if (decibels || matches!(lower.as_str(), "mag" | "magnitude" | "abs"))
+                && let [CalculatorExpr::WaveformRef { signal, dataset }] = args.as_slice()
             {
-                return if name.eq_ignore_ascii_case("db") {
+                return if decibels {
                     let value = match ctx.get_waveform(signal, dataset.as_deref()) {
                         Err(EvaluationError::PhaseUnavailable(_)) => {
                             ctx.get_magnitude(signal, dataset.as_deref())?
                         }
                         value => value?,
                     };
-                    super::complex_functions::dispatch("db", vec![value])?.checked()
+                    super::complex_functions::dispatch(&lower, vec![value])?.checked()
                 } else {
                     ctx.get_magnitude(signal, dataset.as_deref())?.checked()
                 };
@@ -309,9 +309,8 @@ fn function_unit(
     match name {
         // The value itself, or a level of it.
         "abs" | "mag" | "magnitude" | "re" | "real" | "im" | "imag" | "conj" | "complex"
-        | "clip" | "unwrap" | "avg" | "average" | "rms" | "min" | "max" | "pp" | "yval" => {
-            argument(0)
-        }
+        | "clip" | "limit" | "unwrap" | "avg" | "average" | "rms" | "min" | "max" | "pp"
+        | "yval" => argument(0),
         // A point or a span on the x-axis.
         "xval" | "cross" | "rise" | "risetime" | "fall" | "falltime" | "delay" | "pulsewidth"
         | "period" | "settling" | "settlingtime" | "bandwidth" => x_unit(),
@@ -319,7 +318,24 @@ fn function_unit(
         "deriv" | "derivative" | "slewrate" => Ok(argument(0)?.divided_by(&x_unit()?)),
         "integ" | "integral" => Ok(argument(0)?.times(&x_unit()?)),
         "duty" | "dutycycle" | "overshoot" | "undershoot" | "thd" => named("%"),
-        "db" | "gainmargin" => named("dB"),
+        // The amplitude decibel of a power is a number with no meaning, so
+        // it states none and names the power form instead.
+        "db" | "db20" => {
+            let power = args
+                .first()
+                .and_then(|arg| infer(arg, ctx).ok())
+                .map(Inferred::into_unit)
+                .filter(Unit::is_power);
+            match power {
+                Some(unit) => Err(format!(
+                    "{} is a power, whose decibels dB10() reads; dB() and dB20() are \
+                     20·log₁₀ for amplitudes",
+                    unit.label()
+                )),
+                None => named("dB"),
+            }
+        }
+        "db10" | "gainmargin" => named("dB"),
         "phase" | "phase_deg" | "phasemargin" => named("°"),
         "phase_rad" => named("rad"),
         // A bus word's integer value and the levels 0 and 1 of a logic
@@ -488,7 +504,7 @@ mod tests {
     /// The units engineers write for these expressions.
     #[test]
     fn unit_algebra_states_the_unit_an_engineer_writes() {
-        let table: [(&str, &str, &str); 48] = [
+        let table: &[(&str, &str, &str)] = &[
             ("V(out)", "s", "V"),
             ("V(out)/V(in)", "s", ""),
             ("V(out)*I(vdd)", "s", "W"),
@@ -541,8 +557,14 @@ mod tests {
             // A converted bus word or logic level is a plain number.
             ("analog(D(code))", "s", ""),
             ("digital(V(clk), 0.9)", "s", ""),
+            // Decibels: dB10 reads a power, dB and dB20 an amplitude.
+            ("dB10(V(out)*I(vdd))", "s", "dB"),
+            ("dB10(onoise)", "Hz", "dB"),
+            ("dB20(V(out)/V(in))", "Hz", "dB"),
+            ("clip(V(out), 0.001, 0.002)", "s", "V"),
+            ("limit(I(vdd), 0, 0.001)", "s", "A"),
         ];
-        for (text, x, expected) in table {
+        for &(text, x, expected) in table {
             assert_eq!(unit_of(text, x).as_deref(), Ok(expected), "{text} over {x}");
         }
     }
@@ -559,6 +581,16 @@ mod tests {
             ("V(out)^0.3", "V to the power 0.3 is not a unit"),
             ("mystery(V(out))", "the unit of mystery() is not known"),
             ("V(out)/node", "node states no unit"),
+            (
+                "db(V(out)*I(vdd))",
+                "W is a power, whose decibels dB10() reads; dB() and dB20() are 20·log₁₀ for \
+                 amplitudes",
+            ),
+            (
+                "dB20(onoise)",
+                "V²/Hz is a power, whose decibels dB10() reads; dB() and dB20() are 20·log₁₀ \
+                 for amplitudes",
+            ),
         ] {
             assert_eq!(unit_of(text, "s"), Err(reason.to_owned()), "{text}");
         }

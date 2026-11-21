@@ -214,19 +214,25 @@ fn delay_takes_each_signals_level_edge_type_and_edge_number() {
 #[test]
 fn rise_and_fall_take_thresholds_an_edge_number_and_absolute_levels() {
     let s = trains();
-    // Rise 1 unit, fall 2 units, both linear.
-    close(&s, "rise(V(a))", 0.8, 1e-12);
-    close(&s, "rise(V(a), 20, 80)", 0.6, 1e-12);
-    close(&s, "rise(V(a), 10, 90, 3)", 0.8, 1e-12);
-    close(&s, "fall(V(a))", 1.6, 1e-12);
-    close(&s, "fall(V(a), 10, 90, 2)", 1.6, 1e-12);
+    // Rise 1 unit, fall 2 units, both linear, on a 0–5 V swing.
+    close(&s, "rise(V(a), 10, 90, 1, 0, 5)", 0.8, 1e-12);
+    close(&s, "rise(V(a), 20, 80, 1, 0, 5)", 0.6, 1e-12);
+    close(&s, "rise(V(a), 10, 90, 3, 0, 5)", 0.8, 1e-12);
+    close(&s, "fall(V(a), 10, 90, 1, 5, 0)", 1.6, 1e-12);
+    close(&s, "fall(V(a), 10, 90, 2, 5, 0)", 1.6, 1e-12);
     // A 0–10 V swing stated absolutely: 10 % and 40 % of it are 1 V and
     // 4 V, three fifths of the 5 V edge.
     close(&s, "rise(V(a), 10, 40, 1, 0, 10)", 0.6, 1e-12);
     close(&s, "fall(V(a), 20, 80, 1, 5, 0)", 1.2, 1e-12);
+    // A clock starts and ends at the same level, so its levels are given.
     refuses(
         &s,
-        "rise(V(a), 10, 90, 4)",
+        "rise(V(a))",
+        "first and last samples set them unless the 0 % and 100 % levels are given",
+    );
+    refuses(
+        &s,
+        "rise(V(a), 10, 90, 4, 0, 5)",
         "finds 3 complete rising edge(s)",
     );
     refuses(&s, "rise(V(a), 90, 10)", "0 <= first < second <= 100");
@@ -236,6 +242,53 @@ fn rise_and_fall_take_thresholds_an_edge_number_and_absolute_levels() {
         "rise(V(a), 10, 90, 1, 5, 0)",
         "final level must be above",
     );
+}
+
+/// The unit step response of a second-order system with damping `zeta` and
+/// natural frequency `fn_hz`, settled at 1.
+fn underdamped_step(zeta: f64, fn_hz: f64) -> impl Fn(f64) -> f64 {
+    let wn = 2.0 * PI * fn_hz;
+    let wd = wn * (1.0 - zeta * zeta).sqrt();
+    move |t: f64| 1.0 - (-zeta * wn * t).exp() * ((wd * t).cos() + zeta * wn / wd * (wd * t).sin())
+}
+
+/// Where `f` first passes `level` going up on `[0, until]`, by scanning and
+/// bisecting the closed form.
+fn first_rising_crossing(f: &impl Fn(f64) -> f64, level: f64, until: f64) -> f64 {
+    let steps = 100_000;
+    for step in 0..steps {
+        let (a, b) = (
+            until * step as f64 / steps as f64,
+            until * (step + 1) as f64 / steps as f64,
+        );
+        if f(a) < level && f(b) >= level {
+            let (mut lo, mut hi) = (a, b);
+            for _ in 0..100 {
+                let mid = 0.5 * (lo + hi);
+                if f(mid) < level {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            return 0.5 * (lo + hi);
+        }
+    }
+    panic!("{level} is never reached");
+}
+
+#[test]
+fn an_underdamped_step_rises_between_its_first_and_last_values() {
+    // ζ = 0.2 and fn = 1 kHz peak 52.7 % over the settled 1: read against
+    // the excursion, the 90 % point would sit on the overshoot.
+    let response = underdamped_step(0.2, 1.0e3);
+    let s = Signals(vec![("V(a)", sampled(0.0, 0.02, 200_001, &response))]);
+    let rise =
+        first_rising_crossing(&response, 0.9, 0.02) - first_rising_crossing(&response, 0.1, 0.02);
+    assert!((rise - 191.5e-6).abs() < 0.05e-6, "closed form {rise}");
+    close(&s, "rise(V(a))", rise, 1e-8);
+    close(&s, "riseTime(V(a))", rise, 1e-8);
+    close(&s, "slewRate(V(a))", 0.8 / rise, 0.8 / rise * 1e-4);
 }
 
 #[test]
@@ -299,7 +352,7 @@ fn rise_and_slew_rate_of_an_exponential_match_their_closed_forms() {
 #[test]
 fn slew_rate_is_signed_by_the_direction_of_its_edge() {
     let s = trains();
-    close(&s, "slewRate(V(a))", 5.0, 1e-12);
+    close(&s, "slewRate(V(a), 10, 90, 1, 0, 5)", 5.0, 1e-12);
     close(&s, "slewRate(V(a), 10, 90, 2, 5, 0)", -2.5, 1e-12);
     let vertical = Signals(vec![(
         "V(v)",
