@@ -1,10 +1,10 @@
 //! A compact switch between a few ways of looking at one thing.
 //!
-//! [`segmented`](super::segmented) is a form control: control height, a border
-//! of its own, an accent underline, at home in a preference row. A plot's strip
+//! [`segmented`](super::segmented) is a form control: control height and a
+//! border of its own, at home in a preference row. A plot's strip
 //! needs something smaller and quieter — three words that choose the span a
 //! waveform is seen through, sitting beside readouts in a 24 point row, where a
-//! control-height box with a yellow selection outweighs the data it is about.
+//! control-height box outweighs the data it is about.
 //!
 //! So this is a track and a thumb. The track is an inset well as tall as the
 //! text needs; the chosen option sits on a raised thumb that slides to it, and

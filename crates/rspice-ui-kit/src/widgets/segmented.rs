@@ -5,8 +5,13 @@
 //! all of them" in a single row — the scope of a browser, the mode of a
 //! preference. It reads as one object: a shared border and inset fill, hair
 //! rules between the options, and the chosen one lifted with the active fill
-//! plus an accent underline. Arrow keys walk the options, because a control
+//! and full-contrast text. Arrow keys walk the options, because a control
 //! that behaves like a radio group must be reachable like one.
+//!
+//! It draws no accent underline. An underline is how a tab says it opens onto
+//! the page under the strip it stands on; a bordered group floats in its row,
+//! and an underline there only flattened the chosen option's foot and cut the
+//! group's rounded corner.
 
 use egui::{Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
@@ -89,6 +94,11 @@ pub fn segmented(
         Stroke::new(1.0, t.color.border),
         egui::StrokeKind::Inside,
     );
+    // Cell edges fall on whole pixels, so every divider is the same crisp
+    // line whichever option is chosen.
+    let pixels = ui.painter().pixels_per_point();
+    let snap = |x: f32| (x * pixels).round() / pixels;
+    let chosen = *selected;
     let mut cell_left = rect.left();
     for (index, label) in options.iter().enumerate() {
         let cell_width = if equal {
@@ -102,7 +112,7 @@ pub fn segmented(
                 if index + 1 == options.len() && (fill || rect.width() <= desired_width) {
                     rect.right()
                 } else {
-                    cell_left + cell_width
+                    snap(cell_left + cell_width)
                 },
                 rect.bottom(),
             ),
@@ -124,21 +134,36 @@ pub fn segmented(
         } else {
             egui::Color32::TRANSPARENT
         };
+        let first = index == 0;
+        let last = index + 1 == options.len();
         if fill != egui::Color32::TRANSPARENT {
-            ui.painter().rect_filled(cell.shrink(1.0), 0.0, fill);
-        }
-        if index > 0 {
-            ui.painter().vline(
-                cell.left(),
-                cell.y_range(),
-                Stroke::new(1.0, t.color.border),
+            // The fill keeps clear of the group's border and reaches the
+            // dividers; the end cells round their outer corners with the
+            // group, so a chosen end option keeps the group's shape.
+            let round = (t.radius - 1.0).clamp(0.0, f32::from(u8::MAX)) as u8;
+            let corners = egui::CornerRadius {
+                nw: if first { round } else { 0 },
+                sw: if first { round } else { 0 },
+                ne: if last { round } else { 0 },
+                se: if last { round } else { 0 },
+            };
+            let filled = Rect::from_min_max(
+                egui::pos2(cell.left() + f32::from(u8::from(first)), cell.top() + 1.0),
+                egui::pos2(
+                    cell.right() - f32::from(u8::from(last)),
+                    cell.bottom() - 1.0,
+                ),
             );
+            ui.painter().rect_filled(filled, corners, fill);
         }
-        if active {
-            ui.painter().hline(
-                (cell.left() + 1.0)..=(cell.right() - 1.0),
-                cell.bottom() - 1.0,
-                Stroke::new(2.0, t.color.accent),
+        // A divider parts two unchosen options. Beside the chosen one its
+        // fill is the edge, so a divider there read as a gap on one side of
+        // the choice and not the other.
+        if index > 0 && chosen != index && chosen + 1 != index {
+            ui.painter().vline(
+                ui.painter().round_to_pixel_center(cell.left()),
+                egui::Rangef::new(cell.top() + 1.0, cell.bottom() - 1.0),
+                Stroke::new(1.0, t.color.border),
             );
         }
         ui.painter().text(
