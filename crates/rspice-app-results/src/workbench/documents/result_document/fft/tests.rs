@@ -210,3 +210,42 @@ fn spectrum_settings_are_kept_by_the_view_across_a_rerun_and_undone() {
         SpectrumSettings::default()
     );
 }
+
+/// A trace's Spectrum entry chooses the sheet's source, and the view keeps
+/// the choice: the sheet's next frame shows that trace's spectrum, not the
+/// first voltage plotted, and Undo puts the plotted one back.
+#[test]
+fn a_trace_spectrum_entry_chooses_the_source_the_view_keeps() {
+    use super::adopt_kept_settings;
+    use crate::workbench::documents::result_document::view_edits::{self, Step};
+
+    let (plan, analysis) = (
+        crate::product::SimulationPlanId::new(),
+        crate::product::AnalysisInstanceId::new(),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs = vec![plan_run(plan, analysis)].into();
+    assert!(state.model.simulation.select_run(0));
+    state.quick_frame();
+    state
+        .results
+        .analysis
+        .fft_state
+        .choose_source_from_trace("I(V1)".to_owned());
+    adopt_kept_settings(&mut state.results_parts());
+    let view = state.working_view().expect("the run's view");
+    let pane = view.panes()[0].id;
+    let document = view.id();
+    assert_eq!(
+        view.spectrum_settings(pane)
+            .and_then(|settings| settings.source.as_deref()),
+        Some("I(V1)")
+    );
+    follow_plotted(&mut state.results_parts());
+    assert_eq!(state.results.analysis.fft_state.source(), Some("I(V1)"));
+
+    view_edits::step(&mut state.results_parts(), document, Step::Undo).expect("an undo");
+    adopt_kept_settings(&mut state.results_parts());
+    follow_plotted(&mut state.results_parts());
+    assert_eq!(state.results.analysis.fft_state.source(), Some("V(out)"));
+}

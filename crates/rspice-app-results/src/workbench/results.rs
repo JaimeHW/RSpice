@@ -899,7 +899,7 @@ impl CommandSet for ResultsCommand {
             Self::TraceSpectrum => {
                 if let Some((name, true)) = selected_trace(&cx.state.results, &cx.model.simulation)
                 {
-                    cx.state.analysis.fft_state.set_selected_source(Some(name));
+                    cx.state.analysis.fft_state.choose_source_from_trace(name);
                     // The spectrum on hand is of another trace; the next frame
                     // takes this one's.
                     cx.state.analysis.clear_fft_viewer_cache_authority();

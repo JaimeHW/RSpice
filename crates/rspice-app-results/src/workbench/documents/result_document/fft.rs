@@ -41,6 +41,21 @@ fn kept_settings(state: ResultsReads<'_>) -> Option<(PersistentPaneContext, Spec
 /// Take in the settings the view keeps for the sheet, so a re-run, an undo or
 /// another view's pane shows the spectrum as that view was set.
 pub(crate) fn adopt_kept_settings(state: &mut ResultsParts<'_>) {
+    // A source chosen from a trace's menu is the reader's latest word on
+    // the sheet: the view keeps it rather than putting back its own.
+    if let Some(source) = state.analysis.fft_state.take_unkept_choice() {
+        let held = kept_settings(state.results_reads())
+            .map(|(_, settings)| settings)
+            .unwrap_or_else(|| state.analysis.fft_state.settings());
+        keep_settings(
+            state,
+            SpectrumSettings {
+                source: Some(source),
+                ..held
+            },
+        );
+        return;
+    }
     if let Some((_, settings)) = kept_settings(state.results_reads()) {
         state.analysis.fft_state.adopt_settings(&settings);
     }

@@ -69,6 +69,9 @@ pub struct FftState {
     pub source_choice: Option<String>,
     /// The first voltage plotted, transformed when the reader chose none.
     pub default_source: Option<String>,
+    /// A source the reader chose outside the sheet, from a trace's menu,
+    /// which the sheet's view has not kept yet.
+    pub unkept_choice: Option<String>,
     /// Amplitude normalization mode for FFT magnitudes.
     pub normalization: SpectrumNormalization,
     /// Window function
@@ -127,6 +130,7 @@ impl Default for FftState {
             selected_source: None,
             source_choice: None,
             default_source: None,
+            unkept_choice: None,
             normalization: SpectrumNormalization::Rms,
             window: WindowFunction::Hanning,
             input_fidelity: InputFidelity::Reference,

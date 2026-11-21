@@ -45,6 +45,21 @@ impl FftState {
         self.selected_source = source_name;
     }
 
+    /// The reader asked for the spectrum of `source` from its trace's menu.
+    /// The sheet keeps the choice in its view when it next draws, and until
+    /// then the spectrum on hand is of it.
+    pub fn choose_source_from_trace(&mut self, source: String) {
+        self.choose_source(Some(source.clone()));
+        self.selected_source = Some(source.clone());
+        self.unkept_choice = Some(source);
+    }
+
+    /// The source chosen from a trace's menu that the view has not kept,
+    /// taken so it is kept once.
+    pub fn take_unkept_choice(&mut self) -> Option<String> {
+        self.unkept_choice.take()
+    }
+
     /// The signal the spectrum transforms: the reader's choice, else the
     /// first voltage plotted.
     pub fn source(&self) -> Option<&str> {
