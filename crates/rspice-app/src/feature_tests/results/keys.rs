@@ -320,3 +320,24 @@ fn an_unavailable_command_is_not_run_and_its_row_says_why() {
         .expect("the cursors have a menu row");
     assert_eq!(row.availability, CommandAvailability::Disabled(reason));
 }
+
+/// Tab onto a trace's legend entry and Shift+F10 opens the trace's menu, as
+/// a right click does: the trace's menu took the pointer alone before.
+#[test]
+fn shift_f10_opens_the_trace_menu() {
+    let mut desk = Desk::new();
+    let mut focus = None;
+    for _ in 0..80 {
+        focus = desk.press(Key::Tab, Modifiers::NONE);
+        if focus.as_deref() == Some("V(out)") {
+            break;
+        }
+    }
+    assert_eq!(focus.as_deref(), Some("V(out)"), "Tab reaches the trace");
+    assert!(!egui::Popup::is_any_open(&desk.ctx));
+    desk.press(Key::F10, Modifiers::SHIFT);
+    assert!(
+        egui::Popup::is_any_open(&desk.ctx),
+        "Shift+F10 opens the trace's menu"
+    );
+}

@@ -433,9 +433,10 @@ pub fn show_header(
         let draft_id = ui
             .id()
             .with(("abscissa-menu-draft", model.analysis_key, pane.unit));
-        if let Some(chosen) = egui::Popup::context_menu(&band)
-            .show(|ui| abscissa_choices(ui, pane.unit, menu, &display, draft_id))
-            .and_then(|inner| inner.inner)
+        if let Some(chosen) = crate::context_menu::context_menu(&band, |ui| {
+            abscissa_choices(ui, pane.unit, menu, &display, draft_id)
+        })
+        .and_then(|inner| inner.inner)
         {
             output.abscissa = Some(chosen);
         }
@@ -627,7 +628,7 @@ fn expression_chip(
     if label.clicked() {
         host.activate_pane();
     }
-    label.context_menu(|ui| {
+    crate::context_menu::context_menu(&label, |ui| {
         rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
             if let Some(text) = super::logic::convert::digital_form_of(ui, &expression.text, || {
                 expression
@@ -803,7 +804,7 @@ fn legend_chip(
     if label.clicked() {
         host.select_trace(trace);
     }
-    label.context_menu(|ui| {
+    crate::context_menu::context_menu(&label, |ui| {
         rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
             if let Some(text) =
                 super::logic::convert::digital_form(ui, &trace.source_waveform_name, || {

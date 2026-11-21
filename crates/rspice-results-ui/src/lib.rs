@@ -8,6 +8,7 @@
 pub mod bode;
 pub mod box_violin;
 pub mod chrome;
+mod context_menu;
 pub mod create_document;
 pub mod derived;
 pub mod document_dialogs;

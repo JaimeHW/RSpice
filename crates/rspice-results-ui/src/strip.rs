@@ -628,7 +628,7 @@ impl<'a> StripHeader<'a> {
                         }
                         let removes = removable.contains(&index);
                         if removes || chip_menu.is_some() {
-                            response.context_menu(|ui| {
+                            crate::context_menu::context_menu(&response, |ui| {
                                 if let Some(menu) = chip_menu.as_mut() {
                                     menu(ui, index);
                                     if removes {

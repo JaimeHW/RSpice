@@ -386,7 +386,7 @@ pub fn pane_header(
         )
     });
     let mut action = None;
-    response.context_menu(|ui| {
+    crate::context_menu::context_menu(&response, |ui| {
         let mut item = |ui: &mut Ui, enabled: bool, label: &str, chosen: PaneHeaderAction| {
             if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
                 action = Some(chosen);
