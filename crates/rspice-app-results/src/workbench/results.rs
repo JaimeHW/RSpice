@@ -711,6 +711,17 @@ impl CommandSet for ResultsCommand {
                         )
                 }
             }
+            Self::SendTraceToCalculator => selected_trace(state.results, &model.simulation).map_or(
+                CommandAvailability::Disabled("select a trace in Results"),
+                |_| CommandAvailability::Available,
+            ),
+            Self::TraceSpectrum => match selected_trace(state.results, &model.simulation) {
+                None => CommandAvailability::Disabled("select a trace in Results"),
+                Some((_, false)) => {
+                    CommandAvailability::Disabled("a spectrum is taken of a transient waveform")
+                }
+                Some((_, true)) => CommandAvailability::Available,
+            },
             Self::OverlayPrevious(_) => {
                 if workbench.workspace != Workspace::Results {
                     CommandAvailability::Disabled("open a result in Results")
@@ -846,6 +857,25 @@ impl CommandSet for ResultsCommand {
                         .unwrap_or_else(|error| format!("Could not save the view: {error}"));
                 parts.prompt(said);
             }
+            Self::SendTraceToCalculator => {
+                if let Some((name, _)) = selected_trace(&cx.state.results, &cx.model.simulation) {
+                    let panel = &mut cx.state.calculator_panel;
+                    panel.clear();
+                    panel.expression = name;
+                    cx.state.waveform_calculator_dialog = true;
+                }
+            }
+            Self::TraceSpectrum => {
+                if let Some((name, true)) = selected_trace(&cx.state.results, &cx.model.simulation)
+                {
+                    cx.state.analysis.fft_state.set_selected_source(Some(name));
+                    // The spectrum on hand is of another trace; the next frame
+                    // takes this one's.
+                    cx.state.analysis.clear_fft_viewer_cache_authority();
+                    cx.state.results.session.viewer = ResultViewer::Fft;
+                    cx.wb.activate(Workspace::Results);
+                }
+            }
             Self::OverlayPrevious(depth) => {
                 let view = &mut cx.model.simulation.view;
                 view.overlay_previous = usize::from(depth);
@@ -944,3 +974,20 @@ impl CommandSet for ResultsCommand {
 
 #[cfg(test)]
 mod tests;
+
+/// The trace selected in the analysis Results shows, by name, and whether
+/// that analysis runs in time, so a spectrum can be taken of it.
+fn selected_trace(
+    results: &crate::workbench::documents::result_document::ResultsState,
+    simulation: &crate::state::SimulationState,
+) -> Option<(String, bool)> {
+    let selected = results.valid_selected_trace(simulation)?;
+    let run = simulation.active_run()?;
+    let (analysis_index, _, analysis, _) = selected.resolve(run)?;
+    (simulation.view.active_analysis_idx == Some(analysis_index)).then(|| {
+        (
+            selected.source_name().to_owned(),
+            analysis.analysis_type.is_time_domain(),
+        )
+    })
+}

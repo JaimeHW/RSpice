@@ -548,6 +548,8 @@ pub(super) fn result_signal_context_menu(
             ui.close();
         }
         ui.separator();
+        taken_from_signal_rows(ui, state, &key);
+        ui.separator();
         let table = ui.add_enabled(exact_available, egui::Button::new("Open as table"));
         if let Some(error) = exact_error.as_deref() {
             table.clone().on_disabled_hover_text(error);
@@ -740,4 +742,132 @@ pub(super) fn compare_enabled(state: &ResultsParts<'_>) -> bool {
     )
     .is_none()
         && compare_availability(state.results_reads()).is_available()
+}
+
+/// The signal menu's rows that take something from the signal: the
+/// calculator holding it, its spectrum, and a plot of it against another
+/// signal of its analysis. Each is offered only where it will act.
+fn taken_from_signal_rows(
+    ui: &mut egui::Ui,
+    state: &mut ResultsParts<'_>,
+    key: &SourceWaveformPresentationKey,
+) {
+    let runs = &state.model.simulation.retained.runs;
+    let Some((run_index, analysis_index, _, _)) = key.resolve(runs) else {
+        return;
+    };
+    let analysis = &runs[run_index].analyses[analysis_index];
+    let in_time = analysis.analysis_type.is_time_domain();
+    let against_refusal = plot_against_refusal(analysis.analysis_type);
+    let others: Vec<String> = analysis
+        .waveforms
+        .iter()
+        .map(|waveform| waveform.name.clone())
+        .filter(|name| name != key.source_name())
+        .collect();
+    if ui.button("Send to calculator").clicked() {
+        if select_result_signal_by_key(state, key) {
+            execute(state, ResultsCommand::SendTraceToCalculator.key());
+        }
+        ui.close();
+    }
+    let spectrum = ui.add_enabled(in_time, egui::Button::new("Spectrum"));
+    if !in_time {
+        spectrum
+            .clone()
+            .on_disabled_hover_text("A spectrum is taken of a transient waveform.");
+    }
+    if spectrum.clicked() {
+        if select_result_signal_by_key(state, key) {
+            execute(state, ResultsCommand::TraceSpectrum.key());
+        }
+        ui.close();
+    }
+    let refusal = against_refusal.or(others
+        .is_empty()
+        .then_some("Its analysis holds no other signal to plot it against."));
+    match refusal {
+        Some(reason) => {
+            ui.add_enabled(false, egui::Button::new("Plot against"))
+                .on_disabled_hover_text(reason);
+        }
+        None => {
+            ui.menu_button("Plot against", |ui| {
+                let t = crate::ui::tokens::Tokens::get(ui.ctx());
+                egui::ScrollArea::vertical()
+                    .max_height(t.metrics.row_h * 16.0)
+                    .show(ui, |ui| {
+                        for name in &others {
+                            if ui.button(name).clicked() {
+                                if let Err(error) = plot_against(state, key, name) {
+                                    state.workbench.prompt(error);
+                                }
+                                ui.close();
+                            }
+                        }
+                    });
+            });
+        }
+    }
+}
+
+/// Why a signal of an analysis of `kind` cannot be drawn against another,
+/// if it cannot: a transfer curve, a hysteresis loop or a Lissajous figure
+/// reads real samples of one sweep.
+fn plot_against_refusal(kind: crate::state::AnalysisType) -> Option<&'static str> {
+    (!kind.is_time_domain() && kind != crate::state::AnalysisType::DcSweep)
+        .then_some("A signal is plotted against another in a transient or DC sweep.")
+}
+
+/// Draw the pane `key`'s signal is on against `abscissa`, another signal of
+/// its analysis, in a strip of its own after the analysis' strip, as the
+/// pane's own "Plot against" and ViVA's YvsY do. The signal is plotted first
+/// if it was not, and its run shown.
+pub(super) fn plot_against(
+    state: &mut ResultsParts<'_>,
+    key: &SourceWaveformPresentationKey,
+    abscissa: &str,
+) -> Result<(), String> {
+    let runs = &state.model.simulation.retained.runs;
+    let (run_index, analysis_index, _, waveform) = key
+        .resolve(runs)
+        .ok_or("The signal is no longer in its run.")?;
+    let analysis = &runs[run_index].analyses[analysis_index];
+    if let Some(reason) = plot_against_refusal(analysis.analysis_type) {
+        return Err(reason.to_owned());
+    }
+    if !analysis
+        .waveforms
+        .iter()
+        .any(|waveform| waveform.name == abscissa)
+    {
+        return Err(format!("{abscissa} is not a signal of this analysis."));
+    }
+    let unit = rspice_results_ui::waves::browser_signal_unit(
+        &waveform.name,
+        waveform.unit.as_deref(),
+        rspice_results_ui::waves::analysis_default_unit(analysis.analysis_type),
+    );
+    // A plain number's pane has no unit.
+    let unit = if unit == "1" { "" } else { unit }.to_owned();
+    set_result_signal_plotted(state, key, true);
+    select_result_signal_by_key(state, key);
+    let analysis = key.analysis();
+    let abscissa = rspice_results::visualization_document::Abscissa::Signal {
+        name: abscissa.to_owned(),
+    };
+    let strips = &mut state.results.session.xy_strips;
+    if !strips
+        .iter()
+        .any(|strip| strip.is(analysis, &unit, &abscissa))
+    {
+        strips.push(rspice_results_ui::session::XyStrip::new(
+            analysis, unit, abscissa,
+        ));
+    }
+    execute(
+        state,
+        ResultsCommand::ResultViewer(ResultViewer::Waves).key(),
+    );
+    Ok(())
 }

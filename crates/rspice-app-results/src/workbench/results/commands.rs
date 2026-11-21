@@ -95,6 +95,10 @@ pub enum ResultsCommand {
     /// Draw this many runs of the shown run's plan just before it behind
     /// it, thinner; none for zero.
     OverlayPrevious(u8),
+    /// Open the calculator holding the selected trace.
+    SendTraceToCalculator,
+    /// Show the spectrum of the selected trace.
+    TraceSpectrum,
 }
 
 const NONE: &[ShortcutBinding] = &[];
@@ -150,7 +154,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 65] = [
+    pub const ALL: [Self; 67] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -216,6 +220,8 @@ impl ResultsCommand {
         Self::OverlayPrevious(1),
         Self::OverlayPrevious(2),
         Self::OverlayPrevious(3),
+        Self::SendTraceToCalculator,
+        Self::TraceSpectrum,
     ];
 
     /// The command `key` names, if the feature declares one.
@@ -268,6 +274,8 @@ impl ResultsCommand {
             Self::OverlayPrevious(1) => CommandKey::new("overlay-previous-run"),
             Self::OverlayPrevious(2) => CommandKey::new("overlay-previous-2-runs"),
             Self::OverlayPrevious(_) => CommandKey::new("overlay-previous-3-runs"),
+            Self::SendTraceToCalculator => CommandKey::new("send-trace-to-calculator"),
+            Self::TraceSpectrum => CommandKey::new("trace-spectrum"),
         }
     }
 
@@ -479,6 +487,20 @@ impl ResultsCommand {
                     2 => "Overlay the previous 2 runs",
                     _ => "Overlay the previous 3 runs",
                 },
+                "Results",
+                ANYWHERE,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::SendTraceToCalculator => (
+                "Send selected trace to calculator",
+                "Results",
+                PROJECT,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::TraceSpectrum => (
+                "Spectrum of selected trace",
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,

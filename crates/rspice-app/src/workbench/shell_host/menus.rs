@@ -678,6 +678,7 @@ const RESULTS_MENU: &[MenuEntry] = &[
     results(ResultsCommand::FitYToVisibleX).access('Y'),
     results(ResultsCommand::VisualizationDocumentProperties).access('P'),
     results(ResultsCommand::WaveformCalculator).access('C'),
+    MenuEntry::submenu("Selected trace", TRACE_MENU).access('L'),
     results(ResultsCommand::ExpressionDiagnostics).access('E'),
     hardcopy(HardcopyCommand::ReportAuthoring).access('R'),
     Separator,
@@ -690,6 +691,16 @@ const DOCUMENT_MENU: &[MenuEntry] = &[
     results(ResultsCommand::RenameDocument).access('R'),
     results(ResultsCommand::DuplicateDocument).access('D'),
     results(ResultsCommand::DeleteDocument).access('L'),
+];
+
+/// What is taken from the trace selected on the plot or in the browser.
+const TRACE_MENU: &[MenuEntry] = &[
+    MenuEntry::command_as(
+        ResultsCommand::SendTraceToCalculator.key(),
+        "Send to calculator",
+    )
+    .access('C'),
+    MenuEntry::command_as(ResultsCommand::TraceSpectrum.key(), "Spectrum").access('S'),
 ];
 
 /// How many runs of the shown run's plan just before it are drawn behind
