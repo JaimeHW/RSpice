@@ -203,6 +203,7 @@ impl VisualizationDocument {
             order,
             family_policy: None,
             hidden: false,
+            strips: Vec::new(),
         });
         Ok(id)
     }
@@ -630,6 +631,11 @@ impl VisualizationDocument {
             }
             DocumentEdit::SetPaneHidden { pane_id, hidden } => {
                 self.pane_mut(pane_id)?.hidden = hidden;
+                Ok(())
+            }
+            DocumentEdit::SetPaneStrips { pane_id, strips } => {
+                super::strips::validate_strips(&strips)?;
+                self.pane_mut(pane_id)?.strips = strips;
                 Ok(())
             }
             DocumentEdit::AddBoundPane(pane) => {
@@ -1975,6 +1981,7 @@ impl VisualizationDocument {
             validate_label("pane.title", &pane.title)?;
             self.require_page(pane.page_id)?;
             self.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
+            super::strips::validate_strips(&pane.strips)?;
             if let Some(policy) = &pane.family_policy {
                 self.validate_pane_family_policy(pane.id, policy)?;
             }

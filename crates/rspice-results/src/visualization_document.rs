@@ -10,6 +10,7 @@ mod edits;
 mod family;
 mod query;
 mod run_source;
+mod strips;
 mod working_view;
 
 pub use comparison::*;
@@ -17,6 +18,7 @@ pub use edits::*;
 pub use family::*;
 pub use query::*;
 pub use run_source::*;
+pub use strips::*;
 pub use working_view::*;
 
 use std::cell::RefCell;
@@ -1441,6 +1443,10 @@ pub struct Pane {
     /// comes back as it was.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// The strips the reader arranged the pane's waveform stack into, top
+    /// to bottom. Empty, the stack gives each unit a strip of its own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub strips: Vec<Strip>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2690,6 +2696,7 @@ impl VisualizationDocument {
                 order: 0,
                 family_policy: None,
                 hidden: false,
+                strips: Vec::new(),
             }],
             axes: Vec::new(),
             traces: Vec::new(),
@@ -3179,6 +3186,8 @@ mod expression_tests;
 mod lane_tests;
 #[cfg(test)]
 mod run_source_tests;
+#[cfg(test)]
+mod strip_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

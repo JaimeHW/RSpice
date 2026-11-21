@@ -144,6 +144,12 @@ pub enum DocumentEdit {
         pane_id: PaneId,
         hidden: bool,
     },
+    /// Replace the strips a pane's waveform stack is arranged into, top to
+    /// bottom; an empty list gives each unit a strip of its own again.
+    SetPaneStrips {
+        pane_id: PaneId,
+        strips: Vec<Strip>,
+    },
     AddPaneOnNewPage {
         page: NewPage,
         pane: NewPagePane,
