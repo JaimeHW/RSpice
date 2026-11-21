@@ -8439,10 +8439,11 @@ mod tests {
             normalize_model_string_path_value("PROCESS_FILE", "python3", Some(&base)),
             "python3"
         );
-        // A path with a separator, and a FIFO pair, stay deck-relative.
+        // A path with a separator, and a FIFO pair, stay deck-relative. The
+        // deck's path joins component by component, in the host's separator.
         assert_eq!(
             normalize_model_string_path_value("process_file", "peers/toggle", Some(&base)),
-            joined("peers/toggle")
+            base.join("peers").join("toggle").to_string_lossy()
         );
         assert_eq!(
             normalize_model_string_path_value("process_file", "pipe|", Some(&base)),
