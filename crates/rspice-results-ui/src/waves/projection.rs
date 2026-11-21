@@ -662,7 +662,10 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 TraceSource {
                     waveform_index,
                     source_waveform_name: &waveform.name,
-                    base_name: &waveform.name,
+                    base_name: &rspice_results::harmonic_spectrum::distortion_curve_name(
+                        analysis.analysis_type,
+                        &waveform.name,
+                    ),
                     source_unit: waveform.unit.as_deref(),
                     signal_color: color,
                     palette_slot,
