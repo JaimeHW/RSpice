@@ -325,6 +325,13 @@ pub enum DocumentEdit {
         sheet: crate::result_presentation::ResultViewer,
         x: Option<f64>,
     },
+    /// Keep what the reader left `sheet` showing on a pane, or with `None`
+    /// forget it.
+    SetSheetSetting {
+        pane_id: PaneId,
+        sheet: crate::result_presentation::ResultViewer,
+        setting: Option<super::SheetSettingValue>,
+    },
     MoveCursor {
         cursor_id: CursorId,
         position: TypedValue,

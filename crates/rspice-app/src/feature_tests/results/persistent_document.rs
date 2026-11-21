@@ -655,7 +655,12 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
         );
     app.state.results.results.session.selected_trace =
         Some(rspice_results_ui::selection::SelectedResultTrace::from_identity(analysis, "V(out)"));
-    app.state.results.results.session.smith.markers.push((0, 3));
+    app.state
+        .results
+        .results
+        .session
+        .rf_pin
+        .insert(ResultViewer::Smith, (0, 3));
 
     for frame in 0..3 {
         drive_frame(|ui| {
@@ -672,9 +677,8 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
                 .results
                 .results
                 .session
-                .smith
-                .markers
-                .contains(&(0, 3)),
+                .rf_pin
+                .contains_key(&ResultViewer::Smith),
             "idle frame {frame} cleared the pinned readout"
         );
     }
@@ -1279,7 +1283,12 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
         );
     app.state.results.results.session.selected_trace =
         Some(rspice_results_ui::selection::SelectedResultTrace::from_identity(analysis, "V(out)"));
-    app.state.results.results.session.smith.markers.push((0, 3));
+    app.state
+        .results
+        .results
+        .session
+        .rf_pin
+        .insert(ResultViewer::Smith, (0, 3));
 
     // Close: the reader goes back to the dataset quick view, which leaves
     // the persistent projection behind.
@@ -1317,9 +1326,8 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
                 .results
                 .results
                 .session
-                .smith
-                .markers
-                .contains(&(0, 3)),
+                .rf_pin
+                .contains_key(&ResultViewer::Smith),
             "frame {frame} after re-opening lost the pinned readout"
         );
     }

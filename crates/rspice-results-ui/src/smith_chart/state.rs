@@ -144,8 +144,6 @@ pub struct SmithSheetState {
     /// The gain or noise value field's text while it is being edited.
     pub gain_draft: Option<String>,
     pub noise_draft: Option<String>,
-    /// The markers on the chart, m1 first: each a locus slot and a sample of it.
-    pub markers: Vec<(usize, usize)>,
     /// Whether the constant-Q contours are drawn.
     pub q_shown: bool,
     /// The contours' Q values; empty is the automatic set.
@@ -177,7 +175,6 @@ impl Default for SmithSheetState {
             noise_db: Vec::new(),
             gain_draft: None,
             noise_draft: None,
-            markers: Vec::new(),
             q_shown: false,
             q_values: Vec::new(),
             q_draft: None,

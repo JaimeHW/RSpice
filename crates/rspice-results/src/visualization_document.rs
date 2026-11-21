@@ -97,6 +97,9 @@ pub const MAX_EXPRESSION_TRACE_DATASETS: usize = 16;
 pub const MAX_VISUALIZATION_XY_PLOTS: usize = 1_024;
 /// Maximum readouts pinned across all panes and sheets of one document.
 pub const MAX_VISUALIZATION_READOUT_PINS: usize = 1_024;
+/// Maximum sheet settings in one document: one for each pane and each sheet
+/// that keeps settings of its own (the Smith chart and the network matrix).
+pub const MAX_VISUALIZATION_SHEET_SETTINGS: usize = 2 * MAX_VISUALIZATION_PANES;
 /// Maximum rows one pane's event-lane order names.
 pub const MAX_PANE_EVENT_LANES: usize = 4_096;
 /// Maximum event-lane rows ordered across all panes of one document.
@@ -1913,6 +1916,81 @@ pub struct ReadoutPin {
     pub x: f64,
 }
 
+/// What the reader left one sheet showing on a pane, for a sheet that draws
+/// its pane's analysis its own way rather than through the pane's axes and
+/// traces. Kept by the view, so a re-run and a reopen show it again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SheetSetting {
+    pub pane_id: PaneId,
+    pub setting: SheetSettingValue,
+}
+
+/// One sheet's own settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SheetSettingValue {
+    /// The Smith chart's markers, m1 first.
+    Smith {
+        #[serde(deserialize_with = "deserialize_smith_markers")]
+        markers: Vec<SmithMarker>,
+    },
+    /// The network matrix's form and how each coefficient reads.
+    NetworkMatrix {
+        form: NetworkMatrixForm,
+        format: NetworkMatrixFormat,
+    },
+}
+
+impl SheetSettingValue {
+    /// The sheet the settings are for.
+    pub const fn sheet(&self) -> crate::result_presentation::ResultViewer {
+        match self {
+            Self::Smith { .. } => crate::result_presentation::ResultViewer::Smith,
+            Self::NetworkMatrix { .. } => crate::result_presentation::ResultViewer::NetworkMatrix,
+        }
+    }
+}
+
+/// A Smith marker: the locus it sits on, by name, and the frequency it sits
+/// at. A frequency rather than a sample, so a later run the view follows
+/// reads its own point at the same frequency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SmithMarker {
+    #[serde(deserialize_with = "deserialize_label_string")]
+    pub trace: String,
+    pub frequency: f64,
+}
+
+fn deserialize_smith_markers<'de, D>(deserializer: D) -> Result<Vec<SmithMarker>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_MARKERS>(deserializer)
+}
+
+/// The parameters a network matrix holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetworkMatrixForm {
+    S,
+    Y,
+    Z,
+    H,
+    Abcd,
+}
+
+/// How a network matrix's coefficient reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetworkMatrixFormat {
+    /// The real and imaginary parts.
+    RealImaginary,
+    /// The magnitude and angle.
+    MagnitudeAngle,
+    /// The magnitude in decibels and the angle.
+    DecibelAngle,
+}
+
 impl Trace {
     /// The result vector this trace was provisioned from, as its own row
     /// predicates record it.
@@ -2541,6 +2619,8 @@ pub struct VisualizationDocument {
     xy_plots: Vec<XyPlot>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     readout_pins: Vec<ReadoutPin>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sheet_settings: Vec<SheetSetting>,
 }
 
 #[derive(Deserialize)]
@@ -2601,6 +2681,8 @@ struct VisualizationDocumentWire {
     xy_plots: Option<BoundedVec<XyPlot, MAX_VISUALIZATION_XY_PLOTS>>,
     #[serde(default)]
     readout_pins: Option<BoundedVec<ReadoutPin, MAX_VISUALIZATION_READOUT_PINS>>,
+    #[serde(default)]
+    sheet_settings: Option<BoundedVec<SheetSetting, MAX_VISUALIZATION_SHEET_SETTINGS>>,
 }
 
 impl<'de> Deserialize<'de> for VisualizationDocument {
@@ -2642,6 +2724,9 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             xy_plots: wire.xy_plots.map_or_else(Vec::new, BoundedVec::into_inner),
             readout_pins: wire
                 .readout_pins
+                .map_or_else(Vec::new, BoundedVec::into_inner),
+            sheet_settings: wire
+                .sheet_settings
                 .map_or_else(Vec::new, BoundedVec::into_inner),
         };
         if document.schema_version != Self::SCHEMA_VERSION {
@@ -2722,6 +2807,7 @@ impl VisualizationDocument {
             expression_traces: Vec::new(),
             xy_plots: Vec::new(),
             readout_pins: Vec::new(),
+            sheet_settings: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -2907,6 +2993,11 @@ impl VisualizationDocument {
         &self.readout_pins
     }
 
+    /// What the reader left each settings-keeping sheet showing, per pane.
+    pub fn sheet_settings(&self) -> &[SheetSetting] {
+        &self.sheet_settings
+    }
+
     /// The order one pane draws its event lanes in; empty when it recorded
     /// none.
     #[must_use]
@@ -3029,6 +3120,7 @@ impl VisualizationDocument {
             expression_traces: self.expression_traces.clone(),
             xy_plots: self.xy_plots.clone(),
             readout_pins: self.readout_pins.clone(),
+            sheet_settings: self.sheet_settings.clone(),
         }))
     }
 

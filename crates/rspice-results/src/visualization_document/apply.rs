@@ -1131,6 +1131,35 @@ impl VisualizationDocument {
                 }
                 Ok(())
             }
+            DocumentEdit::SetSheetSetting {
+                pane_id,
+                sheet,
+                setting,
+            } => {
+                self.require_pane(pane_id)?;
+                self.sheet_settings
+                    .retain(|held| held.pane_id != pane_id || held.setting.sheet() != sheet);
+                if let Some(setting) = setting {
+                    let setting = SheetSetting { pane_id, setting };
+                    validate_sheet_setting(&setting)?;
+                    if setting.setting.sheet() != sheet {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "sheet-setting.sheet",
+                            message: format!(
+                                "settings for {:?} cannot be kept as {sheet:?}'s",
+                                setting.setting.sheet()
+                            ),
+                        });
+                    }
+                    ensure_maximum_len(
+                        "visualization-document.sheet-settings",
+                        self.sheet_settings.len() + 1,
+                        MAX_VISUALIZATION_SHEET_SETTINGS,
+                    )?;
+                    self.sheet_settings.push(setting);
+                }
+                Ok(())
+            }
             DocumentEdit::SetEventLaneOrder(order) => {
                 self.validate_event_lane_order(&order)?;
                 self.event_lane_orders
@@ -1843,6 +1872,8 @@ impl VisualizationDocument {
             .retain(|trace| trace.pane_id != pane_id);
         self.xy_plots.retain(|plot| plot.pane_id != pane_id);
         self.readout_pins.retain(|pin| pin.pane_id != pane_id);
+        self.sheet_settings
+            .retain(|setting| setting.pane_id != pane_id);
         let page_id = self
             .panes
             .iter()
@@ -2227,6 +2258,27 @@ impl VisualizationDocument {
                 });
             }
         }
+        ensure_maximum_len(
+            "visualization-document.sheet-settings",
+            self.sheet_settings.len(),
+            MAX_VISUALIZATION_SHEET_SETTINGS,
+        )?;
+        for (index, setting) in self.sheet_settings.iter().enumerate() {
+            self.require_pane(setting.pane_id)?;
+            validate_sheet_setting(setting)?;
+            if self.sheet_settings[..index].iter().any(|held| {
+                held.pane_id == setting.pane_id && held.setting.sheet() == setting.setting.sheet()
+            }) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "sheet-setting.sheet",
+                    message: format!(
+                        "pane {} keeps its {:?} settings twice",
+                        setting.pane_id.get(),
+                        setting.setting.sheet()
+                    ),
+                });
+            }
+        }
         let mut bus_names = HashSet::new();
         for bus in &self.user_buses {
             self.validate_user_bus(bus)?;
@@ -2583,6 +2635,28 @@ fn validate_readout_pin(pin: &ReadoutPin) -> Result<(), VisualizationError> {
             message: format!("a readout cannot be pinned at {}", pin.x),
         })
     }
+}
+
+/// A Smith marker names a locus and sits at a finite, positive frequency.
+fn validate_sheet_setting(setting: &SheetSetting) -> Result<(), VisualizationError> {
+    let SheetSettingValue::Smith { markers } = &setting.setting else {
+        return Ok(());
+    };
+    ensure_maximum_len(
+        "sheet-setting.markers",
+        markers.len(),
+        MAX_VISUALIZATION_MARKERS,
+    )?;
+    for marker in markers {
+        validate_label("sheet-setting.marker.trace", &marker.trace)?;
+        if !(marker.frequency.is_finite() && marker.frequency > 0.0) {
+            return Err(VisualizationError::InvalidValue {
+                field: "sheet-setting.marker.frequency",
+                message: format!("a marker cannot sit at {} Hz", marker.frequency),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn duplicate_xy_plot(plot: &XyPlot) -> VisualizationError {

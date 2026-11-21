@@ -775,6 +775,13 @@ pub struct ResultViewerState {
     /// on a spectrum or phase-noise plot pins its readout there. The run's
     /// working view keeps it, so the next run reads at the same X.
     pub readout_pins: HashMap<(AnalysisPresentationSource, ResultViewer), f64>,
+    /// What the reader left a settings-keeping sheet showing, per authored
+    /// analysis: the Smith chart's markers, the network matrix's form and
+    /// format. The run's working view keeps them, as it keeps the pins.
+    pub sheet_settings: HashMap<
+        (AnalysisPresentationSource, ResultViewer),
+        rspice_results::visualization_document::SheetSettingValue,
+    >,
     /// Display AC phase traces unwrapped into a continuous curve instead of
     /// wrapped to ±180°. Applies to the BODE phase trace and the waves
     /// strips' phase traces; the margin math always reads the raw wrapped

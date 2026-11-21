@@ -9,6 +9,7 @@ use rspice_results::network_matrix::two_port::TwoPortSweep;
 use rspice_results::waveform::{HeldColumn, SharedWaveformValues};
 
 use super::{ResultsParts, ResultsReads};
+use crate::results::visualization_document::{SheetSettingValue, SmithMarker};
 use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
@@ -352,8 +353,52 @@ pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
 /// One frame's traces, circles and figures.
 struct Prepared<'a> {
     traces: Vec<SmithPlotTrace<'a>>,
+    /// The markers the view keeps, each found on its locus: a slot of
+    /// `traces` and the sample nearest its frequency. A marker whose locus
+    /// the frame does not draw is left out.
+    markers: Vec<(usize, usize)>,
     figures: Option<TwoPortFigures>,
     circles: Vec<ChartCircle>,
+}
+
+/// The view's markers found on this frame's loci.
+fn place_markers(traces: &[SmithPlotTrace<'_>], markers: &[SmithMarker]) -> Vec<(usize, usize)> {
+    markers
+        .iter()
+        .filter_map(|marker| {
+            let slot = traces.iter().position(|trace| trace.name == marker.trace)?;
+            let frequencies = &traces[slot].frequencies;
+            let sample = (0..frequencies.len()).min_by(|left, right| {
+                (frequencies[*left] - marker.frequency)
+                    .abs()
+                    .total_cmp(&(frequencies[*right] - marker.frequency).abs())
+            })?;
+            Some((slot, sample))
+        })
+        .collect()
+}
+
+/// The markers as the view keeps them: each by its locus' name and the
+/// frequency of the sample it sits on.
+fn kept_markers(traces: &[SmithPlotTrace<'_>], markers: &[(usize, usize)]) -> Vec<SmithMarker> {
+    markers
+        .iter()
+        .filter_map(|&(slot, sample)| {
+            let trace = traces.get(slot)?;
+            Some(SmithMarker {
+                trace: trace.name.to_owned(),
+                frequency: *trace.frequencies.get(sample)?,
+            })
+        })
+        .collect()
+}
+
+/// The markers the view keeps for the analysis shown.
+fn stored_markers(state: ResultsReads<'_>) -> Vec<SmithMarker> {
+    match super::sheet_settings::kept(state, super::ResultViewer::Smith) {
+        Some(SheetSettingValue::Smith { markers }) => markers,
+        _ => Vec::new(),
+    }
 }
 
 /// Build the frame's traces from the drawing cache and the reader's list,
@@ -365,7 +410,7 @@ fn prepare<'a>(
     analysis: Option<&crate::state::AnalysisResult>,
     owner: u64,
     sweep: Option<&TwoPortSweep>,
-    marker: Option<(usize, usize)>,
+    stored: &[SmithMarker],
 ) -> Prepared<'a> {
     let mut traces = Vec::new();
     let empty = rspice_results::waveform::WaveformValues::default;
@@ -506,8 +551,11 @@ fn prepare<'a>(
         });
     }
     // The circles follow the last marker's frequency, else the sweep's middle.
+    let markers = place_markers(&traces, stored);
     let figures = sweep.and_then(|sweep| {
-        let marked = marker
+        let marked = markers
+            .last()
+            .copied()
             .and_then(|(slot, index)| {
                 traces
                     .get(slot)
@@ -521,6 +569,7 @@ fn prepare<'a>(
         .unwrap_or_default();
     Prepared {
         traces,
+        markers,
         figures,
         circles,
     }
@@ -534,7 +583,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let owner = owner_key(state);
     let sweep = two_port(state, owner);
     let viewer = super::ResultViewer::Smith;
-    let mut markers = state.results.session.smith.markers.clone();
+    let stored = stored_markers(state.results_reads());
     let analysis = state.model.simulation.active_analysis();
     let session = &mut state.results.session;
     let prepared = prepare(
@@ -544,8 +593,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         analysis,
         owner,
         sweep.as_deref(),
-        markers.last().copied(),
+        &stored,
     );
+    let mut markers = prepared.markers.clone();
     let mut view = session.plot_view(viewer, 0);
     let chart = view::SmithChart {
         traces: &prepared.traces,
@@ -574,6 +624,13 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .filter(|trace| trace.removable)
         .map(|trace| trace.name.to_owned());
     let response = frame.map(|frame| frame.plot);
+    // A marker the reader placed or took away is the view's; the loci
+    // after a removed response move up a slot, so its markers go with it.
+    let marked = if removed.is_some() {
+        Some(Vec::new())
+    } else {
+        (markers != prepared.markers).then(|| kept_markers(&prepared.traces, &markers))
+    };
     drop(prepared);
     let results = &mut state.results;
     if let Some((name, removable)) = toggled
@@ -586,10 +643,12 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     }
     if let Some(name) = removed {
         results.session.smith.responses.retain(|text| *text != name);
-        // The loci after it move up a slot, so a marker would land on another.
-        markers.clear();
     }
-    results.session.smith.markers = markers;
+    if let Some(markers) = marked {
+        let setting = (!markers.is_empty()).then_some(SheetSettingValue::Smith { markers });
+        super::sheet_settings::keep(state, viewer, setting);
+    }
+    let results = &mut state.results;
     if let Some(response) = response {
         super::record_drawn_axes(results, viewer, &response);
         if response.view.any() {
@@ -605,7 +664,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let owner = owner_key(state);
     let sweep = two_port(state, owner);
-    let markers = state.results.session.smith.markers.clone();
+    let stored = stored_markers(state.results_reads());
     let analysis = state.model.simulation.active_analysis();
     let session = &mut state.results.session;
     let prepared = prepare(
@@ -615,7 +674,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         analysis,
         owner,
         sweep.as_deref(),
-        markers.last().copied(),
+        &stored,
     );
     let chart = view::SmithChart {
         traces: &prepared.traces,
@@ -623,7 +682,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         figures: prepared.figures.as_ref(),
         circles: &prepared.circles,
     };
-    view::right_panel(ui, &chart, &markers, &quantity_policy, digits);
+    view::right_panel(ui, &chart, &prepared.markers, &quantity_policy, digits);
 }
 
 #[cfg(test)]
@@ -748,7 +807,7 @@ mod tests {
             analysis,
             1,
             None,
-            None,
+            &[],
         );
         let trace = prepared
             .traces
@@ -801,16 +860,12 @@ mod tests {
             analysis,
             owner,
             Some(&sweep),
-            None,
+            &[],
         );
         assert_eq!(unmarked.figures.map(|figures| figures.index), Some(1));
         assert_eq!(unmarked.circles.len(), 2);
         // A marker on the last sample of S11 moves the circles there.
-        let s11_slot = unmarked
-            .traces
-            .iter()
-            .position(|trace| trace.name == "S11")
-            .unwrap();
+        assert!(unmarked.traces.iter().any(|trace| trace.name == "S11"));
         drop(unmarked);
         let marked = prepare(
             &parts.analysis.smith_chart_state,
@@ -819,7 +874,10 @@ mod tests {
             analysis,
             owner,
             Some(&sweep),
-            Some((s11_slot, 2)),
+            &[SmithMarker {
+                trace: "S11".to_owned(),
+                frequency: 2.0e9,
+            }],
         );
         let figures = marked.figures.expect("figures");
         assert_eq!(figures.index, 2);

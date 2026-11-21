@@ -10,6 +10,7 @@ use std::sync::Arc;
 use egui::Ui;
 #[cfg(test)]
 use rspice_results::network_matrix::channel_reference;
+use rspice_results::network_matrix::forms::NetworkForm;
 use rspice_results::network_matrix::{NetworkLayout, resolve};
 use rspice_results_ui::network_matrix as view;
 use rspice_vocabulary::product::DatasetId;
@@ -17,6 +18,9 @@ use rspice_vocabulary::product::DatasetId;
 use view::{formatted, magnitude_db};
 
 use super::{AnalysisPresentationKey, ResultsReads, SheetContext};
+use crate::results::visualization_document::{
+    NetworkMatrixForm, NetworkMatrixFormat, SheetSettingValue,
+};
 use crate::state::AnalysisResult;
 #[cfg(test)]
 use crate::state::AnalysisType;
@@ -194,8 +198,72 @@ fn keep_pin(context: &mut SheetContext<'_>, analysis: &AnalysisResult, frequency
     }
 }
 
-/// The matrix's own controls in its sheet bar. The frequency the reader
-/// chooses is kept in the run's view, so it survives a re-run and a restart.
+/// The form and format the view keeps, as the controls hold them.
+fn reading_of(setting: &SheetSettingValue) -> Option<(NetworkForm, usize)> {
+    let SheetSettingValue::NetworkMatrix { form, format } = setting else {
+        return None;
+    };
+    let form = match form {
+        NetworkMatrixForm::S => NetworkForm::S,
+        NetworkMatrixForm::Y => NetworkForm::Y,
+        NetworkMatrixForm::Z => NetworkForm::Z,
+        NetworkMatrixForm::H => NetworkForm::H,
+        NetworkMatrixForm::Abcd => NetworkForm::Abcd,
+    };
+    let format = match format {
+        NetworkMatrixFormat::RealImaginary => 0,
+        NetworkMatrixFormat::MagnitudeAngle => 1,
+        NetworkMatrixFormat::DecibelAngle => 2,
+    };
+    Some((form, format))
+}
+
+/// The controls' form and format as the view keeps them.
+fn setting_of(form: NetworkForm, format: usize) -> SheetSettingValue {
+    SheetSettingValue::NetworkMatrix {
+        form: match form {
+            NetworkForm::S => NetworkMatrixForm::S,
+            NetworkForm::Y => NetworkMatrixForm::Y,
+            NetworkForm::Z => NetworkMatrixForm::Z,
+            NetworkForm::H => NetworkMatrixForm::H,
+            NetworkForm::Abcd => NetworkMatrixForm::Abcd,
+        },
+        format: match format {
+            1 => NetworkMatrixFormat::MagnitudeAngle,
+            2 => NetworkMatrixFormat::DecibelAngle,
+            _ => NetworkMatrixFormat::RealImaginary,
+        },
+    }
+}
+
+/// Show the form and format the view keeps.
+fn follow_reading(context: &mut SheetContext<'_>, analysis: &AnalysisResult) {
+    let Some((source, sheet)) = pin_key(context, analysis) else {
+        return;
+    };
+    let kept = context
+        .results
+        .session
+        .sheet_settings
+        .get(&(source, sheet))
+        .and_then(reading_of);
+    let controls = &mut context.results.network_matrix.controls;
+    (controls.form, controls.representation) = kept.unwrap_or((NetworkForm::S, 0));
+}
+
+/// Keep the form and format the reader chose in the view.
+fn keep_reading(context: &mut SheetContext<'_>, analysis: &AnalysisResult) {
+    let Some(key) = pin_key(context, analysis) else {
+        return;
+    };
+    let controls = &context.results.network_matrix.controls;
+    let setting = setting_of(controls.form, controls.representation);
+    context.results.session.sheet_settings.insert(key, setting);
+}
+
+/// The matrix's own controls in its sheet bar. The frequency, the form and
+/// the format the reader chooses are kept in the run's view, so they survive
+/// a re-run and a restart, and undo steps them back.
 pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     let Ok((analysis, matrix)) = bound(context) else {
         return false;
@@ -205,6 +273,11 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     if let Some(grid) = &grid {
         follow_pin(context, analysis, grid);
     }
+    follow_reading(context, analysis);
+    let reading = {
+        let controls = &context.results.network_matrix.controls;
+        (controls.form, controls.representation)
+    };
     let before = context.results.network_matrix.controls.sample;
     view::domain_bar(
         ui,
@@ -218,6 +291,10 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
         && let Some(&frequency) = grid.as_ref().and_then(|grid| grid.get(after))
     {
         keep_pin(context, analysis, frequency);
+    }
+    let controls = &context.results.network_matrix.controls;
+    if (controls.form, controls.representation) != reading {
+        keep_reading(context, analysis);
     }
     true
 }

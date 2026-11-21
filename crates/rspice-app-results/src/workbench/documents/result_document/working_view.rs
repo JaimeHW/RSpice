@@ -32,6 +32,7 @@ use crate::ui::plot::XScale;
 
 use super::persistent_document::lanes;
 use super::readout_pins;
+use super::sheet_settings;
 use super::{
     AnalysisPresentationKey, DocumentMarker, ExprTrace, ResultsParts, ResultsReads,
     SourceWaveformPresentationKey, WavePanePresentationKey, view_edits,
@@ -50,6 +51,7 @@ struct ViewScratch {
     hidden: HashSet<AnalysisPresentationKey>,
     lanes: HashMap<AnalysisPresentationKey, EventLaneLayout>,
     pins: readout_pins::Pins,
+    settings: sheet_settings::Settings,
     strips: HashMap<AnalysisPresentationKey, Vec<Strip>>,
     family: HashMap<
         AnalysisPresentationKey,
@@ -777,6 +779,7 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
             session.hidden_strips.remove(&key);
         }
         readout_pins::project(&mut session.readout_pins, &document, key, pane_id);
+        sheet_settings::project(&mut session.sheet_settings, &document, key, pane_id);
         if pane.strips.is_empty() {
             session.strip_layouts.remove(&key);
         } else if session.strip_layouts.get(&key) != Some(&pane.strips) {
@@ -902,6 +905,7 @@ fn scratch_of(state: ResultsReads<'_>, keys: &[(AnalysisPresentationKey, PaneId)
             .map(|(key, layout)| (*key, layout.clone()))
             .collect(),
         pins: readout_pins::scratch(&session.readout_pins, keys),
+        settings: sheet_settings::scratch(&session.sheet_settings, keys),
         strips: session
             .strip_layouts
             .iter()
@@ -1013,6 +1017,12 @@ fn capture_edits(state: &ResultsParts<'_>, binding: &QuickViewBinding) -> Vec<Do
         }
         edits.extend(readout_pins::edits_for(
             &session.readout_pins,
+            document,
+            key,
+            pane_id,
+        ));
+        edits.extend(sheet_settings::edits_for(
+            &session.sheet_settings,
             document,
             key,
             pane_id,
