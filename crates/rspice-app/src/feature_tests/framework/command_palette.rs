@@ -951,7 +951,6 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         .hidden_strips
         .insert(hidden_strip);
     app.state.results.results.session.maximized_strip = Some(maximized_strip);
-    let version_before = app.state.model.simulation.view.data_version;
     entry.execute(&mut app).expect("open real result signal");
 
     assert_eq!(app.state.model.simulation.view.active_run_idx, Some(1));
@@ -960,9 +959,20 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         app.state.model.simulation.retained.runs[1].dataset_id,
         active_dataset_id
     );
-    assert!(app.state.model.simulation.retained.runs[1].analyses[1].waveforms[0].visible);
-    assert!(app.state.model.simulation.view.waveforms[0].visible);
-    assert!(app.state.model.simulation.view.data_version > version_before);
+    assert!(
+        !app.state.model.simulation.retained.runs[1].analyses[1].waveforms[0].visible,
+        "the run stays as it was solved"
+    );
+    assert!(
+        app.state.results.results.session.waveform_visibility(
+            &rspice_results::result_presentation::SourceWaveformPresentationKey::new(
+                hidden_strip,
+                "V(precision_out)",
+            ),
+            false,
+        ),
+        "the signal is plotted on the view that draws it"
+    );
     assert_eq!(
         app.state.results.results.session.viewer,
         rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
