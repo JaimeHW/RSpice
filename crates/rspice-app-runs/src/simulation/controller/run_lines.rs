@@ -293,7 +293,7 @@ fn platform(target: crate::state::ExecutionTarget) -> &'static str {
 }
 
 /// A count with its thousands grouped: `5,512`.
-fn grouped(count: u64) -> String {
+pub(super) fn grouped(count: u64) -> String {
     let digits = count.to_string();
     let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
     for (index, digit) in digits.chars().enumerate() {

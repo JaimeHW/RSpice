@@ -47,7 +47,7 @@ impl LivePreviewGaps {
             words.push(format!(
                 "The live plot could not keep up and left out {} point{}; the trace breaks \
                  where {} ({} gap{}).",
-                self.dropped,
+                super::run_lines::grouped(self.dropped),
                 if self.dropped == 1 { "" } else { "s" },
                 if self.dropped == 1 {
                     "it was"
