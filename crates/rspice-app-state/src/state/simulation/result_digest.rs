@@ -7,10 +7,16 @@ use rspice_results::result_digest::ResultDigestEncoding;
 impl AnalysisResult {
     /// SHA-256 identity of the authoritative retained data and evidence for
     /// this analysis. Display labels, timestamps, colors and visibility are
-    /// intentionally not part of the identity.
+    /// intentionally not part of the identity, nor is where its samples are
+    /// held: samples in memory are digested as the store will hold them.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_ref().digest(ResultDigestEncoding::CURRENT)
+        match super::run_store::as_stored(&self.data) {
+            Some(stored) => stored
+                .result_data_ref()
+                .digest(ResultDigestEncoding::CURRENT),
+            None => self.result_data_ref().digest(ResultDigestEncoding::CURRENT),
+        }
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -39,8 +45,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.data
-            .dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT)
+        super::run_store::dataset_digest(&self.data)
     }
 }
 

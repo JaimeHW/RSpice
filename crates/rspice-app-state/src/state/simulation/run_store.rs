@@ -18,15 +18,14 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use crate::product::ContentDigest;
 use rspice_results::analysis_result::AnalysisResult as RetainedAnalysisResult;
-use rspice_results::store_reader::{Segment, SegmentColumn};
-#[cfg(any(test, target_arch = "wasm32"))]
-use rspice_results::store_reader::{SegmentBytes, StoreReader};
+use rspice_results::result_digest::ResultDigestEncoding;
+use rspice_results::store_reader::{Segment, SegmentBytes, SegmentColumn, StoreReader};
 use rspice_results::waveform::{RetainedWaveform, StoredWindow, WaveformValues, WindowLead};
 /// The store's words for a segment's shape, so a caller of [`keep_segment`] names its schema
 /// without reaching the store itself.
 pub use rspice_results_store::{Axis, RunMeta, Schema, Signal, SignalKind, StoreError};
-#[cfg(any(test, target_arch = "wasm32"))]
 use rspice_results_store::{MemoryIo, SegmentReader, SegmentWriter};
 
 /// Rows written per call to the segment writer.
@@ -234,6 +233,47 @@ pub fn keep_segment(
     process_segment(schema, meta, fill)
 }
 
+/// `analysis` as a results store keeps it: each series it holds in memory written into a segment
+/// held in memory, as a save writes it into the project's store. A digest taken of it is the one
+/// the same samples have once they are stored, so a result's digest never depends on where its
+/// samples are held. `None` when nothing of it is held in memory, when it is still running (a save
+/// keeps none of a preview's samples), or when the store refuses it, which a save does too.
+pub fn as_stored<W>(analysis: &RetainedAnalysisResult<W>) -> Option<RetainedAnalysisResult<W>>
+where
+    W: Clone + AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
+{
+    if analysis.is_live_partial() || !holds_samples_in_memory(analysis) {
+        return None;
+    }
+    let mut stored = analysis.clone();
+    store_analysis_with(&mut stored, memory_segment).ok()?;
+    Some(stored)
+}
+
+/// The digest of the ordered analyses `run` retained, a function of their samples and never of
+/// where they are held: a run saved while it held samples in memory reopens with them in the store
+/// and the same digest.
+#[must_use]
+pub fn dataset_digest<A, W>(run: &rspice_results::run::SimulationRun<A>) -> ContentDigest
+where
+    A: AsRef<RetainedAnalysisResult<W>>,
+    W: Clone + AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
+{
+    let stored: Vec<_> = run
+        .analyses
+        .iter()
+        .map(|analysis| as_stored(analysis.as_ref()))
+        .collect();
+    rspice_results::result_digest::dataset_content_digest(
+        run.analyses
+            .iter()
+            .zip(&stored)
+            .map(|(analysis, stored)| stored.as_ref().unwrap_or(analysis.as_ref()))
+            .map(|analysis| (analysis.id, analysis.result_data_ref())),
+        ResultDigestEncoding::CURRENT,
+    )
+}
+
 /// [`store_analysis`] into segments held in memory, as the browser build keeps them.
 #[cfg(test)]
 pub fn store_analysis_in_memory<W>(analysis: &mut RetainedAnalysisResult<W>) -> Result<(), String>
@@ -426,7 +466,6 @@ fn process_segment(
 }
 
 /// A finished segment held in memory.
-#[cfg(test)]
 fn memory_segment(
     schema: &Schema,
     meta: &RunMeta,
@@ -436,7 +475,6 @@ fn memory_segment(
 }
 
 /// A finished segment held in memory, with its bytes.
-#[cfg(any(test, target_arch = "wasm32"))]
 fn memory_segment_sized(
     schema: &Schema,
     meta: &RunMeta,

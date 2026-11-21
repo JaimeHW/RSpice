@@ -408,24 +408,22 @@ fn retained_waveform_unit_is_content_identity() {
     );
 }
 
+/// A value the digest encodes itself reads one zero and one NaN. Samples
+/// are digested as the results store addresses them, bit for bit, whether
+/// held in memory or stored.
 #[test]
 fn canonical_float_encoding_normalizes_signed_zero_and_nan_payloads() {
-    let mut positive_zero = analysis(AnalysisType::Ac);
-    let mut negative_zero = positive_zero.clone();
-    positive_zero.waveforms[0].y.make_mut()[0] = 0.0;
-    negative_zero.waveforms[0].y.make_mut()[0] = -0.0;
+    let measured = |value: f64| {
+        analysis(AnalysisType::Transient)
+            .with_measurements(vec![rspice_core::MeasureResult::success("peak", value)])
+    };
     assert_eq!(
-        positive_zero.result_data_digest(),
-        negative_zero.result_data_digest()
+        measured(0.0).result_data_digest(),
+        measured(-0.0).result_data_digest()
     );
-
-    let mut first_nan = positive_zero.clone();
-    let mut second_nan = positive_zero;
-    first_nan.waveforms[0].y.make_mut()[0] = f64::from_bits(0x7ff8_0000_0000_0001);
-    second_nan.waveforms[0].y.make_mut()[0] = f64::from_bits(0x7fff_ffff_ffff_ffff);
     assert_eq!(
-        first_nan.result_data_digest(),
-        second_nan.result_data_digest()
+        measured(f64::from_bits(0x7ff8_0000_0000_0001)).result_data_digest(),
+        measured(f64::from_bits(0x7fff_ffff_ffff_ffff)).result_data_digest()
     );
 }
 

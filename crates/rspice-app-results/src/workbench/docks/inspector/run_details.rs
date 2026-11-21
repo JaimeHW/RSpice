@@ -37,14 +37,12 @@ impl RunDetailsDialogState {
     /// computed on a Results job.
     pub fn new(run: &crate::state::SimulationRun) -> Self {
         use crate::workbench::documents::result_document::{frame_work, manifest};
-        use rspice_results::result_digest::ResultDigestEncoding;
 
         let dataset_digest = std::sync::Arc::<std::sync::OnceLock<String>>::default();
         let (slot, retained) = (std::sync::Arc::clone(&dataset_digest), run.data.clone());
         let _ = crate::workbench::results_job::ResultsJob::start("run-digest", move |_| {
             frame_work::note(frame_work::DatasetWalk::DatasetDigest);
-            let digest =
-                retained.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT);
+            let digest = crate::state::run_store::dataset_digest(&retained);
             let _ = slot.set(digest.to_string());
             Ok(())
         });

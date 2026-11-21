@@ -12,7 +12,11 @@ use std::sync::Arc;
 pub fn manifest_for_run(run: &SimulationRun) -> ManifestViewModel {
     frame_work::note(DatasetWalk::ManifestViewModel);
     frame_work::note(DatasetWalk::DatasetDigest);
-    ManifestViewModel::from_run(run, |analysis| analysis.is_live_partial())
+    ManifestViewModel::with_dataset_digest(
+        run,
+        |analysis| analysis.is_live_partial(),
+        run.dataset_content_digest().to_string(),
+    )
 }
 /// The manifest of `run` with its dataset digest left empty: digesting reads
 /// every sample the run retained, and Run details computes it off the frame.
