@@ -1057,6 +1057,11 @@ pub(crate) fn start_browser_checkpoint_read(
                 .map(|value| js_sys::Uint8Array::new(&value).to_vec())
                 .ok_or_else(|| "browser project checkpoint snapshot is missing".to_owned())
         });
+        // The segments the checkpoint's runs read load from the project's results store before
+        // it is read, as they do before a saved project is.
+        if let Ok(bytes) = &result {
+            rspice_app_state::state::run_store::browser::preload(bytes).await;
+        }
         complete(result);
     });
 }

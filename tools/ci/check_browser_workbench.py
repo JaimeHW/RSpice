@@ -824,8 +824,56 @@ def results_survive_reload(browser):
             "before_reload": before, "after_reload": after, "exported_samples": samples}
 
 
+def restored_checkpoint_reads_its_run(browser, store):
+    """A checkpoint keeps the samples of the run it holds: with the run cleared from the project,
+    the project saved and the page reloaded, restoring the checkpoint reads the run's samples
+    back from the browser's own storage, and nothing says they cannot be read."""
+    # Clearing the history is offered on the Results menu, not in the palette.
+    browser.click("Results", "menuItem")
+    items = wait_for(lambda: [c for c in controls(browser.snapshot())
+                              if c["label"].startswith("Clear result history")], "the Results menu")
+    click_control(browser, items[0])
+    browser.click("Delete 1 run", "button")
+    wait_for(lambda: reports(controls(browser.snapshot()), "Deleted 1 run"), "the cleared result history")
+    browser.click("Schematic", "button")
+    choose_command(browser, "Save all")
+    wait_for(lambda: not unsaved(browser.snapshot()), "the project saved without its run", 60)
+    files = canonical_projects(browser)
+    if segments_named(json.loads(next(iter(files.values())))):
+        raise AssertionError("The project saved without its run still names a segment")
+    browser.click("Expand console", "button")
+    clear_console(browser)
+    browser.click("Collapse console", "button")
+    browser.call("POST", "/refresh", {})
+    wait_until_ready(browser)
+    browser.click("Schematic canvas", "canvas")
+    kept = results_store_files(browser, store)
+    if not any(name.startswith("runs/") for name in kept):
+        raise AssertionError(f"The save dropped the segment a checkpoint reads: {kept}")
+    choose_command(browser, "Recovery")
+    label = "Restore Manual checkpoint into the project"
+    # Checkpoints are listed newest first: the top one holds the run.
+    restores = wait_for(lambda: sorted((c for c in controls(browser.snapshot())
+                                        if c["label"] == label and c["role"] == "button"),
+                                       key=lambda c: c["center"][1]), "the checkpoint holding the run")
+    click_control(browser, restores[0])
+    browser.click("Restore Manual checkpoint", "button")
+    wait_for(lambda: reports(controls(browser.snapshot()), "Restored “Manual checkpoint” from"),
+             "the restore of the checkpoint holding the run")
+    browser.click("Expand console", "button")
+    restored = browser.capture("checkpoint-run-restored")
+    browser.click("Collapse console", "button")
+    if reports(controls(restored), UNREAD):
+        raise AssertionError("The restored checkpoint says its run's results cannot be read")
+    samples = verify_exported_samples(exported_dataset(browser))
+    return {"store_files": kept, "exported_samples": samples}
+
+
 def exported_dataset(browser):
     """The reopened run's samples, as Export result dataset… writes them to a CSV download."""
+    # A dataset exported before was read already; the one this export writes is the only one.
+    for earlier in browser.downloads.glob("*.csv"):
+        earlier.rename(earlier.with_name(earlier.name + ".read"))
     choose_command(browser, "Open results workspace")
     # The export writes what the waveform sheet shows, so every signal of the run is plotted.
     plots = wait_for(lambda: [c for c in controls(browser.snapshot())
@@ -1079,6 +1127,7 @@ def run(browser):
     model_validation = model_validation_clock(browser)
     provider_decision = provider_decision_clock(browser)
     results_reload = results_survive_reload(browser)
+    checkpoint_run = restored_checkpoint_reads_its_run(browser, results_reload["store"])
     second_tab = second_tab_refused(browser)
     quota_stop = quota_stop_keeps_rows(browser)
     return {"startup": "passed", "checkpoint_export": "passed", "checkpoint_restore": "passed",
@@ -1089,6 +1138,7 @@ def run(browser):
             "model_validation": model_validation,
             "provider_decision": provider_decision,
             "results_survive_reload": results_reload, "results_store_second_tab": second_tab,
+            "restored_checkpoint_run": checkpoint_run,
             "results_store_quota_stop": quota_stop,
             "review_post_and_resolution": "passed", "review_intervals_ms": review_intervals,
             "checkpoint": manifest, "export": exported.name, "project_version": project["version"]}
