@@ -384,7 +384,7 @@ fn touchstone_v2_import_retains_complex_matrix_and_reference_authority() {
     assert!(analysis.validate_retained_evidence().is_ok());
     assert_eq!(
         state.results.results.session.viewer,
-        rspice_app_results::workbench::documents::result_document::ResultViewer::Smith
+        rspice_app_results::workbench::documents::result_document::ResultViewer::SParameters
     );
     assert_eq!(
         state.results.result_import.source_format_id, "",

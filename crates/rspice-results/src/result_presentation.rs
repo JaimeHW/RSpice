@@ -193,14 +193,18 @@ impl ResultViewer {
     /// Studio's own said `viewer-spectrum`, which the catalog rejects for a
     /// `noise` analysis. Whether a noise sheet could be pinned into a
     /// document depended on which path asked.
+    ///
+    /// The S-parameter sheet is dataset-native: the catalog's Bode
+    /// document refuses a network run, and no catalog document draws the
+    /// rectangular sheet, so it is not offered as a pane rather than offered
+    /// as one that fails.
     pub const fn viewer_document_id(self) -> Option<&'static str> {
         Some(match self {
-            ResultViewer::Manifest => return None,
+            ResultViewer::Manifest | ResultViewer::SParameters => return None,
             ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
             ResultViewer::Bode
             | ResultViewer::Nyquist
-            | ResultViewer::NoiseContrib
-            | ResultViewer::SParameters => "viewer-bode",
+            | ResultViewer::NoiseContrib => "viewer-bode",
             ResultViewer::Fft | ResultViewer::HarmonicBalance => "viewer-spectrum",
             ResultViewer::PhaseNoise => "viewer-phase-noise",
             ResultViewer::Eye => "eye-viewer",
