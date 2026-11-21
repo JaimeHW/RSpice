@@ -202,9 +202,9 @@ impl ResultViewer {
         Some(match self {
             ResultViewer::Manifest | ResultViewer::SParameters => return None,
             ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
-            ResultViewer::Bode
-            | ResultViewer::Nyquist
-            | ResultViewer::NoiseContrib => "viewer-bode",
+            ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
+                "viewer-bode"
+            }
             ResultViewer::Fft | ResultViewer::HarmonicBalance => "viewer-spectrum",
             ResultViewer::PhaseNoise => "viewer-phase-noise",
             ResultViewer::Eye => "eye-viewer",
