@@ -267,8 +267,7 @@ fn a_snapshot_for_another_memory_carries_the_changes_of_its_stored_event_histori
             Signal::new("e(ctl)", "V", SignalKind::RealEvent),
         ],
     };
-    let mut writer =
-        SegmentWriter::create(MemoryIo::new(), &schema, &RunMeta::default()).unwrap();
+    let mut writer = SegmentWriter::create(MemoryIo::new(), &schema, &RunMeta::default()).unwrap();
     writer.push_rows(&[0.0, 1.0], &[0.0, 1.0]).unwrap();
     let changes: Vec<EventChange> = (0..4_u32)
         .map(|i| EventChange {
