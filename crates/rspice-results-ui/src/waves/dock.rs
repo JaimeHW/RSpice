@@ -507,9 +507,15 @@ pub fn marker_section(
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                 .color(color)
         };
-        let format = |value: f64| {
-            rspice_ui_kit::plot::fmt_si_significant(value, &pane.unit, significant_digits)
-        };
+        let unit = models
+            .iter()
+            .find(|model| model.analysis_key == pane.analysis)
+            .map_or_else(
+                || pane.unit.clone(),
+                |model| model.pane_axis_unit(&pane.unit),
+            );
+        let format =
+            |value: f64| rspice_ui_kit::plot::fmt_si_significant(value, &unit, significant_digits);
         row_ui.label(mono(horizontal_pane_name(models, pane), c.text_dim));
         for (slot, color) in [(0, c.canvas_cursor_a), (1, c.canvas_cursor_b)] {
             if let Some(value) = cursors[slot] {
@@ -842,15 +848,19 @@ pub fn horizontal_cursor_rows(
 /// How a horizontal cursor row names its pane: the unit, and the strip when
 /// more than one strip is on the sheet.
 fn horizontal_pane_name(models: &[StripModel], pane: &WavePanePresentationKey) -> String {
-    let unit = if pane.unit.is_empty() {
+    let model = models
+        .iter()
+        .find(|model| model.analysis_key == pane.analysis);
+    let unit = model.map_or_else(
+        || pane.unit.clone(),
+        |model| model.pane_axis_unit(&pane.unit),
+    );
+    let unit = if unit.is_empty() {
         crate::waves::pane::NO_UNIT
     } else {
-        pane.unit.as_str()
+        unit.as_str()
     };
-    match models
-        .iter()
-        .find(|model| model.analysis_key == pane.analysis)
-    {
+    match model {
         Some(model) if models.len() > 1 => format!("{} {unit}", model.kind_tag),
         _ => format!("{unit} pane"),
     }

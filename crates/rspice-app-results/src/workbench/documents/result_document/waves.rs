@@ -518,6 +518,7 @@ pub fn active_pane_facts(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Activ
     let x_unit = active_pane_x_unit(tokens, state);
     let (x_extent, y_extent) = active_pane_extents(tokens, state);
     let analysis = active_pane_analysis(tokens, state);
+    let unit = active_pane_axis_unit(tokens, state);
     let key = state.results.session.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         // One owner: the pane’s own log-Y flag on ResultsState. This read
@@ -531,7 +532,7 @@ pub fn active_pane_facts(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Activ
         }
     });
     ActivePaneFacts {
-        unit: key.map(|key| key.unit.clone()),
+        unit,
         x_unit,
         analysis,
         scale,
@@ -638,6 +639,27 @@ fn active_pane_analysis(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Option
 ///
 /// One derivation, shared with the formatted rows below, so a typed axis
 /// limit can never open on a different interval than the one displayed.
+/// The unit the active pane's axis reads in: its unit in a stack by unit,
+/// the first axis' unit on a strip the reader arranged, none for a plain
+/// number.
+fn active_pane_axis_unit(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Option<String> {
+    let key = state.results.session.active_wave_pane.clone()?;
+    let presentation = state.results_reads().presentation_policy();
+    let models = cached_models(
+        &state.model.simulation,
+        state.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    Some(
+        models
+            .iter()
+            .find(|model| model.analysis_key == key.analysis)
+            .map_or_else(|| key.unit.clone(), |model| model.pane_axis_unit(&key.unit)),
+    )
+    .filter(|unit| !unit.is_empty())
+}
+
 fn active_pane_extents(
     tokens: &Tokens,
     state: &mut ResultsParts<'_>,

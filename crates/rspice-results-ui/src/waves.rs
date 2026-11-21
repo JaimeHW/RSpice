@@ -487,6 +487,15 @@ impl StripModel {
         )
     }
 
+    /// The unit the axis of the pane named `identity` reads in. A strip the
+    /// reader arranged is named by its own key, which is no unit to show.
+    pub fn pane_axis_unit(&self, identity: &str) -> String {
+        self.unit_panes()
+            .iter()
+            .find(|pane| pane.unit == identity)
+            .map_or_else(|| identity.to_owned(), |pane| pane.axis_unit().to_owned())
+    }
+
     /// The unit one trace is measured in.
     pub fn trace_unit<'a>(&'a self, trace: &'a StripTrace) -> &'a str {
         signal_unit(
