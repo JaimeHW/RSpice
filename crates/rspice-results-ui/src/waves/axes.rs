@@ -3,7 +3,8 @@
 //! the colours of the curves it reads, and its ticks. Scrolled over, an
 //! axis zooms about the pointer; dragged, it pans; double-clicked, it fits
 //! its curves again. Its range is its own: the strip's other axes stay as
-//! they are.
+//! they are. Clicked, it is selected and the strip's grid follows its
+//! ticks; clicked again, the grid goes back to the first axis.
 
 use egui::{Rect, Sense, Ui, pos2};
 use rspice_ui_kit::plot::{Axis, fmt_si_significant};
@@ -19,20 +20,31 @@ const ZOOM_PER_POINT: f64 = 0.003;
 /// How far an arrow key pans a focused axis, as a share of its span.
 const KEY_PAN_SHARE: f64 = 0.1;
 
-/// Draw the columns of `axes` beside the plot spanning `plot_rect`, and
-/// return the range each axis the reader zoomed, panned or fitted now
-/// shows, by its slot: `None` to fit its curves again.
+/// What the reader did with a strip's added axes this frame.
+#[derive(Debug, Default)]
+pub(crate) struct AxesResponse {
+    /// The range each axis the reader zoomed, panned or fitted now shows,
+    /// by its slot: `None` to fit its curves again.
+    pub ranges: Vec<(usize, Option<(f64, f64)>)>,
+    /// The axis clicked, by its slot: the grid follows it, or goes back to
+    /// the first axis when it already did.
+    pub clicked: Option<usize>,
+}
+
+/// Draw the columns of `axes` beside the plot spanning `plot_rect`, the
+/// one the grid follows (`grid`, by slot) marked, and report what the
+/// reader did with them.
 pub(crate) fn secondary_axes(
     ui: &mut Ui,
     model: &StripModel,
     axes: &[SecondaryPlot<'_>],
-    plot_rect: Rect,
-    gutter: Gutter,
+    (plot_rect, gutter, grid): (Rect, Gutter, Option<usize>),
     t: &Tokens,
-) -> Vec<(usize, Option<(f64, f64)>)> {
-    let mut changes = Vec::new();
+) -> AxesResponse {
+    let mut response_out = AxesResponse::default();
+    let changes = &mut response_out.ranges;
     if plot_rect.height() <= 1.0 {
-        return changes;
+        return response_out;
     }
     let painter = ui.painter().clone();
     let tick_font = theme::mono(rspice_ui_kit::tokens::FS_MICRO, FontWeight::Regular);
@@ -54,10 +66,15 @@ pub(crate) fn secondary_axes(
             .collect();
         let spine_x = rect.right() - 6.0;
         let spine = colours.first().copied().unwrap_or(t.color.text_dim);
+        // The axis the grid follows stands out by a heavier spine.
+        let followed = grid == Some(axis.slot);
         painter.vline(
             spine_x,
             rect.y_range(),
-            egui::Stroke::new(1.0, spine.gamma_multiply(0.8)),
+            egui::Stroke::new(
+                if followed { 2.0 } else { 1.0 },
+                spine.gamma_multiply(if followed { 1.0 } else { 0.8 }),
+            ),
         );
         let to_y =
             |value: f64| rect.bottom() - ((value - low) / (high - low)) as f32 * rect.height();
@@ -114,8 +131,11 @@ pub(crate) fn secondary_axes(
         });
         theme::paint_focus_ring(ui, &response, rect);
         let response = response.on_hover_text(format!(
-            "The {unit} axis: scroll to zoom, drag to pan, double-click to fit its curves"
+            "The {unit} axis: scroll to zoom, drag to pan, double-click to fit its curves, click to rule the grid by its ticks"
         ));
+        if response.clicked() {
+            response_out.clicked = Some(axis.slot);
+        }
         let span = high - low;
         let per_point = span / f64::from(rect.height());
         if response.double_clicked() {
@@ -166,5 +186,5 @@ pub(crate) fn secondary_axes(
             }
         }
     }
-    changes
+    response_out
 }

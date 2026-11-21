@@ -1193,9 +1193,18 @@ pub fn show(
     // rows tall carries the same tick count as a full-height one, and
     // stacked labels are less readable than none.
     let mut last_label_top = f32::INFINITY;
+    for fraction in spec.grid_rows.iter().flatten() {
+        painter.hline(
+            plot_rect.x_range(),
+            plot_rect.bottom() - fraction * plot_rect.height(),
+            grid,
+        );
+    }
     for (yv, label) in &spec.y.ticks {
         let py = my(*yv);
-        painter.hline(plot_rect.x_range(), py, grid);
+        if spec.grid_rows.is_none() {
+            painter.hline(plot_rect.x_range(), py, grid);
+        }
         let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.canvas_text_dim);
         let (height, top) = (galley.size().y, py - galley.size().y * 0.5);
         if top + height <= last_label_top - Y_TICK_LABEL_GAP

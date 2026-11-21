@@ -209,6 +209,7 @@ fn a_stored_trace_is_read_once_and_kept_however_many_frames_draw_it() {
                                 family_envelopes: &[],
                                 find_nearest: true,
                                 secondary: &[],
+                                grid_axis: None,
                             },
                         );
                     }
@@ -400,6 +401,7 @@ fn a_stored_run_builds_fits_draws_and_reads_its_cursors_without_reading_a_column
                         family_envelopes: &[],
                         find_nearest: true,
                         secondary: &[],
+                        grid_axis: None,
                     },
                 );
             }

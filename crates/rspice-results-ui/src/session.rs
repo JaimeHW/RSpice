@@ -637,6 +637,9 @@ pub struct ResultViewerState {
     pub cursor_a_anchor: Option<WaveformPresentationKey>,
     /// Unit-scoped waveform pane receiving instrument actions.
     pub active_wave_pane: Option<WavePanePresentationKey>,
+    /// The axis each strip's grid follows, by its slot, when the reader
+    /// selected one of the strip's added axes.
+    pub grid_axes: HashMap<WavePanePresentationKey, usize>,
     /// A waveform pane whose "Plot against" choices the command list asked
     /// for: the stack opens them over the pane the next time it draws it.
     pub plot_against_request: Option<WavePanePresentationKey>,

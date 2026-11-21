@@ -535,6 +535,8 @@ pub struct PanePlot<'a> {
     /// The strip's Y axes after its first, each with the curves read against
     /// it and the range it shows.
     pub secondary: &'a [SecondaryPlot<'a>],
+    /// Which of `secondary` the grid follows, when the reader selected one.
+    pub grid_axis: Option<usize>,
 }
 
 /// One Y axis of a strip after its first, as its plot draws it: the curves
@@ -836,6 +838,20 @@ pub fn show_plot<'a>(
     }
     spec.limit_lines = input.specification_limits;
     spec.minor_grid = input.minor_grid;
+    // The grid follows the axis the reader selected.
+    if let Some(axis) = input.grid_axis.and_then(|index| input.secondary.get(index)) {
+        let (low, high) = axis.range;
+        if low.is_finite() && high.is_finite() && high > low {
+            spec.grid_rows = Some(
+                plot::Axis::linear_with(low, high, "", 5)
+                    .ticks
+                    .iter()
+                    .map(|(value, _)| ((value - low) / (high - low)) as f32)
+                    .filter(|fraction| (0.0..=1.0).contains(fraction))
+                    .collect(),
+            );
+        }
+    }
     spec.horizontal_cursors = input.horizontal_cursors;
     spec.horizontal_cursor_interactive = input.horizontal_cursor_interactive;
     spec.markers = input.markers;

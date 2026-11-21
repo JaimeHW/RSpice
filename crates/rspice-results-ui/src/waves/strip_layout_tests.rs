@@ -380,6 +380,7 @@ fn every_curve_a_strip_draws_reads_out_on_hover() {
                 family_envelopes: &[],
                 find_nearest: false,
                 secondary: &[],
+                grid_axis: None,
             },
         );
     });

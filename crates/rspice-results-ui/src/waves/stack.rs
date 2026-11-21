@@ -1917,6 +1917,11 @@ fn show_unit_pane(
         })
         .collect();
     host.note_sample_reads(0, secondary_samples);
+    let grid_axis = host
+        .session()
+        .grid_axes
+        .get(&pane_key)
+        .and_then(|slot| secondary.iter().position(|axis| axis.slot == *slot));
     let input = pane_view::PanePlot {
         x_range: (x0, x1),
         auto_y: (auto_y0, auto_y1),
@@ -1939,6 +1944,7 @@ fn show_unit_pane(
             || host.session().trace_pick.is_armed()
             || (host.session().cursor_placement_enabled() && places_a),
         secondary: &secondary,
+        grid_axis,
     };
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
     let response = drawn.response;
@@ -1951,8 +1957,28 @@ fn show_unit_pane(
         (&response.response, drawn.context.as_ref()),
         (options.pane_chrome, window),
     );
-    let secondary_views =
-        super::axes::secondary_axes(ui, model, &secondary, response.plot_rect, gutter, &t);
+    let axes_response = super::axes::secondary_axes(
+        ui,
+        model,
+        &secondary,
+        (
+            response.plot_rect,
+            gutter,
+            grid_axis
+                .and_then(|index| secondary.get(index))
+                .map(|axis| axis.slot),
+        ),
+        &t,
+    );
+    if let Some(slot) = axes_response.clicked {
+        let grid_axes = &mut host.session_mut().grid_axes;
+        if grid_axes.get(&pane_key) == Some(&slot) {
+            grid_axes.remove(&pane_key);
+        } else {
+            grid_axes.insert(pane_key.clone(), slot);
+        }
+    }
+    let secondary_views = axes_response.ranges;
     // A pane becomes the active one when the reader acts on it: a click, a
     // drag, a cursor placed. Pointing at it is not acting on it, and a pane
     // that took the instrument's actions as the pointer crossed it handed
