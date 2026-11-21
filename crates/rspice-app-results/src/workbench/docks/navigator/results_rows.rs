@@ -1924,13 +1924,22 @@ fn result_browser_analysis_head(
         text_left += PROBLEM_MARK_ADVANCE;
     }
     let text_right = rect.right() - 8.0 - count_width - 8.0;
+    // A run's name carries its date and note, so a narrow dock elides it
+    // short of the count rather than painting it under the number.
+    let label_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
+    let label = super::super::super::design_system::elide_text(
+        ui,
+        label,
+        &label_font,
+        text_right - text_left,
+    );
     let label_end = ui
         .painter()
         .text(
             egui::pos2(text_left, rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            theme::mono(tokens::FS_0, FontWeight::SemiBold),
+            label_font,
             if selected { c.accent } else { c.text },
         )
         .right();

@@ -25,7 +25,8 @@ fn signal(host: &ResultsTestHost, name: &str) -> SourceWaveformPresentationKey {
 #[test]
 fn a_signal_sent_to_the_calculator_opens_it_holding_the_signal_and_its_spectrum_reads_it() {
     let mut host = finished_hierarchical_run();
-    host.workbench.activate(crate::workbench::state::Workspace::Results);
+    host.workbench
+        .activate(crate::workbench::state::Workspace::Results);
     let input = signal(&host, "V(in)");
     assert!(select_result_signal_by_key(
         &mut host.results_parts(),

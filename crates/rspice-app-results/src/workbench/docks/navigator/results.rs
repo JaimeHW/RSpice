@@ -537,7 +537,7 @@ pub(in crate::workbench) fn results(
         stored_kind,
         layout,
         stored_producer_facet,
-        tab == ResultsBrowserTab::Signals,
+        (tab == ResultsBrowserTab::Signals).then_some((order, scope)),
     );
     // The scope band: the signals tab owns the scope control on the left —
     // All | Recent over the session's real recency state — then the Sets
@@ -625,8 +625,6 @@ pub(in crate::workbench) fn results(
                         }
                         ui.add_space(6.0);
                         signal_sets_menu(ui, state, &ticked_ordered);
-                        ui.add_space(6.0);
-                        results_browser_order_menu(ui, order, scope);
                     }
                     // The count is the band's last register: how many of the
                     // tab's rows the filter in force is letting through.
@@ -1512,17 +1510,26 @@ fn results_browser_toolbar(
     kind: ResultsBrowserKind,
     layout: ResultsBrowserLayout,
     producer: Option<AnalysisPresentationKey>,
-    show_quantity_facets: bool,
+    signals: Option<(ResultsBrowserOrder, ResultsBrowserScope)>,
 ) {
     const GUTTER: f32 = 5.0;
 
+    let show_quantity_facets = signals.is_some();
     let t = Tokens::get(ui.ctx());
     let workspace = state.workbench.workspace;
     ui.add_space(7.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(PANEL_SEARCH_MARGIN_X);
-        let field_width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
+        // The signals' order sits square at the query's end, where it costs
+        // the field its own width and never the scope band its count.
+        let order_width = if signals.is_some() {
+            t.metrics.ctl_h + GUTTER
+        } else {
+            0.0
+        };
+        let field_width =
+            panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X) - order_width;
         let placeholder = "Find signal…";
         let field_id = ui.make_persistent_id("workbench.navigator.filter");
         if search_focus_requested::<FocusNavigatorSearch>(ui, &mut state.workbench.outbox) {
@@ -1556,6 +1563,10 @@ fn results_browser_toolbar(
             ),
             t.color.text_faint,
         );
+        if let Some((order, scope)) = signals {
+            ui.add_space(GUTTER);
+            results_browser_order_menu(ui, order, scope);
+        }
     });
     if show_quantity_facets {
         // The producing analysis, on its own row. Every analysis the session
@@ -1770,14 +1781,20 @@ fn results_browser_order_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-order")
 }
 
-/// The order of the signals tab on a menu beside its sets: one order is on.
-/// Recent lists what was used most recently first, so the menu waits while
-/// it is in force.
+/// The order of the signals tab on a square menu at the query's end: one
+/// order is on. Recent lists what was used most recently first, so the menu
+/// waits while it is in force.
 fn results_browser_order_menu(ui: &mut Ui, order: ResultsBrowserOrder, scope: ResultsBrowserScope) {
+    let t = Tokens::get(ui.ctx());
     let recent = scope == ResultsBrowserScope::Recent;
+    let side = t.metrics.ctl_h;
     let response = ui
         .add_enabled_ui(!recent, |ui| {
-            egui::containers::menu::MenuButton::new("Sort")
+            ui.scope(|ui| {
+                ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+                egui::containers::menu::MenuButton::from_button(
+                    egui::Button::new("").min_size(egui::vec2(side, side)),
+                )
                 .ui(ui, |ui| {
                     for candidate in ResultsBrowserOrder::ALL {
                         if ui.radio(candidate == order, candidate.label()).clicked() {
@@ -1789,8 +1806,23 @@ fn results_browser_order_menu(ui: &mut Ui, order: ResultsBrowserOrder, scope: Re
                     }
                 })
                 .0
+            })
+            .inner
         })
         .inner;
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), "Sort")
+    });
+    let ink = if recent {
+        t.color.text_faint
+    } else {
+        t.color.text_dim
+    };
+    WorkbenchIcon::Sort.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(response.rect.center(), egui::vec2(16.0, 16.0)),
+        ink,
+    );
     if recent {
         response.on_disabled_hover_text("Recent lists what was used most recently first.");
     } else {
