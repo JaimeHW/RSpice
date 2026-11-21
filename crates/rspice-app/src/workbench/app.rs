@@ -751,7 +751,13 @@ impl RSpiceApp {
         let console_maximized = self.state.workbench.console_maximized;
         let active_document =
             rspice_app_workbench::workbench::chrome::document_bar::active_document_id(&self.state);
+        let results = self
+            .state
+            .results
+            .results
+            .window_view(&self.state.model.simulation);
         if let Some(window_state) = self.state.workbench.window_session.state_mut(window) {
+            window_state.results = results.keeping_the_run_of(&window_state.results);
             window_state.workspace = workspace;
             window_state.route = route;
             window_state.layout = layout;
@@ -800,6 +806,10 @@ impl RSpiceApp {
             );
             self.state.design.resume_gesture(drag);
         }
+        self.state
+            .results
+            .results
+            .show_window_view(&mut self.state.model.simulation, &window_state.results);
         self.state.workbench.drawer = window_state.drawer;
         self.state.workbench.console_maximized = window_state.console_maximized;
         true

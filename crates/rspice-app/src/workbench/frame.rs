@@ -929,11 +929,14 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
 /// Application-global modal owners and exports remain in the primary
 /// viewport. The window still receives the complete workbench chrome, dock
 /// composition, active document, and workspace surface; the notification
-/// panel when its own bell opened it; and the toasts while it has the
-/// keyboard.
+/// panel when its own bell opened it; the toasts while it has the keyboard;
+/// and the shortcuts typed into it.
 pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
+    // The keys typed into this window run their commands here, on the
+    // window's own projection.
+    app.dispatch_shortcut_keys(ctx);
     app.state.reconcile_schematic_drag(ctx, false);
     app.state.apply_schematic_editing_preferences();
     reconcile_platform_full_screen(app);

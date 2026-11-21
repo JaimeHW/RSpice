@@ -30,6 +30,13 @@ impl RSpiceApp {
     pub(crate) fn handle_shortcuts(&mut self, ctx: &Context) {
         // Commands held in a frame that drew no page are not held longer.
         self.carry_out_held_commands();
+        self.dispatch_shortcut_keys(ctx);
+    }
+
+    /// Resolve the keys typed into the window `ctx` draws and run the
+    /// command they name, in that window: a secondary window's keys are its
+    /// own, read while its projection is on screen.
+    pub(crate) fn dispatch_shortcut_keys(&mut self, ctx: &Context) {
         self.note_editor_keys(ctx);
         if shortcut_dispatch_blocked(&self.state, ctx) {
             self.state.shortcut_resolver.reset();

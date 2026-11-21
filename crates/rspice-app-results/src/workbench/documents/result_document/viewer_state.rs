@@ -20,6 +20,55 @@ impl ResultsState {
         };
     }
 
+    /// The shown window's own Results state, kept for it while another
+    /// window is drawn and saved with the session.
+    pub fn window_view(
+        &self,
+        simulation: &crate::state::SimulationState,
+    ) -> rspice_results_ui::session::WindowResultsView {
+        let run = simulation.active_run().map(|run| run.dataset_id);
+        let mut view = self
+            .session
+            .window_view(run, simulation.view.active_analysis_idx);
+        view.quick_view_viewer = self.quick_view_viewer;
+        view
+    }
+
+    /// Put a window's own Results state back on screen: the analysis it
+    /// shows of the run its document shows, its sheet, cursors, zoom and
+    /// selection. Going back to a window is not a change of what the reader
+    /// looks at in it, so nothing placed there is retired for it.
+    pub fn show_window_view(
+        &mut self,
+        simulation: &mut crate::state::SimulationState,
+        view: &rspice_results_ui::session::WindowResultsView,
+    ) {
+        let run = view
+            .run
+            .and_then(|dataset| {
+                simulation
+                    .retained
+                    .runs
+                    .iter()
+                    .position(|run| run.dataset_id == dataset)
+            })
+            .or(simulation.view.active_run_idx);
+        if let Some(run) = run {
+            let shown = view
+                .analysis
+                .is_some_and(|analysis| simulation.select_run_analysis(run, analysis));
+            if !shown {
+                simulation.select_run(run);
+            }
+        }
+        self.session.show_window_view(view);
+        self.quick_view_viewer = view.quick_view_viewer;
+        self.seen_selection = shown_selection(simulation);
+        if let Some(kind) = self.seen_selection.and_then(|shown| shown.kind) {
+            self.cursor_kind = Some(kind);
+        }
+    }
+
     /// Return the selection only while it resolves to the exact active
     /// retained dataset and source waveform that created it.
     pub fn valid_selected_trace<'a>(

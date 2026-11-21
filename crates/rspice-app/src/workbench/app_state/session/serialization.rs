@@ -395,6 +395,19 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .model
             .workspace
             .save_active_schematic(&state.model.schematic);
+        // The primary window's own place in Results goes back on screen.
+        let primary = state.workbench.window_session.primary();
+        if let Some(view) = state
+            .workbench
+            .window_session
+            .state(primary)
+            .map(|window| window.results.clone())
+        {
+            state
+                .results
+                .results
+                .show_window_view(&mut state.model.simulation, &view);
+        }
         Ok(state)
     }
 }
@@ -718,10 +731,10 @@ mod tests {
         state.results.results.session.viewer = ResultViewer::Table;
         state.simulate.verification_page = VerificationPage::Reference;
         let session = saved_session(&mut state);
-        let stored = "\"result_viewer\":\"Table\"";
+        let stored = "\"viewer\":\"Table\"";
         assert!(session.contains(stored), "the session names its viewer");
 
-        let restored = relaunch(session.replace(stored, "\"result_viewer\":\"Specs\""));
+        let restored = relaunch(session.replace(stored, "\"viewer\":\"Specs\""));
         assert_eq!(
             restored.results.results.session.viewer,
             ResultViewer::default()

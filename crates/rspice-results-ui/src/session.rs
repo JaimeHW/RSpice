@@ -28,7 +28,7 @@ pub type AxisExtent = (f64, f64);
 /// The X and Y intervals one plot last drew.
 pub type DrawnAxes = (AxisExtent, AxisExtent);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PlotPresentationKey {
     Global(usize),
     /// One waveform stack strip, named by the analysis it draws rather than
@@ -403,6 +403,160 @@ impl MemberSelection {
         } else {
             &[]
         }
+    }
+}
+
+/// One window's own place in Results: the analysis of its run it shows, the
+/// sheet, the cursors, the zoom and the selection. Two windows on one project
+/// each keep theirs; the run a window shows is its active document. Saved
+/// with the session, except the selection, which names one run's traces.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct WindowResultsView {
+    /// The run the window shows.
+    pub run: Option<DatasetId>,
+    /// The shown run's analysis, by its place in the run.
+    pub analysis: Option<usize>,
+    /// The sheet; `None` until the window has shown Results, and for a
+    /// sheet this build does not have.
+    #[serde(deserialize_with = "known_viewer")]
+    pub viewer: Option<ResultViewer>,
+    /// The quick view's sheet while the window shows a saved document's.
+    #[serde(deserialize_with = "known_viewer")]
+    pub quick_view_viewer: Option<ResultViewer>,
+    pub cursor_a: Option<f64>,
+    pub cursor_b: Option<f64>,
+    pub cursor_strip: Option<usize>,
+    pub horizontal_cursors: Vec<(WavePanePresentationKey, HorizontalCursors)>,
+    /// The zoom of each plot the window zoomed.
+    pub views: Vec<SavedPlotView>,
+    #[serde(skip)]
+    pub cursor_a_anchor: Option<WaveformPresentationKey>,
+    #[serde(skip)]
+    pub stepping_cursor: CursorId,
+    #[serde(skip)]
+    pub selected_trace: Option<SelectedResultTrace>,
+    #[serde(skip)]
+    pub selected_result_artifact: Option<ResultArtifactPresentationKey>,
+    #[serde(skip)]
+    pub active_wave_pane: Option<WavePanePresentationKey>,
+}
+
+/// A saved sheet, or none for one this build does not have.
+fn known_viewer<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ResultViewer>, D::Error> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Saved {
+        Known(ResultViewer),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(
+        match <Option<Saved> as serde::Deserialize>::deserialize(deserializer)? {
+            Some(Saved::Known(viewer)) => Some(viewer),
+            Some(Saved::Other(_)) | None => None,
+        },
+    )
+}
+
+impl WindowResultsView {
+    /// This view, keeping the run and analysis `previous` showed while this
+    /// one shows none: a window whose run is not loaded yet, or was put
+    /// away, goes back to it when it is.
+    #[must_use]
+    pub fn keeping_the_run_of(mut self, previous: &Self) -> Self {
+        if self.run.is_none() {
+            self.run = previous.run;
+            self.analysis = previous.analysis;
+        }
+        self
+    }
+}
+
+/// The zoom one plot keeps, as a window saves it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SavedPlotView {
+    pub viewer: ResultViewer,
+    pub plot: PlotPresentationKey,
+    pub ordinal: usize,
+    pub x: Option<AxisExtent>,
+    pub y: Option<AxisExtent>,
+}
+
+impl ResultViewerState {
+    /// What of this state is the shown window's own, for when another window
+    /// is drawn. `analysis` is the shown run's analysis.
+    pub fn window_view(
+        &self,
+        run: Option<DatasetId>,
+        analysis: Option<usize>,
+    ) -> WindowResultsView {
+        let mut views: Vec<_> = self
+            .views
+            .iter()
+            .map(|(&(viewer, plot, ordinal), view)| SavedPlotView {
+                viewer,
+                plot,
+                ordinal,
+                x: view.x,
+                y: view.y,
+            })
+            .collect();
+        views
+            .sort_by_cached_key(|saved| format!("{:?}", (saved.viewer, saved.plot, saved.ordinal)));
+        let mut horizontal_cursors: Vec<_> = self
+            .horizontal_cursors
+            .iter()
+            .map(|(pane, cursors)| (pane.clone(), *cursors))
+            .collect();
+        horizontal_cursors.sort_by_cached_key(|(pane, _)| format!("{pane:?}"));
+        WindowResultsView {
+            run,
+            analysis,
+            viewer: Some(self.viewer),
+            quick_view_viewer: None,
+            cursor_a: self.cursors.a,
+            cursor_b: self.cursors.b,
+            cursor_strip: self.cursor_strip,
+            horizontal_cursors,
+            views,
+            cursor_a_anchor: self.cursor_a_anchor.clone(),
+            stepping_cursor: self.stepping_cursor,
+            selected_trace: self.selected_trace.clone(),
+            selected_result_artifact: self.selected_result_artifact.clone(),
+            active_wave_pane: self.active_wave_pane.clone(),
+        }
+    }
+
+    /// Put a window's own state back, as it was when it was last drawn. A
+    /// window that never showed Results keeps the sheet on screen.
+    pub fn show_window_view(&mut self, view: &WindowResultsView) {
+        if let Some(viewer) = view.viewer {
+            self.viewer = viewer;
+        }
+        self.cursors.a = view.cursor_a;
+        self.cursors.b = view.cursor_b;
+        self.cursor_strip = view.cursor_strip;
+        self.horizontal_cursors = view.horizontal_cursors.iter().cloned().collect();
+        self.views = view
+            .views
+            .iter()
+            .map(|saved| {
+                (
+                    (saved.viewer, saved.plot, saved.ordinal),
+                    PlotView {
+                        x: saved.x,
+                        y: saved.y,
+                    },
+                )
+            })
+            .collect();
+        self.cursor_a_anchor = view.cursor_a_anchor.clone();
+        self.stepping_cursor = view.stepping_cursor;
+        self.selected_trace = view.selected_trace.clone();
+        self.selected_result_artifact = view.selected_result_artifact.clone();
+        self.active_wave_pane = view.active_wave_pane.clone();
     }
 }
 

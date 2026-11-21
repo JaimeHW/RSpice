@@ -99,8 +99,6 @@ pub(in crate::workbench) struct UiSessionWire {
     browser_spoken_feedback: bool,
     #[serde(default)]
     text_locale: rspice_app_workbench::workbench::localization::UiTextLocale,
-    #[serde(default, deserialize_with = "known_or_default")]
-    result_viewer: rspice_app_results::workbench::documents::result_document::ResultViewer,
     /// Bit periods the reader pinned eyes to, for results that carry prepared
     /// provenance. Legacy keys name a run-local analysis id that a later
     /// session will never mint again, so they are dropped on save rather than
@@ -212,7 +210,6 @@ impl UiSessionWire {
             preferences: preferences.clone(),
             browser_spoken_feedback: settings.browser_spoken_feedback,
             text_locale: workbench.text_locale,
-            result_viewer: results.results.session.viewer,
             eye_timebase: results
                 .results
                 .session
@@ -271,7 +268,6 @@ impl UiSessionWire {
         state.platform.autosave_minutes = ser.autosave_minutes;
         state.settings.browser_spoken_feedback = ser.browser_spoken_feedback;
         state.workbench.text_locale = ser.text_locale;
-        state.results.results.session.viewer = ser.result_viewer;
         state.results.results.session.eye_timebase = ser
             .eye_timebase
             .into_iter()
@@ -394,7 +390,7 @@ pub(crate) struct WorkbenchWireRef<'a> {
     #[serde(default)]
     workspace: &'a Workspace,
     #[serde(default)]
-    window_session: &'a WindowSessionRegistry,
+    window_session: Cow<'a, WindowSessionRegistry>,
     #[serde(default)]
     navigation_schema_version: &'a u8,
     #[serde(default)]
@@ -482,7 +478,7 @@ pub(crate) struct WorkbenchWireRef<'a> {
 impl<'a> WorkbenchWireRef<'a> {
     /// Borrow what a session keeps of `state`.
     pub(crate) fn capture(state: &'a AppState) -> Self {
-        Self::capture_parts(
+        let mut wire = Self::capture_parts(
             &state.workbench,
             &state.design,
             &state.code,
@@ -496,7 +492,22 @@ impl<'a> WorkbenchWireRef<'a> {
                 .generated_document
                 .as_ref()
                 .map(|document| document.id()),
-        )
+        );
+        // The primary window's own place in Results is what is on screen.
+        let window_session = &state.workbench.window_session;
+        let primary = window_session.primary();
+        let shown = state.results.results.window_view(&state.model.simulation);
+        if let Some(stored) = window_session.state(primary).map(|window| &window.results)
+            && *stored != shown.clone().keeping_the_run_of(stored)
+        {
+            let shown = shown.keeping_the_run_of(stored);
+            let mut registry = window_session.clone();
+            if let Some(window) = registry.state_mut(primary) {
+                window.results = shown;
+            }
+            wire.window_session = Cow::Owned(registry);
+        }
+        wire
     }
 
     /// Borrow what a session keeps of the workbench and of the slots that
@@ -568,7 +579,7 @@ impl<'a> WorkbenchWireRef<'a> {
         } = workbench;
         Self {
             workspace,
-            window_session,
+            window_session: Cow::Borrowed(window_session),
             navigation_schema_version,
             layout_schema_version,
             navigation,
@@ -617,7 +628,7 @@ impl<'a> WorkbenchWireRef<'a> {
     fn to_wire(&self) -> WorkbenchWire {
         WorkbenchWire {
             workspace: *self.workspace,
-            window_session: self.window_session.clone(),
+            window_session: self.window_session.clone().into_owned(),
             navigation_schema_version: *self.navigation_schema_version,
             layout_schema_version: *self.layout_schema_version,
             navigation: self.navigation.clone(),
@@ -667,7 +678,7 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
     fn from(wire: &'a WorkbenchWire) -> Self {
         Self {
             workspace: &wire.workspace,
-            window_session: &wire.window_session,
+            window_session: Cow::Borrowed(&wire.window_session),
             navigation_schema_version: &wire.navigation_schema_version,
             layout_schema_version: &wire.layout_schema_version,
             navigation: &wire.navigation,

@@ -156,6 +156,9 @@ pub struct ApplicationWindowState {
     pub drawer: Option<Drawer>,
     #[serde(skip)]
     pub console_maximized: bool,
+    /// The window's own place in Results: analysis, sheet, cursors, zoom
+    /// and selection.
+    pub results: rspice_results_ui::session::WindowResultsView,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +201,7 @@ impl Default for ApplicationWindowState {
             full_screen: false,
             drawer: None,
             console_maximized: false,
+            results: rspice_results_ui::session::WindowResultsView::default(),
         }
     }
 }
