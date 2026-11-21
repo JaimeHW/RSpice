@@ -1390,7 +1390,7 @@ pub(super) fn xy_plot_edit_for(
         .filter(|plot| plot.pane_id == pane_id)
         .collect();
     (held.len() != plots.len() || held.iter().zip(&plots).any(|(held, plot)| *held != plot))
-        .then(|| DocumentEdit::SetXyPlots { pane_id, plots })
+        .then_some(DocumentEdit::SetXyPlots { pane_id, plots })
 }
 
 /// The edits that make the pane keep the expressions its strip draws: each
