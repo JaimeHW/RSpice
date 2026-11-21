@@ -6,8 +6,8 @@ use std::process::Output;
 
 /// A delimiter-only header is the header, two columns named '', not a blank
 /// line that hands the header's place to the first data row (whose names "0"
-/// and "1" would convert). Two columns of one name are refused, as the app's
-/// importer refuses them, and nothing is written.
+/// and "1" would convert). Its unnamed signal is refused, as the app's
+/// importer refuses it, and nothing is written.
 #[test]
 fn a_delimiter_only_header_is_the_header_and_its_unnamed_columns_are_refused() {
     let directory = test_dir("delimiter_only_header");
@@ -29,7 +29,7 @@ fn a_delimiter_only_header_is_the_header_and_its_unnamed_columns_are_refused() {
         assert_eq!(result.status.code(), Some(1), "{result:?}");
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(
-            stderr.contains("two columns are named '', and a reader cannot tell them apart"),
+            stderr.contains("column 2 has no name, and the importer refuses an unnamed signal"),
             "{format}: {stderr}"
         );
         assert!(!output.exists(), "{format}: a refused table was written");
