@@ -13,6 +13,7 @@ use rspice_results::result_import::ResultImportFormat;
 use rspice_results::result_import::waveforms::{ImportedRowsCheck, WaveformImportLimits};
 use rspice_results::stored_analysis::{Axis, Schema, Signal, SignalKind};
 use rspice_results::waveform::{RetainedTrace, WaveformValues};
+use serde::{Deserialize, Serialize};
 
 use super::stream::{RawRowBlock, RawStreamReader, RawStreamStart, StreamedRawPlot};
 
@@ -25,6 +26,43 @@ pub fn imported_analysis_type(domain: crate::WaveformDomain) -> AnalysisType {
         crate::WaveformDomain::Transient => AnalysisType::Transient,
         crate::WaveformDomain::Ac => AnalysisType::Ac,
         crate::WaveformDomain::DcSweep => AnalysisType::DcSweep,
+    }
+}
+
+/// What an import admits of a source, whoever reads it: the desktop's import job states it to its
+/// reader, the page to its import worker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawImportPolicy {
+    /// The fewest rows a source may hold and still be a result.
+    pub min_rows: usize,
+    /// The longest signal name a file may give: a longer one is a damaged file.
+    pub max_signal_name_bytes: usize,
+    /// The most values one byte of a source can stand for: a source that states more rows,
+    /// columns or values than its bytes can hold is damaged.
+    pub values_per_source_byte: usize,
+    /// The first rows of each signal kept for the review.
+    pub preview_rows: usize,
+}
+
+impl RawImportPolicy {
+    /// What a source of `length` bytes may state: as many values as its bytes can hold.
+    fn limits(&self, length: u64) -> (ResourceLimits, WaveformImportLimits) {
+        let capacity = usize::try_from(length)
+            .unwrap_or(usize::MAX)
+            .max(1)
+            .saturating_mul(self.values_per_source_byte);
+        let mut resource = ResourceLimits::default();
+        resource.max_external_data_bytes = usize::MAX;
+        resource.max_external_data_values = capacity;
+        resource.max_result_values = capacity;
+        let limits = WaveformImportLimits {
+            min_rows: self.min_rows,
+            max_rows: capacity,
+            max_columns: capacity,
+            max_values: capacity,
+            max_signal_name_bytes: self.max_signal_name_bytes,
+        };
+        (resource, limits)
     }
 }
 
@@ -49,17 +87,15 @@ pub struct RawImport {
 }
 
 impl RawImport {
-    /// How the rawfile whose first bytes are `head`, `length` bytes in all, is imported: read
-    /// within `resource`, its rows checked against `limits`, the first `preview_rows` of each
-    /// signal kept for the review.
+    /// How the rawfile whose first bytes are `head`, `length` bytes in all, is imported under
+    /// `policy`.
     pub fn start(
         head: &[u8],
         length: u64,
-        resource: ResourceLimits,
-        limits: WaveformImportLimits,
-        preview_rows: usize,
+        policy: &RawImportPolicy,
     ) -> Result<RawImportStart, String> {
         let format = ResultImportFormat::SpiceRaw;
+        let (resource, limits) = policy.limits(length);
         let reader = match RawStreamReader::start(head, length, resource)
             .map_err(|error| adapter_error(format, error))?
         {
@@ -88,7 +124,7 @@ impl RawImport {
         Ok(RawImportStart::Streamed(Box::new(Self {
             reader,
             check,
-            facts: StreamFacts::new(plot.signals.len(), preview_rows),
+            facts: StreamFacts::new(plot.signals.len(), policy.preview_rows),
             layout: Layout {
                 axis,
                 complex: plot.complex,
@@ -182,8 +218,22 @@ impl RawImport {
     }
 }
 
-/// A rawfile's plot read whole into a segment.
-#[derive(Debug)]
+/// What the browser's import worker answers the page for a picked file.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StreamedRawOutcome {
+    /// The plot read into the store, which keeps it under `digest`.
+    Kept {
+        digest: String,
+        imported: Box<RawImported>,
+    },
+    /// The file is read whole: it is not one ordinary binary plot.
+    WholeFile,
+}
+
+/// A rawfile's plot read whole into a segment. The browser's import worker hands it to the page as
+/// it is, and the page reads the traces over the segment the store kept.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RawImported {
     pub plot: StreamedRawPlot,
     pub rows: usize,
@@ -263,7 +313,7 @@ fn explain(
 }
 
 /// How the plot's columns sit in the segment: the layout the whole-file import keeps.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Layout {
     /// The coordinate is the segment's axis; otherwise it is the first column, beside row numbers.
     axis: bool,

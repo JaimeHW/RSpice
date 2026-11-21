@@ -179,6 +179,8 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-simulation-contract",
         # It reads kept runs and compares them with the results reader and engine.
         "rspice-results",
+        # Its import worker reads picked result files.
+        "rspice-formats",
     },
 }
 HEADLESS = set(ALLOWED) - {

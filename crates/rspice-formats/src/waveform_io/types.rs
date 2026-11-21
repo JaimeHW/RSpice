@@ -3,7 +3,7 @@
 use super::*;
 
 /// Coordinate domain represented by waveform interchange formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WaveformDomain {
     Transient,
     Ac,

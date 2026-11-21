@@ -20,7 +20,7 @@ use rspice_core::io::ltspice_raw::{
 const BLOCK_BYTES: usize = 4 << 20;
 
 /// What a streamed plot declares, read from its header before any row.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StreamedRawPlot {
     /// The plot's own `Plotname:` title.
     pub plot_name: String,

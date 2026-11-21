@@ -6804,6 +6804,7 @@ dependencies = [
  "js-sys",
  "rspice-core",
  "rspice-design",
+ "rspice-formats",
  "rspice-hardcopy",
  "rspice-results",
  "rspice-results-store",

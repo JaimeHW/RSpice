@@ -14,6 +14,12 @@ name = "rspice-worker"
 path = "src/main.rs"
 test = false
 
+# The import worker's entry image: loaded only when an import starts.
+[[bin]]
+name = "rspice-import-worker"
+path = "src/import_main.rs"
+test = false
+
 [features]
 default = []
 generated-veriloga-catalog = ["rspice-simulation/generated-veriloga-catalog"]
@@ -33,10 +39,13 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
 serde-wasm-bindgen = "0.6"
+# The import worker names a picked file's format as every import does, then reads a rawfile.
+rspice-formats = { workspace = true, features = ["fst", "result-waveform", "spice-raw"] }
 rspice-results.workspace = true
 rspice-results-store.workspace = true
 rspice-simulation-contract.workspace = true
 web-sys = { workspace = true, features = [
+    "Blob",
     "FileSystemDirectoryHandle",
     "FileSystemGetDirectoryOptions",
     "FileSystemSyncAccessHandle",

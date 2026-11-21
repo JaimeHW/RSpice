@@ -248,6 +248,84 @@ pub fn pick_text_file(
     });
 }
 
+/// A result file picked for an import.
+#[cfg(target_arch = "wasm32")]
+pub enum PickedResultFile {
+    /// A binary rawfile the browser's import worker streamed into the open project's store:
+    /// `imported` is the plot it read, kept in `segment`.
+    Streamed {
+        name: String,
+        segment: std::sync::Arc<rspice_results::store_reader::Segment>,
+        imported: rspice_formats::spice_raw::streamed_import::RawImported,
+    },
+    /// Any other file, read whole within the import's ceiling.
+    Whole(PickedTextFile),
+}
+
+/// Pick a result file and read it in the browser's import worker under `policy`: a binary
+/// rawfile streams into the open project's store, a block at a time, and the page reads none of
+/// it. Any other file, and any file where the page holds no store, is read whole within the
+/// import's ceiling, as [`pick_text_file`] reads what it picks.
+#[cfg(target_arch = "wasm32")]
+pub fn pick_result_file(
+    filter_name: &'static str,
+    filter_extensions: &'static [&'static str],
+    policy: rspice_formats::spice_raw::streamed_import::RawImportPolicy,
+    on_complete: impl FnOnce(Result<Option<PickedResultFile>, String>) + 'static,
+) {
+    // The ceiling is the initiating import's, captured before the picker's promise starts.
+    let import_kind = active_text_import_kind();
+    let max_bytes = import_kind
+        .map(BrowserTextImportKind::max_bytes)
+        .unwrap_or(crate::io::project_io::BROWSER_FILE_BYTES);
+    wasm_bindgen_futures::spawn_local(async move {
+        let picked = rfd::AsyncFileDialog::new()
+            .add_filter(filter_name, filter_extensions)
+            .pick_file()
+            .await;
+        let result = match picked {
+            Some(picked) => read_result_file(picked.inner(), &policy, import_kind, max_bytes)
+                .await
+                .map(Some),
+            None => Ok(None),
+        };
+        on_complete(result);
+        request_browser_import_repaint();
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn read_result_file(
+    file: &web_sys::File,
+    policy: &rspice_formats::spice_raw::streamed_import::RawImportPolicy,
+    import_kind: Option<BrowserTextImportKind>,
+    max_bytes: u64,
+) -> Result<PickedResultFile, String> {
+    let name = file.name();
+    if let Some((segment, imported)) =
+        crate::state::run_store::browser::import_in_worker(file, policy).await?
+    {
+        return Ok(PickedResultFile::Streamed {
+            name,
+            segment,
+            imported,
+        });
+    }
+    let size = file.size();
+    let too_large = || format!("Selected {name} exceeds the supported {max_bytes}-byte size limit");
+    if !size.is_finite() || size < 0.0 || size > max_bytes as f64 {
+        return Err(too_large());
+    }
+    let buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer())
+        .await
+        .map_err(|error| format!("Selected {name} could not be read: {error:?}"))?;
+    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    if bytes.len() as u64 > max_bytes {
+        return Err(too_large());
+    }
+    decode_picked_file(import_kind, name, bytes).map(PickedResultFile::Whole)
+}
+
 /// Pick files, as many as the reader chooses, and read each whole: its name
 /// and bytes, within the import's ceiling in all.
 #[cfg(target_arch = "wasm32")]

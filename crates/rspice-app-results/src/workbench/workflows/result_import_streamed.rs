@@ -10,7 +10,6 @@
 use super::*;
 use crate::state::run_store::{PushRows, RunMeta, StoreError, keep_segment};
 use rspice_formats::spice_raw::streamed_import::{RawImport, RawImportStart};
-use rspice_results::stored_analysis::whole_column;
 
 /// The most of a file read before its header must have ended for its rows to be read as they
 /// arrive.
@@ -41,14 +40,7 @@ pub(super) fn stream_spice_raw(
     if head.is_empty() || identify_result_import_format(source_name, &head).ok() != Some(format) {
         return Ok(None);
     }
-    let _source = ReadingSource::of(usize::try_from(length).unwrap_or(usize::MAX));
-    let mut import = match RawImport::start(
-        &head,
-        length,
-        streamed_resource_limits(),
-        waveform_import_limits(),
-        RESULT_IMPORT_PREVIEW_ROWS,
-    )? {
+    let mut import = match RawImport::start(&head, length, &raw_import_policy())? {
         RawImportStart::Streamed(import) => import,
         RawImportStart::WholeFile => return Ok(None),
     };
@@ -72,41 +64,11 @@ pub(super) fn stream_spice_raw(
         Ok(segment) => segment,
         Err(reason) => return Err(stopped.unwrap_or(JobStop::Failed(reason))),
     };
-    let imported = import.imported()?;
-    let rows = imported.rows;
-    let waveforms = imported.traces(|slot, name| whole_column(&segment, slot, name, rows))?;
-    let plot = imported.plot;
-    let parsed = ParsedResultDataset {
-        source_format: format,
-        analysis_type: imported_analysis_type(plot.domain),
-        coordinate_name: plot.coordinate_name,
-        coordinate_unit: plot.coordinate_unit,
-        sample_count: rows,
-        waveforms,
-        family_metadata: None,
-        delimiter: 0,
-        notes: Vec::new(),
-        event_payload: None,
-        event_dump: None,
-        plots: None,
-    };
-    Ok(Some(StagedResultImport {
-        source_name: source_name.to_owned(),
-        parsed,
-        facts: ResultImportSampleFacts {
-            frequency_grid: imported.frequency_grid,
-            first_rows: imported.first_rows,
-        },
-    }))
-}
-
-/// What a rawfile read as it arrives may state: as many values as its bytes can hold.
-pub(crate) fn streamed_resource_limits() -> rspice_core::ResourceLimits {
-    let mut limits = rspice_core::ResourceLimits::default();
-    limits.max_external_data_bytes = usize::MAX;
-    limits.max_external_data_values = source_capacity();
-    limits.max_result_values = source_capacity();
-    limits
+    Ok(Some(staged_from_kept(
+        source_name,
+        &segment,
+        import.imported()?,
+    )?))
 }
 
 /// Every row of the plot, checked and pushed into the segment: the rows in `head`, the file's

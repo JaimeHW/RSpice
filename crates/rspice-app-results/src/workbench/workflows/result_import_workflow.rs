@@ -19,7 +19,9 @@ use crate::workbench::documents::result_document::import::{
 };
 use crate::workbench::results_job::{JobContext, JobOutcome, JobState, JobStop, ResultsJob};
 use rspice_formats::result_import::identify_result_import_format;
-use rspice_formats::spice_raw::streamed_import::imported_analysis_type;
+use rspice_formats::spice_raw::streamed_import::{
+    RawImportPolicy, RawImported, imported_analysis_type,
+};
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{io::Read as _, path::Path};
@@ -105,6 +107,17 @@ pub(crate) fn waveform_import_limits()
         max_columns: source_capacity(),
         max_values: source_capacity(),
         max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
+    }
+}
+
+/// What a rawfile read as it arrives may state, whoever reads it: what any source may, with the
+/// first rows of each signal the review shows.
+pub(crate) fn raw_import_policy() -> RawImportPolicy {
+    RawImportPolicy {
+        min_rows: MIN_RESULT_ROWS,
+        max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
+        values_per_source_byte: MOST_VALUES_PER_SOURCE_BYTE,
+        preview_rows: RESULT_IMPORT_PREVIEW_ROWS,
     }
 }
 
@@ -430,6 +443,42 @@ pub struct StagedResultImport {
     source_name: String,
     parsed: ParsedResultDataset,
     facts: ResultImportSampleFacts,
+}
+
+/// The review's draft of a rawfile's plot read whole into the kept `segment`, as a streamed
+/// import leaves it, on the desktop or in the browser's import worker: its traces read the
+/// segment, and nothing reads the segment again before the review opens.
+fn staged_from_kept(
+    source_name: &str,
+    segment: &Arc<rspice_results::store_reader::Segment>,
+    imported: RawImported,
+) -> Result<StagedResultImport, String> {
+    use rspice_results::stored_analysis::whole_column;
+    let rows = imported.rows;
+    let waveforms = imported.traces(|slot, name| whole_column(segment, slot, name, rows))?;
+    let plot = imported.plot;
+    let parsed = ParsedResultDataset {
+        source_format: ResultImportFormat::SpiceRaw,
+        analysis_type: imported_analysis_type(plot.domain),
+        coordinate_name: plot.coordinate_name,
+        coordinate_unit: plot.coordinate_unit,
+        sample_count: rows,
+        waveforms,
+        family_metadata: None,
+        delimiter: 0,
+        notes: Vec::new(),
+        event_payload: None,
+        event_dump: None,
+        plots: None,
+    };
+    Ok(StagedResultImport {
+        source_name: source_name.to_owned(),
+        parsed,
+        facts: ResultImportSampleFacts {
+            frequency_grid: imported.frequency_grid,
+            first_rows: imported.first_rows,
+        },
+    })
 }
 
 /// Parse a selected file into a reviewable draft without mutating retained
@@ -1600,7 +1649,7 @@ fn parse_delimited_result_dataset(
 
 #[cfg(target_arch = "wasm32")]
 enum BrowserResultDatasetImportResult {
-    Loaded(crate::workbench::browser::file_import::PickedTextFile),
+    Loaded(crate::workbench::browser::file_import::PickedResultFile),
     Failed(String),
     Cancelled,
 }
@@ -1623,9 +1672,10 @@ fn start_browser_result_dataset_import() -> Result<(), String> {
     let token = crate::workbench::browser::file_import::try_begin_text_import(
         crate::workbench::browser::file_import::BrowserTextImportKind::ResultDataset,
     )?;
-    crate::workbench::browser::file_import::pick_text_file(
+    crate::workbench::browser::file_import::pick_result_file(
         RESULT_DATASET_FILTER.0,
         RESULT_DATASET_FILTER.1,
+        raw_import_policy(),
         move |result| {
             if !crate::workbench::browser::file_import::text_import_is_current(token) {
                 return;
@@ -1653,14 +1703,35 @@ pub fn poll_browser_result_dataset_import(state: &mut ResultsParts<'_>) -> bool 
     if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return false;
     }
+    use crate::workbench::browser::file_import::PickedResultFile;
     match completion.result {
-        BrowserResultDatasetImportResult::Loaded(file) => {
+        BrowserResultDatasetImportResult::Loaded(PickedResultFile::Whole(file)) => {
             let bytes = file
                 .original_bytes
                 .as_deref()
                 .unwrap_or(file.contents.as_bytes());
             match stage_imported_result_dataset(state, &file.name, bytes) {
                 Ok(()) => true,
+                Err(error) => {
+                    record_import_failure(state, &error);
+                    false
+                }
+            }
+        }
+        BrowserResultDatasetImportResult::Loaded(PickedResultFile::Streamed {
+            name,
+            segment,
+            imported,
+        }) => {
+            let staged = match result_import_block_reason(state.model, state.platform) {
+                Some(reason) => Err(reason),
+                None => staged_from_kept(&name, &segment, imported),
+            };
+            match staged {
+                Ok(staged) => {
+                    open_review_draft(state, staged);
+                    true
+                }
                 Err(error) => {
                     record_import_failure(state, &error);
                     false

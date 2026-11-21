@@ -1,8 +1,12 @@
 //! Browser worker host for simulation, model qualification, compilation,
-//! hardcopy, source imports, and this browser's results stores.
+//! hardcopy, source imports, and this browser's results stores; and the
+//! import worker's reader of picked result files, which only its own entry
+//! image reaches.
 
 #[cfg(target_arch = "wasm32")]
 mod hardcopy;
+#[cfg(target_arch = "wasm32")]
+mod import;
 #[cfg(target_arch = "wasm32")]
 mod jit;
 #[cfg(target_arch = "wasm32")]
@@ -12,6 +16,8 @@ mod model_qualification;
 #[cfg(target_arch = "wasm32")]
 mod results_store;
 
+#[cfg(target_arch = "wasm32")]
+pub use import::import_result_file;
 #[cfg(target_arch = "wasm32")]
 pub use jit::*;
 

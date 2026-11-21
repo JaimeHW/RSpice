@@ -1015,6 +1015,23 @@ jobs:
           crates/rspice-app/web/pkg/rspice-ui-worker_bg.wasm
           --label rspice-ui-worker
           --max-gzip 26214400
+      # The import worker reads picked result files; the page starts it for an import.
+      - name: Build production browser import worker image
+        run: >-
+          cargo build --locked --profile web-release -p rspice-worker
+          --bin rspice-import-worker --target wasm32-unknown-unknown
+      - name: Generate production browser import worker bindings
+        run: >-
+          wasm-bindgen --target web
+          --out-name rspice-ui-import-worker
+          --out-dir crates/rspice-app/web/pkg
+          target/wasm32-unknown-unknown/web-release/rspice-import-worker.wasm
+      - name: Report browser import worker image size
+        run: >-
+          python3 tools/ci/check_wasm_artifact_size.py
+          crates/rspice-app/web/pkg/rspice-ui-import-worker_bg.wasm
+          --label rspice-ui-import-worker
+          --max-gzip 26214400
       - name: Qualify browser WASM JIT solver bridge in Chromium
         run: python3 tools/ci/check_wasm_jit_browser.py
       - name: Qualify Monte Carlo checkpoint capture and continuation in Chromium

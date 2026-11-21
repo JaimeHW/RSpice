@@ -17,6 +17,9 @@
 //! rows, an axis' ends, what a command reads whole) comes a piece at a time, and a read whose
 //! pieces are on their way fails as pending and is made again once they are here. A segment no
 //! longer than one read is read whole when its run opens, so a command finds it at once.
+//!
+//! A picked binary rawfile streams into the store from an import worker the page starts for the
+//! import ([`import_in_worker`]): the page relays the worker's write and reads nothing of the file.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -42,6 +45,9 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::state::{ResultsStorageStop, SimulationState};
+
+mod import;
+pub use import::import_in_worker;
 
 /// The bytes of rows a write sends at once.
 const BYTES_PER_MESSAGE: usize = 8 << 20;
