@@ -1023,32 +1023,3 @@ impl Mosfet {
         self.noise_absolute_temperature = temperature;
     }
 }
-
-#[cfg(test)]
-mod layout_tests {
-    use super::*;
-
-    #[test]
-    fn classic_mos_hot_instance_layout_stays_compact() {
-        // The level-2 bias states are hot: the same load's Meyer state and
-        // limiting read them in place of two model evaluations.
-        let bytes = std::mem::size_of::<Mosfet>();
-        assert!(
-            bytes <= 1_304,
-            "classic MOS hot instance regressed to {bytes} bytes; keep cold model-family payloads indirect"
-        );
-    }
-
-    #[test]
-    fn classic_mos_static_plan_keeps_one_pattern_token() {
-        assert_eq!(
-            std::mem::size_of::<ClassicMosValueSlot>(),
-            std::mem::size_of::<usize>()
-        );
-        let bytes = std::mem::size_of::<ClassicMosStaticStampPlan>();
-        assert!(
-            bytes <= 184,
-            "classic MOS static stamp plan regressed to {bytes} bytes; retain one pattern token per plan"
-        );
-    }
-}

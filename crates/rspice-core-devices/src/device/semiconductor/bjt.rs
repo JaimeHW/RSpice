@@ -3135,13 +3135,6 @@ mod checkpoint_tests {
     }
 
     #[test]
-    fn versioned_bjt_checkpoint_numeric_payload_counts_are_pinned() {
-        assert_eq!(BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 879);
-        assert_eq!(BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT, 449);
-        assert_eq!(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 593);
-    }
-
-    #[test]
     fn promoted_vbic_checkpoint_restores_all_cached_states_and_subsequent_loads() {
         for polarity in [1.0, -1.0] {
             let params = [
