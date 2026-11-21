@@ -1,6 +1,7 @@
 //! The streamed import against the whole-file import of the same rawfile.
 
 use super::*;
+use rspice_results::waveform::StoredWindow;
 
 /// A one-plot binary rawfile of doubles, written to `path`.
 fn write_rawfile(

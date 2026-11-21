@@ -19,6 +19,7 @@ use crate::workbench::documents::result_document::import::{
 };
 use crate::workbench::results_job::{JobContext, JobOutcome, JobState, JobStop, ResultsJob};
 use rspice_formats::result_import::identify_result_import_format;
+use rspice_formats::spice_raw::streamed_import::imported_analysis_type;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{io::Read as _, path::Path};
@@ -1595,14 +1596,6 @@ fn parse_delimited_result_dataset(
         event_dump: None,
         plots: None,
     })
-}
-
-fn imported_analysis_type(domain: rspice_formats::WaveformDomain) -> AnalysisType {
-    match domain {
-        rspice_formats::WaveformDomain::Transient => AnalysisType::Transient,
-        rspice_formats::WaveformDomain::Ac => AnalysisType::Ac,
-        rspice_formats::WaveformDomain::DcSweep => AnalysisType::DcSweep,
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
