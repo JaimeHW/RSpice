@@ -856,17 +856,32 @@ def palette_stays_open(browser, when):
     wait_for(lambda: not search(), "the command palette closed")
 
 
+def clear_result_history(browser, delete=None):
+    """Delete the runs of the result history, through Results > History > Clear result history…,
+    the one place it is offered. `delete`, when given, is the confirmation the reader must see."""
+    browser.click("Results", "menuItem")
+    wait_for(lambda: any(c["label"] == "History" and c["role"] == "menuItem"
+                         for c in controls(browser.snapshot())), "the Results menu")
+    browser.click("History", "menuItem")
+    items = wait_for(lambda: [c for c in controls(browser.snapshot())
+                              if c["label"].startswith("Clear result history")],
+                     "the Results menu's History")
+    click_control(browser, items[0])
+    deletes = wait_for(lambda: [c for c in controls(browser.snapshot())
+                                if re.fullmatch(r"Delete \d+ runs?", c["label"]) and c["role"] == "button"],
+                       "the clear result history confirmation")
+    if delete is not None and [c["label"] for c in deletes] != [delete]:
+        raise AssertionError(f"Clearing the history offers {[c['label'] for c in deletes]}, not {delete!r}")
+    click_control(browser, deletes[0])
+    deleted = deletes[0]["label"].replace("Delete", "Deleted", 1)
+    wait_for(lambda: reports(controls(browser.snapshot()), deleted), "the cleared result history")
+
+
 def restored_checkpoint_reads_its_run(browser, store):
     """A checkpoint keeps the samples of the run it holds: with the run cleared from the project,
     the project saved and the page reloaded, restoring the checkpoint reads the run's samples
     back from the browser's own storage, and nothing says they cannot be read."""
-    # Clearing the history is offered on the Results menu, not in the palette.
-    browser.click("Results", "menuItem")
-    items = wait_for(lambda: [c for c in controls(browser.snapshot())
-                              if c["label"].startswith("Clear result history")], "the Results menu")
-    click_control(browser, items[0])
-    browser.click("Delete 1 run", "button")
-    wait_for(lambda: reports(controls(browser.snapshot()), "Deleted 1 run"), "the cleared result history")
+    clear_result_history(browser, "Delete 1 run")
     browser.click("Schematic", "button")
     choose_command(browser, "Save all")
     wait_for(lambda: not unsaved(browser.snapshot()), "the project saved without its run", 60)
