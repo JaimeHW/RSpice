@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import math
+import re
 from pathlib import Path
 import time
 import uuid
@@ -1046,6 +1047,70 @@ def verify_quota_stop(result, quota):
             "bytes_kept": result["checked"]["len"], "chunks_sent": result["chunks"]}
 
 
+FULL = "this browser's storage for RSpice is full"
+
+
+def quota_stop_cuts_a_page_run(browser):
+    """A run whose samples outgrow the storage the browser gives RSpice keeps the rows the store
+    took: the Console says the storage is full and how many of the run's points it kept. The run
+    is one the store does not keep already, since the store keeps a run's samples once, and it
+    writes megabytes, more than the room the quota leaves past what the store keeps for closing a
+    segment and the grain the browser grants room in."""
+    estimate = browser.call("POST", "/execute/async", {"args": [], "script": """
+        const done = arguments[arguments.length - 1];
+        navigator.storage.estimate().then(done, error => done({error: String(error)}));
+    """})
+    if "error" in estimate:
+        raise AssertionError("The storage estimate failed: " + estimate["error"])
+    quota = int(estimate["usage"]) + (3 << 20)
+    choose_command(browser, "Open simulation workspace")
+    browser.click("Analyses, 1 / 1", "button")
+
+    def field(label):
+        found = [control for control in controls(browser.snapshot())
+                 if control["label"] == label and control["role"] == "textInput"]
+        return found[0]["value"] if len(found) == 1 else None
+
+    wait_for(lambda: field("Stop time") is not None, "the transient's Stop time")
+    for label, value in (("Stop time", "10m"), ("Max step", "10n")):
+        browser.click(label, "textInput", keyboard=(("a", ("\ue009",)), (value, ()), ("\ue007", ())))
+        wait_for(lambda: field(label) == value, f"the transient's {label} set to {value}")
+    browser.click("Expand console", "button")
+    clear_console(browser)
+    browser.click("Collapse console", "button")
+    browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin, "quotaSize": quota})
+    try:
+        browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
+        wait_for(lambda: reports(controls(browser.snapshot()), "results storage full"),
+                 "the run stopped by the full storage", 300)
+        # The finished run opens on Results, whose console starts collapsed; the stop's finding
+        # is on its Problems tab.
+        browser.click("Expand console", "button")
+        problems = wait_for(lambda: [c for c in controls(browser.snapshot())
+                                     if c["role"] == "tab" and c["label"].startswith("Problems")],
+                            "the console's Problems tab")
+        click_control(browser, problems[0])
+        rendered = wait_for(lambda: [c for c in controls(browser.snapshot()) if FULL in c["label"]],
+                            "the full storage's finding", 60)
+        stopped = browser.capture("quota-stop-page-run")
+        browser.click("Collapse console", "button")
+    finally:
+        browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin})
+    line = rendered[0]["label"]
+    kept = re.search(r"; (\d+) points kept \(", line)
+    if not kept:
+        raise AssertionError(f"The full storage's line does not say how many points it kept: {line!r}")
+    if not 0 < int(kept.group(1)) < 1_000_000:
+        raise AssertionError(f"The full storage kept none or all of the run's points: {line!r}")
+    # The run cut to the rows the store kept is whole: it passes its check and the project saves.
+    if reports(controls(stopped), ", corrupted") or reports(controls(stopped), "Damaged result"):
+        raise AssertionError("The run cut to the rows the full store kept fails its check")
+    browser.click("Schematic", "button")
+    choose_command(browser, "Save all")
+    wait_for(lambda: not unsaved(browser.snapshot()), "the project saved with the cut run", 60)
+    return {"quota_bytes": quota, "finding": line, "points_kept": int(kept.group(1))}
+
+
 def quota_stop_keeps_rows(browser):
     """Writing past the origin's quota closes the write on the rows it took: the store keeps them,
     and they read back checked against their digest once the store is opened again."""
@@ -1130,6 +1195,7 @@ def run(browser):
     checkpoint_run = restored_checkpoint_reads_its_run(browser, results_reload["store"])
     second_tab = second_tab_refused(browser)
     quota_stop = quota_stop_keeps_rows(browser)
+    quota_page_run = quota_stop_cuts_a_page_run(browser)
     return {"startup": "passed", "checkpoint_export": "passed", "checkpoint_restore": "passed",
             "revision_history": "opened",
             "configuration_opening_input": "passed",
@@ -1139,7 +1205,7 @@ def run(browser):
             "provider_decision": provider_decision,
             "results_survive_reload": results_reload, "results_store_second_tab": second_tab,
             "restored_checkpoint_run": checkpoint_run,
-            "results_store_quota_stop": quota_stop,
+            "results_store_quota_stop": quota_stop, "results_store_quota_page_run": quota_page_run,
             "review_post_and_resolution": "passed", "review_intervals_ms": review_intervals,
             "checkpoint": manifest, "export": exported.name, "project_version": project["version"]}
 

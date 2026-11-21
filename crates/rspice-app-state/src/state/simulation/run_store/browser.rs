@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, Weak};
 
 use js_sys::{Array, Float64Array, Reflect, Uint8Array};
+use rspice_results::saved_output::SavedOutputMaterializationStatus;
 use rspice_results::store_reader::{Segment, SegmentBytes, SegmentDigest, StoreReader};
 use rspice_results::waveform::{
     ColumnTile, Read, ReadValue, StoredWindow, WaveformValues, WindowLead,
@@ -671,14 +672,24 @@ fn apply_cuts(simulation: &mut SimulationState) -> Vec<(u64, ResultsStorageStop)
                     }
                 };
                 let mut touched = false;
+                let mut kept = HashMap::new();
                 for waveform in &mut analysis.data.waveforms {
                     let waveform = &mut waveform.data;
-                    touched |= cut_values(&mut waveform.x);
-                    touched |= cut_values(&mut waveform.y);
+                    let mut cut_this = cut_values(&mut waveform.x);
+                    cut_this |= cut_values(&mut waveform.y);
                     if let Some(complex) = waveform.complex.as_mut() {
-                        touched |= cut_values(&mut complex.real);
-                        touched |= cut_values(&mut complex.imag);
+                        cut_this |= cut_values(&mut complex.real);
+                        cut_this |= cut_values(&mut complex.imag);
                     }
+                    if cut_this {
+                        kept.insert(waveform.name.clone(), waveform.x.len() as u64);
+                    }
+                    touched |= cut_this;
+                }
+                // A saved output's receipt counts the samples its waveform holds, which are now
+                // the rows the store kept: left at the run's count, the receipt fails its check.
+                for receipt in &mut analysis.data.saved_output_receipts {
+                    recount(&mut receipt.status, &kept);
                 }
                 if touched {
                     cut_here.get_or_insert_with(|| analysis.label.clone());
@@ -700,6 +711,28 @@ fn apply_cuts(simulation: &mut SimulationState) -> Vec<(u64, ResultsStorageStop)
         }
     }
     stops
+}
+
+/// `status` counting the samples `kept` gives the waveforms it names that were cut.
+fn recount(status: &mut SavedOutputMaterializationStatus, kept: &HashMap<String, u64>) {
+    match status {
+        SavedOutputMaterializationStatus::Materialized {
+            waveform_name,
+            sample_count,
+        } => {
+            if let Some(rows) = kept.get(waveform_name) {
+                *sample_count = *rows;
+            }
+        }
+        SavedOutputMaterializationStatus::MaterializedDcFamily { members } => {
+            for member in members {
+                if let Some(rows) = kept.get(&member.waveform_name) {
+                    member.sample_count = *rows;
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Where a browser keeps a project's results store, as a stop names it.
