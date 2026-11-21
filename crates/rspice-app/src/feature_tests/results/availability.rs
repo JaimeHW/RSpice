@@ -621,7 +621,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 "#00aaff",
             )]),
         ResultViewer::Bode | ResultViewer::Nyquist => ac_analysis(),
-        ResultViewer::Smith | ResultViewer::Polar => sparameter_analysis(),
+        ResultViewer::SParameters | ResultViewer::Smith | ResultViewer::Polar => sparameter_analysis(),
         ResultViewer::NetworkMatrix => network_matrix_analysis(false),
         ResultViewer::Scatter | ResultViewer::BoxViolin => {
             // The distribution sheets need a bounded measurement to normalize

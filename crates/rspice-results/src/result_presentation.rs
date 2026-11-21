@@ -53,6 +53,9 @@ pub enum ResultViewer {
     Table,
     /// Nyquist loop-gain stability surface.
     Nyquist,
+    /// A network's S-parameters, and the two-port figures read from them,
+    /// against frequency on rectangular axes.
+    SParameters,
     /// Smith-chart RF/network surface.
     Smith,
     /// One retained complex response on the polar plane.
@@ -96,6 +99,7 @@ impl ResultViewer {
             ResultViewer::TransferFunction => "XF",
             ResultViewer::Table => "TABLE",
             ResultViewer::Nyquist => "NYQ",
+            ResultViewer::SParameters => "SPARAM",
             ResultViewer::Smith => "SMITH",
             ResultViewer::Polar => "POLAR",
             ResultViewer::NetworkMatrix => "NETWORK",
@@ -109,7 +113,7 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 23] = [
+    const PRIMARY: [ResultViewer; 24] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -118,6 +122,7 @@ impl ResultViewer {
         ResultViewer::Fft,
         ResultViewer::HarmonicBalance,
         ResultViewer::PhaseNoise,
+        ResultViewer::SParameters,
         ResultViewer::Smith,
         ResultViewer::Polar,
         ResultViewer::NetworkMatrix,
@@ -162,6 +167,7 @@ impl ResultViewer {
             ResultViewer::TransferFunction => "Transfer Function",
             ResultViewer::Table => "Table",
             ResultViewer::Nyquist => "Nyquist",
+            ResultViewer::SParameters => "S-Parameters",
             ResultViewer::Smith => "Smith",
             ResultViewer::Polar => "Polar",
             ResultViewer::NetworkMatrix => "Network Matrix",
@@ -191,9 +197,10 @@ impl ResultViewer {
         Some(match self {
             ResultViewer::Manifest => return None,
             ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
-            ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
-                "viewer-bode"
-            }
+            ResultViewer::Bode
+            | ResultViewer::Nyquist
+            | ResultViewer::NoiseContrib
+            | ResultViewer::SParameters => "viewer-bode",
             ResultViewer::Fft | ResultViewer::HarmonicBalance => "viewer-spectrum",
             ResultViewer::PhaseNoise => "viewer-phase-noise",
             ResultViewer::Eye => "eye-viewer",
@@ -282,9 +289,13 @@ impl ResultViewer {
                 &[V::Waves, V::DcSweep, V::Bode, V::NoiseContrib, V::Table]
             }
             A::Optimization => &[V::Optimization, V::Table],
-            A::SParameter | A::Hbsp | A::Psp => {
-                &[V::Smith, V::NetworkMatrix, V::Bode, V::Polar, V::Table]
-            }
+            A::SParameter | A::Hbsp | A::Psp => &[
+                V::SParameters,
+                V::Smith,
+                V::NetworkMatrix,
+                V::Polar,
+                V::Table,
+            ],
             A::Fourier | A::HarmonicBalance | A::Qpss => &[V::HarmonicBalance, V::Waves, V::Table],
         }
     }

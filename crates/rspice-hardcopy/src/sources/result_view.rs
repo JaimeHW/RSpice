@@ -92,7 +92,7 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
     }
     let viewer = presentation.viewer;
     let semantic_document = match viewer {
-        ResultViewer::Waves | ResultViewer::DcSweep => {
+        ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::SParameters => {
             HardcopySemanticDocument::Plot(quick_waveform_plot(
                 active,
                 viewer,
@@ -230,8 +230,7 @@ fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(
 /// answered the way `waves::build_models` answers it for the sheet: every
 /// frequency family is a decade axis, everything else is linear.
 const fn waveform_abscissa_scale(analysis: AnalysisType) -> AxisScale {
-    if analysis.is_bode_response()
-        || analysis.is_raw_frequency_curve()
+    if analysis.is_frequency_sweep()
         || matches!(
             analysis,
             AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise

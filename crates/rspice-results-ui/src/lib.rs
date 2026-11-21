@@ -31,6 +31,7 @@ pub mod presentation;
 pub mod qpnoise;
 pub mod report;
 pub mod requirement_lines;
+pub mod s_parameters;
 pub mod scatter;
 pub mod selection;
 pub mod sensitivity;

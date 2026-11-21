@@ -766,6 +766,7 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::DcSweep), "DC sweep").access('D'),
     MenuEntry::offered(viewer(ResultViewer::Bode), "Bode").access('B'),
     MenuEntry::offered(viewer(ResultViewer::Nyquist), "Nyquist").access('Q'),
+    MenuEntry::offered(viewer(ResultViewer::SParameters), "S-parameters").access('X'),
     MenuEntry::offered(viewer(ResultViewer::Smith), "Smith chart").access('S'),
     MenuEntry::offered(viewer(ResultViewer::Polar), "Polar response").access('R'),
     MenuEntry::offered(viewer(ResultViewer::PoleZero), "Pole-zero").access('Z'),

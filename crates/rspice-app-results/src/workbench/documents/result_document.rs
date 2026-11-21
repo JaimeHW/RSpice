@@ -35,6 +35,7 @@ mod population;
 mod pz;
 mod readout_pins;
 mod retained_memo;
+mod s_parameters;
 mod scatter;
 mod sensitivity;
 pub(crate) mod signal_sets;
@@ -2217,7 +2218,7 @@ fn show_viewer_well(
             ResultChrome::Full => waves::show(ui, state),
             ResultChrome::CompactSplit => waves::show_compact(ui, state),
         },
-        ResultViewer::Bode => waves::show_bode(ui, state),
+        ResultViewer::Bode | ResultViewer::SParameters => waves::show_bode(ui, state),
         ResultViewer::Fft => {
             if ensure_derived(ui, state, run_controller, ActiveViewer::Fft) {
                 fft::show(ui, state);
@@ -2747,6 +2748,7 @@ pub fn viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> Vie
             }
         }
         ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
+        ResultViewer::SParameters => s_parameters::availability(state),
         ResultViewer::Smith => smith::availability(state),
         ResultViewer::Polar => {
             if active_run.is_some_and(|run| {
@@ -2934,7 +2936,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         }
     }
     match state.results.session.viewer {
-        ResultViewer::Waves | ResultViewer::DcSweep => waves::right_panel(ui, state),
+        ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::SParameters => {
+            waves::right_panel(ui, state)
+        }
         ResultViewer::Bode => bode::right_panel(ui, state),
         ResultViewer::Fft => fft::right_panel(ui, state),
         ResultViewer::HarmonicBalance => harmonic_balance::right_panel(ui, state),

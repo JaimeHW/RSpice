@@ -832,7 +832,9 @@ pub fn quick_result_availability(
             })
         }),
         ResultViewer::Smith => smith_analysis_is_renderable(analysis, |_| {}),
-        ResultViewer::NetworkMatrix => analysis_supports_viewer(viewer, analysis, |_| {}),
+        ResultViewer::NetworkMatrix | ResultViewer::SParameters => {
+            analysis_supports_viewer(viewer, analysis, |_| {})
+        }
         ResultViewer::Polar => visible_waveforms().any(|waveform| {
             waveform.complex.as_ref().is_some_and(|complex| {
                 !complex.real.is_empty() && complex.real.len() == complex.imag.len()

@@ -95,16 +95,33 @@ impl AnalysisType {
     /// Whether the retained response uses the standard complex-to-
     /// magnitude/phase projection. DISTO retains exact linear Volterra
     /// response and product-ratio phasors, so its dB/dBc curves are also a
-    /// presentation projection. STB already retains loop gain in dB and phase
-    /// in degrees, so applying the projection again would double-scale it.
+    /// presentation projection. A network's S-parameters are retained as AC
+    /// responses are, a linear magnitude beside its phase in degrees. STB
+    /// already retains loop gain in dB and phase in degrees, so applying the
+    /// projection again would double-scale it.
     pub const fn uses_complex_bode_projection(self) -> bool {
-        matches!(self, Self::Disto) || (self.is_bode_response() && !matches!(self, Self::Stb))
+        matches!(self, Self::Disto)
+            || self.is_network_response()
+            || (self.is_bode_response() && !matches!(self, Self::Stb))
     }
 
     /// Whether this is a frequency-curve family that uses the Bode sheet's
     /// logarithmic X axis without participating in stability-margin logic.
     pub const fn is_raw_frequency_curve(self) -> bool {
         matches!(self, Self::Disto)
+    }
+
+    /// Whether retained samples are a multiport network's scattering
+    /// parameters against frequency: SP, and the periodic PSP and HBSP. They
+    /// are drawn on the S-parameter sheet, never in loop-gain margin logic.
+    pub const fn is_network_response(self) -> bool {
+        matches!(self, Self::SParameter | Self::Psp | Self::Hbsp)
+    }
+
+    /// Whether the abscissa is a swept frequency, drawn on a decade axis:
+    /// every frequency response, frequency-curve family and network.
+    pub const fn is_frequency_sweep(self) -> bool {
+        self.is_bode_response() || self.is_raw_frequency_curve() || self.is_network_response()
     }
 
     /// Get SPICE directive keyword for this analysis type.

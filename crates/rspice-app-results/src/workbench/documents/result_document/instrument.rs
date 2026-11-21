@@ -97,6 +97,10 @@ impl WaveInstrumentHost for Host<'_, '_> {
     fn inline_cursor_readout(&mut self) -> Option<String> {
         waves::inline_cursor_readout(self.state, self.tokens)
     }
+    fn sheet_controls(&mut self, ui: &mut Ui) -> bool {
+        super::s_parameters::plot_menu(ui, self.state)
+    }
+
     fn hidden_strip_count(&self) -> usize {
         hidden_wave_strip_count(self.state.results_reads())
     }

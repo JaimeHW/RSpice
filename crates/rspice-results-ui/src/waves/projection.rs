@@ -454,9 +454,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     "Output frequency",
                     "Hz",
                 ),
-                kind if kind.is_bode_response() || kind.is_raw_frequency_curve() => {
-                    (frequency_scale, "frequency", "f", "Hz")
-                }
+                kind if kind.is_frequency_sweep() => (frequency_scale, "frequency", "f", "Hz"),
                 AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise => {
                     (frequency_scale, "frequency", "f", "Hz")
                 }

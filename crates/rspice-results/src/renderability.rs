@@ -540,6 +540,13 @@ pub fn viewer_can_render(
             analysis.analysis_type == AnalysisType::DcSweep && !analysis.waveforms.is_empty()
         }
         ResultViewer::Bode => structural(StructuralGate::BodeResponse),
+        // Any network's coefficients draw against frequency; the two-port
+        // figures are offered only where the sheet resolves a two-port.
+        ResultViewer::SParameters => {
+            analysis.success
+                && analysis.analysis_type.is_network_response()
+                && !analysis.waveforms.is_empty()
+        }
         ResultViewer::NoiseContrib => {
             crate::noise_spectrum::qpnoise_is_renderable(analysis)
                 || structural(StructuralGate::OrdinaryNoiseSpectrum)

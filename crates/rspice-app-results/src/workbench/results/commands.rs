@@ -158,7 +158,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 69] = [
+    pub const ALL: [Self; 70] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -189,6 +189,7 @@ impl ResultsCommand {
         Self::ResultViewer(ResultViewer::TransferFunction),
         Self::ResultViewer(ResultViewer::Table),
         Self::ResultViewer(ResultViewer::Nyquist),
+        Self::ResultViewer(ResultViewer::SParameters),
         Self::ResultViewer(ResultViewer::Smith),
         Self::ResultViewer(ResultViewer::Polar),
         Self::ResultViewer(ResultViewer::NetworkMatrix),
@@ -579,6 +580,7 @@ const fn viewer_key(viewer: ResultViewer) -> CommandKey {
         ResultViewer::TransferFunction => CommandKey::new("result-transfer-function"),
         ResultViewer::Table => CommandKey::new("result-table"),
         ResultViewer::Nyquist => CommandKey::new("result-nyquist"),
+        ResultViewer::SParameters => CommandKey::new("result-s-parameters"),
         ResultViewer::Smith => CommandKey::new("result-smith"),
         ResultViewer::Polar => CommandKey::new("result-polar"),
         ResultViewer::NetworkMatrix => CommandKey::new("result-network-matrix"),
@@ -613,6 +615,7 @@ const fn viewer_label(viewer: ResultViewer) -> &'static str {
         ResultViewer::TransferFunction => "Open transfer-function viewer",
         ResultViewer::Table => "Open sample table",
         ResultViewer::Nyquist => "Open Nyquist viewer",
+        ResultViewer::SParameters => "Open S-parameter viewer",
         ResultViewer::Smith => "Open Smith-chart viewer",
         ResultViewer::Polar => "Open polar-response viewer",
         ResultViewer::NetworkMatrix => "Open network matrix viewer",

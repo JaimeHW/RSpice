@@ -176,6 +176,7 @@ impl ModelsCache {
             return Arc::clone(&cached.models);
         }
         let mut built = build(input.projection, input.waveform_visibility);
+        crate::s_parameters::keep_coefficients(input.viewer, &mut built);
         // The reader's X scale replaces the analysis' own, unless a
         // logarithmic axis cannot show the strip's domain.
         for model in &mut built {
@@ -200,6 +201,7 @@ impl ModelsCache {
                 model.analysis_type.is_bode_response()
                     || model.analysis_type.is_raw_frequency_curve()
             }
+            ResultViewer::SParameters => model.analysis_type.is_network_response(),
             ResultViewer::NoiseContrib => matches!(
                 model.analysis_type,
                 AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Qpnoise

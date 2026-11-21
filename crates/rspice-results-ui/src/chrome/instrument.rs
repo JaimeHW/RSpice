@@ -74,6 +74,10 @@ pub trait WaveInstrumentHost {
     fn export(&mut self, requests: ExportRequests);
     fn inline_cursor_readout(&mut self) -> Option<String>;
     fn hidden_strip_count(&self) -> usize;
+    /// Draws the sheet's own controls ahead of the tools; `true` when it drew any.
+    fn sheet_controls(&mut self, _ui: &mut Ui) -> bool {
+        false
+    }
 }
 
 pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl WaveInstrumentHost) {
@@ -97,8 +101,15 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.spacing_mut().item_spacing.x = CONTROL_GAP;
+                // The sheet's own controls lead the bar and never fold; the
+                // instrument controls fold into the room they leave.
+                let left = ui.cursor().left();
+                if host.sheet_controls(ui) {
+                    instrument_separator(ui);
+                }
+                let room = remaining.x - (ui.cursor().left() - left);
                 let controls = bar_controls(&availability, host);
-                let (shown, folded) = fold(ui, &controls, remaining.x);
+                let (shown, folded) = fold(ui, &controls, room);
                 let mut group = None;
                 for control in &controls[..shown] {
                     if group.is_some_and(|group| group != control.group) {

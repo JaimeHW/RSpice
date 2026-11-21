@@ -196,6 +196,7 @@ pub fn show(ui: &mut Ui, host: &mut impl SheetBarHost) {
         ResultViewer::Waves
             | ResultViewer::DcSweep
             | ResultViewer::Bode
+            | ResultViewer::SParameters
             | ResultViewer::NoiseContrib
     ) {
         "Plot instrument controls"
@@ -236,6 +237,7 @@ pub fn show(ui: &mut Ui, host: &mut impl SheetBarHost) {
         ResultViewer::Waves
             | ResultViewer::DcSweep
             | ResultViewer::Bode
+            | ResultViewer::SParameters
             | ResultViewer::NoiseContrib
     ) {
         host.instrument(&mut child);

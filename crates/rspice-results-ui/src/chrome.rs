@@ -19,6 +19,7 @@ const fn viewer_tab_icon(viewer: ResultViewer) -> WorkbenchIcon {
             WorkbenchIcon::Results
         }
         ResultViewer::Bode
+        | ResultViewer::SParameters
         | ResultViewer::Fft
         | ResultViewer::HarmonicBalance
         | ResultViewer::PhaseNoise

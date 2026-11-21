@@ -705,6 +705,10 @@ static COMMAND_ORDER: &[CommandKey] = &[
     )
     .key(),
     ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::SParameters,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
         rspice_app_results::workbench::documents::result_document::ResultViewer::Smith,
     )
     .key(),
