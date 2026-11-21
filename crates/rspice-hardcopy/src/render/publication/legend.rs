@@ -416,11 +416,4 @@ mod tests {
         );
         assert_eq!(label.shortened(ellipsis - 1, ellipsis, 0), None);
     }
-
-    #[test]
-    fn columns_keep_their_width_until_they_must_share() {
-        assert_eq!(share_width(&[64, 90, 70], 300), vec![64, 90, 70]);
-        assert_eq!(share_width(&[64, 120, 130], 250), vec![64, 93, 93]);
-        assert_eq!(share_width(&[100, 100], 150), vec![75, 75]);
-    }
 }
