@@ -47,7 +47,7 @@ const TIME_TOLERANCE: f64 = 1e-18;
 
 /// Pulse k's rising mid-level crossing: k·T + T/4 + a·(-1)^k.
 fn rising(k: usize) -> f64 {
-    let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
+    let sign = if k.is_multiple_of(2) { 1.0 } else { -1.0 };
     k as f64 * PERIOD + PERIOD / 4.0 + sign * SHIFT
 }
 

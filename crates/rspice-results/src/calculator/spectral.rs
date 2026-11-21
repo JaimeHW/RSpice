@@ -67,7 +67,7 @@ fn record(name: &str, series: &Series, rest: &[Argument]) -> Result<Record, Eval
         )));
     };
     let (from, to) = (from.unwrap_or(first), to.unwrap_or(last));
-    if !(from < to) {
+    if from >= to {
         return Err(EvaluationError::MathError(format!(
             "{name} reads a window from its start to a later stop, not from {from} to {to}"
         )));
@@ -139,7 +139,7 @@ fn analysis(
     let record = record(name, series, rest)?;
     let fundamental = number(name, "fundamental", rest, 3)?;
     if let Some(stated) = fundamental
-        && !(stated > 0.0)
+        && stated <= 0.0
     {
         return Err(EvaluationError::MathError(format!(
             "{name} fundamental must be a positive frequency, not {stated}"

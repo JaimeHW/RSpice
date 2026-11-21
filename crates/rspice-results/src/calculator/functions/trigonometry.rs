@@ -16,31 +16,36 @@ struct Kernel {
 
 const EVERYWHERE: fn(f64) -> bool = |_| true;
 
+impl Kernel {
+    const fn new(apply: fn(f64) -> f64, defined: fn(f64) -> bool, outside: &'static str) -> Self {
+        Self {
+            apply,
+            defined,
+            outside,
+        }
+    }
+}
+
 fn kernel(name: &str) -> Option<Kernel> {
     let unit_interval = |v: f64| (-1.0..=1.0).contains(&v);
-    let (apply, defined, outside): (fn(f64) -> f64, fn(f64) -> bool, &str) = match name {
-        "sin" => (f64::sin, EVERYWHERE, ""),
-        "cos" => (f64::cos, EVERYWHERE, ""),
-        "tan" => (f64::tan, EVERYWHERE, ""),
-        "asin" => (f64::asin, unit_interval, "a value outside -1 to 1"),
-        "acos" => (f64::acos, unit_interval, "a value outside -1 to 1"),
-        "atan" => (f64::atan, EVERYWHERE, ""),
-        "sinh" => (f64::sinh, EVERYWHERE, ""),
-        "cosh" => (f64::cosh, EVERYWHERE, ""),
-        "tanh" => (f64::tanh, EVERYWHERE, ""),
-        "asinh" => (f64::asinh, EVERYWHERE, ""),
-        "acosh" => (f64::acosh, |v| v >= 1.0, "a value below 1"),
-        "atanh" => (
+    Some(match name {
+        "sin" => Kernel::new(f64::sin, EVERYWHERE, ""),
+        "cos" => Kernel::new(f64::cos, EVERYWHERE, ""),
+        "tan" => Kernel::new(f64::tan, EVERYWHERE, ""),
+        "asin" => Kernel::new(f64::asin, unit_interval, "a value outside -1 to 1"),
+        "acos" => Kernel::new(f64::acos, unit_interval, "a value outside -1 to 1"),
+        "atan" => Kernel::new(f64::atan, EVERYWHERE, ""),
+        "sinh" => Kernel::new(f64::sinh, EVERYWHERE, ""),
+        "cosh" => Kernel::new(f64::cosh, EVERYWHERE, ""),
+        "tanh" => Kernel::new(f64::tanh, EVERYWHERE, ""),
+        "asinh" => Kernel::new(f64::asinh, EVERYWHERE, ""),
+        "acosh" => Kernel::new(f64::acosh, |v| v >= 1.0, "a value below 1"),
+        "atanh" => Kernel::new(
             f64::atanh,
             |v| v > -1.0 && v < 1.0,
             "a value outside the open interval -1 to 1",
         ),
         _ => return None,
-    };
-    Some(Kernel {
-        apply,
-        defined,
-        outside,
     })
 }
 
