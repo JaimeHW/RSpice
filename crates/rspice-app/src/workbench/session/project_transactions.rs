@@ -63,6 +63,8 @@ use rspice_app_workbench::workbench::app::dialogs::confirmation_state::Confirmat
 pub(crate) mod check_and_save;
 #[cfg(not(target_arch = "wasm32"))]
 mod project_pack;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use project_pack::pack_into_for_tests;
 
 /// Replacing the open project with a new one: the project's phases over its
 /// own parts, with the shell's steps between them, in the order the

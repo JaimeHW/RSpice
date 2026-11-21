@@ -1450,6 +1450,129 @@ fn a_save_says_saved_and_names_a_rename_it_made() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Pack with results on a project with unsaved changes asks once, offering to save and pack and
+/// never to pack the changes away: Cancel leaves the project unsaved and writes no pack, and
+/// Save and pack saves the project and packs it as saved.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn pack_with_unsaved_changes_offers_save_and_pack_in_one_prompt() {
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh;
+    use rspice_app_workbench::workbench::app::dialogs::confirmation::{
+        ConfirmationHost, render_confirmation_dialog,
+    };
+    use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationResponse;
+    let root = std::env::temp_dir().join(format!(
+        "rspice-save-and-pack-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("temp dir");
+    let path = root.join("amp.rspiceproj");
+    let archive = root.join("amp.rspicepack");
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    let rename = |app: &mut crate::workbench::RSpiceApp, name: &str| {
+        app.state
+            .model
+            .workspace
+            .content
+            .project
+            .rename(name)
+            .expect("valid name");
+    };
+    rename(&mut app, "amp");
+    assert!(app.state.save_project_to_path(&path));
+    crate::workbench::session::project_transactions::pack_into_for_tests(Some(archive.clone()));
+    rename(&mut app, "amp_v2");
+
+    // The one prompt: its question, the verb that saves and packs, and Cancel.
+    app.state.pack_project_with_results();
+    assert_eq!(
+        app.state.workbench.confirmation_dialog.pending_action,
+        Some(ConfirmationAction::PackWithResults)
+    );
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut painted = Vec::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_600.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| render_confirmation_dialog(&mut app, ui.ctx()),
+        );
+        fn texts(shape: &egui::epaint::Shape, painted: &mut Vec<String>) {
+            match shape {
+                egui::epaint::Shape::Vec(shapes) => {
+                    shapes.iter().for_each(|shape| texts(shape, painted));
+                }
+                egui::epaint::Shape::Text(text) => painted.push(text.galley.text().to_owned()),
+                _ => {}
+            }
+        }
+        painted.clear();
+        for clipped in &output.shapes {
+            texts(&clipped.shape, &mut painted);
+        }
+    }
+    for wanted in [
+        "Save changes and pack \u{201c}amp_v2\u{201d}?",
+        "Save and pack",
+        "Cancel",
+    ] {
+        assert!(
+            painted.iter().any(|text| text == wanted),
+            "{wanted:?} is not painted: {painted:?}"
+        );
+    }
+    assert!(
+        !painted.iter().any(|text| text == "Don't save"),
+        "a pack never goes on unsaved: {painted:?}"
+    );
+
+    // Cancel saves nothing and packs nothing.
+    app.answer_confirmation(ConfirmationResponse::Cancel);
+    assert!(app.state.platform.project_pack.is_none());
+    assert!(!archive.exists());
+    assert!(has_unsaved_changes_fresh(&app.state));
+    assert!(
+        !std::fs::read_to_string(&path)
+            .expect("the project file")
+            .contains("amp_v2")
+    );
+
+    // Save and pack saves, then packs the project as saved.
+    app.state.pack_project_with_results();
+    app.answer_confirmation(ConfirmationResponse::Yes);
+    assert!(!has_unsaved_changes_fresh(&app.state));
+    let saved = std::fs::read(&path).expect("the project file");
+    assert!(String::from_utf8_lossy(&saved).contains("amp_v2"));
+    let pack = app
+        .state
+        .platform
+        .project_pack
+        .as_ref()
+        .expect("the pack is being written");
+    assert!(pack.wait(std::time::Duration::from_secs(60)));
+    let folder = root.join("unpacked");
+    let unpacked =
+        rspice_formats::project_results::unpack_project(&archive, &folder, &mut |_, _| true)
+            .expect("the pack opens")
+            .expect("nothing stopped it");
+    assert_eq!(
+        std::fs::read(unpacked).expect("the packed project file"),
+        saved
+    );
+    crate::workbench::session::project_transactions::pack_into_for_tests(None);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn save_project_to_path_round_trips_canonical_result_document_entities() {

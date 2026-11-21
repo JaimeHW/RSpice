@@ -47,6 +47,8 @@ impl RSpiceApp {
 
         match response {
             ConfirmationResponse::Cancel => {}
+            // A pack holds the project as saved: it never goes on unsaved.
+            ConfirmationResponse::No if pending.is_some_and(|action| !action.offers_discard()) => {}
             ConfirmationResponse::No => {
                 // Discard changes and proceed
                 if let Some(action) = pending {
@@ -76,6 +78,7 @@ impl RSpiceApp {
                             | ConfirmationAction::ProjectOpen
                             | ConfirmationAction::CloseProject(_)
                             | ConfirmationAction::Exit
+                            | ConfirmationAction::PackWithResults
                     )
                 ) || matches!(
                     (pending, pending_recent_kind),
@@ -319,6 +322,7 @@ impl RSpiceApp {
                 // Signal exit request - this will be handled by the frame update
                 self.state.shell.exit_requested = true;
             }
+            ConfirmationAction::PackWithResults => self.state.pack_project_with_results(),
         }
     }
 

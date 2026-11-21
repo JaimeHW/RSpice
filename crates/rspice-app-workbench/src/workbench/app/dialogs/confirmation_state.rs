@@ -25,6 +25,9 @@ pub enum ConfirmationAction {
     OpenRecent,
     /// Close the application
     Exit,
+    /// Pack the project with its results: a pack holds the project as saved, so its changes are
+    /// saved first.
+    PackWithResults,
 }
 
 impl ConfirmationAction {
@@ -45,7 +48,33 @@ impl ConfirmationAction {
                 "Save changes to the current design?".to_owned()
             }
             ConfirmationAction::Exit => "Save changes before exiting?".to_owned(),
+            ConfirmationAction::PackWithResults => {
+                if project.is_empty() {
+                    "Save changes and pack this project?".to_owned()
+                } else {
+                    format!("Save changes and pack \u{201c}{project}\u{201d}?")
+                }
+            }
         }
+    }
+
+    /// The verb that saves and goes on.
+    pub fn save_verb(&self) -> &'static str {
+        match self {
+            ConfirmationAction::PackWithResults => "Save and pack",
+            ConfirmationAction::ProjectNew
+            | ConfirmationAction::ProjectOpen
+            | ConfirmationAction::CloseProject(_)
+            | ConfirmationAction::FileOpen
+            | ConfirmationAction::OpenRecent
+            | ConfirmationAction::Exit => "Save",
+        }
+    }
+
+    /// Whether the prompt offers to go on without saving. A pack holds the project as saved, so
+    /// packing without saving would leave the changes out of it.
+    pub fn offers_discard(&self) -> bool {
+        !matches!(self, ConfirmationAction::PackWithResults)
     }
 
     /// The one sentence under the question: what "Don't save" gives up.
@@ -61,6 +90,9 @@ impl ConfirmationAction {
             | ConfirmationAction::CloseProject(_)
             | ConfirmationAction::FileOpen
             | ConfirmationAction::OpenRecent => "Your changes will be lost if you don't save them.",
+            ConfirmationAction::PackWithResults => {
+                "A pack holds the project as saved, so its changes are saved first."
+            }
         }
     }
 }

@@ -124,11 +124,18 @@ fn render_save_confirmation_dialog(app: &mut impl ConfirmationHost, ctx: &Contex
             "Your changes will be lost if you don't save them.",
         ),
     };
-    let choice = Dialog::new(&title, "Save")
+    let pending = app.workbench().confirmation_dialog.pending_action;
+    let verb = pending.map_or("Save", |action| action.save_verb());
+    let dialog = Dialog::new(&title, verb)
         .description(consequence)
-        .size(DialogSize::Confirmation)
-        .secondary("Don't save")
-        .secondary_leading()
+        .size(DialogSize::Confirmation);
+    // A pack holds the project as saved: it offers only to save and go on, or to stay.
+    let dialog = if pending.is_none_or(|action| action.offers_discard()) {
+        dialog.secondary("Don't save").secondary_leading()
+    } else {
+        dialog
+    };
+    let choice = dialog
         .ghost("Cancel")
         .show(ctx, |ui| prompt_sentence(ui, None, consequence));
 

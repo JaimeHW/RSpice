@@ -6,6 +6,7 @@ use rspice_app_services::io::project_pack::{ProjectPackJob, start_pack_open, sta
 use rspice_app_services::workbench::results_job::{JobOutcome, JobState};
 
 use crate::workbench::app_state::AppState;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 impl AppState {
     /// Write the open project, as it is saved, and its results folder as one pack the reader
@@ -26,10 +27,13 @@ impl AppState {
             );
             return;
         };
+        // A pack holds the project as saved, so unsaved changes are saved first, in one prompt.
         if rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh(
             self,
         ) {
-            self.prompt("Save the project before packing it: a pack holds the project as saved.");
+            self.workbench
+                .confirmation_dialog
+                .show(ConfirmationAction::PackWithResults);
             return;
         }
         let Some(archive) = pick_pack_destination(&project) else {
@@ -98,10 +102,22 @@ impl AppState {
     }
 }
 
-/// Where the reader puts the pack of `project`: none in a test, which never opens a dialog.
+#[cfg(test)]
+thread_local! {
+    static PACK_INTO: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Make packs asked for on this thread go to `archive`, as the reader would pick it; `None`
+/// picks nothing. A test never opens a dialog.
+#[cfg(test)]
+pub(crate) fn pack_into_for_tests(archive: Option<PathBuf>) {
+    PACK_INTO.with(|into| *into.borrow_mut() = archive);
+}
+
+/// Where the reader puts the pack of `project`: what the test named, never a dialog.
 #[cfg(test)]
 fn pick_pack_destination(_project: &Path) -> Option<PathBuf> {
-    None
+    PACK_INTO.with(|into| into.borrow().clone())
 }
 
 #[cfg(not(test))]
