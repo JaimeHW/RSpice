@@ -337,10 +337,10 @@ fn fold_rows(
                 if row_y.is_nan() {
                     continue;
                 }
-                if !(min[pixel] <= row_y) {
+                if min[pixel].is_nan() || row_y < min[pixel] {
                     min[pixel] = row_y;
                 }
-                if !(max[pixel] >= row_y) {
+                if max[pixel].is_nan() || row_y > max[pixel] {
                     max[pixel] = row_y;
                 }
             }

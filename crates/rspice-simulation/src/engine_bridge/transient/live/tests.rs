@@ -31,7 +31,7 @@ impl AbortSignal for Opener {
     }
 
     fn observe_transient_sample(&self, sample: TransientSample<'_>) {
-        if sample.points % 2_500 != 0 {
+        if !sample.points.is_multiple_of(2_500) {
             return;
         }
         let path = self.slot.lock().unwrap().clone();
@@ -171,7 +171,7 @@ impl AbortSignal for Drawer {
     }
 
     fn observe_transient_sample(&self, sample: TransientSample<'_>) {
-        if sample.points % 400_000 != 0 {
+        if !sample.points.is_multiple_of(400_000) {
             return;
         }
         let path = self.slot.lock().unwrap().clone();
