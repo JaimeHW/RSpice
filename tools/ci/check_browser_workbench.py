@@ -1302,7 +1302,14 @@ def rawfile_import_streams(browser):
     browser.cdp("Page.setInterceptFileChooserDialog", {"enabled": True})
     try:
         choose_command(browser, "Open results workspace")
-        choose_command(browser, "Import result dataset\u2026")
+        # The import is offered on File > Import, not in the palette.
+        browser.click("File", "menuItem")
+        wait_for(lambda: any(c["label"] == "Import" and c["role"] == "menuItem"
+                             for c in controls(browser.snapshot())), "the File menu")
+        browser.click("Import", "menuItem")
+        wait_for(lambda: any(c["label"] == "Result dataset\u2026" and c["role"] == "menuItem"
+                             for c in controls(browser.snapshot())), "the File menu's Import")
+        browser.click("Result dataset\u2026", "menuItem")
         picker = wait_for(lambda: browser.call("POST", "/elements",
                                                {"using": "css selector", "value": "#rfd-input"}),
                           "the result dataset picker")
