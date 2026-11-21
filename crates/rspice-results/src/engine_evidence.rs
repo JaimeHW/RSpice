@@ -10,7 +10,7 @@
 pub use rspice_core::MeasureResult;
 pub use rspice_core::abort_signal::NoAbort;
 pub use rspice_core::analysis::s_param::{
-    MAX_NETWORK_DIAGNOSTIC_PORTS, network_quality_with_abort,
+    MAX_NETWORK_DIAGNOSTIC_PORTS, SampledPassivity, network_quality_with_abort,
 };
 pub use rspice_core::analysis::signal_integrity::{
     EyeData, EyeDataBuilder, EyeMeasurements, EyeTrace, UiEstimateRejection,

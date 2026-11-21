@@ -471,12 +471,17 @@ struct PreparedTypedResultCsv {
 }
 
 /// The values the displayed sheet shows, as the clipboard takes them: what
-/// its TSV data export writes, with the plotted signals.
+/// its TSV data export writes, with the plotted signals. The network matrix
+/// copies the one matrix on screen, as its frequency sample shows it.
 pub(crate) fn active_sheet_values(state: ResultsReads<'_>) -> Result<String, String> {
     let displayed =
         crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
             state,
         )?;
+    if displayed.viewer == crate::workbench::ResultViewer::NetworkMatrix {
+        return crate::workbench::documents::result_document::network_matrix_exact_values(state)
+            .ok_or_else(|| "The network matrix has no complete sample to copy yet".to_owned());
+    }
     if let Some(table) = prepare_displayed_table(state, &displayed, ExportedSignals::Plotted) {
         return sectioned_csv_to_tsv(&table?.0.contents).map_err(|error| error.to_string());
     }

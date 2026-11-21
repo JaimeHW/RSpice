@@ -61,6 +61,7 @@ pub(crate) struct ResultSheetCsv {
 // belong to the lower-owned session.
 pub(crate) use events::EventOrderCache;
 pub(crate) use manifest::export_csv as export_manifest_csv;
+pub(crate) use network_matrix::exact_values as network_matrix_exact_values;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
 pub(crate) use optimization::export_csv as export_optimization_csv;
@@ -2349,6 +2350,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         ResultViewer::Scatter => scatter::domain_bar(ui, &mut context),
         ResultViewer::BoxViolin => box_violin::domain_bar(ui, &mut context),
         ResultViewer::Events => events::domain_bar(ui, &mut context),
+        ResultViewer::NetworkMatrix => network_matrix::domain_bar(ui, &mut context),
         _ => false,
     }
 }

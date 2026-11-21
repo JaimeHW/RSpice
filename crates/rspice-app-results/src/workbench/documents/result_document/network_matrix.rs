@@ -99,13 +99,20 @@ pub(super) fn availability(state: ResultsReads<'_>) -> super::ViewerAvailability
     }
 }
 
-pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
-    let Some(run) = context.simulation.active_run() else {
-        well_hint(ui, "Run a network analysis to inspect its matrix");
-        return;
+/// The active analysis and its resolved matrix, once the matrix qualified for
+/// this source generation; otherwise the sentence the well states, if any.
+///
+/// The bar and the body both enter here, so either one binds the source and
+/// resolves the layout once per retained generation.
+fn bound<'a>(
+    context: &mut SheetContext<'a>,
+) -> Result<(&'a AnalysisResult, Arc<NetworkLayout>), Option<&'static str>> {
+    let simulation = context.simulation;
+    let Some(run) = simulation.active_run() else {
+        return Err(Some("Run a network analysis to inspect its matrix"));
     };
-    let Some(analysis) = context.simulation.active_analysis() else {
-        return;
+    let Some(analysis) = simulation.active_analysis() else {
+        return Err(None);
     };
     let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     let valid = context.results.structural_gates.get_or_insert_with(
@@ -121,28 +128,55 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         })
         .is_ok();
     if !valid {
-        well_hint(
-            ui,
+        return Err(Some(
             "The saved network matrix is incomplete or has invalid coefficient or frequency data",
-        );
-        return;
+        ));
     }
     let controls = &mut context.results.network_matrix;
-    controls.bind(key, context.simulation);
+    controls.bind(key, simulation);
     // Matrix topology can be large even when only a few rows are visible.
     // Resolve names and block membership once per retained source generation;
     // subsequent frames borrow its index inventory and only read visible cells.
     if controls.layout.is_none() {
         let Some(matrix) = resolve(analysis) else {
-            well_hint(
-                ui,
+            return Err(Some(
                 "Requires a complete complex network matrix and its physical port references",
-            );
-            return;
+            ));
         };
         controls.layout = Some(Arc::new(matrix));
     }
-    let matrix = controls.layout.as_ref().expect("resolved layout").clone();
+    Ok((
+        analysis,
+        controls.layout.as_ref().expect("resolved layout").clone(),
+    ))
+}
+
+/// The matrix's own controls in its sheet bar.
+pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
+    let Ok((analysis, matrix)) = bound(context) else {
+        return false;
+    };
+    view::domain_bar(
+        ui,
+        analysis,
+        &matrix,
+        &mut context.results.network_matrix.controls,
+        context.significant_digits,
+    );
+    true
+}
+
+pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
+    let (analysis, matrix) = match bound(context) {
+        Ok(bound) => bound,
+        Err(hint) => {
+            if let Some(hint) = hint {
+                well_hint(ui, hint);
+            }
+            return;
+        }
+    };
+    let controls = &mut context.results.network_matrix;
     if let Some(coefficient) = view::show(
         ui,
         analysis,
@@ -150,7 +184,6 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         &mut controls.controls,
         context.policy.angle_display,
         context.significant_digits,
-        |block, sample| matrix_csv(&matrix, analysis, block, sample),
     ) {
         context.results.session.polar.quantity = Some(coefficient.waveform_name);
         context.results.session.cursors.a = Some(coefficient.frequency);
@@ -182,16 +215,32 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     context.results.network_matrix.open_trace = open_trace;
 }
 
-fn matrix_csv(
-    matrix: &NetworkLayout,
-    analysis: &AnalysisResult,
-    block_index: usize,
-    sample: usize,
-) -> String {
-    let table = matrix
-        .exact_table(analysis, block_index, sample)
-        .expect("resolved complex coefficient sample");
-    rspice_formats::result_csv::encode_network_matrix_csv(&table)
+/// The exact matrix the sheet shows, as the clipboard takes it: the block and
+/// the frequency sample on screen, every coefficient's parts at full
+/// precision. `None` while the sheet holds no matrix of the active analysis
+/// or its samples have not arrived.
+pub(crate) fn exact_values(state: ResultsReads<'_>) -> Option<String> {
+    let sheet = &state.results.network_matrix;
+    let simulation = &state.model.simulation;
+    let analysis = simulation.active_analysis()?;
+    let key = AnalysisPresentationKey::new(simulation.active_run()?.dataset_id, analysis);
+    let source = (
+        key,
+        simulation.retained.runs.revision(),
+        simulation.view.data_version,
+    );
+    if sheet.source.as_ref() != Some(&source) {
+        return None;
+    }
+    let table = sheet.layout.as_ref()?.exact_table(
+        analysis,
+        sheet.controls.block,
+        sheet.controls.sample,
+    )?;
+    rspice_formats::table::csv_to_tsv(&rspice_formats::result_csv::encode_network_matrix_csv(
+        &table,
+    ))
+    .ok()
 }
 
 #[cfg(test)]
@@ -206,7 +255,9 @@ pub(crate) mod tests {
             let analysis = network_matrix_analysis(mixed);
             assert!(structure_is_renderable(&analysis));
             let matrix = resolve(&analysis).unwrap();
-            let csv = matrix_csv(&matrix, &analysis, 0, 1);
+            let csv = rspice_formats::result_csv::encode_network_matrix_csv(
+                &matrix.exact_table(&analysis, 0, 1).unwrap(),
+            );
             assert!(csv.contains("2.00000000000000000e6"));
             let tables = rspice_results::network_matrix::report_tables(&analysis).unwrap();
             assert_eq!(tables.len(), 1);
@@ -221,6 +272,16 @@ pub(crate) mod tests {
         }
     }
 
+    /// A passivity verdict for the first block's first sample.
+    fn first_sample_verdict(line: &str) -> view::NetworkDiagnostic {
+        view::NetworkDiagnostic {
+            block: 0,
+            sample: 0,
+            line: line.to_owned(),
+            detail: String::new(),
+        }
+    }
+
     #[test]
     fn replacing_evidence_cannot_reuse_a_sampled_diagnostic() {
         let analysis = network_matrix_analysis(false);
@@ -231,13 +292,13 @@ pub(crate) mod tests {
         simulation.retained.runs.push(run);
         let mut controls = NetworkMatrixState::default();
         controls.bind(key, &simulation);
-        controls.controls.diagnostic = Some((0, 0, "old evidence".to_owned()));
+        controls.controls.diagnostic = Some(first_sample_verdict("old evidence"));
         controls.bind(key, &simulation.clone());
         assert!(controls.controls.diagnostic.is_some());
         simulation.view.data_version = simulation.view.data_version.wrapping_add(1);
         controls.bind(key, &simulation);
         assert!(controls.controls.diagnostic.is_none());
-        controls.controls.diagnostic = Some((0, 0, "old evidence".to_owned()));
+        controls.controls.diagnostic = Some(first_sample_verdict("old evidence"));
         simulation.retained.runs[0].analyses[0] = network_matrix_analysis(false);
         controls.bind(key, &simulation);
         assert!(controls.controls.diagnostic.is_none());
@@ -415,7 +476,7 @@ pub(crate) mod tests {
             controls.transpose = true;
             controls.heatmap = false;
             controls.floor_db = -120.0;
-            controls.diagnostic = Some((0, 0, "retained diagnostic".to_owned()));
+            controls.diagnostic = Some(first_sample_verdict("retained diagnostic"));
             app.model
                 .simulation
                 .retained
