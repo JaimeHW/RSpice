@@ -1223,12 +1223,14 @@ pub fn show(
         let py = my(*yv);
         painter.hline(plot_rect.x_range(), py, grid);
         let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), y_ink);
-        let (height, top) = (galley.size().y, py - galley.size().y * 0.5);
-        // A packed strip's margins are too thin to hold half a label: a
-        // tick on its very edge keeps its gridline and gives up its label.
-        let held = !spec.packed || (top >= rect.top() && top + height <= rect.bottom());
-        if held
-            && top + height <= last_label_top - Y_TICK_LABEL_GAP
+        let (height, mut top) = (galley.size().y, py - galley.size().y * 0.5);
+        // A packed strip's margins are thinner than half a label: the label
+        // of a tick on the plot's very edge is nudged inside the strip, so a
+        // short strip keeps its scale and no label is clipped by its header.
+        if spec.packed {
+            top = top.clamp(rect.top(), (rect.bottom() - height).max(rect.top()));
+        }
+        if top + height <= last_label_top - Y_TICK_LABEL_GAP
             && top >= y_chrome_bottom + Y_TICK_LABEL_GAP
         {
             last_label_top = top;

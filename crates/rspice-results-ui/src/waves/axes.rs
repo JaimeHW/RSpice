@@ -327,6 +327,7 @@ pub(crate) fn secondary_axes(
             .size()
     };
     let pitch = plot::y_tick_pitch(ui);
+    let label_height = measure("0").y;
     let columns: Vec<Option<Column>> = axes
         .iter()
         .take(ADDED_AXES)
@@ -357,17 +358,24 @@ pub(crate) fn secondary_axes(
                     continue;
                 }
                 ticks.push(y);
-                let half = 0.5 * (pitch - 2.0);
-                let held = y - half >= plot_rect.top() - LABEL_OVERHANG
-                    && y + half <= plot_rect.bottom() + LABEL_OVERHANG
-                    && labels.last().is_none_or(|(below, _)| below - y >= pitch);
+                // The label of a tick on the plot's very edge is nudged
+                // inside the strip, as the first axis' is.
+                let half = 0.5 * label_height;
+                let label_y = y.clamp(
+                    plot_rect.top() - LABEL_OVERHANG + half,
+                    (plot_rect.bottom() + LABEL_OVERHANG - half)
+                        .max(plot_rect.top() - LABEL_OVERHANG + half),
+                );
+                let held = labels
+                    .last()
+                    .is_none_or(|(below, _)| below - label_y >= label_height + 2.0);
                 if held {
                     let label = if offset {
                         plot::fmt_si_significant(value, "", 4)
                     } else {
                         label
                     };
-                    labels.push((y, label));
+                    labels.push((label_y, label));
                 }
             }
             // The axis names its unit on its top label, as the first does.
