@@ -116,12 +116,34 @@ pub enum DocumentEdit {
         title: String,
     },
     AddComposedPage(NewPage),
+    /// Read `next`, a newer run, in place of the run each pane reads the
+    /// same analysis of: a view following its plan. A trace whose signal
+    /// `next` lacks stays, marked missing; a pane whose analysis `next` does
+    /// not solve stays on its run.
+    FollowRun {
+        next: SourceDataset,
+    },
     AddPane {
         page_id: PageId,
         title: String,
         kind: PaneKind,
     },
     AddBoundPane(NewPane),
+    /// Add a bound pane with its axes and no traces: a view pane, which
+    /// plots only the signals the reader plots.
+    AddViewPane(NewPane),
+    /// Plot one signal of the analysis a pane draws: show its trace, or add
+    /// one.
+    PlotSignal {
+        pane_id: PaneId,
+        #[serde(deserialize_with = "deserialize_label_string")]
+        signal: String,
+    },
+    /// Close or reopen a pane's strip; what it plots stays.
+    SetPaneHidden {
+        pane_id: PaneId,
+        hidden: bool,
+    },
     AddPaneOnNewPage {
         page: NewPage,
         pane: NewPagePane,

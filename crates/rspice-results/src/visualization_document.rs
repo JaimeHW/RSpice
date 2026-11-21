@@ -10,12 +10,14 @@ mod edits;
 mod family;
 mod query;
 mod run_source;
+mod working_view;
 
 pub use comparison::*;
 pub use edits::*;
 pub use family::*;
 pub use query::*;
 pub use run_source::*;
+pub use working_view::*;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1433,6 +1435,10 @@ pub struct Pane {
     pub order: u32,
     #[serde(default)]
     pub family_policy: Option<FamilyPresentationPolicy>,
+    /// The reader closed the pane's strip. It keeps everything it plots and
+    /// comes back as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1884,14 +1890,26 @@ pub enum PlotMarkerKind {
     Peak,
     SpecificationLine,
     MeasurementAnchor,
+    /// The local minimum the trace descends to from the marker's X, found
+    /// again whenever the curve changes.
+    Valley,
+    /// The crossing of `level` nearest the marker's X, found again whenever
+    /// the curve changes.
+    Crossing {
+        level: crate::result_presentation::CrossingLevel,
+    },
 }
 
 impl PlotMarkerKind {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 6] = [
         Self::PointNote,
         Self::Peak,
         Self::SpecificationLine,
         Self::MeasurementAnchor,
+        Self::Valley,
+        Self::Crossing {
+            level: crate::result_presentation::CrossingLevel(0.0),
+        },
     ];
 
     #[must_use]
@@ -1901,6 +1919,8 @@ impl PlotMarkerKind {
             Self::Peak => "Peak flag",
             Self::SpecificationLine => "Specification line",
             Self::MeasurementAnchor => "Measurement anchor",
+            Self::Valley => "Valley flag",
+            Self::Crossing { .. } => "Crossing flag",
         }
     }
 }
@@ -2415,6 +2435,9 @@ pub struct VisualizationDocument {
     title: String,
     tracking: ResultDocumentTracking,
     presentation: VisualizationPresentationPolicy,
+    /// Whose working view this is; absent for a saved document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    working_view: Option<WorkingViewSource>,
     next_serial: u64,
     datasets: Vec<SourceDataset>,
     pages: Vec<Page>,
@@ -2447,6 +2470,8 @@ struct VisualizationDocumentWire {
     title: String,
     tracking: ResultDocumentTracking,
     presentation: VisualizationPresentationPolicy,
+    #[serde(default)]
+    working_view: Option<WorkingViewSource>,
     next_serial: u64,
     datasets: BoundedSourceDatasets,
     pages: BoundedVec<Page, MAX_VISUALIZATION_PAGES>,
@@ -2507,6 +2532,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             title: wire.title,
             tracking: wire.tracking,
             presentation: wire.presentation,
+            working_view: wire.working_view,
             next_serial: wire.next_serial,
             datasets: wire.datasets.0,
             pages: wire.pages.into_inner(),
@@ -2547,7 +2573,7 @@ impl VisualizationDocument {
     /// stating any other version is refused, never migrated. Unknown
     /// extension fields are ignored; a new required meaning takes a new
     /// version.
-    pub const SCHEMA_VERSION: u16 = 15;
+    pub const SCHEMA_VERSION: u16 = 16;
 
     pub fn new(
         title: impl Into<String>,
@@ -2571,6 +2597,7 @@ impl VisualizationDocument {
             title,
             tracking: ResultDocumentTracking::pinned(),
             presentation: VisualizationPresentationPolicy::default(),
+            working_view: None,
             next_serial: 3,
             datasets,
             pages: vec![Page {
@@ -2590,6 +2617,7 @@ impl VisualizationDocument {
                 placement: PanePlacement::Primary,
                 order: 0,
                 family_policy: None,
+                hidden: false,
             }],
             axes: Vec::new(),
             traces: Vec::new(),
@@ -2844,6 +2872,7 @@ impl VisualizationDocument {
             title: self.title.clone(),
             tracking: self.tracking,
             presentation: self.presentation,
+            working_view: self.working_view,
             next_serial: self.next_serial,
             datasets: Vec::new(),
             pages: self.pages.clone(),
@@ -2969,7 +2998,7 @@ impl VisualizationDocument {
                     )
                 },
                 "shown",
-                true,
+                apply::RebindMode::KeepMissing,
             )?;
         }
         Ok(())
@@ -3027,3 +3056,5 @@ mod lane_tests;
 mod run_source_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod working_view_tests;

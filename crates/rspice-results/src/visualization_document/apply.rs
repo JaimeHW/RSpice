@@ -8,6 +8,20 @@
 
 use super::*;
 
+/// What moving a document's consumers from one run onto another asks of
+/// the run moved onto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RebindMode {
+    /// Every consumer moves, and a signal the next run lacks refuses.
+    Exact,
+    /// Every consumer moves; a trace whose signal the next run lacks stays,
+    /// marked missing.
+    KeepMissing,
+    /// Consumers of an analysis the next run solves move, keeping missing
+    /// traces; the rest stay on their run.
+    Follow,
+}
+
 impl VisualizationDocument {
     fn validate_page_definition(page: &NewPage) -> Result<(), VisualizationError> {
         validate_label("page.title", &page.title)?;
@@ -165,7 +179,7 @@ impl VisualizationDocument {
         }
     }
 
-    fn create_pane(&mut self, pane: NewPane) -> Result<PaneId, VisualizationError> {
+    pub(super) fn create_pane(&mut self, pane: NewPane) -> Result<PaneId, VisualizationError> {
         validate_label("pane.title", &pane.title)?;
         self.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
         let order = self.placement_order(pane.page_id, pane.placement, None)?;
@@ -188,6 +202,7 @@ impl VisualizationDocument {
             placement: pane.placement,
             order,
             family_policy: None,
+            hidden: false,
         });
         Ok(id)
     }
@@ -203,6 +218,21 @@ impl VisualizationDocument {
         binding: PaneDataBinding,
         created: &mut Vec<EntityRef>,
     ) -> Result<(), VisualizationError> {
+        let (x_axis_id, y_axis_id) = self.provision_axes(pane_id, viewer_id, created)?;
+        if self.traces.iter().any(|trace| trace.pane_id == pane_id) {
+            return Ok(());
+        }
+        self.provision_display_traces(pane_id, binding, (x_axis_id, y_axis_id), created)
+    }
+
+    /// The pane's horizontal and first vertical axis, made as its viewer
+    /// labels and scales them when the pane has none.
+    pub(super) fn provision_axes(
+        &mut self,
+        pane_id: PaneId,
+        viewer_id: &str,
+        created: &mut Vec<EntityRef>,
+    ) -> Result<(AxisId, AxisId), VisualizationError> {
         self.require_pane(pane_id)?;
         let viewer =
             viewer_document(viewer_id).ok_or_else(|| VisualizationError::InvalidValue {
@@ -266,10 +296,17 @@ impl VisualizationDocument {
             created.push(EntityRef::Axis(id));
             id
         };
+        Ok((x_axis_id, y_axis_id))
+    }
 
-        if self.traces.iter().any(|trace| trace.pane_id == pane_id) {
-            return Ok(());
-        }
+    /// A trace for every display signal of the analysis a new pane draws.
+    fn provision_display_traces(
+        &mut self,
+        pane_id: PaneId,
+        binding: PaneDataBinding,
+        (x_axis_id, y_axis_id): (AxisId, AxisId),
+        created: &mut Vec<EntityRef>,
+    ) -> Result<(), VisualizationError> {
         let (coordinate_key, display_signals) = {
             let dataset = self.dataset_for_binding(binding.dataset)?;
             if let Some((signals, distinguishes_analyses)) =
@@ -584,6 +621,15 @@ impl VisualizationDocument {
                     placement,
                 })?;
                 created.push(EntityRef::Pane(id));
+                Ok(())
+            }
+            DocumentEdit::FollowRun { next } => self.follow_run(next),
+            DocumentEdit::AddViewPane(pane) => self.add_view_pane(pane, created).map(|_| ()),
+            DocumentEdit::PlotSignal { pane_id, signal } => {
+                self.plot_signal(pane_id, &signal, created)
+            }
+            DocumentEdit::SetPaneHidden { pane_id, hidden } => {
+                self.pane_mut(pane_id)?.hidden = hidden;
                 Ok(())
             }
             DocumentEdit::AddBoundPane(pane) => {
@@ -1174,7 +1220,10 @@ impl VisualizationDocument {
         }
     }
 
-    fn attach_dataset(&mut self, dataset: SourceDataset) -> Result<(), VisualizationError> {
+    pub(super) fn attach_dataset(
+        &mut self,
+        dataset: SourceDataset,
+    ) -> Result<(), VisualizationError> {
         dataset.validate()?;
         if let Some(existing) = self
             .datasets
@@ -1197,7 +1246,7 @@ impl VisualizationDocument {
         Ok(())
     }
 
-    fn merge_dataset_projection(
+    pub(super) fn merge_dataset_projection(
         &mut self,
         projection: SourceDataset,
     ) -> Result<(), VisualizationError> {
@@ -1331,7 +1380,7 @@ impl VisualizationDocument {
             next_binding,
             |_| Some(analysis_id),
             "newer tracked",
-            true,
+            RebindMode::KeepMissing,
         )?;
         // Nothing reads the run left behind once its panes and traces have
         // moved, so it goes as it does on a re-point: a document that follows
@@ -1341,7 +1390,7 @@ impl VisualizationDocument {
     }
 
     /// Drop `binding` unless a comparison receipt still names it.
-    fn drop_unreferenced_dataset(&mut self, binding: DatasetBinding) {
+    pub(super) fn drop_unreferenced_dataset(&mut self, binding: DatasetBinding) {
         if !self
             .comparisons
             .iter()
@@ -1391,7 +1440,7 @@ impl VisualizationDocument {
                 .find(|mapping| mapping.previous == analysis)
                 .map(|mapping| mapping.next)
         };
-        self.rebind_consumers(previous, next_binding, mapped, "chosen", false)?;
+        self.rebind_consumers(previous, next_binding, mapped, "chosen", RebindMode::Exact)?;
         self.drop_unreferenced_dataset(previous);
         Ok(())
     }
@@ -1407,8 +1456,10 @@ impl VisualizationDocument {
         next: DatasetBinding,
         analysis: impl Fn(Option<AnalysisInstanceId>) -> Option<AnalysisInstanceId>,
         describe_next: &str,
-        keep_missing: bool,
+        mode: RebindMode,
     ) -> Result<(), VisualizationError> {
+        let keep_missing = mode != RebindMode::Exact;
+        let follow = mode == RebindMode::Follow;
         let unmapped = |from: Option<AnalysisInstanceId>| {
             VisualizationError::InvalidValue {
             field: "visualization-document.datasets",
@@ -1424,7 +1475,11 @@ impl VisualizationDocument {
                 && binding.dataset == previous
             {
                 let from = Some(binding.analysis_id);
-                let to = analysis(from).ok_or_else(|| unmapped(from))?;
+                let to = match analysis(from) {
+                    Some(to) => to,
+                    None if follow => continue,
+                    None => return Err(unmapped(from)),
+                };
                 panes.push((index, to));
             }
         }
@@ -1447,7 +1502,11 @@ impl VisualizationDocument {
                     let first = bound.next()?;
                     bound.all(|other| other == first).then_some(first)
                 });
-                let to = analysis(from).ok_or_else(|| unmapped(from))?;
+                let to = match analysis(from) {
+                    Some(to) => to,
+                    None if follow => continue,
+                    None => return Err(unmapped(from)),
+                };
                 if let std::collections::hash_map::Entry::Vacant(entry) =
                     signals_by_analysis.entry(to)
                 {
@@ -1481,7 +1540,7 @@ impl VisualizationDocument {
                 traces.push((index, predicates));
             }
         }
-        if panes.is_empty() && traces.is_empty() {
+        if panes.is_empty() && traces.is_empty() && !follow {
             return Err(VisualizationError::InvalidValue {
                 field: "visualization-document.datasets",
                 message: format!(
@@ -1490,6 +1549,10 @@ impl VisualizationDocument {
                 ),
             });
         }
+        let moved: HashSet<PaneId> = panes
+            .iter()
+            .map(|(index, _)| self.panes[*index].id)
+            .collect();
         for (index, to) in panes {
             if let Some(binding) = self.panes[index].binding.as_mut() {
                 binding.dataset = next;
@@ -1497,6 +1560,11 @@ impl VisualizationDocument {
             }
         }
         for expression in &mut self.expression_traces {
+            // Following moves only the panes of the analyses the new run
+            // solves, and an expression reads the run its pane does.
+            if follow && !moved.contains(&expression.pane_id) {
+                continue;
+            }
             for binding in &mut expression.datasets {
                 if *binding == previous {
                     *binding = next;
@@ -1517,7 +1585,7 @@ impl VisualizationDocument {
         Ok(())
     }
 
-    fn add_trace(
+    pub(super) fn add_trace(
         &mut self,
         trace: NewTrace,
         created: &mut Vec<EntityRef>,
@@ -2419,7 +2487,7 @@ pub(super) fn display_signal_predicates(
 
 /// Each display signal of one analysis by name, refusing a name two signals
 /// share, and whether the dataset is long-form at all.
-fn display_predicates_by_name(
+pub(super) fn display_predicates_by_name(
     dataset: &SourceDataset,
     analysis_id: AnalysisInstanceId,
     describe: &str,

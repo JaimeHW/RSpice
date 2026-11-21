@@ -1,0 +1,280 @@
+//! A working view plots only what the reader plots, one pane per analysis,
+//! and follows a newer run of its plan analysis by analysis and signal by
+//! name, never moving two panes onto one analysis.
+
+use super::*;
+use crate::analysis_type::AnalysisType;
+
+fn binding(seed: u8) -> DatasetBinding {
+    DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([seed; 32]))
+}
+
+fn run(
+    binding: DatasetBinding,
+    analyses: &[(AnalysisInstanceId, AnalysisType, &[&str])],
+) -> SourceDataset {
+    SourceDataset::run_reference(
+        binding,
+        "Run",
+        analyses
+            .iter()
+            .map(|(id, kind, names)| {
+                RunSourceAnalysis::new(
+                    *id,
+                    *kind,
+                    names
+                        .iter()
+                        .enumerate()
+                        .map(|(index, name)| {
+                            RunSignal::new(u32::try_from(index).unwrap(), *name, false)
+                        })
+                        .collect(),
+                )
+            })
+            .collect(),
+    )
+    .expect("a valid run reference")
+}
+
+fn pane(title: &str, analysis_id: AnalysisInstanceId, plotted: &[&str]) -> WorkingPane {
+    WorkingPane {
+        title: title.to_owned(),
+        kind: PaneKind::Cartesian,
+        viewer_id: "viewer-waveform".to_owned(),
+        analysis_id,
+        plotted: plotted.iter().map(|name| (*name).to_owned()).collect(),
+    }
+}
+
+fn plotted(document: &VisualizationDocument, pane_id: PaneId) -> Vec<(String, bool, bool)> {
+    document
+        .traces()
+        .iter()
+        .filter(|trace| trace.pane_id == pane_id)
+        .map(|trace| (trace.label.clone(), trace.visible, trace.missing))
+        .collect()
+}
+
+struct TwoAnalyses {
+    document: VisualizationDocument,
+    tran: AnalysisInstanceId,
+    ac: AnalysisInstanceId,
+}
+
+fn two_analyses() -> TwoAnalyses {
+    let (tran, ac) = (AnalysisInstanceId::new(), AnalysisInstanceId::new());
+    let source = run(
+        binding(1),
+        &[
+            (tran, AnalysisType::Transient, &["V(in)", "V(out)", "I(R1)"]),
+            (ac, AnalysisType::Ac, &["V(out)", "V(mid)"]),
+        ],
+    );
+    let document = VisualizationDocument::new_working_view(
+        WorkingViewSource::Plan {
+            plan_id: SimulationPlanId::new(),
+        },
+        source,
+        ResultDocumentTracking::pinned(),
+        vec![
+            pane("Transient", tran, &["V(out)"]),
+            pane("AC", ac, &["V(out)", "V(mid)"]),
+        ],
+    )
+    .expect("a working view");
+    TwoAnalyses { document, tran, ac }
+}
+
+#[test]
+fn a_working_view_has_a_pane_per_analysis_plotting_only_what_it_was_given() {
+    let TwoAnalyses { document, tran, ac } = two_analyses();
+    assert!(document.working_view().is_some());
+    assert_eq!(document.panes().len(), 2, "no placeholder pane stays");
+    let tran_pane = document
+        .pane_of_analysis(tran)
+        .expect("the transient pane")
+        .id;
+    let ac_pane = document.pane_of_analysis(ac).expect("the AC pane").id;
+    assert_eq!(
+        plotted(&document, tran_pane),
+        [("V(out)".to_owned(), true, false)]
+    );
+    assert_eq!(plotted(&document, ac_pane).len(), 2);
+
+    let json = serde_json::to_string(&document).expect("a working view serializes");
+    let back: VisualizationDocument = serde_json::from_str(&json).expect("and reads back");
+    assert_eq!(back.working_view(), document.working_view());
+}
+
+#[test]
+fn plotting_a_signal_adds_its_trace_once_and_closing_a_strip_keeps_it() {
+    let TwoAnalyses {
+        mut document, tran, ..
+    } = two_analyses();
+    let pane_id = document
+        .pane_of_analysis(tran)
+        .expect("the transient pane")
+        .id;
+    let plot = |document: &mut VisualizationDocument, signal: &str| {
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::PlotSignal {
+                    pane_id,
+                    signal: signal.to_owned(),
+                }],
+            )
+            .expect("the pane plots its analysis' signal");
+    };
+    plot(&mut document, "I(R1)");
+    let trace = document
+        .traces()
+        .iter()
+        .find(|trace| trace.pane_id == pane_id && trace.label == "I(R1)")
+        .map(|trace| trace.id)
+        .expect("the plotted trace");
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetTraceVisibility {
+                trace_id: trace,
+                visible: false,
+            }],
+        )
+        .unwrap();
+    plot(&mut document, "I(R1)");
+    assert_eq!(
+        plotted(&document, pane_id),
+        [
+            ("V(out)".to_owned(), true, false),
+            ("I(R1)".to_owned(), true, false)
+        ],
+        "plotting a hidden signal shows its trace instead of adding another"
+    );
+    assert!(
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::PlotSignal {
+                    pane_id,
+                    signal: "V(nowhere)".to_owned(),
+                }],
+            )
+            .is_err()
+    );
+
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetPaneHidden {
+                pane_id,
+                hidden: true,
+            }],
+        )
+        .unwrap();
+    let back: VisualizationDocument =
+        serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
+    assert!(
+        back.panes()
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .unwrap()
+            .hidden
+    );
+    assert_eq!(
+        plotted(&back, pane_id).len(),
+        2,
+        "a closed strip keeps its traces"
+    );
+}
+
+#[test]
+fn following_a_run_moves_each_pane_onto_its_own_analysis() {
+    let TwoAnalyses {
+        mut document,
+        tran,
+        ac,
+    } = two_analyses();
+    let next = binding(2);
+    // The re-run lost V(mid) and has a new analysis the view does not draw.
+    let noise = AnalysisInstanceId::new();
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::FollowRun {
+                next: run(
+                    next,
+                    &[
+                        (tran, AnalysisType::Transient, &["V(in)", "V(out)", "I(R1)"]),
+                        (ac, AnalysisType::Ac, &["V(out)"]),
+                        (noise, AnalysisType::Noise, &["onoise"]),
+                    ],
+                ),
+            }],
+        )
+        .expect("the view follows the re-run");
+    let tran_pane = document.pane_of_analysis(tran).expect("the transient pane");
+    let ac_pane = document.pane_of_analysis(ac).expect("the AC pane");
+    assert_eq!(tran_pane.binding.unwrap().dataset, next);
+    assert_eq!(ac_pane.binding.unwrap().dataset, next);
+    assert_ne!(
+        tran_pane.id, ac_pane.id,
+        "two panes never collapse onto one analysis"
+    );
+    assert_eq!(
+        plotted(&document, ac_pane.id),
+        [
+            ("V(out)".to_owned(), true, false),
+            ("V(mid)".to_owned(), true, true)
+        ],
+        "a signal the re-run lacks keeps its trace, marked missing"
+    );
+    assert_eq!(document.datasets().len(), 1, "the earlier run is let go");
+}
+
+#[test]
+fn a_pane_whose_analysis_the_new_run_lacks_stays_on_its_run() {
+    let TwoAnalyses {
+        mut document,
+        tran,
+        ac,
+    } = two_analyses();
+    let first = document
+        .pane_of_analysis(ac)
+        .unwrap()
+        .binding
+        .unwrap()
+        .dataset;
+    let next = binding(3);
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::FollowRun {
+                next: run(next, &[(tran, AnalysisType::Transient, &["V(out)"])]),
+            }],
+        )
+        .expect("the view follows what the re-run solves");
+    assert_eq!(
+        document
+            .pane_of_analysis(tran)
+            .unwrap()
+            .binding
+            .unwrap()
+            .dataset,
+        next
+    );
+    assert_eq!(
+        document
+            .pane_of_analysis(ac)
+            .unwrap()
+            .binding
+            .unwrap()
+            .dataset,
+        first
+    );
+    assert_eq!(
+        document.datasets().len(),
+        2,
+        "the run the AC pane reads stays"
+    );
+}
