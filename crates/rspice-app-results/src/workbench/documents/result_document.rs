@@ -1226,9 +1226,12 @@ pub(crate) fn retained_evidence_verdict_over(
     model: &Model,
     analysis: AnalysisPresentationKey,
 ) -> Result<(), std::sync::Arc<str>> {
-    results
-        .retained_evidence_validity
-        .get_or_insert_with(&model.simulation, analysis, || {
+    // A verdict that waits on the reader service, for a stored trace still being read, is
+    // asked again on a later frame rather than kept as a failure.
+    results.retained_evidence_validity.get_or_insert_lasting(
+        &model.simulation,
+        analysis,
+        || {
             let Some((_, resolved)) = model
                 .simulation
                 .retained
@@ -1240,7 +1243,13 @@ pub(crate) fn retained_evidence_verdict_over(
             };
             frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
             resolved.validate_retained_evidence().map_err(Into::into)
-        })
+        },
+        |verdict| {
+            !verdict
+                .as_ref()
+                .is_err_and(|cause| rspice_results::waveform::is_pending_read(cause))
+        },
+    )
 }
 
 pub(crate) use rspice_results::renderability::StructuralGate;
@@ -2363,7 +2372,11 @@ pub(crate) fn incomplete_evidence_reason(analysis: &AnalysisResult) -> Option<&'
         return Some("the run did not complete — these samples stop where it failed");
     }
     frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
-    if analysis.validate_retained_evidence().is_err() {
+    // A stored trace still being read has not failed.
+    if analysis
+        .validate_retained_evidence()
+        .is_err_and(|cause| !rspice_results::waveform::is_pending_read(&cause))
+    {
         return Some("the saved results failed validation");
     }
     None

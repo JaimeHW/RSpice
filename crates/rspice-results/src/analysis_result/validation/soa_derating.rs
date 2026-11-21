@@ -4,15 +4,19 @@ use crate::safety::{
     SoAParameter, compare_soa_stress, soa_derating_temperature_waveform_name,
     soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
+use crate::waveform::SampleSlice;
 
-/// The samples of the SOA trace `name`. A stored trace is read whole: the analysis holds its
-/// observation axis in memory, so a trace over it fits there too.
+/// The samples of the SOA trace `name`. A stored trace is asked of the reader service whole
+/// ([`crate::waveform::WaveformValues::fetch_whole_or_wait`]): the analysis holds its
+/// observation axis in memory, so a trace over it fits there too. On the thread that draws the
+/// window a trace still being read is [`crate::waveform::BEING_READ`], which a later frame finds
+/// read.
 pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
     analysis: &'a AnalysisResult<W>,
     name: &str,
     time: &[f64],
     unit: &str,
-) -> Result<std::borrow::Cow<'a, [f64]>, String> {
+) -> Result<SampleSlice<'a>, String> {
     if let Some(AnalysisResultPayload::Soa {
         source_history: Some(source),
         ..
@@ -28,7 +32,7 @@ pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
                 "SOA source trace '{name}' has invalid coverage or units"
             ));
         }
-        return Ok(std::borrow::Cow::Borrowed(&wave.values));
+        return Ok(SampleSlice::Borrowed(&wave.values));
     }
     let wave = analysis
         .waveforms
@@ -36,16 +40,19 @@ pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
         .map(AsRef::as_ref)
         .find(|wave| wave.name == name)
         .ok_or_else(|| format!("SOA derating is missing retained trace '{name}'"))?;
+    let invalid =
+        || format!("SOA derating trace '{name}' has an invalid axis, unit or sample coverage");
     if wave.y.len() != time.len()
-        || wave.x != *time
+        || wave.x.len() != time.len()
         || wave.unit.as_deref() != Some(unit)
         || wave.complex.is_some()
     {
-        return Err(format!(
-            "SOA derating trace '{name}' has an invalid axis, unit or sample coverage"
-        ));
+        return Err(invalid());
     }
-    wave.y.read_whole().map_err(|failure| failure.to_string())
+    if wave.x.fetch_whole_or_wait().into_result()?[..] != *time {
+        return Err(invalid());
+    }
+    Ok(wave.y.fetch_whole_or_wait().into_result()?.into())
 }
 
 pub(super) fn validate<W: AsRef<RetainedWaveform>>(

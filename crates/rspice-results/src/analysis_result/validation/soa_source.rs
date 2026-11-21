@@ -10,12 +10,12 @@ pub(super) fn validate_report<W: AsRef<RetainedWaveform>>(
     if source.time != time {
         return Err("SOA source history contradicts its retained observation axis".into());
     }
-    // The reporting view is read whole: the history holds every observation in memory, so a
-    // view of it fits there too.
+    // The reporting view is asked of the reader service whole: the history holds every
+    // observation in memory, so a view of it fits there too.
     fn whole(
         values: &crate::waveform::WaveformValues,
-    ) -> Result<std::borrow::Cow<'_, [f64]>, String> {
-        values.read_whole().map_err(|failure| failure.to_string())
+    ) -> Result<crate::waveform::HeldColumn, String> {
+        values.fetch_whole_or_wait().into_result()
     }
     let reporting_time = whole(
         &waves

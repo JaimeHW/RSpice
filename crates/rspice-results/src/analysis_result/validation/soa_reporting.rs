@@ -23,7 +23,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
     for index in 1..cumulative.len() {
         cumulative[index] += cumulative[index - 1];
     }
-    if soa_derating::trace(analysis, "SOA_VIOLATION_COUNT", time, "count")? != cumulative {
+    if soa_derating::trace(analysis, "SOA_VIOLATION_COUNT", time, "count")?[..] != cumulative[..] {
         return Err("SOA cumulative count contradicts its complete event history".into());
     }
     for evaluation in evaluations

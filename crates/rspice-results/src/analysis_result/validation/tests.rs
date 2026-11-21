@@ -93,3 +93,110 @@ fn only_an_unfinished_analysis_holds_the_live_plots_gaps() {
         AnalysisResult::new(2, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![gapped()]);
     assert!(finished.validate_retained_evidence().is_err());
 }
+
+/// An SOA analysis whose reporting view is its whole source history: a warning at the second of
+/// two samples.
+fn soa_with_history() -> AnalysisResult {
+    use crate::analysis_payload::AnalysisResultPayload;
+    use crate::family_metadata::AnalysisResultFamilyMetadata;
+    use crate::soa_evidence::{
+        SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+        SoaViolationSeverityEvidence,
+    };
+    use crate::soa_source::{SoaSourceHistory, SoaSourceWaveform};
+    use crate::waveform::RetainedWaveform;
+    let time = vec![0.0, 1.0e-9];
+    let stress = crate::safety::soa_stress_waveform_name("M1", crate::safety::SoAParameter::Vds);
+    let traces = [
+        (stress.as_str(), "V", vec![2.0, 3.0]),
+        ("SOA_VIOLATION_COUNT", "count", vec![0.0, 1.0]),
+    ];
+    let source = SoaSourceHistory {
+        time: time.clone(),
+        waveforms: traces
+            .iter()
+            .map(|(name, unit, values)| SoaSourceWaveform {
+                name: (*name).to_owned(),
+                unit: (*unit).to_owned(),
+                values: values.clone(),
+            })
+            .collect(),
+    };
+    AnalysisResult::new(1, AnalysisType::Soa, "SOA", 0.0)
+        .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time: time.clone() })
+        .with_waveforms(
+            traces
+                .iter()
+                .map(|(name, unit, values)| {
+                    RetainedWaveform::new(*name, time.clone(), values.clone()).with_unit(*unit)
+                })
+                .collect(),
+        )
+        .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: Some(std::sync::Arc::new(source)),
+            evaluations: vec![SoaEvaluationEvidence {
+                duration: None,
+                thresholds: Default::default(),
+                envelope: None,
+                derating: None,
+                device_id: "M1".to_owned(),
+                parameter: SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 3.3,
+                worst_actual_value: 3.0,
+                worst_time_s: 1.0e-9,
+                sample_count: 2,
+                unit: "V".to_owned(),
+                description: "Maximum drain-source voltage".to_owned(),
+                verdict: SoaRuleVerdictEvidence::Warning,
+            }],
+            violations: vec![SoaViolationEvidence {
+                device_id: "M1".to_owned(),
+                parameter: SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 3.3,
+                actual_value: 3.0,
+                time_s: 1.0e-9,
+                severity: SoaViolationSeverityEvidence::Warning,
+            }],
+        })
+}
+
+/// A stored SOA reporting view is checked against its source history through the reader
+/// service: on the thread that draws the window the check waits for the read, as a pending read
+/// that a later frame finds, and reads nothing of the store itself; once read it passes as the
+/// same view in memory does.
+#[cfg(feature = "test-support")]
+#[test]
+fn a_stored_soa_view_is_checked_once_the_reader_service_has_read_it() {
+    use crate::waveform::gated_reads::{Gate, stored};
+    use std::sync::atomic::Ordering;
+    static GATE: Gate = Gate::closed();
+    let memory = soa_with_history();
+    memory
+        .validate_retained_evidence()
+        .expect("the history and its view agree");
+    let mut kept = memory.clone();
+    let mut columns = Vec::new();
+    for wave in &mut kept.waveforms {
+        for values in [&mut wave.x, &mut wave.y] {
+            let (column, held) = stored(&values.samples(..).collect::<Vec<_>>());
+            columns.push(column);
+            *values = held;
+        }
+    }
+    crate::waveform::never_wait_for_reads_here();
+    crate::waveform::read_through(&GATE, || {
+        let pending = kept
+            .validate_retained_evidence()
+            .expect_err("the view is still being read");
+        assert!(crate::waveform::is_pending_read(&pending), "{pending}");
+        assert!(
+            columns
+                .iter()
+                .all(|column| column.rows_read.load(Ordering::SeqCst) == 0),
+            "the asker reads nothing of the store"
+        );
+        GATE.open();
+        kept.validate_retained_evidence()
+            .expect("the view passes once it is read");
+    });
+}

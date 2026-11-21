@@ -54,6 +54,35 @@ impl<K: Eq + Hash, V: Clone> RetainedMemo<K, V> {
         entries.values.entry(key).or_insert_with(compute).clone()
     }
 
+    /// [`Self::get_or_insert_with`], keeping the answer only when `lasting` says the same
+    /// retained data gives it again: an answer that waits on the reader service is asked again
+    /// on a later frame.
+    pub(super) fn get_or_insert_lasting(
+        &self,
+        simulation: &SimulationState,
+        key: K,
+        compute: impl FnOnce() -> V,
+        lasting: impl FnOnce(&V) -> bool,
+    ) -> V {
+        let source = (
+            simulation.retained.runs.revision(),
+            simulation.view.data_version,
+        );
+        let mut entries = self.inner.borrow_mut();
+        if entries.source.as_ref() != Some(&source) {
+            entries.source = Some(source);
+            entries.values.clear();
+        }
+        if let Some(value) = entries.values.get(&key) {
+            return value.clone();
+        }
+        let value = compute();
+        if lasting(&value) {
+            entries.values.insert(key, value.clone());
+        }
+        value
+    }
+
     /// Release entries whose datasets are no longer retained, even when no
     /// reader asks another question of this memo after the removal.
     pub(super) fn retain(&mut self, keep: impl FnMut(&K, &mut V) -> bool) {
