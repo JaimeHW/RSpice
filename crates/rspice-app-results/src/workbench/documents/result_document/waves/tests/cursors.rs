@@ -1,10 +1,12 @@
-//! Cursor jumps, keyboard stepping, point markers read against a reference,
-//! and horizontal cursors, each through the whole Results frame the reader
-//! sees: the document bar, the sheet, its keys and the readout dock.
+//! Cursor jumps, stepping, point markers read against a reference, and
+//! horizontal cursors, each through the whole Results frame the reader sees:
+//! the document bar, the sheet and the readout dock. The keys that raise the
+//! steps are the shortcut resolver's, tested with the application's.
 
 use super::lanes::{FRAME, cursor_lines, place_cursors, strip, theme_context, verticals};
 use super::*;
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
+use crate::workbench::results::commands::ResultsCommand;
 use egui::epaint::ClippedShape;
 use rspice_app_runs::simulation::controller::test_execution::run_manual_batch;
 use rspice_results::calculator::functions::FunctionRegistry;
@@ -59,23 +61,15 @@ fn host_on(run: SimulationRun) -> ResultsTestHost {
     state
 }
 
-/// One frame of the whole Results centre view: the keys it answers, the
-/// sheet and the readout dock.
+/// One frame of the whole Results centre view: the sheet and the readout
+/// dock.
 fn whole_frame(
     ctx: &egui::Context,
     parts: &mut ResultsParts<'_>,
     events: Vec<egui::Event>,
 ) -> Vec<ClippedShape> {
-    let modifiers = events
-        .iter()
-        .find_map(|event| match event {
-            egui::Event::Key { modifiers, .. } => Some(*modifiers),
-            _ => None,
-        })
-        .unwrap_or_default();
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, FRAME)),
-        modifiers,
         events,
         ..Default::default()
     };
@@ -88,14 +82,14 @@ fn whole_frame(
     .shapes
 }
 
-fn key(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
-    vec![egui::Event::Key {
-        key,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers,
-    }]
+/// Run `command`, as its key does, then draw the frame after it.
+fn step(
+    ctx: &egui::Context,
+    state: &mut ResultsTestHost,
+    command: ResultsCommand,
+) -> Vec<ClippedShape> {
+    state.run_command(command);
+    whole_frame(ctx, &mut state.results_parts(), Vec::new())
 }
 
 fn texts(shapes: &[ClippedShape]) -> Vec<String> {
@@ -151,12 +145,12 @@ fn mid_level() -> f64 {
     (low + high) * 0.5
 }
 
-/// Left and Right step cursor A sample by sample, Shift+arrow from peak to
-/// peak and Alt+arrow from crossing to crossing of the trace's mid level,
-/// then of H1 once one is placed, each crossing exactly where the
-/// calculator's `cross()` puts it.
+/// The sample steps move cursor A sample by sample, the peak steps from
+/// peak to peak and the crossing steps from crossing to crossing of the
+/// trace's mid level, then of H1 once one is placed, each crossing exactly
+/// where the calculator's `cross()` puts it.
 #[test]
-fn the_arrow_keys_step_the_cursor_by_sample_peak_and_crossing() {
+fn the_steps_move_the_cursor_by_sample_peak_and_crossing() {
     let mut state = host_on(damped_run());
     let start = 0.1003e-3;
     place_cursors(&mut state, Some(start), None);
@@ -165,20 +159,11 @@ fn the_arrow_keys_step_the_cursor_by_sample_peak_and_crossing() {
     let a = |state: &ResultsTestHost| state.results.results.session.cursors.a.unwrap();
     let time = time();
     let y: Vec<f64> = time.iter().map(|t| damped(*t)).collect();
-    let none = egui::Modifiers::NONE;
 
-    let shapes = whole_frame(
-        &ctx,
-        &mut state.results_parts(),
-        key(egui::Key::ArrowRight, none),
-    );
+    let shapes = step(&ctx, &mut state, ResultsCommand::CursorToNextSample);
     let next = *time.iter().find(|t| **t > start).unwrap();
     assert_eq!(a(&state), next, "Right steps to the next sample");
-    whole_frame(
-        &ctx,
-        &mut state.results_parts(),
-        key(egui::Key::ArrowLeft, none),
-    );
+    step(&ctx, &mut state, ResultsCommand::CursorToPreviousSample);
     let previous = *time.iter().rev().find(|t| **t < next).unwrap();
     assert_eq!(a(&state), previous, "Left steps back one sample");
     let color = Tokens::get(&ctx).color.canvas_cursor_a;
@@ -188,30 +173,16 @@ fn the_arrow_keys_step_the_cursor_by_sample_peak_and_crossing() {
         texts(&shapes)
     );
 
-    let shift = egui::Modifiers::SHIFT;
     for k in [0, 2] {
-        whole_frame(
-            &ctx,
-            &mut state.results_parts(),
-            key(egui::Key::ArrowRight, shift),
-        );
+        step(&ctx, &mut state, ResultsCommand::CursorToNextPeak);
         assert_near_extremum(a(&state), k);
     }
-    whole_frame(
-        &ctx,
-        &mut state.results_parts(),
-        key(egui::Key::ArrowLeft, shift),
-    );
+    step(&ctx, &mut state, ResultsCommand::CursorToPreviousPeak);
     assert_near_extremum(a(&state), 0);
 
-    let alt = egui::Modifiers::ALT;
     let crossings = calculator_crossings(&time, &y, mid_level());
     let from = a(&state);
-    whole_frame(
-        &ctx,
-        &mut state.results_parts(),
-        key(egui::Key::ArrowRight, alt),
-    );
+    step(&ctx, &mut state, ResultsCommand::CursorToNextCrossing);
     let expected = crossings.iter().copied().find(|at| *at > from).unwrap();
     assert_eq!(
         a(&state).to_bits(),
@@ -230,21 +201,13 @@ fn the_arrow_keys_step_the_cursor_by_sample_peak_and_crossing() {
         0.3,
     );
     let from = a(&state);
-    whole_frame(
-        &ctx,
-        &mut state.results_parts(),
-        key(egui::Key::ArrowRight, alt),
-    );
+    step(&ctx, &mut state, ResultsCommand::CursorToNextCrossing);
     let expected = calculator_crossings(&time, &y, 0.3)
         .into_iter()
         .find(|at| *at > from)
         .unwrap();
     assert_eq!(a(&state).to_bits(), expected.to_bits());
-    whole_frame(
-        &ctx,
-        &mut state.results_parts(),
-        key(egui::Key::ArrowLeft, alt),
-    );
+    step(&ctx, &mut state, ResultsCommand::CursorToPreviousCrossing);
     let expected = calculator_crossings(&time, &y, 0.3)
         .into_iter()
         .rev()
@@ -265,11 +228,7 @@ fn a_step_past_the_last_peak_says_so_and_moves_nothing() {
     place_cursors(&mut state, Some(last), None);
     let ctx = theme_context();
     whole_frame(&ctx, &mut state.results_parts(), Vec::new());
-    whole_frame(
-        &ctx,
-        &mut state.results_parts(),
-        key(egui::Key::ArrowRight, egui::Modifiers::SHIFT),
-    );
+    step(&ctx, &mut state, ResultsCommand::CursorToNextPeak);
     assert_eq!(state.results.results.session.cursors.a, Some(last));
     assert_eq!(
         state.prompt_text(),

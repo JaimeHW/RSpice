@@ -675,6 +675,7 @@ pub mod ids {
         NEW_CELL = "new-cell";
         NEW_PROJECT = "new-project";
         NEW_VERILOGA_DEVICE = "new-veriloga-device";
+        OBJECT_PROPERTIES = "object-properties";
         OPEN_CONSOLE = "open-console";
         OPEN_NETLIST = "open-netlist";
         OPEN_NOTIFICATIONS = "open-notifications";

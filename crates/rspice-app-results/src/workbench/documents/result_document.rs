@@ -175,7 +175,6 @@ use crate::product::{AnalysisInstanceId, DatasetId};
 
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
-use crate::state::command_catalog::CommandKey;
 use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
@@ -1442,6 +1441,10 @@ pub(crate) fn analysis_evidence_failure(
 #[derive(Debug, Clone, Default)]
 pub struct ResultsState {
     pub session: rspice_results_ui::session::ResultViewerState,
+    /// Whether a widget of the result area held the keyboard as the last
+    /// frame began: a plot or the ruler reached by Tab, a lane or a marker
+    /// strip clicked. Each takes the bare arrows itself. Transient.
+    pub(crate) sheet_focus: bool,
     /// The HDL or deck line the reader asked to open from a waveform strip's
     /// event markers, until the application takes it and opens that file at
     /// that line. One-shot and transient.
@@ -1610,175 +1613,67 @@ pub use rspice_results_ui::waveform::waveform_color;
 
 /// Render the Results workspace center view (docbar + active viewer).
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>, run_controller: &mut SimulationController) {
-    results_keymap(ui, state);
+    record_key_area(ui, state.results);
     show_with_chrome(ui, state, run_controller, ResultChrome::Full);
     waves::marker_dialog::show(ui.ctx(), state);
     view_history::observe(ui, state, view_history::WaveSheet::QuickView);
 }
 
-/// The workspace's own single-key gestures, as the mockup's results keymap
-/// defines them: fit, zoom, grid, cursor tool, drop a trace, nudge a cursor.
-///
-/// Two kinds of key meet here. Fit, zoom and grid are commands, and they are
-/// claimed through the chord the user's own profile shows for them — their
-/// registry context is the engineering canvas, which never becomes active on
-/// this workspace, so the resolver would never fire them here. The rest are
-/// view gestures no menu carries and no command names.
-///
-/// Everything is a bare key, so the map stands down whenever a widget wants
-/// the keyboard or a modifier is held: nothing here may fire while the reader
-/// is typing into a filter, an expression, or a marker label.
-fn results_keymap(ui: &Ui, state: &mut ResultsParts<'_>) {
-    let ctx = ui.ctx();
-    // A focused widget owns the keyboard: a filter, an expression, or a
-    // marker label must never have a letter stolen from it by this map.
-    if ctx.memory(|memory| memory.focused().is_some()) {
-        return;
-    }
-    // Nor may the map fire underneath a dialog.
-    if state.results.session.marker_edit.is_some() {
-        return;
-    }
-    if !state.model.simulation.retained.has_results() {
-        return;
-    }
-    let plain = ctx
-        .input(|input| !input.modifiers.command && !input.modifiers.alt && !input.modifiers.ctrl);
-    if !plain {
-        // Alt+arrow is the one modified key here: it steps a cursor from
-        // crossing to crossing.
-        let alt_only = ctx.input(|input| {
-            input.modifiers.alt && !input.modifiers.command && !input.modifiers.ctrl
-        });
-        if alt_only && state.results.session.cursor_readout_active() {
-            step_cursor_by_key(ctx, state);
-        }
-        return;
-    }
-
-    // Actions that already exist as commands keep the chord the rest of the
-    // product shows for them, read from the user's own profile, so rebinding
-    // one in preferences rebinds it here. Their registry context is the
-    // engineering canvas and never becomes active on this workspace, which is
-    // why the keystroke has to be claimed here rather than left to the
-    // resolver.
-    for (command, gesture) in [
-        (ids::ZOOM_FIT, ViewGesture::Fit),
-        (ids::ZOOM_IN, ViewGesture::ZoomIn),
-        (ids::ZOOM_OUT, ViewGesture::ZoomOut),
-    ] {
-        let permitted = match gesture {
-            ViewGesture::Fit => fit_gesture_available(state.results_reads()),
-            ViewGesture::ZoomIn | ViewGesture::ZoomOut => {
-                zoom_gesture_available(state.results_reads())
-            }
-        };
-        if permitted && consume_command_key(ctx, state.results_reads(), state.commands, command) {
-            request_view_gesture(state.results, gesture);
-        }
-    }
-    if viewer_uses_wave_stack(state.results.session.viewer)
-        && consume_command_key(ctx, state.results_reads(), state.commands, ids::CYCLE_GRID)
-    {
-        state.results.session.show_minor_grid = !state.results.session.show_minor_grid;
-    }
-
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::C)) {
-        state.results.session.toggle_cursor_tool();
-    }
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
-        hide_selected_trace(state);
-    }
-    // Arrow stepping is a cursor gesture, so it only exists while cursors
-    // do: the arrows step the stepping cursor sample by sample along the
-    // trace it reads, Shift+arrow from peak to peak and Alt+arrow from
-    // crossing to crossing, as Left and Right step a logic lane from edge to
-    // edge.
-    if state.results.session.cursor_readout_active() {
-        step_cursor_by_key(ctx, state);
-    }
+/// Where the result area lay this frame, for whether the Results keys stand
+/// down: the area a focused widget must lie in to keep them.
+fn key_area_id() -> egui::Id {
+    egui::Id::new("workbench.results.key-area")
 }
 
-/// The arrow-key cursor step, with its modifier.
-fn step_cursor_by_key(ctx: &egui::Context, state: &mut ResultsParts<'_>) {
-    use rspice_results::feature_search::Direction;
-    use rspice_results_ui::waves::navigation::CursorJump;
-    // A bare pattern also matches a key pressed with Shift or Alt, so the
-    // modified steps are offered the key first.
-    for (modifiers, step) in [
-        (
-            egui::Modifiers::ALT,
-            CursorJump::Crossing as fn(Direction) -> CursorJump,
-        ),
-        (egui::Modifiers::SHIFT, CursorJump::Peak),
-        (egui::Modifiers::NONE, CursorJump::Sample),
-    ] {
-        for (key, direction) in [
-            (egui::Key::ArrowRight, Direction::Next),
-            (egui::Key::ArrowLeft, Direction::Previous),
-        ] {
-            if ctx.input_mut(|input| input.consume_key(modifiers, key)) {
-                let t = Tokens::get(ctx);
-                if let Err(refusal) = waves::jump_cursor(state, &t, step(direction)) {
-                    state.prompt(format!("{refusal}."));
-                }
-                return;
-            }
-        }
+/// Note `ui`'s area as the one the Results keys act over, and whether a
+/// widget in it holds the keyboard.
+fn record_key_area(ui: &Ui, results: &mut ResultsState) {
+    let area = ui.max_rect();
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(key_area_id(), area));
+    results.sheet_focus = focus_in_key_area(ui.ctx()) == Some(true);
+}
+
+/// Whether the widget that holds the keyboard lies in the result area, or
+/// `None` when none holds it.
+fn focus_in_key_area(ctx: &egui::Context) -> Option<bool> {
+    let focused = ctx.memory(|memory| memory.focused())?;
+    let area = ctx.data(|data| data.get_temp::<egui::Rect>(key_area_id()));
+    Some(match (area, ctx.read_response(focused)) {
+        (Some(area), Some(response)) => area.contains(response.rect.center()),
+        _ => false,
+    })
+}
+
+/// Whether the Results keys stand down this frame, as the shortcut resolver
+/// asks before it reads them in Results.
+///
+/// They stand down while a text field has the keyboard, so no letter is
+/// stolen from a filter, an expression or a label; while a marker's dialog
+/// is open over the sheet; and while a widget outside the result area holds
+/// focus, as a data browser row does, whose arrows fold and unfold it. A
+/// widget focused inside the result area, a plot, a lane or a legend chip
+/// reached by Tab, keeps them, the bare arrows aside, which it takes
+/// itself: focusing a pane turned every key off before.
+pub fn keys_stand_down(ctx: &egui::Context, results: &ResultsState) -> bool {
+    ctx.text_edit_focused()
+        || results.session.marker_edit.is_some()
+        || focus_in_key_area(ctx) == Some(false)
+}
+
+/// Where the selected trace is among the shown run's analyses and their
+/// waveforms, when one is selected on the sheet.
+pub(crate) fn selected_trace_on_sheet(state: ResultsReads<'_>) -> Option<(usize, usize)> {
+    if !viewer_uses_wave_stack(state.results.session.viewer) {
+        return None;
     }
-}
-
-/// Claim the modifier-free keystroke the profile binds to `command`.
-///
-/// Only bare or shift-only chords are claimed: these are viewport gestures
-/// pressed with one hand over the plot. A profile that moves the command onto
-/// a modifier chord simply leaves this workspace without a key for it — the
-/// menu entry is still the way in, and no key is silently invented.
-fn consume_command_key(
-    ctx: &egui::Context,
-    state: ResultsReads<'_>,
-    commands: &Registry,
-    command: CommandKey,
-) -> bool {
-    let platform = runtime_command_platform(ctx);
-    state
-        .model
-        .preferences
-        .shortcuts()
-        .effective_bindings(commands, command)
-        .iter()
-        .filter(|binding| binding.supports(platform))
-        .filter_map(|binding| {
-            let strokes = binding.sequence().strokes();
-            let [stroke] = strokes else { return None };
-            (!stroke.primary() && !stroke.alt()).then_some((stroke.key(), stroke.shift()))
-        })
-        .any(|(key, shift)| {
-            let modifiers = if shift {
-                egui::Modifiers::SHIFT
-            } else {
-                egui::Modifiers::NONE
-            };
-            ctx.input_mut(|input| input.consume_key(modifiers, key))
-        })
-}
-
-/// Take the selected trace off the sheet, the way the mockup's Delete does.
-///
-/// Hiding is the reversible form of removal here: the retained dataset is
-/// immutable, so a trace leaves the plot by losing visibility and comes back
-/// from the pane's add-signal menu.
-fn hide_selected_trace(state: &mut ResultsParts<'_>) {
-    let Some(selected) = state.results.valid_selected_trace(&state.model.simulation) else {
-        return;
-    };
+    let selected = state
+        .results
+        .valid_selected_trace(&state.model.simulation)?;
     let analysis_key = selected.analysis_key();
-    let source_name = selected.source_name().to_owned();
-    let Some(run) = state.model.simulation.active_run() else {
-        return;
-    };
-    let located = run
-        .analyses
+    let source_name = selected.source_name();
+    let run = state.model.simulation.active_run()?;
+    run.analyses
         .iter()
         .enumerate()
         .find_map(|(index, analysis)| {
@@ -1789,8 +1684,16 @@ fn hide_selected_trace(state: &mut ResultsParts<'_>) {
                     .position(|waveform| waveform.name == source_name)
                     .map(|waveform_index| (index, waveform_index))
             })?
-        });
-    if let Some((analysis_index, waveform_index)) = located {
+        })
+}
+
+/// Take the selected trace off the sheet, as Delete does.
+///
+/// Hiding is the reversible form of removal here: the retained dataset is
+/// immutable, so a trace leaves the plot by losing visibility, comes back
+/// from the pane's add-signal menu, and Undo puts it back.
+pub(crate) fn hide_selected_trace(state: &mut ResultsParts<'_>) {
+    if let Some((analysis_index, waveform_index)) = selected_trace_on_sheet(state.results_reads()) {
         waves::toggle_visibility(state, analysis_index, waveform_index);
         state.results.session.selected_trace = None;
     }
@@ -1809,7 +1712,7 @@ pub fn show_persistent_document(
 ) {
     // A project-owned document is the same workspace with a retained page
     // layout, so it answers the same keys and owns the same marker dialog.
-    results_keymap(ui, state);
+    record_key_area(ui, state.results);
     persistent_document::show(ui, state, run_controller, document_id);
     waves::marker_dialog::show(ui.ctx(), state);
     view_history::observe(ui, state, view_history::WaveSheet::Document(document_id));

@@ -23,9 +23,10 @@ use crate::workbench::documents::result_document::view_edits;
 use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
     cursor_jump_availability, family_available, fit_gesture_available, fit_y_to_visible_x,
-    jump_cursor, linked_cursors, open_create_document, open_dataset_browser,
-    place_marker_at_cursor, request_view_gesture, viewer_is_available,
-    viewer_unavailability_reason, zoom_gesture_available, zoom_previous, zoom_previous_available,
+    hide_selected_trace, jump_cursor, linked_cursors, open_create_document, open_dataset_browser,
+    place_marker_at_cursor, request_view_gesture, selected_trace_on_sheet, viewer_is_available,
+    viewer_unavailability_reason, viewer_uses_wave_stack, zoom_gesture_available, zoom_previous,
+    zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -365,9 +366,11 @@ fn keep_axis_drafts(_: &mut Cx<'_, ResultsFeature>, _: &egui::Context) {}
 /// The workbench commands the results workspace answers for itself: Copy
 /// takes the cursor readout, the zooms and Fit move the active sheet's
 /// viewport, Zoom previous steps the waveform sheet back through the views it
-/// showed, Undo and Redo step the shown view's edits, and Cancel lets go of
-/// the placed cursors. Each is the workspace's wherever Results is in front,
-/// Cancel only while a cursor is placed.
+/// showed, Undo and Redo step the shown view's edits, Delete takes the
+/// selected trace off the sheet, the grid key shows or hides the minor grid,
+/// Properties (Q, as ViVA binds it) opens the plot's properties, and Cancel
+/// lets go of the placed cursors. Each is the workspace's wherever Results
+/// is in front, Cancel only while a cursor is placed.
 const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
     RoutedCommand {
         key: ids::COPY,
@@ -418,6 +421,36 @@ const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
             view_edits::shown_view_can_step(results_reads(reads), view_edits::Step::Redo)
         },
         execute: |cx| view_edits::step_shown_view(&mut results_parts(cx), view_edits::Step::Redo),
+    },
+    // Hiding is the reversible removal: the trace comes back from the
+    // pane's signal menu, and Undo puts it back.
+    RoutedCommand {
+        key: ids::DELETE,
+        takes: in_results,
+        enabled: |reads| selected_trace_on_sheet(results_reads(reads)).is_some(),
+        execute: |cx| hide_selected_trace(&mut results_parts(cx)),
+    },
+    RoutedCommand {
+        key: ids::CYCLE_GRID,
+        takes: in_results,
+        enabled: |reads| {
+            reads.model.simulation.retained.has_results()
+                && viewer_uses_wave_stack(reads.state.results.session.viewer)
+        },
+        execute: |cx| {
+            let session = &mut cx.state.results.session;
+            session.show_minor_grid = !session.show_minor_grid;
+        },
+    },
+    RoutedCommand {
+        key: ids::OBJECT_PROPERTIES,
+        takes: in_results,
+        enabled: |reads| {
+            ResultsCommand::VisualizationDocumentProperties
+                .availability(reads)
+                .is_available()
+        },
+        execute: |cx| ResultsCommand::VisualizationDocumentProperties.execute(cx),
     },
     RoutedCommand {
         key: ids::CANCEL,
@@ -649,10 +682,59 @@ impl CommandSet for ResultsCommand {
                         })
                 }
             }
+            // The arrows step a cursor that is there to step; with none
+            // placed, or a widget of the sheet holding the keyboard, they
+            // are left to whatever else takes them.
+            Self::CursorToNextSample | Self::CursorToPreviousSample => {
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else if let Err(reason) = cursor_jump_availability(state) {
+                    CommandAvailability::Disabled(reason)
+                } else if state.results.sheet_focus {
+                    CommandAvailability::Disabled(
+                        "the focused plot, lane or ruler takes the arrows; press Escape to give them back",
+                    )
+                } else {
+                    available_or(
+                        state.results.session.cursor_readout_active(),
+                        "place cursor A on a waveform in Results",
+                    )
+                }
+            }
+            Self::ToggleCursorTool => {
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else {
+                    cursor_jump_availability(state)
+                        .map_or_else(CommandAvailability::Disabled, |()| {
+                            CommandAvailability::Available
+                        })
+                }
+            }
             Self::SwitchSteppingCursor => available_or(
                 workbench.workspace == Workspace::Results && state.results.session.cursors.any(),
                 "place a cursor in Results",
             ),
+            Self::SaveViewAsDocument => {
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else if model.safe_mode.project_read_only() {
+                    CommandAvailability::Disabled("the project is open read-only")
+                } else {
+                    crate::workbench::chrome::document_bar::results::save_view_refusal(state)
+                        .map_or(
+                            CommandAvailability::Available,
+                            CommandAvailability::Disabled,
+                        )
+                }
+            }
+            Self::RestoreDeletedRuns => {
+                crate::workbench::docks::navigator::results_runs::restore_refusal(&model.simulation)
+                    .map_or(
+                        CommandAvailability::Available,
+                        CommandAvailability::Disabled,
+                    )
+            }
             Self::MarkerAtCursor => available_or(
                 workbench.workspace == Workspace::Results
                     && state.results.session.cursors.a.is_some(),
@@ -753,7 +835,25 @@ impl CommandSet for ResultsCommand {
             }
             Self::CursorToNextDifference => step_difference(cx, Direction::Next),
             Self::CursorToPreviousDifference => step_difference(cx, Direction::Previous),
+            Self::CursorToNextSample => jump(cx, CursorJump::Sample(Direction::Next)),
+            Self::CursorToPreviousSample => jump(cx, CursorJump::Sample(Direction::Previous)),
+            Self::ToggleCursorTool => cx.state.results.session.toggle_cursor_tool(),
             Self::SwitchSteppingCursor => cx.state.results.session.switch_stepping_cursor(),
+            Self::SaveViewAsDocument => {
+                let mut parts = results_parts(cx);
+                let said =
+                    crate::workbench::chrome::document_bar::results::save_shown_view(&mut parts)
+                        .unwrap_or_else(|error| format!("Could not save the view: {error}"));
+                parts.prompt(said);
+            }
+            Self::RestoreDeletedRuns => {
+                let mut parts = results_parts(cx);
+                let said = crate::workbench::docks::navigator::results_runs::restore_deleted_runs(
+                    &mut parts,
+                )
+                .unwrap_or_else(|error| error);
+                parts.prompt(said);
+            }
             Self::MarkerAtCursor => place_marker_at_cursor(&mut results_parts(cx)),
             Self::FitYToVisibleX => fit_y_to_visible_x(&mut results_parts(cx)),
             Self::OpenProducingPlan => {
@@ -806,6 +906,7 @@ impl CommandSet for ResultsCommand {
         match self {
             Self::ToggleResultsSplit => Some(reads.wb.split_with_results),
             Self::ToggleLinkedCursors => Some(linked_cursors(results_reads(reads))),
+            Self::ToggleCursorTool => Some(reads.state.results.session.cursor_tool.is_armed()),
             _ => None,
         }
     }

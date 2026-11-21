@@ -10,8 +10,8 @@ use crate::results::visualization_document::WorkingViewSource;
 use crate::state::SimulationRun;
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::documents::result_document::ResultsParts;
-use crate::workbench::documents::result_document::working_view::source_of;
+use crate::workbench::documents::result_document::working_view::{self, source_of};
+use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
@@ -171,4 +171,78 @@ pub(in crate::workbench) fn show_result_dataset(
     }
     super::record_active_document(state.workbench, &document);
     true
+}
+
+/// Why the view Results shows cannot be saved as a document, if it cannot.
+pub(in crate::workbench) fn save_view_refusal(state: ResultsReads<'_>) -> Option<&'static str> {
+    match active_result_document(state.model, state.workbench) {
+        Some(WorkspaceDocumentId::VisualizationDocument(_)) => {
+            Some("this is a saved document already")
+        }
+        Some(WorkspaceDocumentId::ResultDataset(dataset))
+            if working_view::view_of_run(state, dataset).is_some() =>
+        {
+            None
+        }
+        _ => Some("Results shows no view to save"),
+    }
+}
+
+/// `base`, or `base` and the first number after it that no document of the
+/// project is titled, as titles are told apart regardless of case.
+fn free_title(model: &Model, base: &str) -> String {
+    let taken = |title: &str| {
+        model
+            .workspace
+            .content
+            .visualization_documents
+            .iter()
+            .any(|document| document.title().eq_ignore_ascii_case(title))
+    };
+    if !taken(base) {
+        return base.to_owned();
+    }
+    (2..)
+        .map(|number| format!("{base} {number}"))
+        .find(|title| !taken(title))
+        .unwrap_or_else(|| base.to_owned())
+}
+
+/// Keep the view Results shows as a result document of the project, titled
+/// for its plan and the run it is on, and show it. Returns what the status
+/// bar says.
+pub(in crate::workbench) fn save_shown_view(
+    state: &mut ResultsParts<'_>,
+) -> Result<String, String> {
+    let reads = state.results_reads();
+    if let Some(reason) = save_view_refusal(reads) {
+        return Err(reason.to_owned());
+    }
+    let Some(WorkspaceDocumentId::ResultDataset(dataset)) =
+        active_result_document(reads.model, reads.workbench)
+    else {
+        return Err("Results shows no view to save".to_owned());
+    };
+    let view = working_view::view_of_run(reads, dataset).ok_or("Results shows no view to save")?;
+    let run = reads
+        .model
+        .simulation
+        .retained
+        .run_by_dataset_id(dataset)
+        .ok_or("the run is no longer in the run history")?;
+    let source = source_of(run);
+    let base = match source {
+        WorkingViewSource::Plan { .. } => {
+            format!(
+                "{} \u{2014} {}",
+                view_title(reads.model, source, run),
+                run.name()
+            )
+        }
+        WorkingViewSource::Imported { .. } => run.name().to_owned(),
+    };
+    let title = free_title(reads.model, &base);
+    let saved = working_view::save_as_document(state, view, &title)?;
+    show_visualization_document(state, &saved);
+    Ok(format!("Saved the view as {title}."))
 }

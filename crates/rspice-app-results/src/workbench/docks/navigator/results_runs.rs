@@ -7,7 +7,7 @@
 use egui::Ui;
 
 use crate::product::DatasetId;
-use crate::state::{RunRetention, SimulationRun};
+use crate::state::{RunRetention, SimulationRun, SimulationState};
 use crate::ui::theme;
 use crate::workbench::chrome::toolbar::results::run_selector;
 use crate::workbench::documents::result_document::ResultsParts;
@@ -128,12 +128,13 @@ pub fn delete_run(state: &mut ResultsParts<'_>, dataset: DatasetId) -> Result<St
     ))
 }
 
-/// Why the deleted runs cannot be restored, if they cannot.
-pub fn restore_refusal(state: &ResultsParts<'_>) -> Option<&'static str> {
-    if state.model.simulation.retained.deleted_runs.is_empty() {
-        Some("No run has been deleted since the project opened.")
-    } else if state.model.simulation.execution.has_active_execution() {
-        Some(RUNNING)
+/// Why the deleted runs cannot be restored, if they cannot, as a menu row
+/// says it.
+pub fn restore_refusal(simulation: &SimulationState) -> Option<&'static str> {
+    if simulation.retained.deleted_runs.is_empty() {
+        Some("no run has been deleted since the project opened")
+    } else if simulation.execution.has_active_execution() {
+        Some("a run is in progress; the history can change when it ends")
     } else {
         None
     }
@@ -142,8 +143,8 @@ pub fn restore_refusal(state: &ResultsParts<'_>) -> Option<&'static str> {
 /// Put every run deleted since the project opened back into the history.
 /// Returns what the status bar says.
 pub fn restore_deleted_runs(state: &mut ResultsParts<'_>) -> Result<String, String> {
-    if let Some(reason) = restore_refusal(state) {
-        return Err(reason.to_owned());
+    if let Some(reason) = restore_refusal(&state.model.simulation) {
+        return Err(format!("Could not restore deleted runs: {reason}."));
     }
     let restored = state.model.simulation.restore_deleted_runs();
     Ok(format!(
@@ -283,7 +284,7 @@ pub fn run_menu(ui: &mut Ui, state: &mut ResultsParts<'_>, dataset: DatasetId) {
         && item(
             ui,
             &format!("Restore deleted runs ({held})"),
-            restore_refusal(state),
+            restore_refusal(&state.model.simulation),
         )
     {
         said = Some(restore_deleted_runs(state).unwrap_or_else(|error| error));

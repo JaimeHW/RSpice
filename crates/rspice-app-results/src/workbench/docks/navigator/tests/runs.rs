@@ -48,8 +48,8 @@ fn a_runs_row_names_notes_pins_deletes_and_restores_it() {
 
     set_run_pinned(&mut host.results_parts(), dataset, false).unwrap();
     assert_eq!(
-        restore_refusal(&host.results_parts()),
-        Some("No run has been deleted since the project opened.")
+        restore_refusal(&host.model.simulation),
+        Some("no run has been deleted since the project opened")
     );
     delete_run(&mut host.results_parts(), dataset).unwrap();
     assert!(host.model.simulation.retained.runs.is_empty());

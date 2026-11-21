@@ -67,6 +67,14 @@ pub enum ResultsCommand {
     /// Move the stepping cursor to the previous place the compared runs
     /// part by more than the tolerance.
     CursorToPreviousDifference,
+    /// Move the stepping cursor to the next sample of the trace it reads,
+    /// the next edge of a selected logic lane.
+    CursorToNextSample,
+    /// Move the stepping cursor to the previous sample of the trace it
+    /// reads, the previous edge of a selected logic lane.
+    CursorToPreviousSample,
+    /// Arm or disarm the A and B cursors.
+    ToggleCursorTool,
     /// Hand the arrow keys and the jumps to the other cursor of the pair.
     SwitchSteppingCursor,
     /// Place a point marker on the trace at cursor A.
@@ -74,6 +82,10 @@ pub enum ResultsCommand {
     /// Let go of the Y ranges the active strip's panes were pinned to, so
     /// each refits to the X window in view.
     FitYToVisibleX,
+    /// Keep the view in front as a result document of the project.
+    SaveViewAsDocument,
+    /// Put back every run deleted since the project opened.
+    RestoreDeletedRuns,
 }
 
 const NONE: &[ShortcutBinding] = &[];
@@ -95,6 +107,27 @@ const fn primary(
 const TOGGLE_RESULTS_SPLIT: &[ShortcutBinding] =
     &[primary(Key::Backslash, true, false, false, "Ctrl+\\")];
 const LINKED_CURSORS: &[ShortcutBinding] = &[primary(Key::C, false, false, true, "Shift+C")];
+// The plot keys, as ViVA's bindkeys give the same commands bare letters.
+// Each acts in Results only, where the sheet in front takes it.
+const CURSOR_TOOL: &[ShortcutBinding] = &[primary(Key::C, false, false, false, "C")];
+const NEXT_SAMPLE: &[ShortcutBinding] = &[primary(Key::ArrowRight, false, false, false, "Right")];
+const PREVIOUS_SAMPLE: &[ShortcutBinding] = &[primary(Key::ArrowLeft, false, false, false, "Left")];
+const NEXT_PEAK: &[ShortcutBinding] =
+    &[primary(Key::ArrowRight, false, false, true, "Shift+Right")];
+const PREVIOUS_PEAK: &[ShortcutBinding] =
+    &[primary(Key::ArrowLeft, false, false, true, "Shift+Left")];
+const NEXT_CROSSING: &[ShortcutBinding] =
+    &[primary(Key::ArrowRight, false, true, false, "Alt+Right")];
+const PREVIOUS_CROSSING: &[ShortcutBinding] =
+    &[primary(Key::ArrowLeft, false, true, false, "Alt+Left")];
+const MAXIMUM: &[ShortcutBinding] = &[primary(Key::ArrowUp, false, false, true, "Shift+Up")];
+const MINIMUM: &[ShortcutBinding] = &[primary(Key::ArrowDown, false, false, true, "Shift+Down")];
+const SWITCH_CURSOR: &[ShortcutBinding] = &[primary(Key::S, false, false, false, "S")];
+const MARKER_AT_CURSOR: &[ShortcutBinding] = &[primary(Key::M, false, false, true, "Shift+M")];
+const CALCULATOR: &[ShortcutBinding] = &[primary(Key::E, false, false, false, "E")];
+const ADD_MEASUREMENT: &[ShortcutBinding] = &[primary(Key::E, false, false, true, "Shift+E")];
+const COMPARE: &[ShortcutBinding] = &[primary(Key::B, false, false, true, "Shift+B")];
+const SAVE_VIEW: &[ShortcutBinding] = &[primary(Key::N, false, false, true, "Shift+N")];
 
 /// A command listed in the palette that runs with or without a project.
 const ANYWHERE: CommandFlags = CommandFlags::PALETTE_VISIBLE;
@@ -106,7 +139,7 @@ const PROJECT_TRANSACTION: CommandFlags =
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 53] = [
+    pub const ALL: [Self; 58] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -157,9 +190,14 @@ impl ResultsCommand {
         Self::CursorToPreviousCrossing,
         Self::CursorToNextDifference,
         Self::CursorToPreviousDifference,
+        Self::CursorToNextSample,
+        Self::CursorToPreviousSample,
+        Self::ToggleCursorTool,
         Self::SwitchSteppingCursor,
         Self::MarkerAtCursor,
         Self::FitYToVisibleX,
+        Self::SaveViewAsDocument,
+        Self::RestoreDeletedRuns,
     ];
 
     /// The command `key` names, if the feature declares one.
@@ -197,9 +235,14 @@ impl ResultsCommand {
             Self::CursorToPreviousCrossing => CommandKey::new("cursor-to-previous-crossing"),
             Self::CursorToNextDifference => CommandKey::new("cursor-to-next-difference"),
             Self::CursorToPreviousDifference => CommandKey::new("cursor-to-previous-difference"),
+            Self::CursorToNextSample => CommandKey::new("cursor-to-next-sample"),
+            Self::CursorToPreviousSample => CommandKey::new("cursor-to-previous-sample"),
+            Self::ToggleCursorTool => CommandKey::new("toggle-cursor-tool"),
             Self::SwitchSteppingCursor => CommandKey::new("switch-stepping-cursor"),
             Self::MarkerAtCursor => CommandKey::new("marker-at-cursor"),
             Self::FitYToVisibleX => CommandKey::new("fit-y-to-visible-x"),
+            Self::SaveViewAsDocument => CommandKey::new("save-view-as-document"),
+            Self::RestoreDeletedRuns => CommandKey::new("restore-deleted-runs"),
         }
     }
 
@@ -289,7 +332,7 @@ impl ResultsCommand {
                 "Results",
                 PROJECT,
                 ShortcutContext::ResultsWorkspace,
-                NONE,
+                CALCULATOR,
             ),
             Self::ExpressionDiagnostics => (
                 "Expression diagnostics…",
@@ -303,14 +346,14 @@ impl ResultsCommand {
                 "Results",
                 PROJECT,
                 ShortcutContext::ResultsWorkspace,
-                NONE,
+                COMPARE,
             ),
             Self::MeasurementLibrary => (
                 "Add measurement…",
                 "Results",
                 PROJECT,
                 ShortcutContext::ResultsWorkspace,
-                NONE,
+                ADD_MEASUREMENT,
             ),
             Self::FamilySlicing => (
                 "Family slicing and pivot…",
@@ -341,20 +384,43 @@ impl ResultsCommand {
                 NONE,
             ),
             // The arrows step the same cursor sample by sample, Shift+arrow
-            // by peak and Alt+arrow by crossing; those keys are the waveform
-            // sheet's own, as Left and Right are a logic lane's.
-            Self::CursorToMaximum => cursor_command("Cursor to maximum"),
-            Self::CursorToMinimum => cursor_command("Cursor to minimum"),
-            Self::CursorToNextPeak => cursor_command("Cursor to next peak"),
-            Self::CursorToPreviousPeak => cursor_command("Cursor to previous peak"),
-            Self::CursorToNextCrossing => cursor_command("Cursor to next crossing"),
-            Self::CursorToPreviousCrossing => cursor_command("Cursor to previous crossing"),
-            Self::CursorToNextDifference => cursor_command("Cursor to next difference"),
-            Self::CursorToPreviousDifference => cursor_command("Cursor to previous difference"),
-            Self::SwitchSteppingCursor => cursor_command("Step the other cursor"),
-            Self::MarkerAtCursor => cursor_command("Place marker at cursor A"),
+            // by peak and Alt+arrow by crossing, as Left and Right step a
+            // logic lane from edge to edge.
+            Self::CursorToMaximum => cursor_command("Cursor to maximum", MAXIMUM),
+            Self::CursorToMinimum => cursor_command("Cursor to minimum", MINIMUM),
+            Self::CursorToNextPeak => cursor_command("Cursor to next peak", NEXT_PEAK),
+            Self::CursorToPreviousPeak => cursor_command("Cursor to previous peak", PREVIOUS_PEAK),
+            Self::CursorToNextCrossing => cursor_command("Cursor to next crossing", NEXT_CROSSING),
+            Self::CursorToPreviousCrossing => {
+                cursor_command("Cursor to previous crossing", PREVIOUS_CROSSING)
+            }
+            Self::CursorToNextDifference => cursor_command("Cursor to next difference", NONE),
+            Self::CursorToPreviousDifference => {
+                cursor_command("Cursor to previous difference", NONE)
+            }
+            Self::CursorToNextSample => cursor_command("Cursor to next sample", NEXT_SAMPLE),
+            Self::CursorToPreviousSample => {
+                cursor_command("Cursor to previous sample", PREVIOUS_SAMPLE)
+            }
+            Self::ToggleCursorTool => cursor_command("A and B cursors", CURSOR_TOOL),
+            Self::SwitchSteppingCursor => cursor_command("Step the other cursor", SWITCH_CURSOR),
+            Self::MarkerAtCursor => cursor_command("Place marker at cursor A", MARKER_AT_CURSOR),
             Self::FitYToVisibleX => (
                 "Fit Y to visible X",
+                "Results",
+                ANYWHERE,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::SaveViewAsDocument => (
+                "Save view as document",
+                "Results",
+                PROJECT_TRANSACTION,
+                ShortcutContext::ResultsWorkspace,
+                SAVE_VIEW,
+            ),
+            Self::RestoreDeletedRuns => (
+                "Restore deleted runs",
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,
@@ -373,10 +439,10 @@ impl ResultsCommand {
     }
 }
 
-/// What a cursor command declares: a Results palette entry with no chord of
-/// its own.
+/// What a cursor command declares: a Results palette entry with `bindings`.
 const fn cursor_command(
     label: &'static str,
+    bindings: &'static [ShortcutBinding],
 ) -> (
     &'static str,
     &'static str,
@@ -389,7 +455,7 @@ const fn cursor_command(
         "Results",
         ANYWHERE,
         ShortcutContext::ResultsWorkspace,
-        NONE,
+        bindings,
     )
 }
 

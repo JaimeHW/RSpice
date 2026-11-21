@@ -657,24 +657,62 @@ const SETUP_MENU: &[MenuEntry] = &[
 ];
 
 /// Results: where results are read, what is built from them, then what is
-/// done on the plot in front.
+/// done on the plot in front, then the run history. Every Results command
+/// has a row here or in File (import, export) or Window (the split), each
+/// with its key.
 const RESULTS_MENU: &[MenuEntry] = &[
     results(ResultsCommand::DatasetManifestBrowser).access('B'),
     MenuEntry::command_as(viewer(ResultViewer::Waves), "Waveforms").access('W'),
     MenuEntry::submenu("View as", VIEW_AS_MENU).access('V'),
     Separator,
     results(ResultsCommand::CreateResultDocument).access('N'),
+    results(ResultsCommand::SaveViewAsDocument).access('S'),
     results(ResultsCommand::AddVisualizationPane).access('A'),
     results(ResultsCommand::CompareResultDatasets).access('D'),
     results(ResultsCommand::MeasurementLibrary).access('M'),
     results(ResultsCommand::FamilySlicing).access('F'),
     Separator,
-    results(ResultsCommand::ToggleLinkedCursors).access('L'),
+    MenuEntry::submenu("Cursors", CURSORS_MENU).access('U'),
+    results(ResultsCommand::FitYToVisibleX).access('Y'),
     results(ResultsCommand::VisualizationDocumentProperties).access('P'),
     results(ResultsCommand::WaveformCalculator).access('C'),
     results(ResultsCommand::ExpressionDiagnostics).access('E'),
     hardcopy(HardcopyCommand::ReportAuthoring).access('R'),
-    results(ResultsCommand::ClearResults).access('H'),
+    Separator,
+    MenuEntry::submenu("History", HISTORY_MENU).access('H'),
+];
+
+/// The A and B cursors: arming them, which one the keys move, where they
+/// go, and what is placed at them.
+const CURSORS_MENU: &[MenuEntry] = &[
+    results(ResultsCommand::ToggleCursorTool).access('A'),
+    results(ResultsCommand::SwitchSteppingCursor).access('S'),
+    results(ResultsCommand::ToggleLinkedCursors).access('B'),
+    Separator,
+    results(ResultsCommand::CursorToNextSample).access('N'),
+    results(ResultsCommand::CursorToPreviousSample).access('V'),
+    results(ResultsCommand::CursorToNextPeak).access('K'),
+    results(ResultsCommand::CursorToPreviousPeak).access('P'),
+    results(ResultsCommand::CursorToNextCrossing).access('G'),
+    results(ResultsCommand::CursorToPreviousCrossing).access('I'),
+    results(ResultsCommand::CursorToMaximum).access('M'),
+    results(ResultsCommand::CursorToMinimum).access('U'),
+    results(ResultsCommand::CursorToNextDifference).access('D'),
+    results(ResultsCommand::CursorToPreviousDifference).access('F'),
+    Separator,
+    results(ResultsCommand::MarkerAtCursor).access('L'),
+];
+
+/// The run shown and the history it is one of: where it came from, and
+/// the runs deleted or cleared from it.
+const HISTORY_MENU: &[MenuEntry] = &[
+    results(ResultsCommand::OpenRunInResults).access('O'),
+    results(ResultsCommand::OpenProducingPlan).access('P'),
+    results(ResultsCommand::OpenTaskDeck).access('I'),
+    results(ResultsCommand::RevealProducerLog).access('L'),
+    Separator,
+    results(ResultsCommand::RestoreDeletedRuns).access('R'),
+    results(ResultsCommand::ClearResults).access('C'),
 ];
 
 /// The key of the command that opens `viewer`.

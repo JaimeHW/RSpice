@@ -158,6 +158,44 @@ impl ResultsTestHost {
         reopened
     }
 
+    /// Carry out the Results command `command` as a key or a menu row in
+    /// Results raises it: the dispatcher runs it only while it is
+    /// available. Panics, saying why, when it is not.
+    pub(crate) fn run_command(
+        &mut self,
+        command: crate::workbench::results::commands::ResultsCommand,
+    ) {
+        use crate::workbench::framework::feature::harness::FeatureHarness;
+        use crate::workbench::results::ResultsFeature;
+        let workspace = self.workbench.workspace;
+        let model = std::mem::replace(
+            &mut self.model,
+            Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
+        );
+        let mut harness = FeatureHarness::<ResultsFeature>::with_model(
+            model,
+            std::mem::take(&mut *self.workbench),
+        );
+        harness.wb.workspace = crate::workbench::state::Workspace::Results;
+        harness.state = std::mem::take(&mut *self.results);
+        harness.platform = std::mem::take(&mut *self.platform);
+        harness.runs = std::mem::take(&mut *self.runs);
+        let availability = harness.availability(command.key());
+        if availability.is_available() {
+            harness.execute(command.key());
+        }
+        self.model = harness.model;
+        *self.workbench = harness.wb;
+        self.workbench.workspace = workspace;
+        *self.results = harness.state;
+        *self.platform = harness.platform;
+        *self.runs = harness.runs;
+        assert!(
+            availability.is_available(),
+            "{command:?} is not available: {availability:?}"
+        );
+    }
+
     /// The parts the results workspace's commands write.
     pub(crate) fn results_parts(&mut self) -> ResultsParts<'_> {
         self.results.parts(

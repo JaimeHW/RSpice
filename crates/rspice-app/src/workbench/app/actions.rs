@@ -56,9 +56,19 @@ impl RSpiceApp {
         }
         // An Escape that let go of a widget which takes Escape itself is that
         // widget's key, as it would be had egui not dropped the focus first.
-        let non_canvas_focus = (ctx.memory(|memory| memory.focused().is_some())
-            || escape_owner_was_let_go(ctx))
-            && !canvas_focus;
+        // Results says itself when its keys stand down: a plot reached by
+        // Tab keeps them.
+        let focus_elsewhere = if self.state.workbench.workspace
+            == rspice_app_state::workbench::workspace::Workspace::Results
+        {
+            rspice_app_results::workbench::documents::result_document::keys_stand_down(
+                ctx,
+                &self.state.results.results,
+            )
+        } else {
+            ctx.memory(|memory| memory.focused().is_some())
+        };
+        let non_canvas_focus = (focus_elsewhere || escape_owner_was_let_go(ctx)) && !canvas_focus;
         let snapshot =
             ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, non_canvas_focus));
         let injected_now =

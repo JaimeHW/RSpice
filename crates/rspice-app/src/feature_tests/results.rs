@@ -11,6 +11,7 @@ mod document_edit;
 mod expression_diagnostics;
 pub(super) mod histogram_publication;
 mod inspector;
+mod keys;
 mod navigation;
 mod navigator_browser;
 mod op_inspector;
