@@ -150,7 +150,7 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
         analysis_type,
         &analysis.waveforms,
         selected.analysis_index,
-        &prefer,
+        prefer,
     )
     .ok_or(NoMargins::NoResponse)?;
 
@@ -176,7 +176,7 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
                 analysis_type,
                 &analysis.waveforms,
                 shape.analysis_index,
-                &prefer,
+                prefer,
             )
             .ok_or(NoMargins::NoResponse)?
             .metrics;
