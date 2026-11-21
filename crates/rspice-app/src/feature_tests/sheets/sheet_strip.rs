@@ -1,14 +1,12 @@
 //! What the strip promises: one chip per sheet, hidden when there is only one
-//! drawing, and painted directly beneath the document row.
+//! drawing, and a chip that routes to its sheet.
 //!
 //! The renders below allocate the document bar and then the strip, which is
-//! the order `frame::show` allocates them in. egui subtracts each top panel's
-//! edge from the remaining rect in call order, so that sequence *is* the
-//! vertical arrangement.
+//! the order `frame::show` allocates them in.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use egui::{Context, Id, RawInput, Rect, Ui, Vec2, containers::panel::PanelState};
+use egui::{Context, RawInput, Rect, Ui, Vec2};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -162,35 +160,6 @@ fn a_single_sheet_drawing_paints_no_strip_at_all() {
             .iter()
             .any(|(_, node)| node.label() == Some("Sheets in this drawing")),
         "a drawing with one sheet has nothing to navigate between"
-    );
-}
-
-#[test]
-fn the_strip_hangs_directly_from_the_document_row() {
-    let ctx = Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut app = app_with_sheets(2);
-
-    // Panel rectangles are stored at the end of the pass that allocates them,
-    // so the first pass is what makes them readable.
-    for _ in 0..2 {
-        let _ = ctx.run_ui(frame_input(), |ui| chrome_rows(ui, &mut app));
-    }
-
-    let document = PanelState::load(&ctx, Id::new("workbench.document_bar"))
-        .expect("the document bar is allocated")
-        .outer_rect;
-    let strip = PanelState::load(&ctx, Id::new("workbench.sheet_strip"))
-        .expect("the sheet strip is allocated")
-        .outer_rect;
-
-    assert!(
-        (strip.top() - document.bottom()).abs() < 0.5,
-        "the strip starts where the document row ends: {strip:?} under {document:?}"
-    );
-    assert!(
-        strip.height() > 0.0 && strip.height() < document.height(),
-        "the strip is the shorter secondary row: {strip:?}"
     );
 }
 

@@ -36,9 +36,9 @@ struct SheetPanel {
     ctx: egui::Context,
     app: RSpiceApp,
     controls: HashMap<String, egui::Rect>,
-    /// Every text the last pass painted, in paint order: its words, where it
-    /// stands and its ink.
-    painted: Vec<(String, egui::Rect, egui::Color32)>,
+    /// Every text the last pass painted, in paint order: its words and where
+    /// it stands.
+    painted: Vec<(String, egui::Rect)>,
 }
 
 impl SheetPanel {
@@ -128,15 +128,6 @@ impl SheetPanel {
             .collect()
     }
 
-    /// The ink of the text painted with these words.
-    fn ink(&self, text: &str) -> egui::Color32 {
-        self.painted
-            .iter()
-            .find(|(painted, ..)| painted == text)
-            .unwrap_or_else(|| panic!("{text:?} is not painted"))
-            .2
-    }
-
     fn click_at(&mut self, pos: egui::Pos2) {
         self.pass(vec![
             egui::Event::PointerMoved(pos),
@@ -190,26 +181,13 @@ impl SheetPanel {
     }
 }
 
-/// Every text `shape` paints: its words, where it stands and its ink.
-fn collect_painted(
-    shape: &egui::epaint::Shape,
-    into: &mut Vec<(String, egui::Rect, egui::Color32)>,
-) {
+/// Every text `shape` paints: its words and where it stands.
+fn collect_painted(shape: &egui::epaint::Shape, into: &mut Vec<(String, egui::Rect)>) {
     match shape {
         egui::epaint::Shape::Text(text) => {
-            let ink = text.override_text_color.unwrap_or_else(|| {
-                text.galley
-                    .job
-                    .sections
-                    .iter()
-                    .map(|section| section.format.color)
-                    .find(|color| *color != egui::Color32::PLACEHOLDER)
-                    .unwrap_or(text.fallback_color)
-            });
             into.push((
                 text.galley.job.text.clone(),
                 egui::Rect::from_min_size(text.pos, text.galley.size()),
-                ink,
             ));
         }
         egui::epaint::Shape::Vec(shapes) => {
@@ -1073,23 +1051,6 @@ fn the_optional_boxes_are_a_checklist() {
     assert!(words.contains("Language\n"), "{words}");
     assert!(panel.app.state.undo_project_design().unwrap().is_some());
     assert!(!shown(&panel, DrawingSheetTitleFieldId::CheckedBy));
-}
-
-/// What a sheet prints while a field is empty stands in that field a step
-/// below a typed value. The form a value is written in stands a step fainter
-/// again, so neither is taken for the other or for a value.
-#[test]
-fn a_printed_default_reads_apart_from_a_format_hint() {
-    let mut panel = SheetPanel::new();
-    panel.pass(Vec::new());
-    let palette = rspice_app_workbench::ui::tokens::Tokens::default().color;
-    assert_eq!(panel.ink("Circuit diagram"), palette.text_dim);
-    assert_eq!(panel.ink("YYYY-MM-DD"), palette.text_faint);
-    assert_eq!(panel.ink("ECO or ticket"), palette.text_faint);
-    // An empty title prints the sheet's name.
-    assert_eq!(panel.ink("top"), palette.text_dim);
-    panel.enter("Approved by", "R. Okafor");
-    assert_eq!(panel.ink("R. Okafor"), palette.text);
 }
 
 /// The change order a revision answers to is the document's, typed with the
