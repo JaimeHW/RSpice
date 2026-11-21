@@ -171,6 +171,24 @@ const SPECTRUM_ARGUMENTS: [ArgumentSpec; 6] = [
     ),
     arg("Harmonics", "harmonics", Number, Literal("10")),
 ];
+/// The jitter readings' options, which may stand in any order after the
+/// signal: the edges are crossings of the threshold going one way, the
+/// threshold the trace's mean level, its integral over its x-span, unless
+/// given, as ViVA's jitter functions find them.
+const JITTER_EDGE: ArgumentSpec = arg(
+    "Edge type",
+    "edge",
+    Choice(&["rising", "falling"]),
+    Literal("rising"),
+);
+const JITTER_OUTPUT: ArgumentSpec =
+    arg("Output", "output", Choice(&["plot", "sd"]), Literal("plot"));
+const JITTER_THRESHOLD: ArgumentSpec = arg(
+    "Threshold",
+    "threshold",
+    Level(0),
+    Derived("the mean level"),
+);
 /// Whether a deviation weighs the signal over its x-span or reads its
 /// samples as a statistical sample.
 const STATISTIC_TYPE: ArgumentSpec = arg(
@@ -408,6 +426,61 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
             SIGNAL,
             arg("Cycles", "n", Number, Derived("every whole cycle")),
             arg("Level", "level", Level(0), Derived("mid level")),
+        ],
+    },
+    MeasureSpec {
+        name: "abs_jitter",
+        aliases: &[],
+        group: MeasureGroup::Timing,
+        summary: "time interval error",
+        description: "Each edge's time less the same edge of an ideal clock started at the \
+                      first, of the nominal period: the mean period unless given. \"plot\" \
+                      gives a trace of one value per edge, \"sd\" their standard deviation.",
+        arguments: &[
+            SIGNAL,
+            JITTER_EDGE,
+            JITTER_OUTPUT,
+            JITTER_THRESHOLD,
+            arg(
+                "Nominal period",
+                "tnom",
+                AxisPoint,
+                Derived("the mean period"),
+            ),
+        ],
+    },
+    MeasureSpec {
+        name: "period_jitter",
+        aliases: &[],
+        group: MeasureGroup::Timing,
+        summary: "each period less the mean",
+        description: "Each period less the mean period, at the edge that ends it. \"plot\" gives \
+                      the trace, \"sd\" its standard deviation.",
+        arguments: &[SIGNAL, JITTER_EDGE, JITTER_OUTPUT, JITTER_THRESHOLD],
+    },
+    MeasureSpec {
+        name: "cc_jitter",
+        aliases: &[],
+        group: MeasureGroup::Timing,
+        summary: "each period less the last",
+        description: "Cycle-to-cycle jitter: each period less the one before it, at the edge \
+                      that ends it. \"plot\" gives the trace, \"sd\" its standard deviation.",
+        arguments: &[SIGNAL, JITTER_EDGE, JITTER_OUTPUT, JITTER_THRESHOLD],
+    },
+    MeasureSpec {
+        name: "longterm_jitter",
+        aliases: &[],
+        group: MeasureGroup::Timing,
+        summary: "n periods less n means",
+        description: "Long-term jitter: the time each run of n periods takes less n mean \
+                      periods, at the edge that ends it. \"plot\" gives the trace, \"sd\" its \
+                      standard deviation.",
+        arguments: &[
+            SIGNAL,
+            arg("Periods", "n", Number, Required),
+            JITTER_EDGE,
+            JITTER_OUTPUT,
+            JITTER_THRESHOLD,
         ],
     },
     MeasureSpec {

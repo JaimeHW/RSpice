@@ -362,7 +362,8 @@ fn function_unit(
         | "yval" => argument(0),
         // A point or a span on the x-axis.
         "xval" | "cross" | "rise" | "risetime" | "fall" | "falltime" | "delay" | "pulsewidth"
-        | "period" | "settling" | "settlingtime" | "bandwidth" => x_unit(),
+        | "period" | "settling" | "settlingtime" | "bandwidth" | "abs_jitter" | "period_jitter"
+        | "cc_jitter" | "longterm_jitter" => x_unit(),
         "freq" | "frequency" => Ok(Unit::none().divided_by(&x_unit()?)),
         "deriv" | "derivative" | "slewrate" => Ok(argument(0)?.divided_by(&x_unit()?)),
         "integ" | "integral" => Ok(argument(0)?.times(&x_unit()?)),
@@ -719,6 +720,8 @@ mod tests {
             ("V(out) > 2.5", "s", ""),
             ("stddev(V(out))", "s", "V"),
             ("sfdr(V(out))", "s", "dB"),
+            ("period_jitter(V(out), \"sd\")", "s", "s"),
+            ("abs_jitter(V(out))", "s", "s"),
             ("enob(V(out))", "s", ""),
             ("groupDelay(V(out)/V(in))", "Hz", "s"),
             ("variance(I(vdd), \"sample\")", "s", "A²"),
