@@ -444,6 +444,10 @@ fn automatic_outputs(
 
     let mut outputs = Vec::with_capacity(candidates.len().min(AUTOMATIC_OUTPUT_HARD_LIMIT));
     for candidate in candidates.into_iter().take(AUTOMATIC_OUTPUT_HARD_LIMIT) {
+        // The design's own outputs are plotted, and what a plan plots streams while the run
+        // goes, so the plot grows as a transient runs unless the plan turns live delivery off.
+        // A net kept for the data browser alone is not streamed.
+        let plotted = candidate.priority <= 1;
         let mut output = SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
             candidate.spelling.display().to_owned(),
@@ -451,7 +455,11 @@ fn automatic_outputs(
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
             SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-            SavedOutputStreaming::StoreOnly,
+            if plotted {
+                SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+            } else {
+                SavedOutputStreaming::StoreOnly
+            },
         )
         .map_err(|error| {
             PreparationError::new(
@@ -463,7 +471,7 @@ fn automatic_outputs(
             )
         })?
         .with_origin(SavedOutputOrigin::Automatic)
-        .with_display_intent(if candidate.priority <= 1 {
+        .with_display_intent(if plotted {
             SavedOutputDisplayIntent::Plot
         } else {
             SavedOutputDisplayIntent::DataBrowserOnly

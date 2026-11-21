@@ -98,6 +98,18 @@ fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
             SavedOutputDisplayIntent::DataBrowserOnly,
         ]
     );
+    assert_eq!(
+        first
+            .iter()
+            .map(|output| output.streaming)
+            .collect::<Vec<_>>(),
+        vec![
+            SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+            SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+            SavedOutputStreaming::StoreOnly,
+        ],
+        "what the plan plots streams while it runs; a data-browser net does not"
+    );
 }
 
 #[test]
