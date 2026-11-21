@@ -172,7 +172,12 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-design", "rspice-design-model", "rspice-results", "rspice-model-library",
         "rspice-project", "rspice-simulation", "rspice-simulation-contract",
     },
-    "rspice-worker": {"rspice-vocabulary", "rspice-design", "rspice-simulation", "rspice-hardcopy"},
+    # The browser worker hosts the engine and the results stores; the worker
+    # transport it answers on is the simulation contract's.
+    "rspice-worker": {
+        "rspice-vocabulary", "rspice-design", "rspice-simulation", "rspice-hardcopy",
+        "rspice-simulation-contract",
+    },
 }
 HEADLESS = set(ALLOWED) - {
     "rspice-fonts", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",

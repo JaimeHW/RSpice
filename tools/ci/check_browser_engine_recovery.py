@@ -89,8 +89,8 @@ def author_deck(browser):
     # The browser has no file system: New deck makes a deck the project keeps
     # as text and puts it in front of the editor.
     choose_command(browser, "New deck")
-    wait_for(lambda: has_control(browser, "Project SPICE netlist editor"), "the new deck's editor")
-    browser.click("Project SPICE netlist editor", "multilineTextInput")
+    wait_for(lambda: has_control(browser, "Deck editor"), "the new deck's editor")
+    browser.click("Deck editor", "multilineTextInput")
     browser.keys("a", ("\ue009",))
     browser.snapshot()
     browser.keys(DECK)
