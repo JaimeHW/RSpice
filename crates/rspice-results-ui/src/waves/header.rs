@@ -17,6 +17,9 @@ use std::borrow::Cow;
 
 pub const WAVE_PANE_HEADER_HEIGHT: f32 = 25.0;
 
+/// How tall the pane's trace list grows before it scrolls.
+const TRACE_LIST_HEIGHT: f32 = 320.0;
+
 /// The height of the row's controls: the header chip's and the strip
 /// header's icon side.
 const ACTION_ICON_SIDE: f32 = 22.0;
@@ -437,15 +440,44 @@ pub fn show_header(
             egui::Popup::menu(&list)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show(|ui| {
-                    for entry in &entries {
-                        trace_list_row(ui, entry, &display_name, host, &mut output);
-                    }
-                    if !entries.is_empty() && !hidden_entries.is_empty() {
-                        ui.separator();
-                    }
-                    for entry in &hidden_entries {
-                        trace_list_row(ui, entry, &display_name, host, &mut output);
-                    }
+                    // However many curves the pane has, the list finds one:
+                    // typed letters narrow it, and it scrolls.
+                    let filter_id = list.id.with("filter");
+                    let mut filter = ui
+                        .data_mut(|data| data.get_temp::<String>(filter_id))
+                        .unwrap_or_default();
+                    ui.add(
+                        egui::TextEdit::singleline(&mut filter)
+                            .hint_text("Filter traces")
+                            .desired_width(200.0),
+                    );
+                    ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+                    let needle = filter.trim().to_lowercase();
+                    let matches = |entry: &&Entry<'_>| {
+                        needle.is_empty()
+                            || entry
+                                .listed_name(&display_name)
+                                .to_lowercase()
+                                .contains(&needle)
+                    };
+                    let shown: Vec<&Entry<'_>> = entries.iter().filter(matches).collect();
+                    let waiting: Vec<&Entry<'_>> = hidden_entries.iter().filter(matches).collect();
+                    egui::ScrollArea::vertical()
+                        .max_height(TRACE_LIST_HEIGHT)
+                        .show(ui, |ui| {
+                            for entry in &shown {
+                                trace_list_row(ui, entry, &display_name, host, &mut output);
+                            }
+                            if !shown.is_empty() && !waiting.is_empty() {
+                                ui.separator();
+                            }
+                            for entry in &waiting {
+                                trace_list_row(ui, entry, &display_name, host, &mut output);
+                            }
+                            if shown.is_empty() && waiting.is_empty() {
+                                ui.weak("No trace matches");
+                            }
+                        });
                 });
         },
     );
@@ -539,6 +571,15 @@ enum Entry<'a> {
 }
 
 impl Entry<'_> {
+    /// The name the pane's trace list gives the entry, which its filter
+    /// reads.
+    fn listed_name(&self, display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>) -> String {
+        match self {
+            Self::Signal(trace) => display_name(&trace.name).into_owned(),
+            Self::Expression(expression) => expression.label.clone(),
+        }
+    }
+
     fn show(
         &self,
         ui: &mut Ui,
