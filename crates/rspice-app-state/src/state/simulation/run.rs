@@ -36,6 +36,15 @@ pub struct ResultsStorageStop {
     pub budget: Option<ResultsStorageBudget>,
 }
 
+impl ResultsStorageStop {
+    /// Whether the store kept none of the run: it filled before the run's first row, and no
+    /// plan budget stopped it.
+    #[must_use]
+    pub fn kept_nothing(&self) -> bool {
+        self.rows == 0 && self.budget.is_none()
+    }
+}
+
 /// The storage budget a run's plan set, which its results reached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultsStorageBudget {

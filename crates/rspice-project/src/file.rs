@@ -1762,8 +1762,15 @@ pub(crate) fn finish_decoding(
                 .iter()
                 .map(|(run, reason)| format!("{run} ({reason})"))
                 .collect();
+            // A browser has no folder for Locate results to look in: a run it does not keep is
+            // not here, and its reason says so.
+            let until = if cfg!(target_arch = "wasm32") {
+                ""
+            } else {
+                " until Locate results finds their results store"
+            };
             project.simulation_results_warning = Some(format!(
-                "The results of {} cannot be read. Those runs show no samples until Locate results finds their results store; the other runs opened.",
+                "The results of {} cannot be read. Those runs show no samples{until}; the other runs opened.",
                 runs.join("; ")
             ));
         }

@@ -362,15 +362,31 @@ async fn begin(
         .max()
         .map_or(0, |index| index + 1);
     let (schema, meta) = schema.store();
-    let io = store
-        .dir
-        .segment(index, true)
-        .await
-        .map_err(|error| format!("the results store could not make a segment: {error}"))?;
+    // A store with no room for the segment's start, or for what it keeps to close it, keeps none
+    // of it, and says so rather than failing: the page states the run is not kept.
+    let io = match store.dir.segment(index, true).await {
+        Ok(io) => io,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
+            ) =>
+        {
+            return Ok(ResultsStoreResponse::Full);
+        }
+        Err(error) => {
+            return Err(format!(
+                "the results store could not make a segment: {error}"
+            ));
+        }
+    };
     let writer = match SegmentWriter::create(WatchedIo::new(io, free), &schema, &meta) {
         Ok(writer) => writer,
         Err(error) => {
             let _ = store.dir.remove_segment(index).await;
+            if matches!(error, StoreError::DiskFull) {
+                return Ok(ResultsStoreResponse::Full);
+            }
             return Err(error.to_string());
         }
     };

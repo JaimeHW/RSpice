@@ -863,7 +863,8 @@ fn aid_name(aid: ContinuationAid) -> &'static str {
 }
 
 /// `Stopped at t = 2.31ms: the volume holding /tmp/rspice-results/… filled;
-/// 2310004 points kept (1.10 GiB), 84.0 MiB free`, or, when the plan's
+/// 2310004 points kept (1.10 GiB), 84.0 MiB free`; `Not kept: …; 0 points kept` when the store
+/// kept none of the run; or, when the plan's
 /// storage budget stopped it, `Stopped at t = 2.31ms: results reached the
 /// plan's 1.00 GiB storage budget; 1.00 GiB written, Run Set point TT · 27 °C`.
 pub fn storage_stop_message(stop: &ResultsStorageStop) -> String {
@@ -894,6 +895,15 @@ pub fn storage_stop_message(stop: &ResultsStorageStop) -> String {
     } else {
         format!("the volume holding {} filled", stop.folder)
     };
+    // The store kept none of the run: a browser page still shows its samples, until it closes.
+    if stop.kept_nothing() {
+        let shown = if cfg!(target_arch = "wasm32") {
+            ", so this run's results are lost when this page closes"
+        } else {
+            ""
+        };
+        return format!("Not kept: {filled}; 0 points kept{shown}{free}");
+    }
     format!(
         "Stopped{at}: {filled}; {} points kept ({}){free}",
         stop.rows,

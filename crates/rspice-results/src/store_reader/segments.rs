@@ -270,8 +270,15 @@ impl MissingSegment {
     }
 }
 
-/// Why no folder holds a segment of `digest`.
+/// Why no folder holds a segment of `digest`. A browser keeps a project's runs in its own
+/// storage, which another browser, or a page that could not keep a run, never wrote: those runs
+/// are not damaged, they are not here.
 fn missing(digest: Digest) -> String {
+    if cfg!(target_arch = "wasm32") {
+        return "its samples are not kept in this browser: it was run in another browser, or \
+                this browser's storage could not keep it"
+            .to_owned();
+    }
     format!(
         "its results store {} is missing: it was deleted or moved outside RSpice",
         rspice_results_store::kept_segment_name(&digest)

@@ -491,8 +491,17 @@ fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Run
             } else {
                 "results storage full"
             };
+            // A run the store kept none of did not stop: its results are not kept.
+            let verdict = if run
+                .results_storage_stop()
+                .is_some_and(rspice_app_state::state::ResultsStorageStop::kept_nothing)
+            {
+                "results not kept: storage full".to_owned()
+            } else {
+                format!("stopped{at}: {cause}")
+            };
             (
-                Cow::Owned(format!("stopped{at}: {cause}")),
+                Cow::Owned(verdict),
                 errors,
                 StatusMark::Problem(Problem::Failure),
             )

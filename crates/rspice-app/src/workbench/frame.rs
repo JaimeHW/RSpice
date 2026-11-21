@@ -675,6 +675,11 @@ fn run_notice(state: &AppState, run_id: rspice_app_state::product::RunId) -> Opt
                 .is_some_and(|stop| stop.budget.is_some())
             {
                 format!("Run {sequence} stopped: storage budget reached")
+            } else if run
+                .results_storage_stop()
+                .is_some_and(rspice_app_state::state::ResultsStorageStop::kept_nothing)
+            {
+                format!("Run {sequence} results not kept: storage full")
             } else {
                 format!("Run {sequence} stopped: results storage full")
             },
@@ -1693,6 +1698,40 @@ mod tests {
             activity[0].message(),
             "Stopped at t = 2.31ms: the volume holding /Volumes/X/rspice-results/7-1-0 \
              filled; 2310004 points kept (1.00 GiB), 84.00 MiB free"
+        );
+    }
+
+    /// A run the store had no room to begin keeps none of its results: the
+    /// notice says they are not kept, not that the run stopped somewhere.
+    #[test]
+    fn a_run_the_full_store_kept_none_of_is_announced_as_not_kept() {
+        use rspice_app_state::state::{ResultsStorageStop, SimulationRunLifecycle as Lifecycle};
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        let run = app.state.model.simulation.start_run();
+        run.stop_on_results_storage(ResultsStorageStop {
+            analysis: "Transient".to_owned(),
+            at: None,
+            rows: 0,
+            bytes: 0,
+            free: Some(84 << 20),
+            folder: "/Volumes/X/rspice-results/7-1-0".to_owned(),
+            budget: None,
+        });
+        run.lifecycle = Lifecycle::Completed;
+        let run_id = run.run_id;
+        app.state.runs.run_watch.run_started(run_id);
+
+        announce_run_completion(&ctx, &mut app);
+
+        let activity = app.state.workbench.toasts.activity();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].title(), "Run 1 results not kept: storage full");
+        assert_eq!(
+            activity[0].message(),
+            "Not kept: the volume holding /Volumes/X/rspice-results/7-1-0 filled; \
+             0 points kept, 84.00 MiB free"
         );
     }
 

@@ -1141,6 +1141,74 @@ def quota_stop_cuts_a_page_run(browser):
     return {"quota_bytes": quota, "finding": line, "points_kept": int(kept.group(1))}
 
 
+NOT_IN_BROWSER = "its samples are not kept in this browser"
+
+
+def quota_refusal_keeps_nothing(browser):
+    """A run the store has no room to begin is not kept, and says so: the run states that its
+    results are not kept and that none of its points are, it passes its check, and the project
+    saves. Opened again, the project says the run's samples are not in this browser, and does
+    not call them damaged."""
+    estimate = browser.call("POST", "/execute/async", {"args": [], "script": """
+        const done = arguments[arguments.length - 1];
+        navigator.storage.estimate().then(done, error => done({error: String(error)}));
+    """})
+    if "error" in estimate:
+        raise AssertionError("The storage estimate failed: " + estimate["error"])
+    # Less than the store keeps past a segment for closing it, so the segment cannot begin.
+    quota = int(estimate["usage"]) + (64 << 10)
+    choose_command(browser, "Open simulation workspace")
+    browser.click("Analyses, 1 / 1", "button")
+
+    def field(label):
+        found = [control for control in controls(browser.snapshot())
+                 if control["label"] == label and control["role"] == "textInput"]
+        return found[0]["value"] if len(found) == 1 else None
+
+    wait_for(lambda: field("Stop time") is not None, "the transient's Stop time")
+    # A run the store does not keep already, small enough to finish at once.
+    for label, value in (("Stop time", "3m"), ("Max step", "auto")):
+        browser.click(label, "textInput", keyboard=(("a", ("\ue009",)), (value, ()), ("\ue007", ())))
+        wait_for(lambda: field(label) == value, f"the transient's {label} set to {value}")
+    browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin, "quotaSize": quota})
+    try:
+        browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
+        wait_for(lambda: reports(controls(browser.snapshot()), "results not kept"),
+                 "the run the full storage did not keep", 120)
+        browser.click("Expand console", "button")
+        problems = wait_for(lambda: [c for c in controls(browser.snapshot())
+                                     if c["role"] == "tab" and c["label"].startswith("Problems")],
+                            "the console's Problems tab")
+        click_control(browser, problems[0])
+        rendered = wait_for(lambda: [c for c in controls(browser.snapshot())
+                                     if "Not kept: " + FULL in c["label"]],
+                            "the finding of the run not kept", 60)
+        refused = browser.capture("quota-refusal-not-kept")
+        browser.click("Collapse console", "button")
+    finally:
+        browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin})
+    line = rendered[0]["label"]
+    if "; 0 points kept" not in line:
+        raise AssertionError(f"The run not kept does not say no point is kept: {line!r}")
+    if reports(controls(refused), ", corrupted") or reports(controls(refused), "Damaged result"):
+        raise AssertionError("The run not kept fails its check")
+    browser.click("Schematic", "button")
+    choose_command(browser, "Save all")
+    wait_for(lambda: not unsaved(browser.snapshot()), "the project saved with the run not kept", 60)
+    browser.call("POST", "/refresh", {})
+    wait_until_ready(browser)
+    browser.click("Schematic canvas", "canvas")
+    choose_command(browser, "Open results workspace")
+    browser.click("Expand console", "button")
+    reopened = wait_for(lambda: (lambda shown: shown if reports(controls(shown), NOT_IN_BROWSER) else None)(
+        browser.snapshot()), "the reopened run saying its samples are not in this browser", 60)
+    browser.capture("quota-refusal-reopened")
+    browser.click("Collapse console", "button")
+    if reports(controls(reopened), ", corrupted") or reports(controls(reopened), "Damaged result"):
+        raise AssertionError("The reopened run whose samples are not in this browser is called damaged")
+    return {"quota_bytes": quota, "finding": line}
+
+
 def quota_stop_keeps_rows(browser):
     """Writing past the origin's quota closes the write on the rows it took: the store keeps them,
     and they read back checked against their digest once the store is opened again."""
@@ -1226,6 +1294,7 @@ def run(browser):
     second_tab = second_tab_refused(browser)
     quota_stop = quota_stop_keeps_rows(browser)
     quota_page_run = quota_stop_cuts_a_page_run(browser)
+    quota_refusal = quota_refusal_keeps_nothing(browser)
     return {"startup": "passed", "checkpoint_export": "passed", "checkpoint_restore": "passed",
             "revision_history": "opened",
             "configuration_opening_input": "passed",
@@ -1235,7 +1304,7 @@ def run(browser):
             "provider_decision": provider_decision,
             "results_survive_reload": results_reload, "results_store_second_tab": second_tab,
             "restored_checkpoint_run": checkpoint_run,
-            "results_store_quota_stop": quota_stop, "results_store_quota_page_run": quota_page_run,
+            "results_store_quota_stop": quota_stop, "results_store_quota_page_run": quota_page_run, "results_store_quota_refusal": quota_refusal,
             "review_post_and_resolution": "passed", "review_intervals_ms": review_intervals,
             "checkpoint": manifest, "export": exported.name, "project_version": project["version"]}
 

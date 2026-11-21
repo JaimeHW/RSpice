@@ -248,6 +248,8 @@ pub enum ResultsStoreResponse {
     Begun {
         write: u32,
     },
+    /// The store has no room to begin the segment: it keeps none of it.
+    Full,
     /// The rows were taken, or the store filled while they were written: the write then takes
     /// no more, and closes on the rows it holds.
     Taken {

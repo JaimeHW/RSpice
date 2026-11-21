@@ -76,10 +76,11 @@ pub enum Standing {
 }
 
 /// A write the store's filling stopped: the page's segment `from` is cut to the rows the store
-/// kept, held by `to`.
+/// kept, held by `to`. With no `to`, the store kept none of it: the page keeps its samples, and
+/// the run says they are not kept.
 struct Cut {
     from: SegmentDigest,
-    to: Arc<Segment>,
+    to: Option<Arc<Segment>>,
     rows: u64,
     bytes: u64,
     at: Option<f64>,
@@ -537,6 +538,11 @@ async fn write(segment: &Arc<Segment>) -> Result<(), String> {
             });
             return Ok(());
         }
+        // The store has no room to begin it: it keeps none of it, and the run says so.
+        ResultsStoreResponse::Full => {
+            not_kept(digest);
+            return Ok(());
+        }
         other => return Err(refusal(other)),
     };
     let slots = schema.slots();
@@ -571,7 +577,9 @@ async fn write(segment: &Arc<Segment>) -> Result<(), String> {
     };
     let kept = rspice_results::store_reader::parse_digest(&record.digest)?;
     with(|client| client.kept.insert(kept.0, record.bytes));
-    if full {
+    if full && record.rows == 0 {
+        not_kept(digest);
+    } else if full {
         let cut = cut(segment, record.rows)?;
         if cut.reader().digest() != Some(kept) {
             return Err("the rows the store kept are not the page's first rows".to_owned());
@@ -586,7 +594,7 @@ async fn write(segment: &Arc<Segment>) -> Result<(), String> {
         with(|client| {
             client.cuts.push(Cut {
                 from: digest,
-                to: cut,
+                to: Some(cut),
                 rows: record.rows,
                 bytes: record.bytes,
                 at,
@@ -595,6 +603,21 @@ async fn write(segment: &Arc<Segment>) -> Result<(), String> {
         repaint();
     }
     Ok(())
+}
+
+/// The store kept none of the page's segment `digest`: the page keeps its samples, and the run
+/// that reads it says they are not kept.
+fn not_kept(digest: SegmentDigest) {
+    with(|client| {
+        client.cuts.push(Cut {
+            from: digest,
+            to: None,
+            rows: 0,
+            bytes: 0,
+            at: None,
+        });
+    });
+    repaint();
 }
 
 fn refusal(response: ResultsStoreResponse) -> String {
@@ -663,13 +686,15 @@ fn apply_cuts(simulation: &mut SimulationState) -> Vec<(u64, ResultsStorageStop)
         for run in &mut simulation.retained.runs {
             let mut cut_here: Option<String> = None;
             for analysis in &mut run.data.analyses {
-                let cut_values = |values: &mut WaveformValues| {
-                    if let Some(again) = cut_to(values, &cut) {
-                        *values = again;
-                        true
-                    } else {
-                        false
-                    }
+                let cut_values = |values: &mut WaveformValues| match &cut.to {
+                    Some(to) => match cut_to(values, cut.from, to, cut.rows) {
+                        Some(again) => {
+                            *values = again;
+                            true
+                        }
+                        None => false,
+                    },
+                    None => reads(values, cut.from),
                 };
                 let mut touched = false;
                 let mut kept = HashMap::new();
@@ -681,7 +706,7 @@ fn apply_cuts(simulation: &mut SimulationState) -> Vec<(u64, ResultsStorageStop)
                         cut_this |= cut_values(&mut complex.real);
                         cut_this |= cut_values(&mut complex.imag);
                     }
-                    if cut_this {
+                    if cut_this && cut.to.is_some() {
                         kept.insert(waveform.name.clone(), waveform.x.len() as u64);
                     }
                     touched |= cut_this;
@@ -738,24 +763,37 @@ fn recount(status: &mut SavedOutputMaterializationStatus, kept: &HashMap<String,
 /// Where a browser keeps a project's results store, as a stop names it.
 pub const STORE_FOLDER: &str = "this browser's storage for RSpice";
 
-/// `values` cut to the rows `cut` kept, when it reads the segment `cut` stopped.
-fn cut_to(values: &WaveformValues, cut: &Cut) -> Option<WaveformValues> {
+/// Whether `values` read the segment `from`.
+fn reads(values: &WaveformValues, from: SegmentDigest) -> bool {
+    values
+        .stored_window()
+        .and_then(|(source, _)| source.identity())
+        .is_some_and(|(digest, _)| digest == from.0)
+}
+
+/// `values` cut to the first `kept` rows, held by `to`, when they read the segment `from`.
+fn cut_to(
+    values: &WaveformValues,
+    from: SegmentDigest,
+    to: &Arc<Segment>,
+    kept: u64,
+) -> Option<WaveformValues> {
     let (source, window) = values.stored_window()?;
     let (digest, index) = source.identity()?;
-    if digest != cut.from.0 {
+    if digest != from.0 {
         return None;
     }
     let slot = index.checked_sub(1).map(|slot| slot as usize);
-    let rows = cut.rows.saturating_sub(window.first).min(window.rows);
+    let rows = kept.saturating_sub(window.first).min(window.rows);
     let column = rspice_results::store_reader::SegmentColumn::new(
-        Arc::clone(&cut.to),
+        Arc::clone(to),
         slot,
         source.name().to_owned(),
     );
     WaveformValues::stored(
         column,
         StoredWindow {
-            first: window.first.min(cut.rows),
+            first: window.first.min(kept),
             rows,
             lead: window.lead,
         },
