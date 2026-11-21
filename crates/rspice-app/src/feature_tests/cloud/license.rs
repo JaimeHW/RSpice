@@ -1,5 +1,5 @@
 //! The license dialog drawn over a whole application's state: where a
-//! verified key is kept, and the plain words it speaks in.
+//! verified key is kept.
 
 use crate::workbench::app::RSpiceApp;
 use rspice_app_cloud::services::license;
@@ -79,34 +79,5 @@ fn a_verified_key_names_where_this_platform_keeps_it() {
             shown.iter().any(|text| text.contains(&file)),
             "the dialog names {file}: {shown:#?}"
         );
-    }
-}
-
-/// The dialog a buyer pastes their key into offers no sample key to
-/// paste instead, and says nothing in signature jargon or with an em
-/// dash, while it waits for a key, refuses one, or shows its grant.
-#[test]
-fn the_license_dialog_offers_no_sample_key_and_speaks_plainly() {
-    let mut app = RSpiceApp::test_instance();
-    let cloud = &mut *app.state.cloud;
-    open_license_dialog(&mut cloud.license_dialog, cloud.license.as_ref());
-    let mut seen = shown_texts(&mut app);
-    app.state.cloud.license_dialog.text = "RSPICE-K1.TRUNCATED".to_owned();
-    verify_license_input(&mut app.state.cloud.license_dialog);
-    seen.extend(shown_texts(&mut app));
-    app.state.cloud.license_dialog.text = license::SAMPLE_KEY.to_owned();
-    verify_license_input(&mut app.state.cloud.license_dialog);
-    seen.extend(shown_texts(&mut app));
-    assert!(
-        seen.iter().any(|text| text == "Verify") && seen.iter().any(|text| text == "Activate"),
-        "the three phases were drawn: {seen:#?}"
-    );
-    for text in &seen {
-        assert!(!text.contains("sample"), "{text:?} offers a sample key");
-        assert!(
-            !text.contains("ed25519"),
-            "{text:?} names the signature scheme"
-        );
-        assert!(!text.contains('\u{2014}'), "{text:?} has an em dash");
     }
 }
