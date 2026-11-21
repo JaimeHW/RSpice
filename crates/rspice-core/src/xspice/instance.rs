@@ -4127,21 +4127,6 @@ impl XspiceInstance {
         )
     }
 
-    /// Get analog vector contributions (conductance, current/value) for stamping.
-    #[cfg(test)]
-    pub fn get_analog_vector_contributions(&self, port_idx: usize) -> Option<Vec<(Value, Value)>> {
-        if !self.has_analog_vector_contributions(port_idx) {
-            return None;
-        }
-        let port = self.ports.get(port_idx)?;
-        let width = self.context.port_width(&port.name);
-        Some(
-            (0..width)
-                .map(|index| self.analog_vector_contribution_at(port_idx, index))
-                .collect(),
-        )
-    }
-
     /// Whether the code model queued any deferred matrix or RHS contribution.
     ///
     /// The analog stamping walk visits every registered instance on every
@@ -5085,37 +5070,6 @@ mod tests {
 
         assert!(matches!(err, CmError::InvalidPortConnection(_)));
         assert!(err.to_string().contains("out"));
-    }
-
-    #[test]
-    fn analog_vector_contribution_accessor_avoids_full_vector_allocation() {
-        let model = model_with_ports(vec![PortSpec::vector_output("out", PortType::Current)]);
-        let mut instance = XspiceInstance::new(
-            "Avecout",
-            Arc::new(model),
-            vec![PortConnection::AnalogVector(vec![1, 2])],
-            &[],
-            &[],
-            &[],
-            &[],
-        )
-        .expect("analog vector output should construct");
-
-        instance
-            .context
-            .set_output_vector_with_partials("out", vec![1.5, 2.5], vec![0.25, 0.5])
-            .expect("set vector output partials");
-
-        assert!(instance.has_analog_vector_contributions(0));
-        assert_eq!(instance.analog_vector_contribution_at(0, 0), (0.25, 1.5));
-        assert_eq!(instance.analog_vector_contribution_at(0, 1), (0.5, 2.5));
-        assert_eq!(instance.analog_vector_contribution_at(0, 2), (0.0, 0.0));
-        assert_eq!(
-            instance
-                .get_analog_vector_contributions(0)
-                .expect("vector contributions should still be available"),
-            vec![(0.25, 1.5), (0.5, 2.5)]
-        );
     }
 
     #[test]

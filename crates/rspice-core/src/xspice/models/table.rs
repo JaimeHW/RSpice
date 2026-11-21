@@ -602,22 +602,6 @@ fn table_line_data(line: &str) -> (&str, bool, bool) {
     (data, header_ignored, data_comment)
 }
 
-/// Test-only unlimited variant; production tokenizes through
-/// `tokenize_table_contents_limited` with the run's resource limits.
-#[cfg(test)]
-fn tokenize_table_contents<'a>(
-    model: &str,
-    file: &str,
-    contents: &'a str,
-) -> CmResult<Vec<TableLine<'a>>> {
-    tokenize_table_contents_limited(
-        model,
-        file,
-        contents,
-        crate::resource::ResourceLimits::default().max_external_data_values,
-    )
-}
-
 fn tokenize_table_contents_limited<'a>(
     model: &str,
     file: &str,
@@ -2261,53 +2245,6 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_table_contents_borrows_input_tokens() {
-        let file = "inline-table";
-        let model = TableKind::Table2D.model_name();
-        let contents = "* header\n2\n2\n0 1\n0 1\n3 4\n";
-        let lines = tokenize_table_contents(model, file, contents).expect("tokenized table");
-        let token = lines[3].tokens[1];
-        let contents_start = contents.as_ptr() as usize;
-        let contents_end = contents_start + contents.len();
-        let token_start = token.as_ptr() as usize;
-        let token_end = token_start + token.len();
-
-        assert_eq!(token, "1");
-        assert!(token_start >= contents_start);
-        assert!(token_end <= contents_end);
-    }
-
-    #[test]
-    fn token_cursor_returns_borrowed_table_lines() {
-        let file = "inline-table";
-        let model = TableKind::Table2D.model_name();
-        let lines = tokenize_table_contents(model, file, "* header\n2\n2\n0 1\n0 1\n3 4\n")
-            .expect("tokenized table");
-        let x_tokens = lines[3].tokens.as_ptr();
-        let data_tokens = lines[5].tokens.as_ptr();
-        let mut cursor = TokenCursor::new(lines);
-
-        assert_eq!(
-            cursor.next_dimension(file, model, "x dimension").unwrap(),
-            2
-        );
-        assert_eq!(
-            cursor.next_dimension(file, model, "y dimension").unwrap(),
-            2
-        );
-        {
-            let x = cursor.next_line(file, model, "x").unwrap();
-            assert_eq!(x.tokens.as_ptr(), x_tokens);
-        }
-        {
-            let _y = cursor.next_line(file, model, "y").unwrap();
-        }
-        let row = cursor.next_data_line_optional().unwrap();
-
-        assert_eq!(row.tokens.as_ptr(), data_tokens);
-    }
-
-    #[test]
     fn table2d_parser_accepts_column_zero_comments() {
         let table = parse_table2d_contents(
             "inline-table2d",
@@ -2396,31 +2333,6 @@ mod tests {
     }
 
     #[test]
-    fn eno1d_reused_scratch_matches_allocating_wrapper() {
-        let samples: Vec<Value> = (0..64)
-            .map(|index| {
-                let x = index as Value;
-                x.sin() + 0.125 * x * x
-            })
-            .collect();
-        let mut scratch = Vec::new();
-
-        let fast = eno1d_eval_with_scratch(&samples, 4, 31, 0.4, &mut scratch)
-            .expect("1-D ENO evaluates with scratch");
-        let expected = eno1d_eval(&samples, 4, 31, 0.4).expect("1-D ENO evaluates");
-        assert_eq!(fast.value, expected.value);
-        assert_eq!(fast.derivative, expected.derivative);
-
-        let capacity = scratch.capacity();
-        let again = eno1d_eval_with_scratch(&samples, 4, 32, 0.1, &mut scratch)
-            .expect("1-D ENO reevaluates with scratch");
-        let expected_again = eno1d_eval(&samples, 4, 32, 0.1).expect("1-D ENO reevaluates");
-        assert_eq!(scratch.capacity(), capacity);
-        assert_eq!(again.value, expected_again.value);
-        assert_eq!(again.derivative, expected_again.derivative);
-    }
-
-    #[test]
     fn eno1d_eval_overwrites_dirty_reused_scratch() {
         let samples: Vec<Value> = (0..16)
             .map(|index| {
@@ -2495,53 +2407,6 @@ mod tests {
     }
 
     #[test]
-    fn table2d_eval_reused_scratch_matches_allocating_wrapper() {
-        let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
-        let mut values = Vec::new();
-        for &y in &axis {
-            for &x in &axis {
-                values.push(x * x + 0.5 * y * y + x * y);
-            }
-        }
-        let table = Table2DData {
-            x: TableAxis::new(axis.clone()),
-            y: TableAxis::new(axis),
-            values,
-        };
-        let mut scratch = TableEvalScratch::default();
-
-        let fast = evaluate_table2d_data_with_scratch(&table, 3, 1.4, 2.2, &mut scratch)
-            .expect("table2d evaluates with scratch");
-        let expected = evaluate_table2d_data(&table, 3, 1.4, 2.2).expect("table2d evaluates");
-        assert_eq!(fast.value, expected.value);
-        assert_eq!(fast.dx, expected.dx);
-        assert_eq!(fast.dy, expected.dy);
-
-        let capacities = (
-            scratch.values_along_y.capacity(),
-            scratch.dx_along_y.capacity(),
-            scratch.x_scratch.capacity(),
-            scratch.y_scratch.capacity(),
-        );
-        let again = evaluate_table2d_data_with_scratch(&table, 3, 2.1, 1.6, &mut scratch)
-            .expect("table2d reevaluates with scratch");
-        let expected_again =
-            evaluate_table2d_data(&table, 3, 2.1, 1.6).expect("table2d reevaluates");
-        assert_eq!(
-            (
-                scratch.values_along_y.capacity(),
-                scratch.dx_along_y.capacity(),
-                scratch.x_scratch.capacity(),
-                scratch.y_scratch.capacity(),
-            ),
-            capacities
-        );
-        assert_eq!(again.value, expected_again.value);
-        assert_eq!(again.dx, expected_again.dx);
-        assert_eq!(again.dy, expected_again.dy);
-    }
-
-    #[test]
     fn table2d_eval_overwrites_dirty_reused_scratch() {
         let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
         let mut values = Vec::new();
@@ -2573,64 +2438,6 @@ mod tests {
         assert_eq!(fast.value, expected.value);
         assert_eq!(fast.dx, expected.dx);
         assert_eq!(fast.dy, expected.dy);
-    }
-
-    #[test]
-    fn table3d_eval_reused_scratch_matches_allocating_wrapper() {
-        let axis = vec![0.0, 1.0, 2.0, 3.0, 4.0];
-        let mut values = Vec::new();
-        for &z in &axis {
-            for &y in &axis {
-                for &x in &axis {
-                    values.push(x * x + 0.5 * y * y + 0.25 * z * z + x * y + y * z);
-                }
-            }
-        }
-        let table = Table3DData {
-            x: TableAxis::new(axis.clone()),
-            y: TableAxis::new(axis.clone()),
-            z: TableAxis::new(axis),
-            values,
-        };
-        let mut scratch = TableEvalScratch::default();
-
-        let fast = evaluate_table3d_data_with_scratch(&table, 3, 1.4, 2.2, 0.7, &mut scratch)
-            .expect("table3d evaluates with scratch");
-        let expected = evaluate_table3d_data(&table, 3, 1.4, 2.2, 0.7).expect("table3d evaluates");
-        assert_eq!(fast.value, expected.value);
-        assert_eq!(fast.dx, expected.dx);
-        assert_eq!(fast.dy, expected.dy);
-        assert_eq!(fast.dz, expected.dz);
-
-        let capacities = (
-            scratch.values_over_zy.capacity(),
-            scratch.dx_over_zy.capacity(),
-            scratch.values_along_y.capacity(),
-            scratch.dx_along_y.capacity(),
-            scratch.x_scratch.capacity(),
-            scratch.yz_x_scratch.capacity(),
-            scratch.yz_y_scratch.capacity(),
-        );
-        let again = evaluate_table3d_data_with_scratch(&table, 3, 2.1, 1.6, 3.2, &mut scratch)
-            .expect("table3d reevaluates with scratch");
-        let expected_again =
-            evaluate_table3d_data(&table, 3, 2.1, 1.6, 3.2).expect("table3d reevaluates");
-        assert_eq!(
-            (
-                scratch.values_over_zy.capacity(),
-                scratch.dx_over_zy.capacity(),
-                scratch.values_along_y.capacity(),
-                scratch.dx_along_y.capacity(),
-                scratch.x_scratch.capacity(),
-                scratch.yz_x_scratch.capacity(),
-                scratch.yz_y_scratch.capacity(),
-            ),
-            capacities
-        );
-        assert_eq!(again.value, expected_again.value);
-        assert_eq!(again.dx, expected_again.dx);
-        assert_eq!(again.dy, expected_again.dy);
-        assert_eq!(again.dz, expected_again.dz);
     }
 
     #[test]

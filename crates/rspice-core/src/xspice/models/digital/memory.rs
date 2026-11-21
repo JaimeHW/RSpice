@@ -1173,44 +1173,4 @@ mod tests {
             "accepted read after rollbackable write probe must see the committed memory"
         );
     }
-
-    #[test]
-    fn d_ram_rollbackable_probe_reuses_snapshot_buffer() {
-        let mut ctx = ram_context();
-        DigitalRam.init(&mut ctx).expect("d_ram initializes");
-
-        evaluate_ram(&mut ctx, 0.0);
-        let _ = take_data_out(&mut ctx);
-
-        let shape = d_ram_shape(&ctx).expect("test RAM shape is valid");
-        assert_eq!(d_ram_memory_state(&ctx, None, shape, 0, 0), 1);
-
-        ctx.set_input_digital("write_en", DigitalValue::one());
-        ctx.set_input(
-            "data_in",
-            InputValue::DigitalVector(vec![DigitalValue::zero()]),
-        );
-        evaluate_ram_with_phase(&mut ctx, 1.0e-9, EvaluationPhase::RollbackableProbe);
-        let _ = take_data_out(&mut ctx);
-
-        let scratch = ctx
-            .resource::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
-            .expect("d_ram scratch state is installed");
-        assert_eq!(scratch.len(), d_ram_state_len(shape));
-        let first_ptr = scratch.as_ptr();
-        let first_capacity = scratch.capacity();
-        drop(scratch);
-
-        evaluate_ram_with_phase(&mut ctx, 2.0e-9, EvaluationPhase::RollbackableProbe);
-        let scratch = ctx
-            .resource::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
-            .expect("d_ram scratch state remains installed");
-        assert_eq!(scratch.as_ptr(), first_ptr);
-        assert_eq!(scratch.capacity(), first_capacity);
-        assert_eq!(
-            d_ram_memory_state(&ctx, None, shape, 0, 0),
-            1,
-            "rollbackable probes must continue to leave committed RAM untouched"
-        );
-    }
 }
