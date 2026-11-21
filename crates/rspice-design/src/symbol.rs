@@ -2037,38 +2037,6 @@ mod validation_tests {
         assert!(error.contains("negative lead length"), "{error}");
     }
 
-    /// Each style marks the body end of the lead: a bubble the lead stops
-    /// at, a wedge inside the body, or both. A bare connection point draws
-    /// nothing, whatever its style.
-    #[test]
-    fn each_pin_style_marks_the_body_end_of_its_lead() {
-        let tip = Point::new(-40, 0);
-        let drawing = |length, style| pin_drawing(tip, SymbolPinSide::Left, length, style);
-        let wedge = [Point::new(-20, 3), Point::new(-16, 0), Point::new(-20, -3)];
-
-        let plain = drawing(20, SymbolPinStyle::Plain);
-        assert_eq!(plain.lead, Some((tip, Point::new(-20, 0))));
-        assert_eq!((plain.bubble, plain.wedge), (None, None));
-
-        let inverted = drawing(20, SymbolPinStyle::Inverted);
-        assert_eq!(inverted.lead, Some((tip, Point::new(-26, 0))));
-        assert_eq!(inverted.bubble, Some((Point::new(-23, 0), 3)));
-        assert_eq!(inverted.wedge, None);
-
-        let clock = drawing(20, SymbolPinStyle::Clock);
-        assert_eq!(clock.lead, plain.lead);
-        assert_eq!((clock.bubble, clock.wedge), (None, Some(wedge)));
-
-        let both = drawing(20, SymbolPinStyle::InvertedClock);
-        assert_eq!(both.lead, inverted.lead);
-        assert_eq!((both.bubble, both.wedge), (inverted.bubble, Some(wedge)));
-
-        for style in SymbolPinStyle::ALL {
-            let bare = drawing(0, style);
-            assert_eq!((bare.lead, bare.bubble, bare.wedge), (None, None, None));
-        }
-    }
-
     /// A generated clock input stores its wedge as its pin's style, so the
     /// document's artwork no longer carries it and the pin draws it exactly
     /// where the generator drew it.

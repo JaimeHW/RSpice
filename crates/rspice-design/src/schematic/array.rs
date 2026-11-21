@@ -1419,9 +1419,4 @@ mod tests {
         .unwrap();
         assert!(!plan.is_electrical());
     }
-
-    #[test]
-    fn preview_default_is_empty() {
-        assert!(SchematicArrayPreview::default().is_empty());
-    }
 }

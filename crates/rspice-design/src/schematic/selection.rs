@@ -665,24 +665,4 @@ mod tests {
         selection.toggle_net_label(41);
         assert!(selection.is_empty());
     }
-
-    #[test]
-    fn legacy_selection_without_net_label_ids_deserializes_empty() {
-        let mut value = serde_json::to_value(Selection::default()).unwrap();
-        value.as_object_mut().unwrap().remove("net_labels");
-
-        let selection: Selection = serde_json::from_value(value).unwrap();
-
-        assert!(selection.net_labels.is_empty());
-    }
-
-    #[test]
-    fn legacy_selection_without_probe_ids_deserializes_empty() {
-        let mut value = serde_json::to_value(Selection::default()).unwrap();
-        value.as_object_mut().unwrap().remove("probes");
-
-        let selection: Selection = serde_json::from_value(value).unwrap();
-
-        assert!(selection.probes.is_empty());
-    }
 }

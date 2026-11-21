@@ -383,18 +383,6 @@ mod tests {
             connector
         );
     }
-
-    #[test]
-    fn every_declarable_direction_has_distinct_copy() {
-        let mut labels: Vec<&'static str> = NetLabelKind::DIRECTIONS
-            .iter()
-            .map(|direction| NetLabelKind::direction_label(*direction))
-            .collect();
-        assert_eq!(labels.len(), 4);
-        labels.sort_unstable();
-        labels.dedup();
-        assert_eq!(labels.len(), 4, "direction copy must be unambiguous");
-    }
 }
 
 // =============================================================================

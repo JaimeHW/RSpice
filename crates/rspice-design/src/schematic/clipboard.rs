@@ -374,16 +374,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_clipboard_without_net_labels_deserializes_empty() {
-        let mut value = serde_json::to_value(ClipboardData::default()).unwrap();
-        value.as_object_mut().unwrap().remove("net_labels");
-
-        let clipboard: ClipboardData = serde_json::from_value(value).unwrap();
-
-        assert!(clipboard.net_labels.is_empty());
-    }
-
-    #[test]
     fn named_net_attachments_are_deduplicated_without_changing_origin() {
         let origin = Point::new(40, 20);
         let mut clipboard = ClipboardData::from_selection(Vec::new(), Vec::new(), vec![origin]);

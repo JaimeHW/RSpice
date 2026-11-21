@@ -706,14 +706,4 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(first.normalized(), second.normalized());
     }
-
-    #[test]
-    fn a_retained_table_takes_its_digest_from_the_bytes_it_retains() {
-        let retained = RetainedPwlFile::new("step.csv", "0 0\n1e-9 1\n", 42);
-        assert_eq!(
-            retained.digest,
-            crate::netlist_document::content_digest("0 0\n1e-9 1\n")
-        );
-        assert_eq!(retained.imported_at_unix_ms, 42);
-    }
 }

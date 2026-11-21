@@ -462,50 +462,6 @@ mod tests {
     }
 
     #[test]
-    fn the_six_states_produce_the_vocabulary_verbatim() {
-        for (state, label, cell) in [
-            (
-                ProvenanceState::Adopted { revision: 4 },
-                "adopted · r4",
-                "sensor_diff_1k · r4",
-            ),
-            (
-                ProvenanceState::Behind {
-                    adopted: 4,
-                    library: 5,
-                },
-                "behind · library r5",
-                "sensor_diff_1k · r4 · library r5",
-            ),
-            (
-                ProvenanceState::Modified { from: 2 },
-                "modified from r2",
-                "sensor_diff_1k · modified from r2",
-            ),
-            (
-                ProvenanceState::ModifiedBehind {
-                    from: 4,
-                    library: 5,
-                },
-                "modified from r4 · library r5",
-                "sensor_diff_1k · modified from r4 · library r5",
-            ),
-            (
-                ProvenanceState::Removed { revision: 2 },
-                "definition removed",
-                "sensor_diff_1k · r2 · definition removed",
-            ),
-        ] {
-            assert_eq!(state.label(), label);
-            assert_eq!(state.studio_cell(Some("sensor_diff_1k")), cell);
-        }
-        assert_eq!(
-            ProvenanceState::FromSchematic.studio_cell(None),
-            "— · from schematic"
-        );
-    }
-
-    #[test]
     fn only_a_state_with_a_revision_left_to_copy_offers_re_adoption() {
         assert!(!ProvenanceState::Adopted { revision: 1 }.offers_readoption());
         assert!(

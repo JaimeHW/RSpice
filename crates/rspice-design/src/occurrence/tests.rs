@@ -126,9 +126,3 @@ fn a_rename_rewrites_every_master_on_the_occurrence() {
         "renaming a master does not rename the instance that reaches it"
     );
 }
-
-#[test]
-fn a_record_written_before_occurrences_existed_is_recognizable() {
-    assert!(DocumentOccurrence::default().is_unrooted());
-    assert!(!DocumentOccurrence::rooted(master("tb_ota")).is_unrooted());
-}

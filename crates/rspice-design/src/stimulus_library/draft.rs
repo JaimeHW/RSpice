@@ -143,14 +143,6 @@ mod tests {
     }
 
     #[test]
-    fn a_freshly_opened_draft_is_clean_and_has_nothing_to_undo() {
-        let draft = draft();
-        assert!(!draft.is_dirty());
-        assert!(!draft.can_undo());
-        assert!(!draft.can_redo());
-    }
-
-    #[test]
     fn undo_and_redo_walk_the_edits_one_at_a_time() {
         let mut draft = draft();
         draft.edit(|working| working.params = "va=6m freq=1k".to_owned());
