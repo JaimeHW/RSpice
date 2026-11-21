@@ -910,7 +910,7 @@ pub(super) fn show_virtualized_result_signals(
                             let domain = data_state_meta(run.data_state);
                             let head = result_browser_analysis_head(
                                 ui,
-                                "DS",
+                                None,
                                 HeadLabel::Run {
                                     name: &run.name,
                                     label: &run.label,
@@ -971,7 +971,7 @@ pub(super) fn show_virtualized_result_signals(
                             let shown = analysis.signals.len() + analysis.artifacts.len();
                             let head = result_browser_analysis_head(
                                 ui,
-                                analysis.short_label,
+                                Some(analysis.short_label),
                                 HeadLabel::Analysis(&analysis.label),
                                 &analysis.domain,
                                 shown,
@@ -1388,7 +1388,7 @@ fn instance_row(
         }
         // The caret sits in the kind column of the rows it folds, so an
         // instance and its own quantities line up one indent apart.
-        let caret_left = rect.left() + 26.0 + depth as f32 * TREE_INDENT;
+        let caret_left = rect.left() + LEAF_INSET + 26.0 + depth as f32 * TREE_INDENT;
         if expanded {
             WorkbenchIcon::ChevronDown
         } else {
@@ -1800,7 +1800,7 @@ enum HeadLabel<'a> {
 
 fn result_browser_analysis_head(
     ui: &mut Ui,
-    glyph: &str,
+    glyph: Option<&str>,
     head: HeadLabel<'_>,
     domain: &str,
     count: usize,
@@ -1812,6 +1812,12 @@ fn result_browser_analysis_head(
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let height = result_browser_row_height(&t);
+    // A run heads the tree; its analyses sit one level in.
+    let level: usize = if matches!(head, HeadLabel::Run { .. }) {
+        0
+    } else {
+        1
+    };
     let (label, spoken, label_font) = match head {
         HeadLabel::Run { name, label } => {
             (name, label, theme::sans(tokens::FS_0, FontWeight::Medium))
@@ -1851,22 +1857,30 @@ fn result_browser_analysis_head(
     if !ui.is_rect_visible(rect) {
         return response;
     }
-    ui.painter().rect_filled(
-        rect,
-        0.0,
+    // A run is the band that heads everything under it: the panel fill and
+    // its own hairline. An analysis is a row inside its run, stepped in one
+    // level, so a run and its analyses never read as peers.
+    if level == 0 {
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            if response.hovered() {
+                c.bg_hover
+            } else {
+                c.bg_panel
+            },
+        );
+        ui.painter().hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            egui::Stroke::new(1.0, c.border),
+        );
+    } else {
         if response.hovered() {
-            c.bg_hover
-        } else {
-            c.bg_panel
-        },
-    );
-    // `box-shadow: 0 1px var(--border)` — the head keeps its own hairline so
-    // it reads as pinned chrome above the quantities it owns.
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
+            ui.painter().rect_filled(rect, 0.0, c.bg_hover);
+        }
+    }
+    let chevron_x = rect.left() + LEVEL_ZERO_CHEVRON + level as f32 * LEVEL_STEP;
 
     // The disclosure caret: a group with many quantities is closed by
     // default, so the panel opens as an index of the run's analyses. It is a
@@ -1880,34 +1894,43 @@ fn result_browser_analysis_head(
     .paint(
         ui.painter(),
         egui::Rect::from_center_size(
-            egui::pos2(rect.left() + 5.0 + 7.0, rect.center().y),
+            egui::pos2(chevron_x, rect.center().y),
             egui::vec2(12.0, 12.0),
         ),
         c.text_faint,
     );
 
-    // 16x16 kind glyph, inside the dense row's 22 px. It says which kind of
-    // thing the group is, which is neither selection nor status, so it is
-    // neutral: it used to be painted in accent on every head, and in warn ink
-    // when the run had failed.
-    let glyph_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 5.0 + 14.0 + 8.0, rect.center().y),
-        egui::vec2(16.0, 16.0),
-    );
-    ui.painter().rect_filled(glyph_rect, 4.0, c.bg_inset);
-    ui.painter().rect_stroke(
-        glyph_rect,
-        4.0,
-        egui::Stroke::new(1.0, c.border_strong),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter().text(
-        glyph_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        glyph,
-        theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
-        c.text_dim,
-    );
+    // 16x16 kind glyph, inside the dense row's 22 px, on an analysis only: it
+    // says which kind of analysis the group is, which is neither selection
+    // nor status, so it is neutral. A run needs none; its band says it.
+    let mut text_left = chevron_x + 10.0;
+    if let Some(glyph) = glyph {
+        // The box is 16 wide or as wide as its letters need: "SOA" overran
+        // a square box.
+        let galley = ui.painter().layout_no_wrap(
+            glyph.to_owned(),
+            theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
+            c.text_dim,
+        );
+        let width = (galley.size().x + 6.0).max(16.0).round();
+        let glyph_rect = egui::Rect::from_min_size(
+            egui::pos2(chevron_x + 7.0, rect.center().y - 8.0),
+            egui::vec2(width, 16.0),
+        );
+        ui.painter().rect_filled(glyph_rect, 4.0, c.bg_inset);
+        ui.painter().rect_stroke(
+            glyph_rect,
+            4.0,
+            egui::Stroke::new(1.0, c.border_strong),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().galley(
+            glyph_rect.center() - galley.size() / 2.0,
+            galley,
+            c.text_dim,
+        );
+        text_left = glyph_rect.right() + 5.0;
+    }
 
     // `shown / retained` while a filter hides part of the group, so the head
     // never implies the analysis solved fewer quantities than it did.
@@ -1937,7 +1960,6 @@ fn result_browser_analysis_head(
     // Label and domain share one baseline; the domain elides first because the
     // label is the identity the head exists to state. A run that did not
     // finish wears the mark that owns that colour, in front of its name.
-    let mut text_left = glyph_rect.right() + 5.0;
     if !ok {
         use crate::ui::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
         crate::ui::widgets::paint_problem_mark(
@@ -1965,7 +1987,13 @@ fn result_browser_analysis_head(
             egui::Align2::LEFT_CENTER,
             label,
             label_font,
-            if selected { c.accent } else { c.text },
+            // The accent names the run on screen. Within a run, the analysis
+            // the sheet is reading is in full ink and the others recede.
+            match (level, selected) {
+                (0, true) => c.accent,
+                (0, false) | (_, true) => c.text,
+                _ => c.text_dim,
+            },
         )
         .right();
     let domain_left = label_end + 6.0;
@@ -2082,9 +2110,13 @@ fn result_quantity_row(
     // cannot produce would put plot membership and favouriting out of reach
     // on the tablet composition entirely.
     let hovered = ui.rect_contains_pointer(rect) || t.metrics.is_touch();
+    // The tick column sits two levels in, under its run and analysis.
     let visibility_rect = egui::Rect::from_min_max(
-        rect.left_top(),
-        egui::pos2((rect.left() + 26.0).min(rect.right()), rect.bottom()),
+        egui::pos2((rect.left() + LEAF_INSET).min(rect.right()), rect.top()),
+        egui::pos2(
+            (rect.left() + LEAF_INSET + 26.0).min(rect.right()),
+            rect.bottom(),
+        ),
     );
     let selection_rect = egui::Rect::from_min_max(
         egui::pos2(visibility_rect.right(), rect.top()),
@@ -2216,8 +2248,16 @@ pub(super) struct RowLabel<'a> {
     pub(super) indent: usize,
 }
 
-/// How far each level of the tree steps in.
+/// How far each level of an instance tree steps in.
 const TREE_INDENT: f32 = 12.0;
+/// How far each level of the browser steps in: a run, its analyses, then
+/// their quantities.
+const LEVEL_STEP: f32 = 16.0;
+/// Where the run's disclosure chevron is centred.
+const LEVEL_ZERO_CHEVRON: f32 = 12.0;
+/// A quantity sits two levels in, under its run and its analysis.
+const LEAF_INSET: f32 = 2.0 * LEVEL_STEP;
+
 /// The kind column: wide enough for a two-character mark such as `dB`.
 const KIND_GLYPH_WIDTH: f32 = 18.0;
 
@@ -2303,8 +2343,11 @@ fn result_artifact_row(
     );
     let hovered = ui.rect_contains_pointer(rect) || t.metrics.is_touch();
     let check_rect = egui::Rect::from_min_max(
-        rect.left_top(),
-        egui::pos2((rect.left() + 26.0).min(rect.right()), rect.bottom()),
+        egui::pos2((rect.left() + LEAF_INSET).min(rect.right()), rect.top()),
+        egui::pos2(
+            (rect.left() + LEAF_INSET + 26.0).min(rect.right()),
+            rect.bottom(),
+        ),
     );
     let selection_rect = egui::Rect::from_min_max(
         egui::pos2(check_rect.right(), rect.top()),
