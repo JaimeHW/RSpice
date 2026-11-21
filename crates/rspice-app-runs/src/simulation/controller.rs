@@ -1597,12 +1597,17 @@ impl SimulationController {
         let mut source = self.live_transient.source_analysis(analysis_type, label);
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(rows) = self.live_segment.rows() {
-            use rspice_results::waveform::OutputWaveform as _;
+            // A trace stores no colour, as a finished run's do: the palette colours it by its
+            // slot, so the live plot's colours are the ones the finished result keeps.
             source.waveforms = rows
                 .waveforms
                 .iter()
                 .cloned()
-                .map(RetainedTrace::from_retained)
+                .map(|data| RetainedTrace {
+                    data,
+                    color: String::new(),
+                    visible: true,
+                })
                 .collect();
         }
         source
@@ -1677,7 +1682,11 @@ impl SimulationController {
             )
         };
         let waveforms = if self.plots_every_column() {
-            source.waveforms.clone()
+            // In the order the finished result lists them, by name, so its panes and colours
+            // stay where they are when the run ends.
+            let mut every = source.waveforms.clone();
+            every.sort_by(|left, right| left.name.cmp(&right.name));
+            every
         } else {
             materialize_live_saved_outputs(&source, &contracts)
         };
