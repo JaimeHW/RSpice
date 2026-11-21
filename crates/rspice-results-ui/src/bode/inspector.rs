@@ -336,7 +336,7 @@ fn or_dash(value: Option<String>) -> String {
     value.unwrap_or_else(|| "\u{2014}".to_owned())
 }
 
-/// The stability card's rows: the loop gain measured, then each margin with
+/// The stability card's rows: the loop gain measured, then each margin and
 /// the frequency it was found at, as the Nyquist panel prints them, then the
 /// loop's gain at the bottom of the sweep.
 fn stability_rows(
@@ -346,41 +346,27 @@ fn stability_rows(
     significant_digits: usize,
 ) -> Vec<(&'static str, String, bool)> {
     let (low, _) = low_frequency_labels(m.adc_is_dc);
-    vec![
-        ("Loop gain", signal.to_owned(), false),
-        (
-            "Phase margin",
-            or_dash(m.pm_deg.zip(m.ugf).map(|(degrees, frequency)| {
-                super::margins::phase_margin(
-                    degrees,
-                    frequency,
-                    quantity_policy,
-                    significant_digits,
-                )
-            })),
-            true,
+    let margin = |value: Option<f64>, hertz: Option<f64>| {
+        value
+            .zip(hertz)
+            .map(|(value, hertz)| super::margins::Margin { value, hertz })
+    };
+    let mut rows = vec![("Loop gain", signal.to_owned(), false)];
+    rows.extend(super::margins::rows(
+        margin(m.pm_deg, m.ugf),
+        margin(m.gm_db, m.f180),
+        quantity_policy,
+        significant_digits,
+    ));
+    rows.push((
+        low,
+        or_dash(
+            m.adc_db
+                .map(|decibels| fmt_si_significant(decibels, "dB", significant_digits)),
         ),
-        (
-            "Gain margin",
-            or_dash(m.gm_db.zip(m.f180).map(|(decibels, frequency)| {
-                super::margins::gain_margin(
-                    decibels,
-                    frequency,
-                    quantity_policy,
-                    significant_digits,
-                )
-            })),
-            true,
-        ),
-        (
-            low,
-            or_dash(
-                m.adc_db
-                    .map(|decibels| fmt_si_significant(decibels, "dB", significant_digits)),
-            ),
-            false,
-        ),
-    ]
+        false,
+    ));
+    rows
 }
 
 /// The response card's rows: the response measured, its gain at the bottom
@@ -540,8 +526,10 @@ mod tests {
             rows,
             [
                 ("Loop gain", "Loop Gain"),
-                ("Phase margin", "27.14 ° at 1.233 kHz"),
-                ("Gain margin", "6.021 dB at 1.732 kHz"),
+                ("Phase margin", "27.14 °"),
+                ("Gain crossover", "1.233 kHz"),
+                ("Gain margin", "6.021 dB"),
+                ("Phase crossover", "1.732 kHz"),
                 ("A_dc", "12.04 dB"),
             ]
         );
@@ -571,8 +559,8 @@ mod tests {
         };
         assert_eq!(
             values(4)[1..],
-            ["61.23 ° at 1.235 MHz", "12.35 dB at 4.568 MHz", "62.35 dB"]
+            ["61.23 °", "1.235 MHz", "12.35 dB", "4.568 MHz", "62.35 dB"]
         );
-        assert_eq!(values(6)[1], "61.2346 ° at 1.23457 MHz");
+        assert_eq!(values(6)[1..3], ["61.2346 °", "1.23457 MHz"]);
     }
 }

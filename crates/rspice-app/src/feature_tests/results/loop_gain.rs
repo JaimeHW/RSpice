@@ -71,9 +71,17 @@ fn session_with_a_stability_run() -> AppState {
     state
 }
 
-/// Every margin `viewer`'s inspector prints: the values that name the
-/// frequency they were read at.
-fn margins(state: &mut AppState, viewer: ResultViewer) -> Vec<String> {
+/// The rows of a loop's margins, and the frequencies they were read at.
+const MARGIN_ROWS: [&str; 4] = [
+    "Phase margin",
+    "Gain crossover",
+    "Gain margin",
+    "Phase crossover",
+];
+
+/// Every margin `viewer`'s inspector prints, and each one's frequency: each
+/// row's words and the value drawn after them.
+fn margins(state: &mut AppState, viewer: ResultViewer) -> Vec<(String, String)> {
     fn collect(shape: &egui::Shape, text: &mut Vec<String>) {
         match shape {
             egui::Shape::Text(value) => text.push(value.galley.text().to_owned()),
@@ -101,8 +109,13 @@ fn margins(state: &mut AppState, viewer: ResultViewer) -> Vec<String> {
     for shape in output.shapes {
         collect(&shape.shape, &mut text);
     }
-    text.retain(|value| value.contains(" at "));
-    text
+    MARGIN_ROWS
+        .iter()
+        .filter_map(|row| {
+            let at = text.iter().position(|value| value == row)?;
+            Some(((*row).to_owned(), text.get(at + 1)?.clone()))
+        })
+        .collect()
 }
 
 /// Save `state`'s project to a scratch folder and open it again in a new
@@ -145,9 +158,10 @@ fn assert_one_loops_margins(state: &mut AppState) {
         bode, nyquist,
         "both cards print the same margins the same way"
     );
-    let [phase, gain] = bode.as_slice() else {
-        panic!("a phase margin and a gain margin: {bode:?}");
+    let [phase, unity_at, gain, inversion_at] = bode.as_slice() else {
+        panic!("each margin and its frequency: {bode:?}");
     };
+    let (phase, unity_at, gain, inversion_at) = (&phase.1, &unity_at.1, &gain.1, &inversion_at.1);
     let leading = |text: &str| -> f64 {
         text.split(' ')
             .next()
@@ -160,9 +174,21 @@ fn assert_one_loops_margins(state: &mut AppState) {
     let phase_margin = 180.0 - 3.0 * unity.atan().to_degrees();
     let gain_margin = 20.0 * 2f64.log10();
     assert!(
-        phase.contains(" \u{b0} at ") && gain.contains(" dB at "),
+        phase.ends_with(" \u{b0}")
+            && gain.ends_with(" dB")
+            && unity_at.ends_with(" kHz")
+            && inversion_at.ends_with(" kHz"),
         "{bode:?}"
     );
+    // The crossovers sit at x = unity and x = √3 of the 1 kHz pole; the
+    // interpolant that finds the margins finds where they are read, within a
+    // tenth of a percent at five points a decade.
+    for (text, closed_form) in [(unity_at, unity), (inversion_at, 3f64.sqrt())] {
+        assert!(
+            (leading(text) / closed_form - 1.0).abs() <= 1.0e-3,
+            "{text} against {closed_form} kHz"
+        );
+    }
     assert!(
         (leading(phase) - phase_margin).abs() <= rspice_results::nyquist::MARGIN_ERROR_DEGREES,
         "{phase} against {phase_margin}"

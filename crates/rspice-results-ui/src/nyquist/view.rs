@@ -434,10 +434,7 @@ pub fn right_panel(
         return;
     };
 
-    let margin = |margin: Option<NyquistMargin>, render: &dyn Fn(NyquistMargin) -> String| {
-        margin.map_or_else(|| "—".to_owned(), render)
-    };
-    let rows = [
+    let mut rows = vec![
         (
             "Encirclements N (CW)",
             encirclement_row(s.encirclements),
@@ -451,31 +448,20 @@ pub fn right_panel(
             ),
             false,
         ),
-        (
-            "Phase margin",
-            margin(s.phase_margin, &|margin| {
-                crate::bode::margins::phase_margin(
-                    margin.value,
-                    margin.frequency,
-                    quantity_policy,
-                    significant_digits,
-                )
-            }),
-            true,
-        ),
-        (
-            "Gain margin",
-            margin(s.gain_margin, &|margin| {
-                crate::bode::margins::gain_margin(
-                    20.0 * margin.value.log10(),
-                    margin.frequency,
-                    quantity_policy,
-                    significant_digits,
-                )
-            }),
-            true,
-        ),
     ];
+    // The gain margin is a factor here; both cards print it in decibels.
+    rows.extend(crate::bode::margins::rows(
+        s.phase_margin.map(|margin| crate::bode::margins::Margin {
+            value: margin.value,
+            hertz: margin.frequency,
+        }),
+        s.gain_margin.map(|margin| crate::bode::margins::Margin {
+            value: 20.0 * margin.value.log10(),
+            hertz: margin.frequency,
+        }),
+        quantity_policy,
+        significant_digits,
+    ));
     crate::presentation::stat_table(ui, &rows);
 
     // The fold, before the criterion. This sheet is the one that carries the

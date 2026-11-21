@@ -15,7 +15,7 @@ use rspice_ui_kit::{
     tokens::Tokens,
     widgets::{
         SegmentedWidth, segmented,
-        table::{Cell, Column, DataTable, SortKey},
+        table::{Align, Cell, Column, DataTable, SortKey},
     },
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -137,6 +137,9 @@ fn accessible_root_inventory(data: &PoleZeroData) -> String {
         .join("; ")
 }
 
+/// The dominant pole as a frequency: a real one signed by its half-plane, a
+/// pair by its natural frequency, whose damping reads on the row after. The
+/// table holds its σ and jω.
 fn format_dominant_pole(
     root: &ComplexRoot,
     quantity_policy: &QuantityPresentationPolicy,
@@ -145,10 +148,10 @@ fn format_dominant_pole(
     if root.is_real() {
         real_root_text(root, quantity_policy, significant_digits)
     } else {
-        format!(
-            "σ {} · jω {}",
-            fmt_si_significant(root.real, "rad/s", significant_digits),
-            fmt_si_significant(root.imag, "rad/s", significant_digits)
+        frequency_readout(
+            quantity_policy,
+            root.natural_frequency() / std::f64::consts::TAU,
+            significant_digits,
         )
     }
 }
@@ -192,14 +195,23 @@ fn root_names(data: &PoleZeroData) -> Vec<String> {
 
 /// The root table's columns: σ and jω in rad/s as the s-plane measures
 /// them, f₀ in Hz, and ζ and Q of a root off the real axis.
+/// The root column's width.
+const ROOT_NAME_WIDTH: f32 = 56.0;
+/// Each figure column's least width: a signed seven-digit value in krad/s.
+const ROOT_FIGURE_WIDTH: f32 = 128.0;
+
+/// The name, then five figure columns of one width that share what the
+/// sheet leaves, so no column takes the spare and none is narrower than its
+/// widest value.
 fn root_columns() -> [Column; 6] {
+    let figure = |head: &str| Column::name(head, ROOT_FIGURE_WIDTH).align(Align::Right);
     [
-        Column::words("Root", 56.0),
-        Column::number("σ", 116.0),
-        Column::number("jω", 116.0),
-        Column::number("f₀", 100.0),
-        Column::number("ζ", 76.0),
-        Column::number("Q", 92.0),
+        Column::words("Root", ROOT_NAME_WIDTH),
+        figure("σ"),
+        figure("jω"),
+        figure("f₀"),
+        figure("ζ"),
+        figure("Q"),
     ]
 }
 
@@ -295,9 +307,9 @@ fn root_card_rows(
     rows
 }
 
-/// The least width beside the square map the root table takes; on a
-/// narrower sheet the table goes under the map.
-const TABLE_BESIDE_MIN_WIDTH: f32 = 540.0;
+/// The least width beside the square map the root table takes, every
+/// column at its least; on a narrower sheet the table goes under the map.
+const TABLE_BESIDE_MIN_WIDTH: f32 = ROOT_NAME_WIDTH + 5.0 * ROOT_FIGURE_WIDTH;
 /// The share of a narrow sheet's height the map takes above the table.
 const MAP_SHARE_ABOVE_TABLE: f32 = 0.58;
 
@@ -609,6 +621,13 @@ pub fn right_panel(
             format_dominant_pole(root, quantity_policy, digits),
             false,
         ));
+        if !root.is_real() {
+            summary_rows.push((
+                "Dominant ζ",
+                fmt_si_significant(root.damping_ratio(), "", digits),
+                false,
+            ));
+        }
     }
     if let Some(q) = summary.worst_q {
         summary_rows.push(("Worst Q", q_text(q, digits), false));
@@ -760,10 +779,8 @@ mod tests {
         let real = ComplexRoot::pole(-std::f64::consts::TAU * 1_234.567, 0.0);
         assert_eq!(format_dominant_pole(&real, &policy, 4), "−1.235 kHz");
         assert_eq!(format_dominant_pole(&real, &policy, 6), "−1.23457 kHz");
-        let complex = ComplexRoot::pole(-1_234.567, 98_765.43);
-        assert_eq!(
-            format_dominant_pole(&complex, &policy, 4),
-            "σ \u{2212}1.235 krad/s · jω 98.77 krad/s"
-        );
+        let natural = std::f64::consts::TAU * 15_915.49;
+        let complex = ComplexRoot::pole(-0.05 * natural, natural * 0.9975f64.sqrt());
+        assert_eq!(format_dominant_pole(&complex, &policy, 4), "15.92 kHz");
     }
 }
