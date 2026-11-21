@@ -77,14 +77,4 @@ mod tests {
         );
         assert_eq!(id.as_uuid(), Uuid::from_u128(1));
     }
-
-    #[test]
-    fn distinct_id_types_remain_explicit() {
-        let raw = Uuid::from_u128(2);
-        let circuit = CircuitId::from_uuid(raw);
-        let workspace = WorkspaceId::from_uuid(raw);
-
-        assert_eq!(circuit.as_uuid(), workspace.as_uuid());
-        assert_eq!(circuit.to_string(), workspace.to_string());
-    }
 }

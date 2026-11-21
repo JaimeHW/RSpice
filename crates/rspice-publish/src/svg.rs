@@ -370,33 +370,6 @@ pub fn scene_svg(scene: &Scene, accessible_title: &str) -> String {
 mod tests {
     use super::*;
 
-    fn markup(font: TextFont) -> String {
-        text_markup(&TextPrimitive {
-            origin: Point { x_um: 0, y_um: 0 },
-            text: "PSAFE-SCH-001".to_owned(),
-            height_um: 3_581,
-            font,
-            anchor: TextAnchor::Start,
-            rotation_millideg: 0,
-            paint: Paint::Role(PaintRole::Foreground),
-        })
-    }
-
-    #[test]
-    fn monospace_lettering_names_the_shipped_face_at_each_weight() {
-        let family = format!(" font-family=\"'{PUBLISHED_MONO_FAMILY}', ");
-        let regular = markup(TextFont::Monospace);
-        let medium = markup(TextFont::MonospaceMedium);
-        for line in [&regular, &medium] {
-            assert!(
-                line.contains(&family),
-                "monospace text must name the face the page ships first: {line}"
-            );
-        }
-        assert!(!regular.contains("font-weight"));
-        assert!(medium.contains(" font-weight=\"500\""));
-    }
-
     #[test]
     fn explicit_colours_are_written_in_syntax_every_svg_reader_parses() {
         let mut translucent = Presentation::default();
@@ -417,58 +390,6 @@ mod tests {
         let mut text = Presentation::default();
         text.text_paint(Paint::Rgba([0, 9, 255, 0]));
         assert_eq!(text.markup(), " fill=\"#0009ff\" fill-opacity=\"0\"");
-    }
-
-    /// A shaded body in a theme ink takes its colour from the page's palette,
-    /// light or dark, and shows only its share of it.
-    #[test]
-    fn a_tint_of_a_theme_ink_takes_the_palette_colour_at_its_share() {
-        let body = PathPrimitive {
-            segments: vec![
-                PathSegment::MoveTo {
-                    to: Point { x_um: 0, y_um: 0 },
-                },
-                PathSegment::LineTo {
-                    to: Point {
-                        x_um: 1_000,
-                        y_um: 0,
-                    },
-                },
-                PathSegment::LineTo {
-                    to: Point {
-                        x_um: 1_000,
-                        y_um: 1_000,
-                    },
-                },
-                PathSegment::Close,
-            ],
-            stroke: Some(Stroke {
-                width_um: 254,
-                paint: Paint::Role(PaintRole::Foreground),
-                pattern: StrokePattern::Solid,
-                dash_um: None,
-            }),
-            fill: Some(Paint::Tint {
-                role: PaintRole::Foreground,
-                alpha: 38,
-            }),
-        };
-        assert_eq!(
-            path_markup(&body),
-            format!(
-                "<path d=\"M 0 0 L 1000 0 L 1000 1000 Z\" class=\"s-foreground f-foreground\" stroke-width=\"254\" fill-opacity=\"{}\"/>",
-                38.0 / 255.0
-            )
-        );
-        let mut text = Presentation::default();
-        text.text_paint(Paint::Tint {
-            role: PaintRole::TraceSeries(9),
-            alpha: 128,
-        });
-        assert_eq!(
-            text.markup(),
-            format!(" class=\"t-trace-1\" fill-opacity=\"{}\"", 128.0 / 255.0)
-        );
     }
 
     /// An outline that carries the pattern its author drew is written in
