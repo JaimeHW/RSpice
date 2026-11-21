@@ -1834,6 +1834,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("state/schematic.rs", "transform_preview_memo"),
             ("state/simulation.rs", "run_reader"),
             ("state/simulation.rs", "run_store"),
+            ("state/simulation/run_store.rs", "browser"),
             ("state/stimulus_library.rs", "fixtures"),
             ("time_compat.rs", "tests"),
             ("workbench/app_state/diagnostic_store.rs", "digest_memo"),
