@@ -309,6 +309,12 @@ impl rspice_results::waveform::ColumnSource for CountedColumn {
         self.digest.map(|digest| (digest, self.index))
     }
 
+    /// A store that states its own digest states each column's too, as a complete segment does.
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        self.digest
+            .map(|_| rspice_results_store::ColumnDigest::of(&self.values).0)
+    }
+
     fn tile(
         &self,
         rows: std::ops::Range<u64>,
