@@ -116,7 +116,7 @@ const fn arg(
 }
 
 use ArgumentDefault::{Derived, Literal, Required, SameAs};
-use ArgumentKind::{AxisFrequency, AxisPoint, Choice, Level, Number, Signal};
+use ArgumentKind::{AxisPoint, Choice, Level, Number, Signal};
 
 const EDGES: &[&str] = &["rising", "falling", "either"];
 const SIGNAL: ArgumentSpec = arg("Signal", "x", Signal, Required);
@@ -153,6 +153,7 @@ const EDGE_ARGUMENTS: [ArgumentSpec; 6] = edge_arguments("first sample", "last s
 /// `(x, from, to, n, f0, harmonics)`, which the spectral scalars share,
 /// the first five in the order of ViVA's `thd`: the record is n samples from
 /// the window's start up to its stop.
+#[cfg(feature = "engine-evidence")]
 const SPECTRUM_ARGUMENTS: [ArgumentSpec; 6] = [
     SIGNAL,
     arg(
@@ -166,7 +167,7 @@ const SPECTRUM_ARGUMENTS: [ArgumentSpec; 6] = [
     arg(
         "Fundamental",
         "f0",
-        AxisFrequency,
+        ArgumentKind::AxisFrequency,
         Derived("the largest tone"),
     ),
     arg("Harmonics", "harmonics", Number, Literal("10")),
@@ -575,6 +576,8 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
                       180° plus its phase where its gain crosses 0 dB.",
         arguments: &[arg("Loop gain", "loop", Signal, Required)],
     },
+    // The spectral scalars run the FFT pipeline, which only engine evidence builds.
+    #[cfg(feature = "engine-evidence")]
     MeasureSpec {
         name: "thd",
         aliases: &[],
@@ -585,6 +588,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
                       period. The fundamental is the largest tone; a stated one must be it.",
         arguments: &SPECTRUM_ARGUMENTS,
     },
+    #[cfg(feature = "engine-evidence")]
     MeasureSpec {
         name: "snr",
         aliases: &[],
@@ -594,6 +598,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
                       as the FFT sheet reads it.",
         arguments: &SPECTRUM_ARGUMENTS,
     },
+    #[cfg(feature = "engine-evidence")]
     MeasureSpec {
         name: "sinad",
         aliases: &[],
@@ -603,6 +608,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
                       dB, as the FFT sheet reads it.",
         arguments: &SPECTRUM_ARGUMENTS,
     },
+    #[cfg(feature = "engine-evidence")]
     MeasureSpec {
         name: "sfdr",
         aliases: &[],
@@ -612,6 +618,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
                       as the FFT sheet reads it.",
         arguments: &SPECTRUM_ARGUMENTS,
     },
+    #[cfg(feature = "engine-evidence")]
     MeasureSpec {
         name: "enob",
         aliases: &[],

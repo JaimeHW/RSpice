@@ -17,6 +17,8 @@ mod measures;
 pub mod parser;
 pub mod retained;
 mod series;
+// The spectral scalars run the FFT pipeline, which only engine evidence builds.
+#[cfg(feature = "engine-evidence")]
 mod spectral;
 #[cfg(feature = "engine-evidence")]
 pub mod spice_parser;
