@@ -59,6 +59,8 @@ pub(super) struct WindowWire {
     lead: Option<LeadReference>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     ascending: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    column_digest: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -117,6 +119,7 @@ impl WindowWire {
             rows: self.rows,
             lead: self.lead,
             ascending: self.ascending,
+            column_digest: self.column_digest,
         };
         (reference, self.held)
     }
@@ -132,6 +135,7 @@ impl From<ColumnReference> for WindowWire {
             rows: reference.rows,
             lead: reference.lead,
             ascending: reference.ascending,
+            column_digest: reference.column_digest,
             held: None,
         }
     }
@@ -172,6 +176,7 @@ pub(super) fn carried_values(
             format!("column {}", reference.column)
         },
         identity: (digest.0, reference.column),
+        column_digest: reference.stated_column_digest()?,
         rows: reference.column_rows,
         from,
         ascending: axis
@@ -188,6 +193,8 @@ struct CarriedColumn {
     name: String,
     store: String,
     identity: ([u8; 32], u64),
+    /// The digest of the column the rows were read from, as its store stated it.
+    column_digest: Option<[u8; 32]>,
     rows: u64,
     /// The column row the first carried row is.
     from: u64,
@@ -231,5 +238,9 @@ impl ColumnSource for CarriedColumn {
 
     fn identity(&self) -> Option<([u8; 32], u64)> {
         Some(self.identity)
+    }
+
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        self.column_digest
     }
 }

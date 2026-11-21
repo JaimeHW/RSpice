@@ -210,7 +210,7 @@ fn every_typed_payload_digests_under_its_own_tag() {
 }
 
 /// A stored column or event signal in memory that counts its reads; `identity` is what its store
-/// states of it.
+/// states of it, and a store that states it states the column's digest too.
 struct Held {
     values: Vec<f64>,
     identity: Option<([u8; 32], u64)>,
@@ -264,6 +264,11 @@ impl crate::waveform::ColumnSource for Held {
     fn identity(&self) -> Option<([u8; 32], u64)> {
         self.identity
     }
+
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        self.identity
+            .map(|_| rspice_results_store::ColumnDigest::of(&self.values).0)
+    }
 }
 
 impl crate::events::points::EventHistorySource for Held {
@@ -310,9 +315,11 @@ impl crate::events::points::EventHistorySource for Held {
 }
 
 /// Opening a stored run digests it to bind its views: a digest that read every row would read
-/// the whole run before its first paint. A stored window or event history whose store states its
-/// digest is identified by the store, its column or signal and its window, and reads nothing; one
-/// whose store states none (a run recovered without its end) digests as its values in memory do.
+/// the whole run before its first paint. A stored window whose store states its column's digest
+/// is identified by that digest and its window, and reads nothing; a whole stored column digests
+/// as the same column held in memory does; one whose store states no digest (a run recovered
+/// without its end) digests as its values in memory do. A stored event history is identified by
+/// its store, its signal and the time it starts from.
 #[test]
 fn a_stored_result_is_identified_by_its_store_without_reading_it() {
     use crate::events::points::EventPoints;
@@ -353,16 +360,31 @@ fn a_stored_result_is_identified_by_its_store_without_reading_it() {
         WaveformValues::stored(column.clone(), window(1, 3, WindowLead::Value(0.5))),
         WaveformValues::stored(column.clone(), window(1, 3, WindowLead::Interpolated(0.5))),
         WaveformValues::stored(
-            Held::new(&samples, Some(([7; 32], 2))),
-            window(1, 3, WindowLead::None),
-        ),
-        WaveformValues::stored(
-            Held::new(&samples, Some(([8; 32], 1))),
+            Held::new(&[0.0, 1.0, 2.0, 3.0, 4.5], Some(([7; 32], 1))),
             window(1, 3, WindowLead::None),
         ),
     ] {
         assert_ne!(values(&other.unwrap()).1, identified);
     }
+    // The same column in another store, or as another of its columns, is the same samples.
+    assert_eq!(
+        values(
+            &WaveformValues::stored(
+                Held::new(&samples, Some(([8; 32], 2))),
+                window(1, 3, WindowLead::None),
+            )
+            .unwrap()
+        )
+        .1,
+        identified
+    );
+    assert_eq!(column.reads(), 0);
+    // A whole stored column digests as the column held in memory does.
+    let whole = WaveformValues::stored(column.clone(), window(0, 5, WindowLead::None)).unwrap();
+    assert_eq!(
+        values(&whole),
+        values(&WaveformValues::from(samples.to_vec()))
+    );
     assert_eq!(column.reads(), 0);
     let unstated =
         WaveformValues::stored(Held::new(&samples, None), window(1, 3, WindowLead::None)).unwrap();

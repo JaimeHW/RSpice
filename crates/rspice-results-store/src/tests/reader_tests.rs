@@ -5,7 +5,8 @@ use std::io;
 use super::support::{meta, mixed_schema, rows, u64_at, walk};
 use crate::format::{FRAME_HEADER_LEN, FrameKind, POINTERS_AT};
 use crate::{
-    MemoryIo, RunStatus, SegmentIo, SegmentReader, SegmentState, SegmentWriter, StopReason,
+    ColumnDigest, MemoryIo, RunStatus, SegmentIo, SegmentReader, SegmentState, SegmentWriter,
+    StopReason,
 };
 
 /// A segment I/O that logs every mutation, so a test can rebuild the bytes a crash at any point
@@ -394,4 +395,31 @@ fn a_complete_segment_opens_from_end_whatever_its_length() {
 fn foreign_bytes_are_refused() {
     assert!(SegmentReader::open(MemoryIo::from_bytes(vec![0; 10])).is_err());
     assert!(SegmentReader::open(MemoryIo::from_bytes(vec![0; 200])).is_err());
+}
+
+/// A result digests a stored column by the digest its segment states, without reading a row: it
+/// must be the digest the same column held in memory has, whatever chunks the run was cut into.
+#[test]
+fn every_column_states_the_digest_its_rows_have_in_memory() {
+    let schema = mixed_schema();
+    let slots = schema.slots();
+    let (x, values) = rows(3000, slots, 5);
+    let column =
+        |slot: usize| -> Vec<f64> { values.iter().skip(slot).step_by(slots).copied().collect() };
+    for chunk_rows in [64, 1024] {
+        let mut writer =
+            SegmentWriter::with_chunk_rows(MemoryIo::new(), &schema, &meta(), chunk_rows).unwrap();
+        writer.push_rows(&x, &values).unwrap();
+        let (_, io) = writer.finish(RunStatus::Completed).unwrap();
+        let reader = SegmentReader::open(io).unwrap();
+        assert_eq!(reader.column_digest(0), Some(ColumnDigest::of(&x)));
+        for slot in 0..slots {
+            assert_eq!(
+                reader.column_digest(slot + 1),
+                Some(ColumnDigest::of(&column(slot))),
+                "slot {slot} in chunks of {chunk_rows}"
+            );
+        }
+        assert_eq!(reader.column_digest(slots + 1), None);
+    }
 }

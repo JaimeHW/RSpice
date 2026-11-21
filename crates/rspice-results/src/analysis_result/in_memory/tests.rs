@@ -84,6 +84,10 @@ impl ColumnSource for Store {
     fn identity(&self) -> Option<([u8; 32], u64)> {
         Some(([3; 32], self.index))
     }
+
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        Some(rspice_results_store::ColumnDigest::of(&self.values).0)
+    }
 }
 
 impl EventHistorySource for Store {
@@ -198,8 +202,9 @@ fn a_stored_result_read_into_memory_holds_the_same_samples_and_digests_as_them()
     assert_ne!(
         digest(&stored),
         digest(&memory),
-        "a stored result digests by its store's identity"
+        "a window of a stored column digests by its column's digest and the window"
     );
+    assert_eq!(time.reads(), 0, "the digest read no row");
 
     stored.read_stored_into_memory().unwrap();
 

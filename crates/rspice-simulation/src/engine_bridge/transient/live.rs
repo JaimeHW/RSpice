@@ -215,6 +215,14 @@ impl ColumnSource for LiveColumn {
         Some((digest, index))
     }
 
+    /// A stand-in unique to this opening and column: a running transient's column has no digest
+    /// until its run ends, and digesting the rows it holds so far would read them.
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        let (mut digest, index) = self.identity()?;
+        digest[20..28].copy_from_slice(&index.to_le_bytes());
+        Some(digest)
+    }
+
     fn tile(
         &self,
         rows: Range<u64>,

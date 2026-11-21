@@ -84,6 +84,11 @@ pub struct ColumnReference {
     /// of its run's axis while the segment waits for its first check.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ascending: bool,
+    /// The digest of the whole column ([`rspice_results_store::ColumnDigest`]), as its store
+    /// stated it: the result keeps its identity where the segment is missing or still being
+    /// checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column_digest: Option<String>,
 }
 
 impl ColumnReference {
@@ -104,7 +109,18 @@ impl ColumnReference {
                 WindowLead::Interpolated(fraction) => Some(LeadReference::Interpolated(fraction)),
             },
             ascending: source.ascending(),
+            column_digest: source
+                .column_digest()
+                .map(|digest| Digest(digest).to_string()),
         })
+    }
+
+    /// The column digest the reference states.
+    pub fn stated_column_digest(&self) -> Result<Option<[u8; 32]>, String> {
+        self.column_digest
+            .as_deref()
+            .map(|hex| digest_of(hex).map(|digest| digest.0))
+            .transpose()
     }
 
     /// The window, read from the kept segment it names, or showing as unavailable where no
@@ -121,6 +137,7 @@ impl ColumnReference {
                 Some(LeadReference::Interpolated(fraction)) => WindowLead::Interpolated(fraction),
             },
         };
+        let column_digest = self.stated_column_digest()?;
         let source: Arc<dyn ColumnSource> = match kept_segment(digest) {
             Some(segment) => segment_column(segment, digest, self.column, self.column_rows)?,
             None if super::checking(digest.0) => CheckingColumn::new(
@@ -128,12 +145,14 @@ impl ColumnReference {
                 self.column,
                 self.column_rows,
                 self.ascending,
+                column_digest,
                 format!("column {} of a results store being checked", self.column),
             ),
-            None => MissingSegment::new(
+            None => MissingSegment::column(
                 digest,
                 self.column,
                 self.column_rows,
+                column_digest,
                 format!("column {} of a missing results store", self.column),
             ),
         };

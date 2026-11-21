@@ -162,6 +162,11 @@ impl ColumnSource for SegmentColumn {
         identity(&self.segment, self.slot)
     }
 
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        let column = self.slot.map_or(Some(0), |slot| slot.checked_add(1))?;
+        Some(self.segment.reader().column_digest(column)?.0)
+    }
+
     fn tile(
         &self,
         rows: Range<u64>,
@@ -252,6 +257,8 @@ pub struct MissingSegment {
     index: u64,
     /// The rows of a column, or the changes of a signal, the saved result stated.
     len: u64,
+    /// A column's digest, as the saved result stated it.
+    column_digest: Option<[u8; 32]>,
     name: String,
 }
 
@@ -261,6 +268,24 @@ impl MissingSegment {
             digest,
             index,
             len,
+            column_digest: None,
+            name,
+        })
+    }
+
+    /// A column of a missing segment, keeping the column digest its result was saved with.
+    pub fn column(
+        digest: Digest,
+        column: u64,
+        rows: u64,
+        column_digest: Option<[u8; 32]>,
+        name: String,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            digest,
+            index: column,
+            len: rows,
+            column_digest,
             name,
         })
     }
@@ -326,6 +351,10 @@ impl ColumnSource for MissingSegment {
 
     fn identity(&self) -> Option<([u8; 32], u64)> {
         Some((self.digest.0, self.index))
+    }
+
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        self.column_digest
     }
 }
 

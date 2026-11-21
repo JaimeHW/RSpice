@@ -17,7 +17,7 @@
 //! may name an index that never reached the disk, or an index that did while frames it names did
 //! not: the reader finds either by its CRC and keeps the prefix before it.
 
-use crate::digest::{Digest, LogicalDigest};
+use crate::digest::{Digest, HASH_STATE_LEN, LogicalDigest};
 
 mod reopen;
 use crate::events::{EventBuffer, EventChange, EventKind, EventScratch};
@@ -367,7 +367,8 @@ impl<I: SegmentIo> Encoder<I> {
             + BLOCK_ENTRY_LEN * (layout.slots + 1)
             + summary_crcs_len(layout.analog.len())
             + 16 * buckets * (layout.analog.len() + 1)
-            + block_bytes * (layout.slots + 1);
+            + block_bytes * (layout.slots + 1)
+            + HASH_STATE_LEN * (layout.slots + 2);
         Self {
             frame: FrameBuf::with_capacity(chunk_frame),
             columns: vec![0.0; layout.slots * column_stride(chunk_rows)],
@@ -393,7 +394,7 @@ impl<I: SegmentIo> Encoder<I> {
                 .collect(),
             event_scratch: EventScratch::new(compress),
             compress,
-            digest: LogicalDigest::new(layout.events.iter().map(|&(id, _)| id)),
+            digest: LogicalDigest::new(layout.slots, layout.events.iter().map(|&(id, _)| id)),
             provisional: Vec::new(),
             layout,
             io,
@@ -590,12 +591,16 @@ impl<I: SegmentIo> Encoder<I> {
         }
         let chunk_index = self.next_chunk;
         let (x_min, x_max) = self.encode_chunk(batch, chunk_index, 0);
-        // The frame ends with the digest's row stream and summary stream after this chunk, which
-        // a reopened segment continues from. A chunk the segment does not keep leaves the streams
-        // as they were.
+        // The frame ends with each column digest's state after this chunk, the run's x first,
+        // then the summary stream's, which a reopened segment continues from. A chunk the segment
+        // does not keep leaves the digests as they were.
         let mark = (self.digest.rows_mark(), self.digest.summaries_mark());
-        self.digest
-            .rows(&batch.x, &batch.values, self.layout.slots, batch.rows);
+        let stride = column_stride(self.layout.chunk_rows);
+        let columns = &self.columns;
+        self.digest.chunk(
+            &batch.x[..batch.rows],
+            (0..self.layout.slots).map(|slot| &columns[slot * stride..slot * stride + batch.rows]),
+        );
         let analog = self.layout.analog.len();
         let region = chunk_summaries_at(self.layout.slots + 1, analog);
         let region_len = 16 * batch.rows.div_ceil(LEVEL1_ROWS) * (1 + analog);
@@ -603,9 +608,10 @@ impl<I: SegmentIo> Encoder<I> {
             &self.frame.payload()[region..region + region_len],
             1 + analog,
         );
-        let rows_state = self.digest.rows_state();
+        for state in self.digest.column_states() {
+            self.frame.put(&state);
+        }
         let summaries_state = self.digest.summaries_state();
-        self.frame.put(&rows_state);
         self.frame.put(&summaries_state);
         let offset = match self.emit_real() {
             Ok(offset) => offset,
@@ -836,8 +842,9 @@ impl<I: SegmentIo> Encoder<I> {
         if !self.entries.is_empty() || self.last_index.is_none() {
             self.write_index()?;
         }
-        let digest = std::mem::replace(&mut self.digest, LogicalDigest::new(std::iter::empty()))
-            .finish(&self.layout.schema_bytes);
+        let (digest, columns) =
+            std::mem::replace(&mut self.digest, LogicalDigest::new(0, std::iter::empty()))
+                .finish(&self.layout.schema_bytes);
         let (code, reason, message) = status.encode();
         self.frame.begin(FrameKind::End, 0);
         self.frame.put_u8(code);
@@ -849,6 +856,10 @@ impl<I: SegmentIo> Encoder<I> {
         self.frame.put_u64(self.next_chunk);
         self.frame.put_u64(self.last_index.unwrap_or(u64::MAX));
         self.frame.put(&digest.0);
+        self.frame.put_u32(columns.len() as u32);
+        for column in &columns {
+            self.frame.put(&column.0);
+        }
         self.frame.put_u32(self.events.len() as u32);
         for buffer in &self.events {
             self.frame.put_u32(buffer.signal);

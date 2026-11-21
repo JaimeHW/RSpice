@@ -398,6 +398,7 @@ fn kept_unchecked_transient(
             rows,
             lead: None,
             ascending: column == 0,
+            column_digest: None,
         };
         opening_unchecked(|| reference.values()).expect("the window names its segment")
     };

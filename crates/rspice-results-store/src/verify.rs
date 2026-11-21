@@ -155,16 +155,31 @@ fn held_digest(
             )
         })));
     };
-    let held = match reader.digest_with(progress) {
+    let (held, columns) = match reader.held_digests(progress) {
         Ok(held) => held?,
         Err(error) => return Some(Err(error)),
     };
-    Some(if held == recorded {
-        Ok(held)
-    } else {
-        Err(StoreError::DigestMismatch {
+    if held != recorded {
+        return Some(Err(StoreError::DigestMismatch {
             expected: recorded,
             held,
-        })
-    })
+        }));
+    }
+    // The column digests `END` states are what a result's identity reads without the rows: each
+    // must be the one its rows hash to.
+    let stated = reader.stated_column_digests();
+    if stated.len() != columns.len() {
+        return Some(Err(StoreError::corrupt(
+            POINTERS_AT + 16,
+            "the segment's END states a column digest for a different number of columns",
+        )));
+    }
+    if let Some((&expected, &held)) = stated
+        .iter()
+        .zip(&columns)
+        .find(|(stated, held)| stated != held)
+    {
+        return Some(Err(StoreError::DigestMismatch { expected, held }));
+    }
+    Some(Ok(held))
 }

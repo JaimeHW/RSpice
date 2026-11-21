@@ -68,6 +68,8 @@ pub struct StoreReader {
     /// The analog signal each value slot begins, by slot.
     slot_signals: Vec<Option<usize>>,
     digest: Option<Digest>,
+    /// Each column's digest as the segment's `END` states it, the run's x first.
+    column_digests: Vec<Digest>,
 }
 
 impl StoreReader {
@@ -98,12 +100,16 @@ impl StoreReader {
             SegmentState::Complete { digest, .. } => Some(*digest),
             SegmentState::Recovered => None,
         };
+        let column_digests = (0..=reader.slots())
+            .map_while(|column| reader.column_digest(column))
+            .collect();
         Self {
             id: NEXT_READER.fetch_add(1, Ordering::Relaxed),
             rows: reader.rows(),
             spans: reader.chunk_spans().collect(),
             slot_signals,
             digest,
+            column_digests,
             reader: Mutex::new(Some(reader)),
         }
     }
@@ -116,6 +122,12 @@ impl StoreReader {
     /// The logical digest its run's `END` gave; none for a segment recovered without one.
     pub fn digest(&self) -> Option<Digest> {
         self.digest
+    }
+
+    /// The digest of column `column` (0 the run's x, else its value slot plus one) as the
+    /// segment states it; `None` for a segment recovered without its end.
+    pub fn column_digest(&self, column: usize) -> Option<Digest> {
+        self.column_digests.get(column).copied()
     }
 
     /// The segment's columns.

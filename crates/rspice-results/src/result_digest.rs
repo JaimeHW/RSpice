@@ -5,6 +5,10 @@
 //! excluded: a color, visibility, or display-cache change does not create a
 //! different source dataset. Authoritative f64/complex128 values are encoded
 //! in IEEE-754 binary64 form after normalizing signed zero and NaN payloads.
+//! A waveform's samples are identified by the digest of the column they are a
+//! window of, as a results store digests a column, with the window: the same
+//! samples digest the same held in memory or stored, and a stored run digests
+//! without reading a row.
 
 use crate::analysis_payload::AnalysisResultPayload;
 use crate::analysis_type::AnalysisType;
@@ -54,15 +58,26 @@ const RESULT_DIGEST_MAGIC: &[u8] = b"RSPICE-RESULT-DATA";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ResultDigestEncoding {
-    V17 = 17,
+    V18 = 18,
 }
 
 impl ResultDigestEncoding {
     /// Encoding used for newly retained results and datasets.
-    pub const CURRENT: Self = Self::V17;
+    pub const CURRENT: Self = Self::V18;
 }
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
+
+/// `value`'s binary64 bits with signed zero and NaN payloads normalized.
+fn canonical_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0
+    } else if value.is_nan() {
+        CANONICAL_NAN_BITS
+    } else {
+        value.to_bits()
+    }
+}
 
 struct ResultDigestWriter {
     hasher: Sha256,
@@ -128,15 +143,8 @@ impl ResultDigestWriter {
 
     fn f64(&mut self, value: f64) {
         self.retained_bytes = self.retained_bytes.saturating_add(8);
-        let bits = if value == 0.0 {
-            0
-        } else if value.is_nan() {
-            CANONICAL_NAN_BITS
-        } else {
-            value.to_bits()
-        };
         self.raw(&[0x04]);
-        self.raw(&bits.to_be_bytes());
+        self.raw(&canonical_bits(value).to_be_bytes());
     }
 
     fn string(&mut self, value: &str) {
@@ -183,37 +191,38 @@ impl ResultDigestWriter {
         }
     }
 
-    /// A waveform's samples. A window of a stored column whose store states its digest is
-    /// identified by the store, the column and the window without reading a row: the store's
-    /// digest already covers every value it holds. Its rows still count as retained data.
+    /// A waveform's samples, by the digest of the column they are a window of and the window
+    /// ([`crate::waveform::WaveformValues::samples_identity`]): samples held in memory digest as
+    /// the same column stored does, and a window of a stored column whose store states the
+    /// column's digest reads no row. The samples count as retained data, and a stored window's
+    /// as held by its store.
     fn waveform_values(&mut self, values: &crate::waveform::WaveformValues) {
         use crate::waveform::WindowLead;
-        let Some((identity, window)) = values
-            .stored_window()
-            .and_then(|(source, window)| Some((source.identity()?, window)))
-        else {
-            // As `f64_slice` writes a slice, a block at a time.
-            self.sequence(values.len());
-            for value in values.samples(..) {
-                self.f64(value);
-            }
-            return;
-        };
-        self.stored_identity(identity);
-        self.u64(window.first);
-        self.u64(window.rows);
-        match window.lead {
-            WindowLead::None => self.u8(0),
+        let identity = values.samples_identity();
+        self.raw(&[0x0b]);
+        self.raw(&identity.column);
+        self.raw(&identity.column_rows.to_be_bytes());
+        self.raw(&identity.window.first.to_be_bytes());
+        self.raw(&identity.window.rows.to_be_bytes());
+        match identity.window.lead {
+            WindowLead::None => self.raw(&[0]),
             WindowLead::Value(value) => {
-                self.u8(1);
-                self.f64(value);
+                self.raw(&[1]);
+                self.raw(&canonical_bits(value).to_be_bytes());
             }
             WindowLead::Interpolated(fraction) => {
-                self.u8(2);
-                self.f64(fraction);
+                self.raw(&[2]);
+                self.raw(&canonical_bits(fraction).to_be_bytes());
             }
         }
-        self.held_values(values.len(), 8);
+        let bytes = u64::try_from(values.len())
+            .unwrap_or(u64::MAX)
+            .saturating_mul(8);
+        if values.is_stored() {
+            self.held_values(values.len(), 8);
+        } else {
+            self.retained_bytes = self.retained_bytes.saturating_add(bytes);
+        }
     }
 
     /// An event history's points, each written by `point`. A stored signal whose store states its
@@ -320,7 +329,7 @@ where
 
     fn result_data_writer(&self, version: ResultDigestEncoding) -> ResultDigestWriter {
         let domain = match version {
-            ResultDigestEncoding::V17 => "rspice.analysis-result-data/v17",
+            ResultDigestEncoding::V18 => "rspice.analysis-result-data/v18",
         };
         let mut writer = ResultDigestWriter::new(domain, version);
         writer.u8(analysis_type_tag(self.analysis_type));
@@ -647,7 +656,7 @@ where
     W: ExactSizeIterator<Item = &'a RetainedWaveform> + Clone,
 {
     let domain = match version {
-        ResultDigestEncoding::V17 => "rspice.simulation-dataset-data/v17",
+        ResultDigestEncoding::V18 => "rspice.simulation-dataset-data/v18",
     };
     let mut writer = ResultDigestWriter::new(domain, version);
     writer.sequence(analyses.len());

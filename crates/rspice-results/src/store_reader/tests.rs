@@ -194,8 +194,24 @@ fn a_saved_reference_reads_its_kept_segment_and_a_missing_one_names_its_file() {
         0.25,
     )
     .unwrap();
+    // The whole column stored has the identity the same column held in memory has.
+    let whole = WaveformValues::stored(
+        SegmentColumn::new(segment.clone(), Some(0), "v(a)".to_owned()),
+        StoredWindow {
+            first: 0,
+            rows: segment.rows(),
+            lead: WindowLead::None,
+        },
+    )
+    .unwrap();
+    let held = WaveformValues::from(whole.samples(..).collect::<Vec<_>>());
+    assert_eq!(whole.samples_identity(), held.samples_identity());
     let column = ColumnReference::of(&stored).unwrap();
     assert_eq!(column.segment, receipt.digest.to_string());
+    assert!(
+        column.column_digest.is_some(),
+        "a complete segment states its columns' digests"
+    );
     let written = writing_references(|| serde_json::to_string(&history).unwrap());
     assert!(written.contains(&receipt.digest.to_string()), "{written}");
     assert_eq!(
@@ -255,6 +271,8 @@ fn a_saved_reference_reads_its_kept_segment_and_a_missing_one_names_its_file() {
         missing.stored_window().unwrap().0.identity(),
         Some(([0; 32], column.column))
     );
+    // A result whose segment went missing keeps the identity its samples had.
+    assert_eq!(missing.samples_identity(), stored.samples_identity());
     std::fs::remove_dir_all(&root).unwrap();
 }
 

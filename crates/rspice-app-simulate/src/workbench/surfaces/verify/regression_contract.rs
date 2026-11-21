@@ -510,7 +510,7 @@ pub(super) fn regression_content_digest(
     run: &crate::state::SimulationRun,
 ) -> crate::product::ContentDigest {
     let mut digest = Sha256::new();
-    digest.update(b"rspice-regression-result-content-v1\0");
+    digest.update(b"rspice-regression-result-content-v2\0");
     digest.update((run.analyses.len() as u64).to_le_bytes());
     for analysis in &run.analyses {
         digest.update(analysis.id.to_le_bytes());
@@ -542,32 +542,43 @@ pub(super) fn regression_content_digest(
         digest.update((analysis.waveforms.len() as u64).to_le_bytes());
         for waveform in &analysis.waveforms {
             digest_text(&mut digest, &waveform.name);
-            digest.update((waveform.x.len() as u64).to_le_bytes());
-            for value in waveform.x.samples(..) {
-                digest.update(value.to_bits().to_le_bytes());
-            }
-            digest.update((waveform.y.len() as u64).to_le_bytes());
-            for value in waveform.y.samples(..) {
-                digest.update(value.to_bits().to_le_bytes());
-            }
+            digest_samples(&mut digest, &waveform.x);
+            digest_samples(&mut digest, &waveform.y);
             match &waveform.complex {
                 Some(complex) => {
                     digest.update([1]);
                     digest_text(&mut digest, &complex.source_name);
-                    digest.update((complex.real.len() as u64).to_le_bytes());
-                    for value in complex.real.samples(..) {
-                        digest.update(value.to_bits().to_le_bytes());
-                    }
-                    digest.update((complex.imag.len() as u64).to_le_bytes());
-                    for value in complex.imag.samples(..) {
-                        digest.update(value.to_bits().to_le_bytes());
-                    }
+                    digest_samples(&mut digest, &complex.real);
+                    digest_samples(&mut digest, &complex.imag);
                 }
                 None => digest.update([0]),
             }
         }
     }
     crate::product::ContentDigest::from_bytes(digest.finalize().into())
+}
+
+/// A waveform's samples, by the digest of the column they are a window of and the window: the
+/// same samples digest the same held in memory or stored, and a stored run is digested without
+/// reading its rows on the frame.
+fn digest_samples(digest: &mut Sha256, values: &rspice_results::waveform::WaveformValues) {
+    use rspice_results::waveform::WindowLead;
+    let identity = values.samples_identity();
+    digest.update(identity.column);
+    digest.update(identity.column_rows.to_le_bytes());
+    digest.update(identity.window.first.to_le_bytes());
+    digest.update(identity.window.rows.to_le_bytes());
+    match identity.window.lead {
+        WindowLead::None => digest.update([0]),
+        WindowLead::Value(value) => {
+            digest.update([1]);
+            digest.update(value.to_bits().to_le_bytes());
+        }
+        WindowLead::Interpolated(fraction) => {
+            digest.update([2]);
+            digest.update(fraction.to_bits().to_le_bytes());
+        }
+    }
 }
 
 pub(super) fn validate_regression_run(

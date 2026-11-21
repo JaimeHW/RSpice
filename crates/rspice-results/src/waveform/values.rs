@@ -48,6 +48,13 @@ pub trait ColumnSource: Send + Sync {
         None
     }
 
+    /// The digest of the whole column, as its store states it: the
+    /// [`rspice_results_store::ColumnDigest`] of its rows, which the same column held in memory
+    /// has too. `None` when the store states none, as a run recovered without its end does not.
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        None
+    }
+
     /// The tile of the rows in `rows` with x in `x0 ..= x1` at `pixels` pixels, x being the axis
     /// of the run the column belongs to; `None` when the source keeps nothing to tile from.
     fn tile(
@@ -164,6 +171,18 @@ pub enum WindowLead {
     /// The value between the row before the first and the first, `fraction` of the way from the
     /// one to the other: a waveform's value at its axis's start.
     Interpolated(f64),
+}
+
+/// What identifies a waveform's samples wherever they are held
+/// ([`WaveformValues::samples_identity`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SamplesIdentity {
+    /// The [`rspice_results_store::ColumnDigest`] of the column the samples are a window of.
+    pub column: [u8; 32],
+    /// The rows that column holds.
+    pub column_rows: u64,
+    /// The window of it the samples are: the whole column for samples held in memory.
+    pub window: StoredWindow,
 }
 
 /// The part of a stored column a waveform holds.
@@ -506,6 +525,49 @@ impl WaveformValues {
         match &self.0 {
             Repr::Memory(_) => None,
             Repr::Stored(stored) => Some((&stored.source, stored.window)),
+        }
+    }
+
+    /// What identifies the samples wherever they are held: the digest of the column they are a
+    /// window of, the rows it holds, and the window. Samples held in memory are a whole column of
+    /// their own, digested here, so they have the identity the same column stored has. A window of
+    /// a stored column whose store states the column's digest reads no row; one whose store
+    /// states none is digested as its samples in memory are, reading them a block at a time.
+    pub fn samples_identity(&self) -> SamplesIdentity {
+        if let Some((source, window)) = self.stored_window()
+            && let Some(column) = source.column_digest()
+        {
+            return SamplesIdentity {
+                column,
+                column_rows: source.rows(),
+                window,
+            };
+        }
+        let column = match self.in_memory() {
+            Some(values) => rspice_results_store::ColumnDigest::of(values),
+            None => {
+                let mut digest = rspice_results_store::ColumnDigest::new();
+                let mut staged = Vec::with_capacity(BLOCK_SAMPLES.min(self.len()));
+                for value in self.samples(..) {
+                    staged.push(value);
+                    if staged.len() == BLOCK_SAMPLES {
+                        digest.values(&staged);
+                        staged.clear();
+                    }
+                }
+                digest.values(&staged);
+                digest.finish()
+            }
+        };
+        let rows = self.len() as u64;
+        SamplesIdentity {
+            column: column.0,
+            column_rows: rows,
+            window: StoredWindow {
+                first: 0,
+                rows,
+                lead: WindowLead::None,
+            },
         }
     }
 

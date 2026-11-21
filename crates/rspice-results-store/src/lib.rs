@@ -38,7 +38,7 @@ mod writer;
 #[cfg(test)]
 mod tests;
 
-pub use digest::{Digest, kept_segment_name};
+pub use digest::{ColumnDigest, Digest, kept_segment_name};
 pub use error::StoreError;
 pub use events::{EventChange, EventValue, Logic};
 #[cfg(any(unix, windows))]

@@ -71,6 +71,8 @@ pub(super) struct CheckingColumn {
     rows: u64,
     /// Whether the saved result stated its rows ascend strictly.
     ascending: bool,
+    /// The column digest the saved result stated.
+    column_digest: Option<[u8; 32]>,
     name: String,
     opened: Opened<dyn ColumnSource>,
 }
@@ -81,12 +83,14 @@ impl CheckingColumn {
         column: u64,
         rows: u64,
         ascending: bool,
+        column_digest: Option<[u8; 32]>,
         name: String,
     ) -> Arc<Self> {
         Arc::new(Self {
             column,
             rows,
             ascending,
+            column_digest,
             name,
             opened: Opened::new(digest),
         })
@@ -128,6 +132,11 @@ impl ColumnSource for CheckingColumn {
 
     fn identity(&self) -> Option<([u8; 32], u64)> {
         Some((self.opened.digest.0, self.column))
+    }
+
+    /// What the saved result stated, so the result digests the same before the check ends.
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        self.column_digest
     }
 
     fn tile(

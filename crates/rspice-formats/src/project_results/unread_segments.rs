@@ -111,6 +111,7 @@ fn damaged(
         failure,
         digest: digest.0,
         column: reference.column,
+        column_digest: reference.stated_column_digest()?,
         rows: reference.column_rows,
     };
     WaveformValues::stored(Arc::new(source), window)
@@ -124,6 +125,8 @@ struct DamagedSegment {
     failure: String,
     digest: [u8; 32],
     column: u64,
+    /// The column digest the saved result stated.
+    column_digest: Option<[u8; 32]>,
     /// The rows the saved result stated.
     rows: u64,
 }
@@ -150,6 +153,10 @@ impl ColumnSource for DamagedSegment {
 
     fn identity(&self) -> Option<([u8; 32], u64)> {
         Some((self.digest, self.column))
+    }
+
+    fn column_digest(&self) -> Option<[u8; 32]> {
+        self.column_digest
     }
 }
 

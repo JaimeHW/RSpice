@@ -17,7 +17,7 @@
 //! the crash tears that one provisional write itself.
 
 use super::{Batch, Encoder, IndexEntry, Layout};
-use crate::digest::{HASH_STATE_LEN, ValueHasher};
+use crate::digest::{ColumnDigest, HASH_STATE_LEN, ValueHasher};
 use crate::events::{EventBuffer, EventChange, decode_events};
 use crate::format::{FrameKind, LEVEL1_ROWS, chunk_summaries_at, summary_buckets_at};
 use crate::reader::{ChunkRef, EventsRef, SegmentReader};
@@ -219,17 +219,17 @@ impl<I: SegmentIo> Encoder<I> {
             })?
         };
 
-        // The digest streams at the cut: the rows' and the summaries' after the last chunk kept,
-        // and the summaries' on over the `SUMMARY` frames that followed it.
+        // The digest streams at the cut: each column's and the summaries' after the last chunk
+        // kept, and the summaries' on over the `SUMMARY` frames that followed it.
         let (rows_stream, mut summaries_stream, since_chunk) = match k.checked_sub(1) {
             Some(previous) => {
                 let offset = chunks[previous].offset;
                 let (_, payload) = reader.read_frame(offset)?;
-                (
-                    Some(trailer(&payload, offset, 1)?),
-                    trailer(&payload, offset, 0)?,
-                    offset,
-                )
+                let columns = layout.slots + 1;
+                let column_streams = (0..columns)
+                    .map(|column| column_trailer(&payload, offset, columns - column))
+                    .collect::<Result<Vec<_>, _>>()?;
+                (Some(column_streams), trailer(&payload, offset, 0)?, offset)
             }
             None => (None, ValueHasher::default(), 0),
         };
@@ -334,13 +334,24 @@ impl<I: SegmentIo> Encoder<I> {
 }
 
 /// A digest state a real `CHUNK` or `EVENTS` frame ends with: `back` 0 is the last (an `EVENTS`
-/// frame's signal stream, a `CHUNK`'s summary stream), 1 the one before it (a `CHUNK`'s rows).
+/// frame's signal stream, a `CHUNK`'s summary stream), and a `CHUNK`'s column digests come before
+/// it, its last value slot's at 1 and its x's at the slot count plus one.
 fn trailer(payload: &[u8], offset: u64, back: usize) -> Result<ValueHasher, StoreError> {
-    payload
-        .len()
-        .checked_sub(HASH_STATE_LEN * (back + 1))
-        .and_then(|at| ValueHasher::resumed(&payload[at..at + HASH_STATE_LEN]))
+    trailer_state(payload, back)
+        .and_then(ValueHasher::resumed)
         .ok_or_else(|| StoreError::corrupt(offset, "a frame's digest state does not decode"))
+}
+
+/// The column digest a `CHUNK` frame's trailer records `back` states from its end.
+fn column_trailer(payload: &[u8], offset: u64, back: usize) -> Result<ColumnDigest, StoreError> {
+    trailer_state(payload, back)
+        .and_then(ColumnDigest::resumed)
+        .ok_or_else(|| StoreError::corrupt(offset, "a frame's digest state does not decode"))
+}
+
+fn trailer_state(payload: &[u8], back: usize) -> Option<&[u8]> {
+    let at = payload.len().checked_sub(HASH_STATE_LEN * (back + 1))?;
+    Some(&payload[at..at + HASH_STATE_LEN])
 }
 
 fn u64_le(payload: &[u8], at: usize, offset: u64) -> Result<u64, StoreError> {

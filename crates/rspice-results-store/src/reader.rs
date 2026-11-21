@@ -189,6 +189,8 @@ struct EndRecord {
     chunks: u64,
     last_index: u64,
     digest: Digest,
+    /// Each column's digest, the run's x first.
+    columns: Vec<Digest>,
     /// Per event signal: (signal id, changes).
     event_totals: Vec<(u32, u64)>,
     /// What the run said of itself, by key.
@@ -209,6 +211,9 @@ pub struct SegmentReader<I: SegmentIo> {
     state: SegmentState,
     /// What the run said of itself in `END`; none for a segment recovered without it.
     annotations: Vec<(String, Vec<u8>)>,
+    /// Each column's digest as `END` states it, the run's x first; none for a segment recovered
+    /// without it.
+    column_digests: Vec<Digest>,
     /// Why the `END` the superblock names was refused, for a segment recovered without it.
     end_damage: Option<StoreError>,
     planes: Vec<u8>,
@@ -259,6 +264,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             catalogue: Catalogue::default(),
             state: SegmentState::Recovered,
             annotations: Vec::new(),
+            column_digests: Vec::new(),
             end_damage: None,
             planes: Vec::new(),
             block: Vec::new(),
@@ -344,6 +350,19 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     pub fn state(&self) -> &SegmentState {
         &self.state
+    }
+
+    /// The digest of column `column` (0 the run's x, else its value slot plus one) as `END`
+    /// states it: the [`crate::ColumnDigest`] of its rows, which the same column held in memory
+    /// has too. `None` for a segment recovered without `END`.
+    pub fn column_digest(&self, column: usize) -> Option<Digest> {
+        self.column_digests.get(column).copied()
+    }
+
+    /// Every column's digest as `END` states it, the run's x first: what [`Self::held_digests`]
+    /// must find the rows hash to.
+    pub(crate) fn stated_column_digests(&self) -> &[Digest] {
+        &self.column_digests
     }
 
     /// Why the `END` the superblock names was refused, with the byte it was refused at, for a
@@ -465,6 +484,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             digest: end.digest,
         };
         self.annotations = end.annotations;
+        self.column_digests = end.columns;
         Ok(())
     }
 
@@ -482,6 +502,13 @@ impl<I: SegmentIo> SegmentReader<I> {
         let last_index = cursor.u64()?;
         let mut digest = [0u8; 32];
         digest.copy_from_slice(cursor.take(32)?);
+        let count = cursor.count(32)?;
+        let mut columns = Vec::with_capacity(count);
+        for _ in 0..count {
+            let mut column = [0u8; 32];
+            column.copy_from_slice(cursor.take(32)?);
+            columns.push(Digest(column));
+        }
         let count = cursor.count(16)?;
         let mut event_totals = Vec::with_capacity(count);
         for _ in 0..count {
@@ -502,6 +529,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             chunks,
             last_index,
             digest: Digest(digest),
+            columns,
             event_totals,
             annotations,
         };
@@ -659,6 +687,7 @@ impl<I: SegmentIo> SegmentReader<I> {
         self.state = match end {
             Some(end) => {
                 self.annotations = end.annotations;
+                self.column_digests = end.columns;
                 SegmentState::Complete {
                     status: end.status,
                     digest: end.digest,
@@ -1106,7 +1135,16 @@ impl<I: SegmentIo> SegmentReader<I> {
         &mut self,
         progress: &mut dyn FnMut(u64, u64) -> bool,
     ) -> Result<Option<Digest>, StoreError> {
-        let mut digest = LogicalDigest::new(self.event_signals.iter().map(|&(id, _)| id));
+        Ok(self.held_digests(progress)?.map(|(digest, _)| digest))
+    }
+
+    /// [`Self::digest_with`], and the digest each column's rows hash to, the run's x first.
+    pub(crate) fn held_digests(
+        &mut self,
+        progress: &mut dyn FnMut(u64, u64) -> bool,
+    ) -> Result<Option<(Digest, Vec<Digest>)>, StoreError> {
+        let mut digest =
+            LogicalDigest::new(self.slots, self.event_signals.iter().map(|&(id, _)| id));
         let mut x = Vec::new();
         let mut columns = vec![Vec::new(); self.slots];
         let chunks = self.catalogue.chunks.len() as u64;
@@ -1122,7 +1160,7 @@ impl<I: SegmentIo> SegmentReader<I> {
                 column.resize(chunk.rows as usize, 0.0);
                 self.decode_block(&chunk, slot + 1, column)?;
             }
-            digest.columns(&x, &columns);
+            digest.chunk(&x, columns.iter().map(Vec::as_slice));
         }
         // The summary regions in the order the segment holds them, as its writer hashed them.
         let mut regions: Vec<(u64, Region)> = self
