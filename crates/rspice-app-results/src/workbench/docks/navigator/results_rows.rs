@@ -52,7 +52,7 @@ pub const TOUCH_TARGET_HEIGHT: f32 = crate::ui::tokens::TOUCH_TARGET;
 /// 24 px at relaxed, and the theme's touch target on a coarse pointer. The
 /// interface scale zooms text and row together, so a row that holds its text
 /// at one scale holds it at all of them.
-pub(super) fn result_browser_row_height(t: &Tokens) -> f32 {
+pub(crate) fn result_browser_row_height(t: &Tokens) -> f32 {
     let desktop = match t.density {
         crate::ui::tokens::Density::Compact => RESULT_QUANTITY_ROW_HEIGHT,
         crate::ui::tokens::Density::Relaxed => RESULT_QUANTITY_ROW_HEIGHT_RELAXED,
