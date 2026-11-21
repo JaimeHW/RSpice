@@ -32,39 +32,25 @@ use super::results_rows::{
     result_run_completeness, result_run_operational_label, retained_result_artifacts,
     show_virtualized_result_signals, signal_row, signal_rows,
 };
-use super::results_sets::signal_sets_menu;
+use super::results_sets::{save_ticked_as_set, signal_sets_menu};
 use super::results_tree::{
     BrowserQuery, InstanceNode, SignalKind, TreeItem, build_tree, is_generated_node,
     split_hierarchy,
 };
 use rspice_app_workbench::workbench::docks::navigator::muted;
 use rspice_app_workbench::workbench::docks::navigator::{
-    PANEL_SEARCH_MARGIN_X, panel_search_field_width, search_focus_requested,
+    PANEL_SEARCH_MARGIN_X, search_focus_requested,
 };
 use rspice_vocabulary::natural_order::natural_cmp;
 
-/// The content width the pair still reads at: the navigator dock's own minimum
-/// of 220 px less its 8 px insets. Above it the typed facets stay side by side
-/// as the mockup draws them, rather than stacking into a column of selects at
-/// every ordinary dock width. Below it — the tablet and phone drawers — they
-/// stack, so a right-to-left row can never enlarge beyond its host and resize
-/// stays monotonic.
-pub const RESULT_BROWSER_STACKED_FACET_MAX_WIDTH: f32 = 204.0;
 /// Clipboard generation is synchronous on every supported target. Keep the
 /// operation bounded and direct larger evidence sets to the streaming export
 /// workflow instead of allocating an unbounded browser/WASM string.
 pub(super) const RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT: usize = 100_000;
 const RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT: usize = 8_000_000;
-/// `.result-browser-status { padding: 3px 8px }` — the padding that makes the
-/// scope control a band rather than a bare row. Without it the segments are
-/// exactly the band, so they sit hard against the toolbar rule above them.
-const RESULT_BROWSER_BAND_PAD_Y: f32 = 3.0;
-/// The band of batch actions over the ticked quantities, under the rows.
-const TICKED_BAND_HEIGHT: f32 = 29.0;
-
-pub fn result_browser_facets_stack(available_width: f32) -> bool {
-    available_width < RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
-}
+/// The gap between the header's columns and rows, and around the controls
+/// of the selection bar.
+const BROWSER_GUTTER: f32 = 5.0;
 
 pub(in crate::workbench) fn results(
     ui: &mut Ui,
@@ -502,6 +488,7 @@ pub(in crate::workbench) fn results(
                 run_index,
                 dataset_id: run.dataset_id,
                 label: run.label.clone(),
+                name: run.name().to_owned(),
                 success: run.success,
                 data_state: result_analysis_data_state(
                     run_currentness,
@@ -527,25 +514,9 @@ pub(in crate::workbench) fn results(
     );
     let visible_result_keys = signal_list.visible_keys(&runs);
     let tab = results_browser_tab_band(ui, [signal_count, runs.len(), expressions.len()]);
-    // The mockup's browser toolbar: the query over this tab, then the analysis,
-    // kind facet, and the layout. They are absent on Datasets and Expressions —
-    // a manifest binding has no quantity kind to filter and no hierarchy to
-    // order, and a saved expression is found by name.
-    results_browser_toolbar(
-        ui,
-        state,
-        stored_kind,
-        layout,
-        stored_producer_facet,
-        (tab == ResultsBrowserTab::Signals).then_some((order, scope)),
-    );
-    // The scope band: the signals tab owns the scope control on the left —
-    // All | Recent over the session's real recency state — then the Sets
-    // menu, and the count on the right states how much of the tab's
-    // inventory is being held back, which is nothing to say while all of it
-    // is on screen and no query is asking.
-    {
-        let t = Tokens::get(ui.ctx());
+    // How much of the tab's inventory a filter is holding back: two numbers
+    // at the query's end, which is where the reader asked for less.
+    let count_copy = {
         let shown = match tab {
             ResultsBrowserTab::Signals => signal_count,
             ResultsBrowserTab::Datasets => runs.len(),
@@ -584,111 +555,41 @@ pub(in crate::workbench) fn results(
             ResultsBrowserTab::Expressions => expression_source.len(),
         };
         // Two numbers, no noun: the tab band above already names what is being
-        // counted and the scope control beside it already says which working
-        // set is in force, so spelling either one again costs the row the width
-        // the count needs at the dock's minimum. With everything on screen the
-        // tab's own count has already said it, so the band says nothing.
+        // counted and the scope control below already says which working set
+        // is in force, so spelling either one again costs the query the width
+        // it reads in at the dock's minimum. With everything on screen the
+        // tab's own count has already said it, so the field says nothing.
         // A query states its match count even when everything matches, so
         // a pattern that should have narrowed the list says that it did not.
-        let count_copy =
-            (shown != loaded || !query.is_empty()).then(|| format!("{shown} / {loaded}"));
-        // Nothing held back and no scope control to hold: the band would be an
-        // empty strip under a rule.
-        if count_copy.is_some() || tab == ResultsBrowserTab::Signals {
-            ui.add_space(RESULT_BROWSER_BAND_PAD_Y);
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), t.metrics.ctl_h.max(28.0)),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    ui.add_space(8.0);
-                    if tab == ResultsBrowserTab::Signals {
-                        // One scope is in force at a time, so the two read as
-                        // one control rather than two independent marks.
-                        const SCOPES: [ResultsBrowserScope; 2] =
-                            [ResultsBrowserScope::All, ResultsBrowserScope::Recent];
-                        let mut index = SCOPES
-                            .iter()
-                            .position(|candidate| *candidate == scope)
-                            .unwrap_or(0);
-                        let changed = crate::ui::widgets::segmented(
-                            ui,
-                            "workbench.results.browser-scope",
-                            &["All", "Recent"],
-                            &mut index,
-                            crate::ui::widgets::SegmentedWidth::Natural,
-                        );
-                        if changed {
-                            let scope_now = SCOPES[index];
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(results_browser_scope_id(), scope_now);
-                            });
-                        }
-                        ui.add_space(6.0);
-                        signal_sets_menu(ui, state, &ticked_ordered);
-                    }
-                    // The count is the band's last register: how many of the
-                    // tab's rows the filter in force is letting through.
-                    if let Some(count_copy) = count_copy {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(8.0);
-                            ui.label(
-                                egui::RichText::new(count_copy)
-                                    .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
-                                    .color(t.color.text_faint),
-                            )
-                            .on_hover_text("Matching rows of the rows this tab holds");
-                        });
-                    }
-                },
-            );
-            ui.add_space(RESULT_BROWSER_BAND_PAD_Y);
-            // `.result-browser-status` closes on its own rule, like the toolbar
-            // above it, so the scope control reads as a band of its own instead
-            // of as the first row of the list below.
-            ui.painter().hline(
-                egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
-                ui.cursor().top() - 0.5,
-                egui::Stroke::new(1.0, t.color.border),
-            );
-        }
-    }
-    if tab == ResultsBrowserTab::Signals {
-        // The rows leave the band its height under them while anything is
-        // ticked.
-        let band = if ticked.is_empty() {
-            0.0
-        } else {
-            TICKED_BAND_HEIGHT
-        };
-        let rows_height = (ui.available_height() - band).max(0.0);
-        ui.allocate_ui(egui::vec2(ui.available_width(), rows_height), |ui| {
-            show_virtualized_result_signals(
-                ui,
-                state,
-                &runs,
-                &signal_list,
-                active_run,
-                active_analysis,
-                selected_trace.as_ref(),
-                selected_artifact.as_ref(),
-                &visible_result_keys,
-                &ticked_ordered,
-                !query.is_empty(),
-                kind,
-                scope,
-            );
-        });
-    }
+        (shown != loaded || !query.is_empty()).then(|| format!("{shown} / {loaded}"))
+    };
+    // The browser's header: the query, then the producing analysis beside
+    // the kind, then the scope beside the sets, on one grid. The facets
+    // belong to the quantity list, so Datasets and Expressions keep the query
+    // alone.
+    results_browser_toolbar(
+        ui,
+        state,
+        BrowserFacets {
+            kind: stored_kind,
+            layout,
+            producer: stored_producer_facet,
+            order,
+            scope,
+        },
+        (tab == ResultsBrowserTab::Signals).then_some(ticked_ordered.as_slice()),
+        count_copy.as_deref(),
+    );
     // What a batch action acts on: the ticked quantities, which for a
-    // waveform are the curves on the plot. The band belongs to the ticks, and
-    // the row ticks above it are how a set starts. It stands under the rows:
-    // over them, the first tick brought it in and moved every row down under
-    // the pointer, so the next click there unticked what had just been ticked.
+    // waveform are the curves on the plot. The bar stands at the foot of the
+    // dock, under the rows: over them, the first tick brought it in and
+    // moved every row down under the pointer, so the next click there
+    // unticked what had just been ticked.
     if tab == ResultsBrowserTab::Signals && !ticked.is_empty() {
         let t = Tokens::get(ui.ctx());
-        let checked = ticked;
+        let checked = &ticked;
         let checked_ordered =
-            ordered_checked_result_keys(&checked, &state.model.simulation.retained.runs);
+            ordered_checked_result_keys(checked, &state.model.simulation.retained.runs);
         let exact_validation_error = checked_ordered.iter().find_map(|key| {
             crate::workbench::documents::result_document::result_browser_selection_evidence(
                 key,
@@ -729,141 +630,181 @@ pub(in crate::workbench) fn results(
                 .collect::<std::collections::HashSet<_>>()
                 .len()
                 == 1;
-        // `.result-browser-selection` opens on a rule, so the rows above it
-        // and the band do not run together.
-        ui.painter().hline(
-            egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
-            ui.cursor().top() + 0.5,
-            egui::Stroke::new(1.0, t.color.border),
-        );
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), TICKED_BAND_HEIGHT),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.painter()
-                    .rect_filled(ui.available_rect_before_wrap(), 0.0, t.color.accent_dim);
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(format!("{} ticked", checked.len()))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.text),
+        egui::Panel::bottom("workbench.results.selection-bar")
+            .resizable(false)
+            .show_separator_line(false)
+            .exact_size(t.metrics.ctl_h + 2.0 * BROWSER_GUTTER)
+            .frame(egui::Frame::new().fill(t.color.bg_panel))
+            .show(ui, |ui| {
+                // The bar opens on a rule, as the header closes on one.
+                ui.painter().hline(
+                    ui.max_rect().x_range(),
+                    ui.max_rect().top() + 0.5,
+                    egui::Stroke::new(1.0, t.color.border),
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(6.0);
-                    rspice_ui_kit::widgets::menu_button(ui, "Actions...", |ui| {
-                        if ui
-                            .add_enabled(
-                                !visible_result_keys.is_empty(),
-                                egui::Button::new("Tick visible quantities"),
-                            )
-                            .clicked()
-                        {
-                            for key in &visible_result_keys {
-                                set_result_quantity_ticked(state, key, true);
-                            }
-                            if let Some(last) = visible_result_keys.last() {
-                                state.results.session.set_browser_range_anchor(last.clone());
-                            }
-                            ui.close();
-                        }
-                        if ui.button("Clear ticks").clicked() {
-                            for key in &checked_ordered {
-                                set_result_quantity_ticked(state, key, false);
-                            }
-                            state.results.session.clear_checked_signals();
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui
-                            .add_enabled(
-                                !checked_ordered.is_empty(),
-                                egui::Button::new("Copy names"),
-                            )
-                            .clicked()
-                        {
-                            let result = checked_ordered
-                                .iter()
-                                .map(|key| {
-                                    crate::workbench::documents::result_document::result_browser_selection_canonical_name(
-                                        key,
-                                        &state.model.simulation.retained.runs,
-                                    )
-                                })
-                                .collect::<Result<Vec<_>, _>>()
-                                .map(|names| names.join("\n"));
-                            match result {
-                                Ok(names) => ui.ctx().copy_text(names),
-                                Err(error) => state.workbench.prompt(error),
-                            }
-                            ui.close();
-                        }
-                        let copy_exact = ui.add_enabled(
-                            clipboard_exact_available,
-                            egui::Button::new("Copy data"),
+                ui.allocate_ui_with_layout(
+                    ui.available_size(),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.add_space(PANEL_SEARCH_MARGIN_X);
+                        ui.label(
+                            egui::RichText::new(format!("{} ticked", checked.len()))
+                                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                                .color(t.color.text),
                         );
-                        if !checked_ordered.is_empty() && !clipboard_exact_available {
-                            copy_exact.clone().on_disabled_hover_text(
-                                exact_validation_error.clone().unwrap_or_else(|| format!(
-                                    "The waveform portion holds {clipboard_sample_count} samples; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}. Export it instead."
-                                )),
-                            );
+                        ui.add_space(2.0 * BROWSER_GUTTER);
+                        let clear = ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Clear")
+                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                        .color(t.color.text_dim),
+                                )
+                                .frame(false)
+                                .min_size(egui::vec2(0.0, t.metrics.ctl_h)),
+                            )
+                            .on_hover_text("Untick every signal");
+                        clear.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear ticks")
+                        });
+                        if clear.clicked() {
+                        for key in &checked_ordered {
+                            set_result_quantity_ticked(state, key, false);
                         }
-                        if copy_exact.clicked() {
-                            match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
-                                &checked_ordered,
+                        state.results.session.clear_checked_signals();
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(PANEL_SEARCH_MARGIN_X);
+                            let actions = rspice_ui_kit::widgets::Button::new("Actions")
+                                .menu()
+                                .show(ui);
+                            button_menu(&actions, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                if ui
+                    .add_enabled(
+                        !visible_result_keys.is_empty(),
+                        egui::Button::new("Tick visible quantities"),
+                    )
+                    .clicked()
+                {
+                    for key in &visible_result_keys {
+                        set_result_quantity_ticked(state, key, true);
+                    }
+                    if let Some(last) = visible_result_keys.last() {
+                        state.results.session.set_browser_range_anchor(last.clone());
+                    }
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        !checked_ordered.is_empty(),
+                        egui::Button::new("Copy names"),
+                    )
+                    .clicked()
+                {
+                    let result = checked_ordered
+                        .iter()
+                        .map(|key| {
+                            crate::workbench::documents::result_document::result_browser_selection_canonical_name(
+                                key,
                                 &state.model.simulation.retained.runs,
-                            ) {
-                                Ok(exact) if exact.len() <= RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT => {
-                                    ui.ctx().copy_text(exact);
-                                }
-                                Ok(exact) => state.workbench.prompt(format!(
-                                    "The selection is {} bytes; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT} bytes. Export it instead.",
-                                    exact.len()
-                                )),
-                                Err(error) => state.workbench.prompt(error),
-                            }
-                            ui.close();
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(|names| names.join("\n"));
+                    match result {
+                        Ok(names) => ui.ctx().copy_text(names),
+                        Err(error) => state.workbench.prompt(error),
+                    }
+                    ui.close();
+                }
+                let copy_exact = ui.add_enabled(
+                    clipboard_exact_available,
+                    egui::Button::new("Copy data"),
+                );
+                if !checked_ordered.is_empty() && !clipboard_exact_available {
+                    copy_exact.clone().on_disabled_hover_text(
+                        exact_validation_error.clone().unwrap_or_else(|| format!(
+                            "The waveform portion holds {clipboard_sample_count} samples; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}. Export it instead."
+                        )),
+                    );
+                }
+                if copy_exact.clicked() {
+                    match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
+                        &checked_ordered,
+                        &state.model.simulation.retained.runs,
+                    ) {
+                        Ok(exact) if exact.len() <= RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT => {
+                            ui.ctx().copy_text(exact);
                         }
-                        let export_exact = ui.add_enabled(
-                            exact_evidence_available && !checked_ordered.is_empty(),
-                            egui::Button::new("Export\u{2026}"),
-                        );
-                        if let Some(error) = exact_validation_error.as_deref() {
-                            export_exact.clone().on_disabled_hover_text(error);
-                        }
-                        if export_exact.clicked() {
-                            state.workbench
-                                .outbox
-                                .push(ExportResultQuantities(checked_ordered.clone()));
-                            ui.close();
-                        }
-                        ui.separator();
-                        let compare = ui.add_enabled(
-                            compare_selection_compatible
-                                && compare_enabled(state),
-                            egui::Button::new("Compare selected quantity across datasets..."),
-                        );
-                        if !checked_ordered.is_empty() && !compare_selection_compatible {
-                            compare.clone().on_disabled_hover_text(
-                                exact_validation_error.as_deref().unwrap_or(
-                                    "Select the same signal in at least two runs.",
-                                ),
-                            );
-                        }
-                        if compare.clicked() {
-                            if let Some(first) = checked_ordered.first()
-                                && select_result_browser_key(state, first)
-                            {
-                                execute(state, ResultsCommand::CompareResultDatasets.key());
-                            }
-                            ui.close();
-                        }
-                    });
+                        Ok(exact) => state.workbench.prompt(format!(
+                            "The selection is {} bytes; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT} bytes. Export it instead.",
+                            exact.len()
+                        )),
+                        Err(error) => state.workbench.prompt(error),
+                    }
+                    ui.close();
+                }
+                let export_exact = ui.add_enabled(
+                    exact_evidence_available && !checked_ordered.is_empty(),
+                    egui::Button::new("Export\u{2026}"),
+                );
+                if let Some(error) = exact_validation_error.as_deref() {
+                    export_exact.clone().on_disabled_hover_text(error);
+                }
+                if export_exact.clicked() {
+                    state.workbench
+                        .outbox
+                        .push(ExportResultQuantities(checked_ordered.clone()));
+                    ui.close();
+                }
+                ui.separator();
+                let compare = ui.add_enabled(
+                    compare_selection_compatible
+                        && compare_enabled(state),
+                    egui::Button::new("Compare across datasets\u{2026}"),
+                );
+                if !checked_ordered.is_empty() && !compare_selection_compatible {
+                    compare.clone().on_disabled_hover_text(
+                        exact_validation_error.as_deref().unwrap_or(
+                            "Select the same signal in at least two runs.",
+                        ),
+                    );
+                }
+                if compare.clicked() {
+                    if let Some(first) = checked_ordered.first()
+                        && select_result_browser_key(state, first)
+                    {
+                        execute(state, ResultsCommand::CompareResultDatasets.key());
+                    }
+                    ui.close();
+                }
+                ui.separator();
+                rspice_ui_kit::widgets::menu_button(ui, "Save ticked as set\u{2026}", |ui| {
+                    save_ticked_as_set(ui, state, &checked_ordered);
                 });
-            },
-        );
+                            });
+                        });
+                    },
+                );
+            });
     }
     if tab == ResultsBrowserTab::Signals {
+        show_virtualized_result_signals(
+            ui,
+            state,
+            &runs,
+            &signal_list,
+            active_run,
+            active_analysis,
+            selected_trace.as_ref(),
+            selected_artifact.as_ref(),
+            &visible_result_keys,
+            &ticked_ordered,
+            !query.is_empty(),
+            kind,
+            scope,
+        );
         return;
     }
     ScrollArea::vertical()
@@ -1493,57 +1434,71 @@ pub(super) fn results_browser_clear_filters(
     });
 }
 
-/// The data browser's own toolbar: the query, the producing analysis, then the
-/// kind facet and the tree or flat layout.
-///
-/// The mockup lays this out as one bordered block under the tab band with an
-/// 8 px inset and a 5 px gutter, in three registers widest-first. The analysis
-/// facet takes a whole row because its option strings are the longest in the
-/// panel and because it is the one control that changes what the tree contains
-/// rather than how it reads; the typed pair below splits unevenly, since kind
-/// carries the longer option names and the layout two short words. Facets
-/// are sized to the panel rather than to their own labels, so the block reads
-/// as one control stack at any dock width.
-fn results_browser_toolbar(
-    ui: &mut Ui,
-    state: &mut ResultsParts<'_>,
+/// What the header's facets read this frame.
+#[derive(Clone, Copy)]
+struct BrowserFacets {
     kind: ResultsBrowserKind,
     layout: ResultsBrowserLayout,
     producer: Option<AnalysisPresentationKey>,
-    signals: Option<(ResultsBrowserOrder, ResultsBrowserScope)>,
-) {
-    const GUTTER: f32 = 5.0;
+    order: ResultsBrowserOrder,
+    scope: ResultsBrowserScope,
+}
 
-    let show_quantity_facets = signals.is_some();
+/// The data browser's header, on one grid: every control at the control
+/// height, inside the dock's 8 px insets, with a 5 px gutter between the rows
+/// and between the two columns the lower rows share.
+///
+/// The query fills the first row, with the view menu square at its end; the
+/// producing analysis and the kind share the second, as the three facets of
+/// the quantity list; the scope and the signal sets share the third. What a
+/// filter holds back is counted at the query's end, inside the field. Given
+/// no `signals` (Datasets and Expressions) the header keeps the query alone:
+/// a manifest binding has no quantity kind to filter and no hierarchy to
+/// order, and a saved expression is found by name.
+fn results_browser_toolbar(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    facets: BrowserFacets,
+    signals: Option<&[ResultBrowserSelectionKey]>,
+    count: Option<&str>,
+) {
     let t = Tokens::get(ui.ctx());
     let workspace = state.workbench.workspace;
+    let side = t.metrics.ctl_h;
+    let row_width = (ui.available_width() - 2.0 * PANEL_SEARCH_MARGIN_X).max(1.0);
+    let column = ((row_width - BROWSER_GUTTER) / 2.0).max(1.0);
+    let count_font = theme::mono(tokens::FS_MICRO, FontWeight::Medium);
+    let count_room = count.map_or(0.0, |count| {
+        ui.painter()
+            .layout_no_wrap(count.to_owned(), count_font.clone(), t.color.text_faint)
+            .size()
+            .x
+            + 6.0
+    });
     ui.add_space(7.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(PANEL_SEARCH_MARGIN_X);
-        // The signals' order sits square at the query's end, where it costs
-        // the field its own width and never the scope band its count.
-        let order_width = if signals.is_some() {
-            t.metrics.ctl_h + GUTTER
+        let menu_room = if signals.is_some() {
+            side + BROWSER_GUTTER
         } else {
             0.0
         };
-        let field_width =
-            panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X) - order_width;
+        let field_width = (row_width - menu_room).max(1.0);
         let placeholder = "Find signal…";
         let field_id = ui.make_persistent_id("workbench.navigator.filter");
         if search_focus_requested::<FocusNavigatorSearch>(ui, &mut state.workbench.outbox) {
             ui.memory_mut(|memory| memory.request_focus(field_id));
         }
         let response = ui.add_sized(
-            [field_width, t.metrics.ctl_h],
+            [field_width, side],
             egui::TextEdit::singleline(state.workbench.navigator_trees.filter_mut(workspace))
                 .id(field_id)
                 .hint_text(placeholder)
                 .font(theme::field_sans())
                 .margin(egui::Margin {
                     left: 29,
-                    right: 8,
+                    right: (8.0 + count_room) as i8,
                     top: 5,
                     bottom: 5,
                 }),
@@ -1563,16 +1518,35 @@ fn results_browser_toolbar(
             ),
             t.color.text_faint,
         );
-        if let Some((order, scope)) = signals {
-            ui.add_space(GUTTER);
-            results_browser_order_menu(ui, order, scope);
+        if let Some(count) = count {
+            // A label of its own, laid over the field's right margin, so
+            // assistive tools read the count as the eye does.
+            let room = egui::Rect::from_min_max(
+                egui::pos2(
+                    response.rect.right() - 8.0 - count_room,
+                    response.rect.top(),
+                ),
+                egui::pos2(response.rect.right() - 8.0, response.rect.bottom()),
+            );
+            ui.put(
+                room,
+                egui::Label::new(
+                    egui::RichText::new(count)
+                        .font(count_font.clone())
+                        .color(t.color.text_faint),
+                )
+                .selectable(false),
+            );
+        }
+        if signals.is_some() {
+            ui.add_space(BROWSER_GUTTER);
+            results_browser_view_menu(ui, facets);
         }
     });
-    if show_quantity_facets {
-        // The producing analysis, on its own row. Every analysis the session
-        // retained is offered under one leading "all" entry that carries the
-        // count, so a reader can see how many producers the tree spans without
-        // opening the list.
+    if let Some(ticked) = signals {
+        // Every analysis the session retained, under one leading "all"
+        // entry that carries the count, so a reader can see how many
+        // producers the tree spans without opening the list.
         let producers = state
             .model
             .simulation
@@ -1583,75 +1557,97 @@ fn results_browser_toolbar(
                 run.analyses.iter().map(move |analysis| {
                     (
                         AnalysisPresentationKey::new(run.dataset_id, analysis),
-                        format!("{} · {}", run.label, analysis.label),
+                        format!("{} · {}", run.name(), analysis.label),
                     )
                 })
             })
             .collect::<Vec<_>>();
-        let selected_producer = producer.and_then(|selected| {
+        let selected_producer = facets.producer.and_then(|selected| {
             producers
                 .iter()
                 .find(|(key, _)| *key == selected)
                 .map(|(_, label)| label.clone())
         });
-        let mut producer_options = vec![format!("All analyses · {}", producers.len())];
+        // The count rides as the first entry's detail, which gives way
+        // before its words do in a narrow dock.
+        let mut producer_options = vec!["All analyses".to_owned()];
         producer_options.extend(producers.iter().map(|(_, label)| label.clone()));
-        ui.add_space(GUTTER);
+        let mut producer_details = vec![producers.len().to_string()];
+        producer_details.resize(producer_options.len(), String::new());
+        let kind_options = ResultsBrowserKind::ALL
+            .map(|value| value.label().to_owned())
+            .to_vec();
+        ui.add_space(BROWSER_GUTTER);
         ui.horizontal(|ui| {
+            // Spacing is added explicitly: an `add_space` inside a horizontal
+            // with item spacing pays for both, and the columns drift off the
+            // query's inset.
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add_space(PANEL_SEARCH_MARGIN_X);
-            let row_width = ui.available_width() - PANEL_SEARCH_MARGIN_X;
-            if let Some(picked) = crate::ui::widgets::select(
+            // The design system's select allocates exactly the width it is
+            // given and shortens a value too long for it, naming it whole on
+            // hover.
+            if let Some(picked) = crate::ui::widgets::select_with_details(
                 ui,
                 "workbench.results.browser-producer",
                 "Producing analysis",
                 selected_producer.as_deref().unwrap_or(&producer_options[0]),
                 &producer_options,
-                row_width,
-            ) {
+                &producer_details,
+                column,
+            )
+            .picked
+            {
                 let key = picked
                     .checked_sub(1)
                     .and_then(|index| producers.get(index).map(|(key, _)| *key));
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(results_browser_producer_id(), key));
             }
+            ui.add_space(BROWSER_GUTTER);
+            results_browser_kind_control(ui, facets.kind, &kind_options, column);
         });
-        ui.add_space(GUTTER);
+        ui.add_space(BROWSER_GUTTER);
         ui.horizontal(|ui| {
-            // Spacing is added explicitly: an `add_space` inside a horizontal
-            // with item spacing pays for both, and the facets drift off the
-            // query field's inset.
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add_space(PANEL_SEARCH_MARGIN_X);
-            // The design system's select allocates exactly the width it is
-            // given, so the pair can be split against the row. A raw combo box
-            // pads itself past the width it is asked for, which pushed the sort
-            // facet off the query's inset and clipped it at the panel edge.
-            let row_width = ui.available_width() - PANEL_SEARCH_MARGIN_X;
-            let kind_options = ResultsBrowserKind::ALL
-                .map(|value| value.label().to_owned())
-                .to_vec();
-            if result_browser_facets_stack(row_width) {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = GUTTER;
-                    results_browser_kind_control(ui, kind, &kind_options, row_width);
-                    results_browser_layout_control(ui, layout, row_width);
+            // One scope is in force at a time, so the two read as one control
+            // rather than two independent marks.
+            const SCOPES: [ResultsBrowserScope; 2] =
+                [ResultsBrowserScope::All, ResultsBrowserScope::Recent];
+            let mut index = SCOPES
+                .iter()
+                .position(|candidate| *candidate == facets.scope)
+                .unwrap_or(0);
+            let changed = ui
+                .allocate_ui_with_layout(
+                    egui::vec2(column, side),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_width(column);
+                        crate::ui::widgets::segmented(
+                            ui,
+                            "workbench.results.browser-scope",
+                            &["All", "Recent"],
+                            &mut index,
+                            crate::ui::widgets::SegmentedWidth::Equal,
+                        )
+                    },
+                )
+                .inner;
+            if changed {
+                let scope_now = SCOPES[index];
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(results_browser_scope_id(), scope_now);
                 });
-            } else {
-                // Kind takes the wider share of the pair: its option list holds
-                // the long names, the layout two short words.
-                let pair_width = row_width - GUTTER;
-                let kind_width = (pair_width * 0.554).max(48.0);
-                let layout_width = (pair_width - kind_width).max(48.0);
-                results_browser_kind_control(ui, kind, &kind_options, kind_width);
-                ui.add_space(GUTTER);
-                results_browser_layout_control(ui, layout, layout_width);
             }
+            ui.add_space(BROWSER_GUTTER);
+            signal_sets_menu(ui, state, ticked, column);
         });
     }
     ui.add_space(7.0);
-    // The toolbar is one block, so it closes with a rule like the tab band
-    // above it rather than bleeding into the status band below.
+    // The header is one block, so it closes with a rule like the tab band
+    // above it rather than bleeding into the rows below.
     ui.painter().hline(
         egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
         ui.cursor().top() - 0.5,
@@ -1659,8 +1655,26 @@ fn results_browser_toolbar(
     );
 }
 
-/// Tree or flat, one click apart: the layout is a pair of segments rather
-/// than a list to open.
+/// Open `content` as a menu from `button`, a button the kit drew: a click on
+/// it opens or closes the menu, and the menu closes as `close_behavior` says.
+pub(super) fn button_menu<R>(
+    button: &Response,
+    close_behavior: egui::PopupCloseBehavior,
+    content: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    use egui::containers::menu::MenuConfig;
+    let config = MenuConfig::new().close_behavior(close_behavior);
+    egui::Popup::menu(button)
+        .close_behavior(close_behavior)
+        .style(config.style.clone())
+        .info(
+            egui::UiStackInfo::new(egui::UiKind::Menu)
+                .with_tag_value(MenuConfig::MENU_CONFIG_TAG, config),
+        )
+        .show(content)
+        .map(|shown| shown.inner)
+}
+
 /// The active run's event-net and bus rows whose lanes are on the plot.
 pub(super) fn plotted_event_rows(state: &ResultsParts<'_>) -> Vec<ResultBrowserSelectionKey> {
     let Some(run) = state.model.simulation.active_run() else {
@@ -1684,36 +1698,6 @@ pub(super) fn plotted_event_rows(state: &ResultsParts<'_>) -> Vec<ResultBrowserS
         .map(|artifact| ResultBrowserSelectionKey::Artifact(artifact.identity))
         .filter(|key| result_quantity_ticked(state, key))
         .collect()
-}
-
-fn results_browser_layout_control(ui: &mut Ui, layout: ResultsBrowserLayout, width: f32) {
-    let labels = ResultsBrowserLayout::ALL.map(ResultsBrowserLayout::label);
-    let mut index = ResultsBrowserLayout::ALL
-        .iter()
-        .position(|candidate| *candidate == layout)
-        .unwrap_or(0);
-    let height = Tokens::get(ui.ctx()).metrics.ctl_h;
-    let changed = ui
-        .allocate_ui_with_layout(
-            egui::vec2(width, height),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_width(width);
-                crate::ui::widgets::segmented(
-                    ui,
-                    "workbench.results.browser-layout",
-                    &labels,
-                    &mut index,
-                    crate::ui::widgets::SegmentedWidth::Equal,
-                )
-            },
-        )
-        .inner;
-    if changed {
-        let layout_now = ResultsBrowserLayout::ALL[index];
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(results_browser_layout_id(), layout_now));
-    }
 }
 
 /// The kind list, closing with the switch that shows internal nodes: as in
@@ -1781,53 +1765,76 @@ fn results_browser_order_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-order")
 }
 
-/// The order of the signals tab on a square menu at the query's end: one
-/// order is on. Recent lists what was used most recently first, so the menu
-/// waits while it is in force.
-fn results_browser_order_menu(ui: &mut Ui, order: ResultsBrowserOrder, scope: ResultsBrowserScope) {
+/// The view menu, square at the query's end: the order the signals read in
+/// and whether they read as a tree or as a flat list. Recent lists what was
+/// used most recently first, so the orders wait while it is in force.
+fn results_browser_view_menu(ui: &mut Ui, facets: BrowserFacets) {
     let t = Tokens::get(ui.ctx());
-    let recent = scope == ResultsBrowserScope::Recent;
     let side = t.metrics.ctl_h;
+    let recent = facets.scope == ResultsBrowserScope::Recent;
+    const RECENT: &str = "Recent lists what was used most recently first.";
+    let heading = |ui: &mut Ui, text: &str| {
+        ui.label(
+            egui::RichText::new(text)
+                .font(theme::sans(tokens::FS_MICRO, FontWeight::Medium))
+                .color(t.color.text_faint),
+        );
+    };
     let response = ui
-        .add_enabled_ui(!recent, |ui| {
-            ui.scope(|ui| {
-                ui.spacing_mut().button_padding = egui::Vec2::ZERO;
-                egui::containers::menu::MenuButton::from_button(
-                    egui::Button::new("").min_size(egui::vec2(side, side)),
-                )
-                .ui(ui, |ui| {
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+            egui::containers::menu::MenuButton::from_button(
+                egui::Button::new("").min_size(egui::vec2(side, side)),
+            )
+            .ui(ui, |ui| {
+                heading(ui, "Sort by");
+                ui.add_enabled_ui(!recent, |ui| {
                     for candidate in ResultsBrowserOrder::ALL {
-                        if ui.radio(candidate == order, candidate.label()).clicked() {
+                        let row = ui.radio(candidate == facets.order, candidate.label());
+                        if row.clicked() {
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(results_browser_order_id(), candidate);
                             });
                             ui.close();
                         }
+                        row.on_disabled_hover_text(RECENT);
                     }
-                })
-                .0
+                });
+                ui.separator();
+                heading(ui, "Show as");
+                for candidate in ResultsBrowserLayout::ALL {
+                    if ui
+                        .radio(candidate == facets.layout, candidate.label())
+                        .clicked()
+                    {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(results_browser_layout_id(), candidate);
+                        });
+                        ui.close();
+                    }
+                }
             })
-            .inner
+            .0
         })
         .inner;
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), "Sort")
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "View options")
     });
-    let ink = if recent {
-        t.color.text_faint
-    } else {
-        t.color.text_dim
-    };
-    WorkbenchIcon::Sort.paint(
+    WorkbenchIcon::Sliders.paint(
         ui.painter(),
         egui::Rect::from_center_size(response.rect.center(), egui::vec2(16.0, 16.0)),
-        ink,
+        t.color.text_dim,
     );
-    if recent {
-        response.on_disabled_hover_text("Recent lists what was used most recently first.");
+    let order = if recent {
+        "Most recently used first"
     } else {
-        response.on_hover_text(order.stated());
-    }
+        facets.order.stated()
+    };
+    let shown = match facets.layout {
+        ResultsBrowserLayout::Tree => "as a tree",
+        ResultsBrowserLayout::Flat => "as a flat list",
+    };
+    response.on_hover_text(format!("{order}, {shown}"));
 }
 
 fn results_browser_active_tab(ctx: &egui::Context) -> ResultsBrowserTab {
@@ -2022,6 +2029,8 @@ pub(super) struct ResultRun {
     pub(super) run_index: usize,
     pub(super) dataset_id: DatasetId,
     pub(super) label: String,
+    /// The run's name, its label without the start it carries.
+    pub(super) name: String,
     pub(super) success: bool,
     /// The binding's own merged reading. A dataset row is where a condition
     /// that holds for every analysis under it is stated, once.

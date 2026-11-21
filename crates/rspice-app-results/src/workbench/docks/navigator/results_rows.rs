@@ -911,7 +911,10 @@ pub(super) fn show_virtualized_result_signals(
                             let head = result_browser_analysis_head(
                                 ui,
                                 "DS",
-                                &run.label,
+                                HeadLabel::Run {
+                                    name: &run.name,
+                                    label: &run.label,
+                                },
                                 domain,
                                 count,
                                 count,
@@ -969,7 +972,7 @@ pub(super) fn show_virtualized_result_signals(
                             let head = result_browser_analysis_head(
                                 ui,
                                 analysis.short_label,
-                                &analysis.label,
+                                HeadLabel::Analysis(&analysis.label),
                                 &analysis.domain,
                                 shown,
                                 analysis.total_signals,
@@ -1786,10 +1789,19 @@ pub(super) fn result_browser_manifest_row(
 /// The mockup's `.result-browser-analysis-head`: a one-row group head whose
 /// kind glyph, name, domain caption, and quantity count identify the retained
 /// analysis a quantity belongs to, so no row has to repeat any of it.
+/// What a group head names: a run by its name, its whole label (the start
+/// it carries) said to assistive tools and shown on hover; an analysis by its
+/// label, in the mono face its code reads in.
+#[derive(Clone, Copy)]
+enum HeadLabel<'a> {
+    Run { name: &'a str, label: &'a str },
+    Analysis(&'a str),
+}
+
 fn result_browser_analysis_head(
     ui: &mut Ui,
     glyph: &str,
-    label: &str,
+    head: HeadLabel<'_>,
     domain: &str,
     count: usize,
     retained: usize,
@@ -1800,10 +1812,25 @@ fn result_browser_analysis_head(
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let height = result_browser_row_height(&t);
+    let (label, spoken, label_font) = match head {
+        HeadLabel::Run { name, label } => {
+            (name, label, theme::sans(tokens::FS_0, FontWeight::Medium))
+        }
+        HeadLabel::Analysis(label) => (
+            label,
+            label,
+            theme::mono(tokens::FS_0, FontWeight::SemiBold),
+        ),
+    };
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::click(),
     );
+    let response = if spoken == label {
+        response
+    } else {
+        response.on_hover_text(spoken)
+    };
     response.widget_info(|| {
         // A head with nothing to say about its data states only its name.
         let domain = if domain.is_empty() {
@@ -1816,7 +1843,7 @@ fn result_browser_analysis_head(
             ui.is_enabled(),
             selected,
             format!(
-                "{label}, {domain}{count} quantities, {}",
+                "{spoken}, {domain}{count} quantities, {}",
                 if expanded { "expanded" } else { "collapsed" }
             ),
         )
@@ -1924,9 +1951,7 @@ fn result_browser_analysis_head(
         text_left += PROBLEM_MARK_ADVANCE;
     }
     let text_right = rect.right() - 8.0 - count_width - 8.0;
-    // A run's name carries its date and note, so a narrow dock elides it
-    // short of the count rather than painting it under the number.
-    let label_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
+    // A long name elides short of the count rather than painting under it.
     let label = super::super::super::design_system::elide_text(
         ui,
         label,

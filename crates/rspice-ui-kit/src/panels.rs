@@ -135,8 +135,6 @@ pub enum WorkbenchIcon {
     VerilogA,
     /// Format a source document: ragged lines brought to one indentation.
     Format,
-    /// The order of a list: rows shortening downwards beside an arrow down.
-    Sort,
     Terminal,
     Compare,
     Info,
@@ -722,13 +720,6 @@ impl WorkbenchIcon {
                 line(&[(9.0, 10.0), (20.0, 10.0)]);
                 line(&[(9.0, 14.0), (20.0, 14.0)]);
                 line(&[(4.0, 18.0), (16.0, 18.0)]);
-            }
-            Self::Sort => {
-                line(&[(3.0, 6.0), (13.0, 6.0)]);
-                line(&[(3.0, 12.0), (10.0, 12.0)]);
-                line(&[(3.0, 18.0), (7.0, 18.0)]);
-                line(&[(18.0, 4.0), (18.0, 20.0)]);
-                line(&[(14.5, 16.5), (18.0, 20.0), (21.5, 16.5)]);
             }
             Self::Terminal => {
                 line(&[(4.0, 6.0), (9.0, 11.0), (4.0, 16.0)]);

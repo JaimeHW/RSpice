@@ -564,7 +564,54 @@ fn the_first_tick_moves_no_row() {
     );
 }
 
-/// The flat list in the order the Sort menu names: the order the run wrote
+/// The selection bar clears the ticks itself, and its Actions menu saves
+/// them as a set: Clear was a row of the menu, and a set was saved only
+/// from the Sets menu up in the header.
+#[test]
+fn the_selection_bar_clears_the_ticks_and_its_menu_saves_them_as_a_set() {
+    let mut browser = Browser::new(finished_hierarchical_run());
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    let at = |nodes: &[Node], label: &str| {
+        find(nodes, label)
+            .unwrap_or_else(|| panic!("no {label}: {:?}", labels(nodes)))
+            .rect
+            .center()
+    };
+    let nodes = browser.click(at(&nodes, "Plot V(in)"));
+    let nodes = browser.click(at(&nodes, "Plot V(out)"));
+    assert!(find(&nodes, "2 ticked").is_some(), "{:?}", labels(&nodes));
+
+    let menu = browser.click(at(&nodes, "Actions"));
+    assert!(
+        find(&menu, "Save ticked as set\u{2026}").is_some(),
+        "{:?}",
+        labels(&menu)
+    );
+    let clear = find(&menu, "Clear ticks").expect("Clear stands on the bar");
+    assert!(
+        clear.rect.top() > at(&nodes, "Plot V(out)").y,
+        "Clear stands on the bar under the rows, not in the menu: {:?}",
+        clear.rect
+    );
+
+    let closed = browser.click(at(&menu, "Actions"));
+    let cleared = browser.click(at(&closed, "Clear ticks"));
+    assert!(
+        find(&cleared, "2 ticked").is_none(),
+        "{:?}",
+        labels(&cleared)
+    );
+    assert!(
+        cleared
+            .iter()
+            .filter(|node| node.label.starts_with("Plot "))
+            .all(|node| !node.ticked),
+        "every signal is unticked"
+    );
+}
+
+/// The flat list in the order the view menu names: the order the run wrote
 /// its signals in, or by unit and then by name.
 #[test]
 fn the_flat_list_sorts_in_run_order_and_by_unit() {
@@ -588,8 +635,9 @@ fn the_flat_list_sorts_in_run_order_and_by_unit() {
             .map(|node| node.label["Plot ".len()..].to_owned())
             .collect::<Vec<_>>()
     };
+    let nodes = browser.click(at(&nodes, "View options"));
     let nodes = browser.click(at(&nodes, "Flat"));
-    let nodes = browser.click(at(&nodes, "Sort"));
+    let nodes = browser.click(at(&nodes, "View options"));
     let nodes = browser.click(at(&nodes, "Run order"));
     assert_eq!(
         rows(&nodes),
@@ -604,7 +652,7 @@ fn the_flat_list_sorts_in_run_order_and_by_unit() {
         "as the run wrote them"
     );
 
-    let nodes = browser.click(at(&nodes, "Sort"));
+    let nodes = browser.click(at(&nodes, "View options"));
     let nodes = browser.click(at(&nodes, "Unit"));
     let by_unit = rows(&nodes);
     let volts: Vec<&str> = by_unit

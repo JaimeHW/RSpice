@@ -267,6 +267,7 @@ pub(super) fn signal_sets_menu(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     ticked: &[ResultBrowserSelectionKey],
+    width: f32,
 ) {
     let count = state.results.signal_sets.len();
     let label = if count == 0 {
@@ -274,23 +275,28 @@ pub(super) fn signal_sets_menu(
     } else {
         format!("Sets {count}")
     };
+    let button = rspice_ui_kit::widgets::Button::new(&label)
+        .menu()
+        .min_width(width)
+        .max_width(width)
+        .show(ui)
+        .on_hover_text("Named sets of signals, saved with the project");
     // A click into a name field must not close the menu it sits in, so the
     // menu closes on a click outside it and each action closes it itself.
-    let config = egui::containers::menu::MenuConfig::new()
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-    let (response, _) = egui::containers::menu::MenuButton::new(label)
-        .config(config)
-        .ui(ui, |ui| signal_sets_menu_body(ui, state, ticked));
-    response.on_hover_text("Named sets of signals, saved with the project");
+    super::results::button_menu(
+        &button,
+        egui::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| signal_sets_menu_body(ui, state, ticked),
+    );
 }
 
-fn signal_sets_menu_body(
+/// A name for a new set and the button that saves the ticked signals under
+/// it. Whether it saved them, closing the menu it stands in.
+pub(super) fn save_ticked_as_set(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     ticked: &[ResultBrowserSelectionKey],
-) {
-    let t = Tokens::get(ui.ctx());
-    ui.set_min_width(220.0);
+) -> bool {
     let new_id = draft_id("new");
     let mut draft = take_draft(ui, new_id, "");
     let mut save = false;
@@ -321,12 +327,25 @@ fn signal_sets_menu_body(
                 state.workbench.prompt(message);
                 forget_draft(ui, new_id);
                 ui.close();
-                return;
+                return true;
             }
             Err(error) => state.workbench.prompt(error),
         }
     }
     store_draft(ui, new_id, draft);
+    false
+}
+
+fn signal_sets_menu_body(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    ticked: &[ResultBrowserSelectionKey],
+) {
+    let t = Tokens::get(ui.ctx());
+    ui.set_min_width(220.0);
+    if save_ticked_as_set(ui, state, ticked) {
+        return;
+    }
     ui.separator();
     if state.results.signal_sets.is_empty() {
         ui.label(
