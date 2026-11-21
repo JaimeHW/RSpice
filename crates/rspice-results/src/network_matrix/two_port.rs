@@ -452,7 +452,8 @@ fn on_grid(x: &WaveformValues, axis: &WaveformValues, grid: &[f64]) -> Result<bo
 }
 
 /// `Rn`, `Fmin` and `Sopt` as the S-parameter runner retains them, on the
-/// scattering grid.
+/// scattering grid. A complex column is found by the quantity it holds, so
+/// `Sopt` is the column the converter names `|Sopt|`.
 fn retained_noise<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,
     axis: &WaveformValues,
@@ -461,7 +462,7 @@ fn retained_noise<W: AsRef<RetainedWaveform>>(
 ) -> Result<Option<Vec<TwoPortNoiseParameters>>, Unread> {
     let named = |name: &str| -> Result<Option<&RetainedWaveform>, Unread> {
         for waveform in analysis.waveforms.iter().map(AsRef::as_ref) {
-            if waveform.name == name && on_grid(&waveform.x, axis, grid)? {
+            if super::coefficient_name(waveform) == name && on_grid(&waveform.x, axis, grid)? {
                 return Ok(Some(waveform));
             }
         }

@@ -368,7 +368,7 @@ fn retained_sweep(
             noise.minimum_factor,
         ));
         waveforms.push(complex_waveform(
-            "Sopt".to_owned(),
+            "|Sopt|".to_owned(),
             "Sopt",
             frequencies,
             &noise.optimum,
