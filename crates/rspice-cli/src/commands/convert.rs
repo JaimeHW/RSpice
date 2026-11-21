@@ -138,21 +138,27 @@ pub fn execute(args: ConvertArgs, config: &Config, quiet: bool) -> Result<(), Cl
 }
 
 /// A table the application's importer would refuse, or read back as another result, is not
-/// written: a signal with no name is refused by the importer, two columns of one name cannot be
-/// told apart, and a time that falls is not one run. Names are compared as the importer compares
-/// them, ignoring case, and an unnamed scale is told apart by its place. A frequency list or a
-/// DC sweep may run in any order its analysis asked for, so only a time is held to rising. A
-/// rawfile holds the runs of a stepped plot as they are, its time restarting for each, so only a
-/// table is held to one run. The reason names the column or the point.
+/// written: a table's signal with no name is refused by the importer, two columns of one name
+/// cannot be told apart, and a time that falls is not one run. Names are compared as the
+/// importer compares them, ignoring case, and an unnamed scale is told apart by its place. A
+/// frequency list or a DC sweep may run in any order its analysis asked for, so only a time is
+/// held to rising. A rawfile holds the runs of a stepped plot as they are, its time restarting
+/// for each, so only a table is held to one run. The reason names the column or the point.
 fn refuse_what_readers_refuse(
     path: &std::path::Path,
     table: &crate::commands::export_table::ExportTable,
     rawfile: bool,
 ) -> Result<(), CliError> {
-    let unnamed = table
-        .columns
-        .iter()
-        .position(|column| column.name.trim().is_empty());
+    // A rawfile keeps every label exactly, blank ones too, under RSpice's table metadata, so only
+    // a table is held to named signals.
+    let unnamed = (!rawfile)
+        .then(|| {
+            table
+                .columns
+                .iter()
+                .position(|column| column.name.trim().is_empty())
+        })
+        .flatten();
     if let Some(column) = unnamed {
         // Column 1 is the scale.
         return Err(CliError::ConversionError {
