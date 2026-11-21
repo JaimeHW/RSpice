@@ -833,6 +833,8 @@ def exported_dataset(browser):
         if plot["toggled"] != "true":
             browser.click(plot["label"], "checkBox")
     browser.capture("results-plotted")
+    # The Results toolbar has an Export… of its own; the form's is the one the form brings.
+    toolbar = {c["id"] for c in controls(browser.snapshot()) if c["label"] == "Export…"}
     browser.click("Export result dataset…", "button")
     rendered = wait_for(lambda: [c for c in controls(browser.snapshot())
                                  if c["role"] == "dialog" and c["label"] == "Export result dataset"]
@@ -843,8 +845,11 @@ def exported_dataset(browser):
     if every:
         browser.click(every[0]["label"], every[0]["role"])
     browser.capture("results-export-form")
-    # Enter is the form's Export…; the Results toolbar has an Export… of its own.
-    browser.keys("")
+    primary = [c for c in controls(browser.snapshot()) if c["label"] == "Export…"
+               and c["role"] == "button" and c["id"] not in toolbar]
+    if len(primary) != 1:
+        raise AssertionError(f"Expected the form to bring one Export… button; got {primary}")
+    click_control(browser, primary[0])
 
     def download():
         files = list(browser.downloads.glob("*.csv"))
@@ -853,6 +858,25 @@ def exported_dataset(browser):
         return files[0] if files and not list(browser.downloads.glob("*.crdownload")) else None
 
     return wait_for(download, "the exported result dataset", 60).read_text(encoding="utf-8")
+
+
+def click_control(browser, control):
+    """Click one rendered control where it is drawn, for a button that shares its name with one
+    outside the form it belongs to."""
+    canvas = browser.script("""
+        const r = document.getElementById('rspice_canvas').getBoundingClientRect();
+        return {x: r.x, y: r.y, ratio: devicePixelRatio};
+    """)
+    x, y = (round(canvas[axis] + control["center"][i] / canvas["ratio"])
+            for i, axis in enumerate(("x", "y")))
+    browser.record_input("click", label=control["label"], role=control["role"], node=control["id"],
+                         x=x, y=y, keyboard=[])
+    pointer = [{"type": "pointerMove", "duration": 0, "origin": "viewport", "x": x, "y": y},
+               {"type": "pointerDown", "button": 0}, {"type": "pause", "duration": 60},
+               {"type": "pointerUp", "button": 0}]
+    browser.call("POST", "/actions", {"actions": [
+        {"type": "pointer", "id": "mouse", "parameters": {"pointerType": "mouse"}, "actions": pointer}]})
+    browser.snapshot()
 
 
 def verify_exported_samples(text):
