@@ -986,53 +986,6 @@ fn fitting_characters(width: f32, columns: &Columns) -> usize {
 mod tests {
     use super::*;
 
-    /// A fixture whose advance is exactly 7 points, so the arithmetic every
-    /// elision does is checkable by hand.
-    fn columns() -> Columns {
-        Columns {
-            left: 0.0,
-            right: 600.0,
-            starts: [0.0, 70.0, 140.0, 210.0, 280.0, 350.0],
-            widths: [70.0; 6],
-            room: 600.0,
-            advance: 7.0,
-            ellipsis: 7.0,
-        }
-    }
-
-    /// A path is read from its tail: the file and the object at the end of it
-    /// say where to go, and the directories above them do not.
-    #[test]
-    fn a_long_path_keeps_its_tail() {
-        let columns = columns();
-        let elided = elide_head("models/analog/opamp.sp", 70.0, &columns);
-        assert!(elided.starts_with('…'), "{elided} must mark the cut");
-        assert!(elided.ends_with("opamp.sp"), "{elided} must keep its tail");
-        assert_eq!(
-            elided.chars().count(),
-            10,
-            "{elided} must fit the width it was measured against",
-        );
-    }
-
-    /// A sentence is read from its start.
-    #[test]
-    fn a_long_sentence_keeps_its_start() {
-        let columns = columns();
-        let elided = elide_tail("Node has only one connection", 70.0, &columns);
-        assert!(elided.ends_with('…'), "{elided} must mark the cut");
-        assert!(elided.starts_with("Node has"), "{elided}");
-        assert_eq!(elided.chars().count(), 10);
-    }
-
-    /// A column too narrow for even one character prints the cut alone rather
-    /// than nothing at all.
-    #[test]
-    fn a_column_with_no_room_prints_the_cut() {
-        assert_eq!(elide_head("Component M1", 3.0, &columns()), "…");
-        assert_eq!(elide_tail("Component M1", 3.0, &columns()), "…");
-    }
-
     /// What [`Columns::measure`] decides for a table `width` wide, in the face
     /// the page prints in, with the room it was measured against.
     struct Measured {

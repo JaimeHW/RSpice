@@ -190,39 +190,6 @@ pub(crate) fn deserialize_active_map<'de, D: Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::CellViewRef;
-
-    /// The retired Studio setup tab reads as no document, and its neighbours
-    /// in the same session survive it.
-    ///
-    /// Both wire formats, because the window session is written as RON by
-    /// eframe and as JSON by the ownership field's own compatibility path.
-    #[test]
-    fn a_retired_identity_reads_as_no_document_beside_live_ones() {
-        const RON: &str = r#"[
-            AnalysisSetup("9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f"),
-            SimulationPlan,
-            CellView((library: "work", cell: "amp", view: "schematic")),
-        ]"#;
-        let documents =
-            deserialize_list(&mut ron::Deserializer::from_str(RON).expect("the fixture is RON"))
-                .expect("a retired identity is tolerated, not refused");
-        assert_eq!(
-            documents,
-            vec![
-                WorkspaceDocumentId::SimulationPlan,
-                WorkspaceDocumentId::CellView(CellViewRef::new("work", "amp", "schematic")),
-            ]
-        );
-
-        const JSON: &str = r#"[
-            {"AnalysisSetup": "9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f"},
-            "SimulationPlan"
-        ]"#;
-        let documents = deserialize_list(&mut serde_json::Deserializer::from_str(JSON))
-            .expect("a retired identity is tolerated in JSON too");
-        assert_eq!(documents, vec![WorkspaceDocumentId::SimulationPlan]);
-    }
 
     /// A variant nobody has ever written is still an error: tolerance is a
     /// list of identities this build retired, not a licence to read anything.

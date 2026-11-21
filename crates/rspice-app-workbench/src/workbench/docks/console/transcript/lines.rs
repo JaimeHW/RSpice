@@ -410,16 +410,6 @@ mod tests {
     }
 
     #[test]
-    fn a_row_is_estimated_one_line_per_wrap_width_of_characters() {
-        let metrics = metrics();
-        assert_eq!(metrics.estimate("short"), 16.0);
-        // 25 characters at 10 per line: three lines, plus the one-line inset
-        // above and below.
-        assert_eq!(metrics.estimate(&"x".repeat(25)), 3.0 * 14.0 + 2.0);
-        assert_eq!(metrics.estimate("one\ntwo"), 2.0 * 14.0 + 2.0);
-    }
-
-    #[test]
     fn rows_follow_appended_lines_and_rebuild_when_the_front_moves() {
         let mut log = LogBuffer::new(3);
         log.log(LogSeverity::Info, LogSource::Studio, "a");

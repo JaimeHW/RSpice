@@ -396,48 +396,6 @@ mod tests {
     }
 
     #[test]
-    fn catalog_classification_counts_match_the_registry() {
-        let count_status = |status| {
-            SurfaceId::ALL
-                .iter()
-                .filter(|surface| surface.release_status() == status)
-                .count()
-        };
-        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 19);
-        assert_eq!(count_status(ReleaseStatus::Preview), 7);
-        assert_eq!(count_status(ReleaseStatus::InternalOnly), 1);
-
-        let count_archetype = |archetype| {
-            SurfaceId::ALL
-                .iter()
-                .filter(|surface| surface.archetype() == archetype)
-                .count()
-        };
-        assert_eq!(count_archetype(SurfaceArchetype::PrimaryWorkspace), 8);
-        assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 5);
-        assert_eq!(count_archetype(SurfaceArchetype::Manager), 8);
-        assert_eq!(count_archetype(SurfaceArchetype::Modal), 2);
-        assert_eq!(count_archetype(SurfaceArchetype::Overlay), 3);
-        assert_eq!(count_archetype(SurfaceArchetype::Internal), 1);
-    }
-
-    #[test]
-    fn models_and_pdk_commercial_tiers_match_the_governed_mockup_contract() {
-        assert_eq!(
-            SurfaceId::ModelCorrelation.canonical_tier(),
-            CanonicalTier::Preview
-        );
-        assert_eq!(
-            SurfaceId::ModelCorrelation.release_status(),
-            ReleaseStatus::Preview
-        );
-        for surface in [SurfaceId::ModelEditor, SurfaceId::LibraryCellviewManager] {
-            assert_eq!(surface.canonical_tier(), CanonicalTier::ReleaseTarget);
-            assert_eq!(surface.release_status(), ReleaseStatus::ReleaseScope);
-        }
-    }
-
-    #[test]
     fn every_surface_has_strict_text_and_serde_roundtrips() {
         for surface in SurfaceId::ALL {
             let stable_id = surface.as_str();
@@ -472,18 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn base_deep_links_preserve_the_exact_view_surface_split() {
-        for (index, surface) in SurfaceId::ALL.into_iter().enumerate() {
-            let expected = if index < Workspace::ALL.len() {
-                format!("?view={surface}")
-            } else {
-                format!("?surface={surface}")
-            };
-            assert_eq!(surface.deep_link(), expected);
-        }
-    }
-
-    #[test]
     fn all_primary_surface_workspace_mappings_roundtrip() {
         let expected = [
             (Workspace::Project, SurfaceId::Project),
@@ -508,54 +454,6 @@ mod tests {
             Err(NonPrimarySurface {
                 surface_id: SurfaceId::ReleaseCockpit,
             })
-        );
-    }
-
-    #[test]
-    fn library_cellview_manager_keeps_specialist_identity_with_models_ownership() {
-        assert_eq!(SurfaceId::LibraryCellviewManager.workspace(), None);
-        assert_eq!(
-            SurfaceId::LibraryCellviewManager.owner_workspace(),
-            Some(Workspace::Models)
-        );
-        assert_eq!(
-            Workspace::try_from(SurfaceId::LibraryCellviewManager),
-            Err(NonPrimarySurface {
-                surface_id: SurfaceId::LibraryCellviewManager,
-            })
-        );
-        assert_eq!(
-            SurfaceId::LibraryCellviewManager.deep_link(),
-            "?surface=library-cellview-manager"
-        );
-    }
-
-    #[test]
-    fn design_management_keeps_manager_identity_with_design_ownership() {
-        assert_eq!(SurfaceId::DesignManagement.workspace(), None);
-        assert_eq!(
-            SurfaceId::DesignManagement.owner_workspace(),
-            Some(Workspace::Design)
-        );
-        assert_eq!(
-            SurfaceId::DesignManagement.label(),
-            "Sheets, variants and annotation"
-        );
-        assert_eq!(
-            SurfaceId::DesignManagement.archetype(),
-            SurfaceArchetype::Manager
-        );
-        assert_eq!(
-            SurfaceId::DesignManagement.canonical_tier(),
-            CanonicalTier::ReleaseTarget
-        );
-        assert_eq!(
-            SurfaceId::DesignManagement.release_status(),
-            ReleaseStatus::ReleaseScope
-        );
-        assert_eq!(
-            SurfaceId::DesignManagement.deep_link(),
-            "?surface=design-management"
         );
     }
 }

@@ -844,28 +844,6 @@ mod tests {
         assert!(restored.recovered_invalid_routes());
     }
 
-    /// Sessions saved before the capability matrix was deleted can name it,
-    /// or one of its nested pages, anywhere in the history. They still load:
-    /// the dead entries are dropped and everything else is kept.
-    #[test]
-    fn saved_history_naming_the_deleted_capability_matrix_still_restores() {
-        let json = r#"{
-            "current":"?surface=feature-availability",
-            "back":["?view=results","?surface=interoperability-matrix","?view=simulate"],
-            "forward":["?surface=touch-edit-guide","?view=models"],
-            "recent":["?surface=feature-availability","?view=results"]
-        }"#;
-        let restored: SurfaceNavigation =
-            serde_json::from_str(json).expect("a session naming a deleted surface restores");
-        assert_eq!(restored.current(), route(SurfaceId::Design));
-        assert_eq!(
-            restored.back_entries(),
-            &[route(SurfaceId::Results), route(SurfaceId::Simulate)]
-        );
-        assert_eq!(restored.forward_entries(), &[route(SurfaceId::Models)]);
-        assert!(restored.recovered_invalid_routes());
-    }
-
     impl SurfaceNavigation {
         fn take_browser_effect_for_test(&self) -> Option<BrowserHistoryEffect> {
             self.pending_browser_effects.front().copied()

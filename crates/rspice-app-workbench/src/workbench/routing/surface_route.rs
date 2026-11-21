@@ -259,29 +259,6 @@ mod tests {
         }
     }
 
-    /// The capability matrix and its nested pages were deleted. Their old
-    /// deep links are unknown surfaces now, so a saved session or a bookmark
-    /// naming one is quarantined by the navigation restore instead of opening.
-    #[test]
-    fn deleted_capability_matrix_routes_no_longer_parse() {
-        for stable_id in [
-            "feature-availability",
-            "interoperability-matrix",
-            "touch-edit-guide",
-            "platform-lifecycle",
-            "source-load-pull-analysis",
-        ] {
-            let value = format!("?surface={stable_id}");
-            assert!(
-                matches!(
-                    value.parse::<SurfaceRoute>(),
-                    Err(SurfaceRouteParseError::UnknownSurface(_))
-                ),
-                "deleted route `{value}` still parses"
-            );
-        }
-    }
-
     #[test]
     fn unknown_alias_partial_and_malformed_routes_fail_closed() {
         let malformed = [

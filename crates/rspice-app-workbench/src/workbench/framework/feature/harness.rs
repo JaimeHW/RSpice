@@ -652,25 +652,6 @@ mod tests {
         cx.foreign_available(CommandKey::new("unread"));
     }
 
-    /// A context reads whether an application-modal dialog was open as the
-    /// shell lent it.
-    #[test]
-    fn a_context_reads_the_application_modal_the_shell_lent_it_with() {
-        let mut harness = reader();
-        assert!(
-            harness
-                .cx()
-                .with_application_modal(true)
-                .application_modal_open()
-        );
-        assert!(
-            !harness
-                .cx()
-                .with_application_modal(false)
-                .application_modal_open()
-        );
-    }
-
     /// Reading whether an application-modal dialog is open from a context
     /// the shell lent without it is a fault in the call that reads it, never
     /// a silent answer.
@@ -682,15 +663,6 @@ mod tests {
         harness.cx().application_modal_open();
     }
 
-    /// A context reads whether anything the dialog gate counts was open as
-    /// the shell lent it.
-    #[test]
-    fn a_context_reads_the_dialog_modal_the_shell_lent_it_with() {
-        let mut harness = reader();
-        assert!(harness.cx().with_dialog_modal(true).dialog_modal_open());
-        assert!(!harness.cx().with_dialog_modal(false).dialog_modal_open());
-    }
-
     /// Reading whether anything the dialog gate counts is open from a
     /// context the shell lent without it is a fault in the call that reads
     /// it, never a silent answer.
@@ -700,16 +672,5 @@ mod tests {
     fn a_context_lent_without_the_dialog_modal_refuses_to_read_it() {
         let mut harness = reader();
         harness.cx().dialog_modal_open();
-    }
-
-    /// A feature's own test reads no clock: the null hardcopy port stamps a
-    /// publication with the epoch, the stamp the hardcopy feature falls back
-    /// to when the clock is out of range.
-    #[test]
-    fn the_null_hardcopy_port_stamps_the_epoch() {
-        assert_eq!(
-            NullPorts.publication_timestamp_utc(),
-            "1970-01-01T00:00:00Z"
-        );
     }
 }

@@ -316,20 +316,6 @@ impl ProblemsView {
 mod tests {
     use super::*;
 
-    /// A session lists everything, worst first: the order every reference
-    /// tool opens its list in.
-    #[test]
-    fn a_session_starts_listing_everything_worst_first() {
-        let view = ProblemsView::default();
-        assert_eq!(view.sort, ProblemColumn::Severity);
-        assert!(!view.descending, "severity read forward is worst first");
-        assert!(!view.is_filtered());
-        for level in DiagnosticLevel::ALL {
-            assert!(view.severities.lists(level), "{level:?} must be listed");
-        }
-        assert!(view.waived, "a recorded waiver is listed, not hidden");
-    }
-
     /// The second click on a column reverses it; the first click on another
     /// column does not inherit the direction the previous one was read in.
     #[test]

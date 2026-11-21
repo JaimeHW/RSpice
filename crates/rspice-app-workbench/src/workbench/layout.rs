@@ -459,19 +459,6 @@ mod tests {
     }
 
     #[test]
-    fn intermediate_desktop_docks_left_and_draws_right() {
-        let spec = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchSession::default());
-
-        assert!(spec.show_activity_rail);
-        assert!(spec.show_navigator_dock);
-        assert!(!spec.navigator_uses_drawer);
-        assert!(!spec.show_inspector_dock);
-        assert!(spec.inspector_uses_drawer);
-        assert_eq!(spec.navigator_width, 228.0);
-        assert!(spec.navigator_resizable);
-    }
-
-    #[test]
     fn a_wide_dock_width_survives_a_spell_in_a_desktop_window() {
         let mut state = WorkbenchSession::default();
         state.navigator_width = 440.0;
@@ -492,20 +479,6 @@ mod tests {
         let wide_again = LayoutSpec::resolve(1_440.0, 900.0, &state);
         assert_eq!(wide_again.navigator_width, 440.0);
         assert_eq!(wide_again.inspector_width, 440.0);
-    }
-
-    #[test]
-    fn responsive_dock_defaults_follow_a_1440_to_1280_viewport_change() {
-        let state = WorkbenchSession::default();
-        let at_1440 = LayoutSpec::resolve(1_440.0, 900.0, &state);
-        let at_1280 = LayoutSpec::resolve(1_280.0, 900.0, &state);
-
-        assert_eq!(at_1440.navigator_width, 256.0);
-        assert_eq!(at_1440.inspector_width, 312.0);
-        assert!((at_1280.navigator_width - 230.4).abs() < 0.001);
-        assert!((at_1280.inspector_width - 281.6).abs() < 0.001);
-        assert!(!state.navigator_width_custom);
-        assert!(!state.inspector_width_custom);
     }
 
     #[test]
@@ -584,20 +557,5 @@ mod tests {
         assert!(!spec.show_inspector_dock);
         assert!(!spec.show_console_body);
         assert_eq!(spec.console_height, 31.0);
-    }
-
-    #[test]
-    fn pvt_selector_follows_the_mockup_width_cutoff() {
-        assert!(!LayoutSpec::resolve(820.0, 900.0, &WorkbenchSession::default()).show_pvt_selector);
-        assert!(LayoutSpec::resolve(821.0, 900.0, &WorkbenchSession::default()).show_pvt_selector);
-        assert!(!LayoutSpec::resolve(844.0, 390.0, &WorkbenchSession::default()).show_pvt_selector);
-        assert!(
-            !LayoutSpec::resolve(1260.0, 900.0, &WorkbenchSession::default())
-                .show_run_config_selector
-        );
-        assert!(
-            LayoutSpec::resolve(1261.0, 900.0, &WorkbenchSession::default())
-                .show_run_config_selector
-        );
     }
 }

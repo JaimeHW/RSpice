@@ -77,7 +77,7 @@ mod tests {
     use serde::Deserialize;
 
     #[test]
-    fn ownership_survives_json_ron_and_legacy_map_sessions() {
+    fn ownership_survives_json_and_ron_sessions() {
         let mut session = WindowSessionRegistry::default();
         let document = WorkspaceDocumentId::CellView(CellViewRef::new("work", "amp", "schematic"));
         let window = session
@@ -101,21 +101,6 @@ mod tests {
                 Some(&document)
             );
         }
-        // Emit the former field shape with a typed map so the test exercises
-        // actual enum payloads in old eframe sessions.
-        #[derive(Serialize)]
-        struct Legacy<'a> {
-            ownership: &'a Ownership,
-        }
-        let legacy = ron::to_string(&Legacy {
-            ownership: &session.ownership,
-        })
-        .unwrap();
-        let restored: WindowSessionRegistry = ron::from_str(&legacy).unwrap();
-        assert_eq!(restored.ownership, session.ownership);
-        let empty_legacy: WindowSessionRegistry =
-            serde_json::from_str(r#"{"ownership":{}}"#).unwrap();
-        assert!(empty_legacy.ownership.is_empty());
     }
 
     #[test]

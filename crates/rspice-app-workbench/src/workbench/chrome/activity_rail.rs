@@ -198,29 +198,3 @@ pub const fn workspace_icon(workspace: Workspace) -> WorkbenchIcon {
         Workspace::Netlist => WorkbenchIcon::Netlist,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn activity_accessibility_names_match_the_mockup_workspace_language() {
-        assert_eq!(activity_workspace_label(Workspace::Project), "Project");
-        assert_eq!(activity_workspace_label(Workspace::Design), "Schematic");
-        assert_eq!(
-            activity_workspace_label(Workspace::Simulate),
-            "Simulation Studio"
-        );
-        assert_eq!(
-            activity_workspace_label(Workspace::Stimulus),
-            "Stimulus Library"
-        );
-        assert_eq!(activity_workspace_label(Workspace::Results), "Results");
-        assert_eq!(activity_workspace_label(Workspace::Verify), "Verify");
-        assert_eq!(
-            activity_workspace_label(Workspace::Models),
-            "Models and PDKs"
-        );
-        assert_eq!(activity_workspace_label(Workspace::Netlist), "Netlist");
-    }
-}

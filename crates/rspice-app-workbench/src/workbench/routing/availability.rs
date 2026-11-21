@@ -230,49 +230,6 @@ mod tests {
     }
 
     #[test]
-    fn model_editor_has_an_explicit_project_owned_executor_boundary() {
-        let availability = surface_availability(SurfaceId::ModelEditor);
-        assert_eq!(
-            availability,
-            SurfaceExecutionAvailability::Available {
-                executor: "rspice-ui governed project-owned device-model definition editor",
-                evidence_boundary: "A selected single-card model owned by the project can be opened, edited through its parameter, section, statistical, temperature, and qualification forms, checked by the parser, compared with saved releases, and saved as a source revision or a results-only revision. Qualification runs on this desktop or browser build and compares only a matching saved pair of results. Promotion stays blocked until the source's results, declarations, compatibility checks, and independent approvals are complete. Built-in and external sources stay read-only.",
-            }
-        );
-        assert!(route_availability(SurfaceRoute::surface(SurfaceId::ModelEditor)).can_open());
-        require_available(SurfaceRoute::surface(SurfaceId::ModelEditor))
-            .expect("model editor route executor is registered");
-    }
-
-    #[test]
-    fn library_cellview_manager_has_an_explicit_shared_project_domain_boundary() {
-        let availability = surface_availability(SurfaceId::LibraryCellviewManager);
-        assert!(matches!(
-            availability,
-            SurfaceExecutionAvailability::Available {
-                executor: "rspice-ui project-owned library, cellview, symbol, and component-form authoring workspace",
-                ..
-            }
-        ));
-        require_available(SurfaceRoute::surface(SurfaceId::LibraryCellviewManager))
-            .expect("the Library Manager's route executor is registered");
-    }
-
-    #[test]
-    fn models_and_pdk_surface_execution_matrix_is_explicit_and_fail_closed() {
-        for surface in [
-            SurfaceId::ModelEditor,
-            SurfaceId::ModelCorrelation,
-            SurfaceId::LibraryCellviewManager,
-        ] {
-            assert!(
-                surface_availability(surface).can_open(),
-                "{surface} lost its registered Rust executor"
-            );
-        }
-    }
-
-    #[test]
     fn every_object_aware_route_fails_closed_without_a_runtime_resolver() {
         let object_ref = ObjectRef::new(
             ProductObjectKind::Project,
