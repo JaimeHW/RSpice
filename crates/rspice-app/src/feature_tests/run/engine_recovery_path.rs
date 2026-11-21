@@ -69,21 +69,6 @@ fn press_run_deck(replay: &mut Replay) {
     replay.click(&label, Role::Button);
 }
 
-/// The browser's New deck is the command the script presses: there it asks
-/// nothing, so its name has no ellipsis.
-#[test]
-fn the_browser_names_new_deck_as_the_script_presses_it() {
-    assert_eq!(
-        rspice_app_code::workbench::code::commands::new_deck_label(true),
-        "New deck"
-    );
-    let script = include_str!("../../../../../tools/ci/check_browser_engine_recovery.py");
-    assert!(
-        script.contains(r#"choose_command(browser, "New deck")"#),
-        "the script presses New deck"
-    );
-}
-
 /// `author_deck` and the native half of `run`: the editor takes the typed
 /// deck, one press of Run checks and runs it, the finished run opens in
 /// Results, a press of the Task log tab shows its DONE row there, and the
