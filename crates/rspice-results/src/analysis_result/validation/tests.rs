@@ -69,3 +69,27 @@ fn retained_measurements_require_exact_failvalue_evidence() {
     passed_after_exceeded.measurements[0].failure_limit_exceeded = true;
     assert!(passed_after_exceeded.validate_retained_evidence().is_err());
 }
+
+/// A running transient's live plot breaks its trace where the live queue let points go, and
+/// is held as an unfinished analysis; the same gap in a finished result is a solver NaN.
+#[test]
+fn only_an_unfinished_analysis_holds_the_live_plots_gaps() {
+    let gapped = || {
+        crate::waveform::RetainedWaveform::new(
+            "out",
+            vec![0.0, 1.0, 2.0, 9.0],
+            vec![0.0, 0.5, f64::NAN, 0.9],
+        )
+    };
+    let mut running =
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![gapped()]);
+    running.success = false;
+    running.error_message = Some(crate::analysis_result::LIVE_TRANSIENT_PARTIAL_MESSAGE.to_owned());
+    running
+        .validate_retained_evidence()
+        .expect("a live plot's gap is not a damaged result");
+
+    let finished =
+        AnalysisResult::new(2, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![gapped()]);
+    assert!(finished.validate_retained_evidence().is_err());
+}

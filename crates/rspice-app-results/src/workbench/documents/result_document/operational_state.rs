@@ -647,6 +647,54 @@ mod tests {
             ResultCurrentness::Corrupted
         );
     }
+
+    /// A running run's card says when its plot starts and how far the run got; once the plot
+    /// is drawn, it says what the live plot left out, in the live plot's own words.
+    #[test]
+    fn a_running_runs_card_says_what_its_live_plot_left_out() {
+        let mut state = ResultsTestHost::default();
+        state.platform.project_lifecycle.authority.open_session();
+        fn run(state: &mut ResultsTestHost, sequence: u64) -> &mut SimulationRun {
+            state
+                .model
+                .simulation
+                .retained
+                .run_by_sequence_mut(sequence)
+                .expect("the run is retained")
+        }
+        let sequence = state.model.simulation.start_run().id;
+        run(&mut state, sequence)
+            .mark_running()
+            .expect("the run starts");
+        state.model.simulation.execution.live_window = Some((0.0, 1e-3));
+        state.model.simulation.execution.reported_progress = Some(0.25);
+
+        let waiting = classify_viewer(&mut state.results_parts(), ResultViewer::Waves);
+        assert_eq!(waiting.state, ResultOperationalState::Loading);
+        assert_eq!(
+            waiting.detail.as_deref(),
+            Some("The plot starts as soon as the run writes its first results. 25% done.")
+        );
+
+        let note = "The live plot could not keep up and left out 6 points; the trace breaks \
+                    where they were (1 gap). The finished result has every point.";
+        state.model.simulation.execution.live_preview_note = Some(note.to_owned());
+        // The live plot breaks its trace where the queue let points go.
+        run(&mut state, sequence).add_analysis(
+            AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![RetainedTrace::new(
+                    "V(out)",
+                    vec![0.0, 1e-4, 2e-4, 9e-4],
+                    vec![0.0, 0.1, f64::NAN, 0.6],
+                    "",
+                )]),
+        );
+
+        let drawn = classify_viewer(&mut state.results_parts(), ResultViewer::Waves);
+        assert_eq!(drawn.state, ResultOperationalState::Streaming);
+        assert_eq!(drawn.detail.as_deref(), Some(note));
+        assert!(!drawn.blocks_visuals, "the plot so far stays in view");
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -90,8 +90,11 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             }
             // Imported adapters explicitly admit unavailable source samples.
             // Native derived PXF delay gaps must be reproducible from finite
-            // retained transfer samples. A solver NaN is still invalid.
+            // retained transfer samples. An analysis that did not finish holds
+            // what the live plot drew, which breaks its trace where it let points
+            // go. A solver NaN in a finished result is still invalid.
             if self.import_source.is_none()
+                && self.success
                 && !stored
                 && waveform.has_missing_samples()
                 && !pxf::verified_group_delay(self, waveform)
