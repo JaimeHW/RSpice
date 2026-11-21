@@ -417,6 +417,122 @@ fn period_and_frequency_average_over_the_cycles_asked_for() {
     refuses(&s, "period(V(p), 4)", "finds 3 whole cycle(s)");
 }
 
+// -- every cycle ----------------------------------------------------------------
+
+/// The trace a `"plot"` reading gives, as (x, y) pairs.
+#[track_caller]
+fn traced(signals: &Signals, expression: &str) -> Vec<(f64, f64)> {
+    let parsed = try_parse(expression, plain_number).unwrap();
+    match evaluate(&parsed, signals) {
+        Ok(CalcValue::Real(crate::calculator::value::RealValue::Waveform(x, y))) => {
+            x.into_iter().zip(y).collect()
+        }
+        other => panic!("{expression} is not a trace: {other:?}"),
+    }
+}
+
+#[track_caller]
+fn assert_points(actual: &[(f64, f64)], expected: &[(f64, f64)], tolerance: f64) {
+    assert_eq!(actual.len(), expected.len(), "{actual:?}");
+    for (&(x, y), &(at, value)) in actual.iter().zip(expected) {
+        assert!(
+            (x - at).abs() <= tolerance && (y - value).abs() <= tolerance,
+            "({x}, {y}) against ({at}, {value})"
+        );
+    }
+}
+
+/// A linear chirp sin(2π(f0·t + k·t²/2)) from 1 kHz rising 1 MHz/s, on an
+/// uneven grid: its rising zero crossings are where the phase is a whole
+/// number m of cycles, t = (√(f0² + 2km) − f0) / k, so each period plotted
+/// against the time it ends follows the chirp.
+#[test]
+fn the_period_of_a_chirp_plotted_against_time_follows_the_chirp() {
+    let (f0, k) = (1e3, 1e6);
+    let (start, stop) = (-1e-4, 9e-3);
+    let phase = move |t: f64| f0 * t + k * t * t / 2.0;
+    let s = Signals(vec![(
+        "V(c)",
+        sampled(start, stop, 200_001, move |t| (2.0 * PI * phase(t)).sin()),
+    )]);
+    let crossings: Vec<f64> = (0..)
+        .map(|m| ((f0 * f0 + 2.0 * k * m as f64).sqrt() - f0) / k)
+        .take_while(|&t| t < stop)
+        .collect();
+    let periods: Vec<(f64, f64)> = crossings
+        .windows(2)
+        .map(|pair| (pair[1], pair[1] - pair[0]))
+        .collect();
+    assert_eq!(periods.len(), 49);
+    assert_points(&traced(&s, "period(V(c), \"plot\")"), &periods, 1e-9);
+    // A count reads the first n cycles.
+    assert_points(
+        &traced(&s, "period(V(c), 5, \"plot\")"),
+        &periods[..5],
+        1e-9,
+    );
+    // Each frequency is its period's reciprocal, standing at the same time.
+    let frequencies = traced(&s, "frequency(V(c), \"plot\")");
+    let plotted = traced(&s, "period(V(c), \"plot\")");
+    for (&(at, hz), &(x, length)) in frequencies.iter().zip(&plotted) {
+        assert_eq!(at.to_bits(), x.to_bits());
+        assert_eq!(hz.to_bits(), (1.0 / length).to_bits());
+    }
+    // Over a whole cycle a linear chirp's phase advances by one, so each
+    // plotted cycle's frequency is the chirp's at the middle of the cycle.
+    for &(end, length) in &plotted {
+        let expected = f0 + k * (end - length / 2.0);
+        assert!(
+            (1.0 / length - expected).abs() <= 1e-5 * expected,
+            "{} Hz against {expected} Hz",
+            1.0 / length
+        );
+    }
+}
+
+/// The pulse train's every cycle, duty and edge: its cycles end at the
+/// rises at 11.5 and 21.5, each 45 % high; its 0-5 V rises take 0.8 from
+/// 10 % to 90 % and end at 1.9 past each period's start; its 2-long falls
+/// slope at -2.5 V per unit and end at 6.8 past it.
+#[test]
+fn duty_cycle_and_edges_plot_one_value_per_cycle() {
+    let s = trains();
+    assert_points(
+        &traced(&s, "dutyCycle(V(a), \"plot\")"),
+        &[(11.5, 45.0), (21.5, 45.0)],
+        1e-12,
+    );
+    let starts = [0.0, 10.0, 20.0];
+    let rises: Vec<(f64, f64)> = starts.iter().map(|t| (t + 1.9, 0.8)).collect();
+    assert_points(
+        &traced(&s, "rise(V(a), 10, 90, 1, 0, 5, \"plot\")"),
+        &rises,
+        1e-12,
+    );
+    assert_points(
+        &traced(&s, "rise(V(a), \"plot\", 10, 90, 2, 0, 5)"),
+        &rises[1..],
+        1e-12,
+    );
+    let falls: Vec<(f64, f64)> = starts.iter().map(|t| (t + 6.8, 1.6)).collect();
+    assert_points(
+        &traced(&s, "fall(V(a), 10, 90, 1, 5, 0, \"plot\")"),
+        &falls,
+        1e-12,
+    );
+    let slopes: Vec<(f64, f64)> = starts.iter().map(|t| (t + 6.8, -2.5)).collect();
+    assert_points(
+        &traced(&s, "slewRate(V(a), 10, 90, 1, 5, 0, \"plot\")"),
+        &slopes,
+        1e-12,
+    );
+    refuses(
+        &s,
+        "rise(V(a), 10, 90, 4, 0, 5, \"plot\")",
+        "none from the 4th on",
+    );
+}
+
 // -- step response ------------------------------------------------------------
 
 /// The unit step response of `ωn² / (s² + 2ζωn s + ωn²)`, delayed by `t0`.

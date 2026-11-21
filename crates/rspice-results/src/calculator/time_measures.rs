@@ -20,12 +20,20 @@
 //!   signal to cross the first threshold again.
 //! - Nothing extrapolates. A measurement that needs a crossing the window
 //!   does not hold says which one is missing.
+//! - `period`, `frequency`, `dutyCycle`, `rise`, `fall` and `slewRate`
+//!   given the word `"plot"` anywhere after the trace read every cycle
+//!   instead of one figure: a trace of one value per cycle or edge, standing
+//!   at the time that cycle or edge completes, as EZwave's measurement tool
+//!   plots them and ViVA's `freq` and `dutyCycle` do. A count then says
+//!   where the trace starts or how many cycles it reads, as it does for the
+//!   single figure.
 
 use super::evaluator::EvaluationError;
 use super::functions::{extremes, forward_domain, interpolate};
 use super::measures::{
     Argument, Edge, Measure, arity, edge, keyword, nth, number, ordinal, series,
 };
+use super::value::RealValue;
 
 /// The function that measures `name` (lower case), if this module owns it.
 pub(super) fn lookup(name: &str) -> Option<Measure> {
@@ -42,6 +50,23 @@ pub(super) fn lookup(name: &str) -> Option<Measure> {
         "overshoot" => overshoot,
         "undershoot" => undershoot,
         "settling" | "settlingtime" => settling_time,
+        _ => return None,
+    })
+}
+
+/// A measurement's every-cycle form: a trace of one value per cycle.
+pub(super) type PerCycle = fn(&str, &[Argument]) -> Result<RealValue, EvaluationError>;
+
+/// The every-cycle form of `name` (lower case), read when the call says
+/// `"plot"`, if it has one.
+pub(super) fn per_cycle(name: &str) -> Option<PerCycle> {
+    Some(match name {
+        "period" => period_trace,
+        "freq" | "frequency" => frequency_trace,
+        "duty" | "dutycycle" => duty_cycle_trace,
+        "rise" | "risetime" => rise_trace,
+        "fall" | "falltime" => fall_trace,
+        "slewrate" => slew_rate_trace,
         _ => return None,
     })
 }
@@ -238,6 +263,7 @@ fn delay(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
 
 /// One measured edge: where it left its first threshold and reached its
 /// second, and the two threshold levels.
+#[derive(Clone, Copy)]
 struct MeasuredEdge {
     start: f64,
     end: f64,
@@ -255,13 +281,24 @@ enum Sense {
     Either,
 }
 
+/// The edges a call of `rise`, `fall` or `slewRate` reads: the trace, the
+/// two threshold levels, the direction, and the edge number asked for.
+struct EdgeQuery<'a> {
+    x: &'a [f64],
+    y: &'a [f64],
+    from: f64,
+    to: f64,
+    direction: Edge,
+    wanted: usize,
+}
+
 /// `(w[, theta1, theta2[, n[, initial, final]]])`, the arguments `rise`,
-/// `fall` and `slewRate` share, resolved to the nth complete edge.
-fn measured_edge(
+/// `fall` and `slewRate` share.
+fn edge_query<'a>(
     name: &str,
-    args: &[Argument],
+    args: &'a [Argument],
     sense: Sense,
-) -> Result<MeasuredEdge, EvaluationError> {
+) -> Result<EdgeQuery<'a>, EvaluationError> {
     arity(name, args, 1, 6)?;
     if args.len() == 2 || args.len() == 5 {
         return Err(math(format!(
@@ -321,6 +358,26 @@ fn measured_edge(
     let from = initial + theta1 / 100.0 * (last - initial);
     let to = initial + theta2 / 100.0 * (last - initial);
     let direction = if rising { Edge::Rising } else { Edge::Falling };
+    Ok(EdgeQuery {
+        x,
+        y,
+        from,
+        to,
+        direction,
+        wanted,
+    })
+}
+
+/// Every complete edge the query names, in time order.
+fn complete_edges(query: &EdgeQuery) -> Vec<MeasuredEdge> {
+    let EdgeQuery {
+        x,
+        y,
+        from,
+        to,
+        direction,
+        ..
+    } = *query;
     // Walk both thresholds' crossings in time order. A first-threshold
     // crossing arms an edge (the latest one wins, so a runt that turned back
     // is forgotten); the next second-threshold crossing completes it.
@@ -337,50 +394,80 @@ fn measured_edge(
     // first threshold is crossed before the second.
     events.sort_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
     let mut armed = None;
-    let mut completed = 0;
+    let mut completed = Vec::new();
     for (at, starts) in events {
         if starts {
             armed = Some(at);
         } else if let Some(start) = armed.take() {
-            completed += 1;
-            if completed == wanted {
-                return Ok(MeasuredEdge {
-                    start,
-                    end: at,
-                    from,
-                    to,
-                });
-            }
+            completed.push(MeasuredEdge {
+                start,
+                end: at,
+                from,
+                to,
+            });
         }
     }
-    Err(math(format!(
-        "{name} finds {completed} complete {} edge(s) from {from} to {to}, not {wanted}",
-        direction.word()
-    )))
+    completed
 }
 
-/// `rise(w[, theta1, theta2[, n[, initial, final]]])` — the time the nth
-/// rising edge takes from `theta1` to `theta2` percent of its transition
-/// (default 10 % to 90 % of the way from the first sample to the last).
-fn rise(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
-    let edge = measured_edge(name, args, Sense::Rise)?;
+/// The nth complete edge a call of `rise`, `fall` or `slewRate` names.
+fn measured_edge(
+    name: &str,
+    args: &[Argument],
+    sense: Sense,
+) -> Result<MeasuredEdge, EvaluationError> {
+    let query = edge_query(name, args, sense)?;
+    let edges = complete_edges(&query);
+    edges.get(query.wanted - 1).copied().ok_or_else(|| {
+        math(format!(
+            "{name} finds {} complete {} edge(s) from {} to {}, not {}",
+            edges.len(),
+            query.direction.word(),
+            query.from,
+            query.to,
+            query.wanted
+        ))
+    })
+}
+
+/// Every complete edge from the nth on, each read by `reading` and standing
+/// at the time it completes.
+fn edge_trace(
+    name: &str,
+    args: &[Argument],
+    sense: Sense,
+    reading: fn(&str, &MeasuredEdge) -> Result<f64, EvaluationError>,
+) -> Result<RealValue, EvaluationError> {
+    let query = edge_query(name, args, sense)?;
+    let edges = complete_edges(&query);
+    let Some(from_nth) = edges
+        .get(query.wanted - 1..)
+        .filter(|rest| !rest.is_empty())
+    else {
+        return Err(math(format!(
+            "{name} finds {} complete {} edge(s) from {} to {}, none from the {} on",
+            edges.len(),
+            query.direction.word(),
+            query.from,
+            query.to,
+            nth(query.wanted)
+        )));
+    };
+    let mut at = Vec::with_capacity(from_nth.len());
+    let mut values = Vec::with_capacity(from_nth.len());
+    for edge in from_nth {
+        at.push(edge.end);
+        values.push(reading(name, edge)?);
+    }
+    Ok(RealValue::Waveform(at, values))
+}
+
+fn duration(_: &str, edge: &MeasuredEdge) -> Result<f64, EvaluationError> {
     Ok(edge.end - edge.start)
 }
 
-/// `fall(w[, theta1, theta2[, n[, initial, final]]])` — as `rise`, on the
-/// nth falling edge.
-fn fall(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
-    let edge = measured_edge(name, args, Sense::Fall)?;
-    Ok(edge.end - edge.start)
-}
-
-/// `slewRate(w[, theta1, theta2[, n[, initial, final]]])` — the average
-/// slope of the nth edge between its two thresholds, in units per unit x.
-/// The edge runs from the initial level to the final one, so it is rising
-/// unless the final level is given below the initial, and a falling edge
-/// reports a negative slope.
-fn slew_rate(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
-    let edge = measured_edge(name, args, Sense::Either)?;
+/// An edge's average slope between its thresholds.
+fn slope(name: &str, edge: &MeasuredEdge) -> Result<f64, EvaluationError> {
     let span = edge.end - edge.start;
     if span <= 0.0 {
         return Err(math(format!(
@@ -389,6 +476,40 @@ fn slew_rate(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
         )));
     }
     Ok((edge.to - edge.from) / span)
+}
+
+/// `rise(w[, theta1, theta2[, n[, initial, final]]])` — the time the nth
+/// rising edge takes from `theta1` to `theta2` percent of its transition
+/// (default 10 % to 90 % of the way from the first sample to the last).
+fn rise(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
+    duration(name, &measured_edge(name, args, Sense::Rise)?)
+}
+
+fn rise_trace(name: &str, args: &[Argument]) -> Result<RealValue, EvaluationError> {
+    edge_trace(name, args, Sense::Rise, duration)
+}
+
+/// `fall(w[, theta1, theta2[, n[, initial, final]]])` — as `rise`, on the
+/// nth falling edge.
+fn fall(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
+    duration(name, &measured_edge(name, args, Sense::Fall)?)
+}
+
+fn fall_trace(name: &str, args: &[Argument]) -> Result<RealValue, EvaluationError> {
+    edge_trace(name, args, Sense::Fall, duration)
+}
+
+/// `slewRate(w[, theta1, theta2[, n[, initial, final]]])` — the average
+/// slope of the nth edge between its two thresholds, in units per unit x.
+/// The edge runs from the initial level to the final one, so it is rising
+/// unless the final level is given below the initial, and a falling edge
+/// reports a negative slope.
+fn slew_rate(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
+    slope(name, &measured_edge(name, args, Sense::Either)?)
+}
+
+fn slew_rate_trace(name: &str, args: &[Argument]) -> Result<RealValue, EvaluationError> {
+    edge_trace(name, args, Sense::Either, slope)
 }
 
 // =============================================================================
@@ -434,12 +555,27 @@ fn pulse_width(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
 /// (default the mid level), averaged over every whole cycle the window
 /// contains.
 fn duty_cycle(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
+    let (_, shares) = duty_shares(name, args)?;
+    Ok(100.0 * shares.iter().sum::<f64>() / shares.len() as f64)
+}
+
+fn duty_cycle_trace(name: &str, args: &[Argument]) -> Result<RealValue, EvaluationError> {
+    let (at, shares) = duty_shares(name, args)?;
+    Ok(RealValue::Waveform(
+        at,
+        shares.into_iter().map(|share| 100.0 * share).collect(),
+    ))
+}
+
+/// Each whole cycle's share of time above the level, and the time of the
+/// rise that ends it.
+fn duty_shares(name: &str, args: &[Argument]) -> Result<(Vec<f64>, Vec<f64>), EvaluationError> {
     arity(name, args, 1, 2)?;
     let (x, y) = timed(name, args, 0)?;
     let level = level_or_mid(name, args, 1, y)?;
     let found = crossings(x, y, level);
-    let mut total = 0.0;
-    let mut cycles = 0usize;
+    let mut at = Vec::new();
+    let mut shares = Vec::new();
     for (index, start) in found.iter().enumerate() {
         if !start.rising {
             continue;
@@ -455,15 +591,15 @@ fn duty_cycle(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
         if cycle <= 0.0 {
             continue;
         }
-        total += (falls.x - start.x) / cycle;
-        cycles += 1;
+        at.push(repeats.x);
+        shares.push((falls.x - start.x) / cycle);
     }
-    if cycles == 0 {
+    if shares.is_empty() {
         return Err(math(format!(
             "{name} needs a whole cycle: a rising crossing of {level}, a fall, and the next rise"
         )));
     }
-    Ok(100.0 * total / cycles as f64)
+    Ok((at, shares))
 }
 
 /// The period between rising crossings of the level at `args[2]` (default
@@ -473,6 +609,21 @@ fn duty_cycle(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
 /// Measured across the cycles rather than from one, so jitter averages out
 /// instead of deciding the answer.
 fn mean_period(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
+    let (rising, level) = counted_crossings(name, args)?;
+    let counted = rising.len() - 1;
+    let span = rising[counted] - rising[0];
+    if span <= 0.0 {
+        return Err(math(format!(
+            "{name} found no elapsed time between crossings of {level}"
+        )));
+    }
+    Ok(span / counted as f64)
+}
+
+/// The rising crossings of the level at `args[2]` (default the mid level)
+/// that bound the cycles counted: every whole cycle in the window, or the
+/// first `args[1]`; and the level.
+fn counted_crossings(name: &str, args: &[Argument]) -> Result<(Vec<f64>, f64), EvaluationError> {
     arity(name, args, 1, 3)?;
     let (x, y) = timed(name, args, 0)?;
     let cycles = match args.get(1) {
@@ -480,7 +631,7 @@ fn mean_period(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
         None => None,
     };
     let level = level_or_mid(name, args, 2, y)?;
-    let rising = edge_crossings(x, y, level, Edge::Rising);
+    let mut rising = edge_crossings(x, y, level, Edge::Rising);
     if rising.len() < 2 {
         return Err(math(format!(
             "{name} needs at least one whole period between rising crossings of {level}"
@@ -496,13 +647,21 @@ fn mean_period(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
         }
         None => rising.len() - 1,
     };
-    let span = rising[counted] - rising[0];
-    if span <= 0.0 {
+    rising.truncate(counted + 1);
+    Ok((rising, level))
+}
+
+/// Each counted period, standing at the rising crossing that ends it.
+fn periods(name: &str, args: &[Argument]) -> Result<(Vec<f64>, Vec<f64>), EvaluationError> {
+    let (rising, level) = counted_crossings(name, args)?;
+    let lengths: Vec<f64> = rising.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    if let Some(index) = lengths.iter().position(|&length| length <= 0.0) {
         return Err(math(format!(
-            "{name} found no elapsed time between crossings of {level}"
+            "{name} finds two rising crossings of {level} at the same instant {}",
+            rising[index]
         )));
     }
-    Ok(span / counted as f64)
+    Ok((rising[1..].to_vec(), lengths))
 }
 
 /// `period(w[, n[, level]])` — the mean period, over the first `n` cycles
@@ -511,9 +670,22 @@ fn period(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
     mean_period(name, args)
 }
 
+fn period_trace(name: &str, args: &[Argument]) -> Result<RealValue, EvaluationError> {
+    let (at, lengths) = periods(name, args)?;
+    Ok(RealValue::Waveform(at, lengths))
+}
+
 /// `frequency(w[, n[, level]])` — the reciprocal of `period`.
 fn frequency(name: &str, args: &[Argument]) -> Result<f64, EvaluationError> {
     Ok(1.0 / mean_period(name, args)?)
+}
+
+fn frequency_trace(name: &str, args: &[Argument]) -> Result<RealValue, EvaluationError> {
+    let (at, lengths) = periods(name, args)?;
+    Ok(RealValue::Waveform(
+        at,
+        lengths.into_iter().map(|length| 1.0 / length).collect(),
+    ))
 }
 
 // =============================================================================

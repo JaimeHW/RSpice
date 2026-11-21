@@ -324,7 +324,8 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         summary: "rise time of an edge",
         description: "How long the nth rising edge takes from one percentage of its transition \
                       to another, 10 % to 90 % unless stated. The 0 % and 100 % levels are the \
-                      first and last samples unless given.",
+                      first and last samples unless given. With \"plot\", every edge from the \
+                      nth on, against the time each ends.",
         arguments: &EDGE_ARGUMENTS,
     },
     MeasureSpec {
@@ -333,7 +334,8 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Timing,
         summary: "fall time of an edge",
         description: "How long the nth falling edge takes from one percentage of its transition \
-                      to another, 10 % to 90 % of the way down unless stated.",
+                      to another, 10 % to 90 % of the way down unless stated. With \"plot\", \
+                      every edge from the nth on, against the time each ends.",
         arguments: &EDGE_ARGUMENTS,
     },
     MeasureSpec {
@@ -344,7 +346,8 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         description: "The average slope of the nth edge between two percentages of its \
                       transition. The edge runs from the 0 % level to the 100 % level, the \
                       first and last samples unless given, so a falling edge's slope is \
-                      negative.",
+                      negative. With \"plot\", every edge from the nth on, against the time \
+                      each ends.",
         arguments: &EDGE_ARGUMENTS,
     },
     MeasureSpec {
@@ -396,7 +399,8 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Timing,
         summary: "% of each period above a level",
         description: "The percentage of each period the signal spends above the level, averaged \
-                      over the whole cycles in the window.",
+                      over the whole cycles in the window. With \"plot\", each cycle's, against \
+                      the time it ends.",
         arguments: &[
             SIGNAL,
             arg("Level", "level", Level(0), Derived("mid level")),
@@ -408,7 +412,8 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Timing,
         summary: "mean period",
         description: "The mean time between rising crossings of the level, over every whole \
-                      cycle in the window or over the first n.",
+                      cycle in the window or over the first n. With \"plot\", each period, \
+                      against the time it ends.",
         arguments: &[
             SIGNAL,
             arg("Cycles", "n", Number, Derived("every whole cycle")),
@@ -421,7 +426,7 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         group: MeasureGroup::Timing,
         summary: "1 / period",
         description: "The reciprocal of the mean period, over every whole cycle in the window or \
-                      over the first n.",
+                      over the first n. With \"plot\", each cycle's, against the time it ends.",
         arguments: &[
             SIGNAL,
             arg("Cycles", "n", Number, Derived("every whole cycle")),
