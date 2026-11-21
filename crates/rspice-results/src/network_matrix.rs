@@ -5,6 +5,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+pub mod forms;
 pub mod two_port;
 
 /// Convert a physical reflection coefficient to (resistance, reactance) in ohms.
@@ -99,6 +100,10 @@ impl MatrixBlock {
     }
     pub fn is_mixed(&self) -> bool {
         self.key.mixed
+    }
+    /// Whether the block couples two sidebands of a periodic conversion.
+    pub fn is_conversion(&self) -> bool {
+        self.key.sidebands.is_some()
     }
     /// Row-major positions in the analysis used to resolve this layout.
     pub fn cells(&self) -> &[usize] {
@@ -378,6 +383,57 @@ impl NetworkLayout {
         })
     }
 }
+impl NetworkLayout {
+    /// [`Self::exact_table`] read in `form`: each coefficient's name, the
+    /// frequency, its channels and their references, and its parts in the
+    /// form's unit, at full precision. `None` where the exact table is, and
+    /// when the network has no such form at this frequency.
+    pub fn exact_form_table<W: AsRef<RetainedWaveform>>(
+        &self,
+        analysis: &AnalysisResult<W>,
+        block_index: usize,
+        sample: usize,
+        form: forms::NetworkForm,
+    ) -> Option<NetworkMatrixTable> {
+        let mut table = self.exact_table(analysis, block_index, sample)?;
+        if form == forms::NetworkForm::S {
+            return Some(table);
+        }
+        let block = self.blocks.get(block_index)?;
+        let ports = self.references.len();
+        let scattering = table
+            .rows
+            .iter()
+            .map(|row| {
+                Some(num_complex::Complex64::new(
+                    row[6].parse().ok()?,
+                    row[7].parse().ok()?,
+                ))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let references = (0..ports)
+            .map(|index| channel_reference(index, &self.references, block.key.mixed))
+            .collect::<Vec<_>>();
+        let values = forms::convert(&scattering, &references, form)?;
+        for (cell, (row, value)) in table.rows.iter_mut().zip(values).enumerate() {
+            let (output, input) = (cell / ports, cell % ports);
+            row[0] = form.coefficient(output, input, |index| {
+                channel_label(index, ports, block.key.mixed)
+                    .trim_start_matches('P')
+                    .to_owned()
+            });
+            row[6] = format!("{:.17e}", value.re);
+            row[7] = format!("{:.17e}", value.im);
+        }
+        table.title = format!(
+            "Network matrix · {} · {}-parameters",
+            block.key.label(),
+            form.label()
+        );
+        Some(table)
+    }
+}
+
 /// Format every retained matrix sample after validation and a bounded row-count check.
 pub fn report_tables<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,

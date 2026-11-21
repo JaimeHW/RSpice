@@ -9,7 +9,10 @@ use rspice_results::waveform::{HeldColumn, RetainedTrace, WaveformValues};
 use rspice_results::{
     analysis_result::AnalysisResult,
     analysis_type::AnalysisType,
-    network_matrix::{NetworkLayout, channel_label, channel_reference},
+    network_matrix::{
+        MatrixBlock, NetworkLayout, channel_label, channel_reference,
+        forms::{self, NetworkForm},
+    },
 };
 use rspice_ui_kit::icons::Icon;
 use rspice_ui_kit::plot::fmt_si_significant;
@@ -24,6 +27,8 @@ use rspice_vocabulary::quantity::AngleDisplay;
 pub struct NetworkMatrixControls {
     pub block: usize,
     pub sample: usize,
+    /// The parameter set the table reads in.
+    pub form: NetworkForm,
     pub representation: usize,
     pub transpose: bool,
     /// The last passivity check, shown while its block and sample are.
@@ -37,6 +42,7 @@ impl Default for NetworkMatrixControls {
         Self {
             block: 0,
             sample: 0,
+            form: NetworkForm::S,
             representation: 0,
             transpose: false,
             diagnostic: None,
@@ -72,23 +78,25 @@ pub struct OpenCoefficient {
     pub frequency: f64,
 }
 
-/// One coefficient as the representation shows it, its phase in the unit
-/// Angle display chose.
+/// One coefficient in `unit` as the representation shows it, its phase in
+/// the unit Angle display chose. A coefficient with a unit reads its
+/// decibels against one of that unit: dBΩ, dBS.
 pub fn formatted(
     real: f64,
     imaginary: f64,
+    unit: &str,
     representation: usize,
     angle_display: AngleDisplay,
     significant_digits: usize,
 ) -> String {
     let digits = significant_digits;
+    let decibels = format!("dB{unit}");
     if real == 0.0 && imaginary == 0.0 && representation != 0 {
         return if representation == 2 {
-            "−∞ dB · phase undefined"
+            format!("−∞ {decibels} · phase undefined")
         } else {
-            "0 · phase undefined"
-        }
-        .to_owned();
+            "0 · phase undefined".to_owned()
+        };
     }
     let phase = || {
         let radians = imaginary.atan2(real);
@@ -100,22 +108,108 @@ pub fn formatted(
     match representation {
         1 => format!(
             "{} ∠ {}",
-            fmt_si_significant(real.hypot(imaginary), "", digits),
+            fmt_si_significant(real.hypot(imaginary), unit, digits),
             phase()
         ),
-        2 => {
-            let magnitude = real.hypot(imaginary);
-            if magnitude == 0.0 {
-                "−∞ dB · phase undefined".to_owned()
-            } else {
-                format!(
-                    "{} ∠ {}",
-                    fmt_si_significant(magnitude_db(real, imaginary), "dB", digits),
-                    phase()
-                )
-            }
-        }
-        _ => crate::presentation::complex_readout(real, imaginary, "", digits),
+        2 => format!(
+            "{} ∠ {}",
+            fmt_si_significant(magnitude_db(real, imaginary), &decibels, digits),
+            phase()
+        ),
+        _ => crate::presentation::complex_readout(real, imaginary, unit, digits),
+    }
+}
+
+/// The forms a block can be read in: every block in S; a single-ended or
+/// mixed-mode block also in Y and Z, and a two-port in H and ABCD. A periodic
+/// conversion block is not an ordinary network, so it reads in S only.
+pub fn offered_forms(block: &MatrixBlock, channels: usize) -> Vec<NetworkForm> {
+    if block.is_conversion() {
+        return vec![NetworkForm::S];
+    }
+    NetworkForm::ALL
+        .into_iter()
+        .filter(|form| form.applies_to(channels))
+        .collect()
+}
+
+/// The block's coefficients at `sample` read in `form`, row-major: `None`
+/// while a column has not arrived or when the network has no such form.
+pub fn form_matrix(
+    analysis: &AnalysisResult<RetainedTrace>,
+    matrix: &NetworkLayout,
+    block: &MatrixBlock,
+    form: NetworkForm,
+    sample: usize,
+) -> Option<Vec<num_complex::Complex64>> {
+    let ports = matrix.references().len();
+    let scattering = block
+        .cells()
+        .iter()
+        .map(|&index| {
+            let complex = analysis.waveforms[index].complex.as_ref()?;
+            let value = num_complex::Complex64::new(
+                coefficient(&complex.real, sample),
+                coefficient(&complex.imag, sample),
+            );
+            (value.re.is_finite() && value.im.is_finite()).then_some(value)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let references = (0..ports)
+        .map(|index| channel_reference(index, matrix.references(), block.is_mixed()))
+        .collect::<Vec<_>>();
+    forms::convert(&scattering, &references, form)
+}
+
+/// Why `form` has no matrix for this block at this frequency.
+fn form_absence(form: NetworkForm) -> &'static str {
+    match form {
+        NetworkForm::Y => "no admittance matrix at this frequency (I + S is singular)",
+        NetworkForm::Z => "no impedance matrix at this frequency (I − S is singular)",
+        NetworkForm::H => "no hybrid matrix at this frequency",
+        NetworkForm::Abcd => "no chain matrix at this frequency (S21 is zero)",
+        NetworkForm::S => "the coefficients have not arrived",
+    }
+}
+
+/// A frequency as a reader types it: a number, an SI prefix as the readout
+/// prints them (`k`, `M` for mega, `G`, `m` for milli, `u` or `µ`), and `Hz`
+/// if they like. `meg` reads as mega too, as a deck writes it.
+pub fn parse_frequency(text: &str) -> Option<f64> {
+    let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let body = compact
+        .strip_suffix("Hz")
+        .or_else(|| compact.strip_suffix("hz"))
+        .or_else(|| compact.strip_suffix("HZ"))
+        .unwrap_or(&compact);
+    let split = body
+        .char_indices()
+        .find(|(_, c)| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
+        .map_or(body.len(), |(index, _)| index);
+    let (number, prefix) = body.split_at(split);
+    let scale = match prefix {
+        "" => 1.0,
+        "T" => 1e12,
+        "G" => 1e9,
+        "M" | "meg" | "Meg" | "MEG" => 1e6,
+        "k" | "K" => 1e3,
+        "m" => 1e-3,
+        "u" | "µ" | "μ" => 1e-6,
+        "n" => 1e-9,
+        "p" => 1e-12,
+        _ => return None,
+    };
+    let value = number.parse::<f64>().ok()? * scale;
+    value.is_finite().then_some(value)
+}
+
+/// The sample of the ascending `grid` nearest `frequency`.
+pub fn nearest_sample(grid: &[f64], frequency: f64) -> usize {
+    let above = grid.partition_point(|value| *value < frequency);
+    match (above.checked_sub(1), grid.get(above)) {
+        (Some(below), Some(next)) if frequency - grid[below] <= next - frequency => below,
+        (Some(below), None) => below,
+        _ => above.min(grid.len().saturating_sub(1)),
     }
 }
 
@@ -222,9 +316,9 @@ fn passivity(
             };
             (
                 format!(
-                    "At {at}: {verdict} · largest singular value {} · reciprocity residual {:.1e}",
+                    "At {at}: {verdict} · largest singular value {} · reciprocity residual {}",
                     fmt_si_significant(quality.largest_singular_value, "", significant_digits),
-                    quality.reciprocity_residual
+                    fmt_si_significant(quality.reciprocity_residual, "", significant_digits)
                 ),
                 format!(
                     "Sampled passivity: {verdict}\nLargest singular value: {:.17e}\nNormalized reciprocity residual: {:.17e}\nTolerance: {:.3e}\nFrequency: {frequency:.17e} Hz\nApplies only at this frequency.",
@@ -307,6 +401,26 @@ pub fn domain_bar(
     if let Some(grid) = grid.as_deref() {
         controls.sample = controls.sample.min(grid.len().saturating_sub(1));
     }
+    let offered = offered_forms(block, matrix.references().len());
+    if !offered.contains(&controls.form) {
+        controls.form = NetworkForm::S;
+    }
+    if offered.len() > 1 {
+        let labels = offered.iter().map(|form| form.label()).collect::<Vec<_>>();
+        let mut chosen = offered
+            .iter()
+            .position(|form| *form == controls.form)
+            .unwrap_or(0);
+        segmented(
+            ui,
+            "rspice.results.network-matrix.form",
+            &labels,
+            &mut chosen,
+            SegmentedWidth::Natural,
+        );
+        controls.form = offered[chosen];
+        ui.add_space(GROUP_GAP);
+    }
     segmented(
         ui,
         "rspice.results.network-matrix.format",
@@ -344,9 +458,9 @@ pub fn domain_bar(
     ui.data_mut(|data| data.insert_temp(rest_id, measured));
 }
 
-/// The frequency sample as a stepper: the arrows move one sample, the
-/// readout between them names the frequency and which sample of how many,
-/// and dragging it scrubs the samples or a click types a sample number.
+/// The frequency as a stepper: the arrows move one sample, the readout
+/// between them names the frequency, dragging it scrubs the samples, and a
+/// click types a frequency, which lands on the nearest sample.
 fn frequency_stepper(
     ui: &mut Ui,
     controls: &mut NetworkMatrixControls,
@@ -367,19 +481,12 @@ fn frequency_stepper(
     }
     let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
     let readout = move |sample: usize| match grid {
-        Some(grid) => format!(
-            "{} · {} of {count}",
-            fmt_si_significant(grid[sample.min(last)], "Hz", significant_digits),
-            sample.min(last) + 1
-        ),
+        Some(grid) => fmt_si_significant(grid[sample.min(last)], "Hz", significant_digits),
         None => "Frequency pending".to_owned(),
     };
     // The widest frequency the reader's digits can print, so the readout
     // holds one width as it steps and nothing after it moves.
-    let widest = format!(
-        "{} · {count} of {count}",
-        fmt_si_significant(8.888_888_888_888_89e8, "Hz", significant_digits)
-    );
+    let widest = fmt_si_significant(8.888_888_888_888_89e8, "MHz", significant_digits);
     let width = text_width(ui, &widest, &mono).max(text_width(ui, &readout(0), &mono))
         + 2.0 * ui.spacing().button_padding.x;
     ui.scope(|ui| {
@@ -391,18 +498,15 @@ fn frequency_stepper(
                 .range(0..=last)
                 .speed(0.1)
                 .custom_formatter(move |sample, _| readout(sample as usize))
-                .custom_parser(|text| {
-                    // Typed: a sample number, alone or as the readout's own
-                    // "n of N".
-                    let number = text
-                        .split(" of ")
-                        .next()?
-                        .rsplit(|c: char| c.is_whitespace() || c == '·')
-                        .find(|part| !part.is_empty())?;
-                    number.parse::<f64>().ok().map(|sample| sample - 1.0)
+                .custom_parser(move |text| {
+                    let grid = grid?;
+                    parse_frequency(text).map(|frequency| nearest_sample(grid, frequency) as f64)
                 }),
         )
-        .on_hover_text("Frequency sample: drag to scrub, or click and type a sample number");
+        .on_hover_text(format!(
+            "Frequency: drag to scrub, or click and type one (2.4G, 900 MHz); \
+             it lands on the nearest of the {count} samples"
+        ));
     });
     if IconButton::new(Icon::ChevronRight)
         .size(STEP_WIDTH, height)
@@ -441,9 +545,14 @@ fn display_menu(
             }
             ui.checkbox(&mut controls.transpose, "Transpose")
                 .on_hover_text("Rows read the incident waves and columns the outgoing ones");
-            ui.checkbox(&mut controls.heatmap, "Heat map")
-                .on_hover_text("Wash each coefficient by its magnitude in dB");
-            ui.add_enabled_ui(controls.heatmap, |ui| {
+            let washable = controls.form == NetworkForm::S;
+            ui.add_enabled(
+                washable,
+                egui::Checkbox::new(&mut controls.heatmap, "Heat map"),
+            )
+            .on_hover_text("Wash each coefficient by its magnitude in dB")
+            .on_disabled_hover_text("The heat map washes S-parameters, which are ratios");
+            ui.add_enabled_ui(washable && controls.heatmap, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Heat-map floor");
                     ui.add(
@@ -559,23 +668,47 @@ pub fn show(
             .align(Align::Right)
             .unsortable()
     }));
-    let entry = |row: usize, column: usize| {
-        let (out, input) = if controls.transpose {
+    let form = controls.form;
+    let converted = form_matrix(analysis, matrix, block, form, controls.sample);
+    let held_coefficients = form == NetworkForm::S || converted.is_some();
+    // Where a cell sits in the matrix, the transpose undone.
+    let position = |row: usize, column: usize| {
+        if controls.transpose {
             (column, row)
         } else {
             (row, column)
-        };
+        }
+    };
+    let entry = |row: usize, column: usize| {
+        let (out, input) = position(row, column);
         let waveform = &analysis.waveforms[block.cells()[out * ports + input]];
         let complex = waveform
             .complex
             .as_ref()
             .expect("resolved complex coefficient");
-        (
-            waveform,
-            complex,
-            coefficient(&complex.real, controls.sample),
-            coefficient(&complex.imag, controls.sample),
-        )
+        let (real, imaginary) = match (form, &converted) {
+            (NetworkForm::S, _) => (
+                coefficient(&complex.real, controls.sample),
+                coefficient(&complex.imag, controls.sample),
+            ),
+            (_, Some(values)) => (
+                values[out * ports + input].re,
+                values[out * ports + input].im,
+            ),
+            (_, None) => (f64::NAN, f64::NAN),
+        };
+        (waveform, complex, real, imaginary)
+    };
+    let name = |row: usize, column: usize| {
+        let (out, input) = position(row, column);
+        match form {
+            NetworkForm::S => entry(row, column).1.source_name.clone(),
+            _ => form.coefficient(out, input, |index| {
+                channel_label(index, ports, mixed)
+                    .trim_start_matches('P')
+                    .to_owned()
+            }),
+        }
     };
     let frequency = grid[controls.sample];
     let verdict = controls
@@ -585,7 +718,9 @@ pub fn show(
             diagnostic.block == controls.block && diagnostic.sample == controls.sample
         })
         .cloned();
-    let footer = controls.heatmap || verdict.is_some();
+    let washed = controls.heatmap && form == NetworkForm::S;
+    let absence = (!held_coefficients).then(|| form_absence(form));
+    let footer = washed || verdict.is_some() || absence.is_some();
     let table_height = if footer {
         (ui.available_height() - FOOTER_HEIGHT - ui.spacing().item_spacing.y).max(0.0)
     } else {
@@ -600,19 +735,31 @@ pub fn show(
             .show(ui, |row| {
                 let mut cells = vec![Cell::text(channel(row))];
                 cells.extend((0..ports).map(|column| {
-                    let (_, complex, real, imaginary) = entry(row, column);
-                    let mut cell = Cell::number(formatted(
-                        real,
-                        imaginary,
-                        controls.representation,
-                        angle_display,
-                        significant_digits,
-                    ))
-                    .hint(format!(
-                        "{}\nReal: {real:.17e}\nImaginary: {imaginary:.17e}\nFrequency: {frequency:.17e} Hz\nDouble-click or press Enter to open this coefficient in Polar",
-                        complex.source_name
+                    let (_, _, real, imaginary) = entry(row, column);
+                    let (out, input) = position(row, column);
+                    let unit = form.unit(out, input);
+                    let text = if real.is_finite() && imaginary.is_finite() {
+                        formatted(
+                            real,
+                            imaginary,
+                            unit,
+                            controls.representation,
+                            angle_display,
+                            significant_digits,
+                        )
+                    } else {
+                        "\u{2014}".to_owned()
+                    };
+                    let opens = if form == NetworkForm::S {
+                        "\nDouble-click or press Enter to open this coefficient in Polar"
+                    } else {
+                        ""
+                    };
+                    let mut cell = Cell::number(text).hint(format!(
+                        "{}\nReal: {real:.17e} {unit}\nImaginary: {imaginary:.17e} {unit}\nFrequency: {frequency:.17e} Hz{opens}",
+                        name(row, column)
                     ));
-                    if controls.heatmap {
+                    if washed {
                         let color = heat_color(
                             magnitude_db(real, imaginary),
                             controls.floor_db,
@@ -633,8 +780,16 @@ pub fn show(
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.add_space(8.0);
-                if controls.heatmap {
+                if washed {
                     heat_legend(ui, controls.floor_db, &tokens.color);
+                    ui.add_space(16.0);
+                }
+                if let Some(absence) = absence {
+                    ui.label(
+                        egui::RichText::new(format!("{}: {absence}", form.label()))
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(tokens.color.text_dim),
+                    );
                     ui.add_space(16.0);
                 }
                 if let Some(verdict) = &verdict {
@@ -658,7 +813,7 @@ pub fn show(
         .double_clicked
         .and_then(|cell| Some((cell.row, cell.column?)))
         .or_else(|| Some((response.activate?, chosen?)))
-        .filter(|(_, column)| *column > 0);
+        .filter(|(_, column)| *column > 0 && form == NetworkForm::S);
     if let Some((row, column)) = opened {
         let (waveform, ..) = entry(row, column - 1);
         open_coefficient = Some(OpenCoefficient {
@@ -667,4 +822,49 @@ pub fn show(
         });
     }
     open_coefficient
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_typed_frequency_reads_as_the_readout_prints_it() {
+        assert_eq!(parse_frequency("2.4G"), Some(2.4e9));
+        assert_eq!(parse_frequency("900 MHz"), Some(900e6));
+        assert_eq!(parse_frequency("1.5meg"), Some(1.5e6));
+        assert_eq!(parse_frequency("10 kHz"), Some(10e3));
+        assert_eq!(parse_frequency("250m"), Some(0.25));
+        assert_eq!(parse_frequency("3e9"), Some(3e9));
+        assert_eq!(parse_frequency("12 µHz"), Some(12e-6));
+        assert_eq!(parse_frequency("fast"), None);
+        assert_eq!(parse_frequency("1 X"), None);
+    }
+
+    #[test]
+    fn a_frequency_lands_on_the_nearest_sample() {
+        let grid = [1e6, 2e6, 4e6, 8e6];
+        assert_eq!(nearest_sample(&grid, 0.0), 0);
+        assert_eq!(nearest_sample(&grid, 1.4e6), 0);
+        assert_eq!(nearest_sample(&grid, 1.6e6), 1);
+        assert_eq!(nearest_sample(&grid, 4e6), 2);
+        assert_eq!(nearest_sample(&grid, 7e6), 3);
+        assert_eq!(nearest_sample(&grid, 1e12), 3);
+    }
+
+    #[test]
+    fn a_coefficient_with_a_unit_reads_in_it() {
+        assert_eq!(
+            formatted(50.0, -25.0, "Ω", 0, AngleDisplay::Degrees, 4),
+            "50 Ω \u{2212} j25 Ω"
+        );
+        assert_eq!(
+            formatted(0.0, 0.02, "S", 1, AngleDisplay::Degrees, 4),
+            "20 mS ∠ 90 °"
+        );
+        assert_eq!(
+            formatted(100.0, 0.0, "Ω", 2, AngleDisplay::Degrees, 4),
+            "40 dBΩ ∠ 0 °"
+        );
+    }
 }

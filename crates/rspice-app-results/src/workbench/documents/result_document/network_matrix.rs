@@ -151,11 +151,61 @@ fn bound<'a>(
     ))
 }
 
-/// The matrix's own controls in its sheet bar.
+/// The frequency grid of the block the sheet shows, once it has arrived.
+fn shown_grid(
+    analysis: &AnalysisResult,
+    matrix: &NetworkLayout,
+    block: usize,
+) -> Option<rspice_results::waveform::HeldColumn> {
+    let block = matrix.blocks().get(block)?;
+    analysis.waveforms[block.cells()[0]].x.fetch_whole().ready()
+}
+
+/// The readout pin that keeps the matrix's frequency in the run's view: the
+/// authored analysis shown and this sheet.
+fn pin_key(
+    context: &SheetContext<'_>,
+    analysis: &AnalysisResult,
+) -> Option<(
+    rspice_results::result_presentation::AnalysisPresentationSource,
+    super::ResultViewer,
+)> {
+    let run = context.simulation.active_run()?;
+    Some((
+        AnalysisPresentationKey::new(run.dataset_id, analysis).authored(),
+        super::ResultViewer::NetworkMatrix,
+    ))
+}
+
+/// Show the frequency the view keeps, at the nearest retained sample.
+fn follow_pin(context: &mut SheetContext<'_>, analysis: &AnalysisResult, grid: &[f64]) {
+    let Some(key) = pin_key(context, analysis) else {
+        return;
+    };
+    if let Some(&frequency) = context.results.session.readout_pins.get(&key) {
+        context.results.network_matrix.controls.sample = view::nearest_sample(grid, frequency);
+    }
+}
+
+/// Keep the frequency the reader chose in the view.
+fn keep_pin(context: &mut SheetContext<'_>, analysis: &AnalysisResult, frequency: f64) {
+    if let Some(key) = pin_key(context, analysis) {
+        context.results.session.readout_pins.insert(key, frequency);
+    }
+}
+
+/// The matrix's own controls in its sheet bar. The frequency the reader
+/// chooses is kept in the run's view, so it survives a re-run and a restart.
 pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     let Ok((analysis, matrix)) = bound(context) else {
         return false;
     };
+    let block = context.results.network_matrix.controls.block;
+    let grid = shown_grid(analysis, &matrix, block);
+    if let Some(grid) = &grid {
+        follow_pin(context, analysis, grid);
+    }
+    let before = context.results.network_matrix.controls.sample;
     view::domain_bar(
         ui,
         analysis,
@@ -163,6 +213,12 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
         &mut context.results.network_matrix.controls,
         context.significant_digits,
     );
+    let after = context.results.network_matrix.controls.sample;
+    if after != before
+        && let Some(&frequency) = grid.as_ref().and_then(|grid| grid.get(after))
+    {
+        keep_pin(context, analysis, frequency);
+    }
     true
 }
 
@@ -232,10 +288,11 @@ pub(crate) fn exact_values(state: ResultsReads<'_>) -> Option<String> {
     if sheet.source.as_ref() != Some(&source) {
         return None;
     }
-    let table = sheet.layout.as_ref()?.exact_table(
+    let table = sheet.layout.as_ref()?.exact_form_table(
         analysis,
         sheet.controls.block,
         sheet.controls.sample,
+        sheet.controls.form,
     )?;
     rspice_formats::table::csv_to_tsv(&rspice_formats::result_csv::encode_network_matrix_csv(
         &table,
@@ -248,6 +305,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::state::{AnalysisResultFamilyMetadata, SimulationRun};
     use crate::workbench::documents::result_document::test_fixtures::network_matrix_analysis;
+    use rspice_results::network_matrix::forms as view_form;
 
     #[test]
     fn complete_physical_and_mixed_matrices_have_exact_references_and_values() {
@@ -369,20 +427,23 @@ pub(crate) mod tests {
             );
         }
         use crate::quantity::AngleDisplay;
-        assert!(formatted(0.0, 0.0, 2, AngleDisplay::Degrees, 7).contains("phase undefined"));
+        assert!(formatted(0.0, 0.0, "", 2, AngleDisplay::Degrees, 7).contains("phase undefined"));
         // The phase reads in the unit Angle display chose, at the reader's
         // digits, and a negative part with a true minus.
-        assert_eq!(formatted(0.0, 1.0, 1, AngleDisplay::Degrees, 7), "1 ∠ 90 °");
         assert_eq!(
-            formatted(0.0, 1.0, 1, AngleDisplay::Radians, 7),
+            formatted(0.0, 1.0, "", 1, AngleDisplay::Degrees, 7),
+            "1 ∠ 90 °"
+        );
+        assert_eq!(
+            formatted(0.0, 1.0, "", 1, AngleDisplay::Radians, 7),
             "1 ∠ 1.570796 rad"
         );
         assert_eq!(
-            formatted(0.5, -0.25, 0, AngleDisplay::Degrees, 7),
+            formatted(0.5, -0.25, "", 0, AngleDisplay::Degrees, 7),
             "0.5 \u{2212} j0.25"
         );
         assert_eq!(
-            formatted(0.1, 0.0, 2, AngleDisplay::Degrees, 4),
+            formatted(0.1, 0.0, "", 2, AngleDisplay::Degrees, 4),
             "\u{2212}20 dB ∠ 0 °"
         );
         assert!((magnitude_db(1e308, 1e308) - (6160.0 + 10.0 * 2.0_f64.log10())).abs() < 1e-10);
@@ -513,6 +574,139 @@ pub(crate) mod tests {
             assert!(!controls.heatmap);
             assert_eq!(controls.floor_db, -120.0);
         }
+    }
+
+    /// A series impedance Zs(f) = 100 Ω + j·f/10 kHz Ω between two 50 Ω
+    /// ports, at 1 MHz and 2 MHz: S11 = S22 = Zs/(Zs + 100), S21 = S12 =
+    /// 100/(Zs + 100).
+    fn series_two_port() -> AnalysisResult {
+        use num_complex::Complex64;
+        let frequencies = [1e6, 2e6];
+        let impedance = |f: f64| Complex64::new(100.0, f / 1e4);
+        let mut traces = Vec::new();
+        for (name, reflection) in [("S11", true), ("S12", false), ("S21", false), ("S22", true)] {
+            let values = frequencies
+                .iter()
+                .map(|&f| {
+                    let z = impedance(f);
+                    if reflection {
+                        z / (z + 100.0)
+                    } else {
+                        Complex64::new(100.0, 0.0) / (z + 100.0)
+                    }
+                })
+                .collect::<Vec<_>>();
+            traces.push(
+                crate::state::RetainedTrace::new(
+                    format!("|{name}|"),
+                    frequencies.to_vec(),
+                    values.iter().map(|value| value.norm()).collect::<Vec<_>>(),
+                    "#00aaff",
+                )
+                .with_complex_components(
+                    name,
+                    values.iter().map(|value| value.re).collect::<Vec<_>>(),
+                    values.iter().map(|value| value.im).collect::<Vec<_>>(),
+                ),
+            );
+        }
+        AnalysisResult::new(1, AnalysisType::SParameter, "Network")
+            .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+                reference_impedances_ohm: vec![50.0; 2],
+                noise_reference_temperature_kelvin: None,
+            })
+            .with_waveforms(traces)
+    }
+
+    fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => out.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn a_series_element_reads_in_chain_form_at_the_frequency_the_view_keeps() {
+        let mut app =
+            crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(series_two_port());
+        app.model.simulation.retained.runs.push(run);
+        assert!(app.model.simulation.select_run(0));
+        let authored = {
+            let simulation = &app.model.simulation;
+            AnalysisPresentationKey::new(
+                simulation.active_run().unwrap().dataset_id,
+                simulation.active_analysis().unwrap(),
+            )
+            .authored()
+        };
+        // The view keeps 1.9 MHz; the sheet shows the nearest sample, 2 MHz.
+        app.results
+            .results
+            .session
+            .readout_pins
+            .insert((authored, super::super::ResultViewer::NetworkMatrix), 1.9e6);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let frame =
+            |app: &mut crate::workbench::documents::result_document::test_host::ResultsTestHost,
+             form: view_form::NetworkForm| {
+                let mut shown = Vec::new();
+                for _ in 0..2 {
+                    let output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1600.0, 900.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            egui::CentralPanel::default().show(ui, |ui| {
+                                let mut parts = app.results_parts();
+                                let mut context = SheetContext::of(&mut parts);
+                                ui.horizontal(|ui| domain_bar(ui, &mut context));
+                                context.results.network_matrix.controls.form = form;
+                                show(ui, &mut context);
+                            });
+                        },
+                    );
+                    shown.clear();
+                    for shape in &output.shapes {
+                        texts(&shape.shape, &mut shown);
+                    }
+                }
+                shown
+            };
+        let chain = frame(&mut app, view_form::NetworkForm::Abcd);
+        assert_eq!(app.results.results.network_matrix.controls.sample, 1);
+        // A = D = 1, B = Zs(2 MHz) = 100 + j200 Ω, C = 0.
+        assert!(
+            chain.iter().any(|text| text == "100 Ω + j200 Ω"),
+            "{chain:?}"
+        );
+        assert!(chain.iter().any(|text| text == "2 MHz"), "{chain:?}");
+        let impedance = frame(&mut app, view_form::NetworkForm::Z);
+        assert!(
+            impedance
+                .iter()
+                .any(|text| text.starts_with("Z: no impedance matrix")),
+            "a series element has no impedance matrix: {impedance:?}"
+        );
+        // The clipboard takes the form shown, at full precision.
+        app.results.results.network_matrix.controls.form = view_form::NetworkForm::Y;
+        let copied = exact_values(app.results_reads()).unwrap();
+        let y11 = copied
+            .lines()
+            .find(|line| line.starts_with("Y11\t"))
+            .expect("Y11 row");
+        let parts = y11.split('\t').collect::<Vec<_>>();
+        let expected =
+            num_complex::Complex64::new(1.0, 0.0) / num_complex::Complex64::new(100.0, 200.0);
+        assert!((parts[6].parse::<f64>().unwrap() - expected.re).abs() < 1e-15);
+        assert!((parts[7].parse::<f64>().unwrap() - expected.im).abs() < 1e-15);
     }
 
     #[test]
