@@ -142,7 +142,7 @@ fn fill_chunk<I: SegmentIo>(
 
 /// The column of `shell` a stored slot fills, which the evaluator reads from the rows; `None` for
 /// one it derives.
-fn stream_column(shell: &TransientResult, target: SlotTarget) -> Option<&[f64]> {
+pub(super) fn stream_column(shell: &TransientResult, target: SlotTarget) -> Option<&[f64]> {
     match target {
         SlotTarget::Voltage(node) => shell.voltages.get(node).map(Vec::as_slice),
         SlotTarget::Current(branch) => shell.branch_currents.get(branch).map(Vec::as_slice),

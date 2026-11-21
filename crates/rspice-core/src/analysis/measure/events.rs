@@ -314,15 +314,28 @@ pub(crate) fn event_steps(
     name: &str,
     result: &TransientResult,
 ) -> Result<Steps, String> {
+    let Some((&start, &end)) = result.time.first().zip(result.time.last()) else {
+        let accessor = if digital { 'D' } else { 'E' };
+        return Err(format!(
+            "{accessor}({name}) has no accepted time span to read"
+        ));
+    };
+    event_steps_within(digital, name, result, start, end)
+}
+
+/// [`event_steps`] over the run's accepted span `start ..= end`, for a result
+/// that holds the run's whole event histories but only its first rows.
+pub(crate) fn event_steps_within(
+    digital: bool,
+    name: &str,
+    result: &TransientResult,
+    start: Value,
+    end: Value,
+) -> Result<Steps, String> {
     let (domain, accessor) = if digital {
         (Domain::Digital, 'D')
     } else {
         (Domain::Real, 'E')
-    };
-    let Some((&start, &end)) = result.time.first().zip(result.time.last()) else {
-        return Err(format!(
-            "{accessor}({name}) has no accepted time span to read"
-        ));
     };
     resolve(
         domain,

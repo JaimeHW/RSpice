@@ -76,6 +76,112 @@ fn bits(values: &[f64]) -> Vec<u64> {
     values.iter().map(|value| value.to_bits()).collect()
 }
 
+thread_local! {
+    /// How many times a stored run on this thread was read back whole.
+    pub(super) static READ_BACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The deck's `.ASSERT` reports over its whole accepted trajectory, as the in-memory route
+/// checks them.
+fn in_memory_assertions(
+    bridge: &EngineBridge,
+    deck: &str,
+    config: &TransientAnalysisConfig,
+) -> Vec<rspice_core::analysis::AssertionReport> {
+    let analysis = AnalysisConfig::Transient(config.clone());
+    let input = SimulationInput {
+        config: &analysis,
+        netlist_str: deck,
+        source_path: None,
+        supply_corner: None,
+        environment: None,
+    };
+    let materialized = bridge.materialize_input(&input, &NoAbort).unwrap();
+    let netlist = netlist_for_transient_config(&materialized, config, &NoAbort).unwrap();
+    let max_step = config
+        .resolved_maximum_step(netlist.parse_dialect())
+        .unwrap();
+    let run = bridge
+        .engine_for_netlist(&netlist)
+        .run_tran_with_abort(&netlist, config.stop_time, max_step, &NoAbort)
+        .unwrap();
+    rspice_core::analysis::evaluate_tran_assertions(&netlist, &run, &NoAbort).unwrap()
+}
+
+#[test]
+fn a_stored_transient_is_checked_and_measured_from_its_store_as_the_in_memory_route_checks_it() {
+    let bridge = EngineBridge::new();
+    let config = config(300e-6, 33.3e-6, None);
+    // Checks over the whole run, before the output start included: a band, one inside a window,
+    // one that must last, a condition on two nodes and one on a branch current.
+    let asserted = DECK.replace(
+        ".end\n",
+        ".ASSERT high EXPR='v(out)' MAX=0.4\n\
+         .ASSERT early EXPR='v(out)' MIN=0.05 FROM=20u TO=120u\n\
+         .ASSERT held EXPR='v(out)' MAX=0.3 DURATION=20u\n\
+         .ASSERT apart COND='v(in)-v(out) < 0.5 || v(out) > 0.2'\n\
+         .ASSERT drawn EXPR='i(V1)' MIN=-0.0006\n\
+         .end\n",
+    );
+    let (expected, _, _) = in_memory(&bridge, &asserted, &config);
+    let expected_assertions = in_memory_assertions(&bridge, &asserted, &config);
+    assert!(
+        expected_assertions
+            .iter()
+            .any(|report| !report.violations.is_empty()),
+        "the cards find violations to compare"
+    );
+    READ_BACKS.with(|count| count.set(0));
+    let actual = bridge
+        .run(&AnalysisConfig::Transient(config.clone()), &asserted)
+        .unwrap();
+    assert_eq!(
+        READ_BACKS.with(std::cell::Cell::get),
+        0,
+        "neither the checks nor the measurements read the run back whole"
+    );
+    let (
+        SimulationResult::Transient {
+            measurements,
+            checks,
+            store,
+            ..
+        },
+        SimulationResult::Transient {
+            measurements: expected_measurements,
+            ..
+        },
+    ) = (actual, expected)
+    else {
+        panic!("both routes return a transient");
+    };
+    assert!(store.is_some());
+    assert_eq!(
+        format!("{:?}", checks.assertions),
+        format!("{expected_assertions:?}")
+    );
+    assert_eq!(
+        format!("{measurements:?}"),
+        format!("{expected_measurements:?}")
+    );
+    // A card the rows cannot answer reads the run back, and words its report as in memory.
+    let unanswered = DECK.replace(".end\n", ".ASSERT gone EXPR='v(nowhere)' MAX=1\n.end\n");
+    let expected_assertions = in_memory_assertions(&bridge, &unanswered, &config);
+    READ_BACKS.with(|count| count.set(0));
+    let SimulationResult::Transient { checks, .. } = bridge
+        .run(&AnalysisConfig::Transient(config.clone()), &unanswered)
+        .unwrap()
+    else {
+        panic!("a transient");
+    };
+    assert_eq!(READ_BACKS.with(std::cell::Cell::get), 1);
+    assert!(checks.assertions[0].error.is_some());
+    assert_eq!(
+        format!("{:?}", checks.assertions),
+        format!("{expected_assertions:?}")
+    );
+}
+
 #[test]
 fn a_stored_transient_holds_the_samples_the_in_memory_route_returns_without_reading_them() {
     let bridge = EngineBridge::new();

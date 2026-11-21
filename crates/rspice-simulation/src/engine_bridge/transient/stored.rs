@@ -9,9 +9,9 @@
 //! segment the run writes counts against it, and the write that would pass it stops the run.
 //!
 //! A deck whose `.FFT` cards or lead-power outputs read whole waveforms after the run is read
-//! back whole, completed by the engine and converted in memory, as before. `.MEAS TRAN` is
-//! measured from the store a chunk at a time; `.ASSERT`, and a measurement that does not stream,
-//! read the rows back for their own evaluation only.
+//! back whole, completed by the engine and converted in memory, as before. `.MEAS TRAN` and
+//! `.ASSERT` are evaluated from the store a chunk at a time; a measurement or a check that does
+//! not stream reads the rows back for its own evaluation only.
 
 use std::sync::Arc;
 
@@ -297,6 +297,8 @@ impl StoredTransient {
     /// Read every row and event into the shell, with each instance parameter as the constant
     /// trace the run kept, so it is the result the run returned in memory.
     pub(super) fn read_rows(&mut self) -> Result<(), SimulationError> {
+        #[cfg(test)]
+        tests::READ_BACKS.with(|count| count.set(count.get() + 1));
         let rows = self.rows()?;
         let Self {
             shell,
@@ -667,6 +669,7 @@ fn store_failure(path: &std::path::Path, error: StoreError) -> SimulationError {
     }
 }
 
+mod assert;
 mod measure;
 
 #[cfg(test)]

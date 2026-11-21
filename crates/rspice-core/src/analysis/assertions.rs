@@ -26,11 +26,18 @@
 //!
 //! **Device forms** expand to every instance the target names, in elaboration
 //! order, each with its own report.
+//!
+//! **Streamed.** A transient kept in a results store is checked without the
+//! run in memory ([`TranAssertStream`]): each check walks the accepted rows in
+//! order as the store gives them back, a chunk at a time, through the same
+//! walk the evaluation in memory feeds the run's rows to, so the two classify
+//! the same pieces with the same arithmetic.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use super::error::SimulationError;
-use super::measure::events::{Level, Steps, event_steps};
+use super::measure::events::{Level, Steps, event_steps, event_steps_within};
 use super::measure_signals::{DcSweepSeries, retained_transient_signal_map};
 use super::transient::TransientResult;
 use crate::Value;
@@ -115,6 +122,7 @@ pub fn evaluate_tran_assertions(
         signals,
         params: &netlist.params,
         transient: Some(result),
+        span: None,
         devices: None,
     };
     let mut reports = Vec::new();
@@ -302,6 +310,7 @@ fn solved_points(
         signals: series.signal_map(),
         params: &netlist.params,
         transient: None,
+        span: None,
         devices,
     };
     let mut reports = Vec::new();
@@ -392,18 +401,21 @@ struct Source<'a> {
     signals: HashMap<String, &'a [Value]>,
     params: &'a ParamContext,
     transient: Option<&'a TransientResult>,
+    /// The run's first and last accepted time, when `transient` holds only its
+    /// first rows: the span its event operands step over.
+    span: Option<(Value, Value)>,
     devices: Option<&'a DeviceOpReport>,
 }
 
-impl Source<'_> {
-    fn lookup(&self, name: &str) -> Option<&[Value]> {
+impl<'a> Source<'a> {
+    fn lookup(&self, name: &str) -> Option<&'a [Value]> {
         if let Some(values) = self
             .signals
             .get(name)
             .or_else(|| self.signals.get(&name.to_ascii_uppercase()))
             .or_else(|| self.signals.get(&name.to_ascii_lowercase()))
         {
-            return Some(values);
+            return Some(*values);
         }
         let wanted = super::canonical_measure_signal_name(name);
         self.signals
@@ -413,7 +425,7 @@ impl Source<'_> {
     }
 
     /// The value of `@instance[parameter]` across the axis.
-    fn device_column(&self, instance: &str, parameter: &str) -> Result<Vec<Value>, String> {
+    fn device_column(&self, instance: &str, parameter: &str) -> Result<Cow<'a, [Value]>, String> {
         match self.analysis {
             AssertAnalysis::Dc => Err(format!(
                 "@{instance}[{parameter}] is an operating-point quantity, and a DC sweep \
@@ -436,7 +448,7 @@ impl Source<'_> {
                     .params
                     .iter()
                     .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
-                    .map(|(_, value)| vec![*value])
+                    .map(|(_, value)| Cow::Owned(vec![*value]))
                     .ok_or_else(|| {
                         format!("device {instance} does not report the quantity {parameter}")
                     })
@@ -457,7 +469,7 @@ impl Source<'_> {
                 }
                 traces
                     .find(|trace| trace.parameter.eq_ignore_ascii_case(parameter))
-                    .map(|trace| trace.values.clone())
+                    .map(|trace| Cow::Borrowed(trace.values.as_slice()))
                     .ok_or_else(|| {
                         format!("device {instance} does not report the quantity {parameter}")
                     })
@@ -482,15 +494,16 @@ enum Node {
 }
 
 /// An operand resolved against the result.
-enum Operand {
-    /// One value per point of the axis, linear between points.
-    Column(Vec<Value>),
+enum Operand<'p> {
+    /// One value per point of the axis, linear between points: the result's own column
+    /// where it holds one.
+    Column(Cow<'p, [Value]>),
     /// A right-continuous step function (transient event operands).
     Steps(Steps),
 }
 
 struct Program<'p> {
-    operands: Vec<Operand>,
+    operands: Vec<Operand<'p>>,
     params: &'p ParamContext,
 }
 
@@ -575,15 +588,15 @@ impl Program<'_> {
 /// Builds a [`Program`] from parsed expressions, resolving each operand once.
 struct Compiler<'s, 'a> {
     source: &'s Source<'a>,
-    operands: Vec<Operand>,
+    operands: Vec<Operand<'a>>,
     keys: HashMap<String, usize>,
 }
 
-impl Compiler<'_, '_> {
+impl<'a> Compiler<'_, 'a> {
     fn operand(
         &mut self,
         key: String,
-        resolve: impl FnOnce(&Source<'_>) -> Result<Operand, String>,
+        resolve: impl FnOnce(&Source<'a>) -> Result<Operand<'a>, String>,
     ) -> Result<Node, String> {
         if let Some(index) = self.keys.get(&key) {
             return Ok(Node::Operand(*index));
@@ -598,7 +611,7 @@ impl Compiler<'_, '_> {
         self.operand(text.clone(), |source| {
             source
                 .lookup(&text)
-                .map(|values| Operand::Column(values.to_vec()))
+                .map(|values| Operand::Column(Cow::Borrowed(values)))
                 .ok_or_else(|| missing_signal(source, &text))
         })
     }
@@ -617,7 +630,7 @@ impl Compiler<'_, '_> {
                 let (instance, parameter) = (instance.to_string(), parameter.to_string());
                 self.operand(name.clone(), |source| {
                     if let Some(values) = source.lookup(name) {
-                        return Ok(Operand::Column(values.to_vec()));
+                        return Ok(Operand::Column(Cow::Borrowed(values)));
                     }
                     source
                         .device_column(&instance, &parameter)
@@ -626,12 +639,12 @@ impl Compiler<'_, '_> {
             }
             Expr::Param(name) if name.eq_ignore_ascii_case("TIME") => self
                 .operand("TIME".into(), |source| {
-                    Ok(Operand::Column(source.axis.to_vec()))
+                    Ok(Operand::Column(Cow::Borrowed(source.axis)))
                 })?,
             Expr::Param(name) => {
                 if let Some(values) = self.source.lookup(name) {
-                    let values = values.to_vec();
-                    return self.operand(name.clone(), |_| Ok(Operand::Column(values)));
+                    return self
+                        .operand(name.clone(), |_| Ok(Operand::Column(Cow::Borrowed(values))));
                 }
                 let value = crate::netlist::expr::evaluate(expression, self.source.params)
                     .map_err(|_| {
@@ -670,7 +683,11 @@ impl Compiler<'_, '_> {
                 let digital = name == "D";
                 let text = format!("{name}({net})");
                 self.operand(text.clone(), |source| match source.transient {
-                    Some(result) => event_steps(digital, &net, result).map(Operand::Steps),
+                    Some(result) => match source.span {
+                        Some((start, end)) => event_steps_within(digital, &net, result, start, end),
+                        None => event_steps(digital, &net, result),
+                    }
+                    .map(Operand::Steps),
                     None => Err(format!(
                         "{text} is an event operand, and {} solves points that carry no event \
                          values",
@@ -1033,6 +1050,8 @@ fn sampled(
 }
 
 fn compile<'p>(source: &Source<'p>, text: &str) -> Result<(Program<'p>, Node), String> {
+    // Parsed and compiled against `source`'s signal table: a stream compiles against its first
+    // rows, which hold every name the whole run does.
     let expression = crate::netlist::expr::parse_expression(text)
         .map_err(|error| format!("'{text}' is not an expression: {error}"))?;
     let mut compiler = Compiler {
@@ -1277,97 +1296,238 @@ fn transient(
     }
     let lower = statement.from.map_or(first, |from| from.max(first));
     let upper = statement.to.map_or(stop, |to| to.min(stop));
-    let mut timeline = Timeline {
-        statement,
-        stop,
-        run: None,
-        violations: Vec::new(),
-        unknown: 0,
-    };
     if lower > upper {
         return Ok((Vec::new(), 0));
     }
-    // Every instant an event operand steps at.
-    let mut events = program
-        .operands
-        .iter()
-        .filter_map(|operand| match operand {
-            Operand::Steps(steps) => Some(steps.instants()),
-            Operand::Column(_) => None,
-        })
-        .flatten()
-        .copied()
-        .filter(|instant| *instant > lower && *instant < upper)
-        .collect::<Vec<_>>();
-    events.sort_by(Value::total_cmp);
-    events.dedup();
-    let atoms = atoms(check);
-    let mut next_event = 0;
-    let mut values = vec![None; program.operands.len()];
+    let mut walk = Walk::new(statement, program, check, upper, stop);
+    // Each operand's value at one row; an event operand's entry is not read.
+    let mut row = vec![Value::NAN; program.operands.len()];
+    let fill = |index: usize, row: &mut [Value]| {
+        for (value, operand) in row.iter_mut().zip(&program.operands) {
+            if let Operand::Column(column) = operand {
+                *value = column[index];
+            }
+        }
+    };
     if time.len() == 1 || lower == upper {
         // A single instant: the check at that point.
-        let row = time.partition_point(|t| *t <= lower).saturating_sub(1);
-        let interpolant = Interpolant::new(program, time, row, row, lower);
-        interpolant.at(lower, &mut values);
-        let (class, excess) = classify(program, check, &values)?;
-        timeline.push(
+        let index = time.partition_point(|t| *t <= lower).saturating_sub(1);
+        fill(index, &mut row);
+        walk.instant = Some((time[index], row));
+        walk.check_instant(program, check, lower, upper)?;
+        return Ok(walk.finish());
+    }
+    for (index, &t) in time.iter().enumerate() {
+        fill(index, &mut row);
+        walk.row(program, check, t, &row)?;
+    }
+    Ok(walk.finish())
+}
+
+/// One check walked along the transient timeline, fed one accepted row at a
+/// time: the evaluation in memory feeds it the run's rows, and
+/// [`TranAssertStream`] the rows a store gives back a chunk at a time.
+struct Walk<'s> {
+    from: Option<Value>,
+    to: Option<Value>,
+    /// The end of the checked window: `TO` clipped to the stop time.
+    upper: Value,
+    /// The start of the checked window, which the first row sets.
+    lower: Option<Value>,
+    /// Every instant an event operand steps at inside the window, which the
+    /// first row sets.
+    events: Vec<Value>,
+    next_event: usize,
+    atoms: Vec<(Node, Value)>,
+    timeline: Timeline<'s>,
+    values: Vec<Option<Value>>,
+    /// The previous row: its time and each operand's value there.
+    previous: Option<(Value, Vec<Value>)>,
+    /// The last row at or before the window's start: the point a window of a
+    /// single instant is checked at.
+    instant: Option<(Value, Vec<Value>)>,
+}
+
+impl<'s> Walk<'s> {
+    fn new(
+        statement: &'s AssertStatement,
+        program: &Program<'_>,
+        check: &Check,
+        upper: Value,
+        stop: Value,
+    ) -> Self {
+        Self {
+            from: statement.from,
+            to: statement.to,
+            upper,
+            lower: None,
+            events: Vec::new(),
+            next_event: 0,
+            atoms: atoms(check),
+            timeline: Timeline {
+                statement,
+                stop,
+                run: None,
+                violations: Vec::new(),
+                unknown: 0,
+            },
+            values: vec![None; program.operands.len()],
+            previous: None,
+            instant: None,
+        }
+    }
+
+    /// The next accepted row: its time and each operand's value there.
+    fn row(
+        &mut self,
+        program: &Program<'_>,
+        check: &Check,
+        t1: Value,
+        row: &[Value],
+    ) -> Result<(), String> {
+        let lower = match self.lower {
+            Some(lower) => lower,
+            None => {
+                let lower = self.from.map_or(t1, |from| from.max(t1));
+                let upper = self.upper;
+                let mut events = program
+                    .operands
+                    .iter()
+                    .filter_map(|operand| match operand {
+                        Operand::Steps(steps) => Some(steps.instants()),
+                        Operand::Column(_) => None,
+                    })
+                    .flatten()
+                    .copied()
+                    .filter(|instant| *instant > lower && *instant < upper)
+                    .collect::<Vec<_>>();
+                events.sort_by(Value::total_cmp);
+                events.dedup();
+                self.events = events;
+                self.lower = Some(lower);
+                lower
+            }
+        };
+        if t1 <= lower {
+            match &mut self.instant {
+                Some((at, values)) => {
+                    *at = t1;
+                    values.clear();
+                    values.extend_from_slice(row);
+                }
+                None => self.instant = Some((t1, row.to_vec())),
+            }
+        }
+        let Some((t0, mut v0)) = self.previous.take() else {
+            self.previous = Some((t1, row.to_vec()));
+            return Ok(());
+        };
+        let upper = self.upper;
+        if !(t1 <= t0 || t1 <= lower || t0 >= upper) {
+            let mut start = t0.max(lower);
+            let end = t1.min(upper);
+            while start < end {
+                while self.next_event < self.events.len() && self.events[self.next_event] <= start {
+                    self.next_event += 1;
+                }
+                let piece_end = self
+                    .events
+                    .get(self.next_event)
+                    .copied()
+                    .filter(|instant| *instant < end)
+                    .unwrap_or(end);
+                let interpolant = Interpolant::new(program, (t0, v0.as_slice()), (t1, row), start);
+                segment(
+                    check,
+                    &self.atoms,
+                    &interpolant,
+                    (start, piece_end),
+                    &mut self.values,
+                    &mut self.timeline,
+                )?;
+                start = piece_end;
+            }
+        }
+        v0.clear();
+        v0.extend_from_slice(row);
+        self.previous = Some((t1, v0));
+        Ok(())
+    }
+
+    /// The check of a window of a single instant, at `lower`, with the values
+    /// of the last row at or before it.
+    fn check_instant(
+        &mut self,
+        program: &Program<'_>,
+        check: &Check,
+        lower: Value,
+        upper: Value,
+    ) -> Result<(), String> {
+        let Some((at, row)) = &self.instant else {
+            return Ok(());
+        };
+        let interpolant =
+            Interpolant::new(program, (*at, row.as_slice()), (*at, row.as_slice()), lower);
+        interpolant.at(lower, &mut self.values);
+        let (class, excess) = classify(program, check, &self.values)?;
+        self.timeline.push(
             lower,
             upper,
             class,
             excess.map(|(excess, value)| (excess, value, lower)),
         );
-        timeline.close();
-        return Ok((timeline.violations, timeline.unknown));
+        Ok(())
     }
-    for row in 0..time.len() - 1 {
-        let (t0, t1) = (time[row], time[row + 1]);
-        if t1 <= t0 || t1 <= lower || t0 >= upper {
-            continue;
+
+    /// The violations and unknown stretches of a walk whose every row has
+    /// been fed: `first` and `stop` the first and last time, `count` the rows.
+    fn conclude(
+        mut self,
+        program: &Program<'_>,
+        check: &Check,
+        first: Option<Value>,
+        stop: Value,
+        count: usize,
+    ) -> Result<(Vec<AssertViolation>, usize), String> {
+        let Some(first) = first else {
+            return Err("the transient accepted no time point".into());
+        };
+        let lower = self.from.map_or(first, |from| from.max(first));
+        let upper = self.to.map_or(stop, |to| to.min(stop));
+        if lower > upper {
+            return Ok((Vec::new(), 0));
         }
-        let mut start = t0.max(lower);
-        let end = t1.min(upper);
-        while start < end {
-            while next_event < events.len() && events[next_event] <= start {
-                next_event += 1;
-            }
-            let piece_end = events
-                .get(next_event)
-                .copied()
-                .filter(|instant| *instant < end)
-                .unwrap_or(end);
-            let interpolant = Interpolant::new(program, time, row, row + 1, start);
-            segment(
-                check,
-                &atoms,
-                &interpolant,
-                (start, piece_end),
-                &mut values,
-                &mut timeline,
-            )?;
-            start = piece_end;
+        if count == 1 || lower == upper {
+            // A window of one instant holds no piece: the check is made at
+            // that instant alone.
+            self.check_instant(program, check, lower, upper)?;
         }
+        Ok(self.finish())
     }
-    timeline.close();
-    Ok((timeline.violations, timeline.unknown))
+
+    fn finish(mut self) -> (Vec<AssertViolation>, usize) {
+        self.timeline.close();
+        (self.timeline.violations, self.timeline.unknown)
+    }
 }
 
 /// Operand values on one segment: analog columns on the line between two
 /// rows, event operands at their level from the segment's start.
-struct Interpolant<'p, 'q> {
+struct Interpolant<'p, 'q, 'r> {
     program: &'p Program<'q>,
     t0: Value,
     t1: Value,
-    row0: usize,
-    row1: usize,
+    /// Each operand's value at the two rows.
+    v0: &'r [Value],
+    v1: &'r [Value],
     levels: Vec<Option<Value>>,
 }
 
-impl<'p, 'q> Interpolant<'p, 'q> {
+impl<'p, 'q, 'r> Interpolant<'p, 'q, 'r> {
     fn new(
         program: &'p Program<'q>,
-        time: &[Value],
-        row0: usize,
-        row1: usize,
+        (t0, v0): (Value, &'r [Value]),
+        (t1, v1): (Value, &'r [Value]),
         start: Value,
     ) -> Self {
         let levels = program
@@ -1380,10 +1540,10 @@ impl<'p, 'q> Interpolant<'p, 'q> {
             .collect();
         Self {
             program,
-            t0: time[row0],
-            t1: time[row1],
-            row0,
-            row1,
+            t0,
+            t1,
+            v0,
+            v1,
             levels,
         }
     }
@@ -1397,8 +1557,8 @@ impl<'p, 'q> Interpolant<'p, 'q> {
         };
         for (index, operand) in self.program.operands.iter().enumerate() {
             values[index] = match operand {
-                Operand::Column(column) => {
-                    let (v0, v1) = (column[self.row0], column[self.row1]);
+                Operand::Column(_) => {
+                    let (v0, v1) = (self.v0[index], self.v1[index]);
                     Some(if fraction == 1.0 {
                         v1
                     } else {
@@ -1411,13 +1571,326 @@ impl<'p, 'q> Interpolant<'p, 'q> {
     }
 }
 
+//=============================================================================
+// The transient checked from its store
+//=============================================================================
+
+/// `.ASSERT` checks of a transient evaluated over its rows without the run in
+/// memory, the counterpart of [`super::TranMeasureStream`]: [`Self::rows`]
+/// over every accepted row of the columns [`Self::columns`] names, in row
+/// order from the first, then [`Self::finish`].
+pub struct TranAssertStream<'n> {
+    checks: Vec<Streamed<'n>>,
+    /// The caller's columns the rows carry, in the order [`Self::rows`] takes
+    /// them.
+    columns: Vec<usize>,
+    /// The run's last accepted time, as the plan was given it.
+    stop: Value,
+    first: Option<Value>,
+    last: Value,
+    count: usize,
+    nondecreasing: bool,
+    row: Vec<Value>,
+}
+
+enum Streamed<'n> {
+    /// A report the plan decided: a device target the deck's hierarchy does
+    /// not expand.
+    Decided(Box<AssertionReport>),
+    Walking(Box<Walking<'n>>),
+}
+
+struct Walking<'n> {
+    statement: &'n AssertStatement,
+    instance: Option<String>,
+    program: Program<'n>,
+    check: Check,
+    /// Where each operand's value at a row comes from; `None` for an event
+    /// operand, which the walk reads from its history.
+    carried: Vec<Option<Carried>>,
+    walk: Walk<'n>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum Carried {
+    Axis,
+    /// A column, by its place in [`TranAssertStream::columns`].
+    Column(usize),
+}
+
+impl<'n> TranAssertStream<'n> {
+    /// Plan the deck's transient `.ASSERT` cards against `probe`, a result
+    /// holding the run's first rows and its whole event histories, whose every
+    /// column the rows could be read from is among `columns` (`None` for one
+    /// that is not); `stop` is the run's last accepted time.
+    ///
+    /// `None` when a card cannot be checked from the rows, and the run is
+    /// checked in memory: a `.VEC` file, whose expected outputs are read at
+    /// their own instants; an operand that is not one of `columns` (an instance
+    /// parameter or a stored expression); a card that does not compile against
+    /// the probe, whose report the evaluation in memory words.
+    pub fn plan(
+        netlist: &'n Netlist,
+        probe: &TransientResult,
+        stop: Value,
+        columns: &[Option<&[Value]>],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Self>, SimulationError> {
+        if !netlist.vector_files.is_empty() {
+            return Ok(None);
+        }
+        let Some(&first) = probe.time.first() else {
+            return Ok(None);
+        };
+        let source = Source {
+            analysis: AssertAnalysis::Tran,
+            axis: &probe.time,
+            signals: retained_transient_signal_map(probe),
+            params: &netlist.params,
+            transient: Some(probe),
+            span: Some((first, stop)),
+            devices: None,
+        };
+        let time = (probe.time.as_ptr() as usize, probe.time.len());
+        let mut needed: Vec<usize> = Vec::new();
+        let mut checks = Vec::new();
+        for statement in applicable(netlist, AssertAnalysis::Tran) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let compiled = match &statement.check {
+                AssertCheck::Expression {
+                    expression,
+                    min,
+                    max,
+                } => vec![(
+                    None,
+                    compile(&source, expression).map(|(program, value)| {
+                        let check = Check::Band {
+                            value,
+                            min: *min,
+                            max: *max,
+                        };
+                        (program, check)
+                    }),
+                )],
+                AssertCheck::Condition { condition } => vec![(
+                    None,
+                    compile(&source, condition)
+                        .map(|(program, condition)| (program, Check::Condition(condition))),
+                )],
+                AssertCheck::Device {
+                    target,
+                    parameter,
+                    min,
+                    max,
+                } => match instances(netlist, target) {
+                    Err(error) => {
+                        checks.push(Streamed::Decided(Box::new(failed(
+                            statement,
+                            AssertAnalysis::Tran,
+                            None,
+                            error,
+                        ))));
+                        continue;
+                    }
+                    Ok(instances) => instances
+                        .into_iter()
+                        .map(|instance| {
+                            let compiled =
+                                source.device_column(&instance, parameter).map(|column| {
+                                    let program = Program {
+                                        operands: vec![Operand::Column(column)],
+                                        params: source.params,
+                                    };
+                                    let check = Check::Band {
+                                        value: Node::Operand(0),
+                                        min: *min,
+                                        max: *max,
+                                    };
+                                    (program, check)
+                                });
+                            (Some(instance), compiled)
+                        })
+                        .collect(),
+                },
+                AssertCheck::Sampled { .. } => return Ok(None),
+            };
+            for (instance, compiled) in compiled {
+                let Ok((program, check)) = compiled else {
+                    return Ok(None);
+                };
+                let mut carried = Vec::with_capacity(program.operands.len());
+                let mut operands = Vec::with_capacity(program.operands.len());
+                for operand in program.operands {
+                    match operand {
+                        Operand::Steps(steps) => {
+                            carried.push(None);
+                            operands.push(Operand::Steps(steps));
+                        }
+                        Operand::Column(Cow::Borrowed(values)) => {
+                            let address = (values.as_ptr() as usize, values.len());
+                            let place = if address == time {
+                                Carried::Axis
+                            } else {
+                                let Some(column) = columns.iter().position(|column| {
+                                    column.is_some_and(|column| {
+                                        !column.is_empty()
+                                            && (column.as_ptr() as usize, column.len()) == address
+                                    })
+                                }) else {
+                                    return Ok(None);
+                                };
+                                Carried::Column(
+                                    match needed.iter().position(|&known| known == column) {
+                                        Some(place) => place,
+                                        None => {
+                                            needed.push(column);
+                                            needed.len() - 1
+                                        }
+                                    },
+                                )
+                            };
+                            carried.push(Some(place));
+                            operands.push(Operand::Column(Cow::Owned(Vec::new())));
+                        }
+                        Operand::Column(Cow::Owned(_)) => return Ok(None),
+                    }
+                }
+                let program = Program {
+                    operands,
+                    params: &netlist.params,
+                };
+                let walk = Walk::new(
+                    statement,
+                    &program,
+                    &check,
+                    statement.to.map_or(stop, |to| to.min(stop)),
+                    stop,
+                );
+                checks.push(Streamed::Walking(Box::new(Walking {
+                    statement,
+                    instance,
+                    program,
+                    check,
+                    carried,
+                    walk,
+                    error: None,
+                })));
+            }
+        }
+        Ok(Some(Self {
+            checks,
+            columns: needed,
+            stop,
+            first: None,
+            last: Value::NAN,
+            count: 0,
+            nondecreasing: true,
+            row: Vec::new(),
+        }))
+    }
+
+    /// The caller's columns, by their place in the `columns` [`Self::plan`]
+    /// was given, that [`Self::rows`] takes, in the order it takes them.
+    pub fn columns(&self) -> &[usize] {
+        &self.columns
+    }
+
+    /// The next accepted rows: their times `x` and each of [`Self::columns`]
+    /// over the same rows.
+    pub fn rows(&mut self, x: &[Value], columns: &[&[Value]]) {
+        let Self {
+            checks,
+            first,
+            last,
+            count,
+            nondecreasing,
+            row,
+            ..
+        } = self;
+        for (index, &t) in x.iter().enumerate() {
+            if first.is_none() {
+                *first = Some(t);
+            } else if t < *last {
+                *nondecreasing = false;
+            }
+            *last = t;
+            *count += 1;
+            for check in checks.iter_mut() {
+                let Streamed::Walking(walking) = check else {
+                    continue;
+                };
+                if walking.error.is_some() {
+                    continue;
+                }
+                row.clear();
+                row.extend(walking.carried.iter().map(|carried| match carried {
+                    Some(Carried::Axis) => t,
+                    Some(Carried::Column(place)) => columns[*place][index],
+                    None => Value::NAN,
+                }));
+                if let Err(error) = walking.walk.row(&walking.program, &walking.check, t, row) {
+                    walking.error = Some(error);
+                }
+            }
+        }
+    }
+
+    /// Every card's report, as [`evaluate_tran_assertions`] gives them for the
+    /// whole run, once every row has been read. `None` when the time axis ran
+    /// backwards, which the evaluation in memory reads differently, or the rows
+    /// did not end at the stop the plan was given, so that the run is checked
+    /// in memory.
+    pub fn finish(self) -> Option<Vec<AssertionReport>> {
+        if !self.nondecreasing || self.last.to_bits() != self.stop.to_bits() {
+            return None;
+        }
+        let (first, stop, count) = (self.first, self.last, self.count);
+        let reports = self
+            .checks
+            .into_iter()
+            .map(|check| match check {
+                Streamed::Decided(report) => *report,
+                Streamed::Walking(walking) => {
+                    let Walking {
+                        statement,
+                        instance,
+                        program,
+                        check,
+                        walk,
+                        error,
+                        ..
+                    } = *walking;
+                    let outcome = match error {
+                        Some(error) => Err(error),
+                        None => walk.conclude(&program, &check, first, stop, count),
+                    };
+                    match outcome {
+                        Ok((violations, unknown_stretches)) => {
+                            let mut report =
+                                blank_report(statement, AssertAnalysis::Tran, instance);
+                            report.violations = violations;
+                            report.unknown_stretches = unknown_stretches;
+                            report
+                        }
+                        Err(error) => failed(statement, AssertAnalysis::Tran, instance, error),
+                    }
+                }
+            })
+            .collect();
+        Some(reports)
+    }
+}
+
 /// Classify one segment `[start, end)` of the timeline, on which event
 /// operands are constant and analog operands linear, cut at every root of
 /// every atom, into `timeline`.
 fn segment(
     check: &Check,
     atoms: &[(Node, Value)],
-    interpolant: &Interpolant<'_, '_>,
+    interpolant: &Interpolant<'_, '_, '_>,
     (start, end): (Value, Value),
     values: &mut [Option<Value>],
     timeline: &mut Timeline<'_>,
@@ -1620,3 +2093,6 @@ fn primitive_name(kind: &ElementKind) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests;

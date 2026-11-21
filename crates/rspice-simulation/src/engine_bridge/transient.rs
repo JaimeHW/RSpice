@@ -618,45 +618,62 @@ fn convert_stored_transient(
         .iter()
         .any(|measurement| measurement.analysis.eq_ignore_ascii_case("TRAN"));
     let asserted = !netlist.assertions.is_empty() || !netlist.vector_files.is_empty();
-    // `.MEAS TRAN` is measured from the store a chunk at a time when every statement streams.
-    let streamed = if measured && !asserted {
+    // `.ASSERT` is checked over the whole run, and `.MEAS TRAN` over the output window, from the
+    // store a chunk at a time when every card streams.
+    let streamed_assertions = if asserted {
+        let streamed = stored.assert(netlist, abort, translate)?;
+        stored.drop_rows(device_traces);
+        stored.read_span()?;
+        streamed
+    } else {
+        Some(Vec::new())
+    };
+    let streamed_measurements = if measured {
         let streamed = stored.measure(netlist, &window, abort, translate)?;
         stored.drop_rows(device_traces);
         stored.read_span()?;
         streamed
     } else {
-        None
+        Some(Vec::new())
     };
-    // `.ASSERT`, and a `.MEAS TRAN` statement that does not stream, read the whole run: it is
-    // read back for them, then dropped.
-    let (measurements, assertions) = if let Some(measurements) = streamed {
-        (measurements, Vec::new())
-    } else if measured || asserted {
-        stored.drop_rows(device_traces);
-        stored.read_rows()?;
-        let assertions =
-            rspice_core::analysis::evaluate_tran_assertions(netlist, &stored.shell, abort)
-                .map_err(translate)?;
-        let time = &stored.shell.time;
-        let mut filtered_time = Vec::with_capacity(sample_count + usize::from(lead.is_some()));
-        if lead.is_some() {
-            filtered_time.push(start_time);
+    // A card that does not stream reads the whole run: it is read back for it, then dropped.
+    let (measurements, assertions) = match (streamed_measurements, streamed_assertions) {
+        (Some(measurements), Some(assertions)) => (measurements, assertions),
+        (streamed_measurements, streamed_assertions) => {
+            stored.drop_rows(device_traces);
+            stored.read_rows()?;
+            let assertions = match streamed_assertions {
+                Some(assertions) => assertions,
+                None => {
+                    rspice_core::analysis::evaluate_tran_assertions(netlist, &stored.shell, abort)
+                        .map_err(translate)?
+                }
+            };
+            let measurements = match streamed_measurements {
+                Some(measurements) => measurements,
+                None => {
+                    let time = &stored.shell.time;
+                    let mut filtered_time =
+                        Vec::with_capacity(sample_count + usize::from(lead.is_some()));
+                    if lead.is_some() {
+                        filtered_time.push(start_time);
+                    }
+                    filtered_time.extend_from_slice(&time[start_idx..start_idx + sample_count]);
+                    evaluate_transient_measurements(
+                        netlist,
+                        &stored.shell,
+                        &filtered_time,
+                        start_idx,
+                        start_time,
+                        lead.is_some(),
+                        abort,
+                    )?
+                }
+            };
+            stored.drop_rows(device_traces);
+            stored.read_span()?;
+            (measurements, assertions)
         }
-        filtered_time.extend_from_slice(&time[start_idx..start_idx + sample_count]);
-        let measurements = evaluate_transient_measurements(
-            netlist,
-            &stored.shell,
-            &filtered_time,
-            start_idx,
-            start_time,
-            lead.is_some(),
-            abort,
-        )?;
-        stored.drop_rows(device_traces);
-        stored.read_span()?;
-        (measurements, assertions)
-    } else {
-        (Vec::new(), Vec::new())
     };
     let events = collect_event_history(&stored.shell, start_time, Some(&stored), abort)?;
     let spectra = super::recorded_fft::recorded_spectra(netlist, &stored.shell.fft_results, abort)?;
