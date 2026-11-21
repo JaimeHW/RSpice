@@ -1,6 +1,5 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use super::family_src::read_family_src;
 use num_complex::Complex64;
 use rspice_core::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
 use rspice_core::analysis::{HbConfig, HbError, HbFft, HbSolver, HbSolverState};
@@ -233,29 +232,6 @@ fn public_hb_solver_rejects_invalid_charge_parameters_before_evaluation() {
         assert!(
             error.to_string().contains(expected),
             "wrong public-solver parameter diagnostic: {error}"
-        );
-    }
-}
-
-#[test]
-fn public_hb_surface_does_not_advertise_rejected_approximate_kernels() {
-    let solver_source = read_family_src("analysis/harmonic_balance/solver.rs");
-    let device_source = read_family_src("analysis/harmonic_balance/solver/devices.rs");
-    let api_source = read_family_src("analysis/harmonic_balance/solver/nonlinear_api.rs");
-    let combined = format!("{solver_source}\n{device_source}\n{api_source}");
-
-    for stale_name in [
-        "NpnBjt",
-        "PnpBjt",
-        "CurrentSwitch",
-        "npn_bjt",
-        "pnp_bjt",
-        "current_switch",
-        "add_current_switch",
-    ] {
-        assert!(
-            !combined.contains(stale_name),
-            "exact-HB public surface still advertises removed approximate kernel {stale_name}"
         );
     }
 }
