@@ -103,7 +103,7 @@ pub fn measure_interval_values(
 
 /// The measurement over the samples `pairs` yields afresh for each pass, each as (x, y), the
 /// first and last x being `ends`.
-fn measure_pairs<I: Iterator<Item = (f64, f64)>>(
+pub(crate) fn measure_pairs<I: Iterator<Item = (f64, f64)>>(
     (first, last): (f64, f64),
     pairs: impl Fn() -> I,
     window: Option<(f64, f64)>,

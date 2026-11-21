@@ -173,19 +173,8 @@ pub fn evaluate(
                     ctx.get_magnitude(signal, dataset.as_deref())?.checked()
                 };
             }
-            if let Some(reduce) = super::measures::reduction(&lower)
-                && let Some(first) = args.first()
-                && let Some(series) = stored_series(first, ctx)?
-            {
-                super::measures::reduction_arity(name, args.len())?;
-                let mut rest = Vec::with_capacity(args.len() - 1);
-                for arg in &args[1..] {
-                    rest.push(match arg {
-                        CalculatorExpr::Keyword(word) => Argument::Keyword(word.clone()),
-                        _ => Argument::Value(evaluate(arg, ctx)?),
-                    });
-                }
-                return CalcValue::Real(reduce(name, &series, &rest)?).checked();
+            if let Some(value) = stored_measure(name, &lower, args, ctx)? {
+                return value.checked();
             }
             let mut arg_values = Vec::with_capacity(args.len());
             for arg in args {
@@ -483,6 +472,81 @@ fn function_unit(
             }
         }
         _ => Err(format!("the unit of {name}() is not known")),
+    }
+}
+
+/// A measurement of a stored trace, read where it is stored a block at a time: a reduction,
+/// a time measurement or a level measure whose trace, or `delay` either of whose traces,
+/// [`stored_series`] finds. `None` for anything else, which is read as a value.
+fn stored_measure(
+    name: &str,
+    lower: &str,
+    args: &[CalculatorExpr],
+    ctx: &impl EvaluationContext,
+) -> Result<Option<CalcValue>, EvaluationError> {
+    use super::measures::{reduction, reduction_arity, series};
+    use super::series::Series;
+    let evaluated = |rest: &[CalculatorExpr]| -> Result<Vec<Argument>, EvaluationError> {
+        rest.iter()
+            .map(|arg| match arg {
+                CalculatorExpr::Keyword(word) => Ok(Argument::Keyword(word.clone())),
+                _ => evaluate(arg, ctx).map(Argument::Value),
+            })
+            .collect()
+    };
+    let scalar = |value: f64| Some(CalcValue::Real(RealValue::Scalar(value)));
+    if lower == "delay"
+        && let [first, second, rest @ ..] = args
+    {
+        let (from, to) = (stored_series(first, ctx)?, stored_series(second, ctx)?);
+        if from.is_none() && to.is_none() {
+            return Ok(None);
+        }
+        // A trace read as a value is read as such, as `delay` reads both in memory.
+        let (from_value, to_value): ([Argument; 1], [Argument; 1]);
+        let from = match from {
+            Some(from) => from,
+            None => {
+                from_value = [Argument::Value(evaluate(first, ctx)?)];
+                let (x, y) = series(name, &from_value, 0)?;
+                Series::memory(x, y)
+            }
+        };
+        let to = match to {
+            Some(to) => to,
+            None => {
+                to_value = [Argument::Value(evaluate(second, ctx)?)];
+                let (x, y) = series(name, &to_value, 0)?;
+                Series::memory(x, y)
+            }
+        };
+        let rest = evaluated(rest)?;
+        return super::time_measures::measure_delay(name, &from, &to, &rest).map(scalar);
+    }
+    let reduce = reduction(lower);
+    let timed = super::time_measures::lookup(lower);
+    let level = super::levels::lookup(lower);
+    if reduce.is_none() && timed.is_none() && level.is_none() {
+        return Ok(None);
+    }
+    let Some(first) = args.first() else {
+        return Ok(None);
+    };
+    let Some(trace) = stored_series(first, ctx)? else {
+        return Ok(None);
+    };
+    if let Some(reduce) = reduce {
+        reduction_arity(name, args.len())?;
+        let rest = evaluated(&args[1..])?;
+        return Ok(Some(CalcValue::Real(reduce(name, &trace, &rest)?)));
+    }
+    let rest = evaluated(&args[1..])?;
+    if let Some(timed) = timed {
+        return Ok(Some(CalcValue::Real(timed.measure(name, &trace, &rest)?)));
+    }
+    match level {
+        Some(level) => Ok(Some(CalcValue::Real(level(name, &trace, &rest)?))),
+        None => Ok(None),
     }
 }
 

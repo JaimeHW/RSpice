@@ -9,6 +9,7 @@
 use crate::calculator::evaluator::{EvaluationContext, EvaluationError, evaluate};
 use crate::calculator::parser::try_parse;
 use crate::calculator::value::CalcValue;
+use crate::waveform::WaveformValues;
 use std::f64::consts::PI;
 
 struct Signals(Vec<(&'static str, CalcValue)>);
@@ -639,4 +640,178 @@ fn a_complex_signal_or_a_stray_option_is_refused_by_name() {
     let s = trains();
     refuses(&s, "avg(V(a), \"rising\")", "avg takes no option words");
     refuses(&s, "\"rising\"", "is an option of a measurement function");
+}
+
+/// A stored column that records the longest read it is asked for.
+struct Column {
+    values: Vec<f64>,
+    ascending: bool,
+    longest: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::waveform::ColumnSource for Column {
+    fn name(&self) -> &str {
+        "column"
+    }
+
+    fn store(&self) -> String {
+        "run.rsr".to_owned()
+    }
+
+    fn rows(&self) -> u64 {
+        self.values.len() as u64
+    }
+
+    fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+        self.longest
+            .fetch_max(out.len(), std::sync::atomic::Ordering::SeqCst);
+        let first = first as usize;
+        out.copy_from_slice(&self.values[first..first + out.len()]);
+        Ok(())
+    }
+
+    fn ascending(&self) -> bool {
+        self.ascending
+    }
+}
+
+fn stored(values: &[f64], ascending: bool) -> (std::sync::Arc<Column>, WaveformValues) {
+    let column = std::sync::Arc::new(Column {
+        values: values.to_vec(),
+        ascending,
+        longest: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let window = crate::waveform::StoredWindow {
+        first: 0,
+        rows: values.len() as u64,
+        lead: crate::waveform::WindowLead::None,
+    };
+    let stored = WaveformValues::stored(column.clone(), window).expect("the window fits");
+    (column, stored)
+}
+
+/// What an expression gives, bit for bit: a scalar, a trace's x and y, or the refusal.
+fn bits(context: &impl EvaluationContext, expression: &str) -> Result<Vec<u64>, String> {
+    use crate::calculator::value::RealValue;
+    let parsed = try_parse(expression, plain_number).map_err(|error| error.to_string())?;
+    match evaluate(&parsed, context).map_err(|error| error.to_string())? {
+        CalcValue::Real(RealValue::Scalar(value)) => Ok(vec![value.to_bits()]),
+        CalcValue::Real(RealValue::Waveform(x, y)) => {
+            Ok(x.iter().chain(&y).map(|value| value.to_bits()).collect())
+        }
+        other => Err(format!("{expression} gave {other:?}")),
+    }
+}
+
+/// Every time measurement and level measure of a stored trace reads it a block at a time, and
+/// answers what the same samples answer in memory, bit for bit, refusals included: on clip of
+/// it, and with `delay` reading one stored trace against one in memory.
+#[test]
+fn every_measure_of_a_stored_trace_is_read_a_block_at_a_time_and_equals_its_twin_in_memory() {
+    use crate::calculator::retained::WaveformsContext;
+    use crate::waveform::{BLOCK_SAMPLES, RetainedWaveform};
+    // Two and a bit blocks over 10 ms, on a grid whose steps grow and shrink.
+    let points = 2 * BLOCK_SAMPLES + 777;
+    let x: Vec<f64> = (0..points)
+        .map(|i| {
+            let u = i as f64 / (points - 1) as f64;
+            0.01 * (u + 0.3 * (2.0 * PI * u).sin() / (2.0 * PI))
+        })
+        .collect();
+    // A 1 kHz clock between 0 and 5 V with finite edges, and an underdamped step.
+    let clock: Vec<f64> = x
+        .iter()
+        .map(|t| 2.5 + 2.5 * (8.0 * (2.0 * PI * 1.0e3 * t).sin()).tanh())
+        .collect();
+    let late: Vec<f64> = x
+        .iter()
+        .map(|t| 2.5 + 2.5 * (8.0 * (2.0 * PI * 1.0e3 * (t - 5.0e-5)).sin()).tanh())
+        .collect();
+    let (zeta, omega) = (0.3, 2.0 * PI * 2.0e3);
+    let damped = omega * (1.0f64 - zeta * zeta).sqrt();
+    let step: Vec<f64> = x
+        .iter()
+        .map(|t| {
+            1.0 - (-zeta * omega * t).exp()
+                * ((damped * t).cos() + zeta * omega / damped * (damped * t).sin())
+        })
+        .collect();
+    let (axis, x_stored) = stored(&x, true);
+    let (clock_column, clock_stored) = stored(&clock, false);
+    let (step_column, step_stored) = stored(&step, false);
+    let on_disk = vec![
+        RetainedWaveform::new("V(clk)", x_stored.clone(), clock_stored),
+        RetainedWaveform::new("V(step)", x_stored, step_stored),
+        RetainedWaveform::new("V(late)", x.clone(), late.clone()),
+    ];
+    let in_memory = vec![
+        RetainedWaveform::new("V(clk)", x.clone(), clock),
+        RetainedWaveform::new("V(step)", x.clone(), step),
+        RetainedWaveform::new("V(late)", x, late),
+    ];
+    let (disk, memory) = (
+        WaveformsContext::new(&on_disk),
+        WaveformsContext::new(&in_memory),
+    );
+    let mut measured = 0;
+    for expression in [
+        "cross(V(clk), 2.5, 3)",
+        "cross(V(clk), 2.5, 2, \"falling\")",
+        "cross(V(clk), 2.5, 99)",
+        "rise(V(step))",
+        "rise(V(clk), 10, 90, 3, 0, 5)",
+        "fall(V(clk), 10, 90, 2, 5, 0)",
+        "slewRate(V(step))",
+        "slewRate(V(clk))",
+        "delay(V(clk), V(late))",
+        "delay(V(clk), V(late), 2.5, \"rising\", 2)",
+        "delay(V(late), V(clk), 2.5, \"falling\", 3, 2.5, \"rising\", 4)",
+        "pulseWidth(V(clk))",
+        "pulseWidth(V(clk), 2.5, \"low\", 2)",
+        "dutyCycle(V(clk))",
+        "dutyCycle(V(clk), 1)",
+        "period(V(clk))",
+        "period(V(clk), 3)",
+        "period(V(clk), 30)",
+        "freq(V(clk))",
+        "overshoot(V(step))",
+        "undershoot(V(step))",
+        "settlingTime(V(step), 2)",
+        "settlingTime(V(step), 2, 1, 0.001)",
+        "period(V(clk), \"plot\")",
+        "freq(V(clk), 4, \"plot\")",
+        "dutyCycle(V(clk), \"plot\")",
+        "rise(V(clk), 10, 90, 2, 0, 5, \"plot\")",
+        "fall(V(clk), 20, 80, 1, 5, 0, \"plot\")",
+        "slewRate(V(step), \"plot\")",
+        "avg(V(clk))",
+        "rms(V(clk))",
+        "avg(V(clk), 0.001, 0.003)",
+        "min(V(step))",
+        "max(V(step))",
+        "pp(V(clk))",
+        "min(V(clk), 0.002, 0.0025)",
+        "yval(V(step), 0.00123)",
+        "yval(V(step), 1)",
+        "avg(clip(V(clk), 0.0011, 0.0051))",
+        "cross(clip(V(clk), 0.0021, 0.009), 2.5, 1)",
+        "max(clip(V(step), 0.0002, 0.0004))",
+        "yval(clip(V(step), 0.0002, 0.0004), 0.0003)",
+        "avg(V(clk), \"rising\")",
+    ] {
+        let (from_disk, from_memory) = (bits(&disk, expression), bits(&memory, expression));
+        assert_eq!(
+            from_disk, from_memory,
+            "{expression}: stored and in memory disagree"
+        );
+        measured += usize::from(from_disk.is_ok());
+    }
+    assert!(measured >= 35, "only {measured} expressions measured");
+    for column in [&axis, &clock_column, &step_column] {
+        let longest = column.longest.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            longest <= BLOCK_SAMPLES,
+            "a read of {longest} samples took more than a block"
+        );
+    }
 }

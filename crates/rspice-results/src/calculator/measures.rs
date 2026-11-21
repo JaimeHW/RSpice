@@ -44,20 +44,14 @@ pub(super) fn dispatch(name: &str, args: Vec<Argument>) -> Result<CalcValue, Eva
         let (x, y) = series(name, &args, 0)?;
         return reduce(name, &Series::memory(x, y), &args[1..]).map(CalcValue::Real);
     }
-    // "plot" asks a per-cycle measurement for every cycle, wherever it
-    // stands after the trace.
-    if let Some(per_cycle) = time_measures::per_cycle(&lower)
-        && let Some(at) = args
-            .iter()
-            .position(|argument| matches!(argument, Argument::Keyword(word) if word == "plot"))
-    {
-        let mut rest = args;
-        rest.remove(at);
-        return per_cycle(name, &rest).map(CalcValue::Real);
+    if let Some(timed) = time_measures::lookup(&lower) {
+        return timed.dispatch(name, &args).map(CalcValue::Real);
     }
-    if let Some(measure) =
-        frequency_measures::lookup(&lower).or_else(|| time_measures::lookup(&lower))
-    {
+    if lower == "delay" {
+        return time_measures::dispatch_delay(name, &args)
+            .map(|value| CalcValue::Real(RealValue::Scalar(value)));
+    }
+    if let Some(measure) = frequency_measures::lookup(&lower) {
         return measure(name, &args).map(|value| CalcValue::Real(RealValue::Scalar(value)));
     }
     let values = args

@@ -6,6 +6,7 @@
 
 mod interval;
 
+pub(crate) use interval::measure_pairs;
 pub use interval::{
     IntervalStatistics, MeasurementError, measure_interval, measure_interval_values,
 };

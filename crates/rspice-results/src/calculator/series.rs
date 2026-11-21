@@ -116,6 +116,95 @@ impl<'a> Series<'a> {
         Ok(self)
     }
 
+    /// The first and last x a pass reads: a window's ends as `clip` cuts them, else the trace's
+    /// own. `None` for a trace with no samples.
+    pub(super) fn ends(&self) -> Option<(f64, f64)> {
+        if self.window.is_some() {
+            let mut pairs = self.pairs();
+            let first = pairs.next()?.0;
+            return Some((first, pairs.last().map_or(first, |(x, _)| x)));
+        }
+        let last = self.range.end.checked_sub(1)?;
+        (self.range.start <= last).then_some(())?;
+        Some((self.x_at(self.range.start)?, self.x_at(last)?))
+    }
+
+    /// Refuse an x-axis that runs backwards, as [`super::functions::forward_domain`] refuses
+    /// one in memory. A stored time axis was checked as its run ended, so it is not read again.
+    pub(super) fn forward(&self, name: &str) -> Result<(), EvaluationError> {
+        match self.source {
+            Source::Memory { x, .. } if self.window.is_none() => {
+                return super::functions::forward_domain(name, &x[self.range.clone()]);
+            }
+            Source::Stored { x, .. } if self.window.is_none() && x.is_ascending_axis() => {
+                return Ok(());
+            }
+            _ => {}
+        }
+        let mut previous: Option<f64> = None;
+        for (x, _) in self.pairs() {
+            if let Some(before) = previous
+                && x < before
+            {
+                return super::functions::forward_domain(name, &[before, x]);
+            }
+            previous = Some(x);
+        }
+        Ok(())
+    }
+
+    /// The trace's value where its x-axis reads `at`, interpolated linearly between the samples
+    /// either side, as [`super::functions::interpolate`] reads a trace in memory: the first
+    /// sample at or past `at` and the one before it. A stored time axis is searched by
+    /// bisection, so only the samples around `at` are read.
+    pub(super) fn value_at(&self, at: f64) -> Option<f64> {
+        if let Source::Stored { x, y } = self.source
+            && self.window.is_none()
+            && x.is_ascending_axis()
+        {
+            let range = self.range.clone();
+            let after = x
+                .partition_point(|value| value < at)
+                .clamp(range.start, range.end);
+            if after == range.end {
+                return y.sample(range.end.checked_sub(1)?);
+            }
+            let (x1, y1) = (x.sample(after)?, y.sample(after)?);
+            if after == range.start {
+                return Some(y1);
+            }
+            let (x0, y0) = (x.sample(after - 1)?, y.sample(after - 1)?);
+            let dx = x1 - x0;
+            return Some(if dx == 0.0 {
+                y1
+            } else {
+                y0 + (y1 - y0) * (at - x0) / dx
+            });
+        }
+        let (first, last) = self.ends()?;
+        let descending = first > last;
+        let before = |a: f64, b: f64| if descending { a >= b } else { a <= b };
+        let mut previous: Option<(f64, f64)> = None;
+        let mut final_value = None;
+        for (x1, y1) in self.pairs() {
+            match previous {
+                None if before(at, x1) => return Some(y1),
+                Some((x0, y0)) if before(at, x1) => {
+                    let dx = x1 - x0;
+                    return Some(if dx == 0.0 {
+                        y1
+                    } else {
+                        y0 + (y1 - y0) * (at - x0) / dx
+                    });
+                }
+                _ => {}
+            }
+            previous = Some((x1, y1));
+            final_value = Some(y1);
+        }
+        final_value
+    }
+
     /// One pass over the samples as (x, y), a window's ends interpolated.
     /// A stored sample that cannot be read is NaN, an undefined sample, and
     /// its failure is kept for the run's diagnostics.

@@ -77,15 +77,20 @@ impl FunctionRegistry {
 
             name if trigonometry::NAMES.contains(&name) => trigonometry::apply(name, args),
 
-            _ => match super::time_measures::lookup(&name.to_lowercase()) {
-                // Edge, pulse and step measurements take option words, so
-                // they live with the argument handling that reads them.
-                Some(measure) => {
-                    let args: Vec<Argument> = args.into_iter().map(Argument::from).collect();
-                    measure(name, &args).map(CalcValue::Scalar)
+            // Edge, pulse and step measurements take option words, so they live with the
+            // argument handling that reads them.
+            _ => {
+                let lower = name.to_lowercase();
+                let args: Vec<Argument> = args.into_iter().map(Argument::from).collect();
+                if lower == "delay" {
+                    return super::time_measures::dispatch_delay(name, &args)
+                        .map(CalcValue::Scalar);
                 }
-                None => Err(EvaluationError::UnknownFunction(name.to_string())),
-            },
+                match super::time_measures::lookup(&lower) {
+                    Some(timed) => timed.dispatch(name, &args),
+                    None => Err(EvaluationError::UnknownFunction(name.to_string())),
+                }
+            }
         }
     }
 }
