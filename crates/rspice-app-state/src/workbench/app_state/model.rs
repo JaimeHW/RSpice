@@ -318,6 +318,9 @@ impl Model {
             .content
             .visualization_documents
             .iter()
+            // A working view follows the reader's runs; it is no saved document
+            // and keeps no run from being cleared or pruned.
+            .filter(|document| document.working_view().is_none())
             .flat_map(|document| document.datasets())
             .filter(|dataset| dataset.run_source().is_some())
             .map(|dataset| dataset.binding().dataset_id)

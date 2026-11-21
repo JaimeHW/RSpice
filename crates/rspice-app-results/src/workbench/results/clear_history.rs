@@ -183,3 +183,37 @@ fn delete_label(deleted: usize) -> String {
 const fn runs(count: usize) -> &'static str {
     if count == 1 { "run" } else { "runs" }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ClearHistoryCounts;
+    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
+    use crate::workbench::documents::result_document::test_host::ResultsTestHost;
+
+    /// A plan's or an imported run's working view follows the reader's runs;
+    /// it is no saved document, so the run it reads is cleared like any
+    /// other. Once each run had a view, every newest run counted as one a
+    /// saved document reads and clearing a one-run history deleted nothing.
+    #[test]
+    fn a_run_its_working_view_reads_is_cleared_like_any_other() {
+        let mut state = ResultsTestHost::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+            ]),
+        );
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        state.quick_frame();
+        assert!(
+            state.working_view().is_some(),
+            "the run has its working view"
+        );
+
+        let counts = ClearHistoryCounts::of(&state.model);
+        assert_eq!((counts.ordinary, counts.read_by_documents), (1, 0));
+        assert_eq!(counts.deleted(false), 1);
+        assert!(state.model.document_read_datasets().is_empty());
+    }
+}
