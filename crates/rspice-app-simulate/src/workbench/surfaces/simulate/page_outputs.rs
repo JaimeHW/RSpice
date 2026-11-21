@@ -6,13 +6,14 @@
 //! here rather than after a dispatched run.
 
 use egui::Ui;
+use rspice_simulation_contract::saved_output::SavedOutputDisplayIntent;
 
 use crate::state::command_catalog::CommandKey;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroup, CaptureGroupMembership, ComplexExpressionPolicy, SavedOutput,
-    SavedOutputCompatibility, SavedOutputDisplayIntent, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, UNGROUPED_NAME,
+    SavedOutputCompatibility, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    UNGROUPED_NAME,
 };
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
