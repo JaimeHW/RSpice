@@ -140,6 +140,37 @@ fn wrapped_response(frequency: &[f64], gain_db: &[f64], phase_deg: &[f64]) -> Re
     ])
 }
 
+/// The same pair sampled forty times a decade along curves that are affine
+/// in log-frequency between the given decade knots.
+///
+/// Margins are read off an interpolant through six neighbouring samples,
+/// which reproduces an affine piece exactly once it holds six samples of
+/// it. Sampling each piece densely keeps every crossing the fixture places
+/// inside one piece where the oracle's straight line is the curve itself.
+fn densely_affine_response(
+    frequency: &[f64],
+    gain_db: &[f64],
+    phase_deg: &[f64],
+) -> ResponseFixture {
+    const PER_DECADE: usize = 40;
+    let (mut f, mut g, mut p) = (Vec::new(), Vec::new(), Vec::new());
+    for i in 0..frequency.len() - 1 {
+        let (l0, l1) = (frequency[i].log10(), frequency[i + 1].log10());
+        let steps = ((l1 - l0) * PER_DECADE as f64).round() as usize;
+        for step in 0..steps {
+            let t = step as f64 / steps as f64;
+            f.push(10f64.powf(l0 + t * (l1 - l0)));
+            g.push(gain_db[i] + t * (gain_db[i + 1] - gain_db[i]));
+            p.push(phase_deg[i] + t * (phase_deg[i + 1] - phase_deg[i]));
+        }
+    }
+    let last = frequency.len() - 1;
+    f.push(frequency[last]);
+    g.push(gain_db[last]);
+    p.push(phase_deg[last]);
+    wrapped_response(&f, &g, &p)
+}
+
 fn loop_response(loop_: &PoleLoop, frequency: &[f64]) -> ResponseFixture {
     let gain = frequency
         .iter()
@@ -313,7 +344,7 @@ fn conditionally_stable_loop_reports_the_binding_gain_margin() {
     let gain_db = (0..phase_deg.len())
         .map(|i| gain_at(i as f64))
         .collect::<Vec<_>>();
-    let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+    let analysis = densely_affine_response(&frequency, &gain_db, &phase_deg);
 
     let margins = closed_form_margins(&phase_deg, gain_at);
     assert_eq!(margins.len(), 3, "the fixture must invert three times");
@@ -355,7 +386,7 @@ fn the_binding_gain_margin_is_the_shallowest_when_every_crossing_is_negative() {
     let gain_db = (0..phase_deg.len())
         .map(|i| gain_at(i as f64))
         .collect::<Vec<_>>();
-    let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+    let analysis = densely_affine_response(&frequency, &gain_db, &phase_deg);
 
     let margins = closed_form_margins(&phase_deg, gain_at);
     assert_eq!(margins.len(), 2, "the fixture must invert twice");
@@ -391,7 +422,7 @@ fn multiple_unity_gain_crossings_report_the_binding_phase_margin() {
     let frequency = (0..gain_db.len())
         .map(|i| 10f64.powi(i as i32))
         .collect::<Vec<_>>();
-    let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+    let analysis = densely_affine_response(&frequency, &gain_db, &phase_deg);
 
     // Every 0 dB crossing of the affine gain, with the phase there.
     let crossings = gain_db

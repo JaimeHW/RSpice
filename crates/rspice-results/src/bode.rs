@@ -11,20 +11,21 @@ pub mod retained;
 ///
 /// # Conventions
 ///
-/// Phase is unwrapped before any margin is measured — see
-/// `unwrap_retained_phase_deg` — and the unwrapped branch is anchored at the
-/// lowest swept frequency. Both crossing searches and both reads of a curve at
-/// a located crossing interpolate in log-frequency, so a margin never depends
-/// on which measure the reader happens to think in.
+/// The magnitude and phase are one complex loop gain read in polar form, and
+/// the margins are read off that loop gain exactly as the Nyquist sheet reads
+/// its locus: [`crate::nyquist::NyquistData::from_polar`] rebuilds `L` and its
+/// margins interpolate `log|L|` and the unwrapped `∠L` against log-frequency
+/// through the same samples. The two sheets therefore print the same margins
+/// for one loop, to the last digit, and both carry the interpolation's stated
+/// error ([`crate::nyquist::MARGIN_ERROR_DECIBELS`]).
 ///
-/// The instability phases are `-180° - 360k` for `k >= 0`: the lag-sense
-/// inversions a loop transmission reaches as it rolls off. Phase margin is the
-/// textbook `180° + ∠L(f_ugf)` against the first of them, folded into
-/// `(-180°, 180°]` by [`crate::stability::phase_margin_deg`] — the
-/// turn MATLAB, ADS and Spectre all report a margin in, and the turn the
-/// Nyquist card reports in. When the fold moved the number,
-/// [`AcBodeMetrics::pm_phase_deg`] carries the angle it was folded from and
-/// the card says so beside the margin.
+/// The unwrapped branch is anchored at the lowest swept frequency. A gain
+/// margin is read where the locus crosses the negative real axis. Phase margin
+/// is the textbook `180° + ∠L(f_ugf)`, folded into `(-180°, 180°]` by
+/// [`crate::stability::phase_margin_deg`]: the turn MATLAB, ADS and Spectre
+/// all report a margin in. When the fold moved the number,
+/// [`AcBodeMetrics::pm_phase_deg`] carries the angle it was folded from and the
+/// card says so beside the margin.
 ///
 /// Either curve can reach its level more than once. Both margins then name the
 /// crossing that *binds* — the one a perturbation reaches first, `min |GM_dB|`
@@ -81,9 +82,9 @@ pub fn log_frequency_crossing(frequency: &[f64], series: &[f64], level: f64) -> 
 /// Every frequency in the swept band at which `series` reaches `level`, in
 /// sweep order.
 ///
-/// A level touched exactly at a retained sample is reported once, under the
-/// same ownership rule the phase inversions use: each segment owns its leading
-/// endpoint, and the final segment additionally owns its trailing one.
+/// A level touched exactly at a retained sample is reported once: each
+/// segment owns its leading endpoint, and the final segment additionally owns
+/// its trailing one.
 pub(crate) fn log_frequency_crossings(frequency: &[f64], series: &[f64], level: f64) -> Vec<f64> {
     let n = frequency.len().min(series.len());
     let mut out = Vec::new();
@@ -118,201 +119,6 @@ fn interpolate_log_frequency(f0: f64, f1: f64, t: f64) -> f64 {
     }
     let (l0, l1) = (f0.log10(), f1.log10());
     10f64.powf(l0 + t * (l1 - l0))
-}
-
-/// Continuous phase from a retained `(-180°, 180°]` trace.
-///
-/// Retained AC phase is `imag.atan2(real)`, which folds every branch into a
-/// single turn: a response passing -180° does not cross it, it jumps to
-/// +180°. A margin is an angle, not a position relative to that fold, so every
-/// margin in this module is measured on the unwrapped series.
-///
-/// The branch is anchored at the lowest swept frequency, whose sample is
-/// carried through exactly as retained. A response whose true phase has
-/// already passed -180° before its first sample cannot be anchored from the
-/// swept data alone; sweeping from below the dominant pole resolves it.
-///
-/// Non-finite samples pass through and are skipped when measuring jumps, so a
-/// gap in the trace does not poison the running branch offset.
-fn unwrap_retained_phase_deg(phase: &[f64]) -> Vec<f64> {
-    let mut out = Vec::with_capacity(phase.len());
-    let mut offset = 0.0_f64;
-    let mut previous: Option<f64> = None;
-    for &sample in phase {
-        if !sample.is_finite() {
-            out.push(sample);
-            continue;
-        }
-        if let Some(previous) = previous {
-            let jump = sample - previous;
-            if jump.abs() > 180.0 {
-                offset -= 360.0 * (jump / 360.0).round();
-            }
-        }
-        previous = Some(sample);
-        out.push(sample + offset);
-    }
-    out
-}
-
-/// `log10` of the frequency axis, which is the abscissa every interpolation
-/// here works in. A non-positive frequency — never produced by an AC sweep —
-/// maps below every real sample so it can never bracket a query, and the
-/// crossing searches skip its segments outright.
-fn log_frequency_axis(frequency: &[f64]) -> Vec<f64> {
-    frequency
-        .iter()
-        .map(|&f| {
-            if f > 0.0 {
-                f.log10()
-            } else {
-                f64::NEG_INFINITY
-            }
-        })
-        .collect()
-}
-
-/// Read `series` at `frequency` interpolating in log-frequency — the same
-/// measure the crossing searches use to locate that frequency.
-///
-/// Sampling a decade-swept curve linearly in frequency is a large error at
-/// realistic sweep densities: on a `-50°/decade` phase read at a crossing
-/// three-tenths of a decade into a decade-wide interval it is nearly 13°.
-fn sample_at_log_frequency(log_frequency: &[f64], series: &[f64], frequency: f64) -> f64 {
-    crate::sampling::sample_at(log_frequency, series, frequency.log10())
-}
-
-/// Phases at which a loop transmission inverts, in the lag sense a rolling-off
-/// response reaches them: -180°, -540°, -900°, …
-fn instability_phases_between(p0: f64, p1: f64) -> impl Iterator<Item = f64> {
-    let (lo, hi) = if p0 <= p1 { (p0, p1) } else { (p1, p0) };
-    // `-180 - 360k` lies in `[lo, hi]` exactly when `k` does. Only `k >= 0`
-    // is reachable by a response anchored inside one turn and rolling off.
-    let k_first = ((-hi - 180.0) / 360.0).ceil().max(0.0);
-    let k_last = ((-lo - 180.0) / 360.0).floor();
-    let count = if k_last >= k_first {
-        (k_last - k_first) as usize + 1
-    } else {
-        0
-    };
-    (0..count).map(move |i| -180.0 - 360.0 * (k_first + i as f64))
-}
-
-/// Every frequency in the swept band at which the unwrapped phase reaches an
-/// instability phase.
-///
-/// A level touched exactly at a retained sample is reported once: each segment
-/// owns its leading endpoint, and the final segment additionally owns its
-/// trailing one.
-fn phase_inversion_frequencies(frequency: &[f64], phase_unwrapped: &[f64]) -> Vec<f64> {
-    let n = frequency.len().min(phase_unwrapped.len());
-    let mut out = Vec::new();
-    for i in 1..n {
-        let (f0, f1) = (frequency[i - 1], frequency[i]);
-        if f0 <= 0.0 || f1 <= 0.0 {
-            continue;
-        }
-        let (p0, p1) = (phase_unwrapped[i - 1], phase_unwrapped[i]);
-        if !p0.is_finite() || !p1.is_finite() {
-            continue;
-        }
-        let owns_trailing_endpoint = i == n - 1;
-        for level in instability_phases_between(p0, p1) {
-            if level == p1 && !owns_trailing_endpoint {
-                continue;
-            }
-            out.push(if p0 == p1 {
-                f0
-            } else {
-                interpolate_log_frequency(f0, f1, (level - p0) / (p1 - p0))
-            });
-        }
-    }
-    out
-}
-
-/// The gain margin the reader has to act on, and the phase inversion it was
-/// measured at.
-///
-/// A response can invert more than once — every conditionally stable loop dips
-/// through -180° above 0 dB and comes back. Reporting the first inversion would
-/// hide the one that matters, and reporting the deepest one over-warns by the
-/// whole conditionally stable hump: a healthy loop with 2 dB in hand reads as
-/// 26.7 dB past the margin. The inversion that *binds* is the one nearest unity
-/// gain in log magnitude — `min |GM_dB|`, the smallest gain change that reaches
-/// instability, which is the perturbation a gain error actually applies, and
-/// the crossing MATLAB's `margin` names. The reported value keeps its sign, so
-/// a negative gain margin still says the loop is already past that crossing.
-/// Ties — two inversions the sweep cannot separate, being good to about
-/// [`crate::stability::GAIN_MARGIN_TIE_DECIBELS`] — go to the
-/// inversion nearest the unity-gain frequency in log-frequency, which is the
-/// one the loop is working at.
-///
-/// The tie band is not a nicety. Two inversions can sit the same distance
-/// either side of unity, one with headroom and one already past the critical
-/// point; separating them on a hundredth of that distance makes the *sign* of
-/// the reported margin a function of the sweep's point density. The Nyquist
-/// card applies the same band, sequentially over the same crossing order, so
-/// the two cards resolve such a dead heat to the same inversion — see
-/// `crate::analysis::nyquist`'s agreement module.
-fn binding_gain_margin(
-    frequency: &[f64],
-    log_frequency: &[f64],
-    gain_db: &[f64],
-    phase_unwrapped: &[f64],
-    ugf: Option<f64>,
-) -> Option<(f64, f64)> {
-    let reference = ugf.filter(|f| *f > 0.0).map(f64::log10);
-    let distance = |f: f64| reference.map_or(f.log10(), |reference| (f.log10() - reference).abs());
-    phase_inversion_frequencies(frequency, phase_unwrapped)
-        .into_iter()
-        .map(|f180| (f180, -sample_at_log_frequency(log_frequency, gain_db, f180)))
-        .reduce(|best, candidate| {
-            let binds = if (candidate.1.abs() - best.1.abs()).abs()
-                <= crate::stability::GAIN_MARGIN_TIE_DECIBELS
-            {
-                distance(candidate.0) < distance(best.0)
-            } else {
-                candidate.1.abs() < best.1.abs()
-            };
-            if binds { candidate } else { best }
-        })
-}
-
-/// The phase margin the reader has to act on, and the unity-gain crossing it
-/// was measured at.
-///
-/// Gain reaches 0 dB more than once whenever the response has a resonance to
-/// climb back over, so the same question the gain margin answers arises here:
-/// which crossing binds. It is the one with the smallest `|PM|` — the same
-/// distance-to-instability rule as the gain margin, measured in phase instead
-/// of in log magnitude — and the reported sign is retained. Ties go to the
-/// lowest crossing. `ugf` names the crossing the margin was read at, so the
-/// card's two rows always describe the same point on the curve.
-///
-/// The margin is folded into `(-180°, 180°]` before it is either compared or
-/// reported. Folding only the reported value would let this card select a
-/// crossing on one quantity and print another, which is how it and the
-/// Nyquist card came to name different unity-gain frequencies on a loop whose
-/// phase had wound. The third element is the unwrapped angle the fold was
-/// applied to, which is what a wound loop has to be reported *with*.
-fn binding_phase_margin(
-    frequency: &[f64],
-    log_frequency: &[f64],
-    gain_db: &[f64],
-    phase_unwrapped: &[f64],
-) -> Option<(f64, f64, f64)> {
-    log_frequency_crossings(frequency, gain_db, 0.0)
-        .into_iter()
-        .map(|ugf| {
-            let loop_phase = sample_at_log_frequency(log_frequency, phase_unwrapped, ugf);
-            (
-                ugf,
-                crate::stability::phase_margin_deg(loop_phase),
-                loop_phase,
-            )
-        })
-        .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
 }
 
 /// How flat the first swept decade must be for the gain there to be presented
@@ -398,20 +204,15 @@ pub fn metrics_from_curves(
     };
 
     if let Some(phase) = phase_deg {
-        let log_frequency = log_frequency_axis(frequency);
-        let unwrapped = unwrap_retained_phase_deg(phase);
-        if let Some((ugf, pm_deg, pm_phase_deg)) =
-            binding_phase_margin(frequency, &log_frequency, gain_db, &unwrapped)
-        {
-            metrics.ugf = Some(ugf);
-            metrics.pm_deg = Some(pm_deg);
-            metrics.pm_phase_deg = Some(pm_phase_deg);
+        let locus = crate::nyquist::NyquistData::from_polar("", frequency, gain_db, phase);
+        if let Some(margin) = locus.phase_margin() {
+            metrics.ugf = Some(margin.frequency);
+            metrics.pm_deg = Some(margin.value);
+            metrics.pm_phase_deg = Some(margin.phase_deg);
         }
-        if let Some((f180, gm_db)) =
-            binding_gain_margin(frequency, &log_frequency, gain_db, &unwrapped, metrics.ugf)
-        {
-            metrics.f180 = Some(f180);
-            metrics.gm_db = Some(gm_db);
+        if let Some(margin) = locus.gain_margin() {
+            metrics.f180 = Some(margin.frequency);
+            metrics.gm_db = Some(20.0 * margin.value.log10());
         }
     }
 
@@ -420,7 +221,71 @@ pub fn metrics_from_curves(
 
 #[cfg(test)]
 mod tests {
-    use super::log_frequency_crossing;
+    use super::{log_frequency_crossing, metrics_from_curves};
+    use crate::nyquist::{MARGIN_ERROR_DECIBELS, MARGIN_ERROR_DEGREES, NyquistData};
+    use num_complex::Complex64;
+
+    /// `L = 4 / (1 + jf/1 kHz)³` swept from 1 Hz to 10 MHz at five points a
+    /// decade, the first sample `offset` decades above 1 Hz.
+    fn three_pole_sweep(offset: f64) -> (Vec<f64>, Vec<Complex64>) {
+        let frequency: Vec<f64> = (0..=35)
+            .map(|i| 10f64.powf(offset + f64::from(i) / 5.0))
+            .collect();
+        let gain = frequency
+            .iter()
+            .map(|&f| Complex64::new(4.0, 0.0) / Complex64::new(1.0, f / 1.0e3).powi(3))
+            .collect();
+        (frequency, gain)
+    }
+
+    /// The Bode card and the Nyquist card read one loop's margins off one
+    /// interpolant of the complex loop gain. At five points a decade both
+    /// read the closed form, GM = 20·log₁₀(8/4) = 6.0206 dB and
+    /// PM = 180° − 3·atan(√(4^⅔ − 1)) = 27.1416°, within the stated error,
+    /// wherever the sweep's samples fall, and they read the same numbers.
+    #[test]
+    fn both_cards_read_the_closed_form_margins_of_a_coarse_sweep() {
+        let gain_margin = 20.0 * 2f64.log10();
+        let crossover = (4f64.powf(2.0 / 3.0) - 1.0).sqrt();
+        let phase_margin = 180.0 - 3.0 * crossover.atan().to_degrees();
+        for step in 0..8 {
+            let (frequency, gain) = three_pole_sweep(f64::from(step) * 0.025);
+            let gain_db: Vec<f64> = gain.iter().map(|l| 20.0 * l.norm().log10()).collect();
+            let phase: Vec<f64> = gain.iter().map(|l| l.arg().to_degrees()).collect();
+            let bode = metrics_from_curves(&frequency, &gain_db, Some(&phase));
+            let real: Vec<f64> = gain.iter().map(|l| l.re).collect();
+            let imag: Vec<f64> = gain.iter().map(|l| l.im).collect();
+            let locus = NyquistData::from_arrays("L", &frequency, &real, &imag);
+            let nyquist_gm = 20.0 * locus.gain_margin().expect("a gain margin").value.log10();
+            let nyquist_pm = locus.phase_margin().expect("a phase margin").value;
+
+            let bode_gm = bode.gm_db.expect("a gain margin");
+            let bode_pm = bode.pm_deg.expect("a phase margin");
+            assert!(
+                (bode_gm - gain_margin).abs() <= MARGIN_ERROR_DECIBELS,
+                "GM {bode_gm} dB against {gain_margin} dB"
+            );
+            assert!(
+                (bode_pm - phase_margin).abs() <= MARGIN_ERROR_DEGREES,
+                "PM {bode_pm}° against {phase_margin}°"
+            );
+            assert!(
+                (bode_gm - nyquist_gm).abs() < 1.0e-9,
+                "{bode_gm} {nyquist_gm}"
+            );
+            assert!(
+                (bode_pm - nyquist_pm).abs() < 1.0e-9,
+                "{bode_pm} {nyquist_pm}"
+            );
+            let f180 = bode.f180.expect("a phase crossover");
+            assert!(
+                (f180 / (3f64.sqrt() * 1.0e3) - 1.0).abs() < 1.0e-3,
+                "{f180}"
+            );
+            let ugf = bode.ugf.expect("a unity-gain crossover");
+            assert!((ugf / (crossover * 1.0e3) - 1.0).abs() < 1.0e-3, "{ugf}");
+        }
+    }
 
     #[test]
     fn log_frequency_crossing_interpolates_between_positive_frequencies() {

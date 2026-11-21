@@ -1,12 +1,11 @@
 //! The stability-margin conventions both cards are ratified to report under.
 //!
-//! Margins are measured twice in this application — once off the Bode card's
-//! magnitude/phase pair, once off the Nyquist card's complex locus — by two
-//! implementations that share no code. That independence is worth keeping:
-//! it is what makes their agreement evidence rather than tautology. What is
-//! *not* worth keeping independent is the convention itself. A convention
-//! stated twice is two conventions, and the two cards drifted apart on both
-//! of the rules below before this module existed:
+//! Both cards read their margins off one interpolant of the complex loop
+//! gain (`crate::nyquist`): the Bode card rebuilds `L` from its magnitude and
+//! phase pair and runs the same search the Nyquist card runs on its locus. The
+//! convention is stated once, here, because a convention stated twice is two
+//! conventions, and the two cards drifted apart on both of the rules below
+//! before this module existed:
 //!
 //! - the phase margin's fold, where one card reported `180° + ∠L` unbounded
 //!   and the other wrapped it, so a loop whose phase had wound past a full
@@ -15,8 +14,6 @@
 //!   unity-gain frequency and the other compared magnitudes strictly, so two
 //!   inversions 0.005 dB apart in `|GM|` produced margins of opposite sign at
 //!   frequencies a factor of two apart.
-//!
-//! Both cards call the functions here. Neither restates them.
 
 /// A phase margin, folded into the turn every tool reports one in.
 ///

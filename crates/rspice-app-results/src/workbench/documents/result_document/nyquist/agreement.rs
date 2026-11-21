@@ -1,31 +1,23 @@
 //! The two stability cards, read off one loop and checked against each other.
 //!
-//! Margins are measured twice in this application, by two implementations that
-//! share no code:
-//!
-//! - the Bode card, [`crate::state::ac_bode_summary_for_analysis`],
-//!   which unwraps the retained `(-180°, 180°]` phase trace and locates every
-//!   crossing by linear interpolation in log-frequency;
-//! - the Nyquist card, [`super::NyquistData`], which works on the complex
-//!   locus and solves for each crossing by bisection on a Lagrange cubic over
-//!   `(log f, log|L|, unwrapped ∠L)`.
-//!
-//! Both are ratified to report the same convention: the gain margin is the
-//! −180° crossing with the **smallest |dB| distance to unity** — the smallest
-//! gain change that reaches instability, which is the crossing MATLAB's
-//! `margin` names — reported signed, ties inside
+//! Both cards read their margins off one interpolant of the complex loop
+//! gain: the Bode card, [`crate::state::ac_bode_summary_for_analysis`],
+//! rebuilds `L` from its retained magnitude and phase and hands it to the
+//! same margin search the Nyquist card, [`super::NyquistData`], runs on its
+//! locus: bisection on a Lagrange polynomial over `(log f, log|L|,
+//! unwrapped ∠L)`. The convention is the one both report: the gain margin is
+//! the −180° crossing with the **smallest |dB| distance to unity**, reported
+//! signed, ties inside
 //! [`rspice_results::stability::GAIN_MARGIN_TIE_DECIBELS`] going to the
 //! crossing nearest the unity-gain frequency; the phase margin is the
 //! unity-gain crossing with the smallest `|PM|`, also signed, folded into one
 //! turn by [`rspice_results::stability::phase_margin_deg`].
 //!
-//! Each card was aligned to that convention separately, and separately is how
-//! they drifted: both rules were implemented twice, and both pairs disagreed
-//! on loops neither module's own fixtures reached. Those two rules now live in
-//! `results::stability` and are called rather than restated — but a shared
-//! helper is a claim about the code, not about the readings, and a convention
-//! holds only where two independent readings of it agree. That is what this
-//! module measures.
+//! One shared search is a claim about the code, not about the readings: the
+//! Bode card still reaches it through a decibel conversion, a retained
+//! `(-180°, 180°]` phase and a polar rebuild, and either half can drift. So
+//! each margin is still read on both cards and checked against the closed
+//! form and against the other.
 //!
 //! Every fixture here is one closed-form loop transmission `L(j2πf)`, sampled
 //! once. The samples become a magnitude/phase pair for the Bode card and a
@@ -55,13 +47,9 @@ use super::NyquistData;
 
 /// How far apart two readings of one margin may sit, in dB.
 ///
-/// The two cards are not equally accurate, and the budget belongs to the
-/// weaker one. Nyquist solves on a Lagrange cubic and lands within 4e-6 dB of
-/// the closed form on every fixture here — better than its own quoted 0.002 dB.
-/// The Bode card reads the same samples with a straight chord, and that error
-/// dominates: 3.0e-3 dB at 40 points per decade, 5.0e-5 dB at 250. The budget
-/// is the coarsest of those with room to spare, so the sweep density can be
-/// varied without re-tuning it.
+/// Both cards read one interpolant, so they agree to rounding; the budget
+/// is what either may be off the closed form at the sweeps here, 40 points
+/// per decade and up, with room to vary the density without re-tuning it.
 ///
 /// It is also far below what this module exists to catch. The conditionally
 /// stable fixture's binding and worst-case crossings are 147 dB apart, so a
@@ -70,10 +58,9 @@ const GAIN_MARGIN_AGREEMENT_DB: f64 = 0.02;
 
 /// How far apart two readings of one margin may sit, in degrees.
 ///
-/// The same asymmetry: Nyquist lands within 8e-6° of the closed form, the
-/// Bode card within 9.3e-3° at 40 points per decade. Nothing here is a
-/// tolerance on the *convention* — a card binding at the wrong unity-gain
-/// crossing misses by 95° on the resonant fixture.
+/// The same budget in phase. Nothing here is a tolerance on the
+/// *convention*: a card binding at the wrong unity-gain crossing misses by
+/// 95° on the resonant fixture.
 const PHASE_MARGIN_AGREEMENT_DEG: f64 = 0.05;
 
 /// How far apart two readings of one crossing *frequency* may sit, relative.

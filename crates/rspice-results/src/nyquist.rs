@@ -144,6 +144,17 @@ const SETTLED_LOW_FREQUENCY_AXIS_RATIO: f64 = 1.0e-2;
 
 use crate::stability::GAIN_MARGIN_TIE_DECIBELS;
 
+/// Samples each margin interpolant passes through.
+const STENCIL_SAMPLES: usize = 6;
+
+/// The most a gain margin read at five points a decade is off the loop's own,
+/// for a loop of three coincident poles: the interpolation's stated error.
+pub const MARGIN_ERROR_DECIBELS: f64 = 0.01;
+
+/// The most a phase margin read at five points a decade is off the loop's
+/// own, for a loop of three coincident poles: the interpolation's stated error.
+pub const MARGIN_ERROR_DEGREES: f64 = 0.05;
+
 // =============================================================================
 // Nyquist Data
 // =============================================================================
@@ -165,6 +176,24 @@ impl NyquistData {
             .map(|i| NyquistPoint::new(freq[i], real[i], imag[i]))
             .collect();
 
+        Self {
+            name: name.to_string(),
+            points,
+        }
+    }
+
+    /// The loop gain a magnitude in decibels and a phase in degrees spell,
+    /// sample by sample: the same complex `L` a Bode pair is a polar reading
+    /// of, so its margins are read off the same interpolant as the locus's.
+    pub fn from_polar(name: &str, freq: &[f64], gain_db: &[f64], phase_deg: &[f64]) -> Self {
+        let n = freq.len().min(gain_db.len()).min(phase_deg.len());
+        let points = (0..n)
+            .map(|i| {
+                let magnitude = 10f64.powf(gain_db[i] / 20.0);
+                let (sin, cos) = sin_cos_degrees(phase_deg[i]);
+                NyquistPoint::new(freq[i], magnitude * cos, magnitude * sin)
+            })
+            .collect();
         Self {
             name: name.to_string(),
             points,
@@ -369,6 +398,31 @@ impl NyquistData {
     }
 }
 
+/// Sine and cosine of an angle in degrees, exact on the axes: a phase of
+/// −180° is on the negative real axis, not 1e-16 below it, so a crossing a
+/// retained sample lands on is found at that sample.
+fn sin_cos_degrees(degrees: f64) -> (f64, f64) {
+    let turn = degrees.rem_euclid(360.0);
+    if turn == 0.0 {
+        (0.0, 1.0)
+    } else if turn == 90.0 {
+        (1.0, 0.0)
+    } else if turn == 180.0 {
+        (0.0, -1.0)
+    } else if turn == 270.0 {
+        (-1.0, 0.0)
+    } else {
+        degrees.to_radians().sin_cos()
+    }
+}
+
+/// Whether a step whose ends sit `v0` and `v1` from a level reaches it. Each
+/// step owns its leading end, and the last step its trailing end as well,
+/// so a level touched at a retained sample is found once.
+fn step_reaches(v0: f64, v1: f64, last: bool) -> bool {
+    v0 == 0.0 || (v1 == 0.0 && last) || v0 * v1 < 0.0
+}
+
 // =============================================================================
 // Geometry
 // =============================================================================
@@ -485,7 +539,7 @@ impl MeasuredBranch {
     /// it sits on, which is the inversion the margin there is read at.
     fn phase_crossover(&self, index: usize) -> Option<(f64, f64)> {
         let (imag0, imag1) = (self.imag[index], self.imag[index + 1]);
-        if imag0 != 0.0 && imag0 * imag1 >= 0.0 {
+        if !step_reaches(imag0, imag1, index + 2 == self.len()) {
             return None;
         }
         if self.real[index] >= 0.0 || self.real[index + 1] >= 0.0 {
@@ -535,7 +589,7 @@ impl MeasuredBranch {
         if !lm0.is_finite() || !lm1.is_finite() {
             return None;
         }
-        if lm0 != 0.0 && lm0 * lm1 >= 0.0 {
+        if !step_reaches(lm0, lm1, index + 2 == self.len()) {
             return None;
         }
         self.solve(&self.log_magnitude, index, 0.0)
@@ -581,11 +635,15 @@ impl MeasuredBranch {
 
     /// `values` interpolated against log-frequency at `x`.
     ///
-    /// Lagrange through up to four samples around step `index`. A decade
-    /// sweep is coarse — ten points per decade is normal — and a straight
-    /// chord across one of its steps costs a tenth of a dB at the crossing,
-    /// which is the whole margin budget. A cubic through the neighbours
-    /// costs nothing and lands three orders of magnitude closer.
+    /// Lagrange through up to six samples around step `index`, three either
+    /// side where the sweep has them. A decade sweep is coarse, five or ten
+    /// points per decade is normal, and a straight chord across one of its
+    /// steps costs half a dB and two degrees at a crossing; a cubic still
+    /// costs 0.04 dB and 0.2° at five points a decade. Through six samples a
+    /// loop of three coincident poles reads its margins within
+    /// [`MARGIN_ERROR_DECIBELS`] and [`MARGIN_ERROR_DEGREES`] at five points a
+    /// decade, wherever the sweep's samples fall, and within a hundredth of
+    /// those at ten.
     fn interpolate(&self, values: &[f64], index: usize, x: f64) -> f64 {
         let (start, end) = self.stencil(index);
         let (nodes, samples) = (&self.log_frequency[start..end], &values[start..end]);
@@ -602,11 +660,12 @@ impl MeasuredBranch {
         total
     }
 
-    /// Up to four samples around step `index`, always containing the step.
+    /// Up to [`STENCIL_SAMPLES`] samples around step `index`, centred on the
+    /// step where the sweep allows and always containing it.
     fn stencil(&self, index: usize) -> (usize, usize) {
-        let start = index.saturating_sub(1);
-        let end = (start + 4).min(self.len());
-        (end.saturating_sub(4).min(index), end)
+        let start = index.saturating_sub(STENCIL_SAMPLES / 2 - 1);
+        let end = (start + STENCIL_SAMPLES).min(self.len());
+        (end.saturating_sub(STENCIL_SAMPLES).min(index), end)
     }
 }
 
