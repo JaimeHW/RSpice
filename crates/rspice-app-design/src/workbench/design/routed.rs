@@ -160,13 +160,13 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
     },
     RoutedCommand {
         key: ids::UNDO,
-        takes: |_| true,
+        takes: steps_a_design_history,
         enabled: can_undo,
         execute: undo,
     },
     RoutedCommand {
         key: ids::REDO,
-        takes: |_| true,
+        takes: steps_a_design_history,
         enabled: can_redo,
         execute: redo,
     },
@@ -520,6 +520,12 @@ fn find_in_design(cx: &mut Cx<'_, DesignFeature>) {
 /// whose specification and acceptance edits are plan changes.
 fn steps_the_setup(workspace: Workspace) -> bool {
     matches!(workspace, Workspace::Simulate | Workspace::Verify)
+}
+
+/// Whether Undo and Redo are the design feature's here: everywhere but
+/// Results, which steps its own views' edits.
+fn steps_a_design_history(reads: &Reads<'_, DesignFeature>) -> bool {
+    reads.wb.workspace != Workspace::Results
 }
 
 /// Whether Undo would take a step: on a Simulate page or a Verify view, where

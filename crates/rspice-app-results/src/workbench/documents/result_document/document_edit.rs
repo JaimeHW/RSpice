@@ -53,12 +53,7 @@ pub fn transact(
     edits: Vec<DocumentEdit>,
 ) -> Result<VisualizationTransactionReceipt, String> {
     let revision = project_document(state.results_reads(), document_id)?.revision();
-    state
-        .model
-        .workspace
-        .content
-        .transact_visualization_document(document_id, revision, edits)
-        .map_err(|error| error.to_string())
+    super::view_edits::apply(state, document_id, revision, edits).map_err(|error| error.to_string())
 }
 
 /// The run and analysis the reader is looking at: the selected pane's

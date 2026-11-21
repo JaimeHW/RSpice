@@ -556,20 +556,16 @@ pub fn refresh_latest_binding(
             "The selected project result document is no longer retained.".to_owned(),
         );
     };
-    if let Err(error) = state
-        .model
-        .workspace
-        .content
-        .transact_visualization_document(
-            document_id,
-            revision,
-            vec![DocumentEdit::RetargetTrackedDataset {
-                previous,
-                next: next_source,
-                analysis_id,
-            }],
-        )
-    {
+    if let Err(error) = super::view_edits::apply(
+        state,
+        document_id,
+        revision,
+        vec![DocumentEdit::RetargetTrackedDataset {
+            previous,
+            next: next_source,
+            analysis_id,
+        }],
+    ) {
         return refuse(
             state,
             format!("This document could not be retargeted onto the newest run: {error}."),
@@ -1271,12 +1267,7 @@ pub fn capture_pane_presentation(
     if edits.is_empty() {
         return;
     }
-    if let Err(error) = state
-        .model
-        .workspace
-        .content
-        .transact_visualization_document(pane.document_id, revision, edits)
-    {
+    if let Err(error) = super::view_edits::apply(state, pane.document_id, revision, edits) {
         // A prompt, not a record: this runs every frame, and a refused write
         // is refused again until the reader's change is undone.
         state.prompt(format!(

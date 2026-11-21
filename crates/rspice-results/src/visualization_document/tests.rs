@@ -464,6 +464,70 @@ fn provisioned_trace_document(
     (document, source, analysis_id)
 }
 
+/// Putting an earlier view back restores what it held as the next revision,
+/// over the datasets the document reads now. An identity the undone edit
+/// created is never handed out again, and a stale revision or another
+/// document's view is refused without touching the document.
+#[test]
+fn restoring_a_view_puts_back_what_it_held_as_a_new_revision() {
+    let (mut document, _, _) = provisioned_trace_document("V(out)");
+    let pane_id = document.panes()[0].id;
+    let trace_id = document.traces()[0].id;
+    let before = document.view_snapshot();
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::SetTraceVisibility {
+                    trace_id,
+                    visible: false,
+                },
+                DocumentEdit::AddMarker {
+                    pane_id,
+                    trace_id,
+                    coordinate: TypedValue::Real(0.0),
+                    label: "peak".to_owned(),
+                },
+            ],
+        )
+        .unwrap();
+    let undone_marker = receipt.created[0];
+    let edited = document.revision();
+
+    let restored = document.restore_view(edited, &before).unwrap();
+    assert!(document.traces()[0].visible, "the hidden trace shows again");
+    assert!(document.markers().is_empty(), "the placed marker is gone");
+    assert_eq!(restored.previous_revision, edited);
+    assert_eq!(restored.committed_revision, document.revision());
+    assert_ne!(document.revision(), edited);
+
+    let again = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddMarker {
+                pane_id,
+                trace_id,
+                coordinate: TypedValue::Real(0.0),
+                label: "peak".to_owned(),
+            }],
+        )
+        .unwrap();
+    assert_ne!(again.created[0], undone_marker, "identities are not reused");
+
+    let unchanged = document.clone();
+    assert!(matches!(
+        document.restore_view(edited, &before),
+        Err(VisualizationError::RevisionConflict { .. })
+    ));
+    let (other, _, _) = provisioned_trace_document("V(out)");
+    assert!(
+        document
+            .restore_view(document.revision(), &other.view_snapshot())
+            .is_err()
+    );
+    assert_eq!(document, unchanged);
+}
+
 /// Provisioning labels a trace with the vector's own name, and the vector it
 /// came from stays recorded beside it. A display surface may re-spell a label
 /// it can prove derivation wrote — the two are still equal — and must leave one

@@ -1653,3 +1653,56 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
 
 /// The fixture's one trace's X samples, as the drawn pane knows them.
 static FIXTURE_SAMPLES: [f64; 3] = [0.0, 0.5, 1.0];
+
+/// Undo and Redo in Results step the shown view's own edits, one reader's
+/// edit at a time, and never reach the schematic's history.
+#[test]
+fn undo_in_results_steps_the_view_and_leaves_the_schematic_alone() {
+    use rspice_app_state::state::{ComponentType, Point};
+    use rspice_app_workbench::workbench::framework::command_registry::{CommandAvailability, ids};
+    use rspice_app_workbench::workbench::state::Workspace;
+
+    let (mut app, document_id) = persistent_transient_fixture();
+    app.state.model.schematic.init_undo_history();
+    app.state
+        .model
+        .schematic
+        .with_undo("place R1", |schematic| {
+            schematic.add_component(ComponentType::Resistor, Point::new(0, 0));
+        });
+    assert!(app.state.model.schematic.can_undo());
+    let placed = app.state.model.schematic.document().components.len();
+    app.state.workbench.activate(Workspace::Results);
+    let _pane = projected_pane(&mut app.state, document_id);
+    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
+    assert_ne!(
+        app.command_availability(ids::UNDO),
+        CommandAvailability::Available,
+        "nothing the reader did in this view yet"
+    );
+
+    for x in [0.0, 1.0] {
+        rspice_app_results::workbench::documents::result_document::place_marker(
+            &mut app.state.results_parts(),
+            placement(analysis, &anchor, "V(out)", x),
+        )
+        .expect("the placement resolves a store");
+    }
+    assert_eq!(retained_markers(&app, document_id).len(), 2);
+
+    app.execute_command_key(ids::UNDO);
+    assert_eq!(retained_markers(&app, document_id).len(), 1);
+    app.execute_command_key(ids::UNDO);
+    assert!(retained_markers(&app, document_id).is_empty());
+    assert_eq!(
+        app.state.model.schematic.document().components.len(),
+        placed,
+        "Undo in Results never takes back a schematic edit"
+    );
+    assert!(app.state.model.schematic.can_undo());
+
+    app.execute_command_key(ids::REDO);
+    let redone = retained_markers(&app, document_id);
+    assert_eq!(redone.len(), 1);
+    assert_eq!(redone[0].coordinate, TypedValue::Real(0.0));
+}

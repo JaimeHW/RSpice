@@ -401,6 +401,33 @@ impl ProjectWorkspace {
         Ok(receipt)
     }
 
+    /// Put back one result document's view as `snapshot` held it, as a
+    /// revision-checked step like [`Self::transact_visualization_document`].
+    pub fn restore_visualization_document_view(
+        &mut self,
+        document_id: ResultDocumentId,
+        expected_revision: rspice_vocabulary::product::ObjectRevision,
+        snapshot: &rspice_results::visualization_document::ViewSnapshot,
+    ) -> Result<
+        rspice_results::visualization_document::VisualizationTransactionReceipt,
+        VisualizationDocumentPersistenceError,
+    > {
+        let document = self
+            .visualization_documents
+            .iter_mut()
+            .find(|document| document.id() == document_id)
+            .ok_or(VisualizationDocumentPersistenceError::NotFound { document_id })?;
+        let receipt = document
+            .restore_view(expected_revision, snapshot)
+            .map_err(|error| VisualizationDocumentPersistenceError::Transaction {
+                document_id,
+                message: error.to_string(),
+            })?;
+        self.visualization_documents_dirty = true;
+        self.visualization_documents_modified.insert(document_id);
+        Ok(receipt)
+    }
+
     /// Validate the persisted simulation configuration without requiring any
     /// runtime editor state. Cross-document targets are validated by project
     /// I/O once the library tree and simulation plan are available.

@@ -193,12 +193,7 @@ fn restore(state: &mut ResultsParts<'_>, sheet: WaveSheet, view: &SheetView) {
         return;
     }
     let revision = document.revision();
-    if let Err(error) = state
-        .model
-        .workspace
-        .content
-        .transact_visualization_document(document_id, revision, edits)
-    {
+    if let Err(error) = super::view_edits::apply(state, document_id, revision, edits) {
         state.prompt(format!("Could not go back to the earlier view: {error}"));
     }
 }

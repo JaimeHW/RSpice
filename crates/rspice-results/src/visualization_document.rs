@@ -2389,6 +2389,19 @@ pub enum VisualizationError {
     Revision(#[from] RevisionError),
 }
 
+/// A view as it stood at one revision, without the datasets it read; see
+/// [`VisualizationDocument::view_snapshot`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewSnapshot(Box<VisualizationDocument>);
+
+impl ViewSnapshot {
+    /// The revision the view stood at.
+    #[must_use]
+    pub const fn revision(&self) -> ObjectRevision {
+        self.0.revision
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct VisualizationDocument {
     schema_version: u16,
@@ -2810,6 +2823,79 @@ impl VisualizationDocument {
             created,
             tombstoned,
             edit_count: edits.len(),
+        })
+    }
+
+    /// What the view holds apart from the datasets it reads: the state an
+    /// undo step puts back. The edits a reader makes never change the
+    /// datasets, and a document can carry whole archived runs, so a step
+    /// keeps only the view.
+    #[must_use]
+    pub fn view_snapshot(&self) -> ViewSnapshot {
+        ViewSnapshot(Box::new(Self {
+            schema_version: self.schema_version,
+            id: self.id,
+            revision: self.revision,
+            title: self.title.clone(),
+            tracking: self.tracking,
+            presentation: self.presentation,
+            next_serial: self.next_serial,
+            datasets: Vec::new(),
+            pages: self.pages.clone(),
+            panes: self.panes.clone(),
+            axes: self.axes.clone(),
+            traces: self.traces.clone(),
+            cursors: self.cursors.clone(),
+            markers: self.markers.clone(),
+            measurements: self.measurements.clone(),
+            annotations: self.annotations.clone(),
+            link_groups: self.link_groups.clone(),
+            tombstones: self.tombstones.clone(),
+            comparisons: self.comparisons.clone(),
+            user_buses: self.user_buses.clone(),
+            event_lane_orders: self.event_lane_orders.clone(),
+            expression_traces: self.expression_traces.clone(),
+            xy_plots: self.xy_plots.clone(),
+        }))
+    }
+
+    /// Put back the view `snapshot` held, over the datasets this document
+    /// reads now, as the next revision. Identities are never reused: serials
+    /// continue from the higher of the two. A snapshot of another document,
+    /// or one naming a dataset this document no longer reads, is refused and
+    /// leaves `self` unchanged.
+    pub fn restore_view(
+        &mut self,
+        expected_revision: ObjectRevision,
+        snapshot: &ViewSnapshot,
+    ) -> Result<VisualizationTransactionReceipt, VisualizationError> {
+        if expected_revision != self.revision {
+            return Err(VisualizationError::RevisionConflict {
+                expected: expected_revision,
+                actual: self.revision,
+            });
+        }
+        if snapshot.0.id != self.id {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.restore",
+                message: "the snapshot belongs to another document".to_owned(),
+            });
+        }
+        let previous_revision = self.revision;
+        let committed_revision = previous_revision.next()?;
+        let mut candidate = (*snapshot.0).clone();
+        candidate.datasets = self.datasets.clone();
+        candidate.next_serial = candidate.next_serial.max(self.next_serial);
+        candidate.revision = committed_revision;
+        candidate.validate()?;
+        *self = candidate;
+        Ok(VisualizationTransactionReceipt {
+            document_id: self.id,
+            previous_revision,
+            committed_revision,
+            created: Vec::new(),
+            tombstoned: Vec::new(),
+            edit_count: 0,
         })
     }
 

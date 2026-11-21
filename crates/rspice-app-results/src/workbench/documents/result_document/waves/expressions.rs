@@ -719,11 +719,12 @@ pub(crate) fn toggle_source_visibility(
                 })
                 .collect::<Vec<_>>();
             if !edits.is_empty()
-                && let Err(error) = state
-                    .model
-                    .workspace
-                    .content
-                    .transact_visualization_document(context.document_id, revision, edits)
+                && let Err(error) = crate::workbench::documents::result_document::view_edits::apply(
+                    state,
+                    context.document_id,
+                    revision,
+                    edits,
+                )
             {
                 state
                     .workbench

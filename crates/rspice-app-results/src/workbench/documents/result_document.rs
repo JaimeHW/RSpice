@@ -43,6 +43,7 @@ mod table;
 pub(crate) mod trace_statistics;
 mod transfer_function;
 pub mod view_context;
+pub(crate) mod view_edits;
 mod view_history;
 mod view_plans;
 mod viewer_state;
@@ -885,27 +886,22 @@ pub fn place_marker(
         return quick_fallback(state, reason);
     };
 
-    let receipt = match state
-        .model
-        .workspace
-        .content
-        .transact_visualization_document(
-            context.document_id,
-            revision,
-            vec![
-                crate::results::visualization_document::DocumentEdit::AddTypedMarker {
-                    pane_id: context.pane_id,
-                    trace_id,
-                    coordinate: crate::results::visualization_document::TypedValue::Real(
-                        retained_x,
-                    ),
-                    label: trace_name.clone(),
-                    kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
-                    scope: crate::results::visualization_document::PlotMarkerScope::Pane,
-                    source_specification: None,
-                },
-            ],
-        ) {
+    let receipt = match view_edits::apply(
+        state,
+        context.document_id,
+        revision,
+        vec![
+            crate::results::visualization_document::DocumentEdit::AddTypedMarker {
+                pane_id: context.pane_id,
+                trace_id,
+                coordinate: crate::results::visualization_document::TypedValue::Real(retained_x),
+                label: trace_name.clone(),
+                kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
+                scope: crate::results::visualization_document::PlotMarkerScope::Pane,
+                source_specification: None,
+            },
+        ],
+    ) {
         Ok(receipt) => receipt,
         Err(error) => {
             return quick_fallback(
@@ -961,20 +957,16 @@ pub fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelector) {
             else {
                 return;
             };
-            if let Err(error) = state
-                .model
-                .workspace
-                .content
-                .transact_visualization_document(
-                    document_id,
-                    revision,
-                    vec![
-                        crate::results::visualization_document::DocumentEdit::Remove(
-                            crate::results::visualization_document::EntityRef::Marker(marker_id),
-                        ),
-                    ],
-                )
-            {
+            if let Err(error) = view_edits::apply(
+                state,
+                document_id,
+                revision,
+                vec![
+                    crate::results::visualization_document::DocumentEdit::Remove(
+                        crate::results::visualization_document::EntityRef::Marker(marker_id),
+                    ),
+                ],
+            ) {
                 state.prompt(format!("Could not remove the marker: {error}"));
                 return;
             }
@@ -1058,25 +1050,22 @@ pub fn commit_marker_edit(
                     "The retained marker is no longer part of this result document.".to_owned(),
                 );
             };
-            state
-                .model
-                .workspace
-                .content
-                .transact_visualization_document(
-                    document_id,
-                    revision,
-                    vec![
-                        crate::results::visualization_document::DocumentEdit::SetMarker {
-                            marker_id,
-                            coordinate,
-                            label: label.clone(),
-                            kind: retained_kind,
-                            scope,
-                            source_specification,
-                        },
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
+            view_edits::apply(
+                state,
+                document_id,
+                revision,
+                vec![
+                    crate::results::visualization_document::DocumentEdit::SetMarker {
+                        marker_id,
+                        coordinate,
+                        label: label.clone(),
+                        kind: retained_kind,
+                        scope,
+                        source_specification,
+                    },
+                ],
+            )
+            .map_err(|error| error.to_string())?;
             // The overlay states what the document now holds, not what was
             // typed: those are the same thing only when the typed label was
             // one the document would accept.
@@ -1669,6 +1658,8 @@ pub struct ResultsState {
     plans: view_plans::ViewPlans,
     /// The views each waveform sheet showed, for Zoom previous. Transient.
     view_histories: view_history::WaveViewHistories,
+    /// Each view's undo and redo steps. Transient.
+    pub(crate) view_edits: view_edits::ViewHistories,
 }
 
 /// One evaluated expression series (owned arrays, cheap to clone).

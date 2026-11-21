@@ -208,17 +208,14 @@ fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Lay
             ResultDocumentTrackingMode::Pinned
         };
         let next = ResultDocumentTracking::for_plan(next_mode, plan_id, analysis_id);
-        let result = state
-            .model
-            .workspace
-            .content
-            .transact_visualization_document(
-                document_id,
-                revision,
-                vec![DocumentEdit::SetTracking(next)],
-            )
-            .map(|_| ())
-            .map_err(|error| error.to_string());
+        let result = crate::workbench::documents::result_document::view_edits::apply(
+            state,
+            document_id,
+            revision,
+            vec![DocumentEdit::SetTracking(next)],
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string());
         match result {
             Ok(()) => state.workbench.prompt(if pinned {
                 "Result document now follows the latest plan run."

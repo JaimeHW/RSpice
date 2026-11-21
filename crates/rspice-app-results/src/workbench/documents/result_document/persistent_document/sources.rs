@@ -291,20 +291,17 @@ pub fn repoint(
     .map_err(|error| error.to_string())?;
     let revision = document.revision();
     let label = reference_run_label(run);
-    state
-        .model
-        .workspace
-        .content
-        .transact_visualization_document(
-            document_id,
-            revision,
-            vec![DocumentEdit::RepointDataset {
-                previous,
-                next,
-                analyses,
-            }],
-        )
-        .map_err(|error| error.to_string())?;
+    crate::workbench::documents::result_document::view_edits::apply(
+        state,
+        document_id,
+        revision,
+        vec![DocumentEdit::RepointDataset {
+            previous,
+            next,
+            analyses,
+        }],
+    )
+    .map_err(|error| error.to_string())?;
     state
         .workbench
         .prompt(format!("The result document now reads {label}."));
@@ -462,12 +459,13 @@ pub fn archive_document(
         edits.push(DocumentEdit::ArchiveDataset { binding, archive });
     }
     let revision = document.revision();
-    state
-        .model
-        .workspace
-        .content
-        .transact_visualization_document(document_id, revision, edits)
-        .map_err(|error| error.to_string())?;
+    crate::workbench::documents::result_document::view_edits::apply(
+        state,
+        document_id,
+        revision,
+        edits,
+    )
+    .map_err(|error| error.to_string())?;
     state
         .workbench
         .prompt("The result document now keeps its runs and reads without the run history.");

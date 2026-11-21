@@ -19,6 +19,7 @@ use crate::workbench::commands::result_navigation::{
     dataset_export_is_resolvable, follow_notification_action, open_run_log, producer_log_hop,
     producing_plan_hop, select_newest_retained_run, task_deck_hop,
 };
+use crate::workbench::documents::result_document::view_edits;
 use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
     cursor_jump_availability, family_available, fit_gesture_available, fit_y_to_visible_x,
@@ -345,8 +346,9 @@ fn keep_axis_drafts(_: &mut Cx<'_, ResultsFeature>, _: &egui::Context) {}
 /// The workbench commands the results workspace answers for itself: Copy
 /// takes the cursor readout, the zooms and Fit move the active sheet's
 /// viewport, Zoom previous steps the waveform sheet back through the views it
-/// showed, and Cancel lets go of the placed cursors. Each is the workspace's
-/// wherever Results is in front, Cancel only while a cursor is placed.
+/// showed, Undo and Redo step the shown view's edits, and Cancel lets go of
+/// the placed cursors. Each is the workspace's wherever Results is in front,
+/// Cancel only while a cursor is placed.
 const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
     RoutedCommand {
         key: ids::COPY,
@@ -379,6 +381,24 @@ const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
         takes: in_results,
         enabled: |reads| zoom_previous_available(results_reads(reads)),
         execute: |cx| zoom_previous(&mut results_parts(cx)),
+    },
+    // Undo and Redo step the shown view's own edits; in Results they never
+    // reach another workspace's history.
+    RoutedCommand {
+        key: ids::UNDO,
+        takes: in_results,
+        enabled: |reads| {
+            view_edits::shown_view_can_step(results_reads(reads), view_edits::Step::Undo)
+        },
+        execute: |cx| view_edits::step_shown_view(&mut results_parts(cx), view_edits::Step::Undo),
+    },
+    RoutedCommand {
+        key: ids::REDO,
+        takes: in_results,
+        enabled: |reads| {
+            view_edits::shown_view_can_step(results_reads(reads), view_edits::Step::Redo)
+        },
+        execute: |cx| view_edits::step_shown_view(&mut results_parts(cx), view_edits::Step::Redo),
     },
     RoutedCommand {
         key: ids::CANCEL,
