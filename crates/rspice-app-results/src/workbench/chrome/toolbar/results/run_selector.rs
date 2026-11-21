@@ -11,7 +11,9 @@ use crate::results::visualization_document::{ResultDocumentTrackingMode, Working
 use crate::state::{SimulationRun, SimulationRunLifecycle};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::chrome::document_bar::results::active_result_document;
+use crate::workbench::chrome::document_bar::results::{
+    activate_result_dataset, active_result_document, show_result_dataset,
+};
 use crate::workbench::design_system::{WorkbenchIcon, labeled_icon_button_sized};
 use crate::workbench::documents::result_document::working_view::{self, source_of};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
@@ -74,10 +76,44 @@ pub fn run_choice(state: ResultsReads<'_>) -> Option<RunChoice<'_>> {
 /// `run` is `None`, and make the view's tab name it.
 pub fn choose(state: &mut ResultsParts<'_>, run: Option<DatasetId>) -> Result<(), String> {
     let choice = run_choice(state.results_reads()).ok_or("Results shows no run of a plan")?;
-    let source = choice.source;
+    let (source, shown) = (choice.source, choice.shown.dataset_id);
+    choose_in(state, source, run, shown)
+}
+
+/// Show the run of `dataset`, as choosing its row does: a plan's run
+/// through the plan's view, kept until Latest is chosen or the plan runs
+/// again; an imported run through its own.
+pub fn show_run(state: &mut ResultsParts<'_>, dataset: DatasetId) -> Result<(), String> {
+    let run = state
+        .model
+        .simulation
+        .retained
+        .run_by_dataset_id(dataset)
+        .ok_or("the run is no longer in the run history")?;
+    match source_of(run) {
+        source @ WorkingViewSource::Plan { .. } => choose_in(state, source, Some(dataset), dataset),
+        WorkingViewSource::Imported { .. } => {
+            if show_result_dataset(state, &dataset) {
+                Ok(())
+            } else {
+                Err("Results is not the workspace showing".to_owned())
+            }
+        }
+    }
+}
+
+/// Choose `run` for the plan view of `source`, making the view from `any`,
+/// a run of the plan, when the plan has none yet.
+fn choose_in(
+    state: &mut ResultsParts<'_>,
+    source: WorkingViewSource,
+    run: Option<DatasetId>,
+    any: DatasetId,
+) -> Result<(), String> {
     let view = match working_view::view_of(state.results_reads(), source) {
         Some(view) => view,
         None => {
+            activate_result_dataset(state, &any);
             working_view::sync(state);
             working_view::view_of(state.results_reads(), source)
                 .ok_or("this plan's runs have no view to show them through")?

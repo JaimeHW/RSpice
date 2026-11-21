@@ -23,7 +23,7 @@ use super::super::super::commands::result_navigation::{open_run_log, ticked_resu
 use super::super::super::design_system::WorkbenchIcon;
 use super::results_actions::{
     compare_enabled, execute, locate_on_schematic_menu, select_result_analysis_by_key,
-    select_result_browser_key, select_result_dataset, set_result_quantity_ticked,
+    select_result_browser_key, set_result_quantity_ticked,
 };
 use super::results_rows::{
     ResultCompletenessClass, artifact_hierarchical_name, artifact_signal_kind, expression_header,
@@ -883,6 +883,22 @@ pub(in crate::workbench) fn results(
                         data_state_meta(run.data_state)
                     };
                     let overlaid = state.model.simulation.is_dataset_overlaid(run.dataset_id);
+                    let pinned = state
+                        .model
+                        .simulation
+                        .retained
+                        .runs
+                        .get(run.run_index)
+                        .is_some_and(|retained| retained.retention().is_pinned());
+                    let pinned_meta;
+                    let run_meta = match (pinned, run_meta.is_empty()) {
+                        (false, _) => run_meta,
+                        (true, true) => "pinned",
+                        (true, false) => {
+                            pinned_meta = format!("pinned \u{b7} {run_meta}");
+                            pinned_meta.as_str()
+                        }
+                    };
                     let responses = result_dataset_row(
                         ui,
                         if run.success {
@@ -896,7 +912,21 @@ pub(in crate::workbench) fn results(
                         overlaid,
                     );
                     if responses.selection.clicked() {
-                        select_result_dataset(state, run.run_index);
+                        // A plan's run is shown through the plan's view and
+                        // stays shown, as choosing it on the toolbar's run
+                        // selector does.
+                        if let Err(error) =
+                            crate::workbench::chrome::toolbar::results::run_selector::show_run(
+                                state,
+                                run.dataset_id,
+                            )
+                        {
+                            state
+                                .workbench
+                                .prompt(format!("Could not show {}: {error}", run.label));
+                        }
+                        state.results.session.selected_trace = None;
+                        state.results.session.selected_result_artifact = None;
                     }
                     if let Some(reason) = &unread {
                         responses.selection.clone().on_hover_text(format!(
@@ -908,6 +938,8 @@ pub(in crate::workbench) fn results(
                     let mut log = false;
                     let mut locate = false;
                     responses.selection.context_menu(|ui| {
+                        super::results_runs::run_menu(ui, state, run.dataset_id);
+                        ui.separator();
                         if unread.is_some() && ui.button("Locate results\u{2026}").clicked() {
                             locate = true;
                             ui.close();

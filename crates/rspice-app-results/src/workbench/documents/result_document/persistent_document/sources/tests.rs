@@ -483,3 +483,41 @@ fn an_archive_that_is_not_the_bound_run_is_refused() {
             .is_some_and(|reason| reason.contains("not the run it was made from"))
     );
 }
+
+/// A run deleted from its row leaves the view that read it saying it was
+/// deleted and can be restored, not that it is simply gone; restored, the
+/// view reads it again.
+#[test]
+fn a_run_deleted_from_its_row_leaves_the_view_saying_it_can_be_restored() {
+    use crate::workbench::docks::navigator::results_runs::{delete_run, restore_deleted_runs};
+    let original = run(1, 2, 32, 0.0);
+    let other = run(2, 2, 32, 1.0);
+    let mut state = host(&[&original, &other]);
+    let document_id = save_view(&mut state);
+
+    let said = delete_run(&mut state.results_parts(), original.dataset_id).expect("deleted");
+    assert_eq!(
+        said,
+        format!(
+            "Deleted {}. Restore deleted runs brings it back until the project closes.",
+            original.label
+        )
+    );
+    let gone = unavailable_sources(state.results_reads(), document_id);
+    assert_eq!(gone.len(), 1);
+    assert_eq!(gone[0].problem, SourceProblem::Deleted);
+    assert_eq!(
+        gone[0].reason(),
+        format!(
+            "{}, which this document reads, was deleted. Restore deleted runs brings it back \
+             until the project closes.",
+            original.label
+        )
+    );
+
+    restore_deleted_runs(&mut state.results_parts()).expect("restored");
+    assert!(
+        unavailable_sources(state.results_reads(), document_id).is_empty(),
+        "the restored run is the one the view was made from"
+    );
+}

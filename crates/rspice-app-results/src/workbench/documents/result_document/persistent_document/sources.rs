@@ -40,6 +40,8 @@ const RUN_ARCHIVE_ENCODING: &str = "rspice-project-run";
 pub enum SourceProblem {
     /// No retained run has the dataset's identity.
     Missing,
+    /// The run was deleted since the project opened, and can be restored.
+    Deleted,
     /// The retained run with that identity no longer holds the bound results.
     Changed,
 }
@@ -61,6 +63,11 @@ impl UnavailableSource {
         match self.problem {
             SourceProblem::Missing => format!(
                 "{}, which this document reads, is no longer in the run history.",
+                self.run_label
+            ),
+            SourceProblem::Deleted => format!(
+                "{}, which this document reads, was deleted. Restore deleted runs brings it back \
+                 until the project closes.",
                 self.run_label
             ),
             SourceProblem::Changed => format!(
@@ -116,7 +123,18 @@ fn retained_run(state: ResultsReads<'_>, dataset_id: DatasetId) -> Option<&Simul
 
 fn source_problem(state: ResultsReads<'_>, binding: DatasetBinding) -> Option<SourceProblem> {
     let Some(run) = retained_run(state, binding.dataset_id) else {
-        return Some(SourceProblem::Missing);
+        let deleted = state
+            .model
+            .simulation
+            .retained
+            .deleted_runs
+            .iter()
+            .any(|run| run.dataset_id == binding.dataset_id);
+        return Some(if deleted {
+            SourceProblem::Deleted
+        } else {
+            SourceProblem::Missing
+        });
     };
     (retained_dataset_digest(state, run) != binding.content_digest)
         .then_some(SourceProblem::Changed)
@@ -482,6 +500,7 @@ pub(super) fn show_banner(
     restore_archived_runs(state, document_id);
     let sources = unavailable_sources(state.results_reads(), document_id);
     let mut chosen = None;
+    let mut restore = false;
     for source in &sources {
         let reason = state
             .results
@@ -490,9 +509,17 @@ pub(super) fn show_banner(
                 || source.reason(),
                 |failure| format!("{} {failure}", source.reason()),
             );
-        if let Some(dataset_id) = banner_row(ui, &reason, &source.candidates) {
-            chosen = Some((source.binding, dataset_id));
+        let restorable = source.problem == SourceProblem::Deleted;
+        match banner_row(ui, &reason, restorable, &source.candidates) {
+            Some(BannerChoice::Read(dataset_id)) => chosen = Some((source.binding, dataset_id)),
+            Some(BannerChoice::Restore) => restore = true,
+            None => {}
         }
+    }
+    if restore {
+        let said = crate::workbench::docks::navigator::results_runs::restore_deleted_runs(state)
+            .unwrap_or_else(|error| error);
+        state.workbench.prompt(said);
     }
     if let Some((previous, dataset_id)) = chosen
         && let Err(error) = repoint(state, document_id, previous, dataset_id)
@@ -501,8 +528,22 @@ pub(super) fn show_banner(
     }
 }
 
-/// One line of the banner: the reason, then a choice of run to read instead.
-fn banner_row(ui: &mut Ui, reason: &str, candidates: &[(DatasetId, String)]) -> Option<DatasetId> {
+/// What the reader chose on a line of the banner.
+enum BannerChoice {
+    /// Read this run instead.
+    Read(DatasetId),
+    /// Bring the deleted runs back.
+    Restore,
+}
+
+/// One line of the banner: the reason, then a choice of run to read instead,
+/// and Restore for a run deleted since the project opened.
+fn banner_row(
+    ui: &mut Ui,
+    reason: &str,
+    restorable: bool,
+    candidates: &[(DatasetId, String)],
+) -> Option<BannerChoice> {
     let t = Tokens::get(ui.ctx());
     let height = ui.text_style_height(&egui::TextStyle::Body) + 10.0;
     let mut chosen = None;
@@ -524,18 +565,21 @@ fn banner_row(ui: &mut Ui, reason: &str, candidates: &[(DatasetId, String)]) -> 
                     .color(t.color.text_dim),
             )
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, reason));
+            if restorable && ui.button("Restore deleted runs").clicked() {
+                chosen = Some(BannerChoice::Restore);
+            }
             match candidates {
                 [] => {}
                 [(dataset_id, label)] => {
                     if ui.button(format!("Read {label} instead")).clicked() {
-                        chosen = Some(*dataset_id);
+                        chosen = Some(BannerChoice::Read(*dataset_id));
                     }
                 }
                 _ => {
                     rspice_ui_kit::widgets::menu_button(ui, "Read another run instead", |ui| {
                         for (dataset_id, label) in candidates {
                             if ui.button(label).clicked() {
-                                chosen = Some(*dataset_id);
+                                chosen = Some(BannerChoice::Read(*dataset_id));
                                 ui.close();
                             }
                         }
