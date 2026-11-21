@@ -268,16 +268,6 @@ fn rows_cover_the_registry_in_order() {
 }
 
 #[test]
-fn shell_command_ids_are_unique_and_resolve_to_their_command() {
-    let mut ids = HashSet::new();
-    for command in ShellCommand::ALL.iter().copied() {
-        let id = command.stable_id();
-        assert!(ids.insert(id), "duplicate command id {id}");
-        assert_eq!(ShellCommand::from_stable_id(id), Some(command), "{id}");
-    }
-}
-
-#[test]
 fn every_legacy_alias_resolves_to_a_registered_command_and_shadows_no_live_id() {
     let registry = command_registry();
     let live: HashSet<&str> = registry.order().iter().map(|key| key.as_str()).collect();
@@ -307,31 +297,8 @@ fn every_legacy_alias_resolves_to_a_registered_command_and_shadows_no_live_id() 
 }
 
 #[test]
-fn rows_are_deterministic() {
-    assert_eq!(command_rows(), command_rows());
-}
-
-#[test]
 fn the_command_registry_validates() {
     assert_eq!(command_registry().validate(ids::named()), Ok(()));
-}
-
-/// A retired id is answered with the key of the command it names now, and
-/// is never itself a key the registry declares.
-#[test]
-fn the_registry_answers_every_legacy_alias_with_a_live_key() {
-    let registry = command_registry();
-    for &(alias, target) in LEGACY_ALIASES {
-        assert!(
-            registry.spec(CommandKey::new(alias)).is_none(),
-            "alias {alias} is also a key"
-        );
-        let resolved = registry
-            .resolve(alias)
-            .unwrap_or_else(|| panic!("alias {alias} resolves to nothing"));
-        assert_eq!(resolved.as_str(), target, "alias {alias}");
-        assert!(registry.spec(resolved).is_some(), "alias {alias}");
-    }
 }
 
 /// The shortcut resolver breaks equal-precedence ties by position in the

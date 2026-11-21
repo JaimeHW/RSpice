@@ -887,20 +887,3 @@ impl CommandCatalog for CommandRegistry {
         command_registry().primary_is_reserved_on(command, platform)
     }
 }
-
-/// Searchable projection of the command registry, as values: the commands
-/// the palette lists. The command palette itself and context-only
-/// cancellation are intentionally not self-referential rows.
-#[cfg(test)]
-pub fn command_catalog() -> impl Iterator<Item = ShellCommand> {
-    let registry = command_registry();
-    registry
-        .order()
-        .iter()
-        .filter(move |key| {
-            registry
-                .spec(**key)
-                .is_some_and(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE))
-        })
-        .filter_map(|key| ShellCommand::from_key(*key))
-}

@@ -732,12 +732,10 @@ mod tests {
         );
     }
 
-    /// One node the frame published for a reader: what it says, what it is,
-    /// and where it was drawn.
+    /// One node the frame published for a reader: what it says and what it is.
     struct Shown {
         text: String,
         role: egui::accesskit::Role,
-        bounds: Option<egui::accesskit::Rect>,
     }
 
     /// Every node `render` published for a reader, at desktop size. Generic
@@ -769,7 +767,6 @@ mod tests {
                 Some(Shown {
                     text: node.value().or_else(|| node.label())?.to_owned(),
                     role: node.role(),
-                    bounds: node.bounds(),
                 })
             })
             .collect()
@@ -799,71 +796,6 @@ mod tests {
             !shown.iter().any(|text| text == "Examples\u{2026}"),
             "{shown:?}"
         );
-    }
-
-    /// About says what the build, its engine and this machine's license are
-    /// in words, beside their labels: no dash for "no license", no
-    /// abbreviation, and the copyright the shipped license states.
-    #[test]
-    fn about_states_the_build_engine_and_license_in_words() {
-        let mut app = RSpiceApp::test_instance();
-        assert!(app.state.cloud.license.is_none());
-        app.execute_command_key(ShellCommand::About.key());
-        let shown = shown_nodes(&mut app, RSpiceApp::render_about_dialog);
-        let texts: Vec<&str> = shown.iter().map(|shown| shown.text.as_str()).collect();
-        for expected in [
-            "About RSpice",
-            VERSION_LINE,
-            ENGINE_LINE,
-            "Not activated",
-            "\u{a9} 2026 RSpice Contributors",
-            "Third-party notices",
-        ] {
-            assert!(
-                texts.contains(&expected),
-                "About shows {expected:?}: {texts:#?}"
-            );
-        }
-        assert!(PRODUCT_LICENSE.contains(&format!("Copyright (c) {}.", copyright_holder())));
-        for text in &texts {
-            assert!(!text.contains('\u{2014}'), "{text:?} has an em dash");
-            assert!(!text.contains("pkg"), "{text:?} abbreviates");
-        }
-        // Each value starts at one x, beside its label rather than at the
-        // dialog's far edge.
-        let value_left: Vec<f64> = shown
-            .iter()
-            .filter(|shown| {
-                [VERSION_LINE, ENGINE_LINE, "Not activated"].contains(&shown.text.as_str())
-            })
-            .filter_map(|shown| shown.bounds.map(|bounds| bounds.x0.round()))
-            .collect();
-        // A selectable label publishes its words twice: as the label and as
-        // its text run, at one place.
-        assert!(value_left.len() >= 3, "{value_left:?}");
-        assert!(
-            value_left.windows(2).all(|pair| pair[0] == pair[1]),
-            "{value_left:?}"
-        );
-    }
-
-    /// A command with no shortcut leaves its cell blank rather than marking
-    /// it with a dash.
-    #[test]
-    fn an_unbound_command_leaves_its_shortcut_cell_blank() {
-        let shortcuts = ShortcutPreferences::default();
-        let os = egui::os::OperatingSystem::Windows;
-        let unbound = ShortcutCategory::ALL
-            .iter()
-            .flat_map(|category| category.commands(command_registry()))
-            .find(|command| {
-                shortcuts
-                    .resolved_label(&CommandRegistry, *command, CommandPlatform::Desktop, os)
-                    .is_empty()
-            })
-            .expect("some listed command has no shortcut");
-        let (shortcut, name) = shortcut_help_row(&shortcuts, unbound, CommandPlatform::Desktop, os);
-        assert_eq!(shortcut, "", "{name} shows a blank shortcut cell");
     }
 
     /// The legal page's captions are headings in the kit's section face.

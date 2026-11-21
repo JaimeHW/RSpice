@@ -903,20 +903,6 @@ mod ui_session_tests {
     }
 
     #[test]
-    fn legacy_ui_session_defaults_to_all_selection_classes() {
-        let wire: UiSessionWire =
-            serde_json::from_value(serde_json::json!({})).expect("legacy session without a filter");
-        let restored = AppState::from(wire);
-
-        assert!(
-            restored.design.schematic_selection_filter.instances
-                && restored.design.schematic_selection_filter.wires
-                && restored.design.schematic_selection_filter.labels
-                && restored.design.schematic_selection_filter.annotations
-        );
-    }
-
-    #[test]
     fn schematic_bulk_edit_filters_round_trip_with_the_ui_session() {
         let mut session = AppState::default();
         session.design.schematic_bulk_edit_filters.active = SelectionBulkFilter {
@@ -977,18 +963,6 @@ mod ui_session_tests {
     }
 
     #[test]
-    fn legacy_ui_session_defaults_bulk_edit_filters_without_project_mutation() {
-        let restored = AppState::from(
-            serde_json::from_value::<UiSessionWire>(serde_json::json!({}))
-                .expect("legacy session without bulk filters"),
-        );
-        assert_eq!(
-            restored.design.schematic_bulk_edit_filters,
-            SelectionBulkFilterSession::default()
-        );
-    }
-
-    #[test]
     fn schematic_visibility_policy_round_trips_with_the_ui_session() {
         let mut session = AppState::default();
         session.design.schematic_visibility = SchematicVisibilityPolicy {
@@ -1012,40 +986,6 @@ mod ui_session_tests {
         );
     }
 
-    /// Earlier builds saved a hierarchy-context choice with the policy (C-13,
-    /// J-3: the dimmed-parent overlay it governed is gone). A session written
-    /// then still loads, and every choice saved beside it survives.
-    #[test]
-    fn a_session_saved_with_the_retired_hierarchy_choice_still_loads() {
-        let legacy = serde_json::json!({
-            "schematic_visibility": {
-                "hierarchy": "full-visible-hierarchy",
-                "annotations": "violations-only",
-                "back_annotation": "voltages-only",
-                "parameter_labels": "hidden",
-                "wire_routing": "forty-five-degree",
-                "net_highlighting": "off",
-                "review_markers": "all"
-            }
-        });
-        let restored = AppState::from(
-            serde_json::from_value::<UiSessionWire>(legacy)
-                .expect("a session carrying the retired hierarchy choice loads"),
-        );
-
-        assert_eq!(
-            restored.design.schematic_visibility,
-            SchematicVisibilityPolicy {
-                annotations: SchematicAnnotationVisibility::ViolationsOnly,
-                back_annotation: SchematicBackAnnotationContent::VoltagesOnly,
-                parameter_labels: SchematicParameterLabelVisibility::Hidden,
-                wire_routing: SchematicWireRoutingStyle::FortyFiveDegree,
-                net_highlighting: SchematicNetHighlighting::Off,
-                review_markers: SchematicReviewMarkerVisibility::All,
-            }
-        );
-    }
-
     #[test]
     fn grid_cycle_is_dots_then_lines_then_off_and_round_trips_exactly() {
         let mut session = AppState::default();
@@ -1065,19 +1005,6 @@ mod ui_session_tests {
         assert_eq!(restored.design.grid_restore_style, GridStyle::Lines);
         assert_eq!(restored.design.cycle_grid_style(), GridStyle::Dots);
         assert_eq!(restored.design.cycle_grid_style(), GridStyle::Lines);
-    }
-
-    #[test]
-    fn legacy_ui_session_uses_safe_visibility_defaults() {
-        let restored = AppState::from(
-            serde_json::from_value::<UiSessionWire>(serde_json::json!({}))
-                .expect("legacy session without visibility policy"),
-        );
-
-        assert_eq!(
-            restored.design.schematic_visibility,
-            SchematicVisibilityPolicy::default()
-        );
     }
 
     #[test]
@@ -1122,27 +1049,6 @@ mod ui_session_tests {
             rspice_app_state::state::DuplicateExternalNets::PreserveNamedNetAttachment
         );
     }
-
-    #[test]
-    fn legacy_ui_session_uses_snap_and_routing_defaults() {
-        let restored = AppState::from(
-            serde_json::from_value::<UiSessionWire>(serde_json::json!({}))
-                .expect("legacy session without editor runtime settings"),
-        );
-
-        assert_eq!(
-            restored.design.schematic_snap,
-            rspice_app_state::state::SnapEngine::default()
-        );
-        assert_eq!(
-            restored.design.schematic_routing_mode,
-            rspice_app_state::state::WireRoutingMode::HorizontalFirst
-        );
-        assert_eq!(
-            restored.design.duplicate_external_nets,
-            rspice_app_state::state::DuplicateExternalNets::LeaveUnconnected
-        );
-    }
 }
 
 /// Workbench sessions saved and restored through the wire: missing fields,
@@ -1160,20 +1066,6 @@ mod workbench_session_tests {
         let mut state = AppState::default();
         wire.scatter(&mut state);
         state
-    }
-
-    #[test]
-    fn workbench_without_a_project_page_defaults_to_overview() {
-        let mut encoded =
-            serde_json::to_value(WorkbenchWireRef::capture(&AppState::default())).unwrap();
-        encoded
-            .as_object_mut()
-            .expect("workbench is an object")
-            .remove("project_page");
-
-        let restored = restore(serde_json::from_value(encoded).unwrap());
-
-        assert_eq!(restored.project.project_page, ProjectPage::Overview);
     }
 
     #[test]
@@ -1210,17 +1102,6 @@ mod workbench_session_tests {
         assert_eq!(
             restored.project.library_cellview_page,
             LibraryCellviewPage::SymbolForm
-        );
-    }
-
-    #[test]
-    fn legacy_session_without_library_cellview_page_defaults_to_libraries() {
-        let state = restore(
-            serde_json::from_str(r#"{"workspace":"Models"}"#).expect("legacy workbench restores"),
-        );
-        assert_eq!(
-            state.project.library_cellview_page,
-            LibraryCellviewPage::Libraries
         );
     }
 

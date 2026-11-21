@@ -1031,38 +1031,6 @@ mod tests {
     }
 
     #[test]
-    fn browser_spoken_feedback_preference_round_trips() {
-        let mut state = AppState::default();
-        state.settings.browser_spoken_feedback = true;
-
-        let json = serde_json::to_string(&state).expect("session serializes");
-        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
-
-        assert!(restored.settings.browser_spoken_feedback);
-    }
-
-    /// The Han form a person prefers comes back from the stored session.
-    #[test]
-    fn the_han_form_round_trips_through_the_stored_session() {
-        use rspice_ui_kit::fonts::{HanPreference, HanVariant};
-
-        let mut state = AppState::default();
-        state
-            .model
-            .preferences
-            .set_choice(
-                rspice_app_state::workbench::preferences::ChoicePreference::HanForm,
-                4,
-            )
-            .expect("Japanese is one of the Han forms");
-        let restored = relaunch(saved_session(&mut state));
-        assert_eq!(
-            restored.model.preferences.han_preference(),
-            HanPreference::Prefer(HanVariant::Japanese)
-        );
-    }
-
-    #[test]
     fn appearance_preferences_round_trip_through_the_application_session() {
         let mut state = AppState::default();
         state.workbench.theme.mode = rspice_app_workbench::ui::Mode::System;

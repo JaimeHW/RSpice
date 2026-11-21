@@ -21,11 +21,9 @@ mod sheets;
 mod simulation_plan;
 mod view_state;
 
-use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
-use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
 use rspice_app_state::state::Wire;

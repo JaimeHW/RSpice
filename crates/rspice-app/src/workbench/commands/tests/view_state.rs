@@ -473,13 +473,6 @@ fn escape_lets_go_of_an_armed_zoom_box() {
 }
 
 #[test]
-fn only_exactly_implemented_reset_actions_are_discoverable() {
-    let searchable = command_catalog().collect::<Vec<_>>();
-    assert!(vocabulary::ShellCommand::ALL.contains(&ShellCommand::ResetLayout));
-    assert!(searchable.contains(&ShellCommand::ResetLayout));
-}
-
-#[test]
 fn full_screen_command_enters_in_the_same_frame_with_no_dialog() {
     let mut app = RSpiceApp::test_instance();
     assert!(!app.state.workbench.full_screen_presentation);

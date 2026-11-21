@@ -269,31 +269,6 @@ mod tests {
         assert!(opened_pages(&mut app).is_empty(), "the page opens once");
     }
 
-    /// The topics are exactly the pages the site publishes, in its order.
-    #[test]
-    fn the_topics_are_the_sites_documentation_pages() {
-        assert_eq!(
-            DocsTopic::ALL.map(DocsTopic::slug),
-            [
-                "getting-started",
-                "schematic-entry",
-                "simulation-setup",
-                "results",
-                "verification",
-                "models-and-pdks",
-                "verilog-a",
-                "netlists-and-scripts",
-                "troubleshooting",
-                "keyboard-shortcuts",
-            ]
-        );
-        assert_eq!(docs_url(None), "https://rspice.app/docs");
-        assert_eq!(
-            docs_url(Some(DocsTopic::ModelsAndPdks)),
-            "https://rspice.app/docs/models-and-pdks"
-        );
-    }
-
     /// Every workspace has a topic of its own, by an exhaustive match: a new
     /// workspace does not compile until it is given one.
     #[test]

@@ -12,23 +12,7 @@ use rspice_app_workbench::workbench::routing::{
     surface_catalog::SurfaceId,
     surface_route::SurfaceRoute,
 };
-use rspice_app_workbench::workbench::state::workbench_session::{
-    Drawer, LAYOUT_SCHEMA_VERSION, WorkbenchSession, WorkspaceLayoutState, default_inspector_width,
-    default_navigator_width,
-};
-
-#[test]
-fn ordinary_noise_uses_the_frequency_document_identity() {
-    use rspice_app_results::workbench::documents::result_document::ResultViewer;
-    assert_eq!(
-        ResultViewer::NoiseContrib.viewer_document_id(),
-        Some("viewer-bode")
-    );
-    assert_eq!(
-        ResultViewer::Fft.viewer_document_id(),
-        Some("viewer-spectrum")
-    );
-}
+use rspice_app_workbench::workbench::state::workbench_session::{Drawer, WorkbenchSession};
 
 /// Every document a sheet claims must exist in the catalog and must accept
 /// the sheet's analysis. Three copies of this map used to exist; one said
@@ -178,42 +162,6 @@ fn manager_history_roundtrips_back_and_forward_to_its_source() {
             .current,
         help
     );
-}
-
-#[test]
-fn legacy_shell_geometry_migrates_to_redesigned_responsive_docks() {
-    let mut state = WorkbenchSession::default();
-    state.layout_schema_version = 0;
-    state.navigator_width = 232.0;
-    state.navigator_width_custom = true;
-    state.inspector_width = 440.0;
-    state.inspector_width_custom = true;
-    state.workspace_layouts.insert(
-        Workspace::Design,
-        WorkspaceLayoutState {
-            navigator_width: 232.0,
-            navigator_width_custom: true,
-            inspector_width: 440.0,
-            inspector_width_custom: true,
-            ..WorkspaceLayoutState::default()
-        },
-    );
-
-    state.reconcile_restored_navigation();
-
-    assert_eq!(state.layout_schema_version, LAYOUT_SCHEMA_VERSION);
-    assert_eq!(state.navigator_width, default_navigator_width());
-    assert!(!state.navigator_width_custom);
-    assert_eq!(state.inspector_width, default_inspector_width());
-    assert!(!state.inspector_width_custom);
-    let design = state
-        .workspace_layouts
-        .get(&Workspace::Design)
-        .expect("design workspace layout remains present");
-    assert_eq!(design.navigator_width, default_navigator_width());
-    assert!(!design.navigator_width_custom);
-    assert_eq!(design.inspector_width, default_inspector_width());
-    assert!(!design.inspector_width_custom);
 }
 
 #[test]

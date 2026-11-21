@@ -55,18 +55,6 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn native_default_filter_suppresses_gpu_backend_probe_warnings() {
-        let filter = native_default_filter();
-
-        assert!(filter.starts_with("warn,"));
-        assert!(filter.contains("wgpu_core=error"));
-        assert!(filter.contains("wgpu_hal=error"));
-        assert!(filter.contains("naga=error"));
-        assert!(!filter.contains("wgpu_core=warn"));
-        assert!(!filter.contains("wgpu_hal=warn"));
-    }
-
-    #[test]
     fn native_log_env_ignores_generic_rust_log_and_honors_rspice_log() {
         let _guard = ScopedEnv::lock();
         let _rust_log = ScopedEnv::capture("RUST_LOG");

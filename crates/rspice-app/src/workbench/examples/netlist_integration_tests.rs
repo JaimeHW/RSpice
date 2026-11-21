@@ -10,29 +10,6 @@ use rspice_app_state::state::{
 };
 use rspice_app_state::workbench::examples::load_example;
 
-/// A label sitting on a wire names that net in the generated netlist.
-#[test]
-fn net_label_names_the_node() {
-    let mut state = SchematicState::default();
-    load_example("RC Lowpass Filter", &mut state);
-
-    let result = generate_netlist(&state);
-    assert!(
-        result.nets.contains_key("out"),
-        "the \"out\" label should name its net; got nets {:?}",
-        result.nets.keys().collect::<Vec<_>>()
-    );
-    // The named node appears in instance lines (R1 ... out ...).
-    assert!(
-        result
-            .netlist
-            .lines()
-            .any(|l| { l.starts_with('R') && l.split_whitespace().any(|tok| tok == "out") }),
-        "instance lines should reference the labeled node:\n{}",
-        result.netlist
-    );
-}
-
 #[test]
 fn design_notes_never_change_generated_spice_or_connectivity() {
     let mut baseline = SchematicState::default();

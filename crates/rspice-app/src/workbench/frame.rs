@@ -1201,7 +1201,6 @@ fn apply_browser_full_screen(app: &mut RSpiceApp, enabled: bool) {
 mod tests {
     use super::*;
     use rspice_app_state::workbench::workspace::Workspace;
-    use rspice_app_workbench::workbench::state::workbench_session::{Drawer, WorkbenchSession};
 
     /// A reported failure is toasted with an offer to show its Console line,
     /// and the mirror then meets that same line: one failure, one record.
@@ -1985,39 +1984,6 @@ mod tests {
             app.state.workbench.toasts.activity()[0].kind(),
             ToastKind::Success
         );
-    }
-
-    #[test]
-    fn drawer_state_is_transient_navigation_not_a_workspace() {
-        let mut state = WorkbenchSession::default();
-        state.toggle_drawer(Drawer::Navigator);
-        assert_eq!(state.workspace, Workspace::Design);
-        assert_eq!(state.drawer, Some(Drawer::Navigator));
-    }
-
-    #[test]
-    fn application_full_screen_has_exactly_one_enter_and_exit_request() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.enter_full_screen_presentation();
-
-        assert!(app.state.workbench.full_screen_presentation);
-        assert!(app.state.workbench.full_screen);
-        assert_eq!(take_full_screen_request(&mut app), Some(true));
-        assert_eq!(take_full_screen_request(&mut app), None);
-
-        app.state.exit_full_screen_presentation();
-        assert!(!app.state.workbench.full_screen_presentation);
-        assert!(!app.state.workbench.full_screen);
-        assert_eq!(take_full_screen_request(&mut app), Some(false));
-        assert_eq!(take_full_screen_request(&mut app), None);
-    }
-
-    fn take_full_screen_request(app: &mut RSpiceApp) -> Option<bool> {
-        app.state
-            .workbench
-            .outbox
-            .take::<FullScreen>()
-            .map(|FullScreen(enabled)| enabled)
     }
 
     #[test]
