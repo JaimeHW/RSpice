@@ -337,6 +337,29 @@ pub fn parse_raw_plots_bytes_with_limits(
     Ok(RawFile { plots })
 }
 
+/// The header of the plot `bytes` open with, and the byte offset its data section starts at:
+/// what a reader that decodes the data itself, as it arrives, needs. `bytes` hold the header
+/// through its `Binary:` or `Values:` line; nothing after that line is read.
+pub fn parse_raw_plot_header(
+    bytes: &[u8],
+    resource_limits: ResourceLimits,
+) -> Result<(RawFileHeader, Vec<RawVariable>, usize), RawParseError> {
+    let header_text = header_text::decode_header(bytes)?;
+    let (header, variables) = parse_header(&header_text.text, resource_limits)?;
+    Ok((header, variables, header_text.data_offset))
+}
+
+/// Whether the time scale of the plot `header` and `variables` declare carries LTspice's
+/// compression marks, the sign bit set on each point its compression kept: the time is then the
+/// magnitude, as the whole-file readers take it.
+#[must_use]
+pub fn raw_time_carries_compression_marks(
+    header: &RawFileHeader,
+    variables: &[RawVariable],
+) -> bool {
+    time_carries_compression_marks(header, variables)
+}
+
 /// Parse one plot block, returning it and the byte length it consumed.
 fn parse_plot(
     bytes: &[u8],

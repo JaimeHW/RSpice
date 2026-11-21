@@ -6,6 +6,7 @@ use rspice_core::io::RawParseError;
 
 #[cfg(feature = "result-waveform")]
 pub mod result;
+pub mod stream;
 
 #[derive(Debug)]
 pub enum RawReadError {

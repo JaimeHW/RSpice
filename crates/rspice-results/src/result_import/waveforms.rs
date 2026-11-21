@@ -227,11 +227,22 @@ fn validate_finite(
     identity: &str,
     values: &[f64],
 ) -> Result<(), String> {
+    validate_finite_from(format, identity, values, 0)
+}
+
+/// [`validate_finite`] for `values` that start at sample `first`.
+fn validate_finite_from(
+    format: ResultImportFormat,
+    identity: &str,
+    values: &[f64],
+    first: usize,
+) -> Result<(), String> {
     if let Some((index, value)) = values
         .iter()
         .enumerate()
         .find(|(_, value)| !value.is_finite())
     {
+        let index = first + index;
         return Err(adapter_error(
             format,
             format_args!("'{identity}' contains non-finite value {value} at sample {index}"),
@@ -245,7 +256,18 @@ fn validate_signal_values(
     identity: &str,
     values: &[f64],
 ) -> Result<(), String> {
+    validate_signal_values_from(format, identity, values, 0)
+}
+
+/// [`validate_signal_values`] for `values` that start at sample `first`.
+fn validate_signal_values_from(
+    format: ResultImportFormat,
+    identity: &str,
+    values: &[f64],
+    first: usize,
+) -> Result<(), String> {
     if let Some(index) = values.iter().position(|value| value.is_infinite()) {
+        let index = first + index;
         return Err(adapter_error(
             format,
             format_args!("'{identity}' contains an infinite value at sample {index}"),
@@ -259,44 +281,298 @@ fn validate_coordinate(
     analysis_type: AnalysisType,
     coordinate: &[f64],
 ) -> Result<(), String> {
-    let mut direction = None;
-    for (index, pair) in coordinate.windows(2).enumerate() {
-        let step = pair[1].total_cmp(&pair[0]);
+    let mut check = CoordinateCheck::default();
+    for value in coordinate {
+        check.step(format, *value)?;
+    }
+    if analysis_type == AnalysisType::Ac && coordinate.iter().any(|value| *value <= 0.0) {
+        return Err(frequency_above_zero(format));
+    }
+    Ok(())
+}
+
+/// Why an AC coordinate with a sample at or below zero is refused.
+fn frequency_above_zero(format: ResultImportFormat) -> String {
+    adapter_error(
+        format,
+        "frequency coordinates must all be greater than zero",
+    )
+}
+
+/// A coordinate's samples checked one at a time: none repeats, and all run one way.
+#[derive(Debug, Default)]
+struct CoordinateCheck {
+    previous: Option<f64>,
+    direction: Option<std::cmp::Ordering>,
+    index: usize,
+}
+
+impl CoordinateCheck {
+    fn step(&mut self, format: ResultImportFormat, value: f64) -> Result<(), String> {
+        let index = self.index;
+        self.index += 1;
+        let Some(previous) = self.previous.replace(value) else {
+            return Ok(());
+        };
+        let step = value.total_cmp(&previous);
         // Signed zeros have different total ordering but the same coordinate.
-        if pair[1] == pair[0] {
+        if value == previous {
             return Err(adapter_error(
                 format,
                 format_args!(
-                    "coordinate repeats {} at samples {} and {}",
-                    pair[0],
-                    index,
-                    index + 1
+                    "coordinate repeats {previous} at samples {} and {index}",
+                    index - 1
                 ),
             ));
         }
-        if let Some(expected) = direction {
-            if step != expected {
-                return Err(adapter_error(
-                    format,
-                    format_args!("coordinate reverses direction at sample {}", index + 1),
-                ));
+        match self.direction {
+            Some(expected) if step != expected => Err(adapter_error(
+                format,
+                format_args!("coordinate reverses direction at sample {index}"),
+            )),
+            Some(_) => Ok(()),
+            None => {
+                self.direction = Some(step);
+                Ok(())
             }
-        } else {
-            direction = Some(step);
         }
     }
-    if analysis_type == AnalysisType::Ac && coordinate.iter().any(|value| *value <= 0.0) {
-        return Err(adapter_error(
+}
+
+/// The checks [`assemble_imported_waveforms`] makes, made on a source's rows as they arrive, a
+/// block at a time: a source kept in a results store as it is read is never held whole. The
+/// rules and their words are the assembler's.
+#[derive(Debug)]
+pub struct ImportedRowsCheck {
+    format: ResultImportFormat,
+    analysis_type: AnalysisType,
+    limits: WaveformImportLimits,
+    coordinate_name: String,
+    signals: Vec<String>,
+    coordinate: CoordinateCheck,
+    rows: usize,
+}
+
+impl ImportedRowsCheck {
+    /// Check the source's names and width before a row arrives. `signals` names each signal in
+    /// source order.
+    pub fn new(
+        format: ResultImportFormat,
+        analysis_type: AnalysisType,
+        coordinate_name: impl Into<String>,
+        signals: &[&str],
+        limits: WaveformImportLimits,
+    ) -> Result<Self, String> {
+        let coordinate_name = coordinate_name.into();
+        validate_name(
             format,
-            "frequency coordinates must all be greater than zero",
-        ));
+            "coordinate",
+            &coordinate_name,
+            limits.max_signal_name_bytes,
+        )?;
+        if signals.is_empty() {
+            return Err(adapter_error(
+                format,
+                "the source contains no importable signals",
+            ));
+        }
+        if signals.len() + 1 > limits.max_columns {
+            return Err(adapter_error(
+                format,
+                format_args!(
+                    "the source contains {} columns; the limit is {}",
+                    signals.len() + 1,
+                    limits.max_columns
+                ),
+            ));
+        }
+        let mut names = HashSet::with_capacity(signals.len());
+        for name in signals {
+            validate_name(format, "signal", name, limits.max_signal_name_bytes)?;
+            if !names.insert(name.to_ascii_lowercase()) {
+                return Err(adapter_error(
+                    format,
+                    format_args!("duplicate signal identity '{name}'"),
+                ));
+            }
+        }
+        Ok(Self {
+            format,
+            analysis_type,
+            limits,
+            coordinate_name,
+            signals: signals.iter().map(|name| (*name).to_owned()).collect(),
+            coordinate: CoordinateCheck::default(),
+            rows: 0,
+        })
     }
-    Ok(())
+
+    /// Check the next rows: their coordinate, and each signal's real parts and, for a complex
+    /// source, imaginary parts, in source order. Every slice holds the same number of rows.
+    pub fn rows(
+        &mut self,
+        coordinate: &[f64],
+        real: &[Vec<f64>],
+        imag: &[Vec<f64>],
+    ) -> Result<(), String> {
+        let format = self.format;
+        let first = self.rows;
+        validate_finite_from(format, &self.coordinate_name, coordinate, first)?;
+        for value in coordinate {
+            self.coordinate.step(format, *value)?;
+        }
+        if self.analysis_type == AnalysisType::Ac && coordinate.iter().any(|value| *value <= 0.0) {
+            return Err(frequency_above_zero(format));
+        }
+        for (index, name) in self.signals.iter().enumerate() {
+            let real = &real[index];
+            validate_signal_values_from(format, name, real, first)?;
+            if let Some(imag) = imag.get(index) {
+                validate_signal_values_from(
+                    format,
+                    &format!("{name} imaginary component"),
+                    imag,
+                    first,
+                )?;
+                if real
+                    .iter()
+                    .zip(imag)
+                    .any(|(real, imag)| real.is_nan() != imag.is_nan())
+                {
+                    return Err(adapter_error(
+                        format,
+                        format_args!(
+                            "signal '{name}' complex components have inconsistent sample \
+                             availability"
+                        ),
+                    ));
+                }
+            }
+        }
+        self.rows += coordinate.len();
+        let retained = imag.len().saturating_mul(2).saturating_add(real.len() + 1);
+        let values = self.rows.saturating_mul(retained);
+        if values > self.limits.max_values {
+            return Err(adapter_error(
+                format,
+                format_args!(
+                    "the source expands to {values} numeric values; the limit is {}",
+                    self.limits.max_values
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The rows the source held, once every one has arrived and been checked.
+    pub fn finish(self) -> Result<usize, String> {
+        let format = self.format;
+        let coordinate_name = &self.coordinate_name;
+        if self.rows < self.limits.min_rows {
+            return Err(adapter_error(
+                format,
+                format_args!(
+                    "the '{coordinate_name}' coordinate carries no samples, so the source holds \
+                     no result to import"
+                ),
+            ));
+        }
+        if self.rows > self.limits.max_rows {
+            return Err(adapter_error(
+                format,
+                format_args!(
+                    "the coordinate contains {} samples; the limit is {}",
+                    self.rows, self.limits.max_rows
+                ),
+            ));
+        }
+        Ok(self.rows)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A source checked a block at a time is refused for what the assembler refuses it for, in
+    /// the same words, with each sample numbered from the source's first row.
+    #[test]
+    fn rows_checked_in_blocks_are_refused_as_the_assembler_refuses_them() {
+        let limits = WaveformImportLimits {
+            min_rows: 1,
+            max_rows: 100,
+            max_columns: 10,
+            max_values: 1_000,
+            max_signal_name_bytes: 64,
+        };
+        let format = ResultImportFormat::SpiceRaw;
+        let assembled = |coordinate: Vec<f64>, real: Vec<f64>| {
+            assemble_imported_waveforms(
+                format,
+                AnalysisType::Ac,
+                "frequency",
+                coordinate,
+                vec![ImportedSignal {
+                    name: "V(out)".to_owned(),
+                    real,
+                    imag: None,
+                    unit: None,
+                }],
+                limits,
+            )
+            .map(|_| ())
+        };
+        let streamed = |coordinate: Vec<f64>, real: Vec<f64>| {
+            let mut check =
+                ImportedRowsCheck::new(format, AnalysisType::Ac, "frequency", &["V(out)"], limits)?;
+            for first in (0..coordinate.len()).step_by(2) {
+                let last = (first + 2).min(coordinate.len());
+                check.rows(&coordinate[first..last], &[real[first..last].to_vec()], &[])?;
+            }
+            check.finish().map(|_| ())
+        };
+        for (coordinate, real) in [
+            (vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![0.0; 5]),
+            (vec![1.0, 2.0, 3.0, 3.0, 5.0], vec![0.0; 5]),
+            (vec![1.0, 2.0, 3.0, 2.5, 1.0], vec![0.0; 5]),
+            (vec![1.0, 2.0, 3.0, f64::NAN, 5.0], vec![0.0; 5]),
+            (
+                vec![1.0, 2.0, 3.0, 4.0, 5.0],
+                vec![0.0, 0.0, 0.0, f64::INFINITY, 0.0],
+            ),
+            (vec![-1.0, 2.0, 3.0], vec![0.0; 3]),
+            (Vec::new(), Vec::new()),
+        ] {
+            assert_eq!(
+                streamed(coordinate.clone(), real.clone()),
+                assembled(coordinate.clone(), real.clone()),
+                "{coordinate:?}"
+            );
+        }
+        assert_eq!(
+            ImportedRowsCheck::new(format, AnalysisType::Ac, "frequency", &["a", "A"], limits)
+                .unwrap_err(),
+            assembled_names_error(limits)
+        );
+    }
+
+    fn assembled_names_error(limits: WaveformImportLimits) -> String {
+        let signal = |name: &str| ImportedSignal {
+            name: name.to_owned(),
+            real: vec![0.0],
+            imag: None,
+            unit: None,
+        };
+        assemble_imported_waveforms(
+            ResultImportFormat::SpiceRaw,
+            AnalysisType::Ac,
+            "frequency",
+            vec![1.0],
+            vec![signal("a"), signal("A")],
+            limits,
+        )
+        .unwrap_err()
+    }
 
     #[test]
     fn signed_zero_is_one_coordinate_but_keeps_its_sample_bits() {
