@@ -275,7 +275,8 @@ fn evaluate_expression(
     Ok((frequencies, real, imag))
 }
 
-/// The two-port of the selected analysis, resolved once per owner.
+/// The two-port of the selected analysis, resolved once per owner. A stored sweep the reader
+/// service is still reading has none yet and is asked again on a later frame.
 fn two_port(state: &mut ResultsParts<'_>, owner: u64) -> Option<Arc<TwoPortSweep>> {
     let sheet = &mut state.results.session.smith;
     if let Some((cached_owner, sweep)) = &sheet.two_port_cache
@@ -283,12 +284,15 @@ fn two_port(state: &mut ResultsParts<'_>, owner: u64) -> Option<Arc<TwoPortSweep
     {
         return sweep.clone();
     }
-    let sweep = state
-        .model
-        .simulation
-        .active_analysis()
-        .and_then(|analysis| TwoPortSweep::resolve(&**analysis))
-        .map(Arc::new);
+    let resolved = match state.model.simulation.active_analysis() {
+        Some(analysis) => TwoPortSweep::resolve(&**analysis),
+        None => rspice_results::waveform::Fetched::Ready(None),
+    };
+    let sweep = match resolved {
+        rspice_results::waveform::Fetched::Ready(sweep) => sweep.map(Arc::new),
+        rspice_results::waveform::Fetched::Pending => return None,
+        rspice_results::waveform::Fetched::Refused(_) => None,
+    };
     state.results.session.smith.two_port_cache = Some((owner, sweep.clone()));
     sweep
 }

@@ -397,9 +397,61 @@ fn sweep_analysis(with_noise: bool) -> AnalysisResult {
     )
 }
 
+/// The two-port of a sweep held in memory, which is read as it is asked.
+fn resolved(analysis: &AnalysisResult) -> Option<TwoPortSweep> {
+    match TwoPortSweep::resolve(analysis) {
+        Fetched::Ready(sweep) => sweep,
+        Fetched::Pending => panic!("a sweep in memory is never pending"),
+        Fetched::Refused(reason) => panic!("a sweep in memory is never refused: {reason}"),
+    }
+}
+
+/// A stored sweep is asked of the reader service, never read by the asker: pending while the
+/// service reads it, and then the two-port the same sweep in memory gives, noise included.
+#[cfg(feature = "test-support")]
+#[test]
+fn a_stored_two_port_sweep_resolves_once_the_reader_service_has_read_it() {
+    use crate::waveform::WaveformValues;
+    use crate::waveform::gated_reads::{Gate, stored};
+    use std::sync::atomic::Ordering;
+    static GATE: Gate = Gate::closed();
+    let memory = sweep_analysis(true);
+    let mut kept = memory.clone();
+    let mut columns = Vec::new();
+    let mut keep = |values: &mut WaveformValues| {
+        let (column, held) = stored(&values.samples(..).collect::<Vec<_>>());
+        columns.push(column);
+        *values = held;
+    };
+    for wave in &mut kept.waveforms {
+        keep(&mut wave.x);
+        keep(&mut wave.y);
+        if let Some(complex) = &mut wave.complex {
+            keep(&mut complex.real);
+            keep(&mut complex.imag);
+        }
+    }
+    crate::waveform::never_wait_for_reads_here();
+    crate::waveform::read_through(&GATE, || {
+        assert!(
+            matches!(TwoPortSweep::resolve(&kept), Fetched::Pending),
+            "nothing resolves while the sweep is read"
+        );
+        assert!(
+            columns
+                .iter()
+                .all(|column| column.rows_read.load(Ordering::SeqCst) == 0),
+            "the asker reads nothing of the store"
+        );
+        GATE.open();
+        let sweep = resolved(&kept).expect("a two-port once the sweep is read");
+        assert_eq!(Some(sweep), resolved(&memory));
+    });
+}
+
 #[test]
 fn a_retained_two_port_sweep_resolves_with_its_noise_parameters() {
-    let sweep = TwoPortSweep::resolve(&sweep_analysis(true)).expect("two-port sweep");
+    let sweep = resolved(&sweep_analysis(true)).expect("two-port sweep");
     assert_eq!(sweep.frequencies, vec![1.0e8, 1.4e9]);
     assert_eq!(sweep.reference_impedances_ohm, [50.0, 75.0]);
     let expected = [arar_100_mhz(), arar_1400_mhz()];
@@ -419,7 +471,7 @@ fn a_retained_two_port_sweep_resolves_with_its_noise_parameters() {
     assert_eq!(noise[1].reference_impedance_ohm, 50.0);
     assert_eq!(sweep.nearest_index(1.0e9), Some(1));
 
-    let quiet = TwoPortSweep::resolve(&sweep_analysis(false)).expect("two-port sweep");
+    let quiet = resolved(&sweep_analysis(false)).expect("two-port sweep");
     assert!(quiet.noise.is_none(), "no noise parameters are invented");
 
     let mut one_port = sweep_analysis(false);
@@ -427,12 +479,12 @@ fn a_retained_two_port_sweep_resolves_with_its_noise_parameters() {
         reference_impedances_ohm: vec![50.0],
         noise_reference_temperature_kelvin: None,
     });
-    assert!(TwoPortSweep::resolve(&one_port).is_none());
+    assert!(resolved(&one_port).is_none());
 
     let mut partial = sweep_analysis(false);
     partial.waveforms.remove(1);
     assert!(
-        TwoPortSweep::resolve(&partial).is_none(),
+        resolved(&partial).is_none(),
         "a matrix without S12 cannot place a circle"
     );
 }
@@ -523,7 +575,7 @@ fn a_simulated_transistor_stage_gets_the_engines_circles() {
                 .collect(),
         }),
     );
-    let sweep = TwoPortSweep::resolve(&analysis).expect("the run resolves as a two-port");
+    let sweep = resolved(&analysis).expect("the run resolves as a two-port");
     assert_eq!(sweep.reference_impedances_ohm, [50.0, 50.0]);
     let sweep_noise = sweep.noise.as_ref().expect("noise parameters are attached");
 

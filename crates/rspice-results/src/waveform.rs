@@ -9,14 +9,16 @@ pub use retained::{
     samples_equal,
 };
 
+#[cfg(all(test, feature = "test-support"))]
+pub(crate) mod gated_reads;
 mod reads;
 mod trace;
 mod values;
 #[cfg(feature = "test-support")]
 pub use reads::read_through;
 pub use reads::{
-    Fetched, HeldColumn, Read, ReadService, ReadValue, SampleSlice, ViewTile, install_read_service,
-    perform, read_service,
+    BEING_READ, Fetched, HeldColumn, Read, ReadService, ReadValue, SampleSlice, ViewTile,
+    install_read_service, never_wait_for_reads_here, perform, read_service,
 };
 pub use trace::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 #[cfg(feature = "engine-evidence")]

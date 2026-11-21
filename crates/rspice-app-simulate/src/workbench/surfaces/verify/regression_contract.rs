@@ -8,6 +8,7 @@
 //! is never quietly scored as a pass.
 
 use super::*;
+use rspice_results::waveform::{BEING_READ, HeldColumn};
 
 pub(super) fn active_regression_specification_policy(
     model: &Model,
@@ -58,6 +59,45 @@ pub(super) fn orphaned_regression_targets(
         .collect()
 }
 
+/// A waveform's columns as the reader service holds them: its axis and values, and its complex
+/// parts when it has them.
+pub(super) struct HeldWaveform {
+    pub(super) x: HeldColumn,
+    pub(super) y: HeldColumn,
+    complex: Option<(HeldColumn, HeldColumn)>,
+}
+
+/// Every column of `waveform`, asked of the reader service whole: a stored waveform is read off
+/// the frame, and on the thread that draws the window says [`BEING_READ`] until it has arrived,
+/// in place of a verdict, until the comparison is built again with it.
+pub(super) fn held_waveform(
+    waveform: &crate::state::RetainedTrace,
+) -> Result<HeldWaveform, String> {
+    fn held(values: &rspice_results::waveform::WaveformValues) -> Result<HeldColumn, String> {
+        values.fetch_whole_or_wait().into_result()
+    }
+    Ok(HeldWaveform {
+        x: held(&waveform.x)?,
+        y: held(&waveform.y)?,
+        complex: match &waveform.complex {
+            Some(complex) => Some((held(&complex.real)?, held(&complex.imag)?)),
+            None => None,
+        },
+    })
+}
+
+/// Whether any column of either run's waveforms is still being read for the comparison.
+pub(super) fn regression_reads_pending(
+    baseline: &crate::state::SimulationRun,
+    current: &crate::state::SimulationRun,
+) -> bool {
+    [baseline, current]
+        .into_iter()
+        .flat_map(|run| run.analyses.iter())
+        .flat_map(|analysis| analysis.waveforms.iter())
+        .any(|waveform| held_waveform(waveform).is_err_and(|why| why == BEING_READ))
+}
+
 pub(super) fn validate_regression_waveform_data(
     waveform: &crate::state::RetainedTrace,
 ) -> Result<(), String> {
@@ -71,17 +111,24 @@ pub(super) fn validate_regression_waveform_data(
     if waveform.x.is_empty() {
         return Err("waveform contains no samples".to_owned());
     }
+    validate_held_waveform(&held_waveform(waveform)?)
+}
+
+/// The sample checks of [`validate_regression_waveform_data`], over the columns as held.
+fn validate_held_waveform(waveform: &HeldWaveform) -> Result<(), String> {
     if !strictly_increasing_finite_values(&waveform.x) {
         return Err("waveform axis is not finite and strictly increasing".to_owned());
     }
-    if waveform.y.samples(..).any(|value| !value.is_finite()) {
+    if waveform.y.iter().any(|value| !value.is_finite()) {
         return Err("waveform contains a non-finite value".to_owned());
     }
-    if let Some(complex) = &waveform.complex
-        && (complex.real.len() != waveform.x.len()
-            || complex.imag.len() != waveform.x.len()
-            || complex.real.samples(..).any(|value| !value.is_finite())
-            || complex.imag.samples(..).any(|value| !value.is_finite()))
+    if let Some((real, imag)) = &waveform.complex
+        && (real.len() != waveform.x.len()
+            || imag.len() != waveform.x.len()
+            || real
+                .iter()
+                .chain(imag.iter())
+                .any(|value| !value.is_finite()))
     {
         return Err("complex waveform components are incomplete or non-finite".to_owned());
     }
@@ -1618,14 +1665,11 @@ pub(super) fn evaluate_regression_check(
     }
 }
 
-/// Whether a series is finite and strictly increasing, read a block at a time.
-fn strictly_increasing_finite_values(values: &rspice_results::waveform::WaveformValues) -> bool {
+/// Whether a series is finite and strictly increasing.
+fn strictly_increasing_finite_values(values: &[f64]) -> bool {
     !values.is_empty()
-        && values.samples(..).all(f64::is_finite)
-        && values
-            .samples(..)
-            .zip(values.samples(1..))
-            .all(|(before, after)| before < after)
+        && values.iter().all(|value| value.is_finite())
+        && values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
 pub(super) fn minimum_interpolated_delta(
@@ -1714,8 +1758,9 @@ pub(super) fn waveform_evaluation_samples(
 }
 
 /// The envelope comparison matches every sample of each waveform against the other's samples
-/// within the skew allowance, on grids of their own, so it reads both whole; a waveform larger
-/// than the whole-read budget is not evaluated, and says why.
+/// within the skew allowance, on grids of their own, so it asks the reader service for both
+/// whole; a waveform still being read, or larger than the loaded-results budget, is not
+/// evaluated, and says why.
 pub(super) fn evaluate_regression_waveform(
     pair: &RegressionWaveformPair<'_>,
     rule: Option<&crate::state::RegressionToleranceRule>,
@@ -1732,24 +1777,19 @@ pub(super) fn evaluate_regression_waveform(
     if let Err(error) = validate_regression_waveform_data(pair.current) {
         return RegressionVerdict::NotEvaluated(format!("candidate {error}"));
     }
-    /// A waveform's two columns, each borrowed or read.
-    type Columns<'a> = (std::borrow::Cow<'a, [f64]>, std::borrow::Cow<'a, [f64]>);
-    fn whole(waveform: &crate::state::RetainedTrace) -> Result<Columns<'_>, String> {
-        let x = waveform
-            .x
-            .read_whole()
-            .map_err(|failure| failure.to_string())?;
-        let y = waveform
-            .y
-            .read_whole()
-            .map_err(|failure| failure.to_string())?;
-        Ok((x, y))
-    }
-    let (baseline_x, baseline_y) = match whole(pair.baseline) {
+    let HeldWaveform {
+        x: baseline_x,
+        y: baseline_y,
+        ..
+    } = match held_waveform(pair.baseline) {
         Ok(columns) => columns,
         Err(failure) => return RegressionVerdict::NotEvaluated(format!("baseline {failure}")),
     };
-    let (current_x, current_y) = match whole(pair.current) {
+    let HeldWaveform {
+        x: current_x,
+        y: current_y,
+        ..
+    } = match held_waveform(pair.current) {
         Ok(columns) => columns,
         Err(failure) => return RegressionVerdict::NotEvaluated(format!("candidate {failure}")),
     };

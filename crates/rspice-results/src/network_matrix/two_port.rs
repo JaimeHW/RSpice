@@ -18,7 +18,7 @@ use num_complex::Complex64;
 
 use crate::analysis_result::AnalysisResult;
 use crate::analysis_type::AnalysisType;
-use crate::waveform::RetainedWaveform;
+use crate::waveform::{Fetched, HeldColumn, RetainedWaveform, WaveformValues};
 
 /// A circle on the reflection-coefficient plane.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -316,50 +316,73 @@ pub struct TwoPortSweep {
 impl TwoPortSweep {
     /// Resolve the physical two-port of a successful S-parameter analysis.
     ///
-    /// `None` unless the run declared exactly two ports, retained all four
+    /// `Ready(None)` unless the run declared exactly two ports, retained all four
     /// single-ended coefficients on one finite, strictly increasing grid, and
     /// carries no sideband terms. Noise parameters are attached only when
     /// `Rn`, `Fmin` and the complex `Sopt` were retained on that same grid.
-    pub fn resolve<W: AsRef<RetainedWaveform>>(analysis: &AnalysisResult<W>) -> Option<Self> {
-        if analysis.analysis_type != AnalysisType::SParameter {
-            return None;
+    ///
+    /// The network is solved at every frequency of the sweep at once, so a stored sweep is asked
+    /// of the reader service whole: on the thread that draws the window `Pending` while it is
+    /// read; `Refused` when it cannot be (a sweep larger than the loaded-results budget).
+    pub fn resolve<W: AsRef<RetainedWaveform>>(
+        analysis: &AnalysisResult<W>,
+    ) -> Fetched<Option<Self>> {
+        match Self::read(analysis) {
+            Ok(sweep) => Fetched::Ready(sweep),
+            Err(Unread::Pending) => Fetched::Pending,
+            Err(Unread::Refused(reason)) => Fetched::Refused(reason),
         }
-        let layout = super::resolve(analysis)?;
-        let &[port1, port2] = layout.references() else {
-            return None;
+    }
+
+    fn read<W: AsRef<RetainedWaveform>>(
+        analysis: &AnalysisResult<W>,
+    ) -> Result<Option<Self>, Unread> {
+        if analysis.analysis_type != AnalysisType::SParameter {
+            return Ok(None);
+        }
+        let Some(layout) = super::resolve(analysis) else {
+            return Ok(None);
         };
-        let block = layout
+        let &[port1, port2] = layout.references() else {
+            return Ok(None);
+        };
+        let Some(block) = layout
             .blocks()
             .iter()
-            .find(|block| !block.is_mixed() && block.key.sidebands.is_none())?;
-        let cells = block
+            .find(|block| !block.is_mixed() && block.key.sidebands.is_none())
+        else {
+            return Ok(None);
+        };
+        let Some(cells) = block
             .cells()
             .iter()
             .map(|index| analysis.waveforms.get(*index).map(AsRef::as_ref))
-            .collect::<Option<Vec<_>>>()?;
-        // The network is solved at every frequency of the sweep at once, so a stored sweep is
-        // read whole; one larger than the loaded-results budget has no two-port view.
-        let grid = cells.first()?.x.read_whole().ok()?;
-        let grid = &grid[..];
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        let Some(axis) = cells.first().map(|cell| &cell.x) else {
+            return Ok(None);
+        };
+        let grid = held(axis)?;
         if grid.is_empty()
             || grid.iter().any(|frequency| !frequency.is_finite())
             || !grid.windows(2).all(|pair| pair[0] < pair[1])
         {
-            return None;
+            return Ok(None);
         }
         let mut columns = Vec::with_capacity(4);
         for waveform in &cells {
-            let complex = waveform.complex.as_ref()?;
-            if waveform.x != *grid
-                || complex.real.len() != grid.len()
+            let Some(complex) = waveform.complex.as_ref() else {
+                return Ok(None);
+            };
+            if complex.real.len() != grid.len()
                 || complex.imag.len() != grid.len()
+                || !on_grid(&waveform.x, axis, &grid)?
             {
-                return None;
+                return Ok(None);
             }
-            columns.push((
-                complex.real.read_whole().ok()?,
-                complex.imag.read_whole().ok()?,
-            ));
+            columns.push((held(&complex.real)?, held(&complex.imag)?));
         }
         let scattering = (0..grid.len())
             .map(|index| {
@@ -378,15 +401,15 @@ impl TwoPortSweep {
                 .iter()
                 .any(|value| !value.re.is_finite() || !value.im.is_finite())
         }) {
-            return None;
+            return Ok(None);
         }
-        let noise = retained_noise(analysis, grid, port1);
-        Some(Self {
+        let noise = retained_noise(analysis, axis, &grid, port1)?;
+        Ok(Some(Self {
             frequencies: grid.to_vec(),
             scattering,
             reference_impedances_ohm: [port1, port2],
             noise,
-        })
+        }))
     }
 
     /// The retained sample nearest `frequency`.
@@ -399,35 +422,68 @@ impl TwoPortSweep {
     }
 }
 
+/// Why a column the two-port needs is not to hand yet.
+enum Unread {
+    /// The reader service is reading it.
+    Pending,
+    /// It cannot be read.
+    Refused(String),
+}
+
+/// Every sample of `values`, as the reader service holds them.
+fn held(values: &WaveformValues) -> Result<HeldColumn, Unread> {
+    match values.fetch_whole_or_wait() {
+        Fetched::Ready(samples) => Ok(samples),
+        Fetched::Pending => Err(Unread::Pending),
+        Fetched::Refused(reason) => Err(Unread::Refused(reason)),
+    }
+}
+
+/// Whether `x` is the scattering grid, `axis` held as `grid`: the same column without a read,
+/// else the same samples.
+fn on_grid(x: &WaveformValues, axis: &WaveformValues, grid: &[f64]) -> Result<bool, Unread> {
+    if WaveformValues::ptr_eq(x, axis) {
+        return Ok(true);
+    }
+    if x.len() != grid.len() {
+        return Ok(false);
+    }
+    Ok(held(x)?[..] == *grid)
+}
+
 /// `Rn`, `Fmin` and `Sopt` as the S-parameter runner retains them, on the
 /// scattering grid.
 fn retained_noise<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,
+    axis: &WaveformValues,
     grid: &[f64],
     reference_impedance_ohm: f64,
-) -> Option<Vec<TwoPortNoiseParameters>> {
-    let named = |name: &str| {
-        analysis
-            .waveforms
-            .iter()
-            .map(AsRef::as_ref)
-            .find(|waveform| waveform.name == name && waveform.x == *grid)
+) -> Result<Option<Vec<TwoPortNoiseParameters>>, Unread> {
+    let named = |name: &str| -> Result<Option<&RetainedWaveform>, Unread> {
+        for waveform in analysis.waveforms.iter().map(AsRef::as_ref) {
+            if waveform.name == name && on_grid(&waveform.x, axis, grid)? {
+                return Ok(Some(waveform));
+            }
+        }
+        Ok(None)
     };
-    let resistance = named("Rn")?;
-    let minimum = named("Fmin")?;
-    let optimum = named("Sopt")?.complex.as_ref()?;
+    let (Some(resistance), Some(minimum), Some(optimum)) =
+        (named("Rn")?, named("Fmin")?, named("Sopt")?)
+    else {
+        return Ok(None);
+    };
+    let Some(optimum) = optimum.complex.as_ref() else {
+        return Ok(None);
+    };
     if resistance.y.len() != grid.len()
         || minimum.y.len() != grid.len()
         || optimum.real.len() != grid.len()
         || optimum.imag.len() != grid.len()
     {
-        return None;
+        return Ok(None);
     }
-    fn whole(values: &crate::waveform::WaveformValues) -> Option<std::borrow::Cow<'_, [f64]>> {
-        values.read_whole().ok()
-    }
-    let (resistance, minimum) = (whole(&resistance.y)?, whole(&minimum.y)?);
-    let (optimum_real, optimum_imag) = (whole(&optimum.real)?, whole(&optimum.imag)?);
+    let (resistance, minimum) = (held(&resistance.y)?, held(&minimum.y)?);
+    let (optimum_real, optimum_imag) = (held(&optimum.real)?, held(&optimum.imag)?);
     let parameters = (0..grid.len())
         .map(|index| TwoPortNoiseParameters {
             minimum_noise_factor: minimum[index],
@@ -436,7 +492,7 @@ fn retained_noise<W: AsRef<RetainedWaveform>>(
             reference_impedance_ohm,
         })
         .collect::<Vec<_>>();
-    parameters
+    Ok(parameters
         .iter()
         .all(|point| {
             point.minimum_noise_factor.is_finite()
@@ -445,7 +501,7 @@ fn retained_noise<W: AsRef<RetainedWaveform>>(
                 && point.noise_resistance_ohm >= 0.0
                 && point.optimum_source_reflection.norm() < 1.0
         })
-        .then_some(parameters)
+        .then_some(parameters))
 }
 
 #[cfg(test)]

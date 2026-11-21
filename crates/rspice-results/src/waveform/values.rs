@@ -214,7 +214,7 @@ pub const CHECKING_READ: &str = "its results store is still being checked";
 /// Whether a read failed only because its rows are on their way ([`PENDING_READ`]) or their store
 /// is still being checked ([`CHECKING_READ`]).
 pub fn is_pending_read(cause: &str) -> bool {
-    cause == PENDING_READ || cause == CHECKING_READ
+    cause == PENDING_READ || cause == CHECKING_READ || cause == super::reads::BEING_READ
 }
 
 /// Failures of reads that had no caller to return them to, waiting for diagnostics to collect.

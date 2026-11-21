@@ -376,6 +376,10 @@ impl rspice_results::waveform::ReadService for RunReader {
     fn held(&self, run: u64, values: &WaveformValues, read: Read) -> Option<ReadValue> {
         self.get(&ReadKey::of(run, values, read)?)
     }
+
+    fn settle(&self) {
+        RunReader::settle(self);
+    }
 }
 
 /// The worker: read each queued job and keep what it gave, until the service is gone.

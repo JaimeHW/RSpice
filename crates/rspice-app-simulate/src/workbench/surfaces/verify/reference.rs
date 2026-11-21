@@ -53,6 +53,9 @@ pub struct ReferenceComparison {
     keys: Vec<RowKey>,
     /// How many times the comparison has been built.
     builds: u64,
+    /// Whether the reader service was still reading a waveform the comparison needs when it was
+    /// built: it is built again, on a later frame, until none is.
+    reading: bool,
 }
 
 /// The runs a reference commit accepts against the run read now.
@@ -202,10 +205,11 @@ impl ReferenceComparison {
             current,
         };
         let rules = plan_rules(model);
-        if self
-            .basis
-            .as_ref()
-            .is_some_and(|basis| basis.pairing == pairing && basis.rules == rules)
+        if !self.reading
+            && self
+                .basis
+                .as_ref()
+                .is_some_and(|basis| basis.pairing == pairing && basis.rules == rules)
         {
             return;
         }
@@ -256,6 +260,7 @@ impl ReferenceComparison {
         self.rows.clear();
         self.keys.clear();
         self.compared = None;
+        self.reading = false;
         let (Some((reference, current)), Some(plan)) = (
             regression_run_pair(model, simulate),
             model.sim_setup.analysis_plan.as_ref(),
@@ -263,6 +268,7 @@ impl ReferenceComparison {
             return;
         };
         let comparison = compare_regression_runs(reference, current, rules, policy);
+        self.reading = regression_reads_pending(reference, current);
         let Ok(receipt) = comparison.receipt(plan.id(), plan.revision(), rules, reference, current)
         else {
             return;

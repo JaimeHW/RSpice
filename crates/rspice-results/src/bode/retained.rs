@@ -101,6 +101,11 @@ pub fn ac_bode_shape_for_analysis<W: AsRef<RetainedWaveform>>(
 }
 
 /// Project the retained response and derive its exact frequency-domain metrics.
+///
+/// Margins and bandwidth are searched over the whole sweep at once, so a stored sweep is asked
+/// of the reader service whole ([`crate::waveform::WaveformValues::fetch_whole_or_wait`]): on
+/// the thread that draws the window `None` while it is being read, as a later frame has it; and
+/// `None` for a sweep larger than the loaded-results budget.
 pub fn ac_bode_summary_for_analysis<W: AsRef<RetainedWaveform>>(
     analysis_type: AnalysisType,
     waveforms: &[W],
@@ -120,23 +125,25 @@ pub fn ac_bode_summary_for_analysis<W: AsRef<RetainedWaveform>>(
     } = ac_bode_shape_for_analysis(analysis_type, waveforms, analysis_index, prefer_magnitude)?;
 
     let mag = waveforms.get(mag_index)?.as_ref();
-    // STB retains decibels; every other response retains linear magnitude.
-    let gain_db = if analysis_type == AnalysisType::Stb {
-        mag.y.clone()
-    } else {
-        magnitude_to_db(&mag.y)
-    };
     let frequency = mag.x.clone();
     let phase_deg = phase_index
         .and_then(|index| waveforms.get(index))
         .map(|waveform| waveform.as_ref().y.clone());
-    // Margins and bandwidth are searched over the whole sweep at once, so a stored sweep is read
-    // whole; one larger than the loaded-results budget has no summary.
-    let frequency_samples = frequency.read_whole().ok()?;
-    let gain_samples = gain_db.read_whole().ok()?;
+    let frequency_samples = frequency.fetch_whole_or_wait().ready()?;
+    let magnitude = mag.y.fetch_whole_or_wait().ready()?;
     let phase_samples = match &phase_deg {
-        Some(phase) => Some(phase.read_whole().ok()?),
+        Some(phase) => Some(phase.fetch_whole_or_wait().ready()?),
         None => None,
+    };
+    // STB retains decibels; every other response retains linear magnitude, converted from the
+    // samples the reader holds.
+    let (gain_db, gain_samples) = if analysis_type == AnalysisType::Stb {
+        (mag.y.clone(), magnitude)
+    } else {
+        let decibels: Vec<f64> = magnitude.iter().map(|m| 20.0 * m.log10()).collect();
+        let gain_db = SharedWaveformValues::from(decibels);
+        let held = gain_db.fetch_whole().ready()?;
+        (gain_db, held)
     };
     let metrics = metrics_from_curves(&frequency_samples, &gain_samples, phase_samples.as_deref());
 
@@ -162,10 +169,6 @@ fn select_magnitude_trace<W: AsRef<RetainedWaveform>>(
         .filter(|(_, waveform)| waveform.as_ref().name.starts_with('|'))
         .max_by_key(|(_, waveform)| prefer_magnitude(waveform))
         .map(|(index, waveform)| (index, waveform.as_ref()))
-}
-
-fn magnitude_to_db(magnitude: &SharedWaveformValues) -> SharedWaveformValues {
-    magnitude.samples(..).map(|m| 20.0 * m.log10()).collect()
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ use crate::state::{
     ActiveViewer, AnalysisType, RunEvent, SharedWaveformValues, SpecializedViewerCacheProvenance,
 };
 use rspice_app_services::workbench::results_job::{JobOutcome, JobStop, ResultsJob};
+use rspice_results::waveform::HeldColumn;
 use rspice_results_ui::eye_diagram::{
     EyeData, EyeDataBuilder, EyeTimebase, EyeTimebaseProvenance, crossing_phase_at,
     estimate_unit_interval, fold_anchor,
@@ -566,21 +567,17 @@ pub fn build_eye_from_waveform(
     ((eye_data.trace_count() > 0).then_some(eye_data), provenance)
 }
 
-/// A source's time and value columns, each borrowed or read.
-type SourceColumns<'a> = (std::borrow::Cow<'a, [f64]>, std::borrow::Cow<'a, [f64]>);
+/// A source's time and value columns, as the reader service holds them.
+type SourceColumns = (HeldColumn, HeldColumn);
 
-/// Both columns of an eye's source. An eye folds every sample of the record, so the job reads
-/// them whole, off the frame; a record past the whole-read budget is refused.
-fn whole_source(source: &DerivedWaveformSource) -> Result<SourceColumns<'_>, String> {
-    let time = source
-        .time
-        .read_whole()
-        .map_err(|failure| failure.to_string())?;
-    let values = source
-        .values
-        .read_whole()
-        .map_err(|failure| failure.to_string())?;
-    Ok((time, values))
+/// Both columns of an eye's source. An eye folds every sample of the record, so the job asks the
+/// reader service for them whole and waits, off the frame; a record past the loaded-results
+/// budget is refused.
+fn whole_source(source: &DerivedWaveformSource) -> Result<SourceColumns, String> {
+    Ok((
+        source.time.fetch_whole_waiting()?,
+        source.values.fetch_whole_waiting()?,
+    ))
 }
 
 fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {

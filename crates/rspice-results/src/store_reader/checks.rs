@@ -97,6 +97,8 @@ pub(super) fn deferring() -> bool {
 /// a file not checked yet is left for a check of its own instead of read whole here.
 pub fn never_wait_for_checks_here() {
     NEVER_WAITS.with(|never| never.set(true));
+    // The thread that never waits for a check never waits for the reader service either.
+    crate::waveform::never_wait_for_reads_here();
 }
 
 /// Whether a read here leaves each kept file not checked yet for a check of its own and waits

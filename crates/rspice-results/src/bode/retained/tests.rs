@@ -663,3 +663,53 @@ fn pstb_mode_samples_never_impersonate_a_frequency_response() {
 
     assert_eq!(summary(&analysis, 0), None);
 }
+
+/// A stored sweep is asked of the reader service, never read by the asker: no summary while the
+/// service reads it, and then the one the same sweep in memory gives.
+#[cfg(feature = "test-support")]
+#[test]
+fn a_stored_sweep_is_summarized_once_the_reader_service_has_read_it() {
+    use crate::waveform::gated_reads::{Gate, stored};
+    use std::sync::atomic::Ordering;
+    static GATE: Gate = Gate::closed();
+    let loop_ = PoleLoop {
+        k_db: 80.0,
+        poles: &[10.0, 2.0e4],
+    };
+    let memory = loop_response(&loop_, &decade_sweep(1.0, 1.0e7, 10));
+    let mut columns = Vec::new();
+    let kept = ac_analysis(
+        memory
+            .waveforms
+            .iter()
+            .map(|wave| {
+                let mut wave = wave.clone();
+                for values in [&mut wave.x, &mut wave.y] {
+                    let (column, held) = stored(&values.samples(..).collect::<Vec<_>>());
+                    columns.push(column);
+                    *values = held;
+                }
+                wave
+            })
+            .collect(),
+    );
+    crate::waveform::never_wait_for_reads_here();
+    crate::waveform::read_through(&GATE, || {
+        assert_eq!(
+            summary(&kept, 0),
+            None,
+            "no summary while the sweep is read"
+        );
+        assert!(
+            columns
+                .iter()
+                .all(|column| column.rows_read.load(Ordering::SeqCst) == 0),
+            "the asker reads nothing of the store"
+        );
+        GATE.open();
+        let stored = summary(&kept, 0).expect("a summary once the sweep is read");
+        let memory = summary(&memory, 0).expect("AC summary");
+        assert_eq!(stored.metrics, memory.metrics);
+        assert_eq!(stored.gain_db, memory.gain_db);
+    });
+}

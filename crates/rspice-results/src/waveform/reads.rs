@@ -108,6 +108,10 @@ pub trait ReadService: Send + Sync {
         let _ = (run, values, read);
         None
     }
+
+    /// Wait until every read asked so far has arrived: how work off the frame that needs a read
+    /// waits for it. A service that answers every read as it is asked has nothing to wait for.
+    fn settle(&self) {}
 }
 
 static SERVICE: OnceLock<&'static dyn ReadService> = OnceLock::new();
@@ -239,6 +243,33 @@ impl<T> Fetched<T> {
             Self::Pending | Self::Refused(_) => None,
         }
     }
+
+    /// The read, or why there is none: [`BEING_READ`] while it is being read, or why it cannot
+    /// be read.
+    pub fn into_result(self) -> Result<T, String> {
+        match self {
+            Self::Ready(value) => Ok(value),
+            Self::Pending => Err(BEING_READ.to_owned()),
+            Self::Refused(reason) => Err(reason),
+        }
+    }
+}
+
+/// The cause work that needs a whole series gives, on the thread that draws the window, while
+/// the reader service is still reading the series: a later frame finds it read, so the answer is
+/// not kept. [`super::is_pending_read`] knows it.
+pub const BEING_READ: &str = "its samples are still being read";
+
+thread_local! {
+    /// Whether this thread draws the window, and so never waits for a read.
+    static DRAWS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Make this thread one that never waits for the reader service: the thread that draws the
+/// window. [`WaveformValues::fetch_whole_or_wait`] answers `Pending` here, and waits anywhere
+/// else.
+pub fn never_wait_for_reads_here() {
+    DRAWS.with(|draws| draws.set(true));
 }
 
 /// A tile a view draws: the store's pixels over an x window that holds the view, and whether it
@@ -501,6 +532,45 @@ impl WaveformValues {
             Some(ReadValue::Tile(_) | ReadValue::Point(_)) => {
                 Fetched::Refused("the reader answered a range with another read".to_owned())
             }
+        }
+    }
+
+    /// Every sample of the window, for work off the frame that needs the whole series at once
+    /// (an eye fold): asked of the installed [`ReadService`], as [`Self::fetch_whole`] asks, and
+    /// waited for, so the read is held under the service's one budget and shared with the views
+    /// that draw the same series. A read the service let go of again before it was taken is
+    /// made here, under the same budget. Never call it on the frame.
+    pub fn fetch_whole_waiting(&self) -> Result<HeldColumn, String> {
+        match self.fetch_whole() {
+            Fetched::Ready(samples) => return Ok(samples),
+            Fetched::Refused(reason) => return Err(reason),
+            Fetched::Pending => {}
+        }
+        if let Some(service) = read_service() {
+            service.settle();
+        }
+        match self.fetch_whole() {
+            Fetched::Ready(samples) => Ok(samples),
+            Fetched::Refused(reason) => Err(reason),
+            Fetched::Pending => match self.read_whole() {
+                Ok(samples) => Ok(samples.into_owned().into()),
+                Err(failure) => Err(failure.to_string()),
+            },
+        }
+    }
+
+    /// Every sample of the window, for work that needs the whole series at once and runs both on
+    /// the frame and off it (a Bode summary, a two-port, a validation): on the thread that draws
+    /// the window ([`never_wait_for_reads_here`]) as [`Self::fetch_whole`] asks, `Pending` until
+    /// the reader service has read it; anywhere else waited for, as
+    /// [`Self::fetch_whole_waiting`] waits.
+    pub fn fetch_whole_or_wait(&self) -> Fetched<HeldColumn> {
+        if DRAWS.with(std::cell::Cell::get) {
+            return self.fetch_whole();
+        }
+        match self.fetch_whole_waiting() {
+            Ok(samples) => Fetched::Ready(samples),
+            Err(reason) => Fetched::Refused(reason),
         }
     }
 }
