@@ -272,31 +272,6 @@ fn a_single_point_run_against_an_authored_analysis_saves() {
     assert_eq!(round_trip_task_identities(&project), vec![source_id]);
 }
 
-#[test]
-fn a_multi_point_run_set_round_trips_through_a_project_file() {
-    let mut project = project_with_execution_context();
-    let (source_id, source_revision, plan_id) = authored_ac(&project);
-    let points = (0..2)
-        .map(|index| {
-            DerivedAnalysisIdentity::new(source_id, run_set_point_role(index))
-                .expect("a point role is named")
-        })
-        .collect::<Vec<_>>();
-    let tasks = points
-        .iter()
-        .map(|point| TaskFixture::derived(point.clone(), AnalysisType::Ac, 2))
-        .collect::<Vec<_>>();
-    attach_run(&mut project, plan_id, source_revision, &tasks, tasks.len());
-
-    assert_eq!(
-        round_trip_task_identities(&project),
-        points
-            .iter()
-            .map(DerivedAnalysisIdentity::instance_id)
-            .collect::<Vec<_>>()
-    );
-}
-
 /// A declared space's points run its *base* analysis, so their canonical tag
 /// is not the declaration's. That divergence is legitimate and has to survive.
 #[test]

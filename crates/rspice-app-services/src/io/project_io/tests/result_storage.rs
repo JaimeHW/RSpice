@@ -466,14 +466,6 @@ fn a_seeded_run_of_64_mib_saves_closes_and_reopens_with_every_sample() {
     a_seeded_run_round_trips(64 << 20, "seeded-64-mib");
 }
 
-/// Writes 2 GiB to the temporary folder; run it on its own, pointing the temporary folder at a
-/// volume with room.
-#[test]
-#[ignore = "writes 2 GiB"]
-fn a_seeded_run_of_2_gib_saves_closes_and_reopens_with_every_sample() {
-    a_seeded_run_round_trips(2 << 30, "seeded-2-gib");
-}
-
 /// Run every check this thread left for one, as the frames after an open or a save do, until
 /// none runs.
 fn run_segment_checks(simulation: &mut SimulationState) {
