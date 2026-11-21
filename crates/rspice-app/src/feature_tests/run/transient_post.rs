@@ -43,6 +43,8 @@ fn seed_fft(state: &mut AppState, analysis: SpecializedViewerCacheProvenance) {
             sample_rate: 16.0,
             original_count: 16,
             decimation_factor: 1,
+            dc_level: 0.0,
+            record: rspice_results_ui::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
         })
         .expect("qualified FFT ownership fixture");
     state
@@ -189,6 +191,8 @@ fn design_replacement_rejects_a_late_successful_fft_completion() {
                 sample_rate: 32.0,
                 original_count: 32,
                 decimation_factor: 1,
+                dc_level: 0.0,
+                record: rspice_results_ui::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
             })),
         })
         .expect("completion arrives before the next application poll");
@@ -292,6 +296,8 @@ fn failed_fft_recompute_cannot_leave_the_coordinator_ready() {
             sample_rate: 16.0,
             original_count: 16,
             decimation_factor: 1,
+            dc_level: 0.0,
+            record: rspice_results_ui::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
         })
         .expect("the rectangular window preserves every authored sample");
 
@@ -352,6 +358,8 @@ fn failed_fft_analysis_cannot_leave_the_coordinator_ready() {
             sample_rate: 64.0,
             original_count: 64,
             decimation_factor: 1,
+            dc_level: 0.0,
+            record: rspice_results_ui::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
         })
         .expect("valid FFT analysis fixture");
 

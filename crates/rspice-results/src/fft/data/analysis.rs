@@ -51,6 +51,42 @@ pub struct HarmonicMeasurement {
     pub level_db: f64,
 }
 
+/// How a spectrum's figures are measured, beyond the record itself: the
+/// choices ViVA's spectrum assistant and Eldo's FFT offer beside the window.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpectrumMeasurement {
+    /// The harmonic orders THD and SINAD count, HD2 through this one.
+    pub harmonics: usize,
+    /// The bins either side of a tone claimed for it rather than counted as
+    /// noise; `None` takes the window's main lobe.
+    pub signal_bins: Option<usize>,
+    /// The fundamental the reader named, in hertz; `None` takes the largest
+    /// tone in the record.
+    pub fundamental: Option<f64>,
+    /// The band, in hertz, noise and spurs are measured over and harmonics
+    /// are counted in; `None` is DC to Nyquist.
+    pub band: Option<(f64, f64)>,
+}
+
+impl SpectrumMeasurement {
+    /// The default measurement counting harmonics through `harmonics`.
+    #[must_use]
+    pub const fn with_harmonics(harmonics: usize) -> Self {
+        Self {
+            harmonics,
+            signal_bins: None,
+            fundamental: None,
+            band: None,
+        }
+    }
+}
+
+impl Default for SpectrumMeasurement {
+    fn default() -> Self {
+        Self::with_harmonics(10)
+    }
+}
+
 /// Analysis results from an FFT spectrum.
 #[derive(Debug, Clone)]
 pub struct SpectrumAnalysis {
@@ -70,8 +106,11 @@ pub struct SpectrumAnalysis {
     pub snr_db: Option<f64>,
     /// Signal-to-Noise-and-Distortion Ratio (dB)
     pub sinad_db: Option<f64>,
-    /// Noise floor (dB)
+    /// The mean noise power per bin, in dB of the spectrum's level unit:
+    /// the floor the plotted noise sits at, not its median.
     pub noise_floor_db: Option<f64>,
+    /// The bins either side of each tone the measurement claimed for it.
+    pub signal_bins: usize,
     /// Coverage evidence for the requested harmonic series.
     pub harmonic_coverage: HarmonicCoverage,
     /// Uniquely assigned, order-labelled harmonic measurements.
@@ -90,6 +129,7 @@ impl Default for SpectrumAnalysis {
             snr_db: None,
             sinad_db: None,
             noise_floor_db: None,
+            signal_bins: 0,
             harmonic_coverage: HarmonicCoverage::NoFundamental { requested_order: 1 },
             harmonics: Vec::new(),
         }
@@ -97,32 +137,64 @@ impl Default for SpectrumAnalysis {
 }
 
 impl SpectrumAnalysis {
+    /// The effective number of bits SINAD is worth, `(SINAD − 1.76)/6.02`:
+    /// the resolution of an ideal quantizer whose noise alone reads that
+    /// SINAD on a full-scale sine.
+    #[must_use]
+    pub fn enob_bits(&self) -> Option<f64> {
+        self.sinad_db.map(|sinad| (sinad - 1.76) / 6.02)
+    }
+
     /// Analyze authenticated FFT data without infallible allocation or
-    /// scale-dependent power arithmetic.
+    /// scale-dependent power arithmetic, counting harmonics through
+    /// `num_harmonics` and otherwise measuring by default.
     pub fn analyze(fft: &FftData, num_harmonics: usize) -> Result<Self, SpectrumAnalysisError> {
+        Self::measure(fft, &SpectrumMeasurement::with_harmonics(num_harmonics))
+    }
+
+    /// Analyze `fft` as `measurement` asks.
+    pub fn measure(
+        fft: &FftData,
+        measurement: &SpectrumMeasurement,
+    ) -> Result<Self, SpectrumAnalysisError> {
+        let num_harmonics = measurement.harmonics;
         validate_analysis_input(fft, num_harmonics)?;
+        let guard_bins = measurement
+            .signal_bins
+            .unwrap_or_else(|| fft.window.signal_bins());
         let mut analysis = Self {
             harmonic_coverage: HarmonicCoverage::NoFundamental {
                 requested_order: num_harmonics,
             },
+            signal_bins: guard_bins,
             ..Self::default()
         };
-        let Some(fund_idx) = dominant_physical_non_dc_bin(fft)? else {
+        let bin_width = fft.frequency_resolution();
+        let named_fundamental = measurement
+            .fundamental
+            .filter(|frequency| frequency.is_finite() && *frequency > 0.0);
+        let fund_idx = match named_fundamental {
+            Some(frequency) => largest_bin_near(fft, frequency / bin_width, guard_bins),
+            None => dominant_physical_non_dc_bin(fft)?,
+        };
+        let Some(fund_idx) = fund_idx else {
             return Ok(analysis);
         };
 
-        let Some(fundamental) = Self::measure_bin(fft, fund_idx) else {
+        let Some(fundamental) = Self::measure_bin(fft, fund_idx, guard_bins) else {
             return Ok(analysis);
         };
-        let (fund_bin, fund_freq, fund_mag, fund_db) = fundamental;
+        let (fund_bin, measured_freq, fund_mag, fund_db) = fundamental;
+        // Harmonics stand at multiples of the fundamental the reader named,
+        // or of the one measured.
+        let fund_freq = named_fundamental.unwrap_or(measured_freq);
         let fund_log_rms = physical_log_magnitude(fft, fund_bin, fund_mag)?;
         let fund_binary_rms = physical_binary_magnitude(fft, fund_bin, fund_mag)?;
 
         analysis.fundamental_bin = Some(fund_bin);
-        analysis.fundamental_frequency = Some(fund_freq);
+        analysis.fundamental_frequency = Some(measured_freq);
         analysis.fundamental_db = Some(fund_db);
 
-        let guard_bins = Self::guard_bins(fft.window);
         let mut excluded_for_noise = try_false_mask(
             fft.points.len(),
             SpectrumAnalysisAllocationStage::NoiseExclusionMask,
@@ -140,6 +212,15 @@ impl SpectrumAnalysis {
         let max_observable_order = ((nyquist / fund_freq).floor() as usize)
             .max(1)
             .min(fft.fft_size.max(1));
+        // A band the reader set ends the series where it ends: harmonics
+        // past it are not asked for, so the series inside it is complete.
+        let band = measurement
+            .band
+            .filter(|(low, high)| low.is_finite() && high.is_finite() && high > low);
+        let num_harmonics = match band {
+            Some((_, high)) => num_harmonics.min(((high / fund_freq).floor() as usize).max(1)),
+            None => num_harmonics,
+        };
         let analyzed_through = num_harmonics.min(max_observable_order);
         let mut harmonic_norm = LogSumSquares::default();
         let mut harmonic_binary_norm = BinaryScaledNorm::default();
@@ -154,7 +235,6 @@ impl SpectrumAnalysis {
                 nyquist,
             }
         };
-        let bin_width = fft.frequency_resolution();
         for order in 2..=analyzed_through {
             let target = fund_freq * order as f64;
             let center = (target / bin_width).round() as usize;
@@ -183,7 +263,8 @@ impl SpectrumAnalysis {
                 break;
             }
 
-            let Some((harm_idx, harm_freq, harm_mag, harm_db)) = Self::measure_bin(fft, center)
+            let Some((harm_idx, harm_freq, harm_mag, harm_db)) =
+                Self::measure_bin(fft, center, guard_bins)
             else {
                 continue;
             };
@@ -223,18 +304,33 @@ impl SpectrumAnalysis {
         // each uniquely assigned harmonic region.
         let mut largest_spur_log_rms: Option<f64> = None;
         let mut noise_norm = LogSumSquares::default();
+        let mut band_bins = 0usize;
         let mut noise_db_bins = Vec::new();
         try_reserve_exact(
             &mut noise_db_bins,
             fft.points.len(),
             SpectrumAnalysisAllocationStage::NoiseLevelBins,
         )?;
+        let mut noise_log_bins = Vec::new();
+        try_reserve_exact(
+            &mut noise_log_bins,
+            fft.points.len(),
+            SpectrumAnalysisAllocationStage::NoiseLevelBins,
+        )?;
         for (idx, point) in fft.points.iter().enumerate().skip(1) {
-            let mag = point.magnitude;
-            if mag == 0.0 {
+            if band.is_some_and(|(low, high)| point.frequency < low || point.frequency > high) {
                 continue;
             }
-            let db = point.magnitude_db();
+            band_bins += 1;
+            let mag = point.magnitude;
+            let noise_bin = !excluded_for_noise.get(idx).copied().unwrap_or(false);
+            if mag == 0.0 {
+                if noise_bin {
+                    noise_db_bins.push(f64::NEG_INFINITY);
+                    noise_log_bins.push(f64::NEG_INFINITY);
+                }
+                continue;
+            }
             let log_rms = physical_log_magnitude(fft, idx, mag)?;
 
             if !excluded_for_spur.get(idx).copied().unwrap_or(false) {
@@ -242,11 +338,26 @@ impl SpectrumAnalysis {
                     Some(largest_spur_log_rms.map_or(log_rms, |largest| largest.max(log_rms)));
             }
 
-            if excluded_for_noise.get(idx).copied().unwrap_or(false) {
+            if !noise_bin {
                 continue;
             }
             noise_norm.add_log(log_rms);
-            noise_db_bins.push(db);
+            noise_db_bins.push(point.magnitude_db());
+            noise_log_bins.push(log_rms);
+        }
+        // Noise lies under the tones too. The bins claimed for the carrier
+        // and its harmonics are counted at the noise's typical power: the
+        // median noise bin over ln 2, since a noise bin's power is exponential
+        // and its median sits ln 2 under its mean. The median, not the mean,
+        // so a spur among the noise bins is counted once, not again under
+        // every tone.
+        let claimed = band_bins.saturating_sub(noise_log_bins.len());
+        if claimed > 0 && !noise_log_bins.is_empty() {
+            let middle = noise_log_bins.len() / 2;
+            let (_, median, _) = noise_log_bins.select_nth_unstable_by(middle, f64::total_cmp);
+            if median.is_finite() {
+                noise_norm.add_log(*median + 0.5 * (claimed as f64 / std::f64::consts::LN_2).ln());
+            }
         }
 
         analysis.sfdr_db = Some(match largest_spur_log_rms {
@@ -254,16 +365,7 @@ impl SpectrumAnalysis {
             None => f64::INFINITY,
         });
 
-        if !noise_db_bins.is_empty() {
-            noise_db_bins.sort_unstable_by(|a, b| a.total_cmp(b));
-            let mid = noise_db_bins.len() / 2;
-            let noise_floor = if noise_db_bins.len() % 2 == 0 {
-                0.5 * (noise_db_bins[mid - 1] + noise_db_bins[mid])
-            } else {
-                noise_db_bins[mid]
-            };
-            analysis.noise_floor_db = Some(noise_floor);
-        }
+        analysis.noise_floor_db = mean_power_db(&noise_db_bins);
 
         // The window spreads each noise bin's power over its equivalent noise
         // bandwidth, so summing the bins counts broadband noise ENBW times
@@ -274,12 +376,15 @@ impl SpectrumAnalysis {
         let noise_log_rms = noise_norm
             .log_norm()
             .map(|log_norm| log_norm - 0.5 * fft.equivalent_noise_bandwidth_bins().ln());
-        analysis.snr_db = Some(match noise_log_rms {
-            Some(noise) => db_from_log_amplitude_ratio(fund_log_rms - noise)?,
-            None => f64::INFINITY,
-        });
-
+        // A harmonic the record cannot resolve from the carrier is summed
+        // into the noise, so the noise figure is then noise and distortion:
+        // SNR is withheld with THD and SINAD rather than print SINAD under
+        // its name.
         if matches!(coverage, HarmonicCoverage::Complete { .. }) {
+            analysis.snr_db = Some(match noise_log_rms {
+                Some(noise) => db_from_log_amplitude_ratio(fund_log_rms - noise)?,
+                None => f64::INFINITY,
+            });
             analysis.sinad_db = Some(match log_hypot(noise_log_rms, harmonic_norm.log_norm()) {
                 Some(noise_and_distortion) => {
                     db_from_log_amplitude_ratio(fund_log_rms - noise_and_distortion)?
@@ -326,21 +431,41 @@ impl SpectrumAnalysis {
         Some((idx, freq, mag, db))
     }
 
-    fn measure_bin(fft: &FftData, idx: usize) -> Option<(usize, f64, f64, f64)> {
-        Self::interpolate_peak(fft, idx).or_else(|| {
-            let point = fft.points.get(idx)?;
-            (point.magnitude > 0.0)
-                .then(|| (idx, point.frequency, point.magnitude, point.magnitude_db()))
-        })
-    }
-
-    fn guard_bins(window: WindowFunction) -> usize {
-        match window {
-            WindowFunction::Rectangular => 1,
-            WindowFunction::Hanning | WindowFunction::Hamming => 2,
-            WindowFunction::Blackman | WindowFunction::Kaiser | WindowFunction::Gaussian => 3,
-            WindowFunction::BlackmanHarris | WindowFunction::FlatTop => 4,
+    /// One tone's bin, frequency and level.
+    ///
+    /// Through a tapering window the tone's power is the power of its
+    /// `signal_bins` either side, divided by the window's noise bandwidth,
+    /// which is Parseval's answer wherever between bins the tone falls; its
+    /// frequency is interpolated between the bins. Through the rectangular
+    /// window the bin is read as it stands, since a coherent tone's bin is
+    /// then exact and its neighbours are noise that would drag it.
+    fn measure_bin(
+        fft: &FftData,
+        idx: usize,
+        signal_bins: usize,
+    ) -> Option<(usize, f64, f64, f64)> {
+        let point = fft.points.get(idx)?;
+        if fft.window == WindowFunction::Rectangular {
+            return (point.magnitude > 0.0)
+                .then(|| (idx, point.frequency, point.magnitude, point.magnitude_db()));
         }
+        let frequency = Self::interpolate_peak(fft, idx).map_or(point.frequency, |peak| peak.1);
+        let low = idx.saturating_sub(signal_bins).max(1);
+        let high = idx.saturating_add(signal_bins).min(fft.points.len() - 1);
+        let scale = fft.points[low..=high]
+            .iter()
+            .fold(0.0_f64, |largest, point| largest.max(point.magnitude));
+        if scale <= 0.0 || !scale.is_finite() {
+            return None;
+        }
+        let power = fft.points[low..=high]
+            .iter()
+            .map(|point| (point.magnitude / scale).powi(2))
+            .sum::<f64>()
+            / fft.equivalent_noise_bandwidth_bins();
+        let magnitude = scale * power.sqrt();
+        (magnitude.is_finite() && magnitude > 0.0)
+            .then(|| (idx, frequency, magnitude, 20.0 * magnitude.log10()))
     }
 
     fn exclude_bin_region(mask: &mut [bool], center: usize, radius: usize) {
@@ -559,6 +684,40 @@ fn materialize_thd_percent(
 /// magnitudes. Peak normalization stores interior bins `sqrt(2)` above their
 /// RMS values while preserving DC and Nyquist, so comparing stored values can
 /// change the selected carrier when only the display normalization changes.
+/// The largest bin within `radius` bins of the fractional bin `center`.
+fn largest_bin_near(fft: &FftData, center: f64, radius: usize) -> Option<usize> {
+    if !center.is_finite() || center < 0.0 {
+        return None;
+    }
+    let center = center.round() as usize;
+    let last = fft.points.len().checked_sub(1)?;
+    if center == 0 || center > last {
+        return None;
+    }
+    let low = center.saturating_sub(radius).max(1);
+    let high = center.saturating_add(radius).min(last);
+    (low..=high)
+        .filter(|bin| fft.points[*bin].magnitude > 0.0)
+        .max_by(|a, b| {
+            fft.points[*a]
+                .magnitude
+                .total_cmp(&fft.points[*b].magnitude)
+        })
+}
+
+/// The mean of the powers whose levels, in dB, are `levels`, in dB.
+fn mean_power_db(levels: &[f64]) -> Option<f64> {
+    let peak = levels.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if levels.is_empty() || !peak.is_finite() {
+        return None;
+    }
+    let sum = levels
+        .iter()
+        .map(|level| 10.0_f64.powf((level - peak) / 10.0))
+        .sum::<f64>();
+    Some(peak + 10.0 * (sum / levels.len() as f64).log10())
+}
+
 fn dominant_physical_non_dc_bin(fft: &FftData) -> Result<Option<usize>, SpectrumAnalysisError> {
     let mut strongest: Option<(usize, PositiveBinaryMagnitude)> = None;
     for (bin, point) in fft.points.iter().enumerate().skip(1) {
@@ -1240,5 +1399,252 @@ mod tests {
                 })
             );
         }
+    }
+
+    /// A coherent record: `cycles` periods of `amplitude·sin` in `length`
+    /// samples, with `harmonics` as (order, fraction of the amplitude, phase)
+    /// and seeded white noise of `sigma`. Returns the samples and the noise's
+    /// own mean power.
+    fn coherent_record(
+        length: usize,
+        cycles: usize,
+        amplitude: f64,
+        harmonics: &[(usize, f64, f64)],
+        sigma: f64,
+        seed: u64,
+    ) -> (Vec<f64>, f64) {
+        let mut rng = Xorshift(seed);
+        let noise: Vec<f64> = (0..length).map(|_| sigma * rng.next_gaussian()).collect();
+        let noise_power = noise.iter().map(|v| v * v).sum::<f64>() / length as f64;
+        let samples = (0..length)
+            .map(|n| {
+                let phase = std::f64::consts::TAU * cycles as f64 * n as f64 / length as f64;
+                let tones = harmonics
+                    .iter()
+                    .map(|(order, fraction, offset)| {
+                        fraction * (*order as f64 * phase + offset).sin()
+                    })
+                    .sum::<f64>();
+                amplitude * (phase.sin() + tones) + noise[n]
+            })
+            .collect();
+        (samples, noise_power)
+    }
+
+    fn spectrum(samples: &[f64], window: WindowFunction) -> FftData {
+        FftData::from_time_domain_with_normalization(
+            "V(out)",
+            samples,
+            samples.len() as f64,
+            window,
+            SpectrumNormalization::Rms,
+        )
+        .expect("a spectrum")
+    }
+
+    /// The Kaiser window measures at its default β = 38, whose sidelobes sit
+    /// below rounding: a clean coherent tone reads SNR and SFDR over 250 dB,
+    /// and a tone with HD2 1 %, HD3 0.1 % and 1 mV of noise reads numpy's
+    /// SNR 10·log10(½/σ²) and SINAD 10·log10(½/(σ² + ½(0.01² + 0.001²))). At
+    /// the β of 5 it was fixed at, every clean tone read SNR 41 dB.
+    #[test]
+    fn the_kaiser_window_measures_below_its_own_sidelobes() {
+        let (clean, _) = coherent_record(4096, 64, 1.0, &[], 0.0, 1);
+        let analysis = SpectrumAnalysis::analyze(&spectrum(&clean, WindowFunction::KAISER), 10)
+            .expect("figures");
+        assert!(analysis.snr_db.unwrap() > 250.0, "{analysis:?}");
+        assert!(analysis.sfdr_db.unwrap() > 250.0, "{analysis:?}");
+        assert!(analysis.thd_percent.unwrap() < 1.0e-10, "{analysis:?}");
+
+        let (noisy, noise_power) =
+            coherent_record(4096, 64, 1.0, &[(2, 0.01, 0.3), (3, 0.001, 1.1)], 1.0e-3, 7);
+        let analysis = SpectrumAnalysis::analyze(&spectrum(&noisy, WindowFunction::KAISER), 10)
+            .expect("figures");
+        let snr = 10.0 * (0.5 / noise_power).log10();
+        let sinad =
+            10.0 * (0.5 / (noise_power + 0.5 * (0.01_f64.powi(2) + 0.001_f64.powi(2)))).log10();
+        assert!(
+            (analysis.snr_db.unwrap() - snr).abs() < 0.3,
+            "{analysis:?} against {snr}"
+        );
+        assert!(
+            (analysis.sinad_db.unwrap() - sinad).abs() < 0.1,
+            "{analysis:?} against {sinad}"
+        );
+        assert!(
+            (analysis.sfdr_db.unwrap() - 40.0).abs() < 0.05,
+            "{analysis:?}"
+        );
+        let thd = 100.0 * (0.01_f64.powi(2) + 0.001_f64.powi(2)).sqrt();
+        assert!(
+            (analysis.thd_percent.unwrap() - thd).abs() < 0.01,
+            "{analysis:?}"
+        );
+    }
+
+    /// SINAD, ENOB and SFDR of a seeded ADC record against their closed
+    /// forms. An ideal 12-bit quantizer on a full-scale coherent sine (127
+    /// cycles, a prime, in 4096 samples) leaves noise of one LSB²/12, so
+    /// SINAD is 10·log10((A²/2)/(1/12)) and ENOB 12 bits; the same record
+    /// with HD3 at 1 % reads SFDR 40 dB.
+    #[test]
+    fn an_adc_record_reads_its_closed_form_sinad_enob_and_sfdr() {
+        let amplitude = 2047.5;
+        let (sine, _) = coherent_record(4096, 127, amplitude, &[], 0.0, 1);
+        let quantized: Vec<f64> = sine.iter().map(|v| v.round()).collect();
+        let analysis =
+            SpectrumAnalysis::analyze(&spectrum(&quantized, WindowFunction::Rectangular), 10)
+                .expect("figures");
+        let sinad = 10.0 * (amplitude * amplitude / 2.0 * 12.0).log10();
+        assert!(
+            (analysis.sinad_db.unwrap() - sinad).abs() < 0.3,
+            "{analysis:?} against {sinad}"
+        );
+        let enob = analysis.enob_bits().unwrap();
+        assert!((enob - 12.0).abs() < 0.05, "ENOB {enob}");
+
+        let (distorted, _) = coherent_record(4096, 127, amplitude, &[(3, 0.01, 0.4)], 0.0, 1);
+        let quantized: Vec<f64> = distorted.iter().map(|v| v.round()).collect();
+        let analysis =
+            SpectrumAnalysis::analyze(&spectrum(&quantized, WindowFunction::Rectangular), 10)
+                .expect("figures");
+        assert!(
+            (analysis.sfdr_db.unwrap() - 40.0).abs() < 0.01,
+            "{analysis:?}"
+        );
+    }
+
+    /// Through the conventional Gaussian window a tone between bins reads its
+    /// true level, −3.0103 dBV rms for 1 V, and no distortion. Through the
+    /// near-rectangle the window once was, it read −4.58 dBV and THD 0.53 %.
+    #[test]
+    fn the_gaussian_window_reads_a_tone_between_bins() {
+        let samples: Vec<f64> = (0..4096)
+            .map(|n| (std::f64::consts::TAU * 64.37 * n as f64 / 4096.0).sin())
+            .collect();
+        let analysis = SpectrumAnalysis::analyze(&spectrum(&samples, WindowFunction::Gaussian), 10)
+            .expect("figures");
+        let level = analysis.fundamental_db.unwrap();
+        assert!((level + 3.0103).abs() < 0.01, "level {level}");
+        assert!(analysis.thd_percent.unwrap() < 0.1, "{analysis:?}");
+    }
+
+    /// When the record cannot resolve a harmonic from the carrier, the
+    /// harmonic is summed into the noise, so SNR is withheld with THD and
+    /// SINAD. It once printed SINAD under the SNR label.
+    #[test]
+    fn an_unresolved_harmonic_withholds_snr_with_thd_and_sinad() {
+        let (samples, _) = coherent_record(8192, 8, 1.0, &[(3, 0.01, 0.0)], 0.0, 1);
+        let analysis =
+            SpectrumAnalysis::analyze(&spectrum(&samples, WindowFunction::BlackmanHarris), 10)
+                .expect("figures");
+        assert!(
+            matches!(
+                analysis.harmonic_coverage,
+                HarmonicCoverage::InsufficientResolution {
+                    failed_order: 2,
+                    ..
+                }
+            ),
+            "{analysis:?}"
+        );
+        assert_eq!(analysis.snr_db, None);
+        assert_eq!(analysis.sinad_db, None);
+        assert_eq!(analysis.thd_percent, None);
+        assert!(
+            (analysis.sfdr_db.unwrap() - 40.0).abs() < 0.05,
+            "{analysis:?}"
+        );
+    }
+
+    /// The noise floor is the mean noise power per bin, 10·log10(2σ²/N) for
+    /// white noise of power σ² in an rms spectrum of N samples: −93.11 dBV
+    /// at 1 mV and N = 4096. It was the median of the bins' levels, 1.6 dB
+    /// under the mean, since a noise bin's power is exponential.
+    #[test]
+    fn the_noise_floor_is_the_mean_noise_power_per_bin() {
+        let (samples, noise_power) = coherent_record(4096, 64, 1.0, &[], 1.0e-3, 11);
+        let analysis =
+            SpectrumAnalysis::analyze(&spectrum(&samples, WindowFunction::Rectangular), 10)
+                .expect("figures");
+        let floor = 10.0 * (2.0 * noise_power / 4096.0).log10();
+        let measured = analysis.noise_floor_db.unwrap();
+        assert!(
+            (measured - floor).abs() < 0.25,
+            "floor {measured} against {floor}"
+        );
+    }
+
+    /// Through the rectangular window a coherent tone's bin is exact and its
+    /// neighbours are noise, so the carrier is read from its bin: level and
+    /// frequency are the bin's own, whatever the noise. Interpolating through
+    /// the noise bins moved the level up to 0.13 dB.
+    #[test]
+    fn a_rectangular_coherent_carrier_is_read_from_its_bin() {
+        for seed in 1..=8 {
+            let (samples, _) = coherent_record(4096, 127, 1.0, &[], 1.0e-3, seed);
+            let fft = spectrum(&samples, WindowFunction::Rectangular);
+            let analysis = SpectrumAnalysis::analyze(&fft, 10).expect("figures");
+            assert_eq!(analysis.fundamental_bin, Some(127));
+            assert_eq!(
+                analysis.fundamental_frequency,
+                Some(fft.points[127].frequency)
+            );
+            assert_eq!(
+                analysis.fundamental_db,
+                Some(fft.points[127].magnitude_db())
+            );
+        }
+    }
+
+    /// A fundamental the reader names places the harmonics; a band ends the
+    /// harmonic series and the noise where it ends.
+    #[test]
+    fn a_named_fundamental_and_a_band_are_measured_as_set() {
+        let (samples, _) =
+            coherent_record(4096, 64, 1.0, &[(2, 0.01, 0.0), (5, 0.02, 0.0)], 1.0e-4, 3);
+        let fft = spectrum(&samples, WindowFunction::BlackmanHarris);
+        // A larger interferer than the carrier at bin 400 would be taken for
+        // the fundamental; the reader names 64 Hz instead.
+        let mut interfered = samples.clone();
+        for (n, value) in interfered.iter_mut().enumerate() {
+            *value += 3.0 * (std::f64::consts::TAU * 400.0 * n as f64 / 4096.0).sin();
+        }
+        let named = SpectrumAnalysis::measure(
+            &spectrum(&interfered, WindowFunction::BlackmanHarris),
+            &SpectrumMeasurement {
+                fundamental: Some(64.0),
+                band: Some((0.0, 1000.0)),
+                ..SpectrumMeasurement::with_harmonics(10)
+            },
+        )
+        .expect("figures");
+        assert_eq!(named.fundamental_bin, Some(64));
+        let banded = SpectrumAnalysis::measure(
+            &fft,
+            &SpectrumMeasurement {
+                band: Some((0.0, 200.0)),
+                ..SpectrumMeasurement::with_harmonics(10)
+            },
+        )
+        .expect("figures");
+        // HD5 at 320 Hz lies past the band: only HD2 and HD3 are counted.
+        assert_eq!(
+            banded.harmonics.iter().map(|h| h.order).collect::<Vec<_>>(),
+            [2, 3]
+        );
+        assert!(
+            (banded.thd_percent.unwrap() - 1.0).abs() < 0.01,
+            "{banded:?}"
+        );
+        let explicit = SpectrumAnalysis::measure(
+            &fft,
+            &SpectrumMeasurement {
+                signal_bins: Some(6),
+                ..SpectrumMeasurement::with_harmonics(10)
+            },
+        )
+        .expect("figures");
+        assert_eq!(explicit.signal_bins, 6);
     }
 }

@@ -197,12 +197,14 @@ impl FftInputPolicy {
     }
 }
 
-/// Optional time-domain bounds for FFT input selection.
+/// The record a spectrum transforms: from `start`, inclusive, to `end`,
+/// exclusive, taken as one period of the signal, as ViVA's `dft` takes it.
+/// A record set to a whole number of periods is then coherent.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FftTimeWindow {
-    /// Inclusive lower bound (seconds).
+    /// The record's first instant (seconds), inclusive.
     pub start: f64,
-    /// Inclusive upper bound (seconds).
+    /// The record's end (seconds), exclusive: one period after `start`.
     pub end: f64,
 }
 
@@ -223,15 +225,44 @@ impl FftTimeWindow {
     }
 }
 
+/// How the transform's samples are made where the record holds none on its
+/// grid: Eldo's resampling choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Resampling {
+    /// A straight line between the neighbouring samples.
+    #[default]
+    Linear,
+    /// The last sample at or before the grid point, held.
+    SampleAndHold,
+}
+
+impl Resampling {
+    /// Both choices, in the order a menu lists them.
+    pub const ALL: [Self; 2] = [Self::Linear, Self::SampleAndHold];
+
+    /// The choice as a menu names it.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Linear => "Interpolate",
+            Self::SampleAndHold => "Sample and hold",
+        }
+    }
+}
+
 /// End-to-end FFT input preparation options.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FftInputOptions {
     /// Data fidelity/performance policy.
     pub policy: FftInputPolicy,
-    /// Optional selected time-domain window.
+    /// The record to transform; `None` is the whole record, its last sample
+    /// taken as the end of its one period.
     pub time_window: Option<FftTimeWindow>,
-    /// Optional target sample count for explicit resampling.
+    /// The transform's sample count `N`; `None` takes as many as the record
+    /// holds inside its window.
     pub target_samples: Option<usize>,
+    /// How samples off the record's own grid are made.
+    pub resampling: Resampling,
 }
 
 impl Default for FftInputOptions {
@@ -240,6 +271,7 @@ impl Default for FftInputOptions {
             policy: FftInputPolicy::interactive_default(),
             time_window: None,
             target_samples: None,
+            resampling: Resampling::Linear,
         }
     }
 }
@@ -261,6 +293,11 @@ impl FftInputOptions {
         self.target_samples = target_samples;
         self
     }
+
+    pub fn with_resampling(mut self, resampling: Resampling) -> Self {
+        self.resampling = resampling;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -271,10 +308,14 @@ pub struct PreparedFftInput {
     pub samples: Vec<f64>,
     /// Effective sample rate (Hz) for `samples`.
     pub sample_rate: f64,
-    /// Original valid sample count before processing.
+    /// The record's own samples inside the record window.
     pub original_count: usize,
     /// Final decimation factor (1 means no decimation).
     pub decimation_factor: usize,
+    /// The record's mean over its window, taken out before the transform.
+    pub dc_level: f64,
+    /// The record transformed, `[start, end)`.
+    pub record: FftTimeWindow,
 }
 
 #[derive(Debug, Clone)]
@@ -297,7 +338,13 @@ pub fn prepare_fft_input_with_options(
     let (point_cap, target_samples) = validate_options(options)?;
     validate_source(time, values)?;
     let windowed = select_time_window(time, values, options.time_window)?;
-    prepare_windowed(name, windowed, point_cap, target_samples)
+    prepare_windowed(
+        name,
+        windowed,
+        point_cap,
+        target_samples,
+        options.resampling,
+    )
 }
 
 /// Prepare a waveform for FFT analysis as [`prepare_fft_input_with_options`] prepares the same
@@ -314,7 +361,13 @@ pub fn prepare_fft_input_from_columns(
     let (point_cap, target_samples) = validate_options(options)?;
     validate_source_columns(time, values)?;
     let windowed = select_time_window_columns(time, values, options.time_window)?;
-    prepare_windowed(name, windowed, point_cap, target_samples)
+    prepare_windowed(
+        name,
+        windowed,
+        point_cap,
+        target_samples,
+        options.resampling,
+    )
 }
 
 /// The point cap and target count `options` ask for, once they agree.
@@ -334,11 +387,18 @@ fn validate_options(
 /// The pipeline from the validated rows of the time window on.
 fn prepare_windowed(
     name: &str,
-    windowed: Vec<(f64, f64)>,
+    windowed: WindowedRows,
     point_cap: Option<usize>,
     target_samples: Option<usize>,
+    resampling: Resampling,
 ) -> Result<PreparedFftInput, FftInputError> {
-    let original_count = windowed.len();
+    let WindowedRows {
+        rows,
+        start,
+        stop,
+        in_window,
+    } = windowed;
+    let original_count = in_window;
 
     let explicit_decimation = match target_samples {
         Some(target_count) if target_count < original_count => {
@@ -360,36 +420,22 @@ fn prepare_windowed(
         _ => None,
     };
 
-    let mut uniform = if let Some(target) = target_samples {
-        if explicit_decimation.is_some() {
-            // Preserve the authored point count before applying the qualified
-            // anti-alias filter. Nonuniform evidence is first projected onto
-            // an equal-count uniform grid, never directly onto the lower rate.
-            if is_uniform_timeline(&windowed)? {
-                uniform_from_cleaned(&windowed)?
-            } else {
-                resample_to_uniform(&windowed, windowed.len())?
-            }
-        } else if target == windowed.len() && is_uniform_timeline(&windowed)? {
-            uniform_from_cleaned(&windowed)?
-        } else {
-            resample_to_uniform(&windowed, target)?
-        }
-    } else if is_uniform_timeline(&windowed)? {
-        uniform_from_cleaned(&windowed)?
-    } else {
-        // Preserve the source rate first. Any later rate reduction happens
-        // only through the qualified anti-alias path below.
-        resample_to_uniform(&windowed, windowed.len())?
+    // The record's own density first: a rate reduction happens only through
+    // the qualified anti-alias path below, never by resampling straight onto
+    // the lower rate.
+    let grid_count = match (explicit_decimation, target_samples) {
+        (Some(_), _) | (None, None) => original_count,
+        (None, Some(target)) => target,
     };
+    let mut uniform = record_on_grid(&rows, start, stop, grid_count, resampling)?;
 
-    remove_dc_offset(&mut uniform.samples)?;
+    let mut dc_level = remove_dc_offset(&mut uniform.samples)?;
 
     let mut decimation_factor = 1usize;
     if let Some(factor) = explicit_decimation {
         uniform = anti_alias_decimate(&uniform, factor)?;
         decimation_factor = factor;
-        remove_dc_offset(&mut uniform.samples)?;
+        dc_level += remove_dc_offset(&mut uniform.samples)?;
     } else if let Some(max_points) = point_cap
         && uniform.samples.len() > max_points
     {
@@ -398,7 +444,7 @@ fn prepare_windowed(
         // Edge extension and finite FIR arithmetic can introduce a small
         // residual mean even when the source was centered. Authenticate
         // the actual retained record, not the pre-filter intermediate.
-        remove_dc_offset(&mut uniform.samples)?;
+        dc_level += remove_dc_offset(&mut uniform.samples)?;
     }
 
     if uniform.samples.len() < MIN_FFT_SAMPLES
@@ -421,6 +467,8 @@ fn prepare_windowed(
         sample_rate: uniform.sample_rate,
         original_count,
         decimation_factor,
+        dc_level,
+        record: FftTimeWindow::new(start, stop),
     })
 }
 
@@ -554,39 +602,103 @@ fn validate_retained_count(retained: usize) -> Result<(), FftInputError> {
     Ok(())
 }
 
+/// The rows of a record window and the window itself: every row from the
+/// last at or before its start to the first at or after its end, so each
+/// point of the transform's grid in `[start, stop)` is bracketed.
+struct WindowedRows {
+    rows: Vec<(f64, f64)>,
+    start: f64,
+    stop: f64,
+    /// The rows inside `[start, stop)`.
+    in_window: usize,
+}
+
+/// The record `[start, stop)` a window asks of a record from `first` to
+/// `last`: the whole record when none is set, and otherwise the window kept
+/// inside the record.
+fn record_bounds(
+    first: f64,
+    last: f64,
+    time_window: Option<FftTimeWindow>,
+) -> Result<(f64, f64), FftInputError> {
+    let Some(window) = time_window else {
+        return Ok((first, last));
+    };
+    let window = window.validated()?;
+    let (start, stop) = (window.start.max(first), window.end.min(last));
+    if stop > start {
+        Ok((start, stop))
+    } else {
+        Err(FftInputError::InsufficientWindowSamples {
+            start: window.start,
+            end: window.end,
+            retained: 0,
+        })
+    }
+}
+
+/// How close to the record's end a written sample is taken to be at it: a
+/// millionth of a step, the slack a time accumulated step by step can miss
+/// the end it was meant to land on by.
+fn end_tolerance(start: f64, stop: f64, samples: usize) -> f64 {
+    let samples = samples.max(1) as f64;
+    (stop / samples - start / samples) * 1.0e-6
+}
+
+/// Whether the instant `t` is the record's end `stop`, or past it.
+fn at_or_past(t: f64, stop: f64, tolerance: f64) -> bool {
+    t >= stop - tolerance
+}
+
+/// The index range of the rows a record `[start, stop)` reads, bracketing
+/// rows included, and how many rows lie inside it, from the count of rows
+/// before an instant.
+fn window_rows(
+    len: usize,
+    start: f64,
+    stop: f64,
+    rows_before: impl Fn(&dyn Fn(f64) -> bool) -> usize,
+) -> (std::ops::Range<usize>, usize) {
+    let through_start = rows_before(&|t| t <= start);
+    let before_start = rows_before(&|t| t < start);
+    let tolerance = end_tolerance(start, stop, rows_before(&|t| t < stop) - before_start);
+    let before_stop = rows_before(&|t| !at_or_past(t, stop, tolerance));
+    let first = through_start.saturating_sub(1);
+    let end = (before_stop + 1).min(len);
+    (first..end, before_stop.saturating_sub(before_start))
+}
+
 fn select_time_window(
     time: &[f64],
     values: &[f64],
     time_window: Option<FftTimeWindow>,
-) -> Result<Vec<(f64, f64)>, FftInputError> {
-    let (start_index, end_index, diagnostic_bounds) = match time_window {
-        Some(window) => {
-            let window = window.validated()?;
-            let start = time.partition_point(|value| *value < window.start);
-            let end = time.partition_point(|value| *value <= window.end);
-            (start, end, Some(window))
-        }
-        None => (0, time.len(), None),
-    };
-    let retained = end_index.saturating_sub(start_index);
-    validate_window_rows(retained, diagnostic_bounds, || FftTimeWindow {
-        start: time[0],
-        end: time[time.len() - 1],
+) -> Result<WindowedRows, FftInputError> {
+    let (start, stop) = record_bounds(time[0], time[time.len() - 1], time_window)?;
+    let (range, in_window) = window_rows(time.len(), start, stop, |before| {
+        time.partition_point(|t| before(*t))
+    });
+    validate_window_rows(in_window, Some(FftTimeWindow::new(start, stop)), || {
+        FftTimeWindow::new(start, stop)
     })?;
 
     let mut selected = Vec::new();
     try_reserve_exact(
         &mut selected,
-        retained,
+        range.len(),
         FftInputAllocationStage::SelectedSamples,
     )?;
     selected.extend(
-        time[start_index..end_index]
+        time[range.clone()]
             .iter()
             .copied()
-            .zip(values[start_index..end_index].iter().copied()),
+            .zip(values[range].iter().copied()),
     );
-    Ok(selected)
+    Ok(WindowedRows {
+        rows: selected,
+        start,
+        stop,
+        in_window,
+    })
 }
 
 /// [`select_time_window`] over columns: the window's bounds found by search, and only its rows
@@ -595,33 +707,33 @@ fn select_time_window_columns(
     time: &crate::waveform::WaveformValues,
     values: &crate::waveform::WaveformValues,
     time_window: Option<FftTimeWindow>,
-) -> Result<Vec<(f64, f64)>, FftInputError> {
-    let (start_index, end_index, diagnostic_bounds) = match time_window {
-        Some(window) => {
-            let window = window.validated()?;
-            let start = time.partition_point(|value| value < window.start);
-            let end = time.partition_point(|value| value <= window.end);
-            (start, end, Some(window))
-        }
-        None => (0, time.len(), None),
-    };
-    let retained = end_index.saturating_sub(start_index);
-    validate_window_rows(retained, diagnostic_bounds, || FftTimeWindow {
-        start: time.sample(0).unwrap_or(f64::NAN),
-        end: time.sample(time.len() - 1).unwrap_or(f64::NAN),
+) -> Result<WindowedRows, FftInputError> {
+    let first = time.sample(0).unwrap_or(f64::NAN);
+    let last = time.sample(time.len() - 1).unwrap_or(f64::NAN);
+    let (start, stop) = record_bounds(first, last, time_window)?;
+    let (range, in_window) = window_rows(time.len(), start, stop, |before| {
+        time.partition_point(|t| before(t))
+    });
+    validate_window_rows(in_window, Some(FftTimeWindow::new(start, stop)), || {
+        FftTimeWindow::new(start, stop)
     })?;
 
     let mut selected = Vec::new();
     try_reserve_exact(
         &mut selected,
-        retained,
+        range.len(),
         FftInputAllocationStage::SelectedSamples,
     )?;
-    column_pairs(time, values, start_index..end_index, |t, value| {
+    column_pairs(time, values, range, |t, value| {
         selected.push((t, value));
         Ok(())
     })?;
-    Ok(selected)
+    Ok(WindowedRows {
+        rows: selected,
+        start,
+        stop,
+        in_window,
+    })
 }
 
 /// Whether a window of `retained` rows can be prepared: `window`, or the whole record's span,
@@ -642,72 +754,93 @@ fn validate_window_rows(
     validate_retained_count(retained)
 }
 
-fn is_uniform_timeline(data: &[(f64, f64)]) -> Result<bool, FftInputError> {
-    let (nominal_interval, _) =
-        qualified_grid_metrics(data[0].0, data[data.len() - 1].0, data.len())?;
-    let mut uniform = true;
-    for (index, pair) in data.windows(2).enumerate() {
-        let ratio = qualified_interval_ratio(pair[0].0, pair[1].0, index, nominal_interval)?;
-        if (ratio - 1.0).abs() > GRID_RELATIVE_TOLERANCE + 8.0 * f64::EPSILON {
-            uniform = false;
-        }
+/// The record `[start, stop)` as `count` samples on its uniform grid,
+/// `start + k·(stop − start)/count`, at the rate `count/(stop − start)`.
+///
+/// When the record's own samples inside the window are that grid, they are
+/// taken as they stand. Otherwise each grid point is made from the record
+/// as `resampling` says: a record whose steps are not uniform, as every
+/// transient with a switching edge is, is resampled rather than refused.
+fn record_on_grid(
+    rows: &[(f64, f64)],
+    start: f64,
+    stop: f64,
+    count: usize,
+    resampling: Resampling,
+) -> Result<UniformSeries, FftInputError> {
+    let interval_count = count.checked_add(1).ok_or(FftInputError::Timebase {
+        index: count,
+        reason: "sample count exceeds this platform",
+    })?;
+    let (nominal_interval, sample_rate) = qualified_grid_metrics(start, stop, interval_count)?;
+    let first_inside = rows.partition_point(|(t, _)| *t < start);
+    let tolerance = end_tolerance(start, stop, count);
+    let inside = rows[first_inside..]
+        .iter()
+        .take_while(|(t, _)| !at_or_past(*t, stop, tolerance))
+        .count();
+    if inside == count
+        && let Some(samples) = sample_grid(start, stop, count, nominal_interval, |index, time| {
+            let (t, value) = rows[first_inside + index];
+            Ok(((t - time).abs() <= GRID_RELATIVE_TOLERANCE * nominal_interval).then_some(value))
+        })?
+    {
+        return Ok(UniformSeries {
+            samples,
+            sample_rate,
+        });
     }
-    Ok(uniform)
-}
-
-fn uniform_from_cleaned(data: &[(f64, f64)]) -> Result<UniformSeries, FftInputError> {
-    let (_, sample_rate) = qualified_grid_metrics(data[0].0, data[data.len() - 1].0, data.len())?;
-    let mut samples = Vec::new();
-    try_reserve_exact(
-        &mut samples,
-        data.len(),
-        FftInputAllocationStage::ResampledSamples,
-    )?;
-    samples.extend(data.iter().map(|(_, value)| *value));
+    let mut upper = 0usize;
+    let samples = sample_grid(start, stop, count, nominal_interval, |index, time| {
+        while upper < rows.len() && rows[upper].0 < time {
+            upper += 1;
+        }
+        value_at(rows, upper, time, index, resampling).map(Some)
+    })?
+    .ok_or(FftInputError::Timebase {
+        index: 0,
+        reason: "resampling left a grid point without a value",
+    })?;
     Ok(UniformSeries {
         samples,
         sample_rate,
     })
 }
 
-fn resample_to_uniform(
-    data: &[(f64, f64)],
-    target_count: usize,
-) -> Result<UniformSeries, FftInputError> {
-    let t_start = data[0].0;
-    let t_end = data[data.len() - 1].0;
-    let (nominal_interval, sample_rate) = qualified_grid_metrics(t_start, t_end, target_count)?;
-    let interval_count = target_count - 1;
-    let interval_count_value =
-        exactly_represented_usize(interval_count).ok_or(FftInputError::Timebase {
-            index: interval_count,
-            reason: "resampling interval count is not exactly representable",
-        })?;
-
+/// The `count` points of the grid `start + k·(stop − start)/count`, each
+/// checked to stand one nominal interval after the last, and the sample
+/// `sample` gives at each: `None` once it gives none.
+fn sample_grid(
+    start: f64,
+    stop: f64,
+    count: usize,
+    nominal_interval: f64,
+    mut sample: impl FnMut(usize, f64) -> Result<Option<f64>, FftInputError>,
+) -> Result<Option<Vec<f64>>, FftInputError> {
+    let count_value = exactly_represented_usize(count).ok_or(FftInputError::Timebase {
+        index: count,
+        reason: "sample count is not exactly representable",
+    })?;
     let mut samples = Vec::new();
     try_reserve_exact(
         &mut samples,
-        target_count,
+        count,
         FftInputAllocationStage::ResampledSamples,
     )?;
-    let mut source_upper = 0usize;
     let mut previous_time = None;
-    for output_index in 0..target_count {
+    for output_index in 0..count {
         let time = if output_index == 0 {
-            t_start
-        } else if output_index == interval_count {
-            t_end
+            start
         } else {
             let index_value =
                 exactly_represented_usize(output_index).ok_or(FftInputError::Timebase {
                     index: output_index,
                     reason: "resampling grid index is not exactly representable",
                 })?;
-            let fraction = index_value / interval_count_value;
-            qualified_affine(t_start, t_end, fraction).map_err(|reason| {
+            qualified_affine(start, stop, index_value / count_value).map_err(|reason| {
                 FftInputError::Interpolation {
                     output_index,
-                    segment: source_upper.saturating_sub(1),
+                    segment: output_index.saturating_sub(1),
                     reason,
                 }
             })?
@@ -729,45 +862,52 @@ fn resample_to_uniform(
             }
         }
         previous_time = Some(time);
-        while source_upper < data.len() && data[source_upper].0 < time {
-            source_upper = source_upper.checked_add(1).ok_or(FftInputError::Timebase {
-                index: output_index,
-                reason: "source cursor exceeds this platform",
-            })?;
-        }
-        if source_upper >= data.len() {
-            return Err(FftInputError::Interpolation {
-                output_index,
-                segment: data.len() - 2,
-                reason: "destination time could not be bracketed",
-            });
-        }
-        let value = if data[source_upper].0 == time {
-            data[source_upper].1
-        } else {
-            if source_upper == 0 {
-                return Err(FftInputError::Interpolation {
-                    output_index,
-                    segment: 0,
-                    reason: "destination time precedes the source grid",
-                });
-            }
-            interpolate_segment(data, source_upper - 1, time, output_index)?
+        let Some(value) = sample(output_index, time)? else {
+            return Ok(None);
         };
-        if !value.is_finite() {
-            return Err(FftInputError::Numerical {
-                stage: "linear interpolation",
-                index: output_index,
-                reason: "result is non-finite",
-            });
-        }
         samples.push(value);
     }
+    Ok(Some(samples))
+}
 
-    Ok(UniformSeries {
-        samples,
-        sample_rate,
-    })
+/// The record's value at the grid instant `time`, `upper` the first row at
+/// or after it.
+fn value_at(
+    rows: &[(f64, f64)],
+    upper: usize,
+    time: f64,
+    output_index: usize,
+    resampling: Resampling,
+) -> Result<f64, FftInputError> {
+    if upper >= rows.len() {
+        return Err(FftInputError::Interpolation {
+            output_index,
+            segment: rows.len().saturating_sub(2),
+            reason: "destination time could not be bracketed",
+        });
+    }
+    let value = if rows[upper].0 == time {
+        rows[upper].1
+    } else if upper == 0 {
+        return Err(FftInputError::Interpolation {
+            output_index,
+            segment: 0,
+            reason: "destination time precedes the source grid",
+        });
+    } else {
+        match resampling {
+            Resampling::Linear => interpolate_segment(rows, upper - 1, time, output_index)?,
+            Resampling::SampleAndHold => rows[upper - 1].1,
+        }
+    };
+    if !value.is_finite() {
+        return Err(FftInputError::Numerical {
+            stage: "resampling",
+            index: output_index,
+            reason: "result is non-finite",
+        });
+    }
+    Ok(value)
 }
 
 fn qualified_interval_ratio(
@@ -1064,7 +1204,8 @@ fn apply_decimating_fir(
     Ok(out)
 }
 
-fn remove_dc_offset(samples: &mut [f64]) -> Result<(), FftInputError> {
+/// Take the record's mean out of it, and return the mean.
+fn remove_dc_offset(samples: &mut [f64]) -> Result<f64, FftInputError> {
     if samples.is_empty() {
         return Err(FftInputError::InsufficientSamples {
             length: 0,
@@ -1072,8 +1213,9 @@ fn remove_dc_offset(samples: &mut [f64]) -> Result<(), FftInputError> {
         });
     }
     if samples.iter().all(|value| *value == samples[0]) {
+        let level = samples[0];
         samples.fill(0.0);
-        return Ok(());
+        return Ok(level);
     }
     let scale = samples
         .iter()
@@ -1148,7 +1290,7 @@ fn remove_dc_offset(samples: &mut [f64]) -> Result<(), FftInputError> {
         }
         *sample = if restored == 0.0 { 0.0 } else { restored };
     }
-    Ok(())
+    Ok(represented_mean)
 }
 
 #[derive(Clone, Copy)]
@@ -1227,10 +1369,19 @@ fn interpolate_segment(
             reason: "interior interpolation fraction is not strictly inside (0, 1)",
         });
     }
-    qualified_affine(value0, value1, fraction).map_err(|reason| FftInputError::Interpolation {
-        output_index,
-        segment,
-        reason,
+    // Neighbouring values a few units in the last place apart can round onto
+    // an endpoint; the straight line between them is then that endpoint.
+    qualified_affine(value0, value1, fraction).or_else(|_| {
+        let value = value0 * (1.0 - fraction) + value1 * fraction;
+        if value.is_finite() {
+            Ok(value.clamp(value0.min(value1), value0.max(value1)))
+        } else {
+            Err(FftInputError::Interpolation {
+                output_index,
+                segment,
+                reason: "interpolated value is not finite",
+            })
+        }
     })
 }
 
@@ -1553,8 +1704,10 @@ mod tests {
         let time = (0..length)
             .map(|index| start + index as f64 * interval)
             .collect::<Vec<_>>();
+        // One period over the record's `length − 1` steps, the last sample
+        // ending it.
         let values = (0..length)
-            .map(|index| (2.0 * PI * index as f64 / length as f64).sin() + 4.0)
+            .map(|index| (2.0 * PI * index as f64 / (length - 1) as f64).sin() + 4.0)
             .collect::<Vec<_>>();
         (time, values)
     }
@@ -1665,11 +1818,12 @@ mod tests {
             Err(FftInputError::InvalidTimeWindow { .. })
         ));
 
+        // One period [0, 4) of a record sampled each second holds 4 samples.
         let short_window =
             FftInputOptions::default().with_time_window(Some(FftTimeWindow::new(0.0, 4.0)));
         assert!(matches!(
             prepare_fft_input_with_options("window", &time, &values, short_window),
-            Err(FftInputError::InsufficientWindowSamples { retained: 5, .. })
+            Err(FftInputError::InsufficientWindowSamples { retained: 4, .. })
         ));
 
         assert_eq!(
@@ -1721,20 +1875,24 @@ mod tests {
         )
         .expect("ordinary uniform record should qualify");
         assert_eq!(prepared.name, "ordinary");
-        assert_eq!(prepared.original_count, 32);
+        // The last sample ends the record's one period: 31 samples over
+        // [0, 7.75) at 4 per second.
+        assert_eq!(prepared.original_count, 31);
+        assert_eq!(prepared.samples.len(), 31);
         assert_eq!(prepared.decimation_factor, 1);
         assert_eq!(prepared.sample_rate, 4.0);
+        assert_eq!(prepared.record, FftTimeWindow::new(0.0, 7.75));
         assert!(prepared.samples.iter().all(|value| value.is_finite()));
         assert!(prepared.samples.iter().sum::<f64>().abs() <= 32.0 * f64::EPSILON);
     }
 
     #[test]
     fn finite_extreme_constants_center_to_exact_zero() {
-        let time = (0..MIN_FFT_SAMPLES)
+        let time = (0..=MIN_FFT_SAMPLES)
             .map(|index| index as f64)
             .collect::<Vec<_>>();
         for constant in [f64::MAX, f64::from_bits(1)] {
-            let values = vec![constant; MIN_FFT_SAMPLES];
+            let values = vec![constant; MIN_FFT_SAMPLES + 1];
             let prepared = prepare_fft_input_with_options(
                 "constant",
                 &time,
@@ -1748,10 +1906,10 @@ mod tests {
 
     #[test]
     fn mixed_scale_centering_fails_when_normalization_erases_evidence() {
-        let time = (0..MIN_FFT_SAMPLES)
+        let time = (0..=MIN_FFT_SAMPLES)
             .map(|index| index as f64)
             .collect::<Vec<_>>();
-        let mut values = vec![f64::MAX; MIN_FFT_SAMPLES];
+        let mut values = vec![f64::MAX; MIN_FFT_SAMPLES + 1];
         values[3] = f64::from_bits(1);
         assert!(matches!(
             prepare_fft_input_with_options(
@@ -1769,37 +1927,51 @@ mod tests {
     }
 
     #[test]
-    fn nonuniform_resampling_is_linear_and_retains_authored_endpoints() {
-        let data = (0..MIN_FFT_SAMPLES)
+    fn nonuniform_resampling_is_linear_over_one_period_from_the_start() {
+        let data = (0..=MIN_FFT_SAMPLES)
             .map(|index| {
                 let time = (index * index) as f64;
                 (time, 3.0 * time - 7.0)
             })
             .collect::<Vec<_>>();
-        let resampled = resample_to_uniform(&data, MIN_FFT_SAMPLES)
+        let (start, stop) = (data[0].0, data[MIN_FFT_SAMPLES].0);
+        let resampled = record_on_grid(&data, start, stop, MIN_FFT_SAMPLES, Resampling::Linear)
             .expect("linear data should resample exactly on a qualified grid");
+        assert_eq!(resampled.samples.len(), MIN_FFT_SAMPLES);
         assert_eq!(resampled.samples[0], data[0].1);
-        assert_eq!(
-            resampled.samples[MIN_FFT_SAMPLES - 1],
-            data[MIN_FFT_SAMPLES - 1].1
-        );
+        assert_eq!(resampled.sample_rate, MIN_FFT_SAMPLES as f64 / stop);
         for (index, value) in resampled.samples.iter().enumerate() {
-            let fraction = index as f64 / (MIN_FFT_SAMPLES - 1) as f64;
-            let time = qualified_affine(data[0].0, data[MIN_FFT_SAMPLES - 1].0, fraction)
-                .expect("test grid must be representable");
+            let fraction = index as f64 / MIN_FFT_SAMPLES as f64;
+            let time =
+                qualified_affine(start, stop, fraction).expect("test grid must be representable");
             let expected = 3.0 * time - 7.0;
             assert!((*value - expected).abs() <= 2.0 * value_ulp(expected));
+        }
+
+        // Sample and hold keeps the last sample at or before each point.
+        let held = record_on_grid(
+            &data,
+            start,
+            stop,
+            MIN_FFT_SAMPLES,
+            Resampling::SampleAndHold,
+        )
+        .expect("held data on a qualified grid");
+        for (index, value) in held.samples.iter().enumerate() {
+            let time = start + (stop - start) * index as f64 / MIN_FFT_SAMPLES as f64;
+            let before = data.iter().rev().find(|(t, _)| *t <= time).expect("a row");
+            assert_eq!(*value, before.1, "grid point {index} at {time}");
         }
     }
 
     #[test]
     fn overflowing_raw_time_span_still_has_a_qualified_finite_rate() {
-        let interval_count = (MIN_FFT_SAMPLES - 1) as f64;
-        let time = (0..MIN_FFT_SAMPLES)
+        let interval_count = MIN_FFT_SAMPLES as f64;
+        let time = (0..=MIN_FFT_SAMPLES)
             .map(|index| {
                 if index == 0 {
                     -f64::MAX
-                } else if index == MIN_FFT_SAMPLES - 1 {
+                } else if index == MIN_FFT_SAMPLES {
                     f64::MAX
                 } else {
                     qualified_affine(-f64::MAX, f64::MAX, index as f64 / interval_count)
@@ -1807,7 +1979,7 @@ mod tests {
                 }
             })
             .collect::<Vec<_>>();
-        let values = vec![f64::MAX; MIN_FFT_SAMPLES];
+        let values = vec![f64::MAX; MIN_FFT_SAMPLES + 1];
         let prepared = prepare_fft_input_with_options(
             "extreme-time",
             &time,
@@ -1822,10 +1994,10 @@ mod tests {
     #[test]
     fn timestamp_ulp_must_be_small_relative_to_nominal_interval() {
         let start = 1.0e16;
-        let time = (0..MIN_FFT_SAMPLES)
+        let time = (0..=MIN_FFT_SAMPLES)
             .map(|index| start + 2.0 * index as f64)
             .collect::<Vec<_>>();
-        let values = vec![1.0; MIN_FFT_SAMPLES];
+        let values = vec![1.0; MIN_FFT_SAMPLES + 1];
         assert!(matches!(
             prepare_fft_input_with_options(
                 "poor-resolution",
@@ -1841,10 +2013,10 @@ mod tests {
     fn generated_resampling_grid_must_meet_the_timestamp_resolution_contract() {
         let start = 1.0e16;
         let interval = 4.0e9;
-        let time = (0..MIN_FFT_SAMPLES)
+        let time = (0..=MIN_FFT_SAMPLES)
             .map(|index| start + interval * index as f64)
             .collect::<Vec<_>>();
-        let values = (0..MIN_FFT_SAMPLES)
+        let values = (0..=MIN_FFT_SAMPLES)
             .map(|index| index as f64)
             .collect::<Vec<_>>();
         let options =
@@ -1857,7 +2029,7 @@ mod tests {
 
     #[test]
     fn integral_rate_reduction_is_filtered_and_unqualified_reductions_fail_closed() {
-        let (time, values) = uniform_record(64, 0.0, 1.0);
+        let (time, values) = uniform_record(65, 0.0, 1.0);
         let qualified_reduction =
             FftInputOptions::with_policy(FftInputPolicy::Reference).with_target_samples(Some(32));
         let prepared =
@@ -2035,6 +2207,143 @@ mod tests {
         assert_eq!(
             prepare_fft_input_from_columns("v", &stored(&time), &stored(&values), narrow),
             prepare_fft_input_with_options("v", &time, &values, narrow)
+        );
+    }
+
+    /// The record is N samples over [start, stop), one period of the signal,
+    /// as ViVA's `dft` takes it. A transient written to an exact whole number
+    /// of periods, 127 cycles of 1 kHz at 4096 steps (4097 points, 0 to
+    /// 127 ms inclusive), is then coherent: the 4096 samples are numpy's
+    /// coherent record, and its rectangular spectrum holds the tone in bin 127
+    /// with every other bin at rounding. Taking the end sample into the
+    /// period, as the record once did, leaked the tone and read SNR 29 dB.
+    #[test]
+    fn a_whole_number_of_periods_is_a_coherent_record() {
+        use crate::fft::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
+        use crate::fft::window::WindowFunction;
+        let (cycles, n) = (127.0_f64, 4096_usize);
+        let step = cycles * 1.0e-3 / n as f64;
+        let time = (0..=n).map(|k| k as f64 * step).collect::<Vec<_>>();
+        let values = time
+            .iter()
+            .map(|t| (2.0 * PI * 1.0e3 * t).sin())
+            .collect::<Vec<_>>();
+        for window in [None, Some(FftTimeWindow::new(0.0, cycles * 1.0e-3))] {
+            let options =
+                FftInputOptions::with_policy(FftInputPolicy::Reference).with_time_window(window);
+            let prepared = prepare_fft_input_with_options("V(out)", &time, &values, options)
+                .expect("a coherent record");
+            assert_eq!(prepared.samples.len(), n);
+            assert!((prepared.sample_rate - n as f64 / (cycles * 1.0e-3)).abs() < 1.0e-6);
+            let data = FftData::from_time_domain_with_normalization(
+                "V(out)",
+                &prepared.samples,
+                prepared.sample_rate,
+                WindowFunction::Rectangular,
+                SpectrumNormalization::Rms,
+            )
+            .expect("a spectrum");
+            let analysis = SpectrumAnalysis::analyze(&data, 10).expect("its figures");
+            assert_eq!(analysis.fundamental_bin, Some(127));
+            assert!((analysis.fundamental_frequency.unwrap() - 1.0e3).abs() < 1.0e-9);
+            assert!((analysis.fundamental_db.unwrap() + 3.010_299_956_639_812).abs() < 1.0e-9);
+            assert!(analysis.snr_db.unwrap() > 250.0, "{analysis:?}");
+            assert!(analysis.sfdr_db.unwrap() > 250.0, "{analysis:?}");
+            assert!(analysis.thd_percent.unwrap() < 1.0e-10, "{analysis:?}");
+        }
+    }
+
+    /// The steady state of a 1 kHz, 0 to 1 V square wave through an RC low
+    /// pass of τ = 100 µs, as a transient writes it: fine steps at each edge,
+    /// coarse between. Each half period is an exponential towards the rail,
+    /// `v(t) = rail + (v₀ − rail)·e^(−t/τ)`, starting from the level the last
+    /// one ended at, `v₀ = 1/(1 + e^(−T/2τ))` after a rising edge.
+    fn rc_square_wave(cycles: usize) -> (Vec<f64>, Vec<f64>) {
+        let (period, tau) = (1.0e-3_f64, 1.0e-4_f64);
+        let half = period / 2.0;
+        let high_start = 1.0 / (1.0 + (-half / tau).exp());
+        let low_start = 1.0 - high_start;
+        let level = |t: f64| {
+            let phase = t.rem_euclid(period);
+            if phase < half {
+                1.0 + (low_start - 1.0) * (-phase / tau).exp()
+            } else {
+                high_start * (-(phase - half) / tau).exp()
+            }
+        };
+        let mut time = vec![0.0];
+        let mut t = 0.0_f64;
+        let end = cycles as f64 * period;
+        while t < end {
+            let since_edge = t.rem_euclid(half);
+            // 1 ns steps for 20 ns after each edge, then growing to 10 µs.
+            let step = if since_edge < 2.0e-8 {
+                1.0e-9
+            } else {
+                (since_edge * 0.05).clamp(1.0e-9, 1.0e-5)
+            };
+            let next_edge = (t / half).floor() * half + half;
+            t = (t + step).min(next_edge).min(end);
+            time.push(t);
+        }
+        let values = time.iter().map(|t| level(*t)).collect();
+        (time, values)
+    }
+
+    /// Auto N resamples a record whose steps are not uniform, rather than
+    /// refusing it on a timestamp check: a transient's switching edges take
+    /// steps a billionth of their timestamps, and the record once got no
+    /// spectrum at all. The THD through HD10 is the Fourier series' answer,
+    /// 20.27 %: the odd harmonics `4/(πk)` of the square wave, each through
+    /// the low pass `1/√(1 + (2πk·f₀τ)²)`.
+    #[test]
+    fn auto_n_resamples_a_transient_and_reads_its_fourier_series() {
+        use crate::fft::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
+        use crate::fft::window::WindowFunction;
+        let (time, values) = rc_square_wave(20);
+        let prepared = prepare_fft_input_with_options(
+            "V(out)",
+            &time,
+            &values,
+            FftInputOptions::with_policy(FftInputPolicy::Reference),
+        )
+        .expect("a transient record resamples");
+        let data = FftData::from_time_domain_with_normalization(
+            "V(out)",
+            &prepared.samples,
+            prepared.sample_rate,
+            WindowFunction::Hanning,
+            SpectrumNormalization::Rms,
+        )
+        .expect("a spectrum");
+        let analysis = SpectrumAnalysis::analyze(&data, 10).expect("its figures");
+        let amplitude = |k: f64| 4.0 / (PI * k) / (1.0 + (2.0 * PI * k * 0.1).powi(2)).sqrt();
+        let thd = 100.0
+            * [3.0, 5.0, 7.0, 9.0]
+                .iter()
+                .map(|k| amplitude(*k).powi(2))
+                .sum::<f64>()
+                .sqrt()
+            / amplitude(1.0);
+        assert!((thd - 20.27).abs() < 0.01, "the closed form itself: {thd}");
+        let measured = analysis.thd_percent.expect("THD");
+        assert!(
+            (measured - thd).abs() < 0.03,
+            "THD {measured} % against the Fourier series' {thd} %"
+        );
+        // The fundamental's rms level, 0.5 of the square's 4/π, through the
+        // low pass.
+        let level = 20.0 * (amplitude(1.0) / 2.0 / std::f64::consts::SQRT_2).log10();
+        assert!(
+            (analysis.fundamental_db.unwrap() - level).abs() < 0.01,
+            "{} against {level}",
+            analysis.fundamental_db.unwrap()
+        );
+        // The record's mean, taken out before the transform, is its DC.
+        assert!(
+            (prepared.dc_level - 0.5).abs() < 1.0e-3,
+            "{}",
+            prepared.dc_level
         );
     }
 }

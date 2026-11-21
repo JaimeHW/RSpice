@@ -43,6 +43,8 @@ fn sine(name: &str) -> PreparedFftInput {
         sample_rate: 16.0,
         original_count: 16,
         decimation_factor: 1,
+        dc_level: 0.0,
+        record: rspice_results_ui::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
     }
 }
 
@@ -57,6 +59,8 @@ fn erased(name: &str) -> PreparedFftInput {
         sample_rate: 16.0,
         original_count: 16,
         decimation_factor: 1,
+        dc_level: 0.0,
+        record: rspice_results_ui::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
     }
 }
 

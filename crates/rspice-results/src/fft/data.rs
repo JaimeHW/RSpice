@@ -9,7 +9,7 @@ mod fft_data;
 mod normalization;
 mod point;
 
-pub use analysis::{HarmonicCoverage, SpectrumAnalysis};
+pub use analysis::{HarmonicCoverage, SpectrumAnalysis, SpectrumMeasurement};
 pub(crate) use error::MIN_FFT_DATA_SAMPLES;
 pub use error::{
     FftAllocationStage, FftBuildError, SpectrumAnalysisAllocationStage, SpectrumAnalysisError,

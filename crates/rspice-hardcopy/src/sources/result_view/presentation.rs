@@ -126,7 +126,7 @@ impl ResultsQuickViewPresentation {
                 WindowFunction::Blackman => PreparedFftWindow::Blackman,
                 WindowFunction::BlackmanHarris => PreparedFftWindow::BlackmanHarris,
                 WindowFunction::FlatTop => PreparedFftWindow::FlatTop,
-                WindowFunction::Kaiser => PreparedFftWindow::Kaiser,
+                WindowFunction::Kaiser(_) => PreparedFftWindow::Kaiser,
                 WindowFunction::Gaussian => PreparedFftWindow::Gaussian,
             },
             fft_input_fidelity: fft.input_fidelity,
@@ -226,7 +226,7 @@ impl ResultsQuickViewPresentation {
             PreparedFftWindow::Blackman => WindowFunction::Blackman,
             PreparedFftWindow::BlackmanHarris => WindowFunction::BlackmanHarris,
             PreparedFftWindow::FlatTop => WindowFunction::FlatTop,
-            PreparedFftWindow::Kaiser => WindowFunction::Kaiser,
+            PreparedFftWindow::Kaiser => WindowFunction::KAISER,
             PreparedFftWindow::Gaussian => WindowFunction::Gaussian,
         }
     }

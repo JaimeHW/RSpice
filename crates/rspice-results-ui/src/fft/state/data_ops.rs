@@ -219,6 +219,8 @@ mod tests {
             sample_rate: 64.0,
             original_count: 64,
             decimation_factor: 1,
+            dc_level: 0.0,
+            record: crate::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
         };
         let mut state = FftState::default();
         state
@@ -256,6 +258,8 @@ mod tests {
             sample_rate: 16.0,
             original_count: 16,
             decimation_factor: 1,
+            dc_level: 0.0,
+            record: crate::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
         };
         let mut state = FftState::default();
         state
@@ -317,6 +321,8 @@ mod tests {
                 sample_rate: 16.0,
                 original_count: 16,
                 decimation_factor: 1,
+                dc_level: 0.0,
+                record: crate::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
             })
             .expect("valid preparation recovers after an input failure");
         assert!(state.has_data());
@@ -336,6 +342,8 @@ mod tests {
                 sample_rate: 64.0,
                 original_count: 64,
                 decimation_factor: 1,
+                dc_level: 0.0,
+                record: crate::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
             })
             .expect("valid spectrum-analysis fixture");
         assert!(state.has_data());

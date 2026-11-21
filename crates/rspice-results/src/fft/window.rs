@@ -9,6 +9,55 @@ use std::{collections::TryReserveError, f64::consts::PI};
 // Window Function Types
 // =============================================================================
 
+/// The Kaiser window's shape parameter β: how far its sidelobes sit below
+/// its main lobe, bought with a wider main lobe.
+///
+/// The default, 38, is the β MATLAB's `sinad`, `snr` and `sfdr` measure
+/// through: its sidelobes sit below double-precision rounding, so a clean
+/// tone's figures are limited by the record, not by the window. ViVA and
+/// Eldo take β as a setting of their Kaiser window, and so does this one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KaiserBeta(u64);
+
+impl KaiserBeta {
+    /// The β a Kaiser window takes until the reader sets another.
+    pub const DEFAULT: Self = Self(38.0_f64.to_bits());
+    /// The largest β the window accepts. Its main lobe is then about 32 bins
+    /// either side of a tone, wider than any measurement needs.
+    pub const MAX: f64 = 100.0;
+
+    /// `beta`, when it is a finite number in `0 ..= MAX`.
+    #[must_use]
+    pub fn new(beta: f64) -> Option<Self> {
+        (beta.is_finite() && (0.0..=Self::MAX).contains(&beta))
+            .then(|| Self((beta + 0.0).to_bits()))
+    }
+
+    /// The β itself.
+    #[must_use]
+    pub fn get(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+
+    /// Half the main lobe's width, in bins: the first null of the Kaiser
+    /// window's transform sits at `√(1 + (β/π)²)` bins from its peak.
+    #[must_use]
+    pub fn main_lobe_half_width_bins(self) -> f64 {
+        (1.0 + (self.get() / PI).powi(2)).sqrt()
+    }
+}
+
+impl Default for KaiserBeta {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// The Gaussian window's α, as MATLAB's `gausswin` takes it: the window is
+/// `exp(−½(α·x)²)` over `x ∈ [−1, 1]`, so it falls to `exp(−α²/2)`, 0.044, at
+/// its ends.
+pub const GAUSSIAN_ALPHA: f64 = 2.5;
+
 /// Window function type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum WindowFunction {
@@ -25,13 +74,30 @@ pub enum WindowFunction {
     BlackmanHarris,
     /// Flat-top window - accurate amplitude measurement
     FlatTop,
-    /// Kaiser window with configurable beta
-    Kaiser,
+    /// Kaiser window with its β
+    Kaiser(KaiserBeta),
     /// Gaussian window
     Gaussian,
 }
 
 impl WindowFunction {
+    /// The Kaiser window at its default β.
+    pub const KAISER: Self = Self::Kaiser(KaiserBeta::DEFAULT);
+
+    /// The window's main lobe half-width in bins, rounded up: the bins
+    /// either side of a tone that its window spreads it over, which a
+    /// measurement claims for the tone rather than counting as noise.
+    #[must_use]
+    pub fn signal_bins(&self) -> usize {
+        match self {
+            Self::Rectangular => 1,
+            Self::Hanning | Self::Hamming => 2,
+            Self::Blackman | Self::Gaussian => 3,
+            Self::BlackmanHarris | Self::FlatTop => 4,
+            Self::Kaiser(beta) => beta.main_lobe_half_width_bins().ceil() as usize,
+        }
+    }
+
     /// Get display name
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -41,12 +107,12 @@ impl WindowFunction {
             Self::Blackman => "Blackman",
             Self::BlackmanHarris => "Blackman-Harris",
             Self::FlatTop => "Flat-Top",
-            Self::Kaiser => "Kaiser",
+            Self::Kaiser(_) => "Kaiser",
             Self::Gaussian => "Gaussian",
         }
     }
 
-    /// All window functions
+    /// All window functions, the Kaiser window at its default β.
     pub fn all() -> &'static [WindowFunction] {
         &[
             Self::Rectangular,
@@ -55,9 +121,15 @@ impl WindowFunction {
             Self::Blackman,
             Self::BlackmanHarris,
             Self::FlatTop,
-            Self::Kaiser,
+            Self::KAISER,
             Self::Gaussian,
         ]
+    }
+
+    /// Whether `self` and `other` are the same kind of window, whatever β.
+    #[must_use]
+    pub fn same_kind(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
     }
 }
 
@@ -77,8 +149,8 @@ pub fn try_generate_window(
         WindowFunction::Blackman => blackman_window(length),
         WindowFunction::BlackmanHarris => blackman_harris_window(length),
         WindowFunction::FlatTop => flat_top_window(length),
-        WindowFunction::Kaiser => kaiser_window(length, 5.0),
-        WindowFunction::Gaussian => gaussian_window(length, 2.5),
+        WindowFunction::Kaiser(beta) => kaiser_window(length, beta.get()),
+        WindowFunction::Gaussian => gaussian_window(length, GAUSSIAN_ALPHA),
     }
 }
 
@@ -177,32 +249,32 @@ fn kaiser_window(length: usize, beta: f64) -> Result<Vec<f64>, TryReserveError> 
     })
 }
 
-fn gaussian_window(length: usize, sigma: f64) -> Result<Vec<f64>, TryReserveError> {
+fn gaussian_window(length: usize, alpha: f64) -> Result<Vec<f64>, TryReserveError> {
     symmetric_window(length, |position| {
-        let normalized = (2.0 * position - 1.0) / sigma;
+        let normalized = alpha * (2.0 * position - 1.0);
         (-0.5 * normalized * normalized).exp()
     })
 }
 
-/// Modified Bessel function of first kind, order 0
+/// Modified Bessel function of the first kind, order 0, by its defining
+/// series `Σ (x²/4)^k / (k!)²` summed until a term no longer moves the sum.
+///
+/// Every term is positive, so the sum carries only rounding, a few parts in
+/// 10¹⁶; a polynomial approximation's 10⁻⁷ would put a floor 140 dB under a
+/// tone in every Kaiser spectrum, far above the window's own sidelobes.
 fn bessel_i0(x: f64) -> f64 {
-    let ax = x.abs();
-    if ax < 3.75 {
-        let y = (x / 3.75).powi(2);
-        1.0 + y
-            * (3.5156229
-                + y * (3.0899424
-                    + y * (1.2067492 + y * (0.2659732 + y * (0.0360768 + y * 0.0045813)))))
-    } else {
-        let y = 3.75 / ax;
-        (ax.exp() / ax.sqrt())
-            * (0.39894228
-                + y * (0.01328592
-                    + y * (0.00225319
-                        + y * (-0.00157565
-                            + y * (0.00916281
-                                + y * (-0.02057706
-                                    + y * (0.02635537 + y * (-0.01647633 + y * 0.00392377))))))))
+    let quarter_square = 0.25 * x * x;
+    let mut term = 1.0_f64;
+    let mut total = 1.0_f64;
+    let mut k = 1.0_f64;
+    loop {
+        term *= quarter_square / (k * k);
+        let next = total + term;
+        if next == total || !next.is_finite() {
+            return next;
+        }
+        total = next;
+        k += 1.0;
     }
 }
 
@@ -261,7 +333,7 @@ mod tests {
                 0.006947368,
             ],
             // Not cosine sums: their closed forms are elsewhere in this module.
-            WindowFunction::Kaiser | WindowFunction::Gaussian => return None,
+            WindowFunction::Kaiser(_) | WindowFunction::Gaussian => return None,
         })
     }
 
@@ -395,61 +467,78 @@ mod tests {
         }
     }
 
-    /// The Kaiser window's `I₀` is a polynomial approximation. Its oracle is
-    /// the defining series `I₀(x) = Σ (x²/4)^k / (k!)²`, summed here to
-    /// convergence, which shares no coefficient with the approximation.
-    ///
-    /// The approximation is Abramowitz & Stegun 9.8.1/9.8.2, quoted to about
-    /// 2e-7 relative; that is what it is held to, so a mistyped coefficient
-    /// fails while the approximation itself passes.
+    /// `I₀` against scipy's `i0`, to the last digit or two of a double:
+    /// the series is exact but for rounding.
     #[test]
-    fn the_kaiser_bessel_approximation_matches_the_defining_series() {
-        let series = |x: f64| {
-            let mut term = 1.0_f64;
-            let mut total = 1.0_f64;
-            for k in 1..200 {
-                term *= (x * x / 4.0) / (f64::from(k) * f64::from(k));
-                total += term;
-                if term <= total * 1.0e-18 {
-                    break;
-                }
-            }
-            total
-        };
-        for step in 0..=120 {
-            let x = f64::from(step) * 0.1;
-            assert_relative(
-                bessel_i0(x),
-                series(x),
-                2.0e-7,
-                &format!("I0({x}) against its series"),
-            );
+    fn the_kaiser_bessel_function_matches_scipy() {
+        for (x, expected) in [
+            (0.0, 1.0),
+            (1.0, 1.266_065_877_752_008_2),
+            (2.0, 2.279_585_302_336_067),
+            (5.0, 27.239_871_823_604_442),
+            (10.0, 2_815.716_628_466_254),
+            (38.0, 2_068_504_714_851_044.5),
+        ] {
+            assert_relative(bessel_i0(x), expected, 4.0e-15, &format!("I0({x})"));
         }
     }
 
     /// The Kaiser window is `I₀(β√(1−x²)) / I₀(β)` on `x ∈ [−1, 1]`, so it is
-    /// 1 at the centre and `1/I₀(β)` at the ends. `generate_window` fixes
-    /// β = 5.
+    /// 1 at the centre and `1/I₀(β)` at the ends, at the β it is given.
     #[test]
     fn the_kaiser_window_is_its_bessel_ratio_at_the_centre_and_the_ends() {
-        const BETA: f64 = 5.0;
-        let w = generate_window(WindowFunction::Kaiser, 1_025);
-        assert_relative(w[512], 1.0, 1.0e-12, "Kaiser centre");
-        assert_relative(w[0], 1.0 / bessel_i0(BETA), 1.0e-12, "Kaiser end");
+        for beta in [0.0, 5.0, 38.0] {
+            let window = WindowFunction::Kaiser(KaiserBeta::new(beta).expect("a valid beta"));
+            let w = generate_window(window, 1_025);
+            assert_relative(w[512], 1.0, 1.0e-12, "Kaiser centre");
+            assert_relative(w[0], 1.0 / bessel_i0(beta), 1.0e-12, "Kaiser end");
+        }
     }
 
-    /// The Gaussian window is `exp(−x²/2)` over `x = (i − c)/(σ·c)`, so with
-    /// `generate_window`'s σ = 2.5 it falls to `exp(−1/(2σ²))` at the ends.
+    /// β is a setting, so the window it shapes is the reader's: β = 0 is
+    /// the rectangular window, and the default β = 38's noise bandwidth and
+    /// coherent gain are scipy's `kaiser(4096, 38)`'s, 3.50798 bins and
+    /// 0.202588.
     #[test]
-    fn the_gaussian_window_falls_to_its_closed_form_at_the_ends() {
-        const SIGMA: f64 = 2.5;
-        let w = generate_window(WindowFunction::Gaussian, 1_025);
-        assert_relative(w[512], 1.0, 1.0e-12, "Gaussian centre");
-        assert_relative(
-            w[0],
-            (-0.5 / (SIGMA * SIGMA)).exp(),
-            1.0e-12,
-            "Gaussian end",
+    fn the_kaiser_window_follows_its_beta() {
+        assert_eq!(
+            WindowFunction::KAISER,
+            WindowFunction::Kaiser(KaiserBeta::DEFAULT)
         );
+        assert_eq!(KaiserBeta::DEFAULT.get(), 38.0);
+        let flat = generate_window(WindowFunction::Kaiser(KaiserBeta::new(0.0).unwrap()), 64);
+        assert!(flat.iter().all(|c| (*c - 1.0).abs() < 1.0e-15));
+        let w = generate_window(WindowFunction::KAISER, 4096);
+        assert_relative(
+            noise_bandwidth_bins(&w),
+            3.507_984_141_319_778_5,
+            1.0e-9,
+            "ENBW",
+        );
+        assert_relative(coherent_gain(&w), 0.202_588_208_063_684_3, 1.0e-9, "CG");
+        assert_eq!(KaiserBeta::new(-1.0), None);
+        assert_eq!(KaiserBeta::new(f64::NAN), None);
+        assert_eq!(KaiserBeta::new(KaiserBeta::MAX + 1.0), None);
+        // The main lobe of β = 38 reaches √(1 + (38/π)²) = 12.13 bins.
+        assert_eq!(WindowFunction::KAISER.signal_bins(), 13);
+    }
+
+    /// The Gaussian window is MATLAB's `gausswin(N, 2.5)`, scipy's
+    /// `gaussian(N, std = (N − 1)/5)`: 0.0439 at its ends, a peak sidelobe
+    /// 43.3 dB down and a noise bandwidth of 1.4459 bins at N = 4096. It
+    /// once used 2.5 as a width in half-windows instead, ended at 0.92 of its
+    /// peak and behaved as a rectangle.
+    #[test]
+    fn the_gaussian_window_is_gausswin_with_alpha_two_and_a_half() {
+        let w = generate_window(WindowFunction::Gaussian, 4096);
+        assert_relative(w[0], 0.043_936_933_623_407_42, 1.0e-12, "Gaussian end");
+        assert_relative(
+            noise_bandwidth_bins(&w),
+            1.445_875_649_407_392,
+            1.0e-9,
+            "ENBW",
+        );
+        let centre = generate_window(WindowFunction::Gaussian, 1_025);
+        assert_relative(centre[512], 1.0, 1.0e-12, "Gaussian centre");
     }
 }
