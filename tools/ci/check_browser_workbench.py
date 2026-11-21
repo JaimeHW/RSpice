@@ -810,6 +810,8 @@ def results_survive_reload(browser):
     wait_until_ready(browser)
     browser.click("Schematic canvas", "canvas")
     after = stated_storage(browser, KEPT, "the reopened run's results read from this browser's storage")
+    if after.split(" · ")[-1] != before.split(" · ")[-1]:
+        raise AssertionError(f"The reopened store states other results than it kept: {before!r}, then {after!r}")
     browser.click("Expand console", "button")
     reopened = browser.capture("results-reopened")
     browser.click("Collapse console", "button")
