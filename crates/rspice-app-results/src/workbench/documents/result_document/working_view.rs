@@ -13,7 +13,8 @@
 //! older run of the plan shows it through the same view.
 //!
 //! A plan's view follows the plan's newest run unless the reader chose a run
-//! for it; an imported run's view reads that run.
+//! for it, and then until the plan runs again; an imported run's view reads
+//! that run.
 
 use std::collections::{HashMap, HashSet};
 
@@ -111,6 +112,7 @@ pub fn sync(state: &mut ResultsParts<'_>) {
         state.results.session.working_view_panes.clear();
         return;
     };
+    follow_a_new_run(state, view, &run);
     follow(state, view, &run);
     reread_grown(state, view, &run);
     plot_marked_outputs(state, view, &run);
@@ -328,6 +330,46 @@ fn newest_run_of_plan(
         .iter()
         .filter(|run| source_of(run) == source)
         .max_by_key(|run| run.id)
+}
+
+/// A plan that runs again shows its new run, as Assembler's Results tab
+/// turns to the history a run makes: a view kept on an earlier run follows
+/// the plan's newest again once the newest is the run shown. The view
+/// changes itself here, so the reader has no step to undo.
+fn follow_a_new_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown: &SimulationRun) {
+    let source = source_of(shown);
+    let WorkingViewSource::Plan { .. } = source else {
+        return;
+    };
+    let Some(document) = state.model.workspace.content.visualization_document(view) else {
+        return;
+    };
+    let mut tracking = document.tracking();
+    let reads_shown = document
+        .panes()
+        .iter()
+        .filter_map(|pane| pane.binding)
+        .any(|binding| binding.dataset.dataset_id == shown.dataset_id);
+    if tracking.mode != ResultDocumentTrackingMode::Pinned
+        || reads_shown
+        || newest_run_of_plan(state.results_reads(), source).map(|run| run.dataset_id)
+            != Some(shown.dataset_id)
+    {
+        return;
+    }
+    tracking.mode = ResultDocumentTrackingMode::Latest;
+    let revision = document.revision();
+    if let Err(error) = view_edits::apply_following(
+        state,
+        view,
+        revision,
+        vec![DocumentEdit::SetTracking(tracking)],
+    ) {
+        state.prompt(format!(
+            "The view could not follow {}: {error}",
+            shown.label
+        ));
+    }
 }
 
 /// Move a view that follows its plan onto the plan's newest run.
