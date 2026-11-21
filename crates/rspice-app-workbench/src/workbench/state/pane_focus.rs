@@ -187,13 +187,13 @@ impl PaneFocus {
         ctx.viewport(|viewport| {
             let widgets = &viewport.this_pass.widgets;
             let usable = |widget: &&egui::WidgetRect| Self::lands_in(drawn, widget);
-            let stops = document_stops
+            let mut stops = document_stops
                 .iter()
                 .filter(|_| drawn.pane == Pane::Document)
                 .filter_map(|id| widgets.get(*id));
             let stop = match step {
-                PaneStep::Next => stops.filter(usable).next(),
-                PaneStep::Previous => stops.filter(usable).last(),
+                PaneStep::Next => stops.find(usable),
+                PaneStep::Previous => stops.rfind(usable),
             };
             stop.or_else(|| widgets.get_layer(drawn.layer).find(usable))
                 .map(|widget| widget.id)
