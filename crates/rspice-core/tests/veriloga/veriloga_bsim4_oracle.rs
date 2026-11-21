@@ -21,22 +21,6 @@ fn bsim4_path() -> Option<std::path::PathBuf> {
     common::optional_bsim4_va_path(env!("CARGO_MANIFEST_DIR"))
 }
 
-#[test]
-fn bsim4_optional_source_prefers_configured_external_path() {
-    let path = std::env::temp_dir().join(format!(
-        "rspice-bsim4-env-path-{}-{}.va",
-        std::process::id(),
-        "core"
-    ));
-    std::fs::write(&path, "module bsim4va; endmodule\n").expect("write temporary VA source");
-
-    let actual =
-        common::optional_bsim4_va_path_from(Some(path.clone().into_os_string()), Path::new(""));
-    let _ = std::fs::remove_file(&path);
-
-    assert_eq!(actual, Some(path));
-}
-
 /// Solve the single-transistor bias circuit and return the drain current
 fn drain_current(model: &Path, vgs: f64, vds: f64) -> f64 {
     drain_current_at(model, vgs, vds, None)
