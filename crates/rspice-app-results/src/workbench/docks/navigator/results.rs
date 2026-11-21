@@ -439,7 +439,8 @@ pub(in crate::workbench) fn results(
                         presentation_key,
                         label,
                         short_label: analysis.analysis_type.short_label(),
-                        success: analysis.success,
+                        // A running analysis has not failed.
+                        success: analysis.success || analysis.is_live_partial(),
                         signals,
                         artifacts,
                     })

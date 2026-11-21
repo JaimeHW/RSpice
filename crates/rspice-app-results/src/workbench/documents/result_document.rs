@@ -2618,7 +2618,18 @@ fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
     if viewer_availability(state.results_reads(), state.results.session.viewer).available {
         return;
     }
-    if state.model.simulation.active_run().is_none() {
+    let Some(run) = state.model.simulation.active_run() else {
+        return;
+    };
+    // A run that has written nothing yet keeps the reader's sheet: its first results arrive
+    // there, and until they do the sheet says what is coming.
+    if run.analyses.is_empty()
+        && matches!(
+            run.lifecycle,
+            crate::state::SimulationRunLifecycle::Preparing
+                | crate::state::SimulationRunLifecycle::Running
+        )
+    {
         return;
     }
     if let Some(viewer) = ResultViewer::all()

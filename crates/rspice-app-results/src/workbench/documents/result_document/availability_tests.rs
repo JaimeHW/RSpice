@@ -606,6 +606,32 @@ fn incompatible_active_viewer_falls_back_to_compatible_view() {
     assert_eq!(state.results.results.session.viewer, ResultViewer::Waves);
 }
 
+/// A running run that has written nothing yet keeps the reader on the sheet its results
+/// arrive on, so a transient's live plot appears where the reader is looking; a run that
+/// ended with nothing to show still falls back to its inventory.
+#[test]
+fn a_run_that_has_written_nothing_yet_keeps_the_readers_sheet() {
+    let mut state = ResultsTestHost::default();
+    let sequence = state.model.simulation.start_run().id;
+    let set_lifecycle = |state: &mut ResultsTestHost, lifecycle| {
+        state
+            .model
+            .simulation
+            .retained
+            .run_by_sequence_mut(sequence)
+            .expect("the run is retained")
+            .lifecycle = lifecycle;
+    };
+
+    set_lifecycle(&mut state, crate::state::SimulationRunLifecycle::Running);
+    reconcile_active_viewer(&mut state.results_parts());
+    assert_eq!(state.results.results.session.viewer, ResultViewer::Waves);
+
+    set_lifecycle(&mut state, crate::state::SimulationRunLifecycle::Failed);
+    reconcile_active_viewer(&mut state.results_parts());
+    assert_eq!(state.results.results.session.viewer, ResultViewer::Manifest);
+}
+
 #[test]
 fn only_the_manifest_draws_without_a_retained_dataset() {
     assert!(!viewer_requires_retained_results(ResultViewer::Manifest));
