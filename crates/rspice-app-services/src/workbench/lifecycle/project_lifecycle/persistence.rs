@@ -153,16 +153,8 @@ thread_local! {
     static NEXT_BROWSER_HANDLE_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 const BROWSER_ASYNC_TIMEOUT_MS: u32 = 15_000;
-
-#[cfg(any(test, target_arch = "wasm32"))]
-fn browser_timeout_message(operation: &str) -> String {
-    format!(
-        "{operation} timed out after {} seconds",
-        BROWSER_ASYNC_TIMEOUT_MS / 1_000
-    )
-}
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn browser_file_picker_supported() -> bool {
@@ -433,18 +425,5 @@ async fn run_browser_open(picker: js_sys::Promise) -> BrowserOpenResult {
         handle_id,
         display_name,
         bytes,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn browser_storage_timeout_message_is_bounded_and_actionable() {
-        assert_eq!(
-            browser_timeout_message("browser staged file write"),
-            "browser staged file write timed out after 15 seconds"
-        );
     }
 }
