@@ -137,11 +137,17 @@ pub fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool {
             let Some((frequencies, real, imaginary)) = held_columns(&waveform.x, complex) else {
                 return clear(state);
             };
-            if state
-                .analysis
-                .smith_chart_state
+            // The chart plots the complex coefficient, so it is named S11,
+            // not by the magnitude column |S11| it is retained beside.
+            let name = if trace_identity(&complex.source_name).is_some() {
+                complex.source_name.as_str()
+            } else {
+                waveform.name.as_str()
+            };
+            let chart = &mut state.analysis.smith_chart_state;
+            if chart
                 .load_sparam_data(
-                    &waveform.name,
+                    name,
                     &frequencies,
                     &real,
                     &imaginary,
@@ -150,6 +156,9 @@ pub fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool {
                 .is_err()
             {
                 return clear(state);
+            }
+            if let Some(trace) = chart.traces.last_mut() {
+                trace.visible = identity.output_port == identity.input_port;
             }
         }
     } else {
@@ -395,7 +404,7 @@ fn prepare<'a>(
             real: held(real),
             imaginary: held(imaginary),
             reference_impedance_ohm: trace.reference_impedance_ohm,
-            visible: trace.visible && !sheet.hidden.contains(&trace.name),
+            visible: trace.visible != sheet.toggled.contains(&trace.name),
             removable: false,
             cache_key: rspice_ui_kit::plot::trace_cache_key(0x501_00F0, index),
         });
@@ -570,9 +579,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if let Some((name, removable)) = toggled
         && !removable
     {
-        let hidden = &mut results.session.smith.hidden;
-        if !hidden.remove(&name) {
-            hidden.insert(name);
+        let toggled = &mut results.session.smith.toggled;
+        if !toggled.remove(&name) {
+            toggled.insert(name);
         }
     }
     if let Some(name) = removed {

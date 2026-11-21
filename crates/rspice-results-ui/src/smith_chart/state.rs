@@ -19,7 +19,9 @@ pub struct SParamTrace {
     pub name: String,
     /// Data points
     pub points: Vec<SParamPoint>,
-    /// Whether the viewer draws this trace and lists it in the legend.
+    /// Whether the chart opens with this trace drawn: a network's reflection
+    /// terms are, its transmission terms are not, as ADS opens a Smith chart
+    /// on S11 and S22 and leaves S21 and S12 to the polar plot.
     pub visible: bool,
     /// Reference impedance for a physical reflection trace. Transmission and
     /// mixed-mode loci deliberately carry none and cannot claim Z or VSWR.
@@ -129,8 +131,9 @@ pub struct SmithSheetState {
     pub expression_draft: Option<String>,
     /// Why the last expression the reader entered was refused.
     pub expression_error: Option<String>,
-    /// Network terms the reader switched off, by retained name.
-    pub hidden: std::collections::BTreeSet<String>,
+    /// Network terms the reader switched from how the chart opens them, by
+    /// name: a reflection term off, a transmission term on.
+    pub toggled: std::collections::BTreeSet<String>,
     pub circles: SmithCircleSet,
     /// Gain-circle values in dB; empty means the three whole decibels at
     /// and below the maximum gain.
@@ -168,7 +171,7 @@ impl Default for SmithSheetState {
             responses: Vec::new(),
             expression_draft: None,
             expression_error: None,
-            hidden: std::collections::BTreeSet::new(),
+            toggled: std::collections::BTreeSet::new(),
             circles: SmithCircleSet::default(),
             gain_db: Vec::new(),
             noise_db: Vec::new(),

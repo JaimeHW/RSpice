@@ -754,11 +754,30 @@ pub fn show(
         );
         return None;
     }
+    let (x0, x1) = view.x.unwrap_or((-1.12, 1.12));
+    let (y0, y1) = view.y.unwrap_or((-1.12, 1.12));
+    // A locus switched on but wholly outside the view says so in its chip,
+    // so the legend never lists a curve the chart is not showing.
+    let names = traces
+        .iter()
+        .map(|prepared| {
+            let shown = (0..prepared.real.len()).any(|index| {
+                let (re, im) = (prepared.real[index], prepared.imaginary[index]);
+                (x0..=x1).contains(&re) && (y0..=y1).contains(&im)
+            });
+            if prepared.visible && !shown {
+                format!("{} (out of view)", prepared.name)
+            } else {
+                prepared.name.to_owned()
+            }
+        })
+        .collect::<Vec<_>>();
     let legend: Vec<LegendChip> = traces
         .iter()
+        .zip(&names)
         .enumerate()
-        .map(|(slot, prepared)| LegendChip {
-            name: prepared.name,
+        .map(|(slot, (prepared, name))| LegendChip {
+            name,
             color: c.traces[slot % c.traces.len()],
             on: prepared.visible,
         })
@@ -791,8 +810,6 @@ pub fn show(
         .removable_from(removable_from)
         .show(ui);
 
-    let (x0, x1) = view.x.unwrap_or((-1.12, 1.12));
-    let (y0, y1) = view.y.unwrap_or((-1.12, 1.12));
     let drawn = traces
         .iter()
         .filter(|prepared| prepared.visible)

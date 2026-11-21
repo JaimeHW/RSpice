@@ -648,6 +648,29 @@ pub fn resolve_overlays(analysis: &AnalysisResult, sheet: &PolarSheetState) -> V
 /// What the reader is told when the run carries no complex response at all.
 const ABSENT_STATE: &str = "No complex response in this run — run an AC, SP, or HB analysis";
 
+/// A network opens on its transmission terms, as ADS opens S21 and S12 on a
+/// polar plot and leaves S11 and S22 to the Smith chart: until the reader
+/// chooses a locus or an overlay, the first transmission term is the locus
+/// and the others overlay it.
+pub fn seed_network_defaults(analysis: &AnalysisResult, sheet: &mut PolarSheetState) {
+    if sheet.quantity.is_some() || !sheet.overlays.is_empty() {
+        return;
+    }
+    let transmissions = quantities(analysis)
+        .into_iter()
+        .filter(|quantity| {
+            rspice_results::network_matrix::trace_identity(&quantity.name)
+                .is_some_and(|identity| identity.output_port != identity.input_port)
+        })
+        .map(|quantity| quantity.name)
+        .collect::<Vec<_>>();
+    let Some((first, rest)) = transmissions.split_first() else {
+        return;
+    };
+    sheet.quantity = Some(first.clone());
+    sheet.overlays = rest.iter().take(MAX_OVERLAYS).cloned().collect();
+}
+
 /// Resolve a selected locus from the host-qualified analysis without copying its sample arrays.
 pub fn resolve_locus(analysis: &AnalysisResult, sheet: &PolarSheetState) -> Option<PolarLocus> {
     let quantities = quantities(analysis);

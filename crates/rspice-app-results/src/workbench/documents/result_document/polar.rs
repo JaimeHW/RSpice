@@ -6,6 +6,7 @@ use rspice_results_ui::polar::{self as view, CanvasResponse, CursorSamples, Pola
 pub(super) use view::quantities;
 
 pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
+    seed(context);
     view::domain_bar(
         ui,
         context
@@ -23,7 +24,15 @@ fn active_locus(context: &SheetContext<'_>) -> Option<PolarLocus> {
     )
 }
 
+/// A network's transmission terms are what the sheet opens on.
+fn seed(context: &mut SheetContext<'_>) {
+    if let Some(analysis) = context.simulation.active_analysis() {
+        view::seed_network_defaults(analysis, &mut context.results.session.polar);
+    }
+}
+
 pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
+    seed(context);
     let locus = active_locus(context);
     if let Some(locus) = &locus {
         seed_cursors(context, locus);
