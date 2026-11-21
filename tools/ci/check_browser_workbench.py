@@ -1317,9 +1317,15 @@ def rawfile_import_streams(browser):
         browser.call("POST", f"/element/{element}/value",
                      {"text": str((browser.output / IMPORTED_RAWFILE).resolve())})
         for step in ("Map signals", "Validate import", "Import"):
-            wait_for(lambda: any(c["label"] == step and c["role"] == "button"
-                                 for c in controls(browser.snapshot())),
-                     f"the import review's {step}", 120)
+            try:
+                wait_for(lambda: any(c["label"] == step and c["role"] == "button"
+                                     for c in controls(browser.snapshot())),
+                         f"the import review's {step}", 120)
+            except AssertionError:
+                # Main's CI stalled here on 11-21 with nothing to read; keep what the page shows.
+                browser.capture("rawfile-import-stalled")
+                browser.console_entries()
+                raise
             browser.click(step, "button")
     finally:
         browser.cdp("Page.setInterceptFileChooserDialog", {"enabled": False})
