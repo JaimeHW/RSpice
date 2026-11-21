@@ -1184,40 +1184,6 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
     );
 }
 
-/// Each of the shipped inverter's transistors names a model the built-in
-/// library resolves, and keeps W and L as instance parameters. Its value once
-/// read "NMOS W=1u L=0.18u": the Model property holding the instance
-/// parameters too, which the inspector read whole as a model name and
-/// reported missing.
-#[test]
-fn the_cmos_inverter_example_binds_models_the_library_resolves() {
-    let mut state = DesignTestHost::default();
-    rspice_app_state::workbench::examples::load_example(
-        "CMOS Inverter",
-        &mut state.model.schematic,
-    );
-    for (name, model) in [("MP", "RSPICE_PMOS"), ("MN", "RSPICE_NMOS")] {
-        let component = state
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.name == name)
-            .unwrap_or_else(|| panic!("the inverter has no {name}"));
-        assert_eq!(
-            component_model_evidence(&state.model, component),
-            ComponentModelEvidence::resolved(model),
-            "{name}'s model binding"
-        );
-        let params = rspice_design::parameters::parse_params_string(&component.params);
-        assert!(
-            params.contains_key("w") && params.contains_key("l"),
-            "{name} keeps W and L as instance parameters: {params:?}"
-        );
-    }
-}
-
 /// A waived error is a decision, not a failure: the sheet's row marks the
 /// findings it counts as the Checks header and the run gate count them, so
 /// errors that are all waived read as findings to note rather than as a

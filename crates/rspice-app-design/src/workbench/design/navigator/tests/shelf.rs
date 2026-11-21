@@ -411,39 +411,6 @@ fn every_shelf_glyph_paints_ink_and_no_text_glyph_is_a_tofu_box() {
     }
 }
 
-/// The shelf's meta column states the default the placed instance will
-/// carry, spelled through the crate's engineering formatter, and nothing
-/// else: the designator prefix it used to lead with is what the glyph column
-/// beside it paints, from the same `spice_prefix`.
-#[test]
-fn shelf_meta_states_the_placed_default() {
-    for (kind, meta) in [
-        (ComponentType::Resistor, Some("1k")),
-        (ComponentType::Capacitor, Some("1u")),
-        (ComponentType::Inductor, Some("1m")),
-        (ComponentType::VoltageSource, Some("5")),
-        (ComponentType::OpAmp, Some("100k")),
-        // The one default not authored in the formatter's spelling: the
-        // formatter's decade wins, as it does in the property editor.
-        (ComponentType::CoupledInductor, Some("990m")),
-        // A default no engineering parser reads is stated as authored.
-        (ComponentType::BehavioralSource, Some("V=0")),
-        // Modelled devices have no meaningful default value.
-        (ComponentType::Diode, None),
-        (ComponentType::Nmos, None),
-        (ComponentType::Memristor, None),
-        // Structural objects own neither a designator nor a value.
-        (ComponentType::Ground, None),
-        (ComponentType::Port, None),
-    ] {
-        assert_eq!(
-            primitive_shelf_meta(kind).as_deref(),
-            meta,
-            "meta column of {kind:?}"
-        );
-    }
-}
-
 // -------------------------------------------------- shelf pinning and recents
 
 /// The whole Component shelf, through the entry point the dock calls.

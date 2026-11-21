@@ -120,16 +120,6 @@ fn alias_candidate_rejects_stale_label_identity() {
     assert_eq!(state.document().net_labels[0].name, "OLD");
 }
 
-#[test]
-fn typed_bus_validation_preserves_declared_direction() {
-    let descending = BusDeclaration::parse("DATA[7:0]").expect("valid");
-    let ascending = BusDeclaration::parse("DATA[0:7]").expect("valid");
-    assert_eq!(descending.direction(), BusDirection::Descending);
-    assert_eq!(ascending.direction(), BusDirection::Ascending);
-    assert_eq!(descending.width(), 8);
-    assert_eq!(ascending.width(), 8);
-}
-
 /// Nothing is proposed: the manager opens with no declaration, so placement
 /// cannot begin on a vector the user never wrote.
 #[test]

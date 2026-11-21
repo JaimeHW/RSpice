@@ -20,18 +20,6 @@ pub fn render(
     super::render::render_create_model_bound_symbol_dialog(draft, model, workbench, ctx);
 }
 
-pub fn node_bounds(
-    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
-    role: egui::accesskit::Role,
-    label: &str,
-) -> egui::accesskit::Rect {
-    nodes
-        .iter()
-        .find(|(_, node)| node.role() == role && node.label() == Some(label))
-        .and_then(|(_, node)| node.bounds())
-        .unwrap_or_else(|| panic!("missing {role:?} node {label}"))
-}
-
 #[test]
 fn target_parser_requires_one_canonical_library_cell_identity() {
     assert_eq!(parse_target("work / ota").unwrap(), ("work", "ota"));
