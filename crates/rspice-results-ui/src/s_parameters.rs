@@ -22,6 +22,18 @@ pub fn is_coefficient(name: &str) -> bool {
     trace_identity(name).is_some()
 }
 
+/// The level a network function's curve is read against, drawn dashed
+/// across its strip as ADS draws it: one for the stability factors K, μ and
+/// μ′, zero for B1.
+pub fn reference_level(expression: &str) -> Option<f64> {
+    let (function, _) = expression.trim().split_once('(')?;
+    match function.trim().to_ascii_lowercase().as_str() {
+        "kf" | "mu" | "mu_prime" => Some(1.0),
+        "b1f" => Some(0.0),
+        _ => None,
+    }
+}
+
 /// What the run offers the Plot menu, read from its column names and
 /// metadata without a sample.
 pub struct NetworkOffer<'a> {

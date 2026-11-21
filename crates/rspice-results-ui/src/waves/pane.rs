@@ -886,6 +886,16 @@ pub fn show_plot<'a>(
     if pane.axis_unit() == "dB" && y0 < 0.0 && y1 > 0.0 {
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
     }
+    // A two-port's stability factor reads against the level that parts
+    // stable from unstable: K = 1 and μ = 1.
+    for level in exprs
+        .iter()
+        .filter_map(|expr| crate::s_parameters::reference_level(&expr.label))
+    {
+        if y0 < level && level < y1 && !spec.ref_lines.iter().any(|line| line.y == level) {
+            spec.ref_lines.push(plot::RefLine { y: level });
+        }
+    }
 
     // A large family is drawn as the band it occupies, with the member the
     // reader points at stroked over it; see `FAMILY_BAND_MEMBERS`. A family's
