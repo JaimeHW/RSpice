@@ -583,9 +583,69 @@ impl ResultsState {
             self.retained_history_revision = Some(revision);
             return;
         }
+        if !self.retained_datasets.is_empty() {
+            self.carry_views_onto_new_runs(simulation, &retained);
+        }
         self.retain_datasets(&retained);
         self.retained_datasets = retained;
         self.retained_history_revision = Some(revision);
+    }
+
+    /// Carry the reader's view onto each run that joined the history since
+    /// the last look: a re-run of a plan opens on what the reader made of
+    /// the run before it, analysis by authored analysis and signal by name,
+    /// not on every signal shown and nothing else.
+    fn carry_views_onto_new_runs(
+        &mut self,
+        simulation: &crate::state::SimulationState,
+        retained: &HashSet<DatasetId>,
+    ) {
+        let runs = &simulation.retained.runs;
+        let plan = |run: &crate::state::SimulationRun| {
+            run.prepared_receipt()
+                .and_then(|receipt| receipt.simulation_plan_id())
+        };
+        for run in runs.iter().filter(|run| {
+            retained.contains(&run.dataset_id) && !self.retained_datasets.contains(&run.dataset_id)
+        }) {
+            let Some(previous) = runs
+                .iter()
+                .filter(|other| {
+                    self.retained_datasets.contains(&other.dataset_id)
+                        && other.id < run.id
+                        && plan(other) == plan(run)
+                })
+                .max_by_key(|other| other.id)
+            else {
+                continue;
+            };
+            for (index, analysis) in run.analyses.iter().enumerate() {
+                let authored = analysis
+                    .provenance()
+                    .map(|provenance| provenance.authored_source_instance_id());
+                let before = previous
+                    .analyses
+                    .iter()
+                    .find(|candidate| {
+                        authored.is_some()
+                            && candidate
+                                .provenance()
+                                .map(|provenance| provenance.authored_source_instance_id())
+                                == authored
+                    })
+                    .or_else(|| {
+                        previous.analyses.get(index).filter(|candidate| {
+                            authored.is_none() && candidate.analysis_type == analysis.analysis_type
+                        })
+                    });
+                if let Some(before) = before {
+                    self.session.carry_view(
+                        AnalysisPresentationKey::new(previous.dataset_id, before),
+                        AnalysisPresentationKey::new(run.dataset_id, analysis),
+                    );
+                }
+            }
+        }
     }
 
     /// The standing reason one document's Latest retarget onto this exact

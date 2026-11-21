@@ -46,15 +46,33 @@ fn authored_run(
     authored_analysis_id: AnalysisInstanceId,
     trace_name: &str,
 ) -> SimulationRun {
+    authored_run_with(
+        run_sequence,
+        plan_id,
+        project_revision,
+        source_digest,
+        authored_analysis_id,
+        trace_name,
+        (vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0]),
+    )
+}
+
+/// [`authored_run`], with the one trace's samples given.
+fn authored_run_with(
+    run_sequence: u64,
+    plan_id: SimulationPlanId,
+    project_revision: ObjectRevision,
+    source_digest: ContentDigest,
+    authored_analysis_id: AnalysisInstanceId,
+    trace_name: &str,
+    (x, y): (Vec<f64>, Vec<f64>),
+) -> SimulationRun {
     let mut run = completed_prepared_run(plan_id, project_revision, source_digest);
     run.id = run_sequence;
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient")
             .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
-                trace_name,
-                vec![0.0, 0.5, 1.0],
-                vec![0.0, 1.0, 0.0],
-                "#fff",
+                trace_name, x, y, "#fff",
             )])
             .with_provenance(
                 AnalysisResultProvenance::new(
@@ -351,6 +369,139 @@ fn undo_survives_the_view_following_a_rerun() {
             .prompt
             .as_ref()
             .map(|prompt| &prompt.text)
+    );
+}
+
+/// A re-run of a plan opens the quick view on what the reader made of the
+/// run before it: the hidden trace, the expression, the markers and the log
+/// axis all carry over, while the earlier run keeps its own. A marker put on
+/// a point keeps its X; a peak marker finds the new run's peak.
+#[test]
+fn a_rerun_keeps_the_quick_view_the_reader_made() {
+    use rspice_app_results::workbench::documents::result_document::prepare_viewer_state;
+    use rspice_app_workbench::workbench::state::{Workspace, WorkspaceDocumentId};
+    use rspice_results::feature_search::{Anchor, nearest};
+    use rspice_results::result_presentation::{
+        ExprTrace, MarkerKind, SourceWaveformPresentationKey, WavePanePresentationKey,
+    };
+
+    let LatestFixture {
+        mut app,
+        plan_id,
+        authored_analysis_id,
+        source_digest,
+        ..
+    } = latest_tracking_fixture();
+    app.state.workbench.activate(Workspace::Results);
+    let first = app.state.model.simulation.retained.runs[0].dataset_id;
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(first));
+    prepare_viewer_state(&mut app.state.results_parts());
+    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
+    let session = &mut app.state.results.results.session;
+    session.waveform_visibility.insert(
+        SourceWaveformPresentationKey::new(analysis, "V(out)"),
+        false,
+    );
+    session.analysis_exprs.insert(
+        analysis,
+        vec![ExprTrace {
+            text: "V(out)*2".to_owned(),
+            complex_policy: Default::default(),
+            visible: true,
+        }],
+    );
+    session.log_y_panes.insert(WavePanePresentationKey {
+        analysis,
+        unit: "V".to_owned(),
+    });
+    session
+        .add_marker(analysis, anchor.clone(), "V(out)".to_owned(), 0.25)
+        .expect("a note marker");
+    let peak = session
+        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.5)
+        .expect("a peak marker");
+    session.marker_mut(peak).expect("the peak marker").kind = MarkerKind::Peak;
+
+    let rerun_x = [0.0, 0.25, 0.5, 0.75, 1.0];
+    let rerun_y = [0.0, 0.2, 0.4, 1.0, 0.1];
+    let project_revision = app.state.model.workspace.content.project.revision();
+    app.state
+        .model
+        .simulation
+        .retained
+        .runs
+        .push(authored_run_with(
+            2,
+            plan_id,
+            project_revision,
+            source_digest,
+            authored_analysis_id,
+            "V(out)",
+            (rerun_x.to_vec(), rerun_y.to_vec()),
+        ));
+    let rerun = app.state.model.simulation.retained.runs[1].dataset_id;
+    assert!(app.state.model.simulation.select_run(1));
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(rerun));
+    prepare_viewer_state(&mut app.state.results_parts());
+    let (rerun_analysis, _) = active_analysis_anchor(&mut app.state);
+    assert_ne!(rerun_analysis, analysis, "the re-run is another dataset");
+
+    let session = &app.state.results.results.session;
+    assert_eq!(
+        session
+            .waveform_visibility
+            .get(&SourceWaveformPresentationKey::new(
+                rerun_analysis,
+                "V(out)"
+            )),
+        Some(&false),
+        "the hidden trace stays hidden"
+    );
+    assert_eq!(
+        session
+            .analysis_exprs
+            .get(&rerun_analysis)
+            .map(|expressions| expressions[0].text.as_str()),
+        Some("V(out)*2")
+    );
+    assert!(session.log_y_panes.contains(&WavePanePresentationKey {
+        analysis: rerun_analysis,
+        unit: "V".to_owned(),
+    }));
+    let carried = session
+        .markers
+        .iter()
+        .filter(|marker| marker.analysis == rerun_analysis)
+        .collect::<Vec<_>>();
+    assert_eq!(carried.len(), 2);
+    let note = carried
+        .iter()
+        .find(|marker| marker.kind == MarkerKind::Note)
+        .expect("the note marker");
+    assert_eq!(note.x, 0.25, "a marker on a point keeps its X");
+    let peak = carried
+        .iter()
+        .find(|marker| marker.kind == MarkerKind::Peak)
+        .expect("the peak marker");
+    assert_eq!(
+        nearest(&rerun_x, &rerun_y, peak.x, Anchor::Peak).map(|found| found.x),
+        Some(0.75),
+        "a peak marker finds the new run's peak"
+    );
+    assert_eq!(
+        session
+            .markers
+            .iter()
+            .filter(|marker| marker.analysis == analysis)
+            .count(),
+        2,
+        "the earlier run keeps its own markers"
     );
 }
 

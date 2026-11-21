@@ -1100,6 +1100,85 @@ impl ResultViewerState {
             .unwrap_or(dataset_default)
     }
 
+    /// Carry the reader's view of the analysis `from` onto `to`, the same
+    /// authored analysis solved again by a newer run: which traces are
+    /// hidden or shown, the expressions and their units, the markers, the
+    /// log axes, the X scale, the XY strips and a hidden strip. A choice
+    /// `to` already holds is kept. A carried marker takes an identity of its
+    /// own and the X it was put at, so a marker on a point keeps its X and
+    /// one that finds a feature finds it again on the new curve.
+    pub fn carry_view(&mut self, from: AnalysisPresentationKey, to: AnalysisPresentationKey) {
+        if from == to {
+            return;
+        }
+        let visibility = self
+            .waveform_visibility
+            .iter()
+            .filter(|(key, _)| key.analysis() == from)
+            .map(|(key, visible)| {
+                (
+                    SourceWaveformPresentationKey::new(to, key.source_name()),
+                    *visible,
+                )
+            })
+            .collect::<Vec<_>>();
+        for (key, visible) in visibility {
+            self.waveform_visibility.entry(key).or_insert(visible);
+        }
+        let log_y = self
+            .log_y_panes
+            .iter()
+            .filter(|pane| pane.analysis == from)
+            .map(|pane| WavePanePresentationKey {
+                analysis: to,
+                unit: pane.unit.clone(),
+            })
+            .collect::<Vec<_>>();
+        self.log_y_panes.extend(log_y);
+        if self.hidden_strips.contains(&from) {
+            self.hidden_strips.insert(to);
+        }
+        match self.quick_view_presentation.as_deref_mut() {
+            Some(aside) => carry_expressions(
+                &mut aside.analysis_exprs,
+                &mut aside.expression_units,
+                &mut aside.x_scales,
+                &mut aside.xy_strips,
+                from,
+                to,
+            ),
+            None => carry_expressions(
+                &mut self.analysis_exprs,
+                &mut self.expression_units,
+                &mut self.x_scales,
+                &mut self.xy_strips,
+                from,
+                to,
+            ),
+        }
+        if self.markers.iter().any(|marker| marker.analysis == to) {
+            return;
+        }
+        let carried = self
+            .markers
+            .iter()
+            .filter(|marker| marker.analysis == from)
+            .cloned()
+            .collect::<Vec<_>>();
+        for marker in carried {
+            let anchor = WaveformPresentationKey {
+                analysis: to,
+                trace: marker.anchor.trace.clone(),
+            };
+            if let Ok(id) = self.add_marker(to, anchor, marker.trace_name, marker.x)
+                && let Some(placed) = self.marker_mut(id)
+            {
+                placed.kind = marker.kind;
+                placed.note = marker.note;
+            }
+        }
+    }
+
     /// Set the quick view's expressions and X scales aside, the first time a
     /// document pane shows its own in their place.
     fn set_quick_view_aside(&mut self) {
@@ -1705,6 +1784,44 @@ impl ResultViewerState {
             .selected_result_artifact
             .take()
             .filter(|key| live(key.analysis()));
+    }
+}
+
+/// Carry one analysis' expressions, their units, its X scale and its XY
+/// strips onto another, keeping any `to` already holds.
+fn carry_expressions(
+    analysis_exprs: &mut HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
+    expression_units: &mut HashMap<(AnalysisPresentationKey, String), String>,
+    x_scales: &mut HashMap<AnalysisPresentationKey, rspice_ui_kit::plot::XScale>,
+    xy_strips: &mut XyStrips,
+    from: AnalysisPresentationKey,
+    to: AnalysisPresentationKey,
+) {
+    if let Some(expressions) = analysis_exprs.get(&from).cloned() {
+        analysis_exprs.entry(to).or_insert(expressions);
+    }
+    let units = expression_units
+        .iter()
+        .filter(|((analysis, _), _)| *analysis == from)
+        .map(|((_, text), unit)| ((to, text.clone()), unit.clone()))
+        .collect::<Vec<_>>();
+    for (key, unit) in units {
+        expression_units.entry(key).or_insert(unit);
+    }
+    if let Some(scale) = x_scales.get(&from).copied() {
+        x_scales.entry(to).or_insert(scale);
+    }
+    if !xy_strips.iter().any(|strip| strip.analysis == to) {
+        let strips = xy_strips
+            .iter()
+            .filter(|strip| strip.analysis == from)
+            .cloned()
+            .map(|mut strip| {
+                strip.analysis = to;
+                strip
+            })
+            .collect::<Vec<_>>();
+        xy_strips.extend(strips);
     }
 }
 
