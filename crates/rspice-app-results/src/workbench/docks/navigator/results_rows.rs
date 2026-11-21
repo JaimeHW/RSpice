@@ -1857,9 +1857,11 @@ fn result_browser_analysis_head(
     if !ui.is_rect_visible(rect) {
         return response;
     }
-    // A run is the band that heads everything under it: the panel fill and
-    // its own hairline. An analysis is a row inside its run, stepped in one
-    // level, so a run and its analyses never read as peers.
+    // A run heads everything under it with the panel fill. An analysis is a
+    // row inside its run, stepped in one level, so a run and its analyses
+    // never read as peers. No rule under the run: it cut the run off from its
+    // own analyses, and a tree reads its nesting by indent alone, as ViVA's
+    // Results Browser does.
     if level == 0 {
         ui.painter().rect_filled(
             rect,
@@ -1869,11 +1871,6 @@ fn result_browser_analysis_head(
             } else {
                 c.bg_panel
             },
-        );
-        ui.painter().hline(
-            rect.x_range(),
-            rect.bottom() - 0.5,
-            egui::Stroke::new(1.0, c.border),
         );
     } else {
         if response.hovered() {
