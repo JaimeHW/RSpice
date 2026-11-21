@@ -96,157 +96,303 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
             remaining,
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                egui::ScrollArea::horizontal()
-                    .id_salt("rspice.results.wave-instrument")
-                    .auto_shrink([false, true])
-                    .scroll_bar_visibility(
-                        egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
-                    )
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            let cursor_active = host.controls().plot_tool
-                                == ResultPlotTool::Cursor
-                                && host.controls().cursor_armed;
-                            if instrument_control(ui, "A|B", cursor_active, "A/B cursor tool")
-                                .clicked()
+                ui.spacing_mut().item_spacing.x = CONTROL_GAP;
+                let controls = bar_controls(&availability, host);
+                let (shown, folded) = fold(ui, &controls, remaining.x);
+                let mut group = None;
+                for control in &controls[..shown] {
+                    if group.is_some_and(|group| group != control.group) {
+                        instrument_separator(ui);
+                    }
+                    group = Some(control.group);
+                    if control.show_on_bar(ui).clicked()
+                        && let Some(action) = control.action()
+                    {
+                        host.request(action);
+                    }
+                }
+                if folded {
+                    instrument_separator(ui);
+                    let more = instrument_control(
+                        ui,
+                        MORE,
+                        false,
+                        "The instrument controls the bar has no room for",
+                    );
+                    egui::Popup::menu(&more).show(|ui| {
+                        let mut group = None;
+                        for control in &controls[shown..] {
+                            if group.is_some_and(|group| group != control.group) {
+                                ui.separator();
+                            }
+                            group = Some(control.group);
+                            if control.show_in_menu(ui).clicked()
+                                && let Some(action) = control.action()
                             {
-                                host.request(InstrumentAction::Cursor);
+                                host.request(action);
+                                ui.close();
                             }
-                            if instrument_control(
-                                ui,
-                                "H",
-                                host.controls().plot_tool == ResultPlotTool::HorizontalCursor,
-                                "Horizontal cursor - click or drag in the active pane",
-                            )
-                            .clicked()
-                            {
-                                host.request(InstrumentAction::Tool(ResultPlotTool::HorizontalCursor));
-                            }
-
-                            // Box zoom and pan are gestures, so they carry
-                            // glyphs; the lettered controls on this bar are
-                            // the named modes beside them.
-                            instrument_separator(ui);
-                            if IconButton::new(Icon::BoxZoom)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .on(host.controls().plot_tool == ResultPlotTool::BoxZoom)
-                                .tooltip("Box zoom - drag a region")
-                                .show(ui)
-                                .clicked()
-                            {
-                                host.request(InstrumentAction::Tool(ResultPlotTool::BoxZoom));
-                            }
-                            if IconButton::new(Icon::Pan)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .on(host.controls().plot_tool == ResultPlotTool::Pan)
-                                .tooltip("Pan viewport - drag the plot")
-                                .show(ui)
-                                .clicked()
-                            {
-                                host.request(InstrumentAction::Tool(ResultPlotTool::Pan));
-                            }
-
-                            // Viewport controls carry their glyphs like the
-                            // mockup: magnitude and fit are gestures, and the
-                            // lettered controls beside them are named modes.
-                            instrument_separator(ui);
-                            if IconButton::new(Icon::ZoomIn)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .tooltip("Zoom active pane in 2x")
-                                .show(ui)
-                                .clicked()
-                            {
-                                host.request(InstrumentAction::Zoom(0.5));
-                            }
-                            if IconButton::new(Icon::ZoomOut)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .tooltip("Zoom active pane out 2x")
-                                .show(ui)
-                                .clicked()
-                            {
-                                host.request(InstrumentAction::Zoom(2.0));
-                            }
-                            if IconButton::new(Icon::ZoomFit)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .tooltip("Fit active waveform pane")
-                                .show(ui)
-                                .clicked()
-                            {
-                                host.request(InstrumentAction::Fit);
-                            }
-
-                            instrument_separator(ui);
-                            if ui
-                                .add_enabled_ui(availability.limits_available, |ui| {
-                                    instrument_control(
-                                        ui,
-                                        "Limits",
-                                        host.controls().show_spec_limits,
-                                        "Show exact compatible project specification limits",
-                                    )
-                                })
-                                .inner
-                                .clicked()
-                            {
-                                host.request(InstrumentAction::ToggleLimits);
-                            }
-                            if ui
-                                .add_enabled_ui(availability.envelope_available, |ui| {
-                                    instrument_control(
-                                        ui,
-                                        "Envelope",
-                                        host.controls().show_family_envelope,
-                                        "Show min/max envelope from retained family samples",
-                                    )
-                                })
-                                .inner
-                                .clicked()
-                            {
-                                host.request(InstrumentAction::ToggleEnvelope);
-                            }
-                            if instrument_control(
-                                ui,
-                                "Grid",
-                                host.controls().show_minor_grid,
-                                "Show minor waveform grid",
-                            )
-                            .clicked()
-                            {
-                                host.request(InstrumentAction::ToggleGrid);
-                            }
-                            if ui
-                                .add_enabled_ui(availability.marker_available, |ui| {
-                                    instrument_control(
-                                        ui,
-                                        "+M",
-                                        false,
-                                        "Drop marker at cursor A on selected or nearest visible trace",
-                                    )
-                                })
-                                .inner
-                                .clicked()
-                            {
-                                host.request(InstrumentAction::DropMarker);
-                            }
-
-                            let hidden = host.hidden_strip_count();
-                            if hidden > 0 {
-                                instrument_separator(ui);
-                                if instrument_control(
-                                    ui,
-                                    &format!("{hidden} hidden"),
-                                    true,
-                                    "Restore closed waveform strips",
-                                )
-                                .clicked()
-                                {
-                                    host.request(InstrumentAction::RestoreStrips);
-                                }
-                            }
-                        });
+                        }
                     });
+                }
             },
         );
     });
+}
+
+/// The gap between two controls of the bar.
+const CONTROL_GAP: f32 = 4.0;
+/// The width a separator takes, its gap included.
+const SEPARATOR_WIDTH: f32 = 7.0 + CONTROL_GAP;
+/// The control the bar folds the controls it has no room for behind.
+const MORE: &str = "More";
+
+/// What one control of the bar is.
+#[derive(Debug, Clone, PartialEq)]
+enum ControlKind {
+    /// A lettered control.
+    Text(String),
+    /// A glyph.
+    Glyph(Icon),
+}
+
+/// One control of the bar, which it draws in its row while there is room
+/// and in its "More" menu once there is not.
+struct BarControl {
+    /// The controls of one group stand together between separators.
+    group: u8,
+    kind: ControlKind,
+    /// What the control's menu row reads, and its tooltip on the bar.
+    name: String,
+    tooltip: &'static str,
+    on: bool,
+    enabled: bool,
+    action: fn() -> Option<InstrumentAction>,
+}
+
+impl BarControl {
+    fn action(&self) -> Option<InstrumentAction> {
+        (self.action)()
+    }
+
+    /// The width the control takes in the bar, its gap included.
+    fn width(&self, ui: &Ui) -> f32 {
+        let side = ResultBarMetrics::of(ui).instrument_control;
+        let own = match &self.kind {
+            ControlKind::Glyph(_) => side,
+            ControlKind::Text(label) => {
+                let galley = ui.painter().layout_no_wrap(
+                    label.clone(),
+                    theme::mono(tokens::FS_0, FontWeight::Medium),
+                    egui::Color32::WHITE,
+                );
+                (galley.size().x + 12.0).max(26.0)
+            }
+        };
+        own + CONTROL_GAP
+    }
+
+    fn show_on_bar(&self, ui: &mut Ui) -> egui::Response {
+        ui.add_enabled_ui(self.enabled, |ui| match &self.kind {
+            ControlKind::Text(label) => instrument_control(ui, label, self.on, self.tooltip),
+            ControlKind::Glyph(icon) => IconButton::new(*icon)
+                .side(ResultBarMetrics::of(ui).instrument_control)
+                .on(self.on)
+                .tooltip(self.tooltip)
+                .show(ui),
+        })
+        .inner
+    }
+
+    fn show_in_menu(&self, ui: &mut Ui) -> egui::Response {
+        ui.add_enabled(
+            self.enabled,
+            egui::Button::selectable(self.on, self.name.as_str()),
+        )
+        .on_hover_text(self.tooltip)
+    }
+}
+
+/// The bar's controls, in order, as the controls and availability read now.
+fn bar_controls(
+    availability: &InstrumentAvailability,
+    host: &impl WaveInstrumentHost,
+) -> Vec<BarControl> {
+    let controls = host.controls();
+    let control = |group, kind, name: &str, tooltip, on, enabled, action| BarControl {
+        group,
+        kind,
+        name: name.to_owned(),
+        tooltip,
+        on,
+        enabled,
+        action,
+    };
+    let mut bar = vec![
+        control(
+            0,
+            ControlKind::Text("A|B".to_owned()),
+            "A/B cursors",
+            "A/B cursor tool",
+            controls.plot_tool == ResultPlotTool::Cursor && controls.cursor_armed,
+            true,
+            || Some(InstrumentAction::Cursor),
+        ),
+        control(
+            0,
+            ControlKind::Text("H".to_owned()),
+            "Horizontal cursor",
+            "Horizontal cursor - click or drag in the active pane",
+            controls.plot_tool == ResultPlotTool::HorizontalCursor,
+            true,
+            || Some(InstrumentAction::Tool(ResultPlotTool::HorizontalCursor)),
+        ),
+        // Box zoom and pan are gestures, so they carry glyphs; the lettered
+        // controls on this bar are the named modes beside them.
+        control(
+            1,
+            ControlKind::Glyph(Icon::BoxZoom),
+            "Box zoom",
+            "Box zoom - drag a region",
+            controls.plot_tool == ResultPlotTool::BoxZoom,
+            true,
+            || Some(InstrumentAction::Tool(ResultPlotTool::BoxZoom)),
+        ),
+        control(
+            1,
+            ControlKind::Glyph(Icon::Pan),
+            "Pan",
+            "Pan viewport - drag the plot",
+            controls.plot_tool == ResultPlotTool::Pan,
+            true,
+            || Some(InstrumentAction::Tool(ResultPlotTool::Pan)),
+        ),
+        control(
+            2,
+            ControlKind::Glyph(Icon::ZoomIn),
+            "Zoom in",
+            "Zoom active pane in 2x",
+            false,
+            true,
+            || Some(InstrumentAction::Zoom(0.5)),
+        ),
+        control(
+            2,
+            ControlKind::Glyph(Icon::ZoomOut),
+            "Zoom out",
+            "Zoom active pane out 2x",
+            false,
+            true,
+            || Some(InstrumentAction::Zoom(2.0)),
+        ),
+        control(
+            2,
+            ControlKind::Glyph(Icon::ZoomFit),
+            "Fit",
+            "Fit active waveform pane",
+            false,
+            true,
+            || Some(InstrumentAction::Fit),
+        ),
+        control(
+            3,
+            ControlKind::Text("Limits".to_owned()),
+            "Limits",
+            "Show exact compatible project specification limits",
+            controls.show_spec_limits,
+            availability.limits_available,
+            || Some(InstrumentAction::ToggleLimits),
+        ),
+        control(
+            3,
+            ControlKind::Text("Envelope".to_owned()),
+            "Envelope",
+            "Show min/max envelope from retained family samples",
+            controls.show_family_envelope,
+            availability.envelope_available,
+            || Some(InstrumentAction::ToggleEnvelope),
+        ),
+        control(
+            3,
+            ControlKind::Text("Grid".to_owned()),
+            "Grid",
+            "Show minor waveform grid",
+            controls.show_minor_grid,
+            true,
+            || Some(InstrumentAction::ToggleGrid),
+        ),
+        control(
+            3,
+            ControlKind::Text("+M".to_owned()),
+            "Drop marker",
+            "Drop marker at cursor A on selected or nearest visible trace",
+            false,
+            availability.marker_available,
+            || Some(InstrumentAction::DropMarker),
+        ),
+    ];
+    let hidden = host.hidden_strip_count();
+    if hidden > 0 {
+        let label = format!("{hidden} hidden");
+        bar.push(control(
+            4,
+            ControlKind::Text(label.clone()),
+            &label,
+            "Restore closed waveform strips",
+            true,
+            true,
+            || Some(InstrumentAction::RestoreStrips),
+        ));
+    }
+    bar
+}
+
+/// How many of `controls` the bar draws in `width`, and whether the rest
+/// fold behind "More": the controls in order while they fit, with room
+/// kept for "More" whenever any is left out.
+fn fold(ui: &Ui, controls: &[BarControl], width: f32) -> (usize, bool) {
+    let widths: Vec<f32> = controls.iter().map(|control| control.width(ui)).collect();
+    let separated = |index: usize| index > 0 && controls[index - 1].group != controls[index].group;
+    let total: f32 = widths
+        .iter()
+        .enumerate()
+        .map(|(index, width)| {
+            width
+                + if separated(index) {
+                    SEPARATOR_WIDTH
+                } else {
+                    0.0
+                }
+        })
+        .sum();
+    if total <= width {
+        return (controls.len(), false);
+    }
+    let more = BarControl {
+        group: u8::MAX,
+        kind: ControlKind::Text(MORE.to_owned()),
+        name: String::new(),
+        tooltip: "",
+        on: false,
+        enabled: true,
+        action: || None,
+    }
+    .width(ui)
+        + SEPARATOR_WIDTH;
+    let mut used = 0.0;
+    let mut shown = 0;
+    for (index, control_width) in widths.iter().enumerate() {
+        let needed = control_width
+            + if separated(index) {
+                SEPARATOR_WIDTH
+            } else {
+                0.0
+            };
+        if used + needed + more > width {
+            break;
+        }
+        used += needed;
+        shown = index + 1;
+    }
+    (shown, true)
 }
