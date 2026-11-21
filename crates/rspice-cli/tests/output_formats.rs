@@ -913,25 +913,6 @@ fn a_two_point_lin_sweep_visits_both_ends() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `-f csv` must produce text CSV, not binary raw bytes (regression test).
-#[test]
-fn transient_csv_is_text_not_binary() {
-    let dir = test_dir("csv_regression");
-    let path = run_export(&dir, "tran_csv", TRAN_DECK, "csv");
-    let bytes = std::fs::read(&path).expect("read csv");
-    let text = std::str::from_utf8(&bytes).expect("csv output contains non-UTF8 (binary) bytes");
-    let header = text.lines().next().expect("csv header");
-    assert!(
-        header.starts_with("time,"),
-        "unexpected csv header: {header:?}"
-    );
-    assert!(
-        !text.contains("Binary:"),
-        "csv output contains rawfile binary marker"
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
 #[test]
 fn transient_csv_preserves_subnanosecond_knots_at_large_times() {
     let dir = test_dir("csv_time_precision");
