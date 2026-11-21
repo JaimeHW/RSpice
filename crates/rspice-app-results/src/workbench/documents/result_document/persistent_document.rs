@@ -761,9 +761,16 @@ fn render_pane(
             .map(VisualizationDocument::presentation)
             .unwrap_or_default()
             .significant_digits;
+        let missing_signals = pane
+            .traces
+            .iter()
+            .filter(|trace| trace.missing)
+            .map(|trace| trace.label.as_str())
+            .collect::<Vec<_>>();
         persistent::evidence_bar(
             ui,
             pane.id,
+            &missing_signals,
             &pane.measurements,
             &pane.annotations,
             usize::from(digits),

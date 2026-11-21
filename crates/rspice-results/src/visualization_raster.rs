@@ -583,7 +583,8 @@ pub fn resolve_cartesian_line_scene(
     let visible = document
         .traces()
         .iter()
-        .filter(|trace| trace.pane_id == pane_id && trace.visible)
+        // A trace whose run lacks its signal draws nothing.
+        .filter(|trace| trace.pane_id == pane_id && trace.visible && !trace.missing)
         .collect::<Vec<_>>();
     if visible.is_empty() {
         return Err(VisualizationRasterError::NoVisibleTraces);

@@ -528,6 +528,55 @@ fn restoring_a_view_puts_back_what_it_held_as_a_new_revision() {
     assert_eq!(document, unchanged);
 }
 
+/// A document following the latest run keeps a plotted signal the new run
+/// lacks: the trace stays, marked missing, the document still moves onto the
+/// new run, and the first later run that has the signal draws it again.
+#[test]
+fn a_signal_the_new_run_lacks_stays_marked_missing_and_the_document_moves_on() {
+    let (mut document, source, analysis_id) = provisioned_trace_document("V(out)");
+    let trace_id = document.traces()[0].id;
+    let without = binding(42);
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous: source,
+                next: long_form_analysis_dataset(without, analysis_id, "V(in)", 2.0),
+                analysis_id,
+            }],
+        )
+        .expect("a missing signal never holds the document back");
+    let trace = &document.traces()[0];
+    assert_eq!(trace.id, trace_id);
+    assert_eq!(trace.binding, without);
+    assert!(trace.missing);
+    assert_eq!(trace.source_signal(), Some("V(out)"));
+    assert_eq!(
+        document.panes()[0].binding.map(|pane| pane.dataset),
+        Some(without)
+    );
+
+    let saved = serde_json::to_string(&document).unwrap();
+    let mut document: VisualizationDocument = serde_json::from_str(&saved).unwrap();
+    assert!(document.traces()[0].missing, "a saved view keeps the mark");
+
+    let with = binding(43);
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous: without,
+                next: long_form_analysis_dataset(with, analysis_id, "V(out)", 3.0),
+                analysis_id,
+            }],
+        )
+        .unwrap();
+    let trace = &document.traces()[0];
+    assert_eq!(trace.id, trace_id);
+    assert_eq!(trace.binding, with);
+    assert!(!trace.missing, "a run that has the signal draws it again");
+}
+
 /// Provisioning labels a trace with the vector's own name, and the vector it
 /// came from stays recorded beside it. A display surface may re-spell a label
 /// it can prove derivation wrote — the two are still equal — and must leave one

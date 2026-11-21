@@ -1331,6 +1331,7 @@ impl VisualizationDocument {
             next_binding,
             |_| Some(analysis_id),
             "newer tracked",
+            true,
         )?;
         // Nothing reads the run left behind once its panes and traces have
         // moved, so it goes as it does on a re-point: a document that follows
@@ -1390,20 +1391,23 @@ impl VisualizationDocument {
                 .find(|mapping| mapping.previous == analysis)
                 .map(|mapping| mapping.next)
         };
-        self.rebind_consumers(previous, next_binding, mapped, "chosen")?;
+        self.rebind_consumers(previous, next_binding, mapped, "chosen", false)?;
         self.drop_unreferenced_dataset(previous);
         Ok(())
     }
 
     /// Move every pane and trace that reads `previous` onto `next`, each
     /// onto the analysis `analysis` maps its own to, and each trace onto the
-    /// display signal of the same name there.
+    /// display signal of the same name there. With `keep_missing`, a trace
+    /// whose signal `next` lacks stays, marked missing; without it, only a
+    /// trace already marked missing may.
     fn rebind_consumers(
         &mut self,
         previous: DatasetBinding,
         next: DatasetBinding,
         analysis: impl Fn(Option<AnalysisInstanceId>) -> Option<AnalysisInstanceId>,
         describe_next: &str,
+        keep_missing: bool,
     ) -> Result<(), VisualizationError> {
         let unmapped = |from: Option<AnalysisInstanceId>| {
             VisualizationError::InvalidValue {
@@ -1453,16 +1457,24 @@ impl VisualizationDocument {
                 let predicates = if *long_form {
                     // The vector the trace was provisioned from, not what it
                     // is called: a reader who renames a trace has not
-                    // repointed it at another signal.
+                    // repointed it at another signal. A signal the run
+                    // lacks keeps its trace, marked missing, naming the
+                    // analysis it now stands in.
                     let signal = trace.source_signal().unwrap_or(&trace.label);
-                    Some(by_name.get(signal).cloned().ok_or_else(|| {
-                        VisualizationError::InvalidValue {
-                            field: "trace.row-predicates",
-                            message: format!(
-                                "the {describe_next} dataset has no exact display trace named {signal:?}"
-                            ),
+                    Some(match by_name.get(signal) {
+                        Some(predicates) => (predicates.clone(), false),
+                        None if keep_missing || trace.missing => {
+                            (missing_signal_predicates(&trace.row_predicates, to), true)
                         }
-                    })?)
+                        None => {
+                            return Err(VisualizationError::InvalidValue {
+                                field: "trace.row-predicates",
+                                message: format!(
+                                    "the {describe_next} dataset has no exact display trace named {signal:?}"
+                                ),
+                            });
+                        }
+                    })
                 } else {
                     None
                 };
@@ -1494,10 +1506,11 @@ impl VisualizationDocument {
         }
         for (index, predicates) in traces {
             let trace = &mut self.traces[index];
-            if let Some(predicates) = predicates {
+            if let Some((predicates, missing)) = predicates {
                 trace.row_predicates = predicates;
                 trace.signal_key = "y".to_owned();
                 trace.coordinate_key = "x".to_owned();
+                trace.missing = missing;
             }
             trace.binding = next;
         }
@@ -1538,6 +1551,7 @@ impl VisualizationDocument {
             label: trace.label,
             visible: true,
             lane: TraceLane::default(),
+            missing: false,
         });
         created.push(EntityRef::Trace(id));
         Ok(())
@@ -1937,7 +1951,9 @@ impl VisualizationDocument {
                     message: "invalid signal or coordinate column role".to_owned(),
                 });
             }
-            validate_trace_row_predicates(dataset, &trace.row_predicates)?;
+            if !trace.missing {
+                validate_trace_row_predicates(dataset, &trace.row_predicates)?;
+            }
             ensure_identity(&mut identities, EntityRef::Trace(trace.id))?;
         }
         for cursor in &self.cursors {
@@ -2349,6 +2365,27 @@ pub(super) fn long_form_display_signals(
         }
     }
     Some((signals, analysis_column.is_some()))
+}
+
+/// A missing trace's predicates: its own, naming `analysis` in place of the
+/// analysis it read before, so a later run is matched to it as to any trace.
+fn missing_signal_predicates(
+    predicates: &[QueryCoordinate],
+    analysis: AnalysisInstanceId,
+) -> Vec<QueryCoordinate> {
+    predicates
+        .iter()
+        .map(|coordinate| {
+            if coordinate.column == ANALYSIS_ID_COLUMN {
+                QueryCoordinate {
+                    column: ANALYSIS_ID_COLUMN.to_owned(),
+                    value: TypedValue::Text(analysis.to_string()),
+                }
+            } else {
+                coordinate.clone()
+            }
+        })
+        .collect()
 }
 
 /// The exact predicates that select one display signal of a long-form source.

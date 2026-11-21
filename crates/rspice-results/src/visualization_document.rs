@@ -1486,6 +1486,11 @@ pub struct Trace {
     /// value trace.
     #[serde(default, skip_serializing_if = "TraceLane::is_value")]
     pub lane: TraceLane,
+    /// The run the trace reads has no signal by its name. The trace keeps
+    /// its place and draws nothing, and reads the signal again from the
+    /// first later run that has it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub missing: bool,
 }
 
 /// What a trace's lane draws: an interpolated value, or one of the exact

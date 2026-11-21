@@ -140,16 +140,18 @@ pub fn pane_frame<R>(
     .inner
 }
 
-/// The pane's kept measurements and notes, in one line above its viewer.
-/// Values carry the document's significant digits.
+/// The pane's kept measurements and notes, in one line above its viewer,
+/// after the plotted signals the run it reads does not have. Values carry
+/// the document's significant digits.
 pub fn evidence_bar(
     ui: &mut Ui,
     pane_id: PaneId,
+    missing_signals: &[&str],
     measurements: &[Measurement],
     annotations: &[Annotation],
     significant_digits: usize,
 ) {
-    if measurements.is_empty() && annotations.is_empty() {
+    if missing_signals.is_empty() && measurements.is_empty() && annotations.is_empty() {
         return;
     }
     let t = Tokens::get(ui.ctx());
@@ -161,6 +163,13 @@ pub fn evidence_bar(
                 .id_salt(("persistent-pane-evidence", pane_id.get()))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
+                        for name in missing_signals {
+                            ui.label(
+                                RichText::new(format!("{name} not in this run"))
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.warn),
+                            );
+                        }
                         for measurement in measurements {
                             let name = measurement
                                 .expression
