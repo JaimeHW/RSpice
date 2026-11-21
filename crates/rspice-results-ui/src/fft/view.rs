@@ -1,34 +1,43 @@
 //! FFT — the derived spectrum of the active transient, rendered as a thin
-//! trace with harmonic markers; THD/SNR and the harmonics table live in the
-//! right panel.
+//! trace with harmonic markers, its phase on a strip of its own when asked;
+//! the figures, the harmonics and the peaks live in the right panel.
 
 use std::sync::Arc;
 
 use egui::Ui;
 
 use super::FftState;
-use crate::presentation::{PlotView, frequency_readout};
+use crate::presentation::{PlotView, frequency_readout, with_table_state};
 use crate::waves::ReadoutPolicy;
-use rspice_results::fft::settings::{SpectrumAmplitude, SpectrumSettings, SpectrumWindow};
+use rspice_results::fft::settings::SpectrumScale;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use rspice_ui_kit::tokens::Tokens;
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use crate::presentation::well_hint;
 use crate::strip::{self, LegendChip};
 
-/// Frequency/magnitude-dB arrays derived from the active FFT, keyed on the
-/// FFT state's spectrum revision — the FFT can be recomputed (window, size,
-/// source) without a simulation data-version bump, and keying on the data's
-/// allocation address could serve stale arrays after a reallocation.
+mod bar;
+pub use bar::{RecordCursors, domain_bar};
+
+/// The arrays the active FFT draws, keyed on the FFT state's spectrum
+/// revision and the scale they are drawn in — the FFT can be recomputed
+/// (window, size, source) without a simulation data-version bump, and keying
+/// on the data's allocation address could serve stale arrays after a
+/// reallocation.
 #[derive(Debug, Clone)]
 pub struct FftSeries {
     revision: u64,
+    scale: SpectrumScale,
     frequency: std::sync::Arc<[f64]>,
-    magnitude_db: std::sync::Arc<[f64]>,
-    /// Cached finite (lo, hi) of the magnitude within view: (x1 bits, lo, hi).
+    /// The ordinate in the drawn scale.
+    level: std::sync::Arc<[f64]>,
+    /// Each bin's phase, in degrees.
+    phase: std::sync::Arc<[f64]>,
+    /// Cached finite (lo, hi) of the level within view: (x1 bits, lo, hi).
     y_extremes: Option<(u64, f64, f64)>,
 }
 
@@ -51,10 +60,40 @@ struct FftModel {
     fft_size: usize,
     resolution_bandwidth: Option<f64>,
     normalization: crate::fft::data::SpectrumNormalization,
+    scale: SpectrumScale,
     frequency: Arc<[f64]>,
-    magnitude_db: Arc<[f64]>,
+    level: Arc<[f64]>,
+    phase: Arc<[f64]>,
+    /// The fundamental's frequency and its level in the drawn scale.
     fundamental: Option<(f64, f64)>,
+    /// Each measured harmonic: order, frequency and dBc.
     harmonics: Vec<(usize, f64, f64)>,
+}
+
+/// One bin's level in `scale`: dB of the unit, the magnitude itself, or the
+/// power spectral density in dB of the unit per root hertz, an rms density
+/// whatever the amplitude convention, over the window's noise bandwidth.
+fn scaled_level(
+    magnitude: f64,
+    scale: SpectrumScale,
+    normalization: crate::fft::data::SpectrumNormalization,
+    resolution_bandwidth: Option<f64>,
+) -> f64 {
+    match scale {
+        SpectrumScale::Magnitude => magnitude,
+        SpectrumScale::Db => 20.0 * magnitude.log10(),
+        SpectrumScale::Psd => {
+            let rms = match normalization {
+                crate::fft::data::SpectrumNormalization::Peak => {
+                    magnitude * std::f64::consts::FRAC_1_SQRT_2
+                }
+                crate::fft::data::SpectrumNormalization::Rms => magnitude,
+            };
+            resolution_bandwidth.map_or(f64::NAN, |bandwidth| {
+                20.0 * rms.log10() - 10.0 * bandwidth.log10()
+            })
+        }
+    }
 }
 
 fn build_model(fft: &FftState, series: &mut Option<FftSeries>) -> Option<FftModel> {
@@ -66,33 +105,49 @@ fn build_model(fft: &FftState, series: &mut Option<FftSeries>) -> Option<FftMode
     if data.points.is_empty() {
         return None;
     }
-    // Display arrays cached on the spectrum revision: a recompute (window,
-    // size, source) replaces the entry rather than growing a map, and a
-    // reused allocation can never serve stale arrays.
+    let bandwidth = resolution_bandwidth(data);
+    // Display arrays cached on the spectrum revision and scale: a recompute
+    // (window, size, source) replaces the entry rather than growing a map,
+    // and a reused allocation can never serve stale arrays.
     let revision = fft.spectrum_revision();
+    let scale = fft.scale;
     let series = match series {
-        Some(series) if series.revision == revision => series,
+        Some(series) if series.revision == revision && series.scale == scale => series,
         _ => series.insert(FftSeries {
             revision,
+            scale,
             frequency: data.points.iter().map(|p| p.frequency).collect(),
-            magnitude_db: data.points.iter().map(|p| p.magnitude_db()).collect(),
+            level: data
+                .points
+                .iter()
+                .map(|p| scaled_level(p.magnitude, scale, data.normalization, bandwidth))
+                .collect(),
+            phase: data.points.iter().map(|p| p.phase.to_degrees()).collect(),
             y_extremes: None,
         }),
     };
     let frequency = Arc::clone(&series.frequency);
-    let magnitude_db = Arc::clone(&series.magnitude_db);
+    let level = Arc::clone(&series.level);
+    let phase = Arc::clone(&series.phase);
 
-    let fundamental = analysis.fundamental_frequency.zip(analysis.fundamental_db);
-    // Harmonic list: order, frequency, dBc relative to the fundamental.
-    let harmonics = match fundamental {
+    let fundamental_db = analysis.fundamental_frequency.zip(analysis.fundamental_db);
+    // Every measured harmonic: order, frequency, dBc relative to the
+    // fundamental.
+    let harmonics = match fundamental_db {
         Some((f0, db0)) if f0 > 0.0 => analysis
             .harmonics
             .iter()
             .map(|harmonic| (harmonic.order, harmonic.frequency, harmonic.level_db - db0))
-            .take(6)
             .collect(),
         Some(_) | None => Vec::new(),
     };
+    let fundamental = fundamental_db.map(|(f0, db0)| {
+        let magnitude = 10.0_f64.powf(db0 / 20.0);
+        (
+            f0,
+            scaled_level(magnitude, scale, data.normalization, bandwidth),
+        )
+    });
 
     Some(FftModel {
         revision,
@@ -101,13 +156,34 @@ fn build_model(fft: &FftState, series: &mut Option<FftSeries>) -> Option<FftMode
             .source_cache
             .as_ref()
             .map_or_else(|| data.name.clone(), |source| source.name.clone()),
-        resolution_bandwidth: resolution_bandwidth(data),
+        resolution_bandwidth: bandwidth,
         normalization: data.normalization,
+        scale,
         frequency,
-        magnitude_db,
+        level,
+        phase,
         fundamental,
         harmonics,
     })
+}
+
+/// The quantity a canonical SPICE source name measures: `V` for a voltage,
+/// `A` for a current, nothing for anything else.
+fn source_quantity(source: &str) -> &'static str {
+    let source = source.trim();
+    if source
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
+    {
+        "V"
+    } else if source
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("I("))
+    {
+        "A"
+    } else {
+        ""
+    }
 }
 
 /// Reference-aware logarithmic amplitude unit for the retained source.
@@ -120,21 +196,7 @@ fn spectrum_level_unit(
     source: &str,
     normalization: crate::fft::data::SpectrumNormalization,
 ) -> &'static str {
-    let source = source.trim();
-    let quantity = if source
-        .get(..2)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
-    {
-        "V"
-    } else if source
-        .get(..2)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("I("))
-    {
-        "A"
-    } else {
-        ""
-    };
-    match (quantity, normalization) {
+    match (source_quantity(source), normalization) {
         ("V", crate::fft::data::SpectrumNormalization::Peak) => "dBV pk",
         ("V", crate::fft::data::SpectrumNormalization::Rms) => "dBV rms",
         // Not "dBA": in every other instrument that prints it, dBA is an
@@ -144,6 +206,21 @@ fn spectrum_level_unit(
         ("A", crate::fft::data::SpectrumNormalization::Rms) => "dB re 1 A rms",
         (_, crate::fft::data::SpectrumNormalization::Peak) => "dB pk",
         (_, crate::fft::data::SpectrumNormalization::Rms) => "dB rms",
+    }
+}
+
+/// The unit the ordinate is drawn in, for `scale`.
+fn ordinate_unit(
+    source: &str,
+    normalization: crate::fft::data::SpectrumNormalization,
+    scale: SpectrumScale,
+) -> &'static str {
+    match (scale, source_quantity(source)) {
+        (SpectrumScale::Db, _) => spectrum_level_unit(source, normalization),
+        (SpectrumScale::Magnitude, quantity) => quantity,
+        (SpectrumScale::Psd, "V") => "dBV/√Hz",
+        (SpectrumScale::Psd, "A") => "dB re 1 A/√Hz",
+        (SpectrumScale::Psd, _) => "dB/√Hz",
     }
 }
 
@@ -177,71 +254,11 @@ fn resolution_bandwidth(data: &crate::fft::data::FftData) -> Option<f64> {
 }
 
 // ---------------------------------------------------------------------------
-// sheet bar
-// ---------------------------------------------------------------------------
-
-/// Width of the window and normalization selects: the longest choice of
-/// either, so the two stand at one width.
-const TRANSFORM_SELECT_WIDTH: f32 = 140.0;
-/// Why the transform settings wait.
-const NO_SOURCE: &str = "The spectrum has no source to transform yet";
-
-/// The transform's settings, the sheet's own controls in its bar: the window
-/// and the amplitude normalization. Both recompute from the cached uniformly
-/// sampled source, so they wait for one. Returns whether a setting failed to
-/// rebuild the spectrum, which revokes the host's source authorization.
-/// The transform settings in the sheet bar. Returns the settings the reader
-/// set, when they changed one, for the host to keep in the sheet's view.
-pub fn domain_bar(ui: &mut Ui, fft: &FftState) -> Option<SpectrumSettings> {
-    let before = fft.settings();
-    let mut settings = before.clone();
-    ui.add_enabled_ui(fft.source_cache.is_some(), |ui| {
-        crate::chrome::bars::bar_label(ui, "Window");
-        let names = SpectrumWindow::ALL
-            .iter()
-            .map(|window| window.label().to_owned())
-            .collect::<Vec<_>>();
-        let window = rspice_ui_kit::widgets::select_with_response(
-            ui,
-            "rspice.fft.window",
-            "Window",
-            settings.window.label(),
-            &names,
-            TRANSFORM_SELECT_WIDTH,
-        );
-        window.response.on_disabled_hover_text(NO_SOURCE);
-        if let Some(picked) = window.picked {
-            settings.window = SpectrumWindow::ALL[picked];
-        }
-        ui.add_space(8.0);
-        crate::chrome::bars::bar_label(ui, "Normalization");
-        let normalizations = crate::fft::data::SpectrumNormalization::all();
-        let names = normalizations
-            .iter()
-            .map(|normalization| normalization.display_name().to_owned())
-            .collect::<Vec<_>>();
-        let normalization = rspice_ui_kit::widgets::select_with_response(
-            ui,
-            "rspice.fft.normalization",
-            "Normalization",
-            fft.normalization.display_name(),
-            &names,
-            TRANSFORM_SELECT_WIDTH,
-        );
-        normalization.response.on_disabled_hover_text(NO_SOURCE);
-        if let Some(picked) = normalization.picked {
-            settings.amplitude = match normalizations[picked] {
-                crate::fft::data::SpectrumNormalization::Peak => SpectrumAmplitude::Peak,
-                crate::fft::data::SpectrumNormalization::Rms => SpectrumAmplitude::Rms,
-            };
-        }
-    });
-    (settings != before).then_some(settings)
-}
-
-// ---------------------------------------------------------------------------
 // center view
 // ---------------------------------------------------------------------------
+
+/// The share of the sheet's height the phase strip takes when it is drawn.
+const PHASE_SHARE: f32 = 0.34;
 
 /// Render the spectrum; its cursor reads at the reader's significant digits
 /// and by the reader's cursor interpolation.
@@ -268,7 +285,7 @@ pub fn show(
         }
         return out;
     };
-    let level_unit = spectrum_level_unit(&model.source, model.normalization);
+    let level_unit = ordinate_unit(&model.source, model.normalization, model.scale);
 
     // The legend names the quantity that is plotted, which is the signal the
     // transform read. Nothing follows the kind: the window is the bar's
@@ -286,19 +303,21 @@ pub fn show(
         out.fit_requested = true;
     }
 
-    // X: linear; zoom to ~11 harmonics when a fundamental is known.
+    // X: zoom to ~11 harmonics when a fundamental is known; a logarithmic
+    // axis starts at the first bin above DC.
     let data_max = *model.frequency.last().unwrap_or(&1.0);
     let x1 = match model.fundamental {
-        Some((f0, _)) if f0 > 0.0 => (f0 * 11.0).min(data_max),
+        Some((f0, _)) if f0 > 0.0 && !fft.log_frequency => (f0 * 11.0).min(data_max),
         _ => data_max,
     };
     if !matches!(x1.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater)) {
         well_hint(ui, NO_FREQUENCY_SPAN);
         return out;
     }
+    let first_bin = model.frequency.get(1).copied().unwrap_or(x1 / 2.0);
 
     // Y: from the data within view, floored sensibly; the scan is cached on
-    // (spectrum revision, x1) so it never repeats per frame.
+    // (spectrum revision, scale, x1) so it never repeats per frame.
     let x1_bits = x1.to_bits();
     let extremes = match series.as_mut() {
         Some(series) => match series.y_extremes {
@@ -306,8 +325,7 @@ pub fn show(
             _ => {
                 let end = model.frequency.partition_point(|&f| f <= x1).max(1);
                 out.range_samples_read = end;
-                let computed =
-                    rspice_results::measurements::finite_extremes(&model.magnitude_db[..end]);
+                let computed = rspice_results::measurements::finite_extremes(&model.level[..end]);
                 if let Some((lo, hi)) = computed {
                     series.y_extremes = Some((x1_bits, lo, hi));
                 }
@@ -316,47 +334,60 @@ pub fn show(
         },
         None => None,
     };
+    // A magnitude of zero is finite, so a silent record drawn as magnitudes
+    // has extremes; it has no level to plot all the same.
+    let extremes = extremes.filter(|&(_, hi)| model.scale != SpectrumScale::Magnitude || hi > 0.0);
     let Some((lo, hi)) = extremes else {
         let end = model.frequency.partition_point(|&f| f <= x1).max(1);
-        let silent = model.magnitude_db[..end.min(model.magnitude_db.len())]
+        let silent = model.level[..end.min(model.level.len())]
             .iter()
-            .all(|level| *level == f64::NEG_INFINITY);
+            .all(|level| *level == f64::NEG_INFINITY || *level == 0.0);
         well_hint(ui, if silent { ZERO_SIGNAL } else { NO_FINITE_LEVEL });
         return out;
     };
-    let (y_lo, y_hi) = view
-        .y
-        .unwrap_or_else(|| plot::padded_fit((lo.max(-200.0), hi)));
+    // A magnitude stands on zero; a level takes the plot's fit headroom.
+    let (y_lo, y_hi) = view.y.unwrap_or_else(|| match model.scale {
+        SpectrumScale::Magnitude => (0.0, plot::padded_fit((0.0, hi)).1),
+        SpectrumScale::Db | SpectrumScale::Psd => plot::padded_fit((lo.max(-200.0), hi)),
+    });
     let y = Axis::linear_with(y_lo, y_hi, level_unit, 7);
 
-    let (x_lo, x_hi) = view.x.unwrap_or((0.0, x1));
     let (frequency_scale, frequency_offset, frequency_unit) =
         quantity_policy.frequency_axis_transform();
-    let x_axis = Axis::linear(x_lo, x_hi, "Hz").with_display_transform(
-        frequency_scale,
-        frequency_offset,
-        frequency_unit,
-    );
-    let mut spec = PlotSpec::new(x_axis, XScale::Linear, y).accessible_name("FFT magnitude plot");
+    let (x_lo, x_hi) = view.x.unwrap_or(if fft.log_frequency {
+        (first_bin, x1)
+    } else {
+        (0.0, x1)
+    });
+    let (x_axis, x_scale) = if fft.log_frequency {
+        (
+            Axis::log_decades(x_lo.max(first_bin), x_hi, "Hz"),
+            XScale::Log10,
+        )
+    } else {
+        (Axis::linear(x_lo, x_hi, "Hz"), XScale::Linear)
+    };
+    let x_axis = x_axis.with_display_transform(frequency_scale, frequency_offset, frequency_unit);
+    let mut spec = PlotSpec::new(x_axis.clone(), x_scale, y).accessible_name("FFT magnitude plot");
     spec.traces.push(
-        Trace::new(&model.frequency, &model.magnitude_db, c.traces[0])
+        Trace::new(&model.frequency, &model.level, c.traces[0])
             .thin()
             .cache_key(trace_cache_key(model.revision)),
     );
 
-    if let Some((f0, db0)) = model.fundamental {
+    if let Some((f0, level0)) = model.fundamental {
         spec.markers.push(plot::Marker {
             x: f0,
-            y: db0,
+            y: level0,
             color: c.accent,
-            label: format!("f₀ {}", fmt_si_significant(db0, level_unit, digits)),
+            label: format!("f₀ {}", fmt_si_significant(level0, level_unit, digits)),
             drop_line: false,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,
         });
     }
-    for (i, &(order, f, dbc)) in model.harmonics.iter().take(4).enumerate() {
-        let level = sample_at(&model.frequency, &model.magnitude_db, f);
+    for (i, &(order, f, dbc)) in model.harmonics.iter().enumerate() {
+        let level = sample_at(&model.frequency, &model.level, f);
         spec.markers.push(plot::Marker {
             x: f,
             y: level,
@@ -370,7 +401,7 @@ pub fn show(
     }
 
     let readout = |x: f64| -> Vec<(String, String)> {
-        vec![
+        let mut rows = vec![
             (
                 "f".to_owned(),
                 frequency_readout(quantity_policy, x, digits),
@@ -378,14 +409,41 @@ pub fn show(
             (
                 "level".to_owned(),
                 fmt_si_significant(
-                    presentation.cursor_sample(&model.frequency, &model.magnitude_db, x),
+                    presentation.cursor_sample(&model.frequency, &model.level, x),
                     level_unit,
                     digits,
                 ),
             ),
-        ]
+        ];
+        if fft.phase {
+            rows.push((
+                "phase".to_owned(),
+                fmt_si_significant(sample_at(&model.frequency, &model.phase, x), "°", digits),
+            ));
+        }
+        rows
     };
 
+    if fft.phase {
+        let level_height = (ui.available_height() * (1.0 - PHASE_SHARE)).max(120.0);
+        let response = ui
+            .allocate_ui(egui::vec2(ui.available_width(), level_height), |ui| {
+                plot::show(ui, &spec, cache, None, Some(&readout))
+            })
+            .inner;
+        crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
+        let mut phase_spec =
+            PlotSpec::new(x_axis, x_scale, Axis::linear_with(-180.0, 180.0, "°", 5))
+                .accessible_name("FFT phase plot");
+        phase_spec.traces.push(
+            Trace::new(&model.frequency, &model.phase, c.traces[1])
+                .thin()
+                .cache_key(trace_cache_key(model.revision) ^ 0x5048),
+        );
+        plot::show(ui, &phase_spec, cache, None, Some(&readout));
+        out.plot = Some(response);
+        return out;
+    }
     let response = plot::show(ui, &spec, cache, None, Some(&readout));
     crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
     out.plot = Some(response);
@@ -396,7 +454,63 @@ pub fn show(
 // right panel
 // ---------------------------------------------------------------------------
 
-/// THD/SNR summary + harmonics table, at the reader's `significant_digits`.
+/// Why THD, SNR and SINAD are absent, in the few words a details row holds,
+/// and the whole reason for its hover.
+fn absent_thd(coverage: crate::fft::data::HarmonicCoverage) -> Option<(String, String)> {
+    match coverage {
+        crate::fft::data::HarmonicCoverage::InsufficientBandwidth {
+            analyzed_through, ..
+        } => Some((
+            format!("— Nyquist at HD{analyzed_through}"),
+            format!(
+                "The record's Nyquist frequency falls before the harmonics asked for: only \
+                 HD2 through HD{analyzed_through} lie below it, so THD, SNR and SINAD are \
+                 withheld. Sample faster or ask for fewer harmonics."
+            ),
+        )),
+        crate::fft::data::HarmonicCoverage::InsufficientResolution { failed_order, .. } => Some((
+            format!("— HD{failed_order} unresolved"),
+            format!(
+                "HD{failed_order} falls inside the carrier's main lobe, so it cannot be \
+                     told from the carrier and THD, SNR and SINAD are withheld. Lengthen the \
+                     record or choose a narrower window."
+            ),
+        )),
+        crate::fft::data::HarmonicCoverage::NoFundamental { .. } => Some((
+            "— no fundamental".to_owned(),
+            "The spectrum has no tone to measure the harmonics against.".to_owned(),
+        )),
+        crate::fft::data::HarmonicCoverage::Complete { .. } => None,
+    }
+}
+
+/// The spectral peaks rising this far over the mean noise floor are listed.
+const PEAK_RISE_DB: f64 = 20.0;
+
+/// Each local maximum of the spectrum rising [`PEAK_RISE_DB`] over the noise
+/// floor, loudest first: (frequency, level in dB).
+fn spectral_peaks(fft: &FftState) -> Vec<(f64, f64)> {
+    let (Some(data), Some(analysis)) = (fft.data.as_ref(), fft.analysis.as_ref()) else {
+        return Vec::new();
+    };
+    let Some(floor) = analysis.noise_floor_db else {
+        return Vec::new();
+    };
+    let points = &data.points;
+    let mut peaks: Vec<(f64, f64)> = (1..points.len().saturating_sub(1))
+        .filter(|&bin| {
+            let magnitude = points[bin].magnitude;
+            magnitude > points[bin - 1].magnitude && magnitude >= points[bin + 1].magnitude
+        })
+        .map(|bin| (points[bin].frequency, points[bin].magnitude_db()))
+        .filter(|(_, level)| level.is_finite() && *level > floor + PEAK_RISE_DB)
+        .collect();
+    peaks.sort_by(|a, b| b.1.total_cmp(&a.1));
+    peaks
+}
+
+/// The figures, the harmonic table and the peak table, at the reader's
+/// `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     fft: &FftState,
@@ -414,6 +528,7 @@ pub fn right_panel(
     };
     section_header(ui, "Spectrum", None);
     let level_unit = spectrum_level_unit(&model.source, model.normalization);
+    let quantity = source_quantity(&model.source);
 
     let digits = significant_digits;
     let f = |v: Option<f64>| {
@@ -422,33 +537,19 @@ pub fn right_panel(
         })
     };
     let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| fmt_si_significant(v, "dB", digits));
+    let absent = absent_thd(analysis.harmonic_coverage);
+    let short = |figure: Option<f64>, unit: &str| match (figure, &absent) {
+        (Some(value), _) => fmt_si_significant(value, unit, digits),
+        (None, Some((reason, _))) => reason.clone(),
+        (None, None) => "—".to_owned(),
+    };
 
-    let enob = analysis
-        .sinad_db
-        .map(|sinad| fmt_si_significant((sinad - 1.76) / 6.02, "bit", digits));
-    let thd = analysis.thd_percent.map_or_else(
-        || match analysis.harmonic_coverage {
-            crate::fft::data::HarmonicCoverage::InsufficientBandwidth {
-                analyzed_through, ..
-            } => format!("— · bandwidth through HD{analyzed_through}"),
-            crate::fft::data::HarmonicCoverage::InsufficientResolution { failed_order, .. } => {
-                format!("— · HD{failed_order} is not independently resolvable")
-            }
-            crate::fft::data::HarmonicCoverage::NoFundamental { .. }
-            | crate::fft::data::HarmonicCoverage::Complete { .. } => "—".to_owned(),
-        },
-        |value| {
-            format!(
-                "{} · {} harmonics",
-                fmt_si_significant(value, "%", digits),
-                analysis.harmonics.len()
-            )
-        },
-    );
     let amplitude = analysis.fundamental_db.map_or("—".to_owned(), |value| {
         fmt_si_significant(value, level_unit, digits)
     });
-    let resolution_bandwidth = f(model.resolution_bandwidth);
+    let dc = fft.source_cache.as_ref().map_or("—".to_owned(), |source| {
+        fmt_si_significant(source.dc_level, quantity, digits)
+    });
     let noise_floor = match (analysis.noise_floor_db, analysis.fundamental_db) {
         (Some(noise), Some(fundamental)) => fmt_si_significant(noise - fundamental, "dBc", digits),
         _ => "—".to_owned(),
@@ -459,44 +560,139 @@ pub fn right_panel(
     // read and what is derived from it.
     let rows = [
         ("Record", record_length(model.fft_size), false),
-        ("Resolution BW", resolution_bandwidth, false),
+        ("Resolution BW", f(model.resolution_bandwidth), false),
         ("Fundamental", f(analysis.fundamental_frequency), false),
-        ("Amplitude", amplitude, false),
-        ("THD", thd, true),
-        ("SNR", db(analysis.snr_db), false),
-        ("SINAD", db(analysis.sinad_db), false),
-        ("SFDR", db(analysis.sfdr_db), false),
-        ("ENOB", enob.unwrap_or_else(|| "—".to_owned()), false),
-        ("Noise floor", noise_floor, false),
+        ("Signal", amplitude, false),
+        ("DC", dc, false),
     ];
     crate::presentation::stat_table(ui, &rows);
-
-    if analysis.fundamental_frequency.is_some() {
-        let db0 = analysis.fundamental_db.unwrap_or(0.0);
-        let harmonic_rows: Vec<(String, String)> = analysis
-            .harmonics
-            .iter()
-            .take(6)
-            .map(|harmonic| {
-                (
-                    format!(
-                        "HD{} · {}",
-                        harmonic.order,
-                        frequency_readout(quantity_policy, harmonic.frequency, digits)
-                    ),
-                    fmt_si_significant(harmonic.level_db - db0, "dBc", digits),
-                )
-            })
-            .collect();
-        if !harmonic_rows.is_empty() {
-            section_header(ui, "Harmonics", None);
-            let rows: Vec<(&str, String, bool)> = harmonic_rows
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.clone(), false))
-                .collect();
-            crate::presentation::stat_table(ui, &rows);
-        }
+    // A figure withheld says why in a few words, and in full on hover.
+    let withheld = ui
+        .scope(|ui| {
+            crate::presentation::stat_table(
+                ui,
+                &[
+                    ("THD", short(analysis.thd_percent, "%"), true),
+                    ("THD", short(analysis.thd_db, "dB"), false),
+                    ("SNR", short(analysis.snr_db, "dB"), false),
+                    ("SINAD", short(analysis.sinad_db, "dB"), false),
+                ],
+            );
+        })
+        .response;
+    if let Some((_, reason)) = &absent {
+        withheld.on_hover_text(reason.as_str());
     }
+    crate::presentation::stat_table(
+        ui,
+        &[
+            ("SFDR", db(analysis.sfdr_db), false),
+            (
+                "ENOB",
+                analysis.enob_bits().map_or("—".to_owned(), |bits| {
+                    fmt_si_significant(bits, "bit", digits)
+                }),
+                false,
+            ),
+            ("Noise floor", noise_floor, false),
+        ],
+    );
+
+    if analysis.fundamental_frequency.is_some() && !analysis.harmonics.is_empty() {
+        section_header(ui, "Harmonics", None);
+        harmonic_table(ui, analysis, quantity_policy, level_unit, digits);
+    }
+    let peaks = spectral_peaks(fft);
+    if !peaks.is_empty() {
+        section_header(ui, "Peaks", None);
+        peak_table(
+            ui,
+            &peaks,
+            analysis.fundamental_db,
+            quantity_policy,
+            level_unit,
+            digits,
+        );
+    }
+}
+
+/// Every measured harmonic: its order, frequency, level and level under the
+/// carrier. The table scrolls; nothing is left off.
+fn harmonic_table(
+    ui: &mut Ui,
+    analysis: &crate::fft::data::SpectrumAnalysis,
+    quantity_policy: &QuantityPresentationPolicy,
+    level_unit: &str,
+    digits: usize,
+) {
+    let width = (ui.available_width() / 4.0).floor();
+    let columns = [
+        Column::number("HD", width),
+        Column::number("Frequency", width),
+        Column::number("Level", width),
+        Column::number("dBc", width),
+    ];
+    let db0 = analysis.fundamental_db.unwrap_or(0.0);
+    let rows = analysis.harmonics.len();
+    let height = (ui.available_height() * 0.5).max(96.0);
+    with_table_state(ui, "fft.harmonics", |ui, state| {
+        DataTable::new("rspice.results.fft.harmonics", &columns, rows)
+            .state(state)
+            .max_height(height)
+            .show(ui, |index| {
+                let harmonic = &analysis.harmonics[index];
+                vec![
+                    Cell::number(format!("HD{}", harmonic.order))
+                        .sort_by(SortKey::Number(harmonic.order as f64)),
+                    Cell::number(frequency_readout(
+                        quantity_policy,
+                        harmonic.frequency,
+                        digits,
+                    ))
+                    .sort_by(SortKey::Number(harmonic.frequency)),
+                    Cell::number(fmt_si_significant(harmonic.level_db, level_unit, digits))
+                        .sort_by(SortKey::Number(harmonic.level_db)),
+                    Cell::number(fmt_si_significant(harmonic.level_db - db0, "dBc", digits))
+                        .sort_by(SortKey::Number(harmonic.level_db - db0)),
+                ]
+            });
+    });
+}
+
+/// Every spectral peak rising over the noise floor, loudest first.
+fn peak_table(
+    ui: &mut Ui,
+    peaks: &[(f64, f64)],
+    carrier_db: Option<f64>,
+    quantity_policy: &QuantityPresentationPolicy,
+    level_unit: &str,
+    digits: usize,
+) {
+    let width = (ui.available_width() / 3.0).floor();
+    let columns = [
+        Column::number("Frequency", width),
+        Column::number("Level", width),
+        Column::number("dBc", width),
+    ];
+    let height = ui.available_height().max(96.0);
+    with_table_state(ui, "fft.peaks", |ui, state| {
+        DataTable::new("rspice.results.fft.peaks", &columns, peaks.len())
+            .state(state)
+            .max_height(height)
+            .show(ui, |index| {
+                let (frequency, level) = peaks[index];
+                vec![
+                    Cell::number(frequency_readout(quantity_policy, frequency, digits))
+                        .sort_by(SortKey::Number(frequency)),
+                    Cell::number(fmt_si_significant(level, level_unit, digits))
+                        .sort_by(SortKey::Number(level)),
+                    carrier_db.map_or_else(Cell::absent, |carrier| {
+                        Cell::number(fmt_si_significant(level - carrier, "dBc", digits))
+                            .sort_by(SortKey::Number(level - carrier))
+                    }),
+                ]
+            });
+    });
 }
 
 #[cfg(test)]
@@ -758,6 +954,144 @@ mod tests {
         assert!(
             silent.iter().any(|label| label == ZERO_SIGNAL),
             "{silent:?}"
+        );
+    }
+
+    /// A coherent 64 Hz tone over 8192 samples a second, with each harmonic
+    /// through HD40 a thousandth of the carrier, set to measure `harmonics`.
+    fn rich_tone(harmonics: usize) -> FftState {
+        let samples = (0..8192)
+            .map(|n| {
+                let phase = std::f64::consts::TAU * 64.0 * n as f64 / 8192.0;
+                phase.sin()
+                    + (2..=40)
+                        .map(|order| 1.0e-3 * (order as f64 * phase).sin())
+                        .sum::<f64>()
+            })
+            .collect();
+        let mut fft = FftState::default();
+        fft.load_prepared_input(crate::fft::pipeline::PreparedFftInput {
+            name: "V(out)".to_owned(),
+            samples,
+            sample_rate: 8192.0,
+            original_count: 8192,
+            decimation_factor: 1,
+            dc_level: 0.0,
+            record: crate::fft::pipeline::FftTimeWindow::new(0.0, 1.0),
+        })
+        .expect("a spectrum");
+        let settings = rspice_results::fft::settings::SpectrumSettings {
+            harmonics,
+            ..fft.settings()
+        };
+        fft.adopt_settings(&settings);
+        assert!(fft.has_data(), "{:?}", fft.last_error);
+        fft
+    }
+
+    /// What the details pane announced for `fft`, drawn on a tall screen so
+    /// no table row scrolls out of view.
+    fn details(fft: &FftState) -> Vec<String> {
+        let mut series = None;
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(480.0, 4000.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    right_panel(
+                        ui,
+                        fft,
+                        &mut series,
+                        &QuantityPresentationPolicy::default(),
+                        4,
+                    );
+                });
+            },
+        )
+        .platform_output
+        .accesskit_update
+        .expect("details accessibility tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| node.label().or(node.value()).map(str::to_owned))
+        .collect()
+    }
+
+    /// Every harmonic measured is a row of the harmonic table. The pane
+    /// listed the first six and drew markers on four, so asking for forty
+    /// showed a tenth of them.
+    #[test]
+    fn every_harmonic_measured_is_listed() {
+        let fft = rich_tone(40);
+        let rows = details(&fft);
+        let listed: Vec<&String> = rows
+            .iter()
+            .filter(|row| row.starts_with("HD: HD"))
+            .collect();
+        assert_eq!(listed.len(), 39, "{listed:?}");
+        let last = listed
+            .iter()
+            .find(|row| row.starts_with("HD: HD40,"))
+            .expect("HD40 listed");
+        assert!(last.contains("dBc: −60"), "{last}");
+        // Each harmonic rises over the floor, so each is a peak as well.
+        let peaks = rows
+            .iter()
+            .filter(|row| row.starts_with("Frequency: "))
+            .count();
+        assert_eq!(peaks, 40, "{rows:?}");
+    }
+
+    /// A THD the record cannot measure says why in the row, in a few words.
+    #[test]
+    fn a_withheld_thd_says_why_in_its_row() {
+        // HD200 of a 64 Hz tone is far past the 4096 Hz Nyquist frequency.
+        let fft = rich_tone(200);
+        assert!(
+            fft.analysis
+                .as_ref()
+                .is_some_and(|a| a.thd_percent.is_none())
+        );
+        let rows = details(&fft);
+        let withheld: Vec<&String> = rows.iter().filter(|row| row.starts_with('—')).collect();
+        assert!(
+            withheld
+                .iter()
+                .any(|row| row.starts_with("— Nyquist at HD")),
+            "{withheld:?}"
+        );
+    }
+
+    /// A density reads the rms level over the window's noise bandwidth,
+    /// whatever the amplitude convention: one volt peak over 100 Hz is
+    /// 20·log10(1/√2) − 20 dBV/√Hz.
+    #[test]
+    fn a_density_reads_the_rms_level_over_the_noise_bandwidth() {
+        let peak = scaled_level(
+            1.0,
+            SpectrumScale::Psd,
+            SpectrumNormalization::Peak,
+            Some(100.0),
+        );
+        let rms = scaled_level(
+            std::f64::consts::FRAC_1_SQRT_2,
+            SpectrumScale::Psd,
+            SpectrumNormalization::Rms,
+            Some(100.0),
+        );
+        assert!((peak + 23.010_299_956_639_81).abs() < 1.0e-12, "{peak}");
+        assert!((rms - peak).abs() < 1.0e-12);
+        assert_eq!(
+            ordinate_unit("V(out)", SpectrumNormalization::Peak, SpectrumScale::Psd),
+            "dBV/√Hz"
         );
     }
 }

@@ -131,7 +131,24 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 /// the spectrum revokes the viewer's source authorization, as it always has.
 pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     adopt_kept_settings(state);
-    if let Some(settings) = view::domain_bar(ui, &state.analysis.fft_state) {
+    // The signals the shown analysis saved, in the order the run wrote them.
+    let sources: Vec<String> = state
+        .model
+        .simulation
+        .active_analysis()
+        .map(|analysis| {
+            analysis
+                .waveforms
+                .iter()
+                .map(|waveform| waveform.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let cursors = view::RecordCursors {
+        a: state.results.session.cursors.a,
+        b: state.results.session.cursors.b,
+    };
+    if let Some(settings) = view::domain_bar(ui, &state.analysis.fft_state, &sources, cursors) {
         keep_settings(state, settings);
     }
     true
