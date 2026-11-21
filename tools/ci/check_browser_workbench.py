@@ -908,12 +908,16 @@ def second_tab_refused(browser):
     try:
         browser.navigate(browser.origin)
         wait_until_ready(browser)
+        # The tab opens on the workspace the first left in front, Results here.
+        browser.click("Schematic", "button")
         browser.click("Schematic canvas", "canvas")
         statement = stated_storage(browser, HELD_ELSEWHERE, "the second tab refused the results store")
         browser.capture("second-tab-refused")
     finally:
         browser.call("DELETE", "/window")
         browser.call("POST", "/window", {"handle": first})
+    browser.click("Schematic", "button")
+    browser.click("Schematic canvas", "canvas")
     stated_storage(browser, KEPT, "the first tab still holding the results store")
     return {"second_tab": statement}
 
