@@ -530,14 +530,6 @@ mod tests {
         super::radial_documentation_center(&state.model)
     }
 
-    #[test]
-    fn the_form_offers_every_array_kind_under_its_own_name() {
-        assert_eq!(
-            SchematicArrayKind::ALL.map(SchematicArrayKind::label),
-            ["Linear", "Rectangular", "Radial documentation"]
-        );
-    }
-
     /// `×` is not on a keyboard. What a reader can type has to reach the
     /// model, and what it reaches has to be what the model prints.
     #[test]

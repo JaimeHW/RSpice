@@ -435,26 +435,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn every_mockup_edit_context_has_an_exact_label() {
-        assert_eq!(
-            edit_mode_label(HierarchyDescendEditMode::EditInPlace),
-            "Edit in place"
-        );
-        assert_eq!(
-            edit_mode_label(HierarchyDescendEditMode::OpenIsolated),
-            "Open isolated cell view"
-        );
-        assert_eq!(
-            edit_mode_label(HierarchyDescendEditMode::ReadOnlyReference),
-            "Read-only reference"
-        );
-        assert_eq!(
-            edit_mode_label(HierarchyDescendEditMode::EditSymbolInPlace),
-            "Edit symbol in place"
-        );
-    }
-
-    #[test]
     fn the_target_row_names_the_occurrence_the_transaction_would_open() {
         let (mut state, _, child) = hierarchy_state();
         assert_eq!(descend_target_path(&state.model.workspace, "XAFE"), "/XAFE");

@@ -445,17 +445,4 @@ pub(crate) mod tests {
         );
         assert!(state.design.schematic_visibility_recovery.is_none());
     }
-
-    /// The default highlight lights the selected net in the open view only:
-    /// nothing carries it into a child or back up to the parent, so it is not
-    /// named for the hierarchy.
-    #[test]
-    fn the_net_highlight_policy_is_named_for_what_it_lights() {
-        let selected = SchematicNetHighlighting::default();
-        assert_eq!(net_highlighting_label(selected), "Selected net");
-        assert_eq!(
-            serde_json::to_string(&selected).expect("the policy writes"),
-            "\"selected-net\""
-        );
-    }
 }

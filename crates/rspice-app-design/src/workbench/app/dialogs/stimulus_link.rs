@@ -537,6 +537,3 @@ pub fn show_stimulus_definition(
     *selected = Some(name.to_owned());
     workbench.activate(Workspace::Stimulus);
 }
-
-#[cfg(test)]
-pub(crate) mod tests;

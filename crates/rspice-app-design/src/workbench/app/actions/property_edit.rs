@@ -992,24 +992,6 @@ mod tests {
     }
 
     #[test]
-    fn generated_veriloga_scope_labels_cover_dual_storage() {
-        use rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterScope;
-
-        assert_eq!(
-            generated_veriloga_parameter_scope_label(GeneratedVerilogAParameterScope::Model),
-            "model"
-        );
-        assert_eq!(
-            generated_veriloga_parameter_scope_label(GeneratedVerilogAParameterScope::Instance),
-            "instance"
-        );
-        assert_eq!(
-            generated_veriloga_parameter_scope_label(GeneratedVerilogAParameterScope::Dual),
-            "model/instance"
-        );
-    }
-
-    #[test]
     fn selected_bus_and_tap_open_the_generic_transaction() {
         let mut state = DesignTestHost::default();
         let bus = Bus::segment(

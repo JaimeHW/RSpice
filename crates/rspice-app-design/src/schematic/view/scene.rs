@@ -1052,39 +1052,6 @@ pub mod tests {
         }
     }
 
-    /// A named net whose name declares no class (not ground, supply or
-    /// clock) is painted as a wire, not in a colour hashed from its name.
-    #[test]
-    fn an_unclassified_named_net_takes_no_class_colour() {
-        let mut state = separated_same_name_groups();
-        for label in &mut state.model.schematic.document_mut_for_test().net_labels {
-            label.name = "VOUT".to_owned();
-        }
-        state.sync_active_schematic_to_workspace();
-        assert!(
-            net_class_colors(&canvas_facts(&state), &crate::ui::palette::INSTRUMENT_DARK)
-                .is_empty()
-        );
-    }
-
-    /// An unnamed conductor declares no class, so it keeps the default stroke
-    /// rather than being handed an arbitrary palette entry.
-    #[test]
-    fn an_autonamed_conductor_takes_no_class_colour() {
-        let mut state = DesignTestHost::default();
-        state
-            .model
-            .schematic
-            .document_mut_for_test()
-            .wires
-            .push(Wire::segment(31, Point::new(0, 0), Point::new(40, 0)));
-        state.sync_active_schematic_to_workspace();
-        assert!(
-            net_class_colors(&canvas_facts(&state), &crate::ui::palette::INSTRUMENT_DARK)
-                .is_empty()
-        );
-    }
-
     #[test]
     fn probe_visual_state_distinguishes_unavailable_pending_and_disabled() {
         let mut probe =

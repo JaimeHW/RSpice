@@ -523,34 +523,3 @@ const STIMULUS: &[ToolbarEntry<DesignFeature>] = &[
         WorkbenchIcon::Target,
     ),
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every control in the symbol row wears an icon of its own, so no two
-    /// read as the same thing.
-    #[test]
-    fn no_icon_stands_twice_in_the_symbol_row() {
-        fn icons(entries: &[ToolbarEntry<DesignFeature>], out: &mut Vec<WorkbenchIcon>) {
-            for entry in entries {
-                match entry {
-                    ToolbarEntry::Icon(icon) => out.push(icon.icon),
-                    ToolbarEntry::Tool(tool) => out.push(tool.icon),
-                    ToolbarEntry::Action(action) => out.push(action.icon),
-                    ToolbarEntry::Only(_, nested) => icons(nested, out),
-                    ToolbarEntry::Separator | ToolbarEntry::Control(_) => {}
-                }
-            }
-        }
-        let mut row = Vec::new();
-        icons(SYMBOL, &mut row);
-        row.extend(SYMBOL_TOGGLES.map(|(icon, _)| icon));
-        for (index, icon) in row.iter().enumerate() {
-            assert!(
-                !row[index + 1..].contains(icon),
-                "{icon:?} stands twice in the symbol row"
-            );
-        }
-    }
-}

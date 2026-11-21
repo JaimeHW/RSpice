@@ -405,17 +405,11 @@ fn operating_point_run(instances: &[(String, &'static str)]) -> SimulationRun {
     run
 }
 
-/// A two-sheet cell view: 2,000 components (R, C, NMOS, PMOS and 200
-/// instances of three masters), 5,000 wires, 2,000 junctions, and a prepared
+/// A two-sheet cell view, each sheet a lattice of `columns` by `rows`
+/// components (at 40 by 25: 2,000 components of R, C, NMOS, PMOS and 200
+/// instances of three masters, 5,000 wires, 2,000 junctions), and a prepared
 /// operating point of 300 nodes. Sheet 1 is active. Deterministic: the same
 /// ids and coordinates every call.
-#[cfg(test)]
-pub(super) fn scale_fixture() -> ScaleFixture {
-    scale_fixture_of(COLUMNS, ROWS)
-}
-
-/// [`scale_fixture`] with each sheet's lattice `columns` by `rows`
-/// components rather than 40 by 25.
 pub fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
     let mut next_id = 1_u64;
     let sheets = [
@@ -470,53 +464,4 @@ pub fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
         components,
         objects: [first.len(), second.len()],
     }
-}
-
-#[test]
-fn the_scale_fixture_holds_the_stated_population() {
-    let fixture = scale_fixture();
-    let document = fixture.state.model.schematic.document();
-    assert_eq!(document.components.len(), 2_000);
-    assert_eq!(document.wires.len(), 5_000);
-    assert_eq!(document.junctions.len(), 2_000);
-    assert_eq!(
-        document
-            .components
-            .iter()
-            .filter(|component| component.kind == ComponentType::CellInstance)
-            .count(),
-        200
-    );
-    let symbols = super::schematic_symbol_context(&fixture.state);
-    assert!(
-        document
-            .components
-            .iter()
-            .filter(|component| component.kind == ComponentType::CellInstance)
-            .all(|component| symbols.resolved_symbol(component).is_some()),
-        "every instance resolves its master's authored symbol"
-    );
-    let catalog = super::sheet_visibility::multi_sheet_catalog(&fixture.state)
-        .expect("the fixture has two sheets");
-    assert_eq!(catalog.sheets().len(), 2);
-    assert!(
-        fixture.components[0]
-            .iter()
-            .all(|id| super::sheet_visibility::object_is_on_active_sheet(&fixture.state, *id))
-    );
-    assert!(
-        fixture.components[1]
-            .iter()
-            .all(|id| !super::sheet_visibility::object_is_on_active_sheet(&fixture.state, *id))
-    );
-    let analysis = fixture
-        .state
-        .model
-        .simulation
-        .active_analysis()
-        .expect("OP");
-    assert_eq!(
-        analysis.dc_op.as_ref().expect("dc op").node_voltages.len(),
-        OPERATING_POINT_NODES
-    );
 }

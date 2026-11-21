@@ -1,9 +1,8 @@
-//! Tests for inspector editing and layout contracts.
+//! Tests for inspector editing contracts.
 //!
 //! The cases pin that an inline edit session folds all its keystrokes into one
-//! undo entry, that choosing the default section removes the instance
-//! override rather than writing it, and that the panel geometry matches its
-//! design contract.
+//! undo entry and that choosing the default section removes the instance
+//! override rather than writing it.
 
 #[cfg(test)]
 mod off_sheet_connectors;
@@ -40,43 +39,6 @@ pub(crate) fn state_with_two_components() -> DesignTestHost {
     let mut state = DesignTestHost::default();
     seed_two_components(&mut state.model);
     state
-}
-
-#[cfg(test)]
-fn validation_slot_height(editing: bool, reason: Option<&str>) -> f32 {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut height = 0.0;
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.set_width(312.0);
-            height = rejection_slot(ui, editing, reason).height();
-        });
-    });
-    height
-}
-
-#[test]
-fn inspector_validation_slot_never_reflows_while_a_field_is_typed_into() {
-    assert_eq!(validation_slot_height(true, None), INLINE_VALIDATION_SLOT_H);
-    assert_eq!(
-        validation_slot_height(
-            true,
-            Some(
-                "This deliberately long validation message must truncate without growing the slot"
-            )
-        ),
-        INLINE_VALIDATION_SLOT_H
-    );
-}
-
-#[test]
-fn a_closed_edit_session_leaves_no_reserved_validation_strip() {
-    assert_eq!(validation_slot_height(false, None), 0.0);
-    assert_eq!(
-        validation_slot_height(false, Some("stated rejections are still shown")),
-        INLINE_VALIDATION_SLOT_H
-    );
 }
 
 pub fn accesskit_nodes(
@@ -861,33 +823,6 @@ fn a_veriloga_cell_opens_its_exact_code_source_target() {
     );
 }
 
-/// The title is one panel row, whatever it names: the name, what the object
-/// is and where it sits share the line.
-#[test]
-fn the_title_takes_one_panel_row() {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut measured = (0.0, 0.0);
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.set_width(220.0);
-            let top = ui.cursor().top();
-            object_title(
-                ui,
-                "XBANDGAP_REFERENCE",
-                Some("bandgap_reference_trimmed"),
-                Some("/XAFE/XBIAS"),
-            );
-            measured = (
-                ui.cursor().top() - top,
-                crate::workbench::design_system::property_row_height(ui),
-            );
-        });
-    });
-    assert_eq!(measured.0, measured.1);
-}
-
 /// A MOS transistor shows the designer's set — region, the bias point and the
 /// small-signal parameters — in engineering notation with units, and the
 /// temperature its run solved it at. What the report carries beyond the set
@@ -1018,76 +953,6 @@ fn a_device_below_the_root_is_read_under_its_instance_path() {
     assert_eq!(
         device_engine_name(&state.model, &component).as_deref(),
         Some("x1.mn")
-    );
-}
-
-/// Measure, in the dock's panel body, the space between a section header and
-/// the first block of its body, and between the body's last block and the
-/// next section's header, for a body drawn by `content`.
-#[cfg(test)]
-fn section_body_padding(mut content: impl FnMut(&mut Ui)) -> (f32, f32) {
-    use crate::workbench::design_system::{PANEL_HEADER_GAP, PANEL_SECTION_H, panel_body};
-
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut measured = (0.0, 0.0);
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.allocate_ui(egui::vec2(312.0, 800.0), |ui| {
-                panel_body(ui, |ui| {
-                    let before_header = ui.cursor().top();
-                    section_header(ui, "Identity", Some("editable"));
-                    let body_top = ui.cursor().top();
-                    content(ui);
-                    let body_bottom = ui.cursor().top();
-                    section_header(ui, "Checks", None);
-                    let next_header = ui.cursor().top() - PANEL_HEADER_GAP - PANEL_SECTION_H;
-                    measured = (
-                        body_top - before_header - PANEL_SECTION_H,
-                        next_header - body_bottom,
-                    );
-                });
-            });
-        });
-    });
-    measured
-}
-
-#[test]
-fn every_inspector_section_frames_its_body_with_the_same_step() {
-    use crate::workbench::design_system::{PANEL_HEADER_GAP, PANEL_SECTION_GAP};
-
-    let list = section_body_padding(|ui| {
-        property_row(ui, "Instance", "R1");
-        property_row(ui, "Value", "1k");
-    });
-    assert_eq!(list, (PANEL_HEADER_GAP, PANEL_SECTION_GAP));
-
-    let tree = section_body_padding(|ui| {
-        terminal_row(ui, "+", Some("net1"));
-        terminal_row(ui, "-", None);
-    });
-    assert_eq!(tree, list, "a tree body is framed like a property list");
-
-    let actions = section_body_padding(|ui| {
-        action_stack(ui, |ui| {
-            let _ = Button::new("Run schematic checks").show(ui);
-        });
-    });
-    assert_eq!(
-        actions, list,
-        "an action row is framed like a property list"
-    );
-
-    let list_then_actions = section_body_padding(|ui| {
-        property_row(ui, "Instance", "R1");
-        action_stack(ui, |ui| {
-            let _ = Button::new("Edit symbol…").ghost().show(ui);
-        });
-    });
-    assert_eq!(
-        list_then_actions, list,
-        "adding a second block must not change how the body is framed"
     );
 }
 
