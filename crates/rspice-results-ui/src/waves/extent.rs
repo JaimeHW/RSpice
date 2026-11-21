@@ -12,6 +12,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use rspice_results::result_presentation::AnalysisPresentationKey;
 use rspice_ui_kit::plot::XScale;
 
 use super::{StripModel, StripTrace, UnitPane, stable_hash};
@@ -28,7 +29,31 @@ pub fn resolve_x_ranges(models: &mut [StripModel]) {
         if model.x_bounds.is_none() {
             model.x_bounds = super::stack::visible_x_bounds(model);
         }
-        model.x_range = x_range(model);
+        let data = x_range(model);
+        // A running transient's strip spans the run from start to stop while it runs, so the
+        // trace grows across a still axis rather than the axis stretching under it.
+        model.x_range = match model.live_frame {
+            Some((start, stop)) if model.x_scale == XScale::Linear => {
+                Some(data.map_or((start, stop), |(x0, x1)| (x0.min(start), x1.max(stop))))
+            }
+            _ => data,
+        };
+    }
+}
+
+/// What the strips of a running transient keep in view as their runs grow.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LiveExtent {
+    /// The strips, by analysis, whose X window keeps their run's newest rows in view at the
+    /// width it has. The reader chooses following; any zoom or pan of theirs ends it, until they
+    /// choose it again, and so does the run's end, leaving the window where it was.
+    pub follow: HashSet<AnalysisPresentationKey>,
+}
+
+impl LiveExtent {
+    /// `view`'s width, ending at the run's newest time.
+    pub fn followed(view: (f64, f64), leading: f64) -> (f64, f64) {
+        (leading - (view.1 - view.0), leading)
     }
 }
 

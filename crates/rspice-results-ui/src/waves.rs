@@ -260,6 +260,10 @@ pub struct StripModel {
     /// the model is built. Whether the X axis can be logarithmic is decided
     /// from it on every frame.
     pub x_bounds: Option<(f64, f64)>,
+    /// The span of time a running transient fills, from where its result starts to its stop
+    /// time, while it runs. An unzoomed strip of it frames this span, so the trace grows across
+    /// an axis that stands still. Set by the host, which knows the run is running.
+    pub live_frame: Option<(f64, f64)>,
     /// Where each peak, valley and crossing marker on this strip stands: a search walks its
     /// trace, and the canvas and the readout ask on every frame. Kept as long as the model,
     /// which is built again when the data under it changes.

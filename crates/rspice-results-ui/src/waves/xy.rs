@@ -1423,7 +1423,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     match ruler.viewport {
         Some(super::navigation::SharedXViewChange::Fit) => held.x_view = None,
         Some(super::navigation::SharedXViewChange::Range(range)) => held.x_view = Some(range),
-        None => {}
+        Some(super::navigation::SharedXViewChange::Follow) | None => {}
     }
     if scale_toggled {
         held.log_x = !log_x;

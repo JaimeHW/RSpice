@@ -427,12 +427,15 @@ pub fn shared_x_view(
     })
 }
 
+/// Set the strip's X window, as the reader zoomed, panned or fitted it: which ends following
+/// its run's newest rows.
 pub fn set_shared_x_view(
     results: &mut ResultViewerState,
     analysis: AnalysisPresentationKey,
     pane_count: usize,
     range: Option<(f64, f64)>,
 ) {
+    results.live_extent.follow.remove(&analysis);
     for ordinal in 0..pane_count {
         results
             .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, ordinal)
@@ -949,6 +952,36 @@ pub(crate) fn visible_x_bounds(model: &StripModel) -> Option<(f64, f64)> {
     maximum.is_finite().then_some((minimum, maximum))
 }
 
+/// Follow a running transient's newest rows: its window keeps the width it has and ends at the
+/// newest time. A strip of anything else has nothing to follow.
+pub fn start_following(results: &mut ResultViewerState, model: &StripModel, pane_count: usize) {
+    if model.live_frame.is_some() {
+        results.live_extent.follow.insert(model.analysis_key);
+        follow_leading_edge(results, model, pane_count);
+    }
+}
+
+/// Keep a following strip's window on its run's newest rows. Once the run ended its strip has
+/// no live frame, and following ends with the window where it was.
+pub fn follow_leading_edge(results: &mut ResultViewerState, model: &StripModel, pane_count: usize) {
+    if !results.live_extent.follow.contains(&model.analysis_key) {
+        return;
+    }
+    let (Some(frame), Some((_, leading))) = (model.live_frame, model.x_bounds) else {
+        results.live_extent.follow.remove(&model.analysis_key);
+        return;
+    };
+    let view = shared_x_view(results, model.analysis_key, pane_count).unwrap_or(frame);
+    let followed = super::extent::LiveExtent::followed(view, leading);
+    if followed != view {
+        for ordinal in 0..pane_count {
+            results
+                .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, ordinal)
+                .x = Some(followed);
+        }
+    }
+}
+
 /// Resolve source ownership, then apply the navigator's actions to the app.
 fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame: StripFrame<'_>) {
     let StripFrame {
@@ -963,6 +996,7 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
     if height <= 1.0 {
         return;
     }
+    follow_leading_edge(host.session_mut(), model, pane_count);
     let current =
         shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(full_domain);
     let cursor_owner = host.session().cursor_strip == Some(model.analysis_index);
@@ -980,11 +1014,22 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
     let output = navigation::show_shared_x_axis(ui, &mut host.session_mut().derived, model, input);
     host.note_sample_reads(output.overview_samples_read, output.extrema_samples_read);
     if let Some(viewport) = output.viewport {
-        let range = match viewport {
-            navigation::SharedXViewChange::Fit => None,
-            navigation::SharedXViewChange::Range(range) => Some(range),
-        };
-        set_shared_x_view(host.session_mut(), model.analysis_key, pane_count, range);
+        match viewport {
+            navigation::SharedXViewChange::Fit => {
+                set_shared_x_view(host.session_mut(), model.analysis_key, pane_count, None);
+            }
+            navigation::SharedXViewChange::Range(range) => {
+                set_shared_x_view(
+                    host.session_mut(),
+                    model.analysis_key,
+                    pane_count,
+                    Some(range),
+                );
+            }
+            navigation::SharedXViewChange::Follow => {
+                start_following(host.session_mut(), model, pane_count);
+            }
+        }
     }
     if let Some(cursor) = output.cursor {
         if !cursor_owner && !linked_cursor {

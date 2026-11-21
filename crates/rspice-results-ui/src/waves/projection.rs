@@ -903,6 +903,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             grid_ascending: false,
             x_range: None,
             x_bounds: None,
+            live_frame: None,
             marker_positions: super::MarkerPositions::default(),
             event_lanes,
             lane_traces,

@@ -144,6 +144,8 @@ pub struct SharedXAxis {
 pub enum SharedXViewChange {
     Fit,
     Range((f64, f64)),
+    /// Keep a running transient's newest rows in view as they arrive.
+    Follow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -813,6 +815,9 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
         if fit_key {
             output.viewport = Some(SharedXViewChange::Fit);
         }
+        if ui.input(|input| input.key_pressed(egui::Key::End)) {
+            output.viewport = Some(SharedXViewChange::Follow);
+        }
         let zoom_in = ui.input(|input| input.key_pressed(egui::Key::Plus));
         let zoom_out = ui.input(|input| input.key_pressed(egui::Key::Minus));
         if (zoom_in || zoom_out)
@@ -848,8 +853,8 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text(hover.unwrap_or_else(|| {
         "Drag an end to zoom in \u{00b7} drag the window to pan \u{00b7} click to recenter \u{00b7} \
-         wheel to zoom \u{00b7} double-click or F for the full view \u{00b7} drag a cursor's box \
-         to move it"
+         wheel to zoom \u{00b7} double-click or F for the full view \u{00b7} End follows a \
+         running transient's newest results \u{00b7} drag a cursor's box to move it"
             .to_owned()
     }));
     output

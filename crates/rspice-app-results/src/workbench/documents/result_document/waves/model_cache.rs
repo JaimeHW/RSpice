@@ -85,6 +85,18 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 projection.selection,
                 projection.hidden_family_traces,
             );
+            // A running transient's strip frames its run from start to stop while it runs.
+            if let Some(run) = simulation.active_run() {
+                for model in &mut built {
+                    if run
+                        .analyses
+                        .get(model.analysis_index)
+                        .is_some_and(|analysis| analysis.is_live_partial())
+                    {
+                        model.live_frame = simulation.execution.live_window;
+                    }
+                }
+            }
             apply_waveform_visibility(
                 &mut built,
                 simulation.active_run().map(AsRef::as_ref),

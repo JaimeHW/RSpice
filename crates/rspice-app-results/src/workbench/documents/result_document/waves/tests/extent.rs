@@ -202,3 +202,122 @@ fn family_envelopes_are_memoized_against_the_models_that_produced_them() {
         "a viewer projection outlived the dataset it was built from"
     );
 }
+
+/// A running transient's strip spans its run from start to stop while it grows, so the trace
+/// grows across an axis that stands still; a zoom taken while it runs is kept when it ends.
+#[test]
+fn a_running_transients_strip_frames_its_run_and_keeps_a_zoom_past_its_end() {
+    use rspice_results_ui::waves::stack::{set_shared_x_view, shared_x_view};
+
+    let trace = |last: f64| {
+        let x = (0..=10)
+            .map(|k| last * f64::from(k) / 10.0)
+            .collect::<Vec<_>>();
+        RetainedTrace::new("V(a)", x.clone(), x, "#fff")
+    };
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.execution.live_window = Some((0.0, 10.0));
+    state.model.simulation.start_run().add_analysis(
+        AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "Tran")
+            .with_waveforms(vec![trace(1.0)]),
+    );
+    let presentation = state.model.preferences.result_presentation_policy();
+    let models = |state: &mut ResultsTestHost| {
+        cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        )
+    };
+    let running = models(&mut state);
+    assert_eq!(running[0].x_range, Some((0.0, 10.0)));
+    let key = running[0].analysis_key;
+    let panes = running[0].unit_panes().len();
+
+    for last in [4.0, 7.5] {
+        state.model.simulation.retained.runs[0].analyses[0] =
+            AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "Tran")
+                .with_waveforms(vec![trace(last)]);
+        state.model.simulation.view.data_version += 1;
+        assert_eq!(
+            models(&mut state)[0].x_range,
+            Some((0.0, 10.0)),
+            "the frame stands still while the run has reached {last}"
+        );
+    }
+
+    set_shared_x_view(
+        &mut state.results.results.session,
+        key,
+        panes,
+        Some((2.0, 4.0)),
+    );
+    state.model.simulation.retained.runs[0].analyses[0] =
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![trace(10.0)]);
+    state.model.simulation.execution.live_window = None;
+    state.model.simulation.view.data_version += 1;
+    let ended = models(&mut state);
+    assert_eq!(ended[0].analysis_key, key);
+    assert_eq!(ended[0].x_range, Some((0.0, 10.0)));
+    assert_eq!(
+        shared_x_view(&state.results.results.session, key, panes),
+        Some((2.0, 4.0)),
+        "the reader's zoom outlives the run's end"
+    );
+}
+
+/// Following keeps a zoomed window's width and ends it at the run's newest time; a zoom of the
+/// reader's ends following, and so does the run's end.
+#[test]
+fn following_a_running_transient_keeps_its_newest_rows_in_view_until_a_zoom() {
+    use rspice_results_ui::waves::stack::{
+        follow_leading_edge, set_shared_x_view, shared_x_view, start_following,
+    };
+
+    let trace = |last: f64| {
+        let x = (0..=10)
+            .map(|k| last * f64::from(k) / 10.0)
+            .collect::<Vec<_>>();
+        RetainedTrace::new("V(a)", x.clone(), x, "#fff")
+    };
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.execution.live_window = Some((0.0, 10.0));
+    state.model.simulation.start_run().add_analysis(
+        AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "Tran")
+            .with_waveforms(vec![trace(3.0)]),
+    );
+    let presentation = state.model.preferences.result_presentation_policy();
+    let models = |state: &mut ResultsTestHost| {
+        cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        )
+    };
+    let running = models(&mut state);
+    let key = running[0].analysis_key;
+    let panes = running[0].unit_panes().len();
+    let session = &mut state.results.results.session;
+    set_shared_x_view(session, key, panes, Some((0.0, 1.0)));
+    start_following(session, &running[0], panes);
+    assert_eq!(shared_x_view(session, key, panes), Some((2.0, 3.0)));
+
+    state.model.simulation.retained.runs[0].analyses[0] =
+        AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "Tran")
+            .with_waveforms(vec![trace(6.0)]);
+    state.model.simulation.view.data_version += 1;
+    let grown = models(&mut state);
+    let session = &mut state.results.results.session;
+    follow_leading_edge(session, &grown[0], panes);
+    assert_eq!(shared_x_view(session, key, panes), Some((5.0, 6.0)));
+
+    set_shared_x_view(session, key, panes, Some((1.0, 2.0)));
+    follow_leading_edge(session, &grown[0], panes);
+    assert_eq!(
+        shared_x_view(session, key, panes),
+        Some((1.0, 2.0)),
+        "a zoom of the reader's ends following"
+    );
+}

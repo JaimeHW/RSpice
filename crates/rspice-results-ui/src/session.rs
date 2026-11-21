@@ -708,6 +708,8 @@ pub struct ResultViewerState {
     /// dataset the user ever opened. It is the same class of fact as a marker
     /// and it is kept the same way.
     pub log_y_panes: HashSet<WavePanePresentationKey>,
+    /// What the strips of a running transient keep in view as they grow.
+    pub live_extent: crate::waves::extent::LiveExtent,
     /// Draw exact project specification bounds compatible with visible axes.
     pub show_spec_limits: bool,
     /// Draw derived min/max curves only when retained family samples exist.
