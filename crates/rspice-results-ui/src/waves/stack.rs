@@ -69,6 +69,16 @@ pub trait StackHost {
     ) -> pane_view::ComparisonMarks {
         pane_view::ComparisonMarks::default()
     }
+    /// What a loop's stability margins mark on `pane`. A host that measures
+    /// no margins of a curve the pane draws marks nothing.
+    fn margin_marks(
+        &mut self,
+        _model: &StripModel,
+        _pane: &UnitPane,
+        _tokens: &Tokens,
+    ) -> crate::bode::margins::MarginMarks {
+        crate::bode::margins::MarginMarks::default()
+    }
     fn pane_header(
         &mut self,
         ui: &mut Ui,
@@ -1964,7 +1974,8 @@ fn show_unit_pane(
     // A click on a strip the pair does not stand on starts the pair afresh
     // there, so it places A however many cursors stood elsewhere.
     let places_a = cursors.is_none() || host.session().cursor_a_is_next();
-    let markers = pane_view::plot_markers(
+    let margins = host.margin_marks(model, pane, &t);
+    let mut markers = pane_view::plot_markers(
         model,
         pane,
         interpolation,
@@ -1979,6 +1990,7 @@ fn show_unit_pane(
                 label: marker_label(marker),
             }),
     );
+    markers.extend(margins.markers);
     // Each axis after the first fits the curves it reads, over the same
     // window, until the reader pins a range of its own on it.
     let secondary_axis_exprs: Vec<Vec<ResolvedExpr>> = pane
@@ -2056,6 +2068,7 @@ fn show_unit_pane(
         cursors,
         specification_limits,
         markers,
+        references: margins.references,
         comparison,
         expressions: exprs,
         family_envelopes,

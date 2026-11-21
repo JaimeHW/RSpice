@@ -12,6 +12,7 @@ use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, ac_bode_shape_fo
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use rspice_results::bode::retained::{self, bode_responses, response_signal};
 use rspice_results_ui::bode::inspector::{self, BodeInspector, BodeResponse, NoiseSpectrumModel};
+use rspice_results_ui::bode::margins::{self, MarginMarks};
 
 use super::{BodeDerived, ResultViewer, ResultsParts, ResultsReads};
 
@@ -19,6 +20,8 @@ use super::{BodeDerived, ResultViewer, ResultsParts, ResultsReads};
 struct BodeModel {
     /// Whether the selected response retained a phase trace.
     phase_available: bool,
+    /// Where the analysis keeps the measured response's phase.
+    phase_index: Option<usize>,
     /// The measured response, including whether the sweep proves its
     /// lowest-frequency gain is the DC gain — the card's labels depend on it,
     /// and an unproven claim of DC gain is a wrong reading of a right number.
@@ -193,6 +196,7 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
 
     Ok(BodeModel {
         phase_available,
+        phase_index: shape.phase_index,
         margins,
         signal: shape.signal,
         loop_gain: analysis_type == AnalysisType::Stb,
@@ -313,6 +317,60 @@ pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut ResultsParts<'
     );
 }
 
+/// What the Bode card's margins mark on one pane of the Bode sheet: the gain
+/// margin on the pane drawing the measured loop gain's magnitude, the phase
+/// margin on the pane drawing its phase. Only a stability analysis's loop
+/// gain has margins, and only the run shown is marked.
+pub(super) fn margin_marks(
+    state: &mut ResultsParts<'_>,
+    model: &rspice_results_ui::waves::StripModel,
+    pane: &rspice_results_ui::waves::UnitPane,
+    tokens: &rspice_ui_kit::tokens::Tokens,
+) -> MarginMarks {
+    if state.results.session.viewer != ResultViewer::Bode {
+        return MarginMarks::default();
+    }
+    let Ok(bode) = build_model(state) else {
+        return MarginMarks::default();
+    };
+    let Some(run) = state.model.simulation.active_run() else {
+        return MarginMarks::default();
+    };
+    let Some(analysis) = run.analyses.get(bode.margins.analysis_index) else {
+        return MarginMarks::default();
+    };
+    if !bode.loop_gain
+        || super::AnalysisPresentationKey::new(run.dataset_id, analysis) != model.analysis_key
+    {
+        return MarginMarks::default();
+    }
+    let draws = |index: Option<usize>| {
+        let Some(name) = index
+            .and_then(|index| analysis.waveforms.get(index))
+            .map(|waveform| waveform.as_ref().name.as_str())
+        else {
+            return false;
+        };
+        pane.traces.iter().any(|&trace| {
+            trace < model.signal_trace_count
+                && model
+                    .traces
+                    .get(trace)
+                    .is_some_and(|trace| trace.source_waveform_name == name)
+        })
+    };
+    let digits = significant_digits(state.results_reads());
+    let color = tokens.color.warn;
+    if draws(Some(bode.margins.mag_index)) {
+        margins::gain_marks(&bode.margins.metrics, color, digits)
+    } else if draws(bode.phase_index) {
+        let policy = state.model.preferences.quantity_presentation_policy();
+        margins::phase_marks(&bode.margins.metrics, color, &policy, digits)
+    } else {
+        MarginMarks::default()
+    }
+}
+
 /// Results ▸ Displayed significant digits, or the open result document's own.
 fn significant_digits(state: ResultsReads<'_>) -> usize {
     let presentation = state.presentation_policy();
@@ -356,6 +414,97 @@ mod tests {
                 )
                 .expect("valid AC provenance"),
             )
+    }
+
+    /// The Bode sheet tags a stability loop's margins where the card reads
+    /// them: the gain margin on the 0 dB reference of the pane drawing the
+    /// loop's gain, the phase margin on the −180° reference of the pane
+    /// drawing its phase, and nothing on any other pane.
+    #[test]
+    fn a_stability_loop_tags_its_margins_on_its_gain_and_phase_panes() {
+        // L = 4/(1 + jf/1 kHz)³: GM 6.02 dB at 1.73 kHz, PM 27.1° at 1.23 kHz.
+        let frequency: Vec<f64> = (0..=30).map(|i| 10f64.powf(f64::from(i) / 5.0)).collect();
+        let polar: Vec<(f64, f64)> = frequency
+            .iter()
+            .map(|&f| {
+                let x = f / 1.0e3;
+                (4.0 / (1.0 + x * x).powf(1.5), -3.0 * x.atan().to_degrees())
+            })
+            .collect();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Stb, "STB").with_waveforms(vec![
+                RetainedTrace::new(
+                    rspice_results::nyquist::LOOP_GAIN_DECIBELS_TRACE,
+                    frequency.clone(),
+                    polar
+                        .iter()
+                        .map(|(m, _)| 20.0 * m.log10())
+                        .collect::<Vec<_>>(),
+                    "#00aaff",
+                )
+                .with_unit("dB"),
+                RetainedTrace::new(
+                    rspice_results::nyquist::LOOP_PHASE_TRACE,
+                    frequency,
+                    polar
+                        .iter()
+                        .map(|&(_, degrees)| degrees)
+                        .collect::<Vec<_>>(),
+                    "#00aaff",
+                )
+                .with_unit("°"),
+            ]),
+        );
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        state.results.results.session.viewer = ResultViewer::Bode;
+        let metrics = build_model(&mut state.results_parts())
+            .expect("Bode model")
+            .margins
+            .metrics;
+
+        let tokens = crate::ui::tokens::Tokens::default();
+        let presentation = state.model.preferences.result_presentation_policy();
+        let models = super::super::waves::cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &tokens,
+        );
+        let mut marks = Vec::new();
+        for pane in models[0].unit_panes() {
+            let found = margin_marks(&mut state.results_parts(), &models[0], &pane, &tokens);
+            for marker in found.markers {
+                marks.push((
+                    pane.axis_unit().to_owned(),
+                    marker.label,
+                    marker.x,
+                    marker.y,
+                    found.references.clone(),
+                ));
+            }
+        }
+
+        let [gain, phase] = &marks[..] else {
+            panic!("one mark on each of two panes: {marks:?}");
+        };
+        assert_eq!(gain.0, "dB");
+        assert!(gain.1.starts_with("GM 6.02"), "{}", gain.1);
+        assert_eq!((gain.2, gain.3), (metrics.f180.unwrap(), 0.0));
+        assert!(gain.4.is_empty());
+        assert_eq!(phase.0, "°");
+        assert!(phase.1.starts_with("PM 27.1"), "{}", phase.1);
+        assert_eq!(phase.2, metrics.ugf.unwrap());
+        assert!((phase.3 + 180.0).abs() < 1e-9);
+        assert_eq!(phase.4, [phase.3]);
+
+        state.results.results.session.viewer = ResultViewer::Waves;
+        for pane in models[0].unit_panes() {
+            let found = margin_marks(&mut state.results_parts(), &models[0], &pane, &tokens);
+            assert!(found.markers.is_empty() && found.references.is_empty());
+        }
     }
 
     #[test]

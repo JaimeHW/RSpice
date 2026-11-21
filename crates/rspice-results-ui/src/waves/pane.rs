@@ -538,6 +538,9 @@ pub struct PanePlot<'a> {
     pub cursors: Option<CursorPair>,
     pub specification_limits: Vec<plot::LimitLine>,
     pub markers: Vec<plot::Marker>,
+    /// The levels a loop's margins are read against on this pane, drawn as
+    /// reference lines.
+    pub references: Vec<f64>,
     /// What the comparison that last answered marks on the pane.
     pub comparison: ComparisonMarks,
     pub expressions: &'a [ResolvedExpr],
@@ -894,6 +897,12 @@ pub fn show_plot<'a>(
     {
         if y0 < level && level < y1 && !spec.ref_lines.iter().any(|line| line.y == level) {
             spec.ref_lines.push(plot::RefLine { y: level });
+        }
+    }
+    // The levels a loop’s margins are read against.
+    for &y in &input.references {
+        if y0.min(y1) < y && y < y0.max(y1) && spec.ref_lines.iter().all(|line| line.y != y) {
+            spec.ref_lines.push(plot::RefLine { y });
         }
     }
 

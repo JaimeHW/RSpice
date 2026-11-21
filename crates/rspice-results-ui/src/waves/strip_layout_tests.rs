@@ -375,6 +375,7 @@ fn every_curve_a_strip_draws_reads_out_on_hover() {
                 cursors: None,
                 specification_limits: Vec::new(),
                 markers: Vec::new(),
+                references: Vec::new(),
                 comparison: Default::default(),
                 expressions: &[],
                 family_envelopes: &[],

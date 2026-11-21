@@ -52,6 +52,14 @@ impl StackHost for WaveStackHost<'_, '_> {
     ) -> Vec<plot::LimitLine> {
         matching_spec_limits(self.0.results_reads(), model, pane, tokens)
     }
+    fn margin_marks(
+        &mut self,
+        model: &StripModel,
+        pane: &UnitPane,
+        tokens: &Tokens,
+    ) -> rspice_results_ui::bode::margins::MarginMarks {
+        super::super::bode::margin_marks(self.0, model, pane, tokens)
+    }
     fn comparison_marks(
         &mut self,
         model: &StripModel,
