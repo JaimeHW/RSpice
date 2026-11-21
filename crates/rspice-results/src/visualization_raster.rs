@@ -234,6 +234,9 @@ pub struct ResolvedRasterTrace {
     trace_id: TraceId,
     label: String,
     binding: DatasetBinding,
+    /// The colour the document gives the trace, which the palette's own
+    /// gives way to.
+    color: Option<super::visualization_document::TraceColor>,
     points: Vec<ResolvedRasterPoint>,
 }
 
@@ -699,6 +702,7 @@ pub fn resolve_cartesian_line_scene(
             trace_id: trace.id,
             label: trace.label.clone(),
             binding: trace.binding,
+            color: trace.color,
             points,
         });
     }
@@ -823,7 +827,13 @@ pub fn rasterize_cartesian_line_scene(
 
     let mut stroke_steps = 0_usize;
     for (trace_index, trace) in scene.traces.iter().enumerate() {
-        let color = profile.palette.traces[trace_index % profile.palette.traces.len()];
+        let color = trace.color.map_or(
+            profile.palette.traces[trace_index % profile.palette.traces.len()],
+            |color| {
+                let [red, green, blue] = color.rgb();
+                Rgb8::new(red, green, blue)
+            },
+        );
         if trace.points.len() == 1 {
             let point = trace.points[0];
             if point_in_range(point, scene.x_range, scene.y_range) {
@@ -1927,6 +1937,45 @@ mod tests {
         assert_eq!(info.color_type, png::ColorType::Rgb);
         assert_eq!(info.bit_depth, png::BitDepth::Eight);
         assert_eq!(info.buffer_size(), 1_200 * 675 * 3);
+    }
+
+    /// A trace the document gives a colour is drawn in it, and not in its
+    /// palette place.
+    #[test]
+    fn a_trace_is_drawn_in_the_colour_its_document_gives_it() {
+        let mut fixture = fixture(ValueType::Real, AxisScale::Linear);
+        let trace_id = fixture.document.traces()[0].id;
+        let orange = crate::visualization_document::TraceColor::from_rgb(0xff, 0x88, 0x00);
+        let pixels = |fixture: &Fixture| {
+            let artifact = render_visualization_report_figure(
+                &fixture.document,
+                &reference(fixture),
+                fixture.page_id,
+                fixture.pane_id,
+                &VisualizationRasterProfile::default(),
+            )
+            .unwrap();
+            let decoder = png::Decoder::new(Cursor::new(artifact.artifact().payload().to_vec()));
+            let mut reader = decoder.read_info().unwrap();
+            let mut decoded = vec![0; reader.output_buffer_size().unwrap()];
+            reader.next_frame(&mut decoded).unwrap();
+            decoded
+                .chunks_exact(3)
+                .filter(|pixel| *pixel == [0xff, 0x88, 0x00])
+                .count()
+        };
+        assert_eq!(pixels(&fixture), 0, "the palette draws no orange");
+        fixture
+            .document
+            .transact(
+                fixture.document.revision(),
+                vec![DocumentEdit::SetTraceColor {
+                    trace_id,
+                    color: Some(orange),
+                }],
+            )
+            .unwrap();
+        assert!(pixels(&fixture) > 100, "the trace is drawn in its colour");
     }
 
     #[test]

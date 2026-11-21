@@ -252,7 +252,19 @@ fn selected_result_trace(
             &waveform_color,
         );
     if trace_colour_row(ui, &mut color) {
-        set_selected_trace_color(&mut state.model.simulation, selected, color);
+        let chosen = crate::results::visualization_document::TraceColor::from_rgb(
+            color.r(),
+            color.g(),
+            color.b(),
+        );
+        if let Err(error) = crate::workbench::documents::result_document::set_trace_color(
+            state,
+            selected.analysis_key(),
+            selected.source_name(),
+            Some(chosen),
+        ) {
+            state.prompt(error);
+        }
     }
 
     section_block_gap(ui);
@@ -485,47 +497,6 @@ fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
         node.set_value(hex.as_str());
     });
     swatch.changed()
-}
-
-fn set_selected_trace_color(
-    simulation: &mut crate::state::SimulationState,
-    selected: &rspice_results_ui::selection::SelectedResultTrace,
-    color: Color32,
-) {
-    let color = format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b());
-    let Some(run_index) = simulation.view.active_run_idx else {
-        return;
-    };
-    let Some((analysis_index, waveform_index)) =
-        simulation.retained.runs.get(run_index).and_then(|run| {
-            selected
-                .resolve(run)
-                .map(|(analysis_index, waveform_index, _, _)| (analysis_index, waveform_index))
-        })
-    else {
-        return;
-    };
-    if let Some(waveform) = simulation
-        .retained
-        .runs
-        .get_mut(run_index)
-        .and_then(|run| run.analyses.get_mut(analysis_index))
-        .and_then(|analysis| analysis.waveforms.get_mut(waveform_index))
-        .filter(|waveform| waveform.name == selected.source_name())
-    {
-        waveform.color.clone_from(&color);
-    } else {
-        return;
-    }
-    if simulation.view.active_analysis_idx == Some(analysis_index)
-        && let Some(waveform) = simulation
-            .view
-            .waveforms
-            .iter_mut()
-            .find(|waveform| waveform.name == selected.source_name())
-    {
-        waveform.color = color;
-    }
 }
 
 fn is_schematic_cross_probe_candidate(signal: &str) -> bool {

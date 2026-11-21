@@ -986,6 +986,15 @@ pub fn project_pane_presentation(
     state
         .results
         .project_waveform_visibility(analysis_key, visibility);
+    state.results.project_waveform_colors(
+        analysis_key,
+        pane.traces.iter().filter_map(|trace| {
+            Some((
+                trace.source_signal().unwrap_or(&trace.label).to_owned(),
+                trace.color?,
+            ))
+        }),
+    );
     // The expressions this pane keeps are the ones its strip draws.
     if let Some(document) = state
         .model

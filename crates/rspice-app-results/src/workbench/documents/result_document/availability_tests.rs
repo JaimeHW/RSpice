@@ -941,6 +941,71 @@ fn an_imported_runs_view_goes_with_the_run() {
     );
 }
 
+/// A colour the reader gives a trace is drawn from the frame it is chosen,
+/// kept by the view that draws it, and drawn from the view again on the next
+/// frame; the run keeps the colour it was solved with.
+#[test]
+fn a_chosen_trace_colour_is_the_views_and_the_run_keeps_its_own() {
+    use crate::results::visualization_document::TraceColor;
+    let mut state = transient_state();
+    state.quick_frame();
+    let analysis = active_analysis_key(&state);
+    let orange = TraceColor::from_rgb(0xff, 0x88, 0x00);
+    let drawn = |state: &mut ResultsTestHost| {
+        let presentation = state.model.preferences.result_presentation_policy();
+        let models = waves::cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        );
+        models[0]
+            .traces
+            .iter()
+            .find(|trace| trace.name == "V(out)" && !trace.overlay)
+            .map(|trace| trace.color)
+            .expect("V(out) is drawn")
+    };
+    let solved = drawn(&mut state);
+
+    set_trace_color(&mut state.results_parts(), analysis, "V(out)", Some(orange))
+        .expect("the working view keeps the trace");
+
+    assert_eq!(drawn(&mut state), egui::Color32::from_rgb(0xff, 0x88, 0x00));
+    let view = state.working_view().expect("the run's view").clone();
+    assert!(
+        view.traces()
+            .iter()
+            .any(|trace| trace.label == "V(out)" && trace.color == Some(orange)),
+        "the view keeps the colour"
+    );
+    assert_eq!(
+        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].color, "#ffbd2e",
+        "the run keeps the colour it was solved with"
+    );
+    state.results.results.session.waveform_colors.clear();
+    state.quick_frame();
+    assert_eq!(
+        drawn(&mut state),
+        egui::Color32::from_rgb(0xff, 0x88, 0x00),
+        "the next frame draws the view's colour"
+    );
+
+    set_trace_color(&mut state.results_parts(), analysis, "V(out)", None)
+        .expect("the colour is given back");
+    assert_eq!(drawn(&mut state), solved);
+    assert!(
+        set_trace_color(
+            &mut state.results_parts(),
+            analysis,
+            "V(nope)",
+            Some(orange)
+        )
+        .is_err(),
+        "a signal the view has no trace of keeps its colour"
+    );
+}
+
 fn active_analysis_key(state: &ResultsTestHost) -> AnalysisPresentationKey {
     let run = state
         .model

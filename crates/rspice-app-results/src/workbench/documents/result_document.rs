@@ -854,6 +854,61 @@ pub fn keep_plotted_expression(
     Ok(added)
 }
 
+/// Give the trace of `signal` on `analysis`'s strip the colour `color`, or
+/// with `None` its signal's own colour again, on the view that keeps the
+/// strip: the saved document's pane, or the run's working view. The run is
+/// left as it was solved.
+pub fn set_trace_color(
+    state: &mut ResultsParts<'_>,
+    analysis: AnalysisPresentationKey,
+    signal: &str,
+    color: Option<crate::results::visualization_document::TraceColor>,
+) -> Result<(), String> {
+    let context = state
+        .results
+        .session
+        .pane_for(analysis)
+        .ok_or_else(|| format!("No view keeps this strip, so '{signal}' keeps its colour."))?;
+    let document = state
+        .model
+        .workspace
+        .content
+        .visualization_document(context.document_id)
+        .ok_or_else(|| "The view is no longer in the project.".to_owned())?;
+    let held: Vec<_> = document
+        .traces()
+        .iter()
+        .filter(|trace| {
+            trace.pane_id == context.pane_id
+                && trace.source_signal().unwrap_or(&trace.label) == signal
+        })
+        .collect();
+    if held.is_empty() {
+        return Err(format!(
+            "'{signal}' is not a trace this view keeps, so its colour was not changed."
+        ));
+    }
+    let edits: Vec<_> = held
+        .iter()
+        .filter(|trace| trace.color != color)
+        .map(
+            |trace| crate::results::visualization_document::DocumentEdit::SetTraceColor {
+                trace_id: trace.id,
+                color,
+            },
+        )
+        .collect();
+    if !edits.is_empty() {
+        let revision = document.revision();
+        view_edits::apply(state, context.document_id, revision, edits)
+            .map_err(|error| error.to_string())?;
+    }
+    state
+        .results
+        .draw_waveform_color(SourceWaveformPresentationKey::new(analysis, signal), color);
+    Ok(())
+}
+
 /// A marker sits at a finite X on a trace of its own strip.
 fn validate_marker_placement(placement: &MarkerPlacement<'_>) -> Result<(), &'static str> {
     if !placement.x.is_finite() {

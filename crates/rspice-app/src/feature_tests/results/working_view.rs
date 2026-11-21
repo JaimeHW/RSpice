@@ -1,14 +1,15 @@
 //! A plan's working view keeps what the reader made of its runs: through a
-//! re-run, a restart, and a save and reopen.
+//! re-run, a restart, and a save and reopen. The runs keep only what they
+//! were solved with.
 
 use crate::workbench::app_state::AppState;
 use rspice_app_results::workbench::documents::result_document::{
     AnalysisPresentationKey, MarkerKind, MarkerPlacement, WavePanePresentationKey,
-    commit_marker_edit, place_marker, waves::source_waveform_anchor, working_view,
+    commit_marker_edit, place_marker, set_trace_color, waves::source_waveform_anchor, working_view,
 };
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
-use rspice_app_state::results::visualization_document::ResultDocumentTrackingMode;
+use rspice_app_state::results::visualization_document::{ResultDocumentTrackingMode, TraceColor};
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, RetainedTrace, SimulationRunLifecycle,
 };
@@ -19,6 +20,7 @@ use rspice_results::result_presentation::SourceWaveformPresentationKey;
 const TIME: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 const FIRST_OUT: [f64; 5] = [0.0, 0.4, 1.0, 0.4, 0.0];
 const RERUN_OUT: [f64; 5] = [0.0, 0.2, 0.4, 1.0, 0.1];
+const ORANGE: TraceColor = TraceColor::from_rgb(0xff, 0x88, 0x00);
 
 /// Run the session's plan once, its transient answering `out`, and finish
 /// the run.
@@ -72,8 +74,9 @@ fn show_newest(state: &mut AppState) -> AnalysisPresentationKey {
     AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
 }
 
-/// The hidden input, the doubled output, the log axis and the peak marker
-/// are all on the quick view of `analysis`.
+/// The hidden input, the doubled output, the output's colour, the log axis
+/// and the peak marker are all on the quick view of `analysis`; every run
+/// keeps the colour it was solved with.
 fn assert_kept(state: &AppState, analysis: AnalysisPresentationKey, phase: &str) {
     let session = &state.results.results.session;
     assert_eq!(
@@ -83,6 +86,18 @@ fn assert_kept(state: &AppState, analysis: AnalysisPresentationKey, phase: &str)
         Some(&false),
         "{phase}: the hidden trace stays hidden"
     );
+    assert_eq!(
+        session
+            .waveform_colors
+            .get(&SourceWaveformPresentationKey::new(analysis, "V(out)")),
+        Some(&ORANGE),
+        "{phase}: the output keeps the colour the reader gave it"
+    );
+    for run in state.model.simulation.retained.runs.iter() {
+        for waveform in &run.analyses[0].waveforms {
+            assert_eq!(waveform.color, "#ffffff", "{phase}: the run is as solved");
+        }
+    }
     assert_eq!(
         session
             .analysis_exprs
@@ -168,6 +183,8 @@ fn a_working_view_keeps_the_readers_changes_through_a_rerun_a_restart_and_a_reop
         MarkerKind::Peak,
     )
     .expect("the marker becomes a peak marker");
+    set_trace_color(&mut state.results_parts(), first, "V(out)", Some(ORANGE))
+        .expect("the working view keeps the output's colour");
     quick_frame(&mut state);
 
     run_plan(&mut state, RERUN_OUT);

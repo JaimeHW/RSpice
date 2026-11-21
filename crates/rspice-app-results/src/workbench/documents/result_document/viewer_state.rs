@@ -1,6 +1,7 @@
 //! Result viewer interaction state and retained presentation mutations.
 
 use super::*;
+use crate::results::visualization_document::TraceColor;
 use rspice_results::result_presentation::SignalSet;
 use rspice_results_ui::derived::DerivedSeries;
 
@@ -219,6 +220,51 @@ impl ResultsState {
             .retain(|key, _| key.analysis() != analysis);
         self.session.waveform_visibility.extend(desired);
         self.models.invalidate();
+    }
+
+    /// Draw `analysis`'s traces in the colours the view being drawn gives
+    /// them, by signal, and every other in its own. Idempotent, like
+    /// [`Self::project_waveform_visibility`].
+    pub(crate) fn project_waveform_colors(
+        &mut self,
+        analysis: AnalysisPresentationKey,
+        colors: impl IntoIterator<Item = (String, TraceColor)>,
+    ) {
+        let desired = colors
+            .into_iter()
+            .map(|(signal, color)| (SourceWaveformPresentationKey::new(analysis, signal), color))
+            .collect::<HashMap<_, _>>();
+        let colors = &mut self.session.waveform_colors;
+        let unchanged = colors
+            .iter()
+            .filter(|(key, _)| key.analysis() == analysis)
+            .count()
+            == desired.len()
+            && desired
+                .iter()
+                .all(|(key, color)| colors.get(key) == Some(color));
+        if unchanged {
+            return;
+        }
+        colors.retain(|key, _| key.analysis() != analysis);
+        colors.extend(desired);
+        self.models.invalidate();
+    }
+
+    /// Draw `key`'s signal in `color` from this frame on, or with `None` in
+    /// its own colour: the view that keeps it was just given the colour.
+    pub(super) fn draw_waveform_color(
+        &mut self,
+        key: SourceWaveformPresentationKey,
+        color: Option<TraceColor>,
+    ) {
+        let changed = match color {
+            Some(color) => self.session.waveform_colors.insert(key, color) != Some(color),
+            None => self.session.waveform_colors.remove(&key).is_some(),
+        };
+        if changed {
+            self.models.invalidate();
+        }
     }
 
     /// Both frame preparation and direct plot/readout actions cross this

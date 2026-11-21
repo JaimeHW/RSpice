@@ -327,6 +327,14 @@ pub fn panel_note(ui: &mut Ui, text: &str) {
     toned_inspector_copy(ui, text, faint);
 }
 
+/// The colour a reader gave a trace, as drawn.
+pub fn chosen_trace_color(
+    color: rspice_results::visualization_document::TraceColor,
+) -> egui::Color32 {
+    let [red, green, blue] = color.rgb();
+    egui::Color32::from_rgb(red, green, blue)
+}
+
 /// Parse a `#rrggbb` trace color, falling back to the palette cycle.
 pub fn trace_color(hex: &str, fallback: egui::Color32) -> egui::Color32 {
     let hex = hex.trim_start_matches('#');

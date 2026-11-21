@@ -624,6 +624,78 @@ fn a_signal_the_new_run_lacks_stays_marked_missing_and_the_document_moves_on() {
     assert!(!trace.missing, "a run that has the signal draws it again");
 }
 
+/// A colour the reader gives a trace is the view's: it is saved with it,
+/// stays when the view follows the next run, and is given back to the
+/// signal's own colour by clearing it. A saved colour not written `#rrggbb`
+/// is refused.
+#[test]
+fn a_trace_colour_is_kept_by_the_view_through_a_save_and_a_rerun() {
+    let (mut document, source, analysis_id) = provisioned_trace_document("V(out)");
+    let trace_id = document.traces()[0].id;
+    assert_eq!(document.traces()[0].color, None);
+    let orange = TraceColor::parse("#FF8800").expect("a colour");
+    assert_eq!(orange.rgb(), [0xff, 0x88, 0x00]);
+    assert_eq!(orange.to_string(), "#ff8800");
+    assert_eq!(TraceColor::parse("ff8800"), Some(orange));
+    for malformed in ["#ff880", "#ff88000", "#gg8800", "", "#"] {
+        assert_eq!(TraceColor::parse(malformed), None, "{malformed:?}");
+    }
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetTraceColor {
+                trace_id,
+                color: Some(orange),
+            }],
+        )
+        .unwrap();
+
+    let saved = serde_json::to_string(&document).unwrap();
+    assert!(saved.contains("\"color\":\"#ff8800\""), "{saved}");
+    let mut document: VisualizationDocument = serde_json::from_str(&saved).unwrap();
+    assert_eq!(
+        document.traces()[0].color,
+        Some(orange),
+        "a saved view keeps it"
+    );
+    let malformed = saved.replace("#ff8800", "orange");
+    assert!(serde_json::from_str::<VisualizationDocument>(&malformed).is_err());
+
+    let next = binding(45);
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous: source,
+                next: long_form_analysis_dataset(next, analysis_id, "V(out)", 2.0),
+                analysis_id,
+            }],
+        )
+        .unwrap();
+    assert_eq!(document.traces()[0].binding, next);
+    assert_eq!(
+        document.traces()[0].color,
+        Some(orange),
+        "the next run's trace keeps it"
+    );
+
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetTraceColor {
+                trace_id,
+                color: None,
+            }],
+        )
+        .unwrap();
+    assert_eq!(document.traces()[0].color, None);
+    assert!(
+        !serde_json::to_string(&document)
+            .unwrap()
+            .contains("\"color\"")
+    );
+}
+
 /// Provisioning labels a trace with the vector's own name, and the vector it
 /// came from stays recorded beside it. A display surface may re-spell a label
 /// it can prove derivation wrote — the two are still equal — and must leave one

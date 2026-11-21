@@ -1001,6 +1001,10 @@ impl VisualizationDocument {
                 self.trace_mut(trace_id)?.visible = visible;
                 Ok(())
             }
+            DocumentEdit::SetTraceColor { trace_id, color } => {
+                self.trace_mut(trace_id)?.color = color;
+                Ok(())
+            }
             DocumentEdit::SetTraceLane { trace_id, lane } => {
                 self.trace_mut(trace_id)?.lane = lane;
                 Ok(())
@@ -1618,6 +1622,7 @@ impl VisualizationDocument {
             y_axis_id: trace.y_axis_id,
             label: trace.label,
             visible: true,
+            color: None,
             lane: TraceLane::default(),
             missing: false,
         });

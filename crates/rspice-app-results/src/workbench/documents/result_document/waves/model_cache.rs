@@ -68,6 +68,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 hidden_family_traces: &session.hidden_family_traces,
             },
             waveform_visibility: &session.waveform_visibility,
+            waveform_colors: &session.waveform_colors,
             expressions,
             x_scales: &session.x_scales,
         },
@@ -101,6 +102,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 &mut built,
                 simulation.active_run().map(AsRef::as_ref),
                 visibility,
+                &session.waveform_colors,
                 projection.hidden_family_traces,
                 &t.color.traces,
             );

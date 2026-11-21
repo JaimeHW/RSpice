@@ -525,6 +525,12 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
             }
         }
         state.results.project_waveform_visibility(key, visibility);
+        state.results.project_waveform_colors(
+            key,
+            traces
+                .iter()
+                .filter_map(|trace| Some((trace_signal(trace).to_owned(), trace.color?))),
+        );
 
         let held: Vec<_> = document
             .expression_traces()

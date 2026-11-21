@@ -1022,20 +1022,24 @@ impl WorkbenchHost for RSpiceApp {
         let state = &mut self.state;
         state.model.simulation.select_run(run_index);
         state.model.simulation.select_analysis(analysis_index);
-        state.model.simulation.retained.runs[run_index].analyses[analysis_index].waveforms
-            [waveform_index]
-            .visible = true;
-        if let Some(waveform) = state
-            .model
-            .simulation
-            .view
-            .waveforms
-            .get_mut(waveform_index)
+        // The run stays as it was solved: the signal is plotted on the view
+        // that draws it, which keeps it from the next frame on.
+        if let Some(run) = state.model.simulation.retained.runs.get(run_index)
+            && let Some(analysis) = run.analyses.get(analysis_index)
+            && let Some(waveform) = analysis.waveforms.get(waveform_index)
         {
-            waveform.visible = true;
+            let key = rspice_results::result_presentation::SourceWaveformPresentationKey::new(
+                rspice_results::result_presentation::AnalysisPresentationKey::new(
+                    run.dataset_id,
+                    analysis,
+                ),
+                waveform.name.clone(),
+            );
+            state
+                .results
+                .results
+                .reveal_waveforms([(key, waveform.visible)]);
         }
-        state.model.simulation.view.data_version =
-            state.model.simulation.view.data_version.wrapping_add(1);
         state.results.results.session.viewer =
             rspice_results::result_presentation::ResultViewer::Waves;
         state

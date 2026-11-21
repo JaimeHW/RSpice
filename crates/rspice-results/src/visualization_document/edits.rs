@@ -259,6 +259,12 @@ pub enum DocumentEdit {
         trace_id: TraceId,
         visible: bool,
     },
+    /// Draw one trace in the colour the reader chose, or, with `None`, in
+    /// its signal's own colour again.
+    SetTraceColor {
+        trace_id: TraceId,
+        color: Option<TraceColor>,
+    },
     /// Set how the waveform stack draws one trace: its lane kind, a bus's
     /// radix, and whether a bus shows its member lanes.
     SetTraceLane {

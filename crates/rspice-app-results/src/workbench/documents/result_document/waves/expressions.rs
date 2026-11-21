@@ -761,6 +761,7 @@ pub(crate) fn copy_cursor_text(
     let sample_selection = parts.results.session.sample_selection.clone();
     let hidden_family_traces = parts.results.session.hidden_family_traces.clone();
     let waveform_visibility = parts.results.session.waveform_visibility.clone();
+    let waveform_colors = parts.results.session.waveform_colors.clone();
     let phase_continuous = parts.results.session.presented_phase_continuous();
     let ac = parts.results.session.ac_display;
     let mut models = build_models(
@@ -777,6 +778,7 @@ pub(crate) fn copy_cursor_text(
         &mut models,
         parts.model.simulation.active_run().map(AsRef::as_ref),
         &waveform_visibility,
+        &waveform_colors,
         &hidden_family_traces,
         &Tokens::default().color.traces,
     );

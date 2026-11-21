@@ -7,6 +7,7 @@ use rspice_results::{
     family_projection::SourceSampleSelection,
     result_presentation::{ResultViewer, SourceWaveformPresentationKey},
     run::SimulationRun,
+    visualization_document::TraceColor,
     waveform::RetainedTrace,
 };
 use rspice_ui_kit::tokens::Tokens;
@@ -21,6 +22,8 @@ pub struct ModelCacheInput<'a> {
     pub viewer: ResultViewer,
     pub projection: ProjectionOptions<'a>,
     pub waveform_visibility: &'a HashMap<SourceWaveformPresentationKey, bool>,
+    /// The colours the view gives its traces, by signal.
+    pub waveform_colors: &'a HashMap<SourceWaveformPresentationKey, TraceColor>,
     /// A digest of what routes the reader's expressions to panes: their
     /// text, visibility and declared units, and which failed to evaluate.
     pub expressions: u64,
@@ -118,6 +121,13 @@ fn models_fingerprint(input: &ModelCacheInput<'_>, t: &Tokens) -> u64 {
         .collect::<Vec<_>>();
     visibility.sort_unstable();
     visibility.hash(&mut h);
+    let mut colors = input
+        .waveform_colors
+        .iter()
+        .map(|(key, color)| (stable_hash(key), color.rgb()))
+        .collect::<Vec<_>>();
+    colors.sort_unstable();
+    colors.hash(&mut h);
     for color in &t.color.traces {
         color.to_array().hash(&mut h);
     }
@@ -191,11 +201,13 @@ impl ModelsCache {
 /// revealing a source never accidentally reveals a hidden family member.
 ///
 /// With the reader's visibility known, each curve then takes its place in
-/// the canvas `palette`'s cycle (see [`rank_palette_slots`]).
+/// the canvas `palette`'s cycle (see [`rank_palette_slots`]), and the colour
+/// the view gives it in `colors`, when it gives one.
 pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
     models: &mut [StripModel],
     active_run: Option<&SimulationRun<A>>,
     overrides: &HashMap<SourceWaveformPresentationKey, bool>,
+    colors: &HashMap<SourceWaveformPresentationKey, TraceColor>,
     hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
     palette: &[egui::Color32],
 ) {
@@ -225,7 +237,7 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 .is_none_or(|key| !hidden_family_traces.contains(&key));
             trace.visible = shown && family_shown;
         }
-        let first_lane_slot = rank_palette_slots(model, analysis, &source_visible, palette);
+        let first_lane_slot = rank_palette_slots(model, analysis, &source_visible, colors, palette);
         for lane in &mut model.lane_traces {
             let key = SourceWaveformPresentationKey::new(
                 model.analysis_key,
@@ -238,8 +250,26 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 .is_some_and(|waveform| waveform.visible);
             lane.visible = overrides.get(&key).copied().unwrap_or(dataset_default);
         }
-        rank_lane_hues(model, analysis, first_lane_slot, palette);
+        rank_lane_hues(model, analysis, first_lane_slot, colors, palette);
     }
+}
+
+/// The colour a curve or real lane of `analysis` reading `signal` draws in:
+/// the one the view gives it, else the one its run's column stores, else
+/// `hue`, its palette place.
+fn drawn_color(
+    colors: &HashMap<SourceWaveformPresentationKey, TraceColor>,
+    analysis: rspice_results::result_presentation::AnalysisPresentationKey,
+    signal: &str,
+    stored: &str,
+    hue: egui::Color32,
+) -> egui::Color32 {
+    colors
+        .get(&SourceWaveformPresentationKey::new(analysis, signal))
+        .map_or_else(
+            || crate::presentation::trace_color(stored, hue),
+            |color| crate::presentation::chosen_trace_color(*color),
+        )
 }
 
 /// Give the lanes of `model` hues from the palette's cycle in turn after the
@@ -253,11 +283,12 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
 /// outnumber the palette.
 /// As with curves, the real lanes the dataset plots rank first and keep that
 /// rank whatever the reader hides, then the ones the reader added; a column
-/// that stores a colour keeps it.
+/// that stores a colour keeps it, and a colour the view gives one wins.
 fn rank_lane_hues(
     model: &mut StripModel,
     analysis: &AnalysisResult<RetainedTrace>,
     first_slot: usize,
+    colors: &HashMap<SourceWaveformPresentationKey, TraceColor>,
     palette: &[egui::Color32],
 ) {
     use super::LaneTraceKind;
@@ -281,6 +312,7 @@ fn rank_lane_hues(
         .filter(|lane| real(lane) && !dataset(lane) && lane.visible)
         .count();
     let (mut plotted_rank, mut added_rank, mut spare_rank) = (0, plotted, plotted + added);
+    let analysis_key = model.analysis_key;
     for lane in model.lane_traces.iter_mut().filter(|lane| real(lane)) {
         let counter = if dataset(lane) {
             &mut plotted_rank
@@ -292,7 +324,13 @@ fn rank_lane_hues(
         let slot = first_slot + *counter;
         *counter += 1;
         let stored = column(lane).map_or("", |waveform| waveform.color.as_str());
-        lane.color = crate::presentation::trace_color(stored, palette[slot % palette.len()]);
+        lane.color = drawn_color(
+            colors,
+            analysis_key,
+            &lane.source_waveform_name,
+            stored,
+            palette[slot % palette.len()],
+        );
     }
     let rows_from = first_slot + plotted + added;
     model.lane_hues = (0..palette.len())
@@ -317,6 +355,7 @@ fn rank_palette_slots(
     model: &mut StripModel,
     analysis: &AnalysisResult<RetainedTrace>,
     source_visible: &[bool],
+    colors: &HashMap<SourceWaveformPresentationKey, TraceColor>,
     palette: &[egui::Color32],
 ) -> usize {
     use super::TraceKind;
@@ -360,6 +399,7 @@ fn rank_palette_slots(
         })
         .collect();
     let mut merged = HashMap::new();
+    let analysis_key = model.analysis_key;
     for trace in model.traces.iter_mut().filter(|trace| ranked(trace)) {
         let key = (trace.waveform_index, trace.kind);
         let Some(&(_, slot)) = slots.iter().find(|(source, _)| *source == key) else {
@@ -372,7 +412,19 @@ fn rank_palette_slots(
             .filter(|_| trace.kind != TraceKind::Imaginary)
             .map_or("", |waveform| waveform.color.as_str());
         trace.palette_slot = Some(slot);
-        trace.signal_color = crate::presentation::trace_color(stored, hue);
+        // An imaginary part keeps its own palette place, as it does against
+        // a colour the run stores.
+        trace.signal_color = if trace.kind == TraceKind::Imaginary {
+            hue
+        } else {
+            drawn_color(
+                colors,
+                analysis_key,
+                &trace.source_waveform_name,
+                stored,
+                hue,
+            )
+        };
         trace.color = trace.family_style.map_or(trace.signal_color, |style| {
             super::projection::family_color(style, trace.signal_color)
         });

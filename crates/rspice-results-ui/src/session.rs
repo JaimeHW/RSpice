@@ -676,6 +676,11 @@ pub struct ResultViewerState {
     /// tri-state representation allows a source that defaults hidden to be
     /// revealed without writing into solver-owned result data.
     pub waveform_visibility: HashMap<SourceWaveformPresentationKey, bool>,
+    /// The colours the view being drawn gives its traces, by signal. A
+    /// missing key draws the signal in the run's colour or its palette place;
+    /// the run keeps no colour a reader chose.
+    pub waveform_colors:
+        HashMap<SourceWaveformPresentationKey, rspice_results::visualization_document::TraceColor>,
     /// Strips hidden via the strip-close action.
     pub hidden_strips: HashSet<AnalysisPresentationKey>,
     /// Strip currently maximized via the strip action, if any.
@@ -1506,6 +1511,7 @@ impl ResultViewerState {
             .filter(|key| retained.contains(&key.dataset_id()));
         self.waveform_visibility
             .retain(|key, _| live(key.analysis()));
+        self.waveform_colors.retain(|key, _| live(key.analysis()));
         self.hidden_family_traces.retain(|key| live(key.analysis()));
         self.eye_timebase.retain(|key, _| match key {
             crate::eye_diagram::EyeTimebaseKey::Prepared(_) => true,

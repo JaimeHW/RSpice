@@ -1488,6 +1488,11 @@ pub struct Trace {
     #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub visible: bool,
+    /// The colour the reader gave this trace. Absent, it draws in the colour
+    /// its run gives the signal, or its place in the palette: the run keeps
+    /// no colour a reader chose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<TraceColor>,
     /// How the waveform stack draws this trace. Absent for an interpolated
     /// value trace.
     #[serde(default, skip_serializing_if = "TraceLane::is_value")]
@@ -1567,6 +1572,54 @@ impl BusRadix {
             Self::Signed => "±DEC",
             Self::Ascii => "ASCII",
         }
+    }
+}
+
+/// A colour a reader gave one trace, kept by the view that draws it and
+/// written `#rrggbb`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TraceColor([u8; 3]);
+
+impl TraceColor {
+    pub const fn from_rgb(red: u8, green: u8, blue: u8) -> Self {
+        Self([red, green, blue])
+    }
+
+    /// The red, green and blue parts.
+    pub const fn rgb(self) -> [u8; 3] {
+        self.0
+    }
+
+    /// Read `#rrggbb` (the `#` may be left off), in either case.
+    pub fn parse(text: &str) -> Option<Self> {
+        let hex = text.strip_prefix('#').unwrap_or(text);
+        if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        let part = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();
+        Some(Self([part(0)?, part(2)?, part(4)?]))
+    }
+}
+
+impl fmt::Display for TraceColor {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let [red, green, blue] = self.0;
+        write!(formatter, "#{red:02x}{green:02x}{blue:02x}")
+    }
+}
+
+impl Serialize for TraceColor {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for TraceColor {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Self::parse(&text).ok_or_else(|| {
+            serde::de::Error::custom(format!("trace colour '{text}' is not written #rrggbb"))
+        })
     }
 }
 
