@@ -13,7 +13,7 @@ use rspice_results_ui::session::PersistentPaneContext;
 
 /// The pane of the result view that keeps the shown analysis' sheets: the
 /// pane of a saved document being drawn, or the run's working view's.
-fn sheet_pane(state: ResultsReads<'_>) -> Option<PersistentPaneContext> {
+pub(super) fn sheet_pane(state: ResultsReads<'_>) -> Option<PersistentPaneContext> {
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     state

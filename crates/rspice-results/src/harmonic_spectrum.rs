@@ -2,6 +2,9 @@
 
 use crate::{analysis_type::AnalysisType, waveform::RetainedWaveform};
 
+pub mod lines;
+pub mod settings;
+
 pub fn spectrum_trace_is_renderable(
     waveform: &RetainedWaveform,
     mut note_scan: impl FnMut(),

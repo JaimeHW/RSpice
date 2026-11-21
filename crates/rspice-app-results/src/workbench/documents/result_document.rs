@@ -2439,6 +2439,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     match viewer {
         ResultViewer::Smith => return smith::domain_bar(ui, state),
         ResultViewer::Fft => return fft::domain_bar(ui, state),
+        ResultViewer::HarmonicBalance => return harmonic_balance::domain_bar(ui, state),
         ResultViewer::Soa => return soa::domain_bar(ui, state),
         ResultViewer::Nyquist => return nyquist::domain_bar(ui, state),
         ResultViewer::PoleZero => return pz::domain_bar(ui, state),

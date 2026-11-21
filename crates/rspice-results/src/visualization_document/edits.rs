@@ -338,6 +338,12 @@ pub enum DocumentEdit {
         pane_id: PaneId,
         settings: Option<crate::fft::settings::SpectrumSettings>,
     },
+    /// Set how a pane's coefficient spectrum sheet draws its lines, or with
+    /// `None` put back the sheet's defaults.
+    SetCoefficientSettings {
+        pane_id: PaneId,
+        settings: Option<crate::harmonic_spectrum::settings::CoefficientSettings>,
+    },
     MoveCursor {
         cursor_id: CursorId,
         position: TypedValue,

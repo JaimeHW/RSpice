@@ -1,16 +1,29 @@
 //! Retained coefficient-spectrum presentation for HB, Fourier, recorded FFT and QPSS.
+//!
+//! An HB, `.FOUR`, PSS or QPSS spectrum is drawn as levels the reader
+//! chooses (magnitude, dB, dBm into a stated resistance or dBc), voltages and
+//! currents on strips of their own, with the phase and the waveform the lines
+//! add up to on further strips when asked. A recorded `.FFT` keeps the
+//! decade ordinate it is read on.
 
 use crate::presentation::{PlotView, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 use crate::waves::ReadoutPolicy;
 use egui::Ui;
+use rspice_results::harmonic_spectrum::lines::CoefficientLine;
+use rspice_results::harmonic_spectrum::settings::{CoefficientQuantity, CoefficientSettings};
 use rspice_results::waveform::HeldColumn;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
+mod bar;
+mod details;
 pub mod recorded_fft;
+mod sheet;
+
+pub use bar::domain_bar;
 
 /// One retained complex coefficient sequence.  `magnitude` is the exact
 /// result-conversion magnitude, not a display-derived dB or RMS estimate.
@@ -18,8 +31,19 @@ pub struct HarmonicTrace {
     pub name: String,
     pub frequency: HeldColumn,
     pub magnitude: HeldColumn,
+    /// The complex lines the magnitudes were taken from, when the trace
+    /// keeps them: the phase, the levels and the waveform are read here.
+    pub lines: Arc<[CoefficientLine]>,
     pub color: egui::Color32,
     pub cache_key: u64,
+}
+
+impl HarmonicTrace {
+    /// What the trace's signal measures.
+    #[must_use]
+    pub fn quantity(&self) -> CoefficientQuantity {
+        CoefficientQuantity::of(&self.name)
+    }
 }
 
 /// All evidence needed by both the plot and the inspector.
@@ -31,12 +55,24 @@ pub struct HarmonicBalanceModel {
     pub magnitude_max: f64,
     pub retained_frequency_count: usize,
     /// The recorded `.FFT` evidence, when the selected analysis carries it.
-    /// Absent for HB, `.FOUR` and the PSS spectrum, which is what keeps their
-    /// rendering exactly what it was.
+    /// Absent for HB, `.FOUR` and the PSS spectrum.
     pub fft: Option<rspice_results::fft::spectrum::FftSpectrumEvidence>,
     pub qpss: Option<Arc<rspice_results::engine_evidence::QpssOperatingPoint>>,
     /// The smallest positive magnitude retained, for the decade ordinate.
     pub smallest_positive_magnitude: Option<f64>,
+}
+
+impl HarmonicBalanceModel {
+    /// The two tones the analysis was solved for, when it states them: a
+    /// QPSS lattice's first two independent tones.
+    #[must_use]
+    pub fn stated_tones(&self) -> Option<[f64; 2]> {
+        let point = self.qpss.as_ref()?;
+        match point.config().grid.frequencies_hz.as_slice() {
+            [first, second, ..] => Some([*first, *second]),
+            _ => None,
+        }
+    }
 }
 
 /// Why the host could not bind a drawable coefficient spectrum.
@@ -46,10 +82,11 @@ pub enum SpectrumAbsence<'a> {
     Unavailable,
 }
 
-/// Requests applied by the host to the viewport that produced this frame.
+/// Requests applied by the host to the viewports that produced this frame.
 pub struct SpectrumResponse {
     pub fit: bool,
-    pub plot: Option<plot::PlotResponse>,
+    /// Each strip's plot, by the index its viewport is kept under.
+    pub plots: Vec<(usize, plot::PlotResponse)>,
 }
 
 /// Explain the selected spectrum's retained failure or incomplete history.
@@ -102,8 +139,55 @@ fn automatic_y_range(model: &HarmonicBalanceModel) -> Option<(f64, f64)> {
 
 /// Render the qualified coefficient spectrum and request navigation; its
 /// cursor reads at the reader's significant digits and by the reader's
-/// cursor interpolation.
+/// cursor interpolation. `views` holds each strip's viewport by its index,
+/// [`strip_count`] of them.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
+    ui: &mut Ui,
+    model: &HarmonicBalanceModel,
+    settings: &CoefficientSettings,
+    views: &[PlotView],
+    quantity_policy: &QuantityPresentationPolicy,
+    presentation: ReadoutPolicy,
+    cache: &mut plot::DecimationCache,
+    pin: &mut Option<f64>,
+) -> SpectrumResponse {
+    if model.fft.is_some() || model.traces.iter().any(|trace| trace.lines.is_empty()) {
+        return show_recorded(
+            ui,
+            model,
+            views.first().copied().unwrap_or_default(),
+            quantity_policy,
+            presentation,
+            cache,
+            pin,
+        );
+    }
+    sheet::show(
+        ui,
+        model,
+        settings,
+        views,
+        quantity_policy,
+        presentation,
+        cache,
+        pin,
+    )
+}
+
+/// How many strips, and so viewports, the sheet draws for `model`.
+#[must_use]
+pub fn strip_count(model: &HarmonicBalanceModel, settings: &CoefficientSettings) -> usize {
+    if model.fft.is_some() || model.traces.iter().any(|trace| trace.lines.is_empty()) {
+        1
+    } else {
+        sheet::strips(model, settings).len()
+    }
+}
+
+/// A recorded `.FFT`: the engine's magnitudes on logarithmic decades, one
+/// strip, as it has always been drawn.
+fn show_recorded(
     ui: &mut Ui,
     model: &HarmonicBalanceModel,
     view: PlotView,
@@ -134,7 +218,7 @@ pub fn show(
     .show(ui);
     let requested = SpectrumResponse {
         fit: header.fit_clicked,
-        plot: None,
+        plots: Vec::new(),
     };
 
     let Some((auto_x0, auto_x1)) = automatic_x_range(model) else {
@@ -156,7 +240,7 @@ pub fn show(
         quantity_policy.frequency_axis_transform();
     // A recorded FFT is drawn on logarithmic decades over the engine's own
     // linear magnitudes: the same picture as dB, with no derived array and no
-    // second cache. HB and `.FOUR` keep the linear ordinate they had.
+    // second cache.
     let decades = model.fft.as_ref().and_then(|_| {
         recorded_fft::decade_ordinate(model.smallest_positive_magnitude, model.magnitude_max, "")
     });
@@ -173,7 +257,7 @@ pub fn show(
     )
     .accessible_name("Retained complex coefficient spectrum")
     .accessible_detail(
-        "Exact retained harmonic-balance magnitude coefficients. Solver tone configuration, harmonic order, convergence iterations, fundamental, and THD are shown only when retained.",
+        "Exact retained magnitude coefficients. Solver tone configuration, harmonic order, convergence iterations, fundamental, and THD are shown only when retained.",
     );
     if decades.is_some() {
         spec = spec.with_log_y();
@@ -181,9 +265,6 @@ pub fn show(
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
     }
 
-    // Retained coefficients are discrete.  The stem underlay makes that
-    // fact clear while the thin trace preserves shared cursor/readout and
-    // keyboard accessibility behaviour from the Results plot primitive.
     // One painted segment per coefficient, so a long spectrum draws none:
     // a recorded FFT can hold half a million bins, where HB holds tens.
     let stems = if model.retained_frequency_count > recorded_fft::MAX_STEMMED_COEFFICIENTS {
@@ -225,12 +306,14 @@ pub fn show(
         );
     }
 
+    // Every trace reads at the cursor: the panel the readout sits in
+    // scrolls, so no signal is left off.
     let readout = |frequency: f64| -> Vec<(String, String)> {
         let mut rows = vec![(
             "f".to_owned(),
             frequency_readout(quantity_policy, frequency, digits),
         )];
-        for trace in model.traces.iter().take(3) {
+        for trace in &model.traces {
             rows.push((
                 trace.name.clone(),
                 fmt_si_significant(
@@ -240,27 +323,22 @@ pub fn show(
                 ),
             ));
         }
-        if model.traces.len() > 3 {
-            rows.push((
-                "signals".to_owned(),
-                format!("+{} more", model.traces.len() - 3),
-            ));
-        }
         rows
     };
     let response = plot::show(ui, &spec, cache, None, Some(&readout));
     crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
     SpectrumResponse {
-        plot: Some(response),
+        plots: vec![(0, response)],
         ..requested
     }
 }
 
-/// Display metadata carried by the same retained coefficient spectrum, at
-/// the reader's `significant_digits`.
+/// The figures and tables read off the same retained coefficient spectrum,
+/// at the reader's `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     source: Result<&HarmonicBalanceModel, SpectrumAbsence<'_>>,
+    settings: &CoefficientSettings,
     quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
 ) {
@@ -283,18 +361,17 @@ pub fn right_panel(
         }
     };
     // A recorded FFT states the transform the engine performed; a quasi-period
-    // steady state states the lattice it was solved on. Plain harmonic
-    // balance, `.FOUR` and PSS state neither, and the sheet beside this panel
-    // already draws every coefficient they retained — so the panel says
-    // nothing rather than four rows of "Not retained".
+    // steady state states the lattice it was solved on.
     if let Some(spectrum) = &model.fft {
         section_header(ui, "Spectrum", None);
         crate::presentation::stat_table(
             ui,
             &recorded_fft::inspector_rows(spectrum, quantity_policy, significant_digits),
         );
-    } else if let Some(point) = &model.qpss {
-        section_header(ui, "Harmonics", None);
+        return;
+    }
+    if let Some(point) = &model.qpss {
+        section_header(ui, "Lattice", None);
         let config = point.config();
         let rows = [
             (
@@ -338,11 +415,138 @@ pub fn right_panel(
         ];
         crate::presentation::stat_table(ui, &rows);
     }
+    details::show(ui, model, settings, quantity_policy, significant_digits);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_results::harmonic_spectrum::settings::CoefficientScale;
+
+    /// A 1 MHz tone's 40 harmonic lines on V(out), each 1/k² of the
+    /// fundamental (H3 at −19.08 dBc), and a current I(V1) beside it.
+    fn forty_harmonics() -> HarmonicBalanceModel {
+        let trace = |name: &str, scale: f64| {
+            let lines: Arc<[CoefficientLine]> = (0..=40)
+                .map(|order| {
+                    let magnitude = if order == 0 {
+                        0.5 * scale
+                    } else {
+                        scale / f64::from(order * order)
+                    };
+                    CoefficientLine {
+                        frequency: f64::from(order) * 1.0e6,
+                        re: magnitude,
+                        im: 0.0,
+                    }
+                })
+                .collect();
+            let frequency: Vec<f64> = lines.iter().map(|line| line.frequency).collect();
+            let magnitude: Vec<f64> = lines.iter().map(CoefficientLine::magnitude).collect();
+            HarmonicTrace {
+                name: name.to_owned(),
+                frequency: HeldColumn::from(frequency),
+                magnitude: HeldColumn::from(magnitude),
+                lines,
+                color: egui::Color32::WHITE,
+                cache_key: 1,
+            }
+        };
+        HarmonicBalanceModel {
+            label: "HB".to_owned(),
+            traces: vec![trace("V(out)", 1.0), trace("I(V1)", 1.0e-3)],
+            frequency_max: 40.0e6,
+            magnitude_min: 0.0,
+            magnitude_max: 1.0,
+            retained_frequency_count: 41,
+            fft: None,
+            qpss: None,
+            smallest_positive_magnitude: Some(1.0e-3 / 1600.0),
+        }
+    }
+
+    /// What the details pane announced for `model`, on a screen tall enough
+    /// that no row of its table scrolls out of view.
+    fn details(model: &HarmonicBalanceModel, settings: &CoefficientSettings) -> Vec<String> {
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 6000.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    right_panel(
+                        ui,
+                        Ok(model),
+                        settings,
+                        &QuantityPresentationPolicy::default(),
+                        4,
+                    );
+                });
+            },
+        )
+        .platform_output
+        .accesskit_update
+        .expect("details accessibility tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| node.label().or(node.value()).map(str::to_owned))
+        .collect()
+    }
+
+    /// Every one of forty harmonics is a row of the line table, and the
+    /// third reads its level under the fundamental in dBc.
+    #[test]
+    fn an_hb_spectrum_lists_every_harmonic_and_reads_the_third_in_dbc() {
+        let model = forty_harmonics();
+        let settings = CoefficientSettings {
+            scale: CoefficientScale::Dbc,
+            ..CoefficientSettings::default()
+        };
+        let rows = details(&model, &settings);
+        let harmonics = rows
+            .iter()
+            .filter(|row| row.starts_with("Signal: V(out), Line: H"))
+            .count();
+        assert_eq!(harmonics, 40, "{rows:?}");
+        let third = rows
+            .iter()
+            .find(|row| row.starts_with("Signal: V(out), Line: H3,"))
+            .expect("H3 listed");
+        assert!(third.contains("Level: −19.08 dBc"), "{third}");
+        assert!(
+            rows.iter().any(|row| row.starts_with("THD ")),
+            "no THD read: {rows:?}"
+        );
+    }
+
+    /// Voltages and currents stand on strips of their own, as do the phase
+    /// and the waveform when asked for.
+    #[test]
+    fn voltages_and_currents_are_never_read_against_one_axis() {
+        let model = forty_harmonics();
+        let units = |settings: &CoefficientSettings| {
+            sheet::strips(&model, settings)
+                .iter()
+                .map(|strip| strip.axes[0].unit.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(units(&CoefficientSettings::default()), ["dBV", "dB re 1 A"]);
+        let all = CoefficientSettings {
+            scale: CoefficientScale::Dbm,
+            phase: true,
+            waveform: true,
+            ..CoefficientSettings::default()
+        };
+        assert_eq!(units(&all), ["dBm", "°", "V", "dBm", "°", "A"]);
+        assert_eq!(strip_count(&model, &all), 6);
+    }
 
     #[test]
     fn padded_bounds_keep_single_retained_frequency_plotable() {
