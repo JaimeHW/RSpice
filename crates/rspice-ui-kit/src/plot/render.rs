@@ -10,7 +10,7 @@ use crate::tokens::Tokens;
 
 use super::cursor::{CursorId, CursorPair};
 use super::decimate::DecimationCache;
-use super::format::{fmt_si_signed, fmt_si_significant};
+use super::format::{fmt_si_signed, fmt_si_significant, tick_with_unit};
 use super::scale::XScale;
 use super::spec::{Axis, DrawMode, MarkerShape, PlotSpec, Trace};
 use crate::palette::TRACE_HUES;
@@ -126,6 +126,9 @@ pub const Y_LABEL_GAP: f32 = 7.0;
 /// The least gap between two Y tick labels that are both drawn.
 const Y_TICK_LABEL_GAP: f32 = 2.0;
 const MARGIN_BOTTOM: f32 = 26.0;
+/// What a packed strip keeps above and below its plot, so a curve at the
+/// fit's edge never touches the strip's header or the strip below.
+const PACKED_MARGIN: f32 = 4.0;
 const MARGIN_RIGHT_PLAIN: f32 = 16.0;
 
 /// A point marker a curve carries besides its colour.
@@ -882,6 +885,8 @@ fn right_margin(spec: &PlotSpec<'_>) -> f32 {
 fn bottom_margin(spec: &PlotSpec<'_>) -> f32 {
     if spec.x_axis_chrome {
         MARGIN_BOTTOM
+    } else if spec.packed {
+        PACKED_MARGIN
     } else {
         MARGIN_TOP
     }
@@ -917,7 +922,9 @@ pub fn y_tick_pitch(ui: &Ui) -> f32 {
 }
 
 fn top_margin(spec: &PlotSpec<'_>) -> f32 {
-    if spec.y_caption_row.is_some() && y_caption_text(spec).is_some() {
+    if spec.packed {
+        PACKED_MARGIN
+    } else if spec.y_caption_row.is_some() && y_caption_text(spec).is_some() {
         MARGIN_TOP_CAPTIONED
     } else {
         MARGIN_TOP
@@ -1162,10 +1169,17 @@ pub fn show(
     // top of the column, so tick labels give way to it; with one, the plot
     // starts below it and every label is drawn.
     let y_ink = spec.y_ink.unwrap_or(c.canvas_text_dim);
-    let y_chrome =
-        y_caption_text(spec).map(|text| painter.layout_no_wrap(text, tick_font.clone(), y_ink));
+    // A packed strip names a plain unit on its top tick label, as ViVA and
+    // EZwave do, rather than in a row of its own; an anchor, or a caption
+    // for an axis without a unit, stands at the top of the column instead.
+    let unit_on_tick = spec.packed && spec.y.offset_anchor.is_none() && !spec.y.unit.is_empty();
+    let y_chrome = y_caption_text(spec)
+        .filter(|_| !unit_on_tick)
+        .map(|text| painter.layout_no_wrap(text, tick_font.clone(), y_ink));
     let y_chrome_bottom = match (&y_chrome, &spec.y_caption_row) {
-        (Some(galley), None) => rect.top() + Y_CAPTION_CENTER + galley.size().y * 0.5,
+        (Some(galley), row) if row.is_none() || spec.packed => {
+            rect.top() + Y_CAPTION_CENTER + galley.size().y * 0.5
+        }
         _ => f32::NEG_INFINITY,
     };
     let mut last_label_right = f32::NEG_INFINITY;
@@ -1204,21 +1218,39 @@ pub fn show(
     // rows tall carries the same tick count as a full-height one, and
     // stacked labels are less readable than none.
     let mut last_label_top = f32::INFINITY;
+    let mut y_labels = Vec::new();
     for (yv, label) in &spec.y.ticks {
         let py = my(*yv);
         painter.hline(plot_rect.x_range(), py, grid);
         let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), y_ink);
         let (height, top) = (galley.size().y, py - galley.size().y * 0.5);
-        if top + height <= last_label_top - Y_TICK_LABEL_GAP
+        // A packed strip's margins are too thin to hold half a label: a
+        // tick on its very edge keeps its gridline and gives up its label.
+        let held = !spec.packed || (top >= rect.top() && top + height <= rect.bottom());
+        if held
+            && top + height <= last_label_top - Y_TICK_LABEL_GAP
             && top >= y_chrome_bottom + Y_TICK_LABEL_GAP
         {
             last_label_top = top;
-            painter.galley(
-                pos2(plot_rect.left() - Y_LABEL_GAP - galley.size().x, top),
-                galley,
-                y_ink,
-            );
+            y_labels.push((top, label, galley));
         }
+    }
+    let topmost = y_labels.len().checked_sub(1);
+    for (index, (top, label, galley)) in y_labels.into_iter().enumerate() {
+        let galley = if unit_on_tick && Some(index) == topmost {
+            painter.layout_no_wrap(
+                tick_with_unit(label, &spec.y.unit),
+                tick_font.clone(),
+                y_ink,
+            )
+        } else {
+            galley
+        };
+        let at = pos2(plot_rect.left() - Y_LABEL_GAP - galley.size().x, top);
+        if unit_on_tick && Some(index) == topmost {
+            out.y_caption = Some(Rect::from_min_size(at, galley.size()));
+        }
+        painter.galley(at, galley, y_ink);
     }
     // ---- reference lines
     let ref_stroke = Stroke::new(hair, c.canvas_text_faint);

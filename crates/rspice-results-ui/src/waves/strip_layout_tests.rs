@@ -434,7 +434,7 @@ fn zooming_a_current_axis_leaves_the_volts_axis_of_its_strip_alone() {
                 ui,
                 &model,
                 &axes,
-                (plot_rect, gutter, 30.0, plot_rect.top() - 16.0),
+                (plot_rect, gutter, 30.0),
                 &Tokens::default(),
             )
             .ranges,
@@ -575,7 +575,7 @@ fn an_axis_paints_its_labels_inside_its_column_and_nothing_without_room() {
                     ui,
                     &model,
                     &axes,
-                    (plot_rect, gutter, 30.0, plot_rect.top() - 16.0),
+                    (plot_rect, gutter, 30.0),
                     &Tokens::default(),
                 )
                 .room,
@@ -600,7 +600,7 @@ fn an_axis_paints_its_labels_inside_its_column_and_nothing_without_room() {
     }
     assert!(
         labels >= 3,
-        "the axis labels its ticks and its unit: {labels}"
+        "the axis labels its ticks, the top one with its unit: {labels}"
     );
 
     let (output, room) = draw(0);

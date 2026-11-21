@@ -292,22 +292,27 @@ pub(crate) struct AxesResponse {
 
 /// One added axis as its column draws it.
 struct Column {
-    ladder: Vec<(f64, String)>,
+    /// Every tick inside the plot, by its height.
+    ticks: Vec<f32>,
+    /// The labelled ticks, bottom to top: the top one carries the unit.
+    labels: Vec<(f32, String)>,
     ink: Color32,
     swatches: Vec<Color32>,
-    unit: String,
     width: f32,
 }
 
+/// How far a label may stand past the plot's top or bottom edge: the few
+/// points a packed strip keeps there.
+const LABEL_OVERHANG: f32 = 4.0;
+
 /// Measure every axis of `axes` beside the plot spanning `plot_rect`, draw
 /// those `gutter` has room for, and report what the reader did with them.
-/// The first axis' labels take `primary` left of the plot; its unit is
-/// centred on `caption_y`.
+/// The first axis' labels take `primary` left of the plot.
 pub(crate) fn secondary_axes(
     ui: &mut Ui,
     model: &StripModel,
     axes: &[SecondaryPlot<'_>],
-    (plot_rect, gutter, primary, caption_y): (Rect, Gutter, f32, f32),
+    (plot_rect, gutter, primary): (Rect, Gutter, f32),
     t: &Tokens,
 ) -> AxesResponse {
     let mut out = AxesResponse::default();
@@ -320,7 +325,6 @@ pub(crate) fn secondary_axes(
         ui.painter()
             .layout_no_wrap(text.to_owned(), font.clone(), Color32::PLACEHOLDER)
             .size()
-            .x
     };
     let pitch = plot::y_tick_pitch(ui);
     let columns: Vec<Option<Column>> = axes
@@ -331,6 +335,9 @@ pub(crate) fn secondary_axes(
             if !(low.is_finite() && high.is_finite()) || high <= low {
                 return None;
             }
+            let to_y = |value: f64| {
+                plot_rect.bottom() - ((value - low) / (high - low)) as f32 * plot_rect.height()
+            };
             let colours = axis_colours(
                 axis.traces
                     .iter()
@@ -342,38 +349,49 @@ pub(crate) fn secondary_axes(
             // beside them, which the column has no room for: such a ladder
             // is labelled in full.
             let offset = ladder.offset_anchor().is_some();
-            let ladder: Vec<(f64, String)> = ladder
-                .ticks
-                .into_iter()
-                .map(|(value, label)| {
+            let mut ticks = Vec::new();
+            let mut labels: Vec<(f32, String)> = Vec::new();
+            for (value, label) in ladder.ticks {
+                let y = to_y(value);
+                if !(plot_rect.top() - 0.5..=plot_rect.bottom() + 0.5).contains(&y) {
+                    continue;
+                }
+                ticks.push(y);
+                let half = 0.5 * (pitch - 2.0);
+                let held = y - half >= plot_rect.top() - LABEL_OVERHANG
+                    && y + half <= plot_rect.bottom() + LABEL_OVERHANG
+                    && labels.last().is_none_or(|(below, _)| below - y >= pitch);
+                if held {
                     let label = if offset {
                         plot::fmt_si_significant(value, "", 4)
                     } else {
                         label
                     };
-                    (value, label)
-                })
-                .collect();
-            let unit = if axis.unit.is_empty() {
-                "1".to_owned()
-            } else {
-                axis.unit.to_owned()
-            };
+                    labels.push((y, label));
+                }
+            }
+            // The axis names its unit on its top label, as the first does.
+            let unit = if axis.unit.is_empty() { "1" } else { axis.unit };
+            if let Some((_, top)) = labels.last_mut() {
+                *top = plot::tick_with_unit(top, unit);
+            }
             let (ink, swatches) = match colours.as_slice() {
                 [only] => (*only, Vec::new()),
                 _ => (t.color.canvas_text_dim, colours),
             };
-            let caption = measure(&unit) + swatches_width(swatches.len());
-            let labels = ladder
+            let widest = labels
                 .iter()
-                .map(|(_, label)| measure(label))
+                .map(|(_, label)| measure(label).x)
                 .fold(0.0, f32::max);
+            let top = labels.last().map_or(0.0, |(_, label)| {
+                measure(label).x + swatches_width(swatches.len())
+            });
             Some(Column {
-                ladder,
+                ticks,
+                labels,
                 ink,
                 swatches,
-                unit,
-                width: plot::Y_LABEL_GAP + labels.max(caption) + COLUMN_PAD,
+                width: plot::Y_LABEL_GAP + widest.max(top) + COLUMN_PAD,
             })
         })
         .collect();
@@ -403,40 +421,26 @@ pub(crate) fn secondary_axes(
             Side::Left => (rect.right(), -1.0, egui::Align2::RIGHT_CENTER),
         };
         painter.vline(spine_x, rect.y_range(), hair);
-        let to_y =
-            |value: f64| rect.bottom() - ((value - low) / (high - low)) as f32 * rect.height();
-        let label_x = spine_x + outward * plot::Y_LABEL_GAP;
-        for (value, label) in &column.ladder {
-            let y = to_y(*value);
-            if !(rect.top() - 0.5..=rect.bottom() + 0.5).contains(&y) {
-                continue;
-            }
-            let tick_end = spine_x + outward * TICK_LENGTH;
-            painter.hline(spine_x.min(tick_end)..=spine_x.max(tick_end), y, hair);
-            painter.text(pos2(label_x, y), align, label, font.clone(), column.ink);
+        let tick_end = spine_x + outward * TICK_LENGTH;
+        for y in &column.ticks {
+            painter.hline(spine_x.min(tick_end)..=spine_x.max(tick_end), *y, hair);
         }
-        // The unit over the column on the first axis' caption row, and a
-        // swatch of each curve beside it when the curves differ in colour.
-        let caption = painter.text(
-            pos2(label_x, caption_y),
-            align,
-            &column.unit,
-            font.clone(),
-            column.ink,
-        );
-        match side {
-            Side::Right => paint_swatches(
-                &painter,
-                &column.swatches,
-                (caption.right(), true),
-                caption_y,
-            ),
-            Side::Left => paint_swatches(
-                &painter,
-                &column.swatches,
-                (caption.left(), false),
-                caption_y,
-            ),
+        let label_x = spine_x + outward * plot::Y_LABEL_GAP;
+        let mut top_label = None;
+        for (y, label) in &column.labels {
+            top_label = Some((
+                *y,
+                painter.text(pos2(label_x, *y), align, label, font.clone(), column.ink),
+            ));
+        }
+        // A swatch of each curve beside the unit when the curves differ in
+        // colour.
+        if let Some((y, label)) = top_label {
+            let from = match side {
+                Side::Right => (label.right(), true),
+                Side::Left => (label.left(), false),
+            };
+            paint_swatches(&painter, &column.swatches, from, y);
         }
 
         let id = egui::Id::new(("rspice.results.strip-axis", model.analysis_key, axis.slot));

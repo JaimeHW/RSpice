@@ -563,6 +563,10 @@ pub struct PlotSpec<'a> {
     /// canvas' dim text: the colour of the only curves the axis carries,
     /// when the plot reads several axes and each says whose it is.
     pub y_ink: Option<Color32>,
+    /// A strip of a stack: the plot fills its rect but for a few points top
+    /// and bottom, reserving no row for its unit and, without X chrome, no
+    /// band under it; the Y unit rides on the top tick label.
+    pub packed: bool,
     /// Horizontal measurement cursors H1 and H2 on the left Y axis.
     pub horizontal_cursors: [Option<f64>; 2],
     /// Whether primary click/drag places or moves a horizontal cursor.
@@ -606,6 +610,12 @@ pub struct YCaptionRow {
 }
 
 impl<'a> PlotSpec<'a> {
+    /// Pack the plot into its strip: see [`Self::packed`].
+    pub fn packed(mut self) -> Self {
+        self.packed = true;
+        self
+    }
+
     /// A plot with the given axes and defaults for everything else.
     pub fn new(x: Axis, x_scale: XScale, y: Axis) -> Self {
         Self {
@@ -621,6 +631,7 @@ impl<'a> PlotSpec<'a> {
             limit_lines: Vec::new(),
             minor_grid: false,
             y_ink: None,
+            packed: false,
             horizontal_cursors: [None; 2],
             horizontal_cursor_interactive: false,
             bands: Vec::new(),

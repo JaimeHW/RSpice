@@ -219,7 +219,7 @@ pub fn pane_auto_log_y(
     if lo > hi {
         return None;
     }
-    let pad = (hi / lo).log10() * 0.08;
+    let pad = (hi / lo).log10() * super::stack::FIT_HEADROOM;
     if !(pad > 0.0 && pad.is_finite()) || hi - lo <= FLAT_FIT_RELATIVE_SPAN * hi {
         return Some((lo / 1.1, hi * 1.1));
     }
@@ -786,7 +786,8 @@ pub fn show_plot<'a>(
             ui,
             &PlotSpec::new(Axis::linear(0.0, 1.0, ""), model.x_scale, densest)
                 .without_x_axis_chrome()
-                .with_y_caption_row(y_caption_row(pane)),
+                .with_y_caption_row(y_caption_row(pane))
+                .packed(),
         )
         .height();
         labelled_y_axis(plot_height, plot::y_tick_pitch(ui), y_axis_with)
@@ -841,20 +842,21 @@ pub fn show_plot<'a>(
                 .collect()
         })
         .collect();
-    // What the first axis' labels take, so an axis on the left stands
-    // just outside them.
+    // What the first axis' labels take, its unit riding on the top one, so
+    // an axis on the left stands just outside them.
     let y_labels_width = y_axis
         .ticks
         .iter()
-        .map(|(_, label)| label.as_str())
-        .chain(std::iter::once(pane.axis_unit()))
+        .map(|(_, label)| label.clone())
+        .chain(
+            y_axis
+                .ticks
+                .last()
+                .map(|(_, label)| plot::tick_with_unit(label, pane.axis_unit())),
+        )
         .map(|text| {
             ui.painter()
-                .layout_no_wrap(
-                    text.to_owned(),
-                    plot::y_tick_font(),
-                    egui::Color32::PLACEHOLDER,
-                )
+                .layout_no_wrap(text, plot::y_tick_font(), egui::Color32::PLACEHOLDER)
                 .size()
                 .x
         })
@@ -863,6 +865,7 @@ pub fn show_plot<'a>(
         .accessible_name("Waveform plot")
         .without_x_axis_chrome()
         .with_y_caption_row(y_caption_row(pane))
+        .packed()
         .with_right_margin(input.right_margin)
         .with_significant_digits(significant_digits);
     if !detail.is_empty() {

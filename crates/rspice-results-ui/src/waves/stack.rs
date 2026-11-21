@@ -351,9 +351,14 @@ fn expressions_range(exprs: &[ResolvedExpr]) -> Option<(f64, f64)> {
         .reduce(|(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
 }
 
-/// A linear fit's span, padded 8 % so no curve runs along the frame.
+/// The share of its span a fit leaves free on each side: enough that no
+/// curve runs along the frame, little enough that the curves fill the strip,
+/// as ViVA's and EZwave's fits leave them.
+pub(crate) const FIT_HEADROOM: f64 = 0.04;
+
+/// A linear fit's span, padded by [`FIT_HEADROOM`] each side.
 fn padded((min, max): (f64, f64)) -> (f64, f64) {
-    let pad = (max - min) * 0.08;
+    let pad = (max - min) * FIT_HEADROOM;
     // A span that cannot survive its own padding is flat as far as any axis
     // can draw it: exactly constant, or constant to within a few ulps. Both
     // widen the same way, because a range finer than the tick ladder can
@@ -364,7 +369,8 @@ fn padded((min, max): (f64, f64)) -> (f64, f64) {
     (min - pad, max + pad)
 }
 
-/// Y range of one pane's traces over the whole record, padded 8 %.
+/// Y range of one pane's traces over the whole record, padded by
+/// [`FIT_HEADROOM`].
 pub fn pane_y_range(
     derived: &mut DerivedSeries,
     model: &StripModel,
@@ -2019,12 +2025,8 @@ fn show_unit_pane(
         (&response.response, drawn.context.as_ref()),
         (options.pane_chrome, window),
     );
-    // The first axis' unit row is every axis' unit row.
-    let caption_y = response
-        .y_caption
-        .map_or(response.plot_rect.top() - 16.0, |caption| {
-            caption.center().y
-        });
+    // The first axis names its unit on its top label; with curves of
+    // several colours, their swatches stand beside it.
     if primary_colours.len() > 1
         && let Some(caption) = response.y_caption
     {
@@ -2045,7 +2047,7 @@ fn show_unit_pane(
         ui,
         model,
         &secondary,
-        (response.plot_rect, gutter, y_labels_width, caption_y),
+        (response.plot_rect, gutter, y_labels_width),
         &t,
     );
     if !secondary.is_empty() {
