@@ -21,6 +21,7 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
 /// One expression trace resolved for plotting.
+#[derive(Clone)]
 pub struct ResolvedExpr {
     /// The expression's place in the strip's expression list, which is how
     /// it finds the pane its unit routed it to.
@@ -497,6 +498,20 @@ pub struct PanePlot<'a> {
     pub family_envelopes: &'a [FamilyEnvelopeSeries],
     /// Hit testing is only needed for marker placement or a newly anchored cursor A.
     pub find_nearest: bool,
+    /// The strip's Y axes after its first, each with the curves read against
+    /// it and the range it shows.
+    pub secondary: &'a [SecondaryPlot<'a>],
+}
+
+/// One Y axis of a strip after its first, as its plot draws it: the curves
+/// read against it, over the range it shows.
+pub struct SecondaryPlot<'a> {
+    pub unit: &'a str,
+    pub traces: &'a [usize],
+    pub expressions: &'a [ResolvedExpr],
+    pub range: (f64, f64),
+    /// The key its range is pinned by in the session's viewports.
+    pub slot: usize,
 }
 
 /// The tolerance a difference is judged against, drawn as the band about
@@ -747,6 +762,16 @@ pub fn show_plot<'a>(
     let held_exprs: Vec<_> = exprs
         .iter()
         .map(|expr| super::held_pair(&expr.x, &expr.y))
+        .collect();
+    let held_secondary: Vec<Vec<_>> = input
+        .secondary
+        .iter()
+        .map(|axis| {
+            axis.expressions
+                .iter()
+                .map(|expr| super::held_pair(&expr.x, &expr.y))
+                .collect()
+        })
         .collect();
     let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
         .accessible_name("Waveform plot")
@@ -1043,6 +1068,64 @@ pub fn show_plot<'a>(
         }
         spec.traces.push(trace);
     }
+    // The curves of the strip's other axes, each mapped through its own.
+    for (axis, held) in input.secondary.iter().zip(&held_secondary) {
+        let on = plot::TraceAxis {
+            min: axis.range.0,
+            max: axis.range.1,
+            scale: XScale::Linear,
+        };
+        for index in axis.traces {
+            let Some(trace) = model.traces.get(*index) else {
+                continue;
+            };
+            let color = if trace.overlay {
+                trace.color.gamma_multiply(0.40)
+            } else {
+                trace.color
+            };
+            let samples = if trace.y.is_stored() {
+                Trace::stored(&trace.x, &trace.y, color)
+            } else if let Some(Some((xs, ys))) = held_traces.get(*index) {
+                Trace::new(xs, ys, color)
+            } else {
+                continue;
+            };
+            let width = if trace.overlay {
+                input.trace_width * SECONDARY_TRACE_RATIO
+            } else {
+                input.trace_width
+            };
+            spec.traces.push(
+                strip_trace_cues(
+                    samples
+                        .width(width)
+                        .cache_key(trace_key(model, trace))
+                        .shape(&trace.shape),
+                    trace.palette_slot,
+                    trace.family_style,
+                    trace.waveform_index,
+                )
+                .on_axis(on),
+            );
+        }
+        for (expr, held) in axis.expressions.iter().zip(held) {
+            let Some((expr_x, expr_y)) = held else {
+                continue;
+            };
+            let mut trace = apply_family_trace_style(
+                Trace::new(expr_x, expr_y, expr.color)
+                    .width(input.trace_width * SECONDARY_TRACE_RATIO)
+                    .cache_key(expr.cache_key)
+                    .shape(&expr.shape),
+                expr.family_style,
+            );
+            if expr.slot != usize::MAX {
+                trace = trace.palette_slot(super::stack::expression_hue_slot(model, expr.slot));
+            }
+            spec.traces.push(trace.on_axis(on));
+        }
+    }
 
     // A family reads out the member the reader points at, not the first six
     // of its members.
@@ -1059,7 +1142,13 @@ pub fn show_plot<'a>(
                 })
                 .map(|(_, trace)| *trace),
         )
-        .take(6)
+        .chain(
+            input
+                .secondary
+                .iter()
+                .flat_map(|axis| axis.traces.iter())
+                .filter_map(|index| model.traces.get(*index)),
+        )
         .collect();
     let readout = |x: f64| -> Vec<(String, String)> {
         let mut rows = vec![(
@@ -1100,20 +1189,34 @@ pub fn show_plot<'a>(
                 ));
             }
         }
-        for (expr, held) in exprs.iter().zip(&held_exprs).take(3) {
+        // Every curve the strip draws reads out, however many: a readout
+        // that stops at a count leaves the rest unread.
+        let expressions = exprs
+            .iter()
+            .zip(&held_exprs)
+            .map(|(expr, held)| (expr, held, pane.axis_unit()))
+            .chain(
+                input
+                    .secondary
+                    .iter()
+                    .zip(&held_secondary)
+                    .flat_map(|(axis, held)| {
+                        axis.expressions
+                            .iter()
+                            .zip(held)
+                            .map(|(expr, held)| (expr, held, axis.unit))
+                    }),
+            );
+        for (expr, held, unit) in expressions {
             let value = held.as_ref().map_or(f64::NAN, |(xs, ys)| {
                 sample_at_with_shape(xs, ys, &expr.shape, x, interpolation)
             });
             rows.push((
                 expr.label.clone(),
                 // The hover readout is a readout: the expression's value in
-                // the unit of the pane that draws it, not the reader's digit
+                // the unit of the axis that draws it, not the reader's digit
                 // preference spelled out in zeros, nor a prefix with no unit.
-                rspice_ui_kit::plot::fmt_si_significant(
-                    value,
-                    pane.axis_unit(),
-                    significant_digits,
-                ),
+                rspice_ui_kit::plot::fmt_si_significant(value, unit, significant_digits),
             ));
         }
         rows

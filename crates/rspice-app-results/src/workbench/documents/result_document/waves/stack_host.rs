@@ -96,6 +96,9 @@ impl StackHost for WaveStackHost<'_, '_> {
         frame_work::note_samples(FrameSampleRead::StripOverview, overview);
         frame_work::note_samples(FrameSampleRead::TraceExtremes, extrema);
     }
+    fn refuse(&mut self, reason: String) {
+        self.0.prompt(reason);
+    }
     fn event_lane_height(&self, model: &StripModel) -> f32 {
         super::lanes::lane_height(self.0, model)
     }

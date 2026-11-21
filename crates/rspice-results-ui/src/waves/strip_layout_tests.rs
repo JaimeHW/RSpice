@@ -273,3 +273,160 @@ fn a_header_drag_reorders_the_strips() {
     model.arrangement = reorder(&model, 1, 0).expect("amps above volts");
     assert_eq!(drawn(&model), [[["I(b)"]], [["V(a)"]]]);
 }
+
+/// Run `frames` passes of `pass` over a 900 x 600 surface with the pointer
+/// at `pointer` and `events` in the first pass, and give back the last
+/// pass' output.
+fn frames(
+    ctx: &egui::Context,
+    pointer: egui::Pos2,
+    events: Vec<egui::Event>,
+    count: usize,
+    mut pass: impl FnMut(&mut egui::Ui),
+) -> egui::FullOutput {
+    let mut output = None;
+    for frame in 0..count {
+        let mut frame_events = vec![egui::Event::PointerMoved(pointer)];
+        if frame == 0 {
+            frame_events.extend(events.iter().cloned());
+        }
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            events: frame_events,
+            ..Default::default()
+        };
+        output = Some(ctx.run_ui(input, &mut pass));
+    }
+    output.expect("at least one pass")
+}
+
+/// Every text a pass painted.
+fn painted_text(output: &egui::FullOutput) -> Vec<String> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => out.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+#[test]
+fn every_curve_a_strip_draws_reads_out_on_hover() {
+    let names: Vec<String> = (1..=12).map(|node| format!("V(n{node})")).collect();
+    let columns: Vec<(&str, &str, [f64; 3])> = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let level = index as f64;
+            (name.as_str(), "V", [level, level + 0.5, level])
+        })
+        .collect();
+    let model = model(&columns);
+    let pane = model.unit_panes().remove(0);
+    assert_eq!(pane.traces.len(), 12);
+    let (x0, x1) = model.x_range.expect("the strip has an X range");
+    let ctx = egui::Context::default();
+    let mut cache = rspice_ui_kit::plot::DecimationCache::default();
+    let output = frames(&ctx, egui::pos2(450.0, 300.0), Vec::new(), 3, |ui| {
+        super::super::pane::show_plot(
+            ui,
+            &mut cache,
+            &model,
+            &pane,
+            super::super::pane::PanePlot {
+                x_range: (x0, x1),
+                auto_y: (0.0, 12.0),
+                y_view: None,
+                log_y: false,
+                left_margin: 64.0,
+                readout: Default::default(),
+                quantity: Default::default(),
+                minor_grid: false,
+                trace_width: 1.8,
+                horizontal_cursors: [None, None],
+                horizontal_cursor_interactive: false,
+                cursors: None,
+                specification_limits: Vec::new(),
+                markers: Vec::new(),
+                comparison: Default::default(),
+                expressions: &[],
+                family_envelopes: &[],
+                find_nearest: false,
+                secondary: &[],
+            },
+        );
+    });
+    let text = painted_text(&output);
+    for name in &names {
+        assert!(
+            text.iter().any(|painted| painted == name),
+            "{name} is missing from the hover readout"
+        );
+    }
+}
+
+#[test]
+fn zooming_a_current_axis_leaves_the_volts_axis_of_its_strip_alone() {
+    let mut model = model(&[
+        ("V(out)", "V", [0.0, 1.0, 2.0]),
+        ("I(load)", "A", [0.0, 1.0e-3, 2.0e-3]),
+    ]);
+    let current = trace(&model, "I(load)");
+    model.arrangement = move_to_strip(&model, current, 0).expect("the volts strip takes amps");
+    let pane = model.unit_panes().remove(0);
+    let amps = &pane.secondary[0];
+    let axes = [super::super::pane::SecondaryPlot {
+        unit: amps.unit,
+        traces: &amps.traces,
+        expressions: &[],
+        range: (0.0, 2.0e-3),
+        slot: amps.slot,
+    }];
+    let plot_rect = egui::Rect::from_min_max(egui::pos2(200.0, 50.0), egui::pos2(850.0, 450.0));
+    let gutter = super::super::stack::Gutter {
+        name: 0.0,
+        axes: super::super::stack::SECONDARY_AXIS_WIDTH,
+        value: 64.0,
+    };
+    // Over the amps column, left of the volts axis' ticks.
+    let pointer = egui::pos2(
+        plot_rect.left() - gutter.value - 0.5 * super::super::stack::SECONDARY_AXIS_WIDTH,
+        250.0,
+    );
+    let wheel = egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, 1.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let ctx = egui::Context::default();
+    let mut changes = Vec::new();
+    frames(&ctx, pointer, vec![wheel], 4, |ui| {
+        changes.extend(super::super::axes::secondary_axes(
+            ui,
+            &model,
+            &axes,
+            plot_rect,
+            gutter,
+            &Tokens::default(),
+        ));
+    });
+    assert!(!changes.is_empty(), "the wheel zooms the amps axis");
+    assert!(
+        changes
+            .iter()
+            .all(|(slot, _)| *slot == amps.slot && *slot != pane.slot),
+        "only the amps axis' range moves: {changes:?}"
+    );
+    let (low, high) = changes[0].1.expect("a pinned range");
+    assert!(high - low < 2.0e-3, "zoomed in: {low}..{high}");
+}

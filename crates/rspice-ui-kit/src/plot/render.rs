@@ -12,7 +12,7 @@ use super::cursor::{CursorId, CursorPair};
 use super::decimate::DecimationCache;
 use super::format::{fmt_si_signed, fmt_si_significant};
 use super::scale::XScale;
-use super::spec::{Axis, MarkerShape, PlotSpec, Trace};
+use super::spec::{Axis, DrawMode, MarkerShape, PlotSpec, Trace};
 use crate::palette::TRACE_HUES;
 
 /// Interaction contract selected by the owning result surface.
@@ -1284,13 +1284,23 @@ pub fn show(
                 trace.width
             };
             let stroke = Stroke::new(width, trace.color);
+            // A trace on a second axis of the strip maps through that axis.
+            let (y_min, y_max, y_scale) = trace
+                .y_axis
+                .map_or((spec.y.min, spec.y.max, spec.y_scale), |axis| {
+                    (axis.min, axis.max, axis.scale)
+                });
+            let my = |y: f64| -> f32 {
+                plot_rect.bottom()
+                    - (y_scale.normalize(y, y_min, y_max) as f32) * plot_rect.height()
+            };
             let view = super::decimate::TraceView {
                 x0: spec.x.min,
                 x1: spec.x.max,
-                y0: spec.y.min,
-                y1: spec.y.max,
+                y0: y_min,
+                y1: y_max,
                 x_scale: spec.x_scale,
-                y_scale: spec.y_scale,
+                y_scale,
                 columns,
                 rows,
             };
@@ -1329,6 +1339,35 @@ pub fn show(
             let marker = look.marker.or_else(|| {
                 (trace.show_single_point && points.len() == 1).then_some(TraceMarkerShape::Circle)
             });
+            match trace.draw {
+                DrawMode::Line => {}
+                DrawMode::Points => {
+                    let radius = (trace.width * 0.9).max(1.5);
+                    for point in points.iter().filter(|point| point.is_finite()) {
+                        clipped.circle_filled(*point, radius, trace.color);
+                    }
+                    continue;
+                }
+                DrawMode::Stems => {
+                    let base = my(0.0);
+                    let base = if base.is_finite() {
+                        base.clamp(plot_rect.top(), plot_rect.bottom())
+                    } else {
+                        plot_rect.bottom()
+                    };
+                    for point in points.iter().filter(|point| point.is_finite()) {
+                        clipped.line_segment([pos2(point.x, base), *point], stroke);
+                        clipped.circle_filled(*point, (trace.width * 0.9).max(1.5), trace.color);
+                    }
+                    continue;
+                }
+                DrawMode::Steps => {}
+            }
+            let points = if trace.draw == DrawMode::Steps {
+                held_steps(&points)
+            } else {
+                points
+            };
             let dense = points.len() >= columns;
             for run in finite_runs(&points) {
                 // A sample with a hole either side, or a run that folds into
@@ -2532,6 +2571,24 @@ fn draw_readout(
             c.text,
         );
     }
+}
+
+/// The staircase a sample-and-hold draws through `points`: each sample held
+/// level until the next one's X, where it steps. A hole (a non-finite point)
+/// stays a hole.
+fn held_steps(points: &[Pos2]) -> Vec<Pos2> {
+    let mut steps = Vec::with_capacity(points.len() * 2);
+    for pair in points.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        steps.push(from);
+        if from.is_finite() && to.is_finite() {
+            steps.push(pos2(to.x, from.y));
+        }
+    }
+    if let Some(last) = points.last() {
+        steps.push(*last);
+    }
+    steps
 }
 
 #[cfg(test)]

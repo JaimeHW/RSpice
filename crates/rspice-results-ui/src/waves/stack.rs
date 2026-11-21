@@ -79,6 +79,9 @@ pub trait StackHost {
     fn family_envelopes(&mut self, model: &StripModel, pane: &UnitPane) -> Arc<FamilyEnvelopePlan>;
     fn place_marker(&mut self, model: &StripModel, trace: &StripTrace, x: f64);
     fn note_sample_reads(&mut self, overview: usize, extrema: usize);
+    /// Say why an arrangement of the strips the reader asked for cannot be
+    /// made: a fifth unit on a strip, say.
+    fn refuse(&mut self, _reason: String) {}
     /// Evaluate `text` as the abscissa a pane is drawn against, once per
     /// member of the strip. A host without a calculator has none to offer.
     fn resolve_abscissa_expression(
@@ -153,20 +156,41 @@ pub fn clamp_name_width(width: f32) -> f32 {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Gutter {
     pub name: f32,
+    /// The columns of the Y axes a strip reads after its first, between the
+    /// name column and the first axis' ticks: as wide on every strip of the
+    /// analysis as on the strip with the most, so every plot starts on one
+    /// rule.
+    pub axes: f32,
     pub value: f32,
 }
 
 impl Gutter {
     pub fn width(self) -> f32 {
-        self.name + self.value
+        self.name + self.axes + self.value
     }
+}
+
+/// The width of the column one Y axis after a strip's first takes.
+pub const SECONDARY_AXIS_WIDTH: f32 = 52.0;
+
+/// The width the most Y axes after the first on any strip of `model` take.
+fn secondary_axes_width(model: &StripModel) -> f32 {
+    let most = model
+        .unit_panes()
+        .iter()
+        .map(|pane| pane.secondary.len())
+        .max()
+        .unwrap_or(0);
+    most as f32 * SECONDARY_AXIS_WIDTH
 }
 
 fn strip_gutter(ui: &Ui, host: &impl StackHost, model: &StripModel) -> Gutter {
     let axis = wave_left_margin(host.session());
+    let axes = secondary_axes_width(model);
     if host.event_lane_height(model) <= 0.0 {
         return Gutter {
             name: 0.0,
+            axes,
             value: axis,
         };
     }
@@ -194,6 +218,7 @@ fn strip_gutter(ui: &Ui, host: &impl StackHost, model: &StripModel) -> Gutter {
     };
     Gutter {
         name: clamp_name_width(host.session().lane_name_width.unwrap_or_else(fit)),
+        axes,
         value: (chars as f32).mul_add(advance, 8.0).max(LANE_VALUE_MIN),
     }
 }
@@ -218,6 +243,15 @@ const WAVE_MIN_PLOT_HEIGHT: f32 = 24.0;
 /// own strip, and the next header plainly starts a new one.
 const STRIP_GAP: f32 = 8.0;
 const STRIP_DIVIDER: f32 = 1.0;
+/// What an analysis' block takes beside its strips: its header and the
+/// shared X axis under them.
+const STRIP_BLOCK_CHROME: f32 = 76.0;
+/// The least height a strip of an analysis' block is given before the
+/// stack scrolls rather than squeeze it further.
+const STRIP_MIN_HEIGHT: f32 = 64.0;
+/// The least height of an analysis' block, or of a strip drawn against a
+/// signal.
+const BLOCK_MIN_HEIGHT: f32 = 140.0;
 
 /// The extremes a pane's traces draw: in the X `window`, or over the whole
 /// record when there is none. Each trace's block extremes are built once per
@@ -574,7 +608,21 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
         })
         .collect();
     let separators = rows.len().saturating_sub(1) as f32 * (STRIP_GAP + STRIP_DIVIDER);
-    let strip_height = ((avail.height() - separators) / rows.len() as f32).max(140.0);
+    let share = (avail.height() - separators) / rows.len() as f32;
+    // An analysis' block grows with its strips, each kept readable, and the
+    // stack scrolls once the blocks outgrow the window.
+    let row_heights: Vec<f32> = rows
+        .iter()
+        .map(|(model, xy)| {
+            let needed = if xy.is_some() {
+                BLOCK_MIN_HEIGHT
+            } else {
+                let strips = model.unit_panes().len() as f32;
+                BLOCK_MIN_HEIGHT.max(strips.mul_add(STRIP_MIN_HEIGHT, STRIP_BLOCK_CHROME))
+            };
+            share.max(needed)
+        })
+        .collect();
     let mut close_xy: Option<usize> = None;
     let maximized = host.session().maximized_strip.is_some();
     let linked_cursor_domain = host
@@ -598,6 +646,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                     ui.painter().rect_filled(gap, 0.0, t.color.canvas_bg);
                     ui.painter().rect_filled(divider, 0.0, t.color.border);
                 }
+                let strip_height = row_heights[position];
                 if let Some(index) = xy {
                     ui.allocate_ui_with_layout(
                         egui::vec2(ui.available_width(), strip_height),
@@ -1127,25 +1176,64 @@ fn show_strip_plot(
         gutter,
         window_slots,
     };
-
+    // The strips share what is left by their weights, as the reader sized
+    // them; a divider being dragged moves the line between two of them
+    // until it is let go.
+    let expanded_total = geometry.pane_height * expanded_count as f32;
+    let weight_sum: f32 = panes
+        .iter()
+        .zip(&collapsed)
+        .filter(|(_, collapsed)| !**collapsed)
+        .map(|(pane, _)| pane.weight)
+        .sum();
+    let mut heights: Vec<f32> = panes
+        .iter()
+        .zip(&collapsed)
+        .map(|(pane, collapsed)| {
+            if *collapsed || weight_sum <= 0.0 {
+                0.0
+            } else {
+                expanded_total * pane.weight / weight_sum
+            }
+        })
+        .collect();
+    for index in 0..count.saturating_sub(1) {
+        let offset = super::strip_drag::divider_offset(ui.ctx(), model, index);
+        if offset != 0.0 && !collapsed[index] && !collapsed[index + 1] {
+            heights[index] += offset;
+            heights[index + 1] -= offset;
+        }
+    }
+    let mut rects = Vec::with_capacity(count);
     for (ordinal, pane) in panes.iter().enumerate() {
         if ordinal > 0 {
-            let (seam, _) = ui.allocate_exact_size(
-                egui::vec2(
-                    ui.available_width(),
-                    1.0_f32.min(ui.available_height().max(0.0)),
-                ),
-                egui::Sense::hover(),
-            );
-            ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
+            if collapsed[ordinal - 1] || collapsed[ordinal] {
+                let (seam, _) = ui.allocate_exact_size(
+                    egui::vec2(
+                        ui.available_width(),
+                        1.0_f32.min(ui.available_height().max(0.0)),
+                    ),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
+            } else {
+                super::strip_drag::divider(
+                    ui,
+                    host,
+                    model,
+                    ordinal - 1,
+                    (heights[ordinal - 1], heights[ordinal]),
+                    panes[ordinal - 1].locked || pane.locked,
+                );
+            }
         }
         let pane_height = if collapsed[ordinal] {
             WAVE_PANE_HEADER_HEIGHT.min(ui.available_height())
         } else {
-            geometry.pane_height
+            heights[ordinal]
         };
         let pane_exprs = std::mem::take(&mut pane_exprs[ordinal]);
-        ui.allocate_ui_with_layout(
+        let drawn = ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), pane_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
@@ -1153,7 +1241,9 @@ fn show_strip_plot(
                 show_unit_pane(ui, host, pane, &pane_exprs, frame, edits);
             },
         );
+        rects.push(drawn.response.rect);
     }
+    super::strip_drag::drops(ui, host, model, &rects);
     let shared_x_height = if expanded_count == 0 {
         WAVE_SHARED_X_HEIGHT.min((available.height() - lane_height).max(0.0))
     } else {
@@ -1270,7 +1360,7 @@ fn route_expressions(
     for expr in host.resolve_expressions(model, t) {
         let ordinal = panes
             .iter()
-            .position(|pane| pane.expressions.contains(&expr.slot))
+            .position(|pane| pane.all_expressions().any(|slot| slot == expr.slot))
             .or((!routed).then_some(0));
         if let Some(exprs) = ordinal.and_then(|ordinal| pane_exprs.get_mut(ordinal)) {
             exprs.push(expr);
@@ -1417,6 +1507,7 @@ fn show_xy_strip(
             .pane_chrome
             .then(|| abscissa_menu(host.session(), model, pane, Some(strip.abscissa.clone()))),
         window_slots: slots,
+        arrange: false,
     };
     let header = ui
         .push_id(("xy-strip-pane", identity), |ui| {
@@ -1600,6 +1691,19 @@ fn show_unit_pane(
     // The pane's own top edge, kept so the active rail can span header and
     // canvas together once the pane's full height is known.
     let pane_top = ui.available_rect_before_wrap().top();
+    // The expressions the strip's other axes read, each with its axis; the
+    // rest, and any real lane's steps, read against its first.
+    let all_exprs = exprs;
+    let (secondary_exprs, exprs): (Vec<&ResolvedExpr>, Vec<&ResolvedExpr>) =
+        exprs.iter().partition(|expr| {
+            expr.slot != usize::MAX
+                && pane
+                    .secondary
+                    .iter()
+                    .any(|axis| axis.expressions.contains(&expr.slot))
+        });
+    let exprs: Vec<ResolvedExpr> = exprs.into_iter().cloned().collect();
+    let exprs = exprs.as_slice();
 
     // Over the whole record: whether the pane draws anything at all, and
     // whether anything it draws could stand on a logarithmic axis.
@@ -1652,14 +1756,18 @@ fn show_unit_pane(
         log_y,
         log_y_available,
         cursor_a,
-        expressions: pane_expressions(host, model, pane, exprs, cursor_a, &t),
+        expressions: pane_expressions(host, model, pane, all_exprs, cursor_a, &t),
         plotted,
         abscissa: options
             .pane_chrome
             .then(|| abscissa_menu(host.session(), model, pane, None)),
         window_slots,
+        arrange: options.pane_chrome,
     };
     let header = host.pane_header(ui, model, pane, input);
+    if let Some(strips) = header.arrange {
+        super::strip_drag::arrange(host, model, Ok(strips));
+    }
     edits.toggle = edits.toggle.or(header.toggle_expression);
     edits.remove = edits.remove.or(header.remove_expression);
     if let Some(abscissa) = header.abscissa {
@@ -1754,6 +1862,51 @@ fn show_unit_pane(
                 label: marker_label(marker),
             }),
     );
+    // Each axis after the first fits the curves it reads, over the same
+    // window, until the reader pins a range of its own on it.
+    let secondary_axis_exprs: Vec<Vec<ResolvedExpr>> = pane
+        .secondary
+        .iter()
+        .map(|axis| {
+            secondary_exprs
+                .iter()
+                .filter(|expr| axis.expressions.contains(&expr.slot))
+                .map(|expr| (*expr).clone())
+                .collect()
+        })
+        .collect();
+    let mut secondary_samples = 0;
+    let secondary: Vec<pane_view::SecondaryPlot<'_>> = pane
+        .secondary
+        .iter()
+        .zip(&secondary_axis_exprs)
+        .filter_map(|(axis, axis_exprs)| {
+            let fitted = pane_fit(
+                &mut host.session_mut().derived,
+                model,
+                &PaneFit {
+                    traces: &axis.traces,
+                    expressions: axis_exprs,
+                    limits: &[],
+                    window,
+                    log: false,
+                },
+                |count| secondary_samples += count,
+            );
+            let pinned = host
+                .session()
+                .analysis_plot_view_pane(ResultViewer::Waves, model.analysis_key, axis.slot)
+                .y;
+            Some(pane_view::SecondaryPlot {
+                unit: axis.unit,
+                traces: &axis.traces,
+                expressions: axis_exprs,
+                range: pinned.or(fitted)?,
+                slot: axis.slot,
+            })
+        })
+        .collect();
+    host.note_sample_reads(0, secondary_samples);
     let input = pane_view::PanePlot {
         x_range: (x0, x1),
         auto_y: (auto_y0, auto_y1),
@@ -1775,10 +1928,13 @@ fn show_unit_pane(
         find_nearest: host.session().marker_tool.is_armed()
             || host.session().trace_pick.is_armed()
             || (host.session().cursor_placement_enabled() && places_a),
+        secondary: &secondary,
     };
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
     let response = drawn.response;
     note_plot_stop(ui.ctx(), response.response.id);
+    let secondary_views =
+        super::axes::secondary_axes(ui, model, &secondary, response.plot_rect, gutter, &t);
     // A pane becomes the active one when the reader acts on it: a click, a
     // drag, a cursor placed. Pointing at it is not acting on it, and a pane
     // that took the instrument's actions as the pointer crossed it handed
@@ -1864,6 +2020,12 @@ fn show_unit_pane(
         if let Some(y) = response.view.y {
             view.y = Some(y);
         }
+    }
+
+    for (slot, range) in secondary_views {
+        host.session_mut()
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, slot)
+            .y = range;
     }
 
     paint_active_rail(ui, host, model, pane, pane_top, &t);

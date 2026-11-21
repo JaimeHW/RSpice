@@ -234,6 +234,36 @@ pub struct Trace<'a> {
     /// The samples, when a results store keeps them: `x` and `y` are then empty, and the trace
     /// is drawn from the store's tiles at the view's width without reading either column.
     pub stored: Option<StoredSamples<'a>>,
+    /// The Y axis the trace reads against when it is not the plot's own: a
+    /// second axis of the strip, with a range and scale of its own. `None`
+    /// reads against [`PlotSpec::y`].
+    pub y_axis: Option<TraceAxis>,
+    /// How the samples are drawn: joined, as points, as steps or as stems.
+    pub draw: DrawMode,
+}
+
+/// A Y axis a trace reads against beside the plot's own: its range and
+/// scale. The plot draws no ticks for it; its owner draws its gutter.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TraceAxis {
+    pub min: f64,
+    pub max: f64,
+    pub scale: XScale,
+}
+
+/// How a trace's samples are drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DrawMode {
+    /// Each sample joined to the next.
+    #[default]
+    Line,
+    /// Each sample a dot, unjoined.
+    Points,
+    /// Each sample held until the next: a sample-and-hold staircase.
+    Steps,
+    /// Each sample a stem from zero, or the axis' bottom when zero is out of
+    /// view, to its value.
+    Stems,
 }
 
 /// A trace's samples as windows of the columns of a results store: its run's axis and the
@@ -261,6 +291,8 @@ impl<'a> Trace<'a> {
             parametric: false,
             shape: None,
             stored: None,
+            y_axis: None,
+            draw: DrawMode::Line,
         }
     }
 
@@ -326,6 +358,18 @@ impl<'a> Trace<'a> {
     /// Thin (1.4 pt) stroke.
     pub fn thin(mut self) -> Self {
         self.width = 1.4;
+        self
+    }
+
+    /// Read against `axis` rather than the plot's own Y axis.
+    pub fn on_axis(mut self, axis: TraceAxis) -> Self {
+        self.y_axis = Some(axis);
+        self
+    }
+
+    /// Draw the samples as `mode` draws them.
+    pub fn draw(mut self, mode: DrawMode) -> Self {
+        self.draw = mode;
         self
     }
 

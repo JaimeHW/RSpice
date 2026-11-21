@@ -14,6 +14,7 @@ use rspice_ui_kit::plot::sample::SweepShape;
 use rspice_ui_kit::plot::{XScale, fmt_si_significant};
 use std::sync::Arc;
 
+mod axes;
 pub mod cache;
 pub mod cursor_values;
 pub mod dock;
@@ -29,6 +30,7 @@ mod policy;
 mod projection;
 pub mod readout;
 pub mod stack;
+mod strip_drag;
 pub mod strip_layout;
 pub mod xy;
 pub use policy::{ReadoutPolicy, cursor_interpolation};

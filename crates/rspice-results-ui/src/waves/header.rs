@@ -4,7 +4,7 @@ use super::pane::SwatchStyle;
 use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
 use crate::strip::{self, HEADER_PADDING_X};
 use egui::Ui;
-use rspice_results::visualization_document::Abscissa;
+use rspice_results::visualization_document::{Abscissa, Strip};
 use rspice_ui_kit::{
     icons::Icon,
     plot::paint_trace_swatch,
@@ -75,6 +75,10 @@ pub struct PaneHeader {
     /// How many window controls the strip header above keeps: the row's fit
     /// icon stands under the leftmost, its scale chip on the same rule.
     pub window_slots: usize,
+    /// Whether the row arranges the stack: its band drags the strip up or
+    /// down and its menu splits and merges strips; a legend entry drags onto
+    /// another strip and its menu moves the curve.
+    pub arrange: bool,
 }
 
 /// What a unit pane's curves may be plotted against: one of the strip's
@@ -166,6 +170,9 @@ pub struct UnitPaneHeaderResponse {
     pub remove_expression: Option<usize>,
     /// What the reader chose to plot the pane's curves against.
     pub abscissa: Option<Abscissa>,
+    /// The strips a strip or curve menu entry the reader chose arranges the
+    /// stack into.
+    pub arrange: Option<Vec<Strip>>,
 }
 
 /// Where the legend runs in a pane header spanning `rect` whose trailing
@@ -208,6 +215,7 @@ pub fn show_header(
         plotted,
         abscissa,
         window_slots,
+        arrange,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -219,8 +227,19 @@ pub fn show_header(
     // it and take their clicks first.
     let (rect, band) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
-        egui::Sense::click(),
+        if arrange {
+            egui::Sense::click_and_drag()
+        } else {
+            egui::Sense::click()
+        },
     );
+    if arrange {
+        // Dragged, the band carries its strip to another place in the stack.
+        band.dnd_set_drag_payload(super::strip_drag::HeaderDrag {
+            analysis: model.analysis_key,
+            identity: pane.unit.to_owned(),
+        });
+    }
     band.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::Button,
@@ -321,10 +340,9 @@ pub fn show_header(
             .is_some_and(|name| super::xy::is_own_abscissa(&trace.source_waveform_name, name))
     };
     let mut plotted_traces: Vec<&StripTrace> = pane
-        .traces
-        .iter()
-        .filter(|index| **index < model.signal_trace_count)
-        .filter_map(|index| model.traces.get(*index))
+        .all_traces()
+        .filter(|index| *index < model.signal_trace_count)
+        .filter_map(|index| model.traces.get(index))
         .filter(curve)
         .collect();
     let mut hidden: Vec<&StripTrace> = model
@@ -394,7 +412,7 @@ pub fn show_header(
                     .map_or(0.0, |label| chip_width(ui, &label) + 3.0)
             });
             for (entry, chip) in entries.iter().zip(&chips).take(fitted) {
-                entry.show(ui, chip, &display_name, host, &mut output);
+                entry.show(ui, chip, (model, arrange), &display_name, host, &mut output);
             }
             let Some(label) = trace_list_label(chips.len() - fitted, hidden_count) else {
                 return;
@@ -431,16 +449,30 @@ pub fn show_header(
                 });
         },
     );
-    if let Some(menu) = abscissa.as_ref() {
+    if abscissa.is_some() || arrange {
         let draft_id = ui
             .id()
             .with(("abscissa-menu-draft", model.analysis_key, pane.unit));
-        if let Some(chosen) = crate::context_menu::context_menu(&band, |ui| {
-            abscissa_choices(ui, pane.quantity_unit(), menu, &display, draft_id)
+        let strip = model
+            .unit_panes()
+            .iter()
+            .position(|held| held.unit == pane.unit);
+        if let Some((strips, chosen)) = crate::context_menu::context_menu(&band, |ui| {
+            let strips = strip
+                .filter(|_| arrange)
+                .and_then(|index| super::strip_drag::strip_menu(ui, model, index));
+            let chosen = abscissa.as_ref().and_then(|menu| {
+                if arrange {
+                    ui.separator();
+                }
+                abscissa_choices(ui, pane.quantity_unit(), menu, &display, draft_id)
+            });
+            (strips, chosen)
         })
-        .and_then(|inner| inner.inner)
+        .map(|inner| inner.inner)
         {
-            output.abscissa = Some(chosen);
+            output.arrange = strips;
+            output.abscissa = chosen;
         }
     }
     output
@@ -511,13 +543,30 @@ impl Entry<'_> {
         &self,
         ui: &mut Ui,
         chip: &LegendEntry,
+        (model, arrange): (&StripModel, bool),
         display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
         host: &mut impl PaneHeaderHost,
         output: &mut UnitPaneHeaderResponse,
     ) {
+        // The curve the entry stands for, when the row arranges the stack.
+        let curve = arrange
+            .then(|| match self {
+                Self::Signal(trace) => model
+                    .traces
+                    .iter()
+                    .position(|held| std::ptr::eq(held, *trace))
+                    .map(super::strip_layout::Curve::Trace),
+                Self::Expression(expression) => {
+                    Some(super::strip_layout::Curve::Expression(expression.slot))
+                }
+            })
+            .flatten()
+            .map(|curve| (model, curve));
         match self {
-            Self::Signal(trace) => legend_chip(ui, trace, chip, display_name, host),
-            Self::Expression(expression) => expression_chip(ui, expression, chip, host, output),
+            Self::Signal(trace) => legend_chip(ui, trace, chip, curve, display_name, host, output),
+            Self::Expression(expression) => {
+                expression_chip(ui, expression, chip, curve, host, output);
+            }
         }
     }
 }
@@ -597,6 +646,7 @@ fn expression_chip(
     ui: &mut Ui,
     expression: &PaneExpression,
     entry: &LegendEntry,
+    curve: Option<(&StripModel, super::strip_layout::Curve)>,
     host: &mut impl PaneHeaderHost,
     output: &mut UnitPaneHeaderResponse,
 ) {
@@ -627,10 +677,18 @@ fn expression_chip(
     let label = ui
         .selectable_label(false, entry.label.as_str())
         .on_hover_text(&expression.text);
+    let label = drag_curve(label, curve);
     if label.clicked() {
         host.activate_pane();
     }
     crate::context_menu::context_menu(&label, |ui| {
+        if let Some((model, curve)) = curve {
+            output.arrange = output
+                .arrange
+                .take()
+                .or_else(|| super::strip_drag::curve_menu(ui, model, curve));
+            ui.separator();
+        }
         rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
             if let Some(text) = super::logic::convert::digital_form_of(ui, &expression.text, || {
                 expression
@@ -771,8 +829,10 @@ fn legend_chip(
     ui: &mut Ui,
     trace: &StripTrace,
     entry: &LegendEntry,
+    curve: Option<(&StripModel, super::strip_layout::Curve)>,
     display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
     host: &mut impl PaneHeaderHost,
+    output: &mut UnitPaneHeaderResponse,
 ) {
     let t = Tokens::get(ui.ctx());
     let (swatch, swatch_response) = ui.allocate_exact_size(LEGEND_SWATCH, egui::Sense::click());
@@ -803,10 +863,18 @@ fn legend_chip(
     let label = ui
         .selectable_label(selected, entry.label.as_str())
         .on_hover_text(&*shown);
+    let label = drag_curve(label, curve);
     if label.clicked() {
         host.select_trace(trace);
     }
     crate::context_menu::context_menu(&label, |ui| {
+        if let Some((model, curve)) = curve {
+            output.arrange = output
+                .arrange
+                .take()
+                .or_else(|| super::strip_drag::curve_menu(ui, model, curve));
+            ui.separator();
+        }
         rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
             if let Some(text) =
                 super::logic::convert::digital_form(ui, &trace.source_waveform_name, || {
@@ -817,6 +885,26 @@ fn legend_chip(
             }
         });
     });
+}
+
+/// A legend entry's name, which a drag carries onto another strip or
+/// between two when the row arranges the stack.
+fn drag_curve(
+    label: egui::Response,
+    curve: Option<(&StripModel, super::strip_layout::Curve)>,
+) -> egui::Response {
+    let Some((model, curve)) = curve else {
+        return label;
+    };
+    let label = label.interact(egui::Sense::click_and_drag());
+    label.dnd_set_drag_payload(super::strip_drag::CurveDrag {
+        analysis: model.analysis_key,
+        curve,
+    });
+    if label.dragged() {
+        label.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+    label
 }
 
 /// The middle of `trace`'s range, where its `digital()` threshold starts. A
