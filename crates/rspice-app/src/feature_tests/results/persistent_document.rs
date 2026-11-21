@@ -1767,3 +1767,73 @@ fn undo_in_results_steps_the_view_and_leaves_the_schematic_alone() {
     assert_eq!(redone.len(), 1);
     assert_eq!(redone[0].coordinate, TypedValue::Real(0.0));
 }
+
+/// A project opened while Results shows a saved view opens on its own
+/// Results, not on the view of the project it replaced.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_project_opened_over_a_shown_view_does_not_show_that_view() {
+    use rspice_app_workbench::workbench::state::{Workspace, WorkspaceDocumentId};
+
+    let path = std::env::temp_dir().join(format!(
+        "rspice-opened-over-results-{}-{}.rspiceproj",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let mut other = RSpiceApp::test_instance();
+    assert!(
+        other.state.save_project_to_path(&path),
+        "the other project saves"
+    );
+    drop(other);
+    let LatestFixture {
+        mut app,
+        document_id,
+        ..
+    } = latest_tracking_fixture();
+    app.state.workbench.activate(Workspace::Results);
+    assert_eq!(
+        app.state.workbench.documents.active(Workspace::Results),
+        Some(&WorkspaceDocumentId::VisualizationDocument(document_id))
+    );
+
+    // The fixture's runs stand in for a simulation without one, which a
+    // project cannot save; the view stays shown without them.
+    app.state.model.simulation.retained.runs = Vec::new().into();
+    let opened = app.state.load_project_from_path(&path);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("rspiceproj.bak"));
+    let mut lock = path.as_os_str().to_os_string();
+    lock.push(".rspice.lock");
+    let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
+    assert!(
+        opened,
+        "the other project opens: {:?} {:?}",
+        app.state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| &prompt.text),
+        app.state
+            .model
+            .notices
+            .take()
+            .into_iter()
+            .map(|notice| format!("{}: {}", notice.title, notice.detail))
+            .collect::<Vec<_>>()
+    );
+
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .is_none()
+    );
+    assert_ne!(
+        app.state.workbench.documents.active(Workspace::Results),
+        Some(&WorkspaceDocumentId::VisualizationDocument(document_id)),
+        "Results no longer names the replaced project's view"
+    );
+}

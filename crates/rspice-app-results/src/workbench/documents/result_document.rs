@@ -1106,6 +1106,18 @@ pub fn marker_anchor_for(
 
 /// Restore authored presentation only after its datasets and visualization
 /// documents have been loaded. Exhaustive ownership covers every durable field.
+/// Forget what Results showed of a project another project replaced: the
+/// view or run it had open, and every view's undo steps. The opened
+/// project then opens on its own Results, not on the view of the project
+/// it replaced.
+pub fn forget_replaced_project(state: &mut ResultsParts<'_>) {
+    state
+        .workbench
+        .documents
+        .retain_available(Workspace::Results, std::iter::empty());
+    state.results.view_edits = view_edits::ViewHistories::default();
+}
+
 pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPresentation) {
     let ResultPresentation {
         markers,

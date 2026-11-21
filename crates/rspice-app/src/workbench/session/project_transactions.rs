@@ -730,6 +730,9 @@ impl AppState {
         // that still find their analysis: a marker pointing at a dataset this
         // project no longer retains would draw on nothing.
         self.restore_result_presentation(result_presentation);
+        rspice_app_results::workbench::documents::result_document::forget_replaced_project(
+            &mut self.results_parts(),
+        );
         project_workflow::report_opened_project(
             &mut self.model,
             &mut self.platform,
