@@ -9,7 +9,7 @@
 
 use egui::Ui;
 use rspice_results::network_matrix::trace_identity;
-use rspice_ui_kit::widgets::Button;
+use rspice_ui_kit::widgets::{Button, menu_button};
 
 /// Whether a retained column is one of a network's scattering coefficients
 /// (`|S21|`, `phase(S21)`), rather than a noise column of the same run.
@@ -251,7 +251,7 @@ pub fn plot_menu(
             };
             for (index, group) in groups.iter().enumerate() {
                 if group.nested {
-                    ui.menu_button(group.title, |ui| rows(ui, &group.entries));
+                    menu_button(ui, group.title, |ui| rows(ui, &group.entries));
                     continue;
                 }
                 if index > 0 {

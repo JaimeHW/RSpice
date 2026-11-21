@@ -1,3 +1,7 @@
+//! The S-parameter sheet against a two-port amplifier run: it opens on
+//! S21 in dB with the noise columns unticked, its stability curves read
+//! what the Smith marker reads, and a Plot menu entry adds its curve once.
+
 use num_complex::Complex64;
 use rspice_results::calculator::evaluator::evaluate;
 use rspice_results::calculator::parser::try_parse;
