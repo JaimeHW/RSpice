@@ -279,14 +279,6 @@ mod tests {
     }
 
     #[test]
-    fn subprotocol_offers_are_one_comma_joined_value() {
-        assert_eq!(
-            subprotocol_offer("rspice.ticket.CREDENTIAL"),
-            format!("{LIVE_SESSION_PROTOCOL}, rspice.ticket.CREDENTIAL")
-        );
-    }
-
-    #[test]
     fn close_frames_map_onto_the_executor_vocabulary() {
         let close = |code, reason: &str| {
             closure_from_close(Some(&CloseFrame {

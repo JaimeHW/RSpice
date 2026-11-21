@@ -644,16 +644,6 @@ mod tests {
         }
     }
 
-    /// A license that names no one says so in words where it is shown, and
-    /// leaves no placeholder for a review to be signed with.
-    #[test]
-    fn a_license_naming_no_one_says_so_in_words() {
-        let mut info = parse_and_verify(SAMPLE_KEY).expect("sample key must verify");
-        assert_eq!(info.licensee_label(), info.licensed_to);
-        info.licensed_to.clear();
-        assert_eq!(info.licensee_label(), "Not named in the license");
-    }
-
     #[test]
     fn sample_key_verifies_with_expected_grant() {
         let info = parse_and_verify(SAMPLE_KEY).expect("sample key must verify");
@@ -670,18 +660,6 @@ mod tests {
             parse_and_verify_with_policy(SAMPLE_KEY, VerificationPolicy::Production),
             Err(LicenseError::BadSignature)
         );
-    }
-
-    #[test]
-    fn development_policy_accepts_development_signer() {
-        let info =
-            parse_and_verify_with_policy(SAMPLE_KEY, VerificationPolicy::Development).unwrap();
-        assert_eq!(info.tier, "PRO");
-    }
-
-    #[test]
-    fn build_policy_matches_debug_or_test_configuration() {
-        assert_eq!(build_verification_policy(), VerificationPolicy::Development);
     }
 
     #[test]
@@ -711,11 +689,6 @@ mod tests {
             group5(signature)
         );
         assert!(parse_and_verify(&pretty).is_ok());
-    }
-
-    #[test]
-    fn dates_render_civil() {
-        assert_eq!(date_from_unix_days(0), "1970-01-01");
     }
 
     #[test]

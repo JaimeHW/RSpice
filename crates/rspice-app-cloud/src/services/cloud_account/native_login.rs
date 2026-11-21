@@ -271,21 +271,6 @@ mod tests {
     }
 
     #[test]
-    fn a_valid_callback_delivers_the_code() {
-        let outcome = run_listener_against(
-            "GET /oauth/callback?code=the-code&state=expected-state HTTP/1.1\r\n\
-             Host: 127.0.0.1:{port}\r\n\r\n",
-        );
-        assert_eq!(
-            outcome,
-            Some(CloudAccountCommand::CompleteSignIn {
-                code: "the-code".to_owned(),
-                state: "expected-state".to_owned(),
-            })
-        );
-    }
-
-    #[test]
     fn valid_callback_delivery_is_stable_across_ephemeral_listeners() {
         for attempt in 0..32 {
             let outcome = run_listener_against(

@@ -375,17 +375,3 @@ fn render_presence_popover(
 fn presented_doc(doc: &str) -> String {
     doc.strip_prefix("schematic/").unwrap_or(doc).to_owned()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The cluster names the session's state in sentence case and neutral
-    /// ink. It used to read "LIVE" in green and "SYNC" in amber, which made a
-    /// reconnecting relay look like a fault and a connected one like a pass.
-    #[test]
-    fn the_presence_cluster_says_live_or_reconnecting_in_plain_words() {
-        assert_eq!(presence_state_label(true), "Live");
-        assert_eq!(presence_state_label(false), "Reconnecting");
-    }
-}

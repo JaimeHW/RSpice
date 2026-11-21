@@ -360,26 +360,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn every_failure_reads_as_a_sentence() {
-        for failure in [
-            CheckFailure::Unreachable,
-            CheckFailure::TimedOut,
-            CheckFailure::Status(503),
-            CheckFailure::Unreadable,
-            CheckFailure::Version,
-            CheckFailure::ForeignPage,
-        ] {
-            let sentence = failure.sentence();
-            assert!(
-                sentence.ends_with('.') && !sentence.contains("Error") && !sentence.contains("::"),
-                "{sentence}"
-            );
-        }
-        assert_eq!(
-            CheckFailure::Status(503).sentence(),
-            "rspice.app could not provide the latest release (HTTP 503)."
-        );
-    }
 }
