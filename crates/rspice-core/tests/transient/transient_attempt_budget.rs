@@ -212,13 +212,10 @@ fn assert_integrates_trapezoidally_by_default(spice_dialect: SpiceDialect) {
 }
 
 #[test]
-fn ngspice_dialect_integrates_trapezoidally_by_default() {
-    assert_integrates_trapezoidally_by_default(SpiceDialect::Ngspice);
-}
-
-#[test]
-fn best_dialect_integrates_trapezoidally_by_default() {
-    assert_integrates_trapezoidally_by_default(SpiceDialect::BestAvailable);
+fn ngspice_and_best_dialects_integrate_trapezoidally_by_default() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        assert_integrates_trapezoidally_by_default(dialect);
+    }
 }
 
 #[test]
