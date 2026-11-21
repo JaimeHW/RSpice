@@ -16,7 +16,10 @@ use crate::simulation::{ViewerHost, ViewerReading};
 use crate::state::{ActiveViewer, RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
-use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use crate::workbench::documents::result_document::{
+    AnalysisPresentationKey, ResultsParts, ResultsReads,
+};
+use rspice_results::result_presentation::SourceWaveformPresentationKey;
 
 impl AnalysisWorkspaceState {
     /// What the transient viewers hold now.
@@ -26,7 +29,13 @@ impl AnalysisWorkspaceState {
             eye_timebase: self.eye_diagram_state.timebase_provenance().cloned(),
             fft_has_data: self.fft_state.has_data(),
             fft_failed: self.fft_state.last_error.is_some(),
-            fft_source: self.fft_state.selected_source.clone(),
+            // The reader's choice, else the voltage plotted, else the signal
+            // the last spectrum was of.
+            fft_source: self
+                .fft_state
+                .source()
+                .or(self.fft_state.selected_source.as_deref())
+                .map(str::to_owned),
         }
     }
 
@@ -38,9 +47,36 @@ impl AnalysisWorkspaceState {
 }
 
 impl ResultsReads<'_> {
-    /// What the transient viewers hold now.
+    /// What the transient viewers hold now. The spectrum's source is the one
+    /// the reader chose, else the first voltage plotted now.
     pub fn viewer_reading(self) -> ViewerReading {
-        self.analysis.viewer_reading()
+        let mut reading = self.analysis.viewer_reading();
+        if self.analysis.fft_state.source_choice.is_none()
+            && let Some(plotted) = self.first_plotted_voltage()
+        {
+            reading.fft_source = Some(plotted);
+        }
+        reading
+    }
+
+    /// The first voltage the reader plots from the active analysis, in the
+    /// order the run saved them: what the spectrum transforms when the reader
+    /// chose no source.
+    pub(crate) fn first_plotted_voltage(self) -> Option<String> {
+        let run = self.model.simulation.active_run()?;
+        let analysis = self.model.simulation.active_analysis()?;
+        let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+        analysis
+            .waveforms
+            .iter()
+            .find(|waveform| {
+                is_voltage(&waveform.name)
+                    && self.results.session.waveform_visibility(
+                        &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
+                        waveform.visible,
+                    )
+            })
+            .map(|waveform| waveform.name.clone())
     }
 
     /// How the FFT prepares the input it is given, as the reader
@@ -53,6 +89,12 @@ impl ResultsReads<'_> {
     pub fn eye_timebase_for(self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.results.eye_timebase_for(owner)
     }
+}
+
+/// Whether a saved signal is a node voltage, `V(…)`.
+fn is_voltage(name: &str) -> bool {
+    let name = name.trim().trim_matches('|');
+    name.len() > 3 && name[..2].eq_ignore_ascii_case("v(") && name.ends_with(')')
 }
 
 impl ViewerHost for ResultsParts<'_> {

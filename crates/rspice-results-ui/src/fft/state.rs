@@ -57,8 +57,12 @@ pub struct FftState {
     pub source_cache: Option<FftSourceCache>,
     /// Most recent typed preparation or construction failure.
     pub last_error: Option<FftFailure>,
-    /// User-selected source trace name preference.
+    /// The trace the spectrum was prepared from.
     pub selected_source: Option<String>,
+    /// The trace or expression the reader chose to transform.
+    pub source_choice: Option<String>,
+    /// The first voltage plotted, transformed when the reader chose none.
+    pub default_source: Option<String>,
     /// Amplitude normalization mode for FFT magnitudes.
     pub normalization: SpectrumNormalization,
     /// Window function
@@ -89,6 +93,8 @@ impl Default for FftState {
             source_cache: None,
             last_error: None,
             selected_source: None,
+            source_choice: None,
+            default_source: None,
             normalization: SpectrumNormalization::Rms,
             window: WindowFunction::Hanning,
             input_fidelity: InputFidelity::Reference,

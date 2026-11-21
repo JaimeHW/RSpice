@@ -161,21 +161,15 @@ impl SimulationController {
         self.poll_transient_task(state, DerivedViewKind::Fft, active_analysis);
     }
 
-    pub(super) fn invalidate_transient_post_views(&mut self, state: &mut impl ViewerHost) {
+    /// Retire the spectrum and the eye a finished transient replaces. Neither is
+    /// prepared here: each is prepared when its sheet is opened, as a job reading
+    /// windows of the record, so a run's completion reads none of its columns.
+    pub fn invalidate_transient_post_views(&mut self, state: &mut impl ViewerHost) {
         self.cancel_task_slot(DerivedViewKind::EyeDiagram);
         self.cancel_task_slot(DerivedViewKind::Fft);
         self.transient_post.eye_loaded = None;
         self.transient_post.fft_loaded = None;
         state.apply_run_event(RunEvent::TransientResultReplaced);
-    }
-
-    pub(super) fn prime_transient_fft_source_selection(&mut self, state: &mut impl ViewerHost) {
-        let Some(source) = self.current_transient_waveform_source(state) else {
-            return;
-        };
-        state.apply_run_event(RunEvent::FftSourceChosen {
-            source: source.source_name,
-        });
     }
 
     fn ensure_eye_diagram_data(&mut self, state: &mut impl ViewerHost) -> DerivedViewerLoadState {

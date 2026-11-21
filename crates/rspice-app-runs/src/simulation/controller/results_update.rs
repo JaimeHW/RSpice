@@ -54,7 +54,6 @@ impl SimulationController {
         match result {
             SimulationResult::Transient { measurements, .. } => {
                 self.invalidate_transient_post_views(state);
-                self.prime_transient_fft_source_selection(state);
                 self.echo_measurements(state.model_mut(), measurements);
             }
             SimulationResult::Stb {

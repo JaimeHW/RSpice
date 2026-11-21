@@ -1,11 +1,23 @@
 //! Application coordination for FFT presentation and source authorization.
 
+#[cfg(test)]
+mod tests;
+
 use super::{ResultViewer, frame_work};
 use crate::workbench::documents::result_document::ResultsParts;
 use egui::Ui;
 use rspice_results_ui::fft::view;
 
+/// Keep the sheet's source on what the reader plots: until the reader chooses
+/// a source, the spectrum is of the first voltage plotted, and plotting
+/// another first drops the spectrum so the sheet prepares that one.
+pub(crate) fn follow_plotted(state: &mut ResultsParts<'_>) {
+    let source = state.results_reads().first_plotted_voltage();
+    state.analysis.fft_state.set_default_source(source);
+}
+
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    follow_plotted(state);
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let presentation = state.results_reads().presentation_policy().readout();
     let plot_view = state.results.session.plot_view(ResultViewer::Fft, 0);

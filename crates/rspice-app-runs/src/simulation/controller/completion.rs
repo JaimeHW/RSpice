@@ -167,9 +167,6 @@ impl SimulationController {
                     analysis_result.error_message = Some(message);
                 }
                 self.materialize_current_saved_outputs(&mut analysis_result);
-                if analysis_result.analysis_type == AnalysisType::Transient {
-                    self.populate_transient_post_views(state, &analysis_result);
-                }
                 // The Console has had the prose as the engine logged it; the
                 // run's batch gets the conditions, one record each for the
                 // whole run.

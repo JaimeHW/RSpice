@@ -1,10 +1,9 @@
 //! Populating the post-run viewers.
 //!
-//! After a run completes, seeds each analysis viewer with the data it needs
-//! — transient traces, AC magnitude and phase, and the specialized viewers
-//! behind the analysis workspace.
+//! After a run completes, seeds each analysis viewer with the data it needs:
+//! AC magnitude and phase and the viewers behind them. A transient's spectrum
+//! and eye are not seeded here; each is prepared when its sheet is opened.
 
-use super::transient_post::{DerivedViewAvailability, LoadedDerivedView};
 use super::*;
 use crate::state::{RunEvent, SpecializedViewerCacheProvenance};
 
@@ -20,90 +19,6 @@ impl SimulationController {
             run.dataset_id,
             source_instance_id,
         ))
-    }
-
-    pub fn populate_transient_post_views(
-        &mut self,
-        state: &mut impl RunHost,
-        analysis: &crate::state::AnalysisResult,
-    ) {
-        self.transient_post.eye_loaded = None;
-        self.transient_post.fft_loaded = None;
-        if !analysis.success || analysis.analysis_type != crate::state::AnalysisType::Transient {
-            state.apply_run_event(RunEvent::TransientResultReplaced);
-            return;
-        }
-
-        let preferred_fft_source = state.viewer_reading().fft_source;
-        let Some((waveform_key, waveform)) = Self::fft_source_waveform_from_state(
-            &analysis.waveforms,
-            preferred_fft_source.as_deref(),
-        ) else {
-            // A specialized viewer must never outlive the retained source it
-            // claims to represent.  In particular, an analysis with no saved
-            // transient outputs cannot keep an FFT derived from the engine's
-            // discarded working set.
-            state.apply_run_event(RunEvent::TransientResultReplaced);
-            return;
-        };
-        state.apply_run_event(RunEvent::FftSourceChosen {
-            source: waveform_key.clone(),
-        });
-        // The spectrum and the eye fold every sample of the record, so seeding them reads it
-        // whole: a stored record is read off the frame by the reader service. Until it has
-        // arrived, or when it is larger than the loaded results may hold, nothing is seeded and
-        // each viewer derives its own off the frame when it is opened.
-        let (Some(time), Some(values)) = (
-            waveform.x.fetch_whole().ready(),
-            waveform.y.fetch_whole().ready(),
-        ) else {
-            return;
-        };
-        // Eye folding retains its historical paired-prefix behavior. FFT
-        // preparation receives the authored arrays whole so its strict shape
-        // contract can diagnose a mismatch instead of inheriting truncation.
-        let paired_count = time.len().min(values.len());
-        let eye_time = &time[..paired_count];
-        let eye_values = &values[..paired_count];
-        let (time, values) = (&time[..], &values[..]);
-        let input_options = state.fft_input_options();
-
-        let provenance = self.in_flight_specialized_viewer_provenance(state.model());
-        // Same builder as the lazy path in `transient_post`, at the same
-        // reader-chosen bit period. Seeding the viewer eagerly must not mean
-        // seeding it from a second, differently-behaved estimator.
-        let timebase = provenance
-            .map(|owner| state.eye_timebase_for(owner))
-            .unwrap_or_default();
-        let (eye_data, eye_provenance) = build_eye_from_waveform(eye_time, eye_values, timebase);
-        state.apply_run_event(RunEvent::EyeFolded {
-            owner: provenance,
-            eye: eye_data,
-            timebase: eye_provenance,
-        });
-
-        let input = rspice_results_ui::fft::prepare_fft_input_with_options(
-            &waveform_key,
-            time,
-            values,
-            input_options,
-        );
-        state.apply_run_event(RunEvent::FftInputPrepared {
-            owner: provenance,
-            input,
-        });
-        // The viewer holds a spectrum exactly when it accepted the input.
-        let availability = if state.viewer_reading().fft_has_data {
-            DerivedViewAvailability::Ready
-        } else {
-            DerivedViewAvailability::Unavailable
-        };
-        if let Some(analysis) = provenance {
-            self.transient_post.fft_loaded = Some(LoadedDerivedView {
-                analysis,
-                availability,
-            });
-        }
     }
 
     pub fn populate_ac_post_views(
@@ -145,14 +60,15 @@ impl SimulationController {
         waveforms: &'a [crate::state::RetainedTrace],
         preferred_name: Option<&str>,
     ) -> Option<(String, &'a crate::state::RetainedTrace)> {
-        let mut candidates: Vec<&crate::state::RetainedTrace> = waveforms
+        // In the order the run saved them, never sorted: the fallback is the
+        // first voltage the run saved, not whichever name sorts first.
+        let candidates: Vec<&crate::state::RetainedTrace> = waveforms
             .iter()
             // Keep malformed or short authored traces selectable so the
             // typed preparation boundary can explain their exact defect.
             // Only a record with no evidence at all is not a candidate.
             .filter(|waveform| !waveform.x.is_empty() || !waveform.y.is_empty())
             .collect();
-        candidates.sort_by(|a, b| a.name.cmp(&b.name));
 
         if let Some(name) = preferred_name {
             if let Some(waveform) = candidates
@@ -182,8 +98,12 @@ impl SimulationController {
         }
 
         candidates
-            .into_iter()
-            .next()
+            .iter()
+            .copied()
+            .find(|waveform| {
+                Self::parse_fft_source_name(&waveform.name).kind == FftSourceKind::Voltage
+            })
+            .or_else(|| candidates.first().copied())
             .map(|waveform| (waveform.name.clone(), waveform))
     }
 

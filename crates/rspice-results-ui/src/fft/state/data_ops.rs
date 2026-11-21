@@ -43,6 +43,39 @@ impl FftState {
         self.selected_source = source_name;
     }
 
+    /// The signal the spectrum transforms: the reader's choice, else the
+    /// first voltage plotted.
+    pub fn source(&self) -> Option<&str> {
+        self.source_choice
+            .as_deref()
+            .or(self.default_source.as_deref())
+    }
+
+    /// Follow the first voltage plotted, when the reader chose no source.
+    /// When it changes, the spectrum of the one before is dropped, so the
+    /// sheet prepares this one; the first one seen is the one the spectrum
+    /// was prepared from.
+    pub fn set_default_source(&mut self, source: Option<String>) {
+        if self.default_source == source {
+            return;
+        }
+        if self.source_choice.is_none() && self.default_source.is_some() {
+            self.clear();
+        }
+        self.default_source = source;
+    }
+
+    /// Transform the signal the reader chose, or the first voltage plotted
+    /// for `None`. A spectrum of another signal is dropped, so the sheet
+    /// prepares this one.
+    pub fn choose_source(&mut self, source: Option<String>) {
+        let before = self.source().map(str::to_owned);
+        self.source_choice = source;
+        if self.source() != before.as_deref() {
+            self.clear();
+        }
+    }
+
     /// Change the displayed amplitude convention and recompute all dependent
     /// metrics from the same prepared time-domain source. Imported test data
     /// without a retained source is converted in place instead.
