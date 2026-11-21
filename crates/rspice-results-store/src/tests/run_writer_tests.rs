@@ -171,8 +171,14 @@ fn a_timed_flush_makes_the_open_rows_durable() {
     for step in &steps[..10] {
         writer.push_row(step.x, &step.values).unwrap();
     }
-    std::thread::sleep(Duration::from_millis(60));
-    // The first push after the interval hands the open chunk over to be written provisionally.
+    // The writer thread asks for the flush once the interval has passed; a loaded machine may
+    // not run that thread for a while, so wait for it to ask rather than for a fixed time.
+    let asked = Instant::now() + Duration::from_secs(10);
+    while !writer.sync_due() && Instant::now() < asked {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(writer.sync_due(), "the writer thread asks for a flush");
+    // The first push after it asks hands the open chunk over to be written provisionally.
     writer.push_row(steps[10].x, &steps[10].values).unwrap();
     writer.amend_open_row(3, 0, 0.5).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);

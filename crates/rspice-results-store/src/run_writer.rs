@@ -84,6 +84,12 @@ impl<I: RunIo> RunWriter<I> {
         })
     }
 
+    /// The writer thread has asked for a durability flush, which the next push hands over.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn sync_due(&self) -> bool {
+        self.inner.sync_due()
+    }
+
     /// Rows accepted so far.
     pub fn rows(&self) -> u64 {
         self.inner.rows()
@@ -467,6 +473,11 @@ mod threaded {
                 Err(TryRecvError::Empty) => Ok(()),
                 Err(TryRecvError::Disconnected) => Err(self.writer_error()),
             }
+        }
+
+        #[cfg(test)]
+        pub(super) fn sync_due(&self) -> bool {
+            self.sync_due.load(Ordering::Relaxed)
         }
 
         /// Hand the staged changes over, then a copy of the open chunk to write provisionally.
