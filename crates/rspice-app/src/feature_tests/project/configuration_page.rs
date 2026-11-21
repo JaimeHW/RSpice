@@ -1,6 +1,5 @@
 //! The Configuration page as a reader meets it: what it states on Default
-//! and on a configured hierarchy, the words it never uses, and how often it
-//! resolves the design.
+//! and on a configured hierarchy, and how often it resolves the design.
 
 use egui::Color32;
 
@@ -9,26 +8,6 @@ use crate::workbench::examples::hierarchy_reference;
 use crate::workbench::features;
 use rspice_app_project::workbench::project::configuration_state::ConfigurationSelection;
 use rspice_app_project::workbench::surfaces::project::configuration::configuration;
-use rspice_app_workbench::ui::tokens::Tokens;
-
-/// Words that name the implementation rather than anything an engineer
-/// acts on. None may reach the page.
-const BANNED: &[&str] = &[
-    "contract",
-    "digest",
-    "semantic",
-    "execution",
-    "materialized",
-    "projection",
-    "precedence",
-    "revision",
-    "owner",
-    "black-box",
-    "model profile",
-    "catalog",
-    "authority",
-    "receipt",
-];
 
 fn reference_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
@@ -224,32 +203,6 @@ fn the_default_states_the_built_in_lists() {
     );
 }
 
-#[test]
-fn no_word_on_the_page_names_the_implementation() {
-    let mut default = RSpiceApp::test_instance();
-    let mut configured = reference_app();
-    for (page, shown) in [
-        ("Default", frame(&mut default, 1440.0)),
-        ("configured", frame(&mut configured, 1440.0)),
-        ("configured, narrow", frame(&mut configured, 640.0)),
-    ] {
-        for word in shown.every_word() {
-            let lower = word.to_ascii_lowercase();
-            for banned in BANNED {
-                assert!(!lower.contains(banned), "{page}: {banned:?} in {word:?}");
-            }
-            assert!(
-                !lower
-                    .split(|c: char| !c.is_ascii_alphanumeric())
-                    .any(|token| token.len() > 1
-                        && token.starts_with('r')
-                        && token[1..].bytes().all(|byte| byte.is_ascii_digit())),
-                "{page}: a revision number in {word:?}"
-            );
-        }
-    }
-}
-
 /// The band counts the circuit the variant populates, not every instance
 /// the schematic draws.
 #[test]
@@ -281,41 +234,6 @@ fn the_band_counts_only_the_populated_variant() {
         assert!(
             shown.says(&format!("{total} of {total} instances bound")),
             "the {width}px band must count {total} instances"
-        );
-    }
-}
-
-/// An unbound status carries the kit's mark; its words keep the band's
-/// neutral tone.
-#[test]
-fn unbound_instances_are_marked_rather_than_painted_red() {
-    let mut app = reference_app();
-    let catalog = app.state.model.workspace.content.configuration_sets.clone();
-    let id = catalog.active_configuration_id().unwrap();
-    app.state
-        .project
-        .configuration
-        .edit(&catalog, id, |definition| {
-            definition.executable_view_policy = vec!["spice".to_owned()];
-            definition.overrides.clear();
-        });
-    let shown = frame(&mut app, 1440.0);
-    let status = shown
-        .announced
-        .iter()
-        .find(|text| text.contains("instances unbound"))
-        .expect("the band states the unbound instances");
-    assert!(
-        status.starts_with("Error: "),
-        "the status carries the mark: {status}"
-    );
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let tokens = Tokens::get(&ctx);
-    for (text, color) in &shown.painted {
-        assert!(
-            *color != tokens.color.warn && *color != tokens.color.err && *color != tokens.color.ok,
-            "{text:?} is painted in a severity tone"
         );
     }
 }

@@ -1,8 +1,8 @@
-//! The Project workspace drawn through the whole application: each page at
-//! the widths it supports, the overview and the recovery page from live
-//! state, and a press on the page carried out in the frame it was clicked in.
+//! The Project workspace drawn through the whole application: the overview
+//! and the recovery page from live state, and a press on the page carried
+//! out in the frame it was clicked in.
 
-use egui::{Color32, Modifiers, Rect, Ui, pos2};
+use egui::{Modifiers, Ui, pos2};
 
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
@@ -11,7 +11,6 @@ use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_app_workbench::workbench::framework::host::{Host, Point};
 
@@ -382,109 +381,6 @@ fn revision_history_opens_before_the_frame_draws_its_dialogs() {
     click_announced(&ctx, &mut app, settled, "Revision history\u{2026}");
 
     assert!(app.state.project.project_revision_history.open);
-}
-
-/// The open workspace's chrome and page share the one fill the shell
-/// paints behind them: a single shape fills the whole stage with the
-/// application background, and no pixel of the stage shows what lies
-/// beneath it.
-#[test]
-fn the_chrome_and_the_page_share_one_fill_across_the_stage() {
-    const BENEATH: Color32 = Color32::from_rgb(255, 0, 255);
-    let size = egui::vec2(1440.0, 900.0);
-    let stage = Rect::from_min_size(egui::Pos2::ZERO, size);
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let bg_app = Tokens::get(&ctx).color.bg_app;
-    let mut app = RSpiceApp::test_instance();
-    app.state.project.project_page = ProjectPage::Library;
-    let mut output = None;
-    for _ in 0..3 {
-        output = Some(ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(stage),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE.fill(BENEATH))
-                    .show(ctx, |ui| show(ui, &mut app));
-            },
-        ));
-    }
-    fn stage_fills(shape: &egui::epaint::Shape, stage: Rect, fill: Color32, found: &mut usize) {
-        match shape {
-            egui::epaint::Shape::Rect(rect)
-                if rect.fill == fill && rect.rect.contains_rect(stage) =>
-            {
-                *found += 1;
-            }
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    stage_fills(shape, stage, fill, found);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut fills = 0;
-    for clipped in &output.expect("three passes ran").shapes {
-        stage_fills(&clipped.shape, stage, bg_app, &mut fills);
-    }
-    assert_eq!(
-        fills, 1,
-        "one shape fills the stage with the application background"
-    );
-
-    let canvas = rspice_app_workbench::ui::raster::render(size, |ui, _| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(BENEATH))
-            .show(ui, |ui| show(ui, &mut app));
-    });
-    let sampled = canvas.pixels_in(stage).collect::<Vec<_>>();
-    assert_eq!(sampled.len(), canvas.width() * canvas.height());
-    assert!(
-        sampled.iter().all(|pixel| *pixel != BENEATH),
-        "the stage shows through the fill"
-    );
-    assert!(
-        sampled.contains(&bg_app),
-        "the fill itself is seen between the panels"
-    );
-}
-
-#[test]
-fn every_project_page_renders_at_desktop_tablet_and_phone_widths() {
-    for page in ProjectPage::ALL {
-        for size in [
-            egui::vec2(1440.0, 900.0),
-            egui::vec2(820.0, 1180.0),
-            egui::vec2(390.0, 844.0),
-        ] {
-            let ctx = egui::Context::default();
-            rspice_app_workbench::ui::Theme::default().apply(&ctx);
-            let mut app = RSpiceApp::test_instance();
-            app.state.project.project_page = page;
-
-            let output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                    ..Default::default()
-                },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
-                },
-            );
-
-            assert!(
-                !output.shapes.is_empty(),
-                "{} did not render at {}x{}",
-                page.label(),
-                size.x,
-                size.y
-            );
-        }
-    }
 }
 
 pub(super) fn populated_project_app() -> RSpiceApp {

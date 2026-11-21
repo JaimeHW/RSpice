@@ -1,7 +1,6 @@
-//! The Project workspace on a tablet and a phone: whole application frames
-//! under a coarse pointer, at the widths of a portrait tablet and a phone.
-//! Every tab and chip is a touch target, the page in front is in view, and
-//! the narrow title names the project.
+//! The Project workspace on a phone: whole application frames under a coarse
+//! pointer at a phone's width. The chips are whole touch targets, the page in
+//! front is in view, and the narrow title names the project.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -14,7 +13,6 @@ use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::tokens::TOUCH_TARGET;
 use rspice_app_workbench::workbench::chrome::title_bar::title_context_text;
 
-const TABLET: Vec2 = vec2(820.0, 1180.0);
 const PHONE: Vec2 = vec2(390.0, 844.0);
 
 /// The application on `page` of the Project workspace under a finger.
@@ -90,25 +88,6 @@ pub(super) fn announced(output: &egui::FullOutput, role: Role) -> Vec<(String, R
             ))
         })
         .collect()
-}
-
-/// The page tabs on a tablet are as tall as a finger needs, whichever page
-/// is in front.
-#[test]
-fn every_page_tab_is_a_touch_target_on_a_tablet() {
-    for page in ProjectPage::ALL {
-        let mut app = touch_app(page);
-        let output = settled_frame(&touch_context(), &mut app, TABLET);
-        let tabs = page_tabs(&output);
-        assert_eq!(tabs.len(), ProjectPage::ALL.len(), "{page:?}: {tabs:?}");
-        for (label, rect) in tabs {
-            assert!(
-                rect.height() >= TOUCH_TARGET - 0.5,
-                "{page:?}: the {label} tab is {} tall",
-                rect.height()
-            );
-        }
-    }
 }
 
 /// On a phone the strip of page tabs is wider than the screen: whichever

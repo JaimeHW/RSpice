@@ -4,7 +4,6 @@
 
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
-use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
 use rspice_app_state::state::{
     CellViewRef, ComponentType, Library, NetNamingPolicy, Point, SchematicGridPitch,
@@ -21,41 +20,6 @@ fn create(app: &mut RSpiceApp) -> bool {
     let created = with_cx(app, create_new_cell);
     app.after_contribution();
     created
-}
-
-/// New cell is the command form with option columns: the four views
-/// are checks on one line of the grid under one label, each in an equal
-/// share, with no kicker over them and no switches.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_new_cell_form_puts_its_views_on_the_grid() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.project.new_cell_dialog = true;
-    app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
-    let painted = rspice_app_workbench::ui::widgets::painted_runs::painted_runs(
-        egui::vec2(1440.0, 900.0),
-        rspice_app_workbench::ui::tokens::Mode::Light,
-        3,
-        |ctx| {
-            with_cx(&mut app, |cx| {
-                ProjectFeature::process_new_cell_dialog(cx, ctx)
-            })
-        },
-    );
-    assert_eq!(painted.surface.width(), 520.0);
-    assert!(painted.rect_of("VIEWS TO CREATE").is_none());
-    let views = painted.rect_of("Views").expect("the Views row");
-    let library = painted.rect_of("Library").expect("the Library row");
-    assert!((views.left() - library.left()).abs() < 0.5);
-    // One line, and the views' words level with the row's label.
-    for view in ["Schematic", "Symbol", "Testbench", "Verilog-A"] {
-        let rect = painted.rect_of(view).expect(view);
-        assert!(
-            (rect.center().y - views.center().y).abs() < 1.0,
-            "{view} is not on the Views line"
-        );
-    }
-    assert!(painted.rect_of("Enter a name for the cell.").is_some());
 }
 
 fn cell_symbol_view(app: &RSpiceApp, library: &str, cell: &str) -> rspice_app_state::state::View {

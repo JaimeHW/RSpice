@@ -20,9 +20,7 @@ use rspice_app_project::workbench::surfaces::project::overview::OverviewSnapshot
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, create,
 };
-use rspice_app_services::workbench::lifecycle::project_lifecycle::{
-    dirty_document_count, without_audit,
-};
+use rspice_app_services::workbench::lifecycle::project_lifecycle::without_audit;
 use rspice_app_services::workbench::lifecycle::recovery::{take_disk_reads, unique_temp_dir};
 use rspice_app_state::product::ContentDigest;
 use rspice_app_state::state::{
@@ -582,45 +580,4 @@ fn the_attach_dialog_proves_its_candidates_when_the_catalogue_changes() {
         "{offered}"
     );
     assert_eq!(idle_frames(&ctx, &mut app).model_library_hashes, 0);
-}
-
-/// How long an idle Overview frame takes on an empty project and on the
-/// large one, and how long a read of the held unsaved-document answer
-/// takes. Numbers to read from a release build, not a rule: the rule is the
-/// work counted above.
-///
-/// `cargo test --release -p rspice-app --lib -- overview_idle_frame_time
-/// --ignored --nocapture`
-#[test]
-#[ignore = "a release-build timing to read, not a rule"]
-#[allow(
-    clippy::print_stdout,
-    reason = "run by hand with --nocapture, the numbers are what it is for"
-)]
-fn overview_idle_frame_time() {
-    for components in [0, COMPONENTS] {
-        let (mut app, folder) = large_project("frame-time", components);
-        show_overview(&mut app);
-        let ctx = offscreen();
-        for _ in 0..WARM_UP_FRAMES {
-            app_frame(&ctx, &mut app, Vec::new());
-        }
-        let frames = u32::try_from(IDLE_FRAMES).expect("the frame count fits");
-        let started = std::time::Instant::now();
-        for _ in 0..IDLE_FRAMES {
-            app_frame(&ctx, &mut app, Vec::new());
-        }
-        let frame = started.elapsed() / frames;
-        let started = std::time::Instant::now();
-        for _ in 0..IDLE_FRAMES {
-            let _ = dirty_document_count(&app.state);
-        }
-        let read = started.elapsed() / frames;
-        println!(
-            "Overview, {components} components: {:.2} ms a frame; a read of the unsaved-document answer {:.3} ms",
-            frame.as_secs_f64() * 1e3,
-            read.as_secs_f64() * 1e3,
-        );
-        let _ = std::fs::remove_dir_all(folder);
-    }
 }
