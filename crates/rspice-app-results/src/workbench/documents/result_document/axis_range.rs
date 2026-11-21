@@ -88,7 +88,7 @@ fn shared_decade_range((minimum, maximum): (f64, f64), width: f64, unit: &str) -
             return None;
         }
         let decade = large_decade.div_euclid(3) * 3;
-        (decade, engineering_prefix(decade))
+        (decade, engineering_prefix(decade, unit))
     };
     let decimals = usize::try_from((decade - step).clamp(0, MAX_DECIMALS)).unwrap_or(0);
     let scale = 10f64.powi(decade);
@@ -117,11 +117,16 @@ fn shared_decade_range((minimum, maximum): (f64, f64), width: f64, unit: &str) -
 
 /// The decade letter the axis ticks write for `decade`, a multiple of three
 /// between femto and tera.
-fn engineering_prefix(decade: i32) -> &'static str {
+///
+/// Before a unit the letters are SI's, as the ticks, the details pane and
+/// Spectre write them: `1 MHz`, never `1 MegHz`. A bare number keeps SPICE's
+/// `Meg`, because there a lone `M` is milli.
+fn engineering_prefix(decade: i32, unit: &str) -> &'static str {
     match decade {
         12 => "T",
         9 => "G",
-        6 => "Meg",
+        6 if unit.is_empty() => "Meg",
+        6 => "M",
         3 => "k",
         -3 => "m",
         -6 => "\u{b5}",
@@ -184,14 +189,22 @@ pub(crate) fn parse_axis_range(text: &str, unit: &str) -> Option<(f64, f64)> {
 /// The unit is stripped before the engineering parser sees the text, so a
 /// unit that is also a scale letter or not a word at all — `K`, `F`, `°`,
 /// `nV/√Hz` — is read as the unit it is rather than as a decade or a refusal.
+///
+/// With a unit the decade letters are SI's, so an `M` before it is mega, as
+/// the field writes `1 MHz` and as Spectre reads it; `m` stays milli. A bare
+/// number keeps the SPICE reading.
 fn parse_axis_value(text: &str, unit: &str) -> Option<f64> {
     let text = text.trim();
-    let number = if unit.is_empty() {
-        text
-    } else {
-        text.strip_suffix(unit).unwrap_or(text)
-    };
-    parse_engineering_value(number).ok()
+    if unit.is_empty() {
+        return parse_engineering_value(text).ok();
+    }
+    let number = text.strip_suffix(unit).unwrap_or(text).trim_end();
+    match number.strip_suffix('M') {
+        Some(mantissa) if !mantissa.ends_with(char::is_alphabetic) => {
+            parse_engineering_value(&format!("{}Meg", mantissa.trim_end())).ok()
+        }
+        _ => parse_engineering_value(number).ok(),
+    }
 }
 
 /// The decade letters `text` ends with once its unit is stripped: `m` of
@@ -212,8 +225,8 @@ fn decade_suffix<'a>(text: &'a str, unit: &str) -> &'a str {
 struct AxisValue {
     /// The digits, signed: `1.5`, `-250`, `3.3333333333333335e-20`.
     mantissa: String,
-    /// The decade the mantissa sits on, as the reader sees it: `k`, `µ`, `Meg`,
-    /// or nothing.
+    /// The decade the mantissa sits on, as the reader sees it: `k`, `µ`, `M`
+    /// before a unit (`Meg` on a bare number), or nothing.
     prefix: String,
     is_zero: bool,
 }
@@ -237,10 +250,12 @@ impl AxisValue {
             let mantissa = spice.trim_end_matches(char::is_alphabetic);
             return Self {
                 mantissa: mantissa.to_owned(),
-                // The parser folds `µ` back to `u`; `Meg` stays as it is,
-                // because a bare `M` is milli to every SPICE reader.
+                // The parser folds `µ` back to `u`. Before a unit `Meg` is
+                // SI's `M`; on a bare number it stays, because a lone `M` is
+                // milli to every SPICE reader.
                 prefix: match &spice[mantissa.len()..] {
                     "u" => "\u{b5}".to_owned(),
+                    "Meg" if !unit.is_empty() => "M".to_owned(),
                     prefix => prefix.to_owned(),
                 },
                 is_zero: value == 0.0,
@@ -352,6 +367,26 @@ mod tests {
             format_axis_range((0.0, 1786.0), "nV/\u{221a}Hz"),
             "0 \u{2026} 1786 nV/\u{221a}Hz"
         );
+    }
+
+    /// James saw an STB sweep's range read `1 Hz … 1 MegHz` in the status
+    /// bar. Before a unit the decade letters are SI's, written and read back.
+    #[test]
+    fn a_megahertz_range_reads_as_si_and_parses_back() {
+        assert_eq!(
+            format_axis_range((1.0, 1.0e6), "Hz"),
+            "1 Hz \u{2026} 1 MHz"
+        );
+        assert_eq!(
+            format_axis_range((5.0e5, 2.0e6), "Hz"),
+            "0.5 \u{2026} 2 MHz"
+        );
+        assert_eq!(parse_axis_range("1 Hz \u{2026} 1 MHz", "Hz"), Some((1.0, 1.0e6)));
+        assert_eq!(parse_axis_range("0.5 \u{2026} 2 MHz", "Hz"), Some((5.0e5, 2.0e6)));
+        assert_eq!(parse_axis_range("1 mHz \u{2026} 1 Hz", "Hz"), Some((1.0e-3, 1.0)));
+        assert_eq!(parse_axis_range("1 \u{2026} 2Meg", "Hz"), Some((1.0e6, 2.0e6)));
+        // A bare number keeps SPICE's spelling, where a lone M is milli.
+        assert_eq!(format_axis_range((0.0, 2.0e6), ""), "0 \u{2026} 2Meg");
     }
 
     /// An autofit pads the data by a fraction of its span, and the sum is
