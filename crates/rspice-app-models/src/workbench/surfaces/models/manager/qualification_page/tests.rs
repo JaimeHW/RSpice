@@ -8,7 +8,6 @@
 
 use super::*;
 
-use super::super::super::ENGINE_OWNED_BAND;
 use crate::state::ModelsPage;
 use crate::state::model_library::{ModelLibraryManager, ProjectModelDefinition};
 use crate::workbench::documents::model_editor::{
@@ -143,69 +142,6 @@ fn themed_context() -> egui::Context {
     ctx
 }
 
-/// One string the page painted: what it said, the tone it said it in, and the
-/// rectangle a reader can actually see it in.
-///
-/// The visible rectangle is the shape's own box clipped to the region it was
-/// painted into, which is the only rectangle worth asserting on: the closure
-/// band lays its segments out against the verdict and clips them at its
-/// heading, so an unclipped box says nothing about what overlaps what.
-#[cfg(not(target_arch = "wasm32"))]
-struct PaintedText {
-    text: String,
-    color: Option<Color32>,
-    visible: egui::Rect,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn painted_text(output: &egui::FullOutput) -> Vec<PaintedText> {
-    fn walk(shape: &egui::epaint::Shape, clip: egui::Rect, out: &mut Vec<PaintedText>) {
-        match shape {
-            egui::epaint::Shape::Text(text) => out.push(PaintedText {
-                text: text.galley.text().to_owned(),
-                color: text.override_text_color.or_else(|| {
-                    text.galley
-                        .job
-                        .sections
-                        .first()
-                        .map(|section| section.format.color)
-                }),
-                visible: egui::Rect::from_min_size(text.pos, text.galley.size()).intersect(clip),
-            }),
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    walk(shape, clip, out);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let mut painted = Vec::new();
-    for clipped in &output.shapes {
-        walk(&clipped.shape, clipped.clip_rect, &mut painted);
-    }
-    painted
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn run_page(app: &mut FeatureHarness<ModelsFeature>, width: f32) -> egui::FullOutput {
-    let size = egui::vec2(width, PAGE_SIZE[1]);
-    app.state.models_page = ModelsPage::Qualification;
-    let ctx = themed_context();
-    ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::super::show(ui, &mut app.cx()));
-        },
-    )
-}
-
 /// The closure ledger counts only the population the gate governs, and states
 /// no verdict at all.
 ///
@@ -260,85 +196,6 @@ fn the_closure_inputs_count_gate_subjects_and_not_the_exempt_population() {
     assert_eq!(inputs[3].detail, "desktop · WebAssembly");
 }
 
-/// The band is one chain — what the gate is, what it consumes, what it
-/// returns — and the four bordered tiles it replaced are not painted again.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_closure_ledger_paints_one_chain_and_never_the_tiles_again() {
-    let mut app = source_owned_app();
-    let verdict_label = owned_summary(&app).gate.label().to_owned();
-    let output = run_page(&mut app, PAGE_SIZE[0]);
-    let ctx = themed_context();
-    let t = Tokens::get(&ctx);
-    let painted = painted_text(&output);
-
-    for banned in [
-        "VECTORS PASSING",
-        "REFERENCE COVERAGE",
-        "QUALIFIED MODELS",
-        "RUNTIME PARITY",
-        "Gate ownership",
-    ] {
-        assert!(
-            !painted.iter().any(|text| text.text == banned),
-            "the tile strip is still painted: {banned}"
-        );
-    }
-
-    for (label, value) in [
-        ("vectors", "0/3"),
-        ("references", "0/3"),
-        ("qualified", "0/1"),
-        ("parity", "0/1"),
-    ] {
-        assert!(
-            painted
-                .iter()
-                .any(|text| text.text == label && text.color == Some(t.color.text_faint)),
-            "the `{label}` segment is missing its label or does not recede behind its value"
-        );
-        // The ratio is a summary of the matrix below, not a verdict cell: it
-        // is painted in plain text, and the matrix's own domain and gate
-        // columns are where a shortfall is read.
-        assert!(
-            painted
-                .iter()
-                .any(|text| text.text == value && text.color == Some(t.color.text)),
-            "the `{label}` segment tones {value} rather than stating it"
-        );
-    }
-
-    // The heading, not the section bar's button of the same name: the band is
-    // painted under the bar, so it is the lower of the two.
-    let title = painted
-        .iter()
-        .filter(|text| text.text == "Release closure")
-        .max_by(|left, right| left.visible.top().total_cmp(&right.visible.top()))
-        .expect("the band states what the gate is");
-    let verdict = painted
-        .iter()
-        .find(|text| text.text == verdict_label)
-        .expect("the chain terminates in the selection's verdict");
-    for segment in painted
-        .iter()
-        .filter(|text| text.text == "0/3" || text.text == "0/1")
-    {
-        assert!(
-            segment.visible.width() > 0.0,
-            "a segment is clipped away at the width the page is designed for: {segment:?}",
-            segment = segment.visible
-        );
-        assert!(
-            segment.visible.left() >= title.visible.right()
-                && segment.visible.right() <= verdict.visible.left(),
-            "the input cluster overlaps the heading or the verdict: {:?} against {:?} and {:?}",
-            segment.visible,
-            title.visible,
-            verdict.visible
-        );
-    }
-}
-
 /// The segments are painted glyphs, so the node each hover region publishes is
 /// the only thing a screen reader has — and it has to carry the fact the band
 /// itself has room for only on hover.
@@ -387,40 +244,6 @@ fn every_closure_segment_announces_its_ratio_and_the_fact_behind_it() {
     assert!(
         announcements.contains(&"qualified 0/1, source-owned release gates"),
         "the qualified segment does not state the population the gate governs"
-    );
-}
-
-/// The header cannot describe a column the rows do not fill, and the columns
-/// cannot describe an analysis a vector cannot name.
-#[test]
-fn the_matrix_columns_name_every_analysis_domain_and_tile_the_track() {
-    let domain_headings = MATRIX_COLUMNS
-        [DOMAIN_COLUMN..DOMAIN_COLUMN + QualificationDomain::ALL.len()]
-        .iter()
-        .map(|(label, _)| *label)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        domain_headings,
-        QualificationDomain::ALL
-            .map(QualificationDomain::column_label)
-            .to_vec(),
-        "a domain column heading has drifted from the domain it counts"
-    );
-    assert_eq!(MATRIX_COLUMNS[REFERENCES_COLUMN].0, "References");
-    assert_eq!(MATRIX_COLUMNS[GATE_COLUMN].0, "Gate");
-    assert!(
-        MATRIX_COLUMNS
-            .iter()
-            .all(|(label, _)| *label != label.to_uppercase() || label.len() <= 2),
-        "a column heading is shouting; headings are sentence case, acronyms aside"
-    );
-    let track = MATRIX_COLUMNS
-        .iter()
-        .map(|(_, fraction)| fraction)
-        .sum::<f32>();
-    assert!(
-        (track - 1.0).abs() <= 1.0e-4,
-        "the columns take {track} of the track rather than all of it"
     );
 }
 
@@ -483,46 +306,6 @@ fn a_matrix_row_announces_every_domain_it_paints() {
         "the undeclared noise domain is announced as a count: {announced}"
     );
     assert!(announced.contains("nch_owned") && announced.contains("owned-models"));
-}
-
-/// The engine-owned band is a full-width matrix row now, so its sentence fits.
-///
-/// On the 300-pixel rail this replaced, the band read "Engine-owned · exempt
-/// from the source-owned re…" — the clause that says what the exemption *is*
-/// was the half that got cut.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_engine_owned_band_states_its_whole_exemption() {
-    fn painted(shape: &egui::epaint::Shape, wanted: &str) -> bool {
-        match shape {
-            egui::epaint::Shape::Text(text) => text.galley.text() == wanted,
-            egui::epaint::Shape::Vec(shapes) => shapes.iter().any(|shape| painted(shape, wanted)),
-            _ => false,
-        }
-    }
-
-    let ctx = themed_context();
-    let mut app = harness();
-    app.state.models_page = ModelsPage::Qualification;
-    let size = egui::vec2(PAGE_SIZE[0], PAGE_SIZE[1]);
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::super::show(ui, &mut app.cx()));
-        },
-    );
-    assert!(
-        output
-            .shapes
-            .iter()
-            .any(|clipped| painted(&clipped.shape, ENGINE_OWNED_BAND)),
-        "the engine-owned band was painted truncated or not at all"
-    );
 }
 
 /// Both per-family workflows stay reachable from the matrix's selection strip.

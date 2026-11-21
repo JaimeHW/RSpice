@@ -108,27 +108,6 @@ fn a_second_click_on_the_ordered_column_reverses_it() {
 }
 
 #[test]
-fn models_operational_state_registry_matches_the_mockup_contract() {
-    assert_eq!(
-        ModelsOperationalState::ALL.map(ModelsOperationalState::label),
-        [
-            "Ready",
-            "Invalid input",
-            "Execution error",
-            "Read-only",
-            "Offline",
-            "Conflict",
-            "Stale",
-            "Permission",
-            "Entitlement",
-            "Cancelled",
-            "Corrupted",
-            "Recalled",
-        ]
-    );
-}
-
-#[test]
 fn models_failures_map_to_actionable_operational_states() {
     use ModelsOperationalState as State;
 

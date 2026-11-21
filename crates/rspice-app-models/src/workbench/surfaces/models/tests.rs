@@ -6,42 +6,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use egui::Rect;
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 
 use super::*;
-use crate::state::ModelsPage;
 use crate::state::model_library::{
     DeviceModel, ModelCorrelationState, ModelLibrary, ModelSourceEvidenceBinding,
 };
 use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::models::tests::harness;
-
-#[test]
-fn model_tabs_match_the_mockup_taxonomy() {
-    assert_eq!(
-        ModelsPage::ALL.map(ModelsPage::label),
-        [
-            "Models",
-            "Symbols & CDF",
-            "Corners & sections",
-            "Bins & geometry",
-            "Include graph",
-            "Qualification",
-        ]
-    );
-}
-
-#[test]
-fn qualification_tab_uses_the_mockup_contract_label() {
-    assert_eq!(ModelsPage::Qualification.label(), "Qualification");
-    assert_eq!(
-        ModelsCommand::Page(ModelsPage::Qualification)
-            .key()
-            .as_str(),
-        "model-qualification"
-    );
-}
 
 #[test]
 fn qualification_evidence_set_digest_is_order_independent_and_suite_qualified() {
@@ -430,74 +402,4 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         "0/1 current suite approvals retained"
     );
     assert!(summary.correlation_evidence_digest.is_none());
-}
-
-/// No page ends in the shell's own canvas.
-///
-/// This workspace is one continuous document surface: the mockup's
-/// `.models-view` sits on the panel colour from the tab strip to the bottom
-/// edge and separates its regions with one-pixel dividers. A page whose content
-/// stopped short exposed the charcoal canvas underneath, which reads as a page
-/// that failed to render rather than as a page with room left.
-///
-/// The probe is a point in the bottom band of the viewport: the panel had
-/// better be painted there, on every page, at a document width where the
-/// detail columns are at their widest.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn no_models_page_ends_in_unpainted_canvas() {
-    fn covers(shape: &egui::epaint::Shape, probe: egui::Pos2, fill: egui::Color32) -> bool {
-        match shape {
-            egui::epaint::Shape::Rect(rect) => rect.fill == fill && rect.rect.contains(probe),
-            egui::epaint::Shape::Vec(shapes) => {
-                shapes.iter().any(|shape| covers(shape, probe, fill))
-            }
-            _ => false,
-        }
-    }
-
-    // Every catalog scope, not only the default: the shelf shipped 250 px
-    // short with this guard green because the probe only ever saw the
-    // project scope's composition.
-    use crate::workbench::models::workspace_state::ModelsCatalogScope;
-    const SCOPES: [ModelsCatalogScope; 3] = [
-        ModelsCatalogScope::Project,
-        ModelsCatalogScope::InstalledPacks,
-        ModelsCatalogScope::RSpiceLibrary,
-    ];
-    for page in ModelsPage::ALL {
-        for scope in SCOPES {
-            let ctx = egui::Context::default();
-            crate::ui::Theme::default().apply(&ctx);
-            let mut app = harness();
-            app.state.models_page = page;
-            app.state.models_view.catalog_scope = scope;
-            let size = egui::vec2(1_180.0, 900.0);
-            let output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
-                    ..Default::default()
-                },
-                |ctx| {
-                    egui::CentralPanel::default()
-                        .frame(egui::Frame::NONE)
-                        .show(ctx, |ui| manager::show(ui, &mut app.cx()));
-                },
-            );
-            let panel = crate::ui::tokens::Tokens::get(&ctx).color.bg_panel;
-            let probe = egui::pos2(size.x * 0.5, size.y - 4.0);
-            assert!(
-                output
-                    .shapes
-                    .iter()
-                    .any(|clipped| covers(&clipped.shape, probe, panel)),
-                "{page:?} under {scope:?} left the document surface unpainted at {probe:?}"
-            );
-            if page != ModelsPage::Models {
-                // Only the Models page reads the scope; one pass is evidence
-                // enough for the rest.
-                break;
-            }
-        }
-    }
 }

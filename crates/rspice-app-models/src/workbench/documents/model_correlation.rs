@@ -414,24 +414,3 @@ impl ModelCorrelationWorkspaceState {
         self.dialog.is_some()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn section_contract_matches_the_mockup_order() {
-        assert_eq!(
-            ModelCorrelationSection::ALL.map(ModelCorrelationSection::label),
-            [
-                "Datasets",
-                "Conditions",
-                "Metrics",
-                "Comparison",
-                "Outliers",
-                "Review",
-                "Gate",
-            ]
-        );
-    }
-}

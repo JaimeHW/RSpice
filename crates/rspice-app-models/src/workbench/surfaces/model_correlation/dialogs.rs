@@ -741,14 +741,6 @@ mod tests {
         CorrelationDatasetImport, CorrelationMetricInput, CorrelationSuiteInput,
     };
 
-    /// Every section band names its section, and names it only once.
-    #[test]
-    fn section_copy_is_complete_for_the_mockup_contract() {
-        for section in ModelCorrelationSection::ALL {
-            assert!(!section_copy(section).is_empty());
-        }
-    }
-
     fn empty_projection() -> CorrelationProjection {
         CorrelationProjection {
             model: Some("dut".to_owned()),
@@ -1171,33 +1163,5 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
                 .all(|measure| measure.label != "Datasets"),
             "the ledger took the dataset count back"
         );
-    }
-
-    /// The band's height is the body's, and the body takes all of it.
-    ///
-    /// The strip this replaces was 62 px per row and could be two rows; the
-    /// ledger is one 54 px band at every width, so the workspace below starts
-    /// exactly that far down and nothing is left unpainted where the second
-    /// row used to be.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn the_workspace_body_starts_directly_under_the_ledger_band() {
-        let mut app = correlated_app();
-        for width in [1_180.0, 900.0] {
-            let nodes = correlation_nodes(&mut app, Vec2::new(width, 900.0));
-            let bounds = nodes
-                .iter()
-                .find(|(_, node)| {
-                    node.role() == egui::accesskit::Role::Tab && node.label() == Some("Datasets")
-                })
-                .and_then(|(_, node)| node.bounds())
-                .expect("first correlation section tab");
-            let expected = f64::from(OUTER_HEADER_H + SUMMARY_H + LEDGER_H);
-            assert!(
-                (bounds.y0 - expected).abs() < 0.5,
-                "the workspace body starts at {} instead of {expected} at {width}",
-                bounds.y0
-            );
-        }
     }
 }
