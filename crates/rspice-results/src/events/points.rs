@@ -71,6 +71,8 @@ struct Stored<P> {
     len: usize,
     points: OnceLock<Vec<P>>,
     failure: OnceLock<ColumnReadFailure>,
+    /// No points: what the history shows while its changes are on their way.
+    none: Vec<P>,
 }
 
 impl<P: EventPoint> Stored<P> {
@@ -82,8 +84,12 @@ impl<P: EventPoint> Stored<P> {
         }
     }
 
-    /// Keep the history's first failure, and hand it to diagnostics once.
+    /// Keep the history's first failure, and hand it to diagnostics once. A read whose changes
+    /// are on their way is not a failure the history keeps.
     fn fail(&self, failure: ColumnReadFailure) -> ColumnReadFailure {
+        if crate::waveform::is_pending_read(&failure.cause) {
+            return failure;
+        }
         if self.failure.set(failure.clone()).is_ok() {
             crate::waveform::report_column_read_failure(failure.clone());
         }
@@ -114,15 +120,20 @@ impl<P: EventPoint> Stored<P> {
     }
 
     fn points(&self) -> &Vec<P> {
-        self.points.get_or_init(|| {
-            if self.failure.get().is_some() {
-                return Vec::new();
-            }
-            self.read().unwrap_or_else(|failure| {
+        if let Some(points) = self.points.get() {
+            return points;
+        }
+        if self.failure.get().is_some() {
+            return self.points.get_or_init(Vec::new);
+        }
+        match self.read() {
+            Ok(points) => self.points.get_or_init(|| points),
+            Err(failure) if crate::waveform::is_pending_read(&failure.cause) => &self.none,
+            Err(failure) => {
                 self.fail(failure);
-                Vec::new()
-            })
-        })
+                self.points.get_or_init(Vec::new)
+            }
+        }
     }
 
     fn around(
@@ -306,6 +317,7 @@ impl<P: EventPoint> EventPoints<P> {
             len,
             points: OnceLock::new(),
             failure: OnceLock::new(),
+            none: Vec::new(),
         }))))
     }
 
@@ -324,6 +336,7 @@ impl<P: EventPoint> EventPoints<P> {
             len,
             points: OnceLock::new(),
             failure: OnceLock::new(),
+            none: Vec::new(),
         }))))
     }
 
@@ -417,6 +430,7 @@ impl<P: EventPoint> EventPoints<P> {
                         let _ = held.set(failure);
                         held
                     }),
+                none: Vec::new(),
             }))),
         }
     }

@@ -540,11 +540,14 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         format_bytes(storage.loaded_bytes),
         format_bytes(storage.budget)
     );
-    // The browser reads every result from the page's memory, and says what that costs and
-    // whether the project's results store in the browser's own storage keeps them past a reload.
+    // The browser says what its results take in the page's memory (the reads it holds, and the
+    // segments or pieces of them it holds) and whether the project's results store in the
+    // browser's own storage keeps them past a reload.
     #[cfg(target_arch = "wasm32")]
     let results_storage = {
-        use crate::state::run_store::browser::{Standing, kept_bytes, settled, standing};
+        use crate::state::run_store::browser::{
+            Standing, kept_bytes, page_bytes, settled, standing,
+        };
         let kept = match standing() {
             Standing::Held if settled() => format!(
                 "{} kept in this browser's storage",
@@ -564,7 +567,7 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         };
         format!(
             "{} of {} in this page's memory \u{b7} {kept}",
-            format_bytes(storage.loaded_bytes),
+            format_bytes(storage.loaded_bytes + page_bytes()),
             format_bytes(storage.budget)
         )
     };

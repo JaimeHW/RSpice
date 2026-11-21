@@ -6,20 +6,26 @@
 //! held elsewhere and writes nothing to it. A segment the page holds is written here from its
 //! rows as a member of the store, and a store that fills stops the write: the segment closes on
 //! the whole chunks it holds, its `END` saying the volume filled, and the page keeps that many
-//! rows. A kept segment is checked against its name before its bytes go back to a page.
+//! rows. A kept segment is checked against its name before a page reads it: a view's reads of
+//! it are made here ([`ResultsStoreRequest::Series`]), and the page asks for its bytes only for
+//! what it reads itself.
 
-use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use js_sys::{Array, Float64Array, Reflect, Uint8Array};
+use rspice_results::store_reader::{Segment, SegmentBytes, SegmentColumn, StoreReader};
+use rspice_results::waveform::{
+    ColumnTile, Read, ReadValue, StoredWindow, WaveformValues, WindowLead,
+};
 use rspice_results_store::{
     Digest, FreeSpace, Manifest, Member, OpfsIo, OpfsStoreDir, RunStatus, SegmentIo, SegmentReader,
     SegmentState, SegmentWriter, StopReason, StoreError, WatchedIo,
 };
 use rspice_simulation_contract::worker_transport::{
-    KeptSegmentRecord, ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding,
-    WorkerResultsSchema,
+    KeptSegmentRecord, ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerF64,
+    WorkerLead, WorkerRead, WorkerReadValue, WorkerResultsSchema, WorkerWindow,
 };
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -52,12 +58,76 @@ struct Store {
     next_write: u32,
     /// The kept segments found to hold what their names state, while this tab holds the store.
     checked: BTreeSet<[u8; 32]>,
-    /// The kept segment being read, held open between its chunks.
-    reading: Option<(Digest, Handle)>,
+    /// The checked segments a page has read, held open while this tab holds the store: each
+    /// with the key of its file.
+    open: BTreeMap<[u8; 32], (u32, Arc<Segment>)>,
 }
 
 thread_local! {
     static STORE: RefCell<Option<Store>> = const { RefCell::new(None) };
+    /// The files of the open segments, by key.
+    static FILES: RefCell<HashMap<u32, Handle>> = RefCell::new(HashMap::new());
+    static NEXT_FILE: Cell<u32> = const { Cell::new(1) };
+}
+
+/// A kept segment's file as its reader reads it: named by a key, so the reader can be held where
+/// a reader must be sendable, while the file's handle stays in this worker. Dropping it closes
+/// the file.
+struct WorkerFile(u32);
+
+impl WorkerFile {
+    fn hold(handle: Handle) -> Self {
+        let key = NEXT_FILE.with(|next| {
+            let key = next.get();
+            next.set(key.wrapping_add(1).max(1));
+            key
+        });
+        FILES.with(|files| files.borrow_mut().insert(key, handle));
+        Self(key)
+    }
+}
+
+/// Run `act` with the file `key` names.
+fn with_file<T>(key: u32, act: impl FnOnce(&Handle) -> std::io::Result<T>) -> std::io::Result<T> {
+    FILES.with(|files| match files.borrow().get(&key) {
+        Some(handle) => act(handle),
+        None => Err(std::io::Error::other("the segment's file was closed")),
+    })
+}
+
+fn read_only() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "a kept segment is only read",
+    )
+}
+
+impl SegmentIo for WorkerFile {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        with_file(self.0, |handle| handle.read_at(offset, buf))
+    }
+
+    fn write_at(&mut self, _offset: u64, _data: &[u8]) -> std::io::Result<()> {
+        Err(read_only())
+    }
+
+    fn truncate(&mut self, _len: u64) -> std::io::Result<()> {
+        Err(read_only())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn size(&self) -> std::io::Result<u64> {
+        with_file(self.0, SegmentIo::size)
+    }
+}
+
+impl Drop for WorkerFile {
+    fn drop(&mut self) {
+        FILES.with(|files| files.borrow_mut().remove(&self.0));
+    }
 }
 
 /// Answer one request from the page: its JSON and the numeric buffers beside it. The worker's
@@ -118,6 +188,12 @@ async fn answer(
             return Ok((ResultsStoreResponse::Bytes, out));
         }
         ResultsStoreRequest::Keep { digests } => keep(held(store)?, &digests).await?,
+        ResultsStoreRequest::Series {
+            digest,
+            x,
+            values,
+            read,
+        } => return series(held(store)?, &digest, x, values, read).await,
     };
     Ok((response, none()))
 }
@@ -161,9 +237,9 @@ async fn records(store: &Store) -> Vec<KeptSegmentRecord> {
         let (Some(digest), Some(_)) = (member.digest.as_ref(), member.status.as_ref()) else {
             continue;
         };
-        let bytes = match &store.reading {
-            Some((open, io)) if open == digest => io.size().ok(),
-            _ => match store.dir.segment(member.index, false).await {
+        let bytes = match store.open.get(&digest.0) {
+            Some((key, _)) => with_file(*key, SegmentIo::size).ok(),
+            None => match store.dir.segment(member.index, false).await {
                 Ok(io) => io.size().ok(),
                 Err(_) => None,
             },
@@ -236,7 +312,7 @@ async fn open(store: &mut Option<Store>, name: String) -> Result<ResultsStoreRes
         writes: Vec::new(),
         next_write: 1,
         checked: BTreeSet::new(),
-        reading: None,
+        open: BTreeMap::new(),
     });
     Ok(opened(open).await)
 }
@@ -415,45 +491,48 @@ fn member_of(store: &Store, digest: &Digest) -> Result<u32, String> {
         .ok_or_else(|| "this browser's results store does not hold it".to_owned())
 }
 
-/// The kept segment `digest`, opened for reading and held open until another is read.
-async fn reading<'a>(store: &'a mut Store, digest: &Digest) -> Result<&'a Handle, String> {
-    if store
-        .reading
-        .as_ref()
-        .is_none_or(|(open, _)| open != digest)
-    {
-        store.reading = None;
+/// The kept segment `digest`, opened for reading and held open while this tab holds the store:
+/// checked against its name first, unless it was checked already.
+async fn opened_segment<'a>(
+    store: &'a mut Store,
+    digest: &Digest,
+) -> Result<&'a (u32, Arc<Segment>), String> {
+    if !store.open.contains_key(&digest.0) {
         let index = member_of(store, digest)?;
         let io =
             store.dir.segment(index, false).await.map_err(|error| {
                 format!("this browser's results store could not open it: {error}")
             })?;
-        store.reading = Some((*digest, io));
+        let file = WorkerFile::hold(io);
+        let key = file.0;
+        let mut reader = SegmentReader::open(Box::new(file) as SegmentBytes)
+            .map_err(|error| error.to_string())?;
+        if !store.checked.contains(&digest.0) {
+            let SegmentState::Complete {
+                digest: recorded, ..
+            } = reader.state().clone()
+            else {
+                return Err("it was never closed: the end its run writes is missing".to_owned());
+            };
+            let held = reader.digest().map_err(|error| error.to_string())?;
+            if held != recorded || held != *digest {
+                return Err("its rows are not the ones its name states".to_owned());
+            }
+            store.checked.insert(digest.0);
+        }
+        let segment = Arc::new(Segment::kept(
+            StoreReader::new(reader),
+            rspice_results_store::kept_segment_name(digest).into(),
+        ));
+        store.open.insert(digest.0, (key, segment));
     }
-    Ok(&store.reading.as_ref().expect("opened above").1)
+    Ok(store.open.get(&digest.0).expect("opened above"))
 }
 
 async fn check(store: &mut Store, digest: &str) -> Result<ResultsStoreResponse, String> {
     let digest = digest_of(digest)?;
-    let len = {
-        let io = reading(store, &digest).await?;
-        io.size().map_err(|error| error.to_string())?
-    };
-    if !store.checked.contains(&digest.0) {
-        let (_, io) = store.reading.take().expect("opened above");
-        let mut reader = SegmentReader::open(io).map_err(|error| error.to_string())?;
-        let SegmentState::Complete {
-            digest: recorded, ..
-        } = reader.state().clone()
-        else {
-            return Err("it was never closed: the end its run writes is missing".to_owned());
-        };
-        let held = reader.digest().map_err(|error| error.to_string())?;
-        if held != recorded || held != digest {
-            return Err("its rows are not the ones its name states".to_owned());
-        }
-        store.checked.insert(digest.0);
-    }
+    let (key, _) = opened_segment(store, &digest).await?;
+    let len = with_file(*key, SegmentIo::size).map_err(|error| error.to_string())?;
     Ok(ResultsStoreResponse::Checked { len })
 }
 
@@ -468,11 +547,150 @@ async fn read(store: &mut Store, digest: &str, offset: u64, len: u64) -> Result<
         .try_reserve_exact(len)
         .map_err(|error| format!("{len} bytes could not be held to read: {error}"))?;
     bytes.resize(len, 0);
-    reading(store, &digest)
-        .await?
-        .read_at(offset, &mut bytes)
+    let (key, _) = opened_segment(store, &digest).await?;
+    with_file(*key, |handle| handle.read_at(offset, &mut bytes))
         .map_err(|error| error.to_string())?;
     Ok(bytes)
+}
+
+/// The name of `segment`'s column at `slot` (`None` for its x axis), as a failure to read it
+/// names it.
+fn column_name(segment: &Segment, slot: Option<usize>) -> String {
+    let Ok(schema) = segment.reader().schema() else {
+        return String::new();
+    };
+    match slot {
+        None => schema.x.name.clone(),
+        Some(slot) => (0..schema.signals.len())
+            .find(|signal| {
+                schema.slot_of(*signal).is_some_and(|first| {
+                    (first..first + schema.signals[*signal].kind.slots()).contains(&slot)
+                })
+            })
+            .map(|signal| schema.signals[signal].name.clone())
+            .unwrap_or_default(),
+    }
+}
+
+/// The window `window` of `segment` as a waveform holds it.
+fn window_of(segment: &Arc<Segment>, window: WorkerWindow) -> Result<WaveformValues, String> {
+    let slot = window
+        .column
+        .checked_sub(1)
+        .map(|slot| usize::try_from(slot).map_err(|_| format!("there is no column {slot}")))
+        .transpose()?;
+    let lead = match window.lead {
+        WorkerLead::None => WindowLead::None,
+        WorkerLead::Value { value } => WindowLead::Value(value.get()),
+        WorkerLead::Interpolated { fraction } => WindowLead::Interpolated(fraction.get()),
+    };
+    WaveformValues::stored(
+        SegmentColumn::new(Arc::clone(segment), slot, column_name(segment, slot)),
+        StoredWindow {
+            first: window.first,
+            rows: window.rows,
+            lead,
+        },
+    )
+}
+
+/// The read a page asked for.
+fn read_of(read: WorkerRead) -> Result<Read, String> {
+    let count = |value: u64, what: &str| {
+        usize::try_from(value).map_err(|_| format!("the {what} is larger than this memory"))
+    };
+    Ok(match read {
+        WorkerRead::Range { first, count: rows } => Read::Range {
+            first: count(first, "range's start")?,
+            count: count(rows, "range")?,
+        },
+        WorkerRead::Tile { x0, x1, pixels } => Read::Tile {
+            x0: x0.get(),
+            x1: x1.get(),
+            pixels: count(pixels, "tile")?,
+        },
+        WorkerRead::LogTile { x0, x1, pixels } => Read::LogTile {
+            x0: x0.get(),
+            x1: x1.get(),
+            pixels: count(pixels, "tile")?,
+        },
+        WorkerRead::Point { x, interpolation } => {
+            use rspice_results::sampling::SampleInterpolation;
+            Read::Point {
+                x: x.get(),
+                interpolation: match interpolation.as_str() {
+                    "linear" => SampleInterpolation::Linear,
+                    "nearest" => SampleInterpolation::Nearest,
+                    "monotone-cubic" => SampleInterpolation::MonotoneCubic,
+                    other => return Err(format!("'{other}' names no interpolation")),
+                },
+            }
+        }
+    })
+}
+
+/// What `value` gave, as it crosses to the page, with the buffers it crosses in.
+fn crossing(value: ReadValue) -> (WorkerReadValue, Array) {
+    let buffers = Array::new();
+    let value = match value {
+        ReadValue::Samples(samples) => {
+            buffers.push(&Float64Array::from(&samples[..]));
+            WorkerReadValue::Samples
+        }
+        ReadValue::Tile(tile) => match tile.as_ref() {
+            ColumnTile::Samples {
+                x,
+                y,
+                before,
+                after,
+            } => {
+                buffers.push(&Float64Array::from(x.as_slice()));
+                buffers.push(&Float64Array::from(y.as_slice()));
+                let pair = |pair: &Option<(f64, f64)>| {
+                    pair.map(|(x, y)| (WorkerF64::from(x), WorkerF64::from(y)))
+                };
+                WorkerReadValue::TileSamples {
+                    before: pair(before),
+                    after: pair(after),
+                }
+            }
+            ColumnTile::Envelope { min, max, touched } => {
+                buffers.push(&Float64Array::from(min.as_slice()));
+                buffers.push(&Float64Array::from(max.as_slice()));
+                let touched: Vec<u8> = touched.iter().map(|touched| u8::from(*touched)).collect();
+                buffers.push(&Uint8Array::from(touched.as_slice()));
+                WorkerReadValue::TileEnvelope
+            }
+        },
+        ReadValue::Point(value) => WorkerReadValue::Point {
+            value: value.map(WorkerF64::from),
+        },
+        ReadValue::Failed(reason) => WorkerReadValue::Failed { reason },
+    };
+    (value, buffers)
+}
+
+/// Make `read` of the window `values` of the kept segment `digest`, its run's axis the window
+/// `x`, and answer what it gave.
+async fn series(
+    store: &mut Store,
+    digest: &str,
+    x: WorkerWindow,
+    values: WorkerWindow,
+    read: WorkerRead,
+) -> Result<(ResultsStoreResponse, Array), String> {
+    let digest = digest_of(digest)?;
+    if !store.checked.contains(&digest.0) {
+        return Err("a kept segment is read only once it is checked".to_owned());
+    }
+    let read = read_of(read)?;
+    let (_, segment) = opened_segment(store, &digest).await?;
+    let value = match (window_of(segment, x), window_of(segment, values)) {
+        (Ok(x), Ok(values)) => rspice_results::waveform::perform(&values, &x, read),
+        (Err(reason), _) | (_, Err(reason)) => ReadValue::Failed(reason),
+    };
+    let (value, buffers) = crossing(value);
+    Ok((ResultsStoreResponse::Series { value }, buffers))
 }
 
 async fn keep(store: &mut Store, digests: &[String]) -> Result<ResultsStoreResponse, String> {
@@ -494,7 +712,8 @@ async fn keep(store: &mut Store, digests: &[String]) -> Result<ResultsStoreRespo
             .map_err(|error| format!("the results store's manifest could not be saved: {error}"))?;
         store.manifest = manifest;
     }
-    store.reading = None;
+    // A file is closed before it is deleted.
+    store.open.retain(|digest, _| kept.contains(digest));
     let live: BTreeSet<u32> = store
         .manifest
         .members()

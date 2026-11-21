@@ -194,6 +194,16 @@ impl fmt::Display for ColumnReadFailure {
 
 impl std::error::Error for ColumnReadFailure {}
 
+/// The cause a source gives a read of rows that are on their way to this process, as a browser
+/// page's are from the worker that holds its segments: the read fails now and a later one finds
+/// them, so the failure is not kept and the window is not shown as unavailable.
+pub const PENDING_READ: &str = "its samples are still being read from this browser's storage";
+
+/// Whether a read failed only because its rows are on their way ([`PENDING_READ`]).
+pub fn is_pending_read(cause: &str) -> bool {
+    cause == PENDING_READ
+}
+
 /// Failures of reads that had no caller to return them to, waiting for diagnostics to collect.
 static UNREPORTED_FAILURES: Mutex<Vec<ColumnReadFailure>> = Mutex::new(Vec::new());
 
@@ -263,8 +273,12 @@ impl Stored {
             + usize::from(self.window.lead != WindowLead::None)
     }
 
-    /// Keep the window's first failure, and hand it to diagnostics once.
+    /// Keep the window's first failure, and hand it to diagnostics once. A read whose rows are
+    /// on their way is not a failure the window keeps.
     fn fail(&self, failure: ColumnReadFailure) {
+        if is_pending_read(&failure.cause) {
+            return;
+        }
         if self.failure.set(failure.clone()).is_ok() {
             UNREPORTED_FAILURES
                 .lock()
@@ -286,26 +300,36 @@ impl Stored {
         self.window.first..self.window.first + self.window.rows
     }
 
-    /// What the window holds before its first row, read once for an interpolated lead.
+    /// What the window holds before its first row, read once for an interpolated lead: NaN
+    /// when it cannot be read.
     fn lead(&self) -> Option<f64> {
-        match self.window.lead {
-            WindowLead::None => None,
-            WindowLead::Value(value) => Some(value),
-            WindowLead::Interpolated(fraction) => Some(*self.lead_value.get_or_init(|| {
-                // The row before the first, moved `fraction` of the way to the first, with the
-                // arithmetic the in-memory window uses.
-                let count = if self.window.rows > 0 { 2 } else { 1 };
-                let mut pair = [0.0; 2];
-                match self.source.read(self.window.first - 1, &mut pair[..count]) {
-                    Ok(()) if count == 2 => pair[0] + fraction * (pair[1] - pair[0]),
-                    Ok(()) => pair[0],
-                    Err(cause) => {
-                        self.fail(self.failed(cause));
-                        f64::NAN
-                    }
-                }
-            })),
+        self.read_lead().unwrap_or(Some(f64::NAN))
+    }
+
+    /// [`Self::lead`], or the failure of a read whose rows are on their way, which is not kept.
+    fn read_lead(&self) -> Result<Option<f64>, ColumnReadFailure> {
+        let fraction = match self.window.lead {
+            WindowLead::None => return Ok(None),
+            WindowLead::Value(value) => return Ok(Some(value)),
+            WindowLead::Interpolated(fraction) => fraction,
+        };
+        if let Some(value) = self.lead_value.get() {
+            return Ok(Some(*value));
         }
+        // The row before the first, moved `fraction` of the way to the first, with the
+        // arithmetic the in-memory window uses.
+        let count = if self.window.rows > 0 { 2 } else { 1 };
+        let mut pair = [0.0; 2];
+        let value = match self.source.read(self.window.first - 1, &mut pair[..count]) {
+            Ok(()) if count == 2 => pair[0] + fraction * (pair[1] - pair[0]),
+            Ok(()) => pair[0],
+            Err(cause) if is_pending_read(&cause) => return Err(self.failed(cause)),
+            Err(cause) => {
+                self.fail(self.failed(cause));
+                f64::NAN
+            }
+        };
+        Ok(Some(*self.lead_value.get_or_init(|| value)))
     }
 
     /// Read samples `start .. start + out.len()` of the window into `out`.
@@ -319,7 +343,7 @@ impl Stored {
         let lead = usize::from(self.window.lead != WindowLead::None);
         let skip = usize::from(start < lead);
         if skip == 1 {
-            out[0] = self.lead().unwrap_or(f64::NAN);
+            out[0] = self.read_lead()?.unwrap_or(f64::NAN);
             if let Some(failure) = self.failure.get() {
                 return Err(failure.clone());
             }
@@ -336,29 +360,39 @@ impl Stored {
         Ok(())
     }
 
-    /// The first and last sample, reading only those.
+    /// The first and last sample, reading only those. `None` while their rows are on their way.
     fn ends(&self) -> Option<(f64, f64)> {
-        *self.ends.get_or_init(|| {
-            let row = |row: u64| {
-                let mut value = [0.0];
-                match self.source.read(row, &mut value) {
-                    Ok(()) => value[0],
-                    Err(cause) => {
-                        self.fail(self.failed(cause));
-                        f64::NAN
-                    }
+        if let Some(ends) = self.ends.get() {
+            return *ends;
+        }
+        let pending = std::cell::Cell::new(false);
+        let row = |row: u64| {
+            let mut value = [0.0];
+            match self.source.read(row, &mut value) {
+                Ok(()) => value[0],
+                Err(cause) => {
+                    pending.set(pending.get() || is_pending_read(&cause));
+                    self.fail(self.failed(cause));
+                    f64::NAN
                 }
-            };
-            let last = match self.window.rows {
-                0 => self.lead()?,
-                rows => row(self.window.first + rows - 1),
-            };
-            let first = match self.lead() {
-                Some(lead) => lead,
-                None => row(self.window.first),
-            };
-            Some((first, last))
-        })
+            }
+        };
+        let lead = self.read_lead().unwrap_or_else(|_| {
+            pending.set(true);
+            Some(f64::NAN)
+        });
+        let ends = match (self.window.rows, lead) {
+            (0, None) => None,
+            (0, Some(lead)) => Some((lead, lead)),
+            (rows, lead) => {
+                let last = row(self.window.first + rows - 1);
+                Some((lead.unwrap_or_else(|| row(self.window.first)), last))
+            }
+        };
+        if pending.get() {
+            return None;
+        }
+        *self.ends.get_or_init(|| ends)
     }
 
     /// The tile of the window over x in `x0 ..= x1`, the window's lead at `lead_x`.

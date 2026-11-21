@@ -98,6 +98,19 @@ impl Drop for Segment {
     }
 }
 
+/// Why a read of a segment failed, in a reader's words: rows on their way to this process (a
+/// browser page's segment read from its worker) fail as [`crate::waveform::PENDING_READ`], which
+/// no reader keeps.
+fn read_cause(error: StoreError) -> String {
+    match error {
+        StoreError::Io {
+            kind: std::io::ErrorKind::WouldBlock,
+            ..
+        } => crate::waveform::PENDING_READ.to_owned(),
+        error => error.to_string(),
+    }
+}
+
 /// The identity a column or event signal of `segment` has: its store's logical digest and
 /// `index`.
 fn identity(segment: &Segment, index: Option<usize>) -> Option<([u8; 32], u64)> {
@@ -137,9 +150,7 @@ impl ColumnSource for SegmentColumn {
     }
 
     fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
-        self.segment
-            .read(self.slot, first, out)
-            .map_err(|error| error.to_string())
+        self.segment.read(self.slot, first, out).map_err(read_cause)
     }
 
     /// The time axis: its run checked it ascends strictly before it made its waveforms.
@@ -164,7 +175,7 @@ impl ColumnSource for SegmentColumn {
                 .reader()
                 .tile(slot, rows, x0, x1, pixels)
                 .map(ColumnTile::from)
-                .map_err(|error| error.to_string()),
+                .map_err(read_cause),
         )
     }
 
@@ -174,7 +185,7 @@ impl ColumnSource for SegmentColumn {
             self.segment
                 .reader()
                 .rows_around(slot, rows, x)
-                .map_err(|error| error.to_string()),
+                .map_err(read_cause),
         )
     }
 }
@@ -209,21 +220,21 @@ impl EventHistorySource for SegmentEvents {
         self.segment
             .reader()
             .event_count(self.signal)
-            .map_err(|error| error.to_string())
+            .map_err(read_cause)
     }
 
     fn before(&self, t: f64) -> Result<u64, String> {
         self.segment
             .reader()
             .events_before(self.signal, t)
-            .map_err(|error| error.to_string())
+            .map_err(read_cause)
     }
 
     fn span(&self, t0: f64, t1: f64) -> Result<EventSpan, String> {
         self.segment
             .reader()
             .events_around(self.signal, t0, t1)
-            .map_err(|error| error.to_string())
+            .map_err(read_cause)
     }
 
     fn identity(&self) -> Option<([u8; 32], u64)> {

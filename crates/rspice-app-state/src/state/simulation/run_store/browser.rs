@@ -11,19 +11,30 @@
 //!
 //! A segment is written from its rows. When the store fills, the write closes on the rows it
 //! holds and the run keeps that many: its waveforms are cut to them and it says why
-//! ([`follow`]). A project's runs whose segments the page does not hold are loaded from the store
-//! when it opens and read again.
+//! ([`follow`]). A project's runs whose segments the page does not hold read them from the store
+//! when it opens: the page never holds such a segment whole. A view's tiles, ranges and points of
+//! it are read in the worker ([`series_request`]); what the page reads of it itself (a cursor's
+//! rows, an axis' ends, what a command reads whole) comes a piece at a time, and a read whose
+//! pieces are on their way fails as pending and is made again once they are here. A segment no
+//! longer than one read is read whole when its run opens, so a command finds it at once.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, Weak};
 
 use js_sys::{Array, Float64Array, Reflect, Uint8Array};
 use rspice_results::store_reader::{Segment, SegmentBytes, SegmentDigest, StoreReader};
-use rspice_results::waveform::{StoredWindow, WaveformValues};
-use rspice_results_store::{MemoryIo, RunStatus, SegmentReader, SegmentWriter, StopReason};
+use rspice_results::waveform::{
+    ColumnTile, Read, ReadValue, StoredWindow, WaveformValues, WindowLead,
+};
+use rspice_results_store::{
+    MemoryIo, RunStatus, SegmentIo, SegmentReader, SegmentState, SegmentWriter, StopReason,
+    StoreError,
+};
 use rspice_simulation_contract::worker_transport::{
-    ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerResultsSchema,
+    ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerF64, WorkerLead,
+    WorkerRead, WorkerReadValue, WorkerResultsSchema, WorkerWindow,
 };
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -33,8 +44,19 @@ use crate::state::{ResultsStorageStop, SimulationState};
 /// The bytes of rows a write sends at once.
 const BYTES_PER_MESSAGE: usize = 8 << 20;
 
-/// The bytes of a kept segment a load asks for at once.
+/// The bytes of a kept segment one request for its bytes asks for at once.
 const BYTES_PER_READ: u64 = 32 << 20;
+
+/// The bytes of a kept segment the page holds as one piece of what it reads of it itself.
+const PIECE: u64 = 1 << 20;
+
+/// The pieces a read the page cannot make yet asks for past the last it needs: what a pass over
+/// its rows reads next.
+const READ_AHEAD: u64 = 3;
+
+/// The rounds of asking for the pieces a kept segment's reader needs to open it: its start, its
+/// end, and what a reader looking for a lost end reads.
+const OPEN_ROUNDS: usize = 8;
 
 /// What this tab has of the open project's results store.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -78,6 +100,11 @@ struct Client {
     unloadable: HashMap<[u8; 32], String>,
     /// Segments loaded and not yet read again by the runs that name them.
     loaded: Vec<Arc<Segment>>,
+    /// The kept segments whose reads are made in the worker, by digest.
+    stubs: HashSet<[u8; 32]>,
+    /// The segments the page holds whole in its memory, with their bytes: a run's own segment
+    /// until the store keeps it, or for good where there is no store.
+    held: Vec<(Weak<Segment>, u64)>,
     /// The segments the project's last saved version reads (the one opened, until a save): a
     /// save keeps them beside the ones it reads, as the version it replaced may be restored.
     named: HashSet<[u8; 32]>,
@@ -117,8 +144,22 @@ pub fn kept_bytes() -> u64 {
     with(|client| client.kept.values().sum())
 }
 
-/// Keep `segment` in the open project's store, unless this tab cannot write one.
-pub(super) fn keep(segment: &Arc<Segment>) {
+/// The bytes of results store segments this page holds: the pieces of kept segments it read
+/// itself, and the segments it holds whole.
+pub fn page_bytes() -> u64 {
+    let held: u64 = with(|client| {
+        client
+            .held
+            .retain(|(segment, _)| segment.strong_count() > 0);
+        client.held.iter().map(|(_, bytes)| bytes).sum()
+    });
+    held + pieces().bytes
+}
+
+/// Keep `segment`, `bytes` long in the page's memory, in the open project's store, unless this
+/// tab cannot write one.
+pub(super) fn keep(segment: &Arc<Segment>, bytes: u64) {
+    with(|client| client.held.push((Arc::downgrade(segment), bytes)));
     let queued = with(|client| {
         let store = client.store.clone()?;
         if !matches!(client.standing, Standing::Held | Standing::Opening) {
@@ -210,7 +251,7 @@ pub async fn preload(bytes: &[u8]) {
             if rspice_results::store_reader::kept_segment(SegmentDigest(*digest)).is_some() {
                 continue;
             }
-            match load(SegmentDigest(*digest)).await {
+            match stub(SegmentDigest(*digest)).await {
                 Ok((segment, _)) => held.push(segment),
                 Err(reason) => {
                     log::warn!("results store segment {}: {reason}", SegmentDigest(*digest))
@@ -519,8 +560,11 @@ fn cut(segment: &Segment, rows: u64) -> Result<Arc<Segment>, String> {
     let (_, io) = writer
         .finish(RunStatus::Stopped(StopReason::DiskFull))
         .map_err(failed)?;
+    let bytes = io.size().map_err(|error| error.to_string())?;
     let reader = SegmentReader::open(Box::new(io) as SegmentBytes).map_err(failed)?;
-    Ok(Segment::kept(StoreReader::new(reader), std::path::PathBuf::new()).shared())
+    let segment = Segment::kept(StoreReader::new(reader), std::path::PathBuf::new()).shared();
+    with(|client| client.held.push((Arc::downgrade(&segment), bytes)));
+    Ok(segment)
 }
 
 /// Cut every waveform that reads a segment a full store stopped to the rows the store kept, and
@@ -637,7 +681,7 @@ fn load_unread(simulation: &mut SimulationState) {
     });
     for digest in start {
         wasm_bindgen_futures::spawn_local(async move {
-            let loaded = load(SegmentDigest(digest)).await;
+            let loaded = stub(SegmentDigest(digest)).await;
             with(|client| {
                 client.loading.remove(&digest);
                 match loaded {
@@ -656,13 +700,13 @@ fn load_unread(simulation: &mut SimulationState) {
     }
 }
 
-/// The kept segment `digest`, checked by the worker and read into the page's memory, with its
-/// bytes in the store.
-async fn load(digest: SegmentDigest) -> Result<(Arc<Segment>, u64), String> {
-    let hex = digest.to_string();
+/// The kept segment `digest` as the page reads it, with its bytes in the store: checked by the
+/// worker, and opened from the pieces its reader needs to open it, or from all of it when it is
+/// no longer than one read. Its views' reads are made in the worker.
+async fn stub(digest: SegmentDigest) -> Result<(Arc<Segment>, u64), String> {
     let len = match call(
         &ResultsStoreRequest::Check {
-            digest: hex.clone(),
+            digest: digest.to_string(),
         },
         Array::new(),
     )
@@ -672,50 +716,388 @@ async fn load(digest: SegmentDigest) -> Result<(Arc<Segment>, u64), String> {
         ResultsStoreResponse::Checked { len } => len,
         other => return Err(refusal(other)),
     };
-    let size = usize::try_from(len).map_err(|_| "it is longer than this page's memory")?;
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(size)
-        .map_err(|error| format!("this page's memory could not hold its {len} bytes: {error}"))?;
-    while (bytes.len() as u64) < len {
-        let offset = bytes.len() as u64;
-        let ask = BYTES_PER_READ.min(len - offset);
-        let (response, buffers) = call(
-            &ResultsStoreRequest::Read {
-                digest: hex.clone(),
-                offset,
-                len: ask,
-            },
-            Array::new(),
-        )
-        .await?;
-        if !matches!(response, ResultsStoreResponse::Bytes) {
-            return Err(refusal(response));
-        }
-        let chunk = buffers
-            .get(0)
-            .dyn_into::<Uint8Array>()
-            .map_err(|_| "the store answered no bytes")?;
-        if u64::from(chunk.length()) != ask {
-            return Err(format!(
-                "the store answered {} bytes where {ask} were asked for",
-                chunk.length()
+    if len > 0 && len <= BYTES_PER_READ {
+        fetch_pieces(digest.0, 0, len.div_ceil(PIECE), len).await?;
+    }
+    let fetch = Arc::new(AtomicBool::new(false));
+    for _ in 0..OPEN_ROUNDS {
+        let io = WorkerIo {
+            digest: digest.0,
+            size: len,
+            fetch: Arc::clone(&fetch),
+        };
+        let opened = SegmentReader::open(Box::new(io) as SegmentBytes);
+        let waiting = match &opened {
+            Ok(reader) => {
+                matches!(reader.state(), SegmentState::Recovered)
+                    && reader.end_damage().is_some_and(pending)
+            }
+            Err(error) => pending(error),
+        };
+        if !waiting {
+            let reader = StoreReader::new(opened.map_err(|error| error.to_string())?);
+            if reader.digest() != Some(digest) {
+                return Err("the segment read is not the one asked for".to_owned());
+            }
+            fetch.store(true, Ordering::Release);
+            with(|client| client.stubs.insert(digest.0));
+            return Ok((
+                Segment::kept(reader, std::path::PathBuf::new()).shared(),
+                len,
             ));
         }
-        let at = bytes.len();
-        bytes.resize(at + ask as usize, 0);
-        chunk.copy_to(&mut bytes[at..]);
+        let mut fetched = false;
+        while let Some((digest, first, count, size)) = next_wanted(Some(digest.0)) {
+            fetch_pieces(digest, first, count, size).await?;
+            fetched = true;
+        }
+        if !fetched {
+            break;
+        }
     }
-    let reader = SegmentReader::open(Box::new(MemoryIo::from_bytes(bytes)) as SegmentBytes)
-        .map_err(|error| error.to_string())?;
-    let reader = StoreReader::new(reader);
-    if reader.digest() != Some(digest) {
-        return Err("the bytes read are not the segment asked for".to_owned());
+    Err("its start and end could not be read from this browser's storage".to_owned())
+}
+
+/// Whether a store failed only because the bytes it read are on their way.
+fn pending(error: &StoreError) -> bool {
+    matches!(
+        error,
+        StoreError::Io {
+            kind: std::io::ErrorKind::WouldBlock,
+            ..
+        }
+    )
+}
+
+/// The pieces of kept segments the page holds, for the reads it makes of them itself, under a
+/// quarter of the loaded results budget, the least recently read let go first.
+#[derive(Default)]
+struct Pieces {
+    held: HashMap<([u8; 32], u64), (Arc<[u8]>, u64)>,
+    bytes: u64,
+    tick: u64,
+    /// Pieces a read found missing, each with its segment's length, to be fetched.
+    wanted: BTreeMap<([u8; 32], u64), u64>,
+    fetching: bool,
+}
+
+static PIECES: LazyLock<Mutex<Pieces>> = LazyLock::new(Mutex::default);
+
+fn pieces() -> MutexGuard<'static, Pieces> {
+    PIECES.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+impl Pieces {
+    /// Hold `bytes`, read from piece `first` of the segment `digest` on.
+    fn hold(&mut self, digest: [u8; 32], first: u64, bytes: &[u8]) {
+        for (index, piece) in bytes.chunks(PIECE as usize).enumerate() {
+            self.tick += 1;
+            let key = (digest, first + index as u64);
+            self.wanted.remove(&key);
+            let held = (Arc::from(piece), self.tick);
+            if let Some((old, _)) = self.held.insert(key, held) {
+                self.bytes -= old.len() as u64;
+            }
+            self.bytes += piece.len() as u64;
+        }
+        let budget = super::super::run_reader::run_reader().budget() / 4;
+        while self.bytes > budget {
+            let Some(oldest) = self
+                .held
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            if let Some((piece, _)) = self.held.remove(&oldest) {
+                self.bytes -= piece.len() as u64;
+            }
+        }
     }
-    Ok((
-        Segment::kept(reader, std::path::PathBuf::new()).shared(),
-        len,
-    ))
+}
+
+/// The next run of wanted pieces of one segment (of `only`, when named), taken from the wanted
+/// list: its segment, first piece, count and the segment's length. At most one read's bytes.
+fn next_wanted(only: Option<[u8; 32]>) -> Option<([u8; 32], u64, u64, u64)> {
+    let mut pieces = pieces();
+    let (&(digest, first), &size) = pieces
+        .wanted
+        .iter()
+        .find(|((digest, _), _)| only.is_none_or(|only| only == *digest))?;
+    let mut count = 0;
+    while count < BYTES_PER_READ / PIECE && pieces.wanted.remove(&(digest, first + count)).is_some()
+    {
+        count += 1;
+    }
+    Some((digest, first, count, size))
+}
+
+/// Ask the worker for `count` pieces of the kept segment `digest`, `size` bytes long, from piece
+/// `first` on, and hold them.
+async fn fetch_pieces(digest: [u8; 32], first: u64, count: u64, size: u64) -> Result<(), String> {
+    let offset = first * PIECE;
+    let len = (count * PIECE).min(size.saturating_sub(offset));
+    if len == 0 {
+        return Ok(());
+    }
+    let (response, buffers) = call(
+        &ResultsStoreRequest::Read {
+            digest: SegmentDigest(digest).to_string(),
+            offset,
+            len,
+        },
+        Array::new(),
+    )
+    .await?;
+    if !matches!(response, ResultsStoreResponse::Bytes) {
+        return Err(refusal(response));
+    }
+    let chunk = buffers
+        .get(0)
+        .dyn_into::<Uint8Array>()
+        .map_err(|_| "the store answered no bytes")?;
+    if u64::from(chunk.length()) != len {
+        return Err(format!(
+            "the store answered {} bytes where {len} were asked for",
+            chunk.length()
+        ));
+    }
+    pieces().hold(digest, first, &chunk.to_vec());
+    Ok(())
+}
+
+/// Fetch every wanted piece, one run after another, and ask for a frame as each arrives, so the
+/// reads that wanted them are made again.
+fn fetch_wanted() {
+    {
+        let mut pieces = pieces();
+        if pieces.fetching || pieces.wanted.is_empty() {
+            return;
+        }
+        pieces.fetching = true;
+    }
+    wasm_bindgen_futures::spawn_local(async {
+        while let Some((digest, first, count, size)) = next_wanted(None) {
+            // A store not held now (another project's opening, or the worker's restart) is asked
+            // again by the next read that wants the pieces.
+            if let Err(reason) = fetch_pieces(digest, first, count, size).await {
+                log::debug!("results store segment {}: {reason}", SegmentDigest(digest));
+            }
+            repaint();
+        }
+        pieces().fetching = false;
+    });
+}
+
+/// A kept segment as the page reads it itself, a piece at a time from the worker that holds it.
+/// A read of bytes whose pieces are not here asks for them and fails as pending: a later read
+/// finds them.
+struct WorkerIo {
+    digest: [u8; 32],
+    size: u64,
+    /// Whether a read that misses asks for its pieces in the background: not while the segment
+    /// opens, which asks for them itself.
+    fetch: Arc<AtomicBool>,
+}
+
+impl SegmentIo for WorkerIo {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        let end = offset
+            .checked_add(buf.len() as u64)
+            .filter(|end| *end <= self.size)
+            .ok_or(std::io::ErrorKind::UnexpectedEof)?;
+        if buf.is_empty() {
+            return Ok(());
+        }
+        let (first, last) = (offset / PIECE, (end - 1) / PIECE);
+        let mut pieces = pieces();
+        let missing =
+            (first..=last).find(|piece| !pieces.held.contains_key(&(self.digest, *piece)));
+        if let Some(missing) = missing {
+            let pieces_in = self.size.div_ceil(PIECE);
+            for piece in missing..(last + 1 + READ_AHEAD).min(pieces_in) {
+                if !pieces.held.contains_key(&(self.digest, piece)) {
+                    pieces.wanted.insert((self.digest, piece), self.size);
+                }
+            }
+            drop(pieces);
+            if self.fetch.load(Ordering::Acquire) {
+                fetch_wanted();
+            }
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                rspice_results::waveform::PENDING_READ,
+            ));
+        }
+        pieces.tick += 1;
+        let tick = pieces.tick;
+        for piece in first..=last {
+            let Some((bytes, used)) = pieces.held.get_mut(&(self.digest, piece)) else {
+                continue;
+            };
+            *used = tick;
+            let start = piece * PIECE;
+            let from = offset.max(start);
+            let to = end.min(start + bytes.len() as u64);
+            buf[(from - offset) as usize..(to - offset) as usize]
+                .copy_from_slice(&bytes[(from - start) as usize..(to - start) as usize]);
+        }
+        Ok(())
+    }
+
+    fn write_at(&mut self, _offset: u64, _data: &[u8]) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "a kept segment is only read",
+        ))
+    }
+
+    fn truncate(&mut self, _len: u64) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "a kept segment is only read",
+        ))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn size(&self) -> std::io::Result<u64> {
+        Ok(self.size)
+    }
+}
+
+/// A view's `read` of `values`, a series whose run's axis is `x`, made in the worker when both
+/// are windows of a kept segment the worker holds: `None` for a series the page reads itself.
+/// The read gives `None` when the worker could not be asked, as while another project's store
+/// opens: the next frame's read asks again.
+pub(crate) fn series_request(
+    values: &WaveformValues,
+    x: &WaveformValues,
+    read: Read,
+) -> Option<impl std::future::Future<Output = Option<ReadValue>> + 'static> {
+    let window = |values: &WaveformValues| {
+        let (source, window) = values.stored_window()?;
+        let (digest, column) = source.identity()?;
+        let lead = match window.lead {
+            WindowLead::None => WorkerLead::None,
+            WindowLead::Value(value) => WorkerLead::Value {
+                value: value.into(),
+            },
+            WindowLead::Interpolated(fraction) => WorkerLead::Interpolated {
+                fraction: fraction.into(),
+            },
+        };
+        Some((
+            digest,
+            WorkerWindow {
+                column,
+                first: window.first,
+                rows: window.rows,
+                lead,
+            },
+        ))
+    };
+    let (digest, values) = window(values)?;
+    let (axis, x) = window(x)?;
+    if axis != digest
+        || !with(|client| client.stubs.contains(&digest))
+        || rspice_results::store_reader::kept_segment(SegmentDigest(digest)).is_none()
+    {
+        return None;
+    }
+    let read = match read {
+        Read::Range { first, count } => WorkerRead::Range {
+            first: first as u64,
+            count: count as u64,
+        },
+        Read::Tile { x0, x1, pixels } => WorkerRead::Tile {
+            x0: x0.into(),
+            x1: x1.into(),
+            pixels: pixels as u64,
+        },
+        Read::LogTile { x0, x1, pixels } => WorkerRead::LogTile {
+            x0: x0.into(),
+            x1: x1.into(),
+            pixels: pixels as u64,
+        },
+        Read::Point { x, interpolation } => {
+            use rspice_results::sampling::SampleInterpolation;
+            WorkerRead::Point {
+                x: x.into(),
+                interpolation: match interpolation {
+                    SampleInterpolation::MonotoneCubic => "monotone-cubic",
+                    SampleInterpolation::Linear => "linear",
+                    SampleInterpolation::Nearest => "nearest",
+                }
+                .to_owned(),
+            }
+        }
+    };
+    let request = ResultsStoreRequest::Series {
+        digest: SegmentDigest(digest).to_string(),
+        x,
+        values,
+        read,
+    };
+    Some(async move {
+        match call(&request, Array::new()).await {
+            Ok((ResultsStoreResponse::Series { value }, buffers)) => {
+                Some(read_value(value, &buffers))
+            }
+            Ok((other, _)) => {
+                log::debug!("a series read was refused: {}", refusal(other));
+                None
+            }
+            Err(reason) => {
+                log::debug!("a series read could not be asked: {reason}");
+                None
+            }
+        }
+    })
+}
+
+/// What a series read the worker answered gave, from its answer and buffers.
+fn read_value(value: WorkerReadValue, buffers: &Array) -> ReadValue {
+    let floats = |index: u32| -> Result<Vec<f64>, String> {
+        buffers
+            .get(index)
+            .dyn_into::<Float64Array>()
+            .map(|values| values.to_vec())
+            .map_err(|_| format!("the worker answered no values in buffer {index}"))
+    };
+    let pair = |pair: Option<(WorkerF64, WorkerF64)>| pair.map(|(x, y)| (x.get(), y.get()));
+    let value = match value {
+        WorkerReadValue::Samples => floats(0).map(|samples| ReadValue::Samples(samples.into())),
+        WorkerReadValue::TileSamples { before, after } => floats(0).and_then(|x| {
+            Ok(ReadValue::Tile(Arc::new(ColumnTile::Samples {
+                x,
+                y: floats(1)?,
+                before: pair(before),
+                after: pair(after),
+            })))
+        }),
+        WorkerReadValue::TileEnvelope => floats(0).and_then(|min| {
+            let touched = buffers
+                .get(2)
+                .dyn_into::<Uint8Array>()
+                .map_err(|_| "the worker answered no touched pixels".to_owned())?
+                .to_vec()
+                .into_iter()
+                .map(|touched| touched != 0)
+                .collect();
+            Ok(ReadValue::Tile(Arc::new(ColumnTile::Envelope {
+                min,
+                max: floats(1)?,
+                touched,
+            })))
+        }),
+        WorkerReadValue::Point { value } => Ok(ReadValue::Point(value.map(WorkerF64::get))),
+        WorkerReadValue::Failed { reason } => Ok(ReadValue::Failed(reason)),
+    };
+    value.unwrap_or_else(ReadValue::Failed)
 }
 
 /// Read again every run of the history that could not read its samples, its signals sharing one

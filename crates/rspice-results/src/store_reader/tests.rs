@@ -309,3 +309,108 @@ fn a_kept_file_that_does_not_hold_its_digest_reads_as_missing() {
     drop(segment);
     std::fs::remove_dir_all(&folder).unwrap();
 }
+
+/// A segment's bytes that are not here yet until `arrived`: a read before then fails as a
+/// browser page's read of a segment its worker holds does while its bytes are on their way.
+struct Arriving {
+    bytes: MemoryIo,
+    arrived: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl rspice_results_store::SegmentIo for Arriving {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        if !self.arrived.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "on their way",
+            ));
+        }
+        self.bytes.read_at(offset, buf)
+    }
+    fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
+        self.bytes.write_at(offset, data)
+    }
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        self.bytes.truncate(len)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.bytes.flush()
+    }
+    fn size(&self) -> std::io::Result<u64> {
+        self.bytes.size()
+    }
+}
+
+/// A window whose rows are on their way reads as pending, keeps no failure and reports none, and
+/// reads its samples once they are here: a pending read never leaves a waveform unavailable.
+#[test]
+fn a_window_whose_rows_are_on_their_way_reads_them_once_they_arrive() {
+    use crate::waveform::{
+        PENDING_READ, StoredWindow, WaveformValues, WindowLead, take_column_read_failures,
+    };
+    let (x, values, reader) = segment(5_000);
+    drop(reader);
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: vec![
+            Signal::new("v(a)", "V", SignalKind::Real),
+            Signal::new("v(b)", "V", SignalKind::Real),
+        ],
+    };
+    let mut writer = SegmentWriter::create(MemoryIo::new(), &schema, &RunMeta::default()).unwrap();
+    writer.push_rows(&x, &values).unwrap();
+    let (_, written) = writer.finish(RunStatus::Completed).unwrap();
+    let bytes = written.into_bytes();
+    let arrived = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let io = Arriving {
+        bytes: MemoryIo::from_bytes(bytes),
+        arrived: Arc::clone(&arrived),
+    };
+    let reader = StoreReader::open(Box::new(io)).unwrap();
+    let segment = Arc::new(Segment::kept(
+        reader,
+        std::path::PathBuf::from("arriving.rseg"),
+    ));
+    arrived.store(false, std::sync::atomic::Ordering::Release);
+    let window = |slot: Option<usize>, lead: WindowLead| {
+        WaveformValues::stored(
+            SegmentColumn::new(Arc::clone(&segment), slot, format!("arriving {slot:?}")),
+            StoredWindow {
+                first: 100,
+                rows: 1_000,
+                lead,
+            },
+        )
+        .unwrap()
+    };
+    let axis = window(None, WindowLead::None);
+    let wave = window(Some(1), WindowLead::Interpolated(0.5));
+    let _ = take_column_read_failures();
+
+    let failure = wave
+        .read_range(0..10)
+        .expect_err("its rows are on their way");
+    assert_eq!(failure.cause, PENDING_READ);
+    assert!(wave.sample(3).is_some_and(f64::is_nan));
+    assert_eq!(axis.ends(), None);
+    assert!(
+        !take_column_read_failures()
+            .iter()
+            .any(|failure| failure.column.starts_with("arriving"))
+    );
+
+    arrived.store(true, std::sync::atomic::Ordering::Release);
+    let lead = values[199] + 0.5 * (values[201] - values[199]);
+    let read = wave.read_range(0..4).expect("its rows are here");
+    assert_eq!(read[..], [lead, values[201], values[203], values[205]]);
+    assert_eq!(axis.ends(), Some((x[100], x[1_099])));
+    assert_eq!(wave.sample(3), Some(values[205]));
+    assert!(
+        !take_column_read_failures()
+            .iter()
+            .any(|failure| failure.column.starts_with("arriving"))
+    );
+}

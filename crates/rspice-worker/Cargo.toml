@@ -33,6 +33,7 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
 serde-wasm-bindgen = "0.6"
+rspice-results.workspace = true
 rspice-results-store.workspace = true
 rspice-simulation-contract.workspace = true
 web-sys = { workspace = true, features = [

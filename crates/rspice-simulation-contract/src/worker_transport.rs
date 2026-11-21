@@ -137,6 +137,97 @@ pub enum ResultsStoreRequest {
     },
     /// Delete every kept segment but `digests`, and every file no write finished.
     Keep { digests: Vec<String> },
+    /// `read` of the window `values` of the kept segment `digest`, a series whose run's axis is
+    /// the window `x` of the same segment: what a view draws, read here so the page never reads
+    /// the segment.
+    Series {
+        digest: String,
+        x: WorkerWindow,
+        values: WorkerWindow,
+        read: WorkerRead,
+    },
+}
+
+/// A float as its bits, so every value, NaN and the infinities among them, crosses exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct WorkerF64(pub u64);
+
+impl WorkerF64 {
+    pub fn get(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+}
+
+impl From<f64> for WorkerF64 {
+    fn from(value: f64) -> Self {
+        Self(value.to_bits())
+    }
+}
+
+/// The rows of a segment's column a waveform holds, as a page names them.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerWindow {
+    /// The column: 0 for the run's x axis, `slot + 1` for a value slot.
+    pub column: u64,
+    pub first: u64,
+    pub rows: u64,
+    pub lead: WorkerLead,
+}
+
+/// What a window holds before its first row.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum WorkerLead {
+    None,
+    Value { value: WorkerF64 },
+    Interpolated { fraction: WorkerF64 },
+}
+
+/// What a view reads of a series.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum WorkerRead {
+    Range {
+        first: u64,
+        count: u64,
+    },
+    Tile {
+        x0: WorkerF64,
+        x1: WorkerF64,
+        pixels: u64,
+    },
+    LogTile {
+        x0: WorkerF64,
+        x1: WorkerF64,
+        pixels: u64,
+    },
+    /// The value at `x`, interpolated as the series is drawn (`interpolation` names how).
+    Point {
+        x: WorkerF64,
+        interpolation: String,
+    },
+}
+
+/// What a series read gave. Samples cross in buffer 0; a tile's x and y, or its least and
+/// greatest values, in buffers 0 and 1, and an envelope's touched pixels as bytes in buffer 2.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum WorkerReadValue {
+    Samples,
+    TileSamples {
+        before: Option<(WorkerF64, WorkerF64)>,
+        after: Option<(WorkerF64, WorkerF64)>,
+    },
+    TileEnvelope,
+    Point {
+        value: Option<WorkerF64>,
+    },
+    /// Why it could not be read.
+    Failed {
+        reason: String,
+    },
 }
 
 /// What the worker answered.
@@ -169,6 +260,9 @@ pub enum ResultsStoreResponse {
     Bytes,
     Kept {
         removed: u32,
+    },
+    Series {
+        value: WorkerReadValue,
     },
     Failed {
         reason: String,
@@ -363,6 +457,51 @@ mod tests {
             panic!("a begin request, not {wire}")
         };
         assert_eq!(read.store(), (schema, meta));
+    }
+
+    #[test]
+    fn a_series_read_crosses_every_float_exactly() {
+        let lead = f64::NAN;
+        let request = ResultsStoreRequest::Series {
+            digest: "cd".repeat(32),
+            x: WorkerWindow {
+                column: 0,
+                first: 3,
+                rows: 10,
+                lead: WorkerLead::Value { value: lead.into() },
+            },
+            values: WorkerWindow {
+                column: 2,
+                first: 3,
+                rows: 10,
+                lead: WorkerLead::Interpolated {
+                    fraction: 0.25.into(),
+                },
+            },
+            read: WorkerRead::Tile {
+                x0: f64::NEG_INFINITY.into(),
+                x1: 1e-300.into(),
+                pixels: 800,
+            },
+        };
+        let wire = serde_json::to_string(&request).expect("written");
+        let read: ResultsStoreRequest = serde_json::from_str(&wire).expect("read back");
+        assert_eq!(read, request);
+        let ResultsStoreRequest::Series { x, read, .. } = read else {
+            panic!("a series request, not {wire}")
+        };
+        let WorkerLead::Value { value } = x.lead else {
+            panic!("a value lead")
+        };
+        assert!(value.get().is_nan());
+        assert_eq!(
+            read,
+            WorkerRead::Tile {
+                x0: f64::NEG_INFINITY.into(),
+                x1: 1e-300.into(),
+                pixels: 800
+            }
+        );
     }
 
     #[test]

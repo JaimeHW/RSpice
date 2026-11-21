@@ -407,25 +407,40 @@ fn process_segment(
     meta: &RunMeta,
     fill: &mut FillSegment<'_>,
 ) -> Result<Arc<Segment>, String> {
-    let segment = memory_segment(schema, meta, fill)?;
-    browser::keep(&segment);
+    let (segment, bytes) = memory_segment_sized(schema, meta, fill)?;
+    browser::keep(&segment, bytes);
     Ok(segment)
 }
 
 /// A finished segment held in memory.
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(test)]
 fn memory_segment(
     schema: &Schema,
     meta: &RunMeta,
     fill: &mut FillSegment<'_>,
 ) -> Result<Arc<Segment>, String> {
+    memory_segment_sized(schema, meta, fill).map(|(segment, _)| segment)
+}
+
+/// A finished segment held in memory, with its bytes.
+#[cfg(any(test, target_arch = "wasm32"))]
+fn memory_segment_sized(
+    schema: &Schema,
+    meta: &RunMeta,
+    fill: &mut FillSegment<'_>,
+) -> Result<(Arc<Segment>, u64), String> {
+    use rspice_results_store::SegmentIo;
     let mut writer = SegmentWriter::create(MemoryIo::new(), schema, meta).map_err(kept_failure)?;
     fill(&mut |x, values| writer.push_rows(x, values)).map_err(kept_failure)?;
     let (_, io) = writer
         .finish(rspice_results_store::RunStatus::Completed)
         .map_err(kept_failure)?;
+    let bytes = io.size().map_err(kept_failure)?;
     let reader = SegmentReader::open(Box::new(io) as SegmentBytes).map_err(kept_failure)?;
-    Ok(Segment::kept(StoreReader::new(reader), std::path::PathBuf::new()).shared())
+    Ok((
+        Segment::kept(StoreReader::new(reader), std::path::PathBuf::new()).shared(),
+        bytes,
+    ))
 }
 
 #[cfg(target_arch = "wasm32")]

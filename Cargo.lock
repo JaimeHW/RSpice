@@ -6805,6 +6805,7 @@ dependencies = [
  "rspice-core",
  "rspice-design",
  "rspice-hardcopy",
+ "rspice-results",
  "rspice-results-store",
  "rspice-simulation",
  "rspice-simulation-contract",

@@ -1,17 +1,18 @@
 //! The results stores a browser keeps in its origin-private file system, reached through the
 //! worker's own entry point in a dedicated worker, where synchronous access handles exist: a
-//! segment written from its rows reads back with every sample once its store is closed and opened
-//! again, and a store another holder has is refused.
+//! segment written from its rows reads back with every sample, through the reads a page's views
+//! make in the worker, once its store is closed and opened again, and a store another holder has
+//! is refused.
 
 #![cfg(target_arch = "wasm32")]
 
-use js_sys::{Array, Float64Array, Reflect, Uint8Array};
+use js_sys::{Array, Float64Array, Reflect};
 use rspice_results_store::{
-    Axis, Digest, MemoryIo, RunMeta, RunStatus, Schema, SegmentReader, SegmentWriter, Signal,
-    SignalKind,
+    Axis, Digest, RunMeta, RunStatus, Schema, SegmentWriter, Signal, SignalKind,
 };
 use rspice_simulation_contract::worker_transport::{
-    ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerResultsSchema,
+    ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerLead, WorkerRead,
+    WorkerReadValue, WorkerResultsSchema, WorkerWindow,
 };
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -22,8 +23,50 @@ wasm_bindgen_test_configure!(run_in_dedicated_worker);
 /// The bytes of rows one request carries, as the page sends them.
 const BYTES_PER_MESSAGE: usize = 8 << 20;
 
-/// The bytes of a kept segment one read asks for, as the page asks.
-const BYTES_PER_READ: u64 = 32 << 20;
+/// A segment's bytes counted and let go, but for the index frames its writer reads back as it
+/// closes the segment: the digest of a run larger than this memory is found as the page finds its
+/// own, without holding the run.
+#[derive(Default)]
+struct Counted {
+    len: u64,
+    /// The index frames written, by offset.
+    indexes: Vec<(u64, Vec<u8>)>,
+}
+
+/// The kind byte of a segment's index frame, after its frame magic.
+const INDEX_FRAME: u8 = 6;
+
+impl rspice_results_store::SegmentIo for Counted {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        let (at, frame) = self
+            .indexes
+            .iter()
+            .find(|(at, frame)| {
+                *at <= offset && offset + buf.len() as u64 <= at + frame.len() as u64
+            })
+            .ok_or(std::io::ErrorKind::Unsupported)?;
+        let from = (offset - at) as usize;
+        buf.copy_from_slice(&frame[from..from + buf.len()]);
+        Ok(())
+    }
+    fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
+        if data.get(4) == Some(&INDEX_FRAME) {
+            self.indexes.push((offset, data.to_vec()));
+        }
+        self.len = self.len.max(offset + data.len() as u64);
+        Ok(())
+    }
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        self.len = len;
+        Ok(())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn size(&self) -> std::io::Result<u64> {
+        Ok(self.len)
+    }
+}
 
 async fn ask(request: &ResultsStoreRequest, buffers: Array) -> (ResultsStoreResponse, Array) {
     let answer = rspice_worker::run_rspice_ui_results_store_request(
@@ -92,7 +135,7 @@ fn rows_per_message(signals: usize) -> u64 {
 /// The digest of the seeded run as the page holds it: written in the page's memory, as a page
 /// holds a run's segment before it is kept.
 fn page_digest(seed: u64, signals: usize, count: u64) -> Digest {
-    let mut writer = SegmentWriter::create(MemoryIo::new(), &schema(signals), &meta()).unwrap();
+    let mut writer = SegmentWriter::create(Counted::default(), &schema(signals), &meta()).unwrap();
     let per = rows_per_message(signals);
     let mut first = 0;
     while first < count {
@@ -104,45 +147,52 @@ fn page_digest(seed: u64, signals: usize, count: u64) -> Digest {
     writer.finish(RunStatus::Completed).unwrap().0.digest
 }
 
-/// The bytes of the kept segment `digest`, checked and read as the page reads them.
-async fn read_back(digest: &str) -> Vec<u8> {
-    let len = match ask(
-        &ResultsStoreRequest::Check {
+/// The window of every row of column `column` (0 for the axis) of a run of `count` rows.
+fn whole(column: u64, count: u64) -> WorkerWindow {
+    WorkerWindow {
+        column,
+        first: 0,
+        rows: count,
+        lead: WorkerLead::None,
+    }
+}
+
+/// `read` of column `column` of the kept segment `digest`, made in the worker as a page's view
+/// asks for it, with the buffers its answer came in.
+async fn series(
+    digest: &str,
+    count: u64,
+    column: u64,
+    read: WorkerRead,
+) -> (WorkerReadValue, Array) {
+    match ask(
+        &ResultsStoreRequest::Series {
             digest: digest.to_owned(),
+            x: whole(0, count),
+            values: whole(column, count),
+            read,
         },
         Array::new(),
     )
     .await
-    .0
     {
-        ResultsStoreResponse::Checked { len } => len,
-        other => panic!("the kept segment was not checked: {other:?}"),
-    };
-    let mut bytes = Vec::new();
-    bytes.try_reserve_exact(len as usize).unwrap();
-    while (bytes.len() as u64) < len {
-        let offset = bytes.len() as u64;
-        let ask_len = BYTES_PER_READ.min(len - offset);
-        let (response, buffers) = ask(
-            &ResultsStoreRequest::Read {
-                digest: digest.to_owned(),
-                offset,
-                len: ask_len,
-            },
-            Array::new(),
-        )
-        .await;
-        assert!(
-            matches!(response, ResultsStoreResponse::Bytes),
-            "{response:?}"
-        );
-        let chunk = buffers.get(0).dyn_into::<Uint8Array>().unwrap();
-        assert_eq!(u64::from(chunk.length()), ask_len);
-        let at = bytes.len();
-        bytes.resize(at + ask_len as usize, 0);
-        chunk.copy_to(&mut bytes[at..]);
+        (ResultsStoreResponse::Series { value }, buffers) => (value, buffers),
+        (other, _) => panic!("the series was not read: {other:?}"),
     }
-    bytes
+}
+
+/// Rows `first .. first + take` of column `column` of the kept segment `digest`, as a view reads
+/// a range.
+async fn range(digest: &str, count: u64, column: u64, first: u64, take: u64) -> Vec<f64> {
+    let (value, buffers) = series(
+        digest,
+        count,
+        column,
+        WorkerRead::Range { first, count: take },
+    )
+    .await;
+    assert_eq!(value, WorkerReadValue::Samples, "rows from {first}");
+    buffers.get(0).dyn_into::<Float64Array>().unwrap().to_vec()
 }
 
 fn now_ms() -> f64 {
@@ -154,11 +204,9 @@ fn now_ms() -> f64 {
     now.call0(&performance).unwrap().as_f64().unwrap()
 }
 
-/// Write the seeded run of `count` rows to the store `store` from its rows, close the store and
-/// open it again, and read every sample back. Returns the milliseconds the round trip took and
-/// the bytes this instance's memory grew to.
-async fn round_trip(store: &str, seed: u64, signals: usize, count: u64) -> (f64, usize) {
-    let started = now_ms();
+/// Write the seeded run to the fresh store `store` from its rows, as the page sends them, and
+/// close the store: the digest of the segment it keeps.
+async fn keep_run(store: &str, seed: u64, signals: usize, count: u64) -> String {
     let digest = page_digest(seed, signals, count).to_string();
     let open = ResultsStoreRequest::Open {
         store: store.to_owned(),
@@ -214,7 +262,19 @@ async fn round_trip(store: &str, seed: u64, signals: usize, count: u64) -> (f64,
         ask(&ResultsStoreRequest::Close, Array::new()).await.0,
         ResultsStoreResponse::Closed
     ));
+    digest
+}
 
+/// Write the seeded run of `count` rows to the store `store` from its rows, close the store and
+/// open it again, and read every sample back. Returns the milliseconds the round trip took and
+/// the bytes this instance's memory grew to.
+async fn round_trip(store: &str, seed: u64, signals: usize, count: u64) -> (f64, usize) {
+    let started = now_ms();
+    let digest = keep_run(store, seed, signals, count).await;
+    let per = rows_per_message(signals);
+    let open = ResultsStoreRequest::Open {
+        store: store.to_owned(),
+    };
     match ask(&open, Array::new()).await.0 {
         ResultsStoreResponse::Opened {
             standing: ResultsStoreStanding::Held,
@@ -225,27 +285,40 @@ async fn round_trip(store: &str, seed: u64, signals: usize, count: u64) -> (f64,
         ),
         other => panic!("the store did not open again: {other:?}"),
     }
-    let bytes = read_back(&digest).await;
-    let mut reader = SegmentReader::open(MemoryIo::from_bytes(bytes)).unwrap();
-    assert_eq!(reader.rows(), count);
-    assert_eq!(reader.digest().unwrap().to_string(), digest);
+    match ask(
+        &ResultsStoreRequest::Check {
+            digest: digest.clone(),
+        },
+        Array::new(),
+    )
+    .await
+    .0
+    {
+        ResultsStoreResponse::Checked { len } => assert!(len > 0),
+        other => panic!("the kept segment was not checked: {other:?}"),
+    }
     let mut first = 0;
     while first < count {
         let take = per.min(count - first) as usize;
         let (x, values) = rows(seed, signals, first, take);
         assert_eq!(
-            reader.read_x(first, take).unwrap(),
+            range(&digest, count, 0, first, take as u64).await,
             x,
             "times from row {first}"
         );
         for signal in 0..signals {
-            let column = reader.read_slot(signal, first, take).unwrap();
+            let column = range(&digest, count, signal as u64 + 1, first, take as u64).await;
             let expected: Vec<f64> = values
                 .iter()
                 .skip(signal)
                 .step_by(signals)
                 .copied()
                 .collect();
+            assert_eq!(
+                column.len(),
+                expected.len(),
+                "signal {signal} from row {first}"
+            );
             assert!(
                 column
                     .iter()
@@ -256,6 +329,60 @@ async fn round_trip(store: &str, seed: u64, signals: usize, count: u64) -> (f64,
         }
         first += take as u64;
     }
+    // A cursor reads the value at a row's time, and a view's tile holds the least and greatest
+    // value of the rows in each of its pixels.
+    let row = count / 3;
+    let (value, _) = series(
+        &digest,
+        count,
+        1,
+        WorkerRead::Point {
+            x: (row as f64 * 1e-9).into(),
+            interpolation: "linear".to_owned(),
+        },
+    )
+    .await;
+    assert_eq!(
+        value,
+        WorkerReadValue::Point {
+            value: Some(seeded(seed, 0, row).into())
+        }
+    );
+    let (lo, hi) = (count / 4, count / 4 + 4_000);
+    let (value, buffers) = series(
+        &digest,
+        count,
+        1,
+        WorkerRead::Tile {
+            x0: (lo as f64 * 1e-9).into(),
+            x1: (hi as f64 * 1e-9).into(),
+            pixels: 100,
+        },
+    )
+    .await;
+    let wrote: Vec<f64> = (lo..=hi).map(|row| seeded(seed, 0, row)).collect();
+    let least = wrote.iter().copied().fold(f64::INFINITY, f64::min);
+    let greatest = wrote.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let (min, max) = match value {
+        WorkerReadValue::TileEnvelope => (
+            buffers.get(0).dyn_into::<Float64Array>().unwrap().to_vec(),
+            buffers.get(1).dyn_into::<Float64Array>().unwrap().to_vec(),
+        ),
+        WorkerReadValue::TileSamples { .. } => {
+            let y = buffers.get(1).dyn_into::<Float64Array>().unwrap().to_vec();
+            (y.clone(), y)
+        }
+        other => panic!("a tile, not {other:?}"),
+    };
+    let fold = |values: &[f64], start: f64, pick: fn(f64, f64) -> f64| {
+        values
+            .iter()
+            .copied()
+            .filter(|v| !v.is_nan())
+            .fold(start, pick)
+    };
+    assert_eq!(fold(&min, f64::INFINITY, f64::min), least);
+    assert_eq!(fold(&max, f64::NEG_INFINITY, f64::max), greatest);
     let elapsed = now_ms() - started;
     let memory = wasm_bindgen::memory()
         .dyn_into::<js_sys::WebAssembly::Memory>()

@@ -10,7 +10,8 @@
 //! with a reason, never kept.
 //!
 //! Samples held in memory are not the service's: a read of them is answered as it is asked.
-//! The browser build has no thread to read on, so it reads as each request is made.
+//! The browser build has no thread to read on: a read of a segment its results store keeps is
+//! made in the worker that holds the store, and any other as it is asked.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -87,11 +88,7 @@ impl Cache {
     fn keep(&mut self, key: ReadKey, mut value: ReadValue) {
         let mut bytes = value.bytes();
         if bytes > self.budget {
-            value = ReadValue::Failed(format!(
-                "the read needs {bytes} bytes, more than the {} the loaded results may hold: \
-                 read a tile or a narrower range",
-                self.budget
-            ));
+            value = self.too_large(bytes);
             bytes = value.bytes();
         }
         if let Some(old) = self.entries.remove(&key) {
@@ -109,6 +106,15 @@ impl Cache {
             },
         );
         self.revision += 1;
+    }
+
+    /// The refusal of a read of `bytes` bytes, more than the budget holds.
+    fn too_large(&self, bytes: u64) -> ReadValue {
+        ReadValue::Failed(format!(
+            "the read needs {bytes} bytes, more than the {} the loaded results may hold: \
+             read a tile or a narrower range",
+            self.budget
+        ))
     }
 
     /// Let go of reads until `bytes` more fit the budget: runs not on screen first, the least
@@ -419,13 +425,43 @@ fn serve(shared: std::sync::Weak<Shared>) {
     }
 }
 
-/// The browser reads every queued job as it is asked.
+/// The browser reads each queued job of a segment its results store keeps in the worker that
+/// holds the store, and keeps what it gave when it arrives; any other it reads as it is asked.
+/// A job the worker could not be asked is dropped, for the next frame's read to ask again.
 #[cfg(target_arch = "wasm32")]
-fn serve_queued(shared: &Shared) {
+fn serve_queued(shared: &Arc<Shared>) {
     loop {
         let Some(job) = shared.lock().jobs.pop_front() else {
             return;
         };
+        if let Read::Range { count, .. } = job.read {
+            let mut cache = shared.lock();
+            let bytes = (count as u64).saturating_mul(8);
+            if bytes > cache.budget {
+                let refused = cache.too_large(bytes);
+                cache.queued.remove(&job.key);
+                cache.keep(job.key, refused);
+                continue;
+            }
+        }
+        if let Some(asked) =
+            super::run_store::browser::series_request(&job.values, &job.x, job.read)
+        {
+            let shared = Arc::clone(shared);
+            wasm_bindgen_futures::spawn_local(async move {
+                let value = asked.await;
+                {
+                    let mut cache = shared.lock();
+                    cache.queued.remove(&job.key);
+                    let Some(value) = value else {
+                        return;
+                    };
+                    cache.keep(job.key, value);
+                }
+                shared.wake();
+            });
+            continue;
+        }
         let value = perform(&job.values, &job.x, job.read);
         let mut cache = shared.lock();
         cache.queued.remove(&job.key);
