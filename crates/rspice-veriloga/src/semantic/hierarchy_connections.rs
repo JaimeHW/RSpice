@@ -185,39 +185,89 @@ pub(super) fn resolved_interconnect(
     source: &Module,
     module: &AnalyzedModule,
     name: &str,
-    depth: usize,
 ) -> Option<SmolStr> {
-    if let Some(declared) = declared_discipline(source, module, name) {
-        return Some(declared);
+    InterconnectWalk {
+        analyzed,
+        sources,
+        open: HashSet::new(),
+        settled: HashMap::new(),
     }
-    if depth > 256 {
-        return None;
-    }
-    let mut signal = Signal::default();
-    let mut children = Vec::new();
-    for instance in &source.instances {
-        let (Some(child_source), Some(child)) = (
-            sources.get(&instance.module).copied(),
-            analyzed.modules.get(&instance.module),
-        ) else {
-            continue;
-        };
-        for (index, connection) in instance.connections.iter().enumerate() {
-            let (port, actual) = match connection {
-                Connection::Named { port, signal, .. } => (Some(port.clone()), signal),
-                Connection::Ordered { signal, .. } => (
-                    child_source.ports.get(index).map(|port| port.name.clone()),
-                    signal,
-                ),
-            };
-            let (Some(port), Some(Expression::Identifier(actual))) = (port, actual) else {
+    .resolve(source, module, name)
+    .0
+}
+
+/// One resolution's walk down the instance hierarchy, keyed by module and
+/// port name.
+///
+/// A module that instantiates itself, directly or through others (a
+/// recursive generate), joins a port to the same port of an instance below
+/// it. That join is the net the walk is already resolving, so it adds no
+/// discipline the other joins do not, and the walk does not follow it. A
+/// port reached along several paths (a module instantiated twice at every
+/// level) is resolved once. Without both, `tree`'s `clk`, joined to the
+/// `clk` of its `left` and `right` children, was walked along every path
+/// to the depth bound: 2^256 calls.
+struct InterconnectWalk<'a> {
+    analyzed: &'a AnalyzedFile,
+    sources: &'a HashMap<SmolStr, &'a Module>,
+    /// The ports being resolved further up the current path.
+    open: HashSet<(SmolStr, SmolStr)>,
+    /// Resolutions that left out no join, so they hold on every path.
+    settled: HashMap<(SmolStr, SmolStr), Option<SmolStr>>,
+}
+
+impl InterconnectWalk<'_> {
+    /// The port's discipline, and whether a join was left out because it
+    /// leads back up the current path, in which case the result holds only
+    /// on this path and is not settled.
+    fn resolve(
+        &mut self,
+        source: &Module,
+        module: &AnalyzedModule,
+        name: &str,
+    ) -> (Option<SmolStr>, bool) {
+        if let Some(declared) = declared_discipline(source, module, name) {
+            return (Some(declared), false);
+        }
+        let key = (source.name.clone(), SmolStr::new(name));
+        if let Some(settled) = self.settled.get(&key) {
+            return (settled.clone(), false);
+        }
+        self.open.insert(key.clone());
+        let mut partial = false;
+        let mut signal = Signal::default();
+        let mut children = Vec::new();
+        for instance in &source.instances {
+            let (Some(child_source), Some(child)) = (
+                self.sources.get(&instance.module).copied(),
+                self.analyzed.modules.get(&instance.module),
+            ) else {
                 continue;
             };
-            if actual.name != name {
-                continue;
-            }
-            let discipline =
-                resolved_interconnect(analyzed, sources, child_source, child, &port, depth + 1)
+            for (index, connection) in instance.connections.iter().enumerate() {
+                let (port, actual) = match connection {
+                    Connection::Named { port, signal, .. } => (Some(port.clone()), signal),
+                    Connection::Ordered { signal, .. } => (
+                        child_source.ports.get(index).map(|port| port.name.clone()),
+                        signal,
+                    ),
+                };
+                let (Some(port), Some(Expression::Identifier(actual))) = (port, actual) else {
+                    continue;
+                };
+                if actual.name != name {
+                    continue;
+                }
+                if self
+                    .open
+                    .contains(&(child_source.name.clone(), port.clone()))
+                {
+                    partial = true;
+                    continue;
+                }
+                let (below, below_partial) = self.resolve(child_source, child, &port);
+                partial |= below_partial;
+                let discipline = below
                     .or_else(|| child.default_discipline.clone())
                     .or_else(|| {
                         child
@@ -227,33 +277,40 @@ pub(super) fn resolved_interconnect(
                             .any(|signal| signal.name == port)
                             .then(|| SmolStr::new("logic"))
                     });
-            let Some(discipline) = discipline else {
-                continue;
-            };
-            let lower = signal.push(NetSegment::new(port.clone()).declared(discipline));
-            children.push(PortLink::new(
-                lower,
-                PortDirection::Inout,
-                instance.name.clone(),
-                port,
-            ));
+                let Some(discipline) = discipline else {
+                    continue;
+                };
+                let lower = signal.push(NetSegment::new(port.clone()).declared(discipline));
+                children.push(PortLink::new(
+                    lower,
+                    PortDirection::Inout,
+                    instance.name.clone(),
+                    port,
+                ));
+            }
         }
+        self.open.remove(&key);
+        let resolved = (!children.is_empty())
+            .then(|| {
+                let mut root = NetSegment::new(name);
+                root.children = children;
+                let root = signal.push(root);
+                let resolved = resolve_disciplines(
+                    &signal,
+                    &self.analyzed.connect_rules,
+                    &self.analyzed.disciplines,
+                    module.default_discipline.as_deref(),
+                    ResolutionMode::Basic,
+                )
+                .ok()?;
+                resolved.discipline(root).map(SmolStr::new)
+            })
+            .flatten();
+        if !partial {
+            self.settled.insert(key, resolved.clone());
+        }
+        (resolved, partial)
     }
-    if children.is_empty() {
-        return None;
-    }
-    let mut root = NetSegment::new(name);
-    root.children = children;
-    let root = signal.push(root);
-    let resolved = resolve_disciplines(
-        &signal,
-        &analyzed.connect_rules,
-        &analyzed.disciplines,
-        module.default_discipline.as_deref(),
-        ResolutionMode::Basic,
-    )
-    .ok()?;
-    resolved.discipline(root).map(SmolStr::new)
 }
 
 struct BoundarySignal {
@@ -379,7 +436,7 @@ fn prepare_boundaries(
             if lower.net_kind.is_some()
                 && declared_discipline(child_source, child, &port.name).is_none()
                 && let Some(resolved) =
-                    resolved_interconnect(analyzed, sources, child_source, child, &port.name, 0)
+                    resolved_interconnect(analyzed, sources, child_source, child, &port.name)
                 && analyzed
                     .disciplines
                     .get_discipline(&resolved)

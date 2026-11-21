@@ -535,7 +535,6 @@ impl DigitalElaborator<'_> {
             source,
             child,
             port,
-            0,
         )
         .or_else(|| child.default_discipline.clone())
         .filter(|discipline| {
